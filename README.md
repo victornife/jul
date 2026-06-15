@@ -8,8 +8,8 @@ interface — all in a single static, dependency-free binary.
 
 - **Binary / module / service name:** `jul`
 - **Product name:** `Jul.IA`
-- **Language:** Go 1.24
-- **License:** _add your license here_
+- **Language:** Go 1.26
+- **License:** PolyForm Non-Commercial 1.0.0
 
 ---
 
@@ -1103,7 +1103,7 @@ docker run --rm -p 8080:8080 -p 9090:9090 \
 
 ## Building from source & cross-compiling
 
-Requires Go 1.24+.
+Requires Go 1.26+.
 
 ```bash
 # Native build
