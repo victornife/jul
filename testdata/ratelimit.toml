@@ -1,0 +1,37 @@
+# Rate limiting and connection capping sample.
+#
+#   go run ./cmd/jul -check -config testdata/ratelimit.toml
+#
+# A global token-bucket policy keyed by client IP applies to every location,
+# with a per-listener connection cap. The /api location overrides the policy
+# with a stricter rate keyed by an API-key header.
+[global]
+log_level = "info"
+
+[rate_limit]
+enabled = true
+key = "ip"
+rate = 100
+burst = 200
+max_conns = 1024
+
+[[servers]]
+listen = "127.0.0.1:8087"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://127.0.0.1:3000"
+
+    # Stricter, header-keyed override for the API surface. max_conns is omitted
+    # because connection caps are listener-global, not per location.
+    [servers.locations.rate_limit]
+    enabled = true
+    key = "header:X-Api-Key"
+    rate = 10
+    burst = 20

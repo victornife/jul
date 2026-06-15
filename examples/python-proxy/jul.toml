@@ -1,0 +1,27 @@
+# Jul config: serve a Python HTTP app via reverse proxy (Windows-friendly).
+#
+# 1. Start the Python app (listens on http://127.0.0.1:3031):
+#       python app.py
+#    (or: pip install waitress && waitress-serve --listen=127.0.0.1:3031 app:application)
+# 2. Start Jul with this config:
+#       go run ./cmd/jul -config examples/python-proxy/jul.toml
+# 3. Browse to http://127.0.0.1:8099/
+
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8099"
+server_names = ["localhost"]
+
+  # Reverse-proxy every request to the Python HTTP server.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:3031"
+
+    # Forward useful context to the backend (optional but recommended).
+    [servers.locations.headers]
+    Host = "$host"
+    X-Real-IP = "$remote_addr"
+    X-Forwarded-For = "$proxy_add_x_forwarded_for"

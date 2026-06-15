@@ -1,0 +1,22 @@
+# Binaries (anchored to repo root so the cmd/jul/ source dir is NOT ignored)
+/jul
+/jul.exe
+/dist/
+
+# Rust example build output
+examples/rust-proxy/target/
+examples/rust-proxy/Cargo.lock
+examples/rust-proxy/app
+examples/rust-proxy/app.exe
+examples/rust-proxy/app.pdb
+
+# Test artifacts
+*.out
+coverage.txt
+
+# Local runtime data (config-history snapshots, access logs, ...)
+/jul-data/
+
+# OS / editor
+.DS_Store
+*.swp

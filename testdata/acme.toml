@@ -1,0 +1,33 @@
+[global]
+log_level = "info"
+log_format = "text"
+
+# HTTPS server with automatic certificates (ACME / Let's Encrypt staging).
+# Requires a binary built with `-tags acme` to actually obtain certificates;
+# `jul -check` validates this file with any build.
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+
+  [servers.tls.acme]
+  enabled = true
+  email = "ops@example.com"
+  ca = "letsencrypt-staging"
+  challenge = "http-01"             # or "tls-alpn-01"
+  cache_dir = "./jul-data/certs"
+  ocsp_stapling = true              # staple OCSP responses (default true)
+  # dns_provider = "cloudflare"     # only used by builds with DNS-01 support
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  return = 204
+
+# Plain HTTP server: answers the HTTP-01 challenge and redirects to HTTPS.
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+redirect_https = 308
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200

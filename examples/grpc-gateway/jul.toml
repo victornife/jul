@@ -1,0 +1,32 @@
+# gRPC <-> JSON transcoding (grpc_transcode), requires a -tags grpc binary.
+#
+#   ../../jul -check -config jul.toml
+#   ../../jul -config jul.toml
+#
+# Jul reads the google.api.http annotations compiled into a descriptor set and
+# translates each HTTP request into a gRPC call, then the protobuf reply back
+# into JSON. Generate api.pb first (see README: protoc or gen_descriptor.go).
+[global]
+log_level = "info"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  # Everything under /v1/ is transcoded to the gRPC EchoService. The HTTP method
+  # and path come from the google.api.http options in echo.proto:
+  #   POST /v1/echo        body: "*"   -> EchoService.Echo (whole JSON body)
+  #   GET  /v1/echo/{id}               -> EchoService.Echo (id from the path)
+  [[servers.locations]]
+  match = { type = "prefix", path = "/v1/" }
+    [servers.locations.grpc_transcode]
+    target = "echo-backend"            # upstream name (or a literal host:port)
+    descriptor_set = "./api.pb"        # generated from echo.proto (see README)
+    # use_reflection = true            # alternative: gRPC server reflection
+    # tls = false                      # dial the backend over TLS (default h2c)
+    # preserve_proto_field_names = false
+
+[[upstreams]]
+name = "echo-backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:50051"]

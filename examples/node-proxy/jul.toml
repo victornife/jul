@@ -1,0 +1,26 @@
+# Jul config: serve a Node.js HTTP app via reverse proxy.
+#
+# 1. Start the Node app (listens on http://127.0.0.1:3032):
+#       node examples/node-proxy/app.js
+# 2. Start Jul with this config:
+#       go run ./cmd/jul -config examples/node-proxy/jul.toml
+# 3. Browse to http://127.0.0.1:8100/
+
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8100"
+server_names = ["localhost"]
+
+  # Reverse-proxy every request to the Node.js HTTP server.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:3032"
+
+    # Forward useful context to the backend (optional but recommended).
+    [servers.locations.headers]
+    Host = "$host"
+    X-Real-IP = "$remote_addr"
+    X-Forwarded-For = "$proxy_add_x_forwarded_for"

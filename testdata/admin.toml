@@ -1,0 +1,20 @@
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8099"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+return = 200
+
+[cache]
+enabled = true
+memory_max_size = "8m"
+default_ttl = "60s"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9099"
+token = "smoketoken"

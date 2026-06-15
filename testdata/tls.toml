@@ -1,0 +1,28 @@
+[global]
+log_level = "info"
+log_format = "text"
+
+# HTTPS server
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+
+  [servers.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+  min_version = "1.2"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  return = 204
+
+# HTTP server that redirects to HTTPS
+[[servers]]
+listen = "127.0.0.1:8081"
+server_names = ["localhost"]
+redirect_https = 308
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200

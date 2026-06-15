@@ -1,0 +1,10 @@
+[package]
+name = "rust-proxy-example"
+version = "0.1.0"
+edition = "2021"
+
+# The example is a single standalone file (app.rs) with no dependencies.
+# This points Cargo (and rust-analyzer) at it without restructuring.
+[[bin]]
+name = "app"
+path = "app.rs"

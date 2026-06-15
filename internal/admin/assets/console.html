@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<title>Jul.IA Console</title>
+<style>
+  :root {
+    --bg: #0b0f17;
+    --bg-2: #111726;
+    --panel: #151c2c;
+    --panel-2: #1b2435;
+    --border: #243049;
+    --text: #e6ebf5;
+    --muted: #8a97b1;
+    --accent: #4f9dff;
+    --accent-2: #34d399;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --radius: 12px;
+    --gap: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "side top" "side main";
+  }
+  /* Sidebar */
+  aside {
+    grid-area: side;
+    background: var(--bg-2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 18px 12px;
+    gap: 4px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px 18px; font-weight: 700; font-size: 16px;
+  }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 10px var(--accent-2); }
+  nav { display: flex; flex-direction: column; gap: 2px; }
+  nav a {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 8px;
+    color: var(--muted); text-decoration: none; font-weight: 500;
+    cursor: pointer; user-select: none;
+  }
+  nav a:hover { background: var(--panel); color: var(--text); }
+  nav a.active { background: var(--panel-2); color: var(--text); }
+  nav a .ico { width: 18px; text-align: center; opacity: .9; }
+  nav a .tag {
+    margin-left: auto; font-size: 10px; letter-spacing: .04em;
+    color: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 1px 7px; text-transform: uppercase;
+  }
+  .side-foot { margin-top: auto; padding: 10px; color: var(--muted); font-size: 12px; }
+  /* Topbar */
+  header {
+    grid-area: top;
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 22px; border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+  .status .live { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .status.ok .live { background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); }
+  .status.err .live { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+  .tokbox { display: flex; align-items: center; gap: 6px; }
+  .tokbox input {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 6px 10px; width: 180px; font: inherit;
+  }
+  .tokbox input:focus { outline: none; border-color: var(--accent); }
+  /* Main */
+  main { grid-area: main; padding: 22px; overflow: auto; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .view h2 { margin: 0 0 4px; font-size: 18px; }
+  .view .sub { color: var(--muted); margin: 0 0 20px; }
+  /* Cards */
+  .grid {
+    display: grid; gap: var(--gap);
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    margin-bottom: var(--gap);
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .card .value { font-size: 26px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .card .value small { font-size: 13px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+  .card .value.good { color: var(--accent-2); }
+  .card .value.warn { color: var(--warn); }
+  .card .value.bad { color: var(--bad); }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px; margin-bottom: var(--gap);
+  }
+  .panel h3 { margin: 0 0 14px; font-size: 14px; color: var(--text); }
+  .latency-row { display: flex; gap: 26px; flex-wrap: wrap; }
+  .latency-row .item .k { color: var(--muted); font-size: 12px; }
+  .latency-row .item .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .bars { display: flex; flex-direction: column; gap: 8px; }
+  .bar-line { display: grid; grid-template-columns: 48px 1fr 60px; align-items: center; gap: 10px; }
+  .bar-line .k { color: var(--muted); font-size: 12px; }
+  .bar-track { background: var(--bg); border-radius: 6px; height: 10px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 6px; }
+  .bar-line .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  canvas { width: 100%; height: 90px; display: block; }
+  .placeholder {
+    border: 1px dashed var(--border); border-radius: var(--radius);
+    padding: 40px; text-align: center; color: var(--muted); background: var(--panel);
+  }
+  .placeholder .big { font-size: 15px; color: var(--text); margin-bottom: 8px; }
+  .btn {
+    display: inline-block; background: var(--accent); color: #08111f;
+    font-weight: 600; text-decoration: none; padding: 10px 18px;
+    border-radius: 8px; border: none; cursor: pointer; font: inherit;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .muted { color: var(--muted); }
+  .err-banner {
+    display: none; background: rgba(248,113,113,.12); border: 1px solid var(--bad);
+    color: #fecaca; padding: 10px 14px; border-radius: 8px; margin-bottom: var(--gap);
+  }
+  .err-banner.show { display: block; }
+  /* Tables */
+  table.tbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  table.tbl th, table.tbl td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  table.tbl th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  table.tbl tr:last-child td { border-bottom: none; }
+  /* Badges + health dots */
+  .badge { display: inline-block; font-size: 11px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .badge.ok { color: var(--accent-2); border-color: var(--accent-2); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); }
+  .hdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 7px; vertical-align: middle; }
+  .hdot.ok { background: var(--accent-2); box-shadow: 0 0 7px var(--accent-2); }
+  .hdot.bad { background: var(--bad); box-shadow: 0 0 7px var(--bad); }
+  /* Forms */
+  .form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; max-width: 460px; }
+  .form-row label { color: var(--muted); font-size: 12px; }
+  .form-row input, .form-row select, textarea.code {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 9px 11px; font: inherit;
+  }
+  .form-row input:focus, .form-row select:focus, textarea.code:focus { outline: none; border-color: var(--accent); }
+  .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.danger { background: var(--bad); color: #2a0a0a; }
+  .btn.sm { padding: 6px 12px; font-size: 13px; }
+  .row-actions { display: flex; gap: 8px; }
+  pre.code, textarea.code {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px; color: var(--text); font: 12.5px/1.5 ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    overflow: auto; white-space: pre; margin: 0;
+  }
+  textarea.code { min-height: 260px; resize: vertical; }
+  .stack { display: flex; flex-direction: column; gap: var(--gap); }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: var(--gap); flex-wrap: wrap; }
+  .ok-banner {
+    display: none; background: rgba(52,211,153,.12); border: 1px solid var(--accent-2);
+    color: #a7f3d0; padding: 10px 14px; border-radius: 8px; margin-bottom: var(--gap);
+  }
+  .ok-banner.show { display: block; }
+</style>
+</head>
+<body>
+  <aside>
+    <div class="brand"><span class="dot"></span> <span id="brandName">Jul.IA</span></div>
+    <nav id="nav">
+      <a data-view="dashboard"    data-role="viewer"><span class="ico">▦</span> Dashboard</a>
+      <a data-view="config"       data-role="editor"><span class="ico">⚙</span> Configuration</a>
+      <a data-view="upstreams"    data-role="viewer"><span class="ico">⤳</span> Upstreams</a>
+      <a data-view="certificates" data-role="viewer"><span class="ico">🔒</span> Certificates</a>
+      <a data-view="history"      data-role="editor"><span class="ico">↩</span> History</a>
+      <a data-view="setup"        data-role="editor"><span class="ico">✦</span> Setup wizard</a>
+      <a data-view="logs"         data-role="viewer"><span class="ico">≣</span> Logs</a>
+    </nav>
+    <div class="side-foot">
+      <div id="version">—</div>
+      <div class="muted">Edge control plane</div>
+    </div>
+  </aside>
+
+  <header>
+    <h1 id="viewTitle">Dashboard</h1>
+    <div class="spacer"></div>
+    <div class="tokbox">
+      <input id="token" type="password" placeholder="Admin token (if required)" autocomplete="off" />
+    </div>
+    <div class="status" id="status"><span class="live"></span><span id="statusText">connecting…</span></div>
+  </header>
+
+  <main>
+    <div class="err-banner" id="errBanner"></div>
+
+    <!-- Dashboard -->
+    <section class="view" id="view-dashboard">
+      <h2>Dashboard</h2>
+      <p class="sub">Live runtime metrics, refreshed every 2 seconds.</p>
+      <div class="grid" id="stat-cards">
+        <div class="card"><div class="label">Uptime</div><div class="value" id="m-uptime">—</div></div>
+        <div class="card"><div class="label">Requests</div><div class="value" id="m-requests">—</div></div>
+        <div class="card"><div class="label">Req / sec</div><div class="value" id="m-rps">—</div></div>
+        <div class="card"><div class="label">In flight</div><div class="value" id="m-inflight">—</div></div>
+        <div class="card"><div class="label">Error rate</div><div class="value" id="m-errrate">—</div></div>
+        <div class="card"><div class="label">Cache hit</div><div class="value" id="m-cache">—</div></div>
+        <div class="card"><div class="label">Connections</div><div class="value" id="m-conns">—</div></div>
+      </div>
+
+      <div class="panel">
+        <h3>Request latency</h3>
+        <div class="latency-row">
+          <div class="item"><div class="k">Average</div><div class="v" id="lat-avg">—</div></div>
+          <div class="item"><div class="k">p50</div><div class="v" id="lat-p50">—</div></div>
+          <div class="item"><div class="k">p95</div><div class="v" id="lat-p95">—</div></div>
+          <div class="item"><div class="k">p99</div><div class="v" id="lat-p99">—</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Requests / sec (last 60 samples)</h3>
+        <canvas id="spark" width="600" height="90"></canvas>
+      </div>
+
+      <div class="panel">
+        <h3>Status classes</h3>
+        <div class="bars" id="status-bars"></div>
+      </div>
+    </section>
+
+    <!-- Configuration -->
+    <section class="view" id="view-config">
+      <h2>Configuration</h2>
+      <p class="sub">Edit server settings and the raw TOML.</p>
+      <div class="placeholder">
+        <div class="big">The configuration editor opens on its own page.</div>
+        <p>Settings form and advanced raw-TOML editing live at <code>/config</code>.</p>
+        <a class="btn" href="/config">Open configuration editor →</a>
+      </div>
+    </section>
+
+    <!-- Upstreams -->
+    <section class="view" id="view-upstreams">
+      <h2>Upstreams</h2>
+      <p class="sub">Backend pools and live health.</p>
+      <div class="toolbar"><button class="btn secondary sm" id="up-refresh">Refresh</button></div>
+      <div id="up-host" class="stack"></div>
+    </section>
+
+    <!-- Certificates -->
+    <section class="view" id="view-certificates">
+      <h2>Certificates</h2>
+      <p class="sub">TLS certificate inventory and expiry.</p>
+      <div class="toolbar"><button class="btn secondary sm" id="cert-refresh">Refresh</button></div>
+      <div id="cert-host" class="grid"></div>
+    </section>
+
+    <!-- History -->
+    <section class="view" id="view-history">
+      <h2>Configuration history</h2>
+      <p class="sub">Every saved edit snapshots the previous configuration. Roll back to any prior version with one click.</p>
+      <div class="ok-banner" id="hist-ok"></div>
+      <div class="toolbar"><button class="btn secondary sm" id="hist-refresh">Refresh</button></div>
+      <div class="panel"><table class="tbl"><thead><tr><th>Snapshot</th><th>When</th><th>Size</th><th></th></tr></thead><tbody id="hist-rows"></tbody></table></div>
+      <div class="panel" id="hist-preview-wrap" style="display:none">
+        <h3 id="hist-preview-title">Preview</h3>
+        <pre class="code" id="hist-preview"></pre>
+      </div>
+    </section>
+
+    <!-- Setup wizard -->
+    <section class="view" id="view-setup">
+      <h2>Setup wizard</h2>
+      <p class="sub">Generate a starter configuration. Review the result, then apply it through the validated editor path.</p>
+      <div class="ok-banner" id="wiz-ok"></div>
+      <div class="panel">
+        <div class="form-row">
+          <label for="wiz-mode">Mode</label>
+          <select id="wiz-mode">
+            <option value="serve">Serve a directory (static files)</option>
+            <option value="proxy">Reverse-proxy a target</option>
+          </select>
+        </div>
+        <div class="form-row" id="wiz-path-row">
+          <label for="wiz-path">Directory to serve</label>
+          <input id="wiz-path" type="text" placeholder="./public" />
+        </div>
+        <div class="form-row" id="wiz-target-row" style="display:none">
+          <label for="wiz-target">Proxy target</label>
+          <input id="wiz-target" type="text" placeholder="http://127.0.0.1:3000 or :3000" />
+        </div>
+        <div class="form-row">
+          <label for="wiz-listen">Listen address (optional)</label>
+          <input id="wiz-listen" type="text" placeholder=":8080" />
+        </div>
+        <div class="row-actions">
+          <button class="btn" id="wiz-gen">Generate</button>
+        </div>
+      </div>
+      <div class="panel" id="wiz-out-wrap" style="display:none">
+        <h3>Generated configuration</h3>
+        <pre class="code" id="wiz-out"></pre>
+        <div class="row-actions" style="margin-top:14px">
+          <button class="btn" id="wiz-apply">Apply &amp; reload</button>
+          <span class="muted" id="wiz-apply-note">This replaces the running configuration and snapshots the current one.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Logs -->
+    <section class="view" id="view-logs">
+      <h2>Logs</h2>
+      <p class="sub">Live access and error streams.</p>
+      <div class="placeholder">
+        <div class="big">Live logs are coming soon.</div>
+        <p>Streaming access and error logs arrive with the logging pipeline (Y2-09).</p>
+      </div>
+    </section>
+  </main>
+
+<script>
+(function () {
+  "use strict";
+
+  var POLL_MS = 2000;
+  var SPARK_MAX = 60;
+  var rpsHistory = [];
+  var pollTimer = null;
+  var token = sessionStorage.getItem("jul_admin_token") || "";
+
+  var tokenInput = document.getElementById("token");
+  tokenInput.value = token;
+  tokenInput.addEventListener("change", function () {
+    token = tokenInput.value.trim();
+    sessionStorage.setItem("jul_admin_token", token);
+    refresh();
+  });
+
+  function api(path) {
+    var headers = {};
+    if (token) headers["Authorization"] = "Bearer " + token;
+    return fetch(path, { headers: headers, cache: "no-store" }).then(function (r) {
+      if (r.status === 401) { throw new Error("unauthorized"); }
+      if (!r.ok) { throw new Error("HTTP " + r.status); }
+      return r.json();
+    });
+  }
+
+  // apiSend issues a JSON-bodied mutating request, surfacing the server's
+  // {"error": "..."} message on failure.
+  function apiSend(path, method, body) {
+    var headers = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = "Bearer " + token;
+    return fetch(path, {
+      method: method, headers: headers, cache: "no-store",
+      body: body == null ? null : JSON.stringify(body)
+    }).then(parseSend);
+  }
+
+  // apiPostRaw posts a raw text body (used for the TOML config write path).
+  function apiPostRaw(path, text) {
+    var headers = { "Content-Type": "text/plain" };
+    if (token) headers["Authorization"] = "Bearer " + token;
+    return fetch(path, { method: "POST", headers: headers, cache: "no-store", body: text }).then(parseSend);
+  }
+
+  function parseSend(r) {
+    return r.text().then(function (t) {
+      var data = {};
+      try { data = t ? JSON.parse(t) : {}; } catch (e) { data = { error: t }; }
+      if (r.status === 401) throw new Error("unauthorized");
+      if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+      return data;
+    });
+  }
+
+  // esc escapes a value for safe insertion as HTML text/attribute content.
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // ----- formatting helpers -----
+  function fmtInt(n) {
+    if (n == null) return "—";
+    return Math.round(n).toLocaleString();
+  }
+  function fmtPct(frac) {
+    if (frac == null) return "—";
+    return (frac * 100).toFixed(1) + "%";
+  }
+  function fmtMs(ms) {
+    if (ms == null) return "—";
+    if (ms >= 1000) return (ms / 1000).toFixed(2) + " s";
+    return ms.toFixed(1) + " ms";
+  }
+  function fmtUptime(sec) {
+    sec = Math.max(0, Math.floor(sec || 0));
+    var d = Math.floor(sec / 86400); sec -= d * 86400;
+    var h = Math.floor(sec / 3600);  sec -= h * 3600;
+    var m = Math.floor(sec / 60);    sec -= m * 60;
+    if (d > 0) return d + "d " + h + "h " + m + "m";
+    if (h > 0) return h + "h " + m + "m " + sec + "s";
+    if (m > 0) return m + "m " + sec + "s";
+    return sec + "s";
+  }
+
+  // ----- rendering -----
+  function setStatus(state, text) {
+    var el = document.getElementById("status");
+    el.className = "status" + (state ? " " + state : "");
+    document.getElementById("statusText").textContent = text;
+  }
+  function showError(msg) {
+    var b = document.getElementById("errBanner");
+    if (!msg) { b.className = "err-banner"; b.textContent = ""; return; }
+    b.className = "err-banner show"; b.textContent = msg;
+  }
+
+  function classColor(cls) {
+    if (cls === "5xx") return "var(--bad)";
+    if (cls === "4xx") return "var(--warn)";
+    if (cls === "3xx") return "var(--accent)";
+    return "var(--accent-2)";
+  }
+
+  function renderStats(s) {
+    if (!s || !s.available) {
+      setStatus("", "no metrics");
+      document.querySelectorAll("#stat-cards .value").forEach(function (e) { e.textContent = "—"; });
+      return;
+    }
+    setStatus("ok", "live");
+    showError("");
+
+    document.getElementById("m-uptime").textContent = fmtUptime(s.uptimeSeconds);
+    document.getElementById("m-requests").textContent = fmtInt(s.requestsTotal);
+    document.getElementById("m-rps").textContent = (s.requestsPerSec || 0).toFixed(1);
+    document.getElementById("m-inflight").textContent = fmtInt(s.inFlight);
+    document.getElementById("m-conns").textContent = fmtInt(s.connections);
+
+    var err = document.getElementById("m-errrate");
+    err.textContent = fmtPct(s.errorRate);
+    err.className = "value " + (s.errorRate >= 0.05 ? "bad" : s.errorRate > 0 ? "warn" : "good");
+
+    var cache = document.getElementById("m-cache");
+    cache.textContent = fmtPct(s.cacheHitRatio);
+    cache.className = "value " + (s.cacheHitRatio >= 0.5 ? "good" : "");
+
+    document.getElementById("lat-avg").textContent = fmtMs(s.latencyAvgMs);
+    document.getElementById("lat-p50").textContent = fmtMs(s.latencyP50Ms);
+    document.getElementById("lat-p95").textContent = fmtMs(s.latencyP95Ms);
+    document.getElementById("lat-p99").textContent = fmtMs(s.latencyP99Ms);
+
+    renderStatusBars(s.statusClasses || {});
+
+    rpsHistory.push(s.requestsPerSec || 0);
+    if (rpsHistory.length > SPARK_MAX) rpsHistory.shift();
+    drawSpark();
+  }
+
+  function renderStatusBars(classes) {
+    var order = ["2xx", "3xx", "4xx", "5xx"];
+    var total = order.reduce(function (a, k) { return a + (classes[k] || 0); }, 0);
+    var host = document.getElementById("status-bars");
+    host.innerHTML = "";
+    order.forEach(function (k) {
+      var n = classes[k] || 0;
+      var pct = total > 0 ? (n / total) * 100 : 0;
+      var row = document.createElement("div");
+      row.className = "bar-line";
+      row.innerHTML =
+        '<span class="k">' + k + '</span>' +
+        '<span class="bar-track"><span class="bar-fill" style="width:' + pct.toFixed(1) +
+          '%;background:' + classColor(k) + '"></span></span>' +
+        '<span class="n">' + fmtInt(n) + '</span>';
+      host.appendChild(row);
+    });
+  }
+
+  function drawSpark() {
+    var c = document.getElementById("spark");
+    var ctx = c.getContext("2d");
+    var W = c.width, H = c.height;
+    ctx.clearRect(0, 0, W, H);
+    if (rpsHistory.length < 2) return;
+    var max = Math.max.apply(null, rpsHistory.concat([1]));
+    var stepX = W / (SPARK_MAX - 1);
+    var pad = 6;
+
+    ctx.beginPath();
+    rpsHistory.forEach(function (v, i) {
+      var x = i * stepX;
+      var y = H - pad - (v / max) * (H - pad * 2);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = "#4f9dff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.lineTo((rpsHistory.length - 1) * stepX, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(79,157,255,.12)";
+    ctx.fill();
+  }
+
+  function refresh() {
+    api("/api/stats").then(renderStats).catch(function (e) {
+      if (e.message === "unauthorized") {
+        setStatus("err", "unauthorized");
+        showError("Authentication required — enter the admin token above.");
+      } else {
+        setStatus("err", "disconnected");
+        showError("Could not reach the server: " + e.message);
+      }
+    });
+  }
+
+  function loadMeta() {
+    api("/api/config").then(function (c) {
+      if (c && c.product) document.getElementById("brandName").textContent = c.product;
+      if (c && c.version) document.getElementById("version").textContent = c.version;
+    }).catch(function () { /* meta is best-effort */ });
+  }
+
+  // ----- upstream panel -----
+  function loadUpstreams() {
+    var host = document.getElementById("up-host");
+    host.innerHTML = '<div class="muted">Loading…</div>';
+    api("/api/upstreams").then(function (pools) {
+      if (!pools || !pools.length) {
+        host.innerHTML = '<div class="placeholder"><div class="big">No named upstreams configured.</div>' +
+          '<p>Pools defined under <code>[[upstreams]]</code> appear here with live backend health.</p></div>';
+        return;
+      }
+      host.innerHTML = "";
+      pools.forEach(function (p) {
+        var rows = (p.backends || []).map(function (b) {
+          var cls = b.healthy ? "ok" : "bad";
+          return '<tr><td><span class="hdot ' + cls + '"></span>' + esc(b.address) + '</td>' +
+            '<td><span class="badge ' + cls + '">' + (b.healthy ? "healthy" : "down") + '</span></td>' +
+            '<td>' + esc(b.weight) + '</td><td>' + esc(b.inflight) + '</td></tr>';
+        }).join("");
+        var panel = document.createElement("div");
+        panel.className = "panel";
+        panel.innerHTML = '<h3>' + esc(p.name) + ' <span class="badge">' + esc(p.strategy || "round_robin") + '</span></h3>' +
+          '<table class="tbl"><thead><tr><th>Backend</th><th>Health</th><th>Weight</th><th>In-flight</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody></table>';
+        host.appendChild(panel);
+      });
+    }).catch(function (e) { host.innerHTML = '<div class="err-banner show">' + esc(e.message) + '</div>'; });
+  }
+
+  // ----- certificate panel -----
+  function loadCerts() {
+    var host = document.getElementById("cert-host");
+    host.innerHTML = '<div class="muted">Loading…</div>';
+    api("/api/certs").then(function (certs) {
+      if (!certs || !certs.length) {
+        host.innerHTML = '<div class="placeholder"><div class="big">No TLS certificates configured.</div>' +
+          '<p>Enable TLS on a server block to see certificate inventory and expiry here.</p></div>';
+        return;
+      }
+      host.innerHTML = "";
+      certs.forEach(function (c) {
+        var card = document.createElement("div");
+        card.className = "card";
+        var names = (c.server_names && c.server_names.length) ? c.server_names.join(", ") : (c.subject || "—");
+        var body = '<div class="label">' + esc(c.source === "acme" ? "ACME-managed" : "File certificate") + '</div>' +
+          '<div style="font-size:15px;font-weight:600;margin:6px 0">' + esc(names) + '</div>';
+        if (c.error) {
+          body += '<div class="badge bad">error</div><div class="muted" style="margin-top:8px">' + esc(c.error) + '</div>';
+        } else if (c.source === "acme") {
+          body += '<div class="badge ok">auto-renew</div><div class="muted" style="margin-top:8px">Live expiry is exported via TLS metrics.</div>';
+        } else {
+          var exp = certExpiry(c.not_after);
+          body += '<div class="badge ' + exp.cls + '">' + esc(exp.label) + '</div>';
+          if (c.subject) body += '<div class="muted" style="margin-top:8px">CN: ' + esc(c.subject) + '</div>';
+          if (c.issuer) body += '<div class="muted">Issuer: ' + esc(c.issuer) + '</div>';
+        }
+        card.innerHTML = body;
+        host.appendChild(card);
+      });
+    }).catch(function (e) { host.innerHTML = '<div class="err-banner show">' + esc(e.message) + '</div>'; });
+  }
+
+  function certExpiry(notAfter) {
+    if (!notAfter) return { cls: "", label: "no expiry" };
+    var ms = new Date(notAfter).getTime() - Date.now();
+    if (isNaN(ms)) return { cls: "", label: "unknown" };
+    if (ms <= 0) return { cls: "bad", label: "expired" };
+    var days = Math.floor(ms / 86400000);
+    var cls = days <= 14 ? "bad" : days <= 30 ? "warn" : "ok";
+    return { cls: cls, label: "expires in " + days + "d" };
+  }
+
+  // ----- configuration history -----
+  function loadHistory() {
+    var tb = document.getElementById("hist-rows");
+    tb.innerHTML = '<tr><td colspan="4" class="muted">Loading…</td></tr>';
+    api("/api/history").then(function (list) {
+      if (!list || !list.length) {
+        tb.innerHTML = '<tr><td colspan="4" class="muted">No snapshots yet. One is created automatically each time you save a configuration change.</td></tr>';
+        return;
+      }
+      tb.innerHTML = "";
+      list.forEach(function (h) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td>' + esc(h.id) + '</td><td>' + esc(fmtTime(h.time)) + '</td><td>' + esc(fmtBytes(h.size)) + '</td>' +
+          '<td><div class="row-actions">' +
+          '<button class="btn secondary sm" data-act="preview" data-id="' + esc(h.id) + '">Preview</button>' +
+          '<button class="btn danger sm" data-act="rollback" data-id="' + esc(h.id) + '">Roll back</button>' +
+          '</div></td>';
+        tb.appendChild(tr);
+      });
+    }).catch(function (e) { tb.innerHTML = '<tr><td colspan="4"><span class="badge bad">' + esc(e.message) + '</span></td></tr>'; });
+  }
+
+  function previewHistory(id) {
+    api("/api/history/get?id=" + encodeURIComponent(id)).then(function (r) {
+      document.getElementById("hist-preview-title").textContent = "Preview — " + id;
+      document.getElementById("hist-preview").textContent = r.raw || "";
+      document.getElementById("hist-preview-wrap").style.display = "block";
+    }).catch(function (e) { showError(e.message); });
+  }
+
+  function rollbackHistory(id) {
+    if (!window.confirm("Roll back to snapshot " + id + "? The running configuration will be replaced and reloaded.")) return;
+    apiSend("/api/history/rollback", "POST", { id: id }).then(function () {
+      flash("hist-ok", "Rolled back to " + id + " and reloaded.");
+      loadHistory();
+    }).catch(function (e) { showError(e.message); });
+  }
+
+  // ----- setup wizard -----
+  function wizardGenerate() {
+    var mode = document.getElementById("wiz-mode").value;
+    var body = { mode: mode, listen: document.getElementById("wiz-listen").value.trim() };
+    if (mode === "serve") body.path = document.getElementById("wiz-path").value.trim();
+    else body.target = document.getElementById("wiz-target").value.trim();
+    apiSend("/api/wizard", "POST", body).then(function (r) {
+      document.getElementById("wiz-out").textContent = r.toml || "";
+      document.getElementById("wiz-out-wrap").style.display = "block";
+    }).catch(function (e) { showError(e.message); });
+  }
+
+  function wizardApply() {
+    var toml = document.getElementById("wiz-out").textContent;
+    if (!toml) return;
+    if (!window.confirm("Apply this configuration? It replaces the running configuration and reloads.")) return;
+    apiPostRaw("/api/config/raw", toml).then(function () {
+      flash("wiz-ok", "Configuration applied and reloaded.");
+    }).catch(function (e) { showError(e.message); });
+  }
+
+  // ----- small helpers -----
+  function fmtTime(t) {
+    if (!t) return "—";
+    var d = new Date(t);
+    return isNaN(d.getTime()) ? t : d.toLocaleString();
+  }
+  function fmtBytes(n) {
+    n = n || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1048576).toFixed(1) + " MB";
+  }
+  function flash(id, msg) {
+    var b = document.getElementById(id);
+    if (!b) return;
+    var base = b.className.indexOf("ok-banner") >= 0 ? "ok-banner" : "err-banner";
+    b.className = base + " show";
+    b.textContent = msg;
+    setTimeout(function () { b.className = base; }, 4000);
+  }
+
+  // ----- view router -----
+  var views = ["dashboard", "config", "upstreams", "certificates", "history", "setup", "logs"];
+  function showView(name) {
+    if (views.indexOf(name) < 0) name = "dashboard";
+    views.forEach(function (v) {
+      document.getElementById("view-" + v).classList.toggle("active", v === name);
+    });
+    document.querySelectorAll("#nav a").forEach(function (a) {
+      a.classList.toggle("active", a.getAttribute("data-view") === name);
+    });
+    var title = document.querySelector('#nav a[data-view="' + name + '"]').textContent.trim();
+    document.getElementById("viewTitle").textContent = title;
+
+    // Only the dashboard polls; other views are static placeholders.
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (name === "dashboard") {
+      refresh();
+      pollTimer = setInterval(refresh, POLL_MS);
+    } else if (name === "upstreams") {
+      loadUpstreams();
+    } else if (name === "certificates") {
+      loadCerts();
+    } else if (name === "history") {
+      loadHistory();
+    }
+  }
+
+  document.getElementById("nav").addEventListener("click", function (e) {
+    var a = e.target.closest("a[data-view]");
+    if (!a) return;
+    location.hash = a.getAttribute("data-view");
+  });
+  window.addEventListener("hashchange", function () {
+    showView(location.hash.replace(/^#/, ""));
+  });
+
+  // panel actions
+  document.getElementById("up-refresh").addEventListener("click", loadUpstreams);
+  document.getElementById("cert-refresh").addEventListener("click", loadCerts);
+  document.getElementById("hist-refresh").addEventListener("click", loadHistory);
+  document.getElementById("hist-rows").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-act]");
+    if (!b) return;
+    var id = b.getAttribute("data-id");
+    if (b.getAttribute("data-act") === "preview") previewHistory(id);
+    else rollbackHistory(id);
+  });
+  document.getElementById("wiz-mode").addEventListener("change", function () {
+    var serve = this.value === "serve";
+    document.getElementById("wiz-path-row").style.display = serve ? "" : "none";
+    document.getElementById("wiz-target-row").style.display = serve ? "none" : "";
+  });
+  document.getElementById("wiz-gen").addEventListener("click", wizardGenerate);
+  document.getElementById("wiz-apply").addEventListener("click", wizardApply);
+
+  // boot
+  loadMeta();
+  showView(location.hash.replace(/^#/, "") || "dashboard");
+})();
+</script>
+</body>
+</html>

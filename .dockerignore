@@ -1,0 +1,19 @@
+# Keep the build context small and reproducible.
+.git
+.gitignore
+Dockerfile
+.dockerignore
+
+# Build outputs
+jul
+jul.exe
+/dist/
+
+# Local test artifacts
+*.out
+coverage.txt
+testdata/
+
+# OS / editor
+.DS_Store
+*.swp

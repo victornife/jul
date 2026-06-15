@@ -1,0 +1,35 @@
+# gRPC <-> JSON transcoding sample (requires a binary built with -tags grpc).
+#
+#   go run -tags grpc ./cmd/jul -check -config testdata/grpctranscode.toml
+#
+# A grpc_transcode location exposes a unary gRPC service as a RESTful JSON API
+# using the google.api.http annotations compiled into the service. Exactly one
+# descriptor source is required: descriptor_set (a compiled FileDescriptorSet)
+# or use_reflection (gRPC server reflection).
+[global]
+log_level = "info"
+
+[[servers]]
+listen = "127.0.0.1:8092"
+
+  # Discover the service schema at runtime via gRPC server reflection.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/v1/" }
+    [servers.locations.grpc_transcode]
+    target = "grpc-backend"
+    use_reflection = true
+
+  # Or load a precompiled descriptor set and dial a literal host:port over TLS,
+  # preserving the original snake_case proto field names in the JSON output.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/internal/" }
+    [servers.locations.grpc_transcode]
+    target = "127.0.0.1:50051"
+    descriptor_set = "testdata/grpc/api.pb"
+    tls = true
+    preserve_proto_field_names = true
+
+[[upstreams]]
+name = "grpc-backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:50051"]

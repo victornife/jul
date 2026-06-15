@@ -1,0 +1,32 @@
+[global]
+log_level = "info"
+log_format = "text"
+
+# HTTPS server with HTTP/3 (QUIC) enabled.
+#
+# HTTP/3 runs on the same address over UDP, shares the TLS certificate below,
+# and is advertised to clients with an Alt-Svc response header. It requires a
+# binary built with -tags http3; other builds reject this config at startup.
+#
+# Validate with: jul -check -config testdata/http3.toml
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+
+  [servers.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+  min_version = "1.3"
+
+  [servers.http3]
+  enabled = true
+  alt_svc_max_age = 86400
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200

@@ -1,0 +1,22 @@
+{
+  // The Rust example lives in a nested folder, not at the workspace root.
+  // Point rust-analyzer at its Cargo.toml so it discovers the project.
+  "rust-analyzer.linkedProjects": [
+    "examples/rust-proxy/Cargo.toml"
+  ],
+  // Corporate networks may fail TLS cert revocation checks on Windows schannel
+  // (CRYPT_E_NO_REVOCATION_CHECK). Skip the check when rust-analyzer runs cargo.
+  "rust-analyzer.cargo.extraEnv": {
+    "CARGO_HTTP_CHECK_REVOKE": "false"
+  },
+  // Analyze the feature-gated Go files (//go:build acme|acme_dns|otel|console|
+  // brotli|zstd|grpc|http3|importer) so their implementation — not just the
+  // no-tag stubs — is type-checked by gopls. Keep this in sync with the full
+  // all-tags build set; otherwise gopls excludes the tagged files and reports
+  // their symbols (e.g. the importer's Translate/Report) as undefined even
+  // though `go build -tags ...` succeeds. With these tags active the matching
+  // *_stub.go fallbacks show as "excluded from build" when opened; that is
+  // expected, since the two sides are mutually exclusive and gopls can only
+  // analyze one at a time.
+  "go.buildTags": "acme,acme_dns,otel,console,brotli,zstd,grpc,http3,importer"
+}

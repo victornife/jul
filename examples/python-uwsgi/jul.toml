@@ -1,0 +1,24 @@
+# Jul config: serve a Python WSGI app through the uWSGI protocol.
+#
+# 1. Start the Python app under uWSGI (listens on the uwsgi socket below):
+#       uwsgi --socket 127.0.0.1:3031 --wsgi-file app.py --callable application
+# 2. Start Jul with this config:
+#       go run ./cmd/jul -config examples/python-uwsgi/jul.toml
+# 3. Browse to http://127.0.0.1:8099/
+
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8099"
+server_names = ["localhost"]
+
+  # Forward every request to the uWSGI app server.
+  # Accepted target forms:
+  #   127.0.0.1:3031          (TCP, default)
+  #   tcp://127.0.0.1:3031    (TCP, explicit)
+  #   unix:/run/app/uwsgi.sock (Unix socket)
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  uwsgi_pass = "127.0.0.1:3031"

@@ -1,0 +1,23 @@
+[global]
+log_level = "info"
+
+[[servers]]
+listen = "127.0.0.1:8083"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  try_files = ["$uri", "$uri/", "/index.html"]
+
+[compression]
+enabled = true
+# Server preference order: pick zstd, then br, then gzip when the client allows.
+# br/zstd only take effect in a build that includes their tags; gzip is the
+# universal fallback.
+encoders = ["zstd", "br", "gzip"]
+level = 0
+min_size = "1k"
+types = ["text/*", "application/json", "application/javascript", "application/xml", "application/wasm", "image/svg+xml"]
+precompressed = true

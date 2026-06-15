@@ -1,0 +1,26 @@
+# Jul config: serve a Go HTTP app via reverse proxy.
+#
+# 1. Start the Go app (listens on http://127.0.0.1:3033):
+#       go run ./examples/go-proxy/app.go
+# 2. Start Jul with this config:
+#       go run ./cmd/jul -config examples/go-proxy/jul.toml
+# 3. Browse to http://127.0.0.1:8101/
+
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8101"
+server_names = ["localhost"]
+
+  # Reverse-proxy every request to the Go HTTP server.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:3033"
+
+    # Forward useful context to the backend (optional but recommended).
+    [servers.locations.headers]
+    Host = "$host"
+    X-Real-IP = "$remote_addr"
+    X-Forwarded-For = "$proxy_add_x_forwarded_for"

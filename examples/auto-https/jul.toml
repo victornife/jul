@@ -1,0 +1,40 @@
+# Automatic HTTPS with ACME (Let's Encrypt).
+#
+# Build Jul with the acme tag, then run as a user allowed to bind :80 and :443:
+#   go build -tags acme -o jul ./cmd/jul
+#
+# Replace example.com / ops@example.com below with a domain that resolves to
+# this host and your contact email. Certificates are cached in ./jul-data/certs
+# and renewed automatically. `jul -check` validates this file with any build.
+
+[global]
+log_level = "info"
+log_format = "text"
+
+# HTTPS: certificates are obtained and renewed automatically.
+[[servers]]
+listen = "0.0.0.0:443"
+server_names = ["example.com"]
+
+  [servers.tls.acme]
+  enabled = true
+  email = "ops@example.com"
+  # Start on staging (untrusted certs, generous limits). Switch to
+  # "letsencrypt" once staging issuance works end to end.
+  ca = "letsencrypt-staging"
+  # domains defaults to server_names when omitted.
+  cache_dir = "./jul-data/certs"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200
+
+# Plain HTTP: answers the ACME HTTP-01 challenge, then redirects to HTTPS.
+[[servers]]
+listen = "0.0.0.0:80"
+server_names = ["example.com"]
+redirect_https = 308
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200

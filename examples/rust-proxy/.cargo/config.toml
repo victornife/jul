@@ -1,0 +1,5 @@
+# Corporate networks on Windows can fail TLS certificate revocation checks
+# with schannel (CRYPT_E_NO_REVOCATION_CHECK). Skipping the revocation check
+# lets cargo reach the crates.io index. Scoped to this example only.
+[http]
+check-revoke = false

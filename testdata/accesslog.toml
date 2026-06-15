@@ -1,0 +1,28 @@
+# Access-log sinks sample. No build tag required.
+#
+#   go run ./cmd/jul -config testdata/accesslog.toml
+#
+# The access log is written to BOTH the server log (the "stdout" sink, following
+# [global].log_format) and a dedicated rotating JSON file. The file sink records
+# every request at info level regardless of [global].log_level, and its parent
+# directory is created automatically. Add "syslog" to sinks on Linux/macOS to
+# also send each record to the local system log (not supported on Windows).
+[global]
+log_level = "info"
+log_format = "text"
+
+[observability.access_log]
+sinks = ["stdout", "file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 50
+rotate_keep = 5
+
+[[servers]]
+listen = "127.0.0.1:8095"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]

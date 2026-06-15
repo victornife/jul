@@ -1,0 +1,10 @@
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8099"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+return = 201

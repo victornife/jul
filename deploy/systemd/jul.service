@@ -1,0 +1,41 @@
+[Unit]
+Description=Jul NGINX-inspired HTTP edge server
+Documentation=https://example.invalid/jul
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Reload configuration on `systemctl reload jul` (SIGHUP).
+ExecStart=/usr/local/bin/jul --config /etc/jul/server.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+
+# Run as an unprivileged, dynamically-allocated system user.
+DynamicUser=yes
+# Allow binding to privileged ports (80/443) without full root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Hardening: minimal filesystem and kernel surface.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+# Writable paths the server needs (disk cache, logs). Adjust as configured.
+StateDirectory=jul
+ReadWritePaths=/var/cache/jul
+
+[Install]
+WantedBy=multi-user.target

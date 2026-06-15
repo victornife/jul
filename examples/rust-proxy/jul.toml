@@ -1,0 +1,30 @@
+# Jul config: serve a Rust HTTP app via reverse proxy.
+#
+# 1. Build and start the Rust app (listens on http://127.0.0.1:3034):
+#       cd examples/rust-proxy && cargo run --release
+#    (or, without Cargo:
+#       rustc -O examples/rust-proxy/app.rs -o examples/rust-proxy/app
+#       .\examples\rust-proxy\app.exe      (Windows)
+#       ./examples/rust-proxy/app          (Linux/macOS) )
+# 2. Start Jul with this config:
+#       go run ./cmd/jul -config examples/rust-proxy/jul.toml
+# 3. Browse to http://127.0.0.1:8102/
+
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8102"
+server_names = ["localhost"]
+
+  # Reverse-proxy every request to the Rust HTTP server.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:3034"
+
+    # Forward useful context to the backend (optional but recommended).
+    [servers.locations.headers]
+    Host = "$host"
+    X-Real-IP = "$remote_addr"
+    X-Forwarded-For = "$proxy_add_x_forwarded_for"

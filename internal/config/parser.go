@@ -1,0 +1,310 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/pelletier/go-toml/v2"
+)
+
+// Source loads a Config from some backing store. v1 ships a single TOML-backed
+// implementation; future versions may add an NGINX-syntax parser that emits the
+// same Config structs without touching the rest of the server.
+type Source interface {
+	// Load reads and decodes the configuration. It does not validate.
+	Load() (*Config, error)
+	// Name identifies the source for logging (e.g. the file path).
+	Name() string
+}
+
+// TOMLSource loads configuration from a TOML file on disk.
+type TOMLSource struct {
+	Path string
+}
+
+// NewTOMLSource returns a Source backed by the TOML file at path.
+func NewTOMLSource(path string) *TOMLSource { return &TOMLSource{Path: path} }
+
+// Name returns the file path.
+func (s *TOMLSource) Name() string { return s.Path }
+
+// Load reads and decodes the TOML file into a Config, applying defaults.
+func (s *TOMLSource) Load() (*Config, error) {
+	data, err := os.ReadFile(s.Path)
+	if err != nil {
+		return nil, fmt.Errorf("read config %q: %w", s.Path, err)
+	}
+	cfg, err := Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("%q: %w", s.Path, err)
+	}
+	return cfg, nil
+}
+
+// Parse decodes TOML bytes into a Config and applies defaults. It does not
+// validate; callers should run Validate separately.
+func Parse(data []byte) (*Config, error) {
+	var cfg Config
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	cfg.applyDefaults()
+	return &cfg, nil
+}
+
+// Marshal encodes a Config back to TOML. Custom types (Duration, Size,
+// UpstreamServer) round-trip via their TextMarshaler implementations. Note that
+// comments and original formatting are not preserved.
+func Marshal(c *Config) ([]byte, error) {
+	data, err := toml.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("encode config: %w", err)
+	}
+	return data, nil
+}
+
+// applyDefaults fills in conservative defaults for unset fields.
+func (c *Config) applyDefaults() {
+	if c.Global.LogLevel == "" {
+		c.Global.LogLevel = "info"
+	}
+	if c.Global.LogFormat == "" {
+		c.Global.LogFormat = "text"
+	}
+	if c.Global.ShutdownTimeout == 0 {
+		c.Global.ShutdownTimeout = Duration(30 * time.Second)
+	}
+
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		if srv.ReadHeaderTimeout == 0 {
+			srv.ReadHeaderTimeout = Duration(10 * time.Second)
+		}
+		if srv.IdleTimeout == 0 {
+			srv.IdleTimeout = Duration(60 * time.Second)
+		}
+		if srv.ClientMaxBodySize == 0 {
+			srv.ClientMaxBodySize = Size(1 << 20) // 1 MiB
+		}
+		if srv.MaxHeaderBytes == 0 {
+			srv.MaxHeaderBytes = Size(1 << 20) // 1 MiB
+		}
+		applyACMEDefaults(srv)
+		applyHTTP3Defaults(srv)
+	}
+
+	for i := range c.Upstreams {
+		up := &c.Upstreams[i]
+		if up.Strategy == "" {
+			up.Strategy = "round_robin"
+		}
+		if up.MaxFails == 0 {
+			up.MaxFails = 3
+		}
+		if up.FailTimeout == 0 {
+			up.FailTimeout = Duration(10 * time.Second)
+		}
+		for j := range up.Servers {
+			if up.Servers[j].Weight == 0 {
+				up.Servers[j].Weight = 1
+			}
+		}
+		applyHealthCheckDefaults(up.HealthCheck)
+	}
+
+	if c.Admin.Enabled && c.Admin.Listen == "" {
+		c.Admin.Listen = "127.0.0.1:9090"
+	}
+	if c.Admin.Enabled && c.Admin.Console == nil {
+		enabled := true
+		c.Admin.Console = &enabled
+	}
+	if c.Admin.Enabled {
+		if c.Admin.HistoryDir == "" {
+			c.Admin.HistoryDir = "./jul-data/config-history"
+		}
+		if c.Admin.HistoryKeep == 0 {
+			c.Admin.HistoryKeep = 50
+		}
+	}
+
+	if c.Cache.Enabled {
+		if c.Cache.MemoryMaxSize == 0 {
+			c.Cache.MemoryMaxSize = Size(64 << 20) // 64 MiB
+		}
+		if c.Cache.DiskPath != "" && c.Cache.DiskMaxSize == 0 {
+			c.Cache.DiskMaxSize = Size(512 << 20) // 512 MiB
+		}
+	}
+
+	if c.Compression.Enabled {
+		if len(c.Compression.Encoders) == 0 {
+			c.Compression.Encoders = []string{"gzip"}
+		}
+		if c.Compression.MinSize == 0 {
+			c.Compression.MinSize = Size(1 << 10) // 1 KiB
+		}
+		if len(c.Compression.Types) == 0 {
+			c.Compression.Types = defaultCompressionTypes()
+		}
+	}
+
+	applyRateLimitDefaults(&c.RateLimit)
+
+	if c.Observability.Tracing.Enabled {
+		t := &c.Observability.Tracing
+		if t.Exporter == "" {
+			t.Exporter = "otlp-grpc"
+		}
+		if t.ServiceName == "" {
+			t.ServiceName = "jul"
+		}
+		// A zero ratio means "unset" here and defaults to full sampling; users
+		// who want less set an explicit fraction in (0,1].
+		if t.SampleRatio == 0 {
+			t.SampleRatio = 1.0
+		}
+	}
+
+	// Access-log defaults always apply: there is always at least the stdout sink
+	// so the standard access line keeps appearing. The rotate defaults are only
+	// consulted by the file sink but are harmless when no file sink is active.
+	al := &c.Observability.AccessLog
+	if len(al.Sinks) == 0 {
+		al.Sinks = []string{"stdout"}
+	}
+	if al.Format == "" {
+		al.Format = "text"
+	}
+	if al.RotateMaxMB == 0 {
+		al.RotateMaxMB = 100
+	}
+	if al.RotateKeep == 0 {
+		al.RotateKeep = 7
+	}
+	for i := range c.Servers {
+		for j := range c.Servers[i].Locations {
+			applyRateLimitDefaults(c.Servers[i].Locations[j].RateLimit)
+			applyAuthDefaults(c.Servers[i].Locations[j].Auth)
+		}
+	}
+}
+
+// applyRateLimitDefaults fills in defaults for an enabled rate-limit policy
+// (global or per-location override). It is a no-op when nil or disabled.
+func applyRateLimitDefaults(rl *RateLimitConfig) {
+	if rl == nil || !rl.Enabled {
+		return
+	}
+	if rl.Key == "" {
+		rl.Key = "ip"
+	}
+	if rl.Burst == 0 {
+		rl.Burst = rl.Rate
+	}
+}
+
+// defaultJWTAlgorithms is the asymmetric signing-algorithm allow-list applied
+// when a JWT auth block omits one. The symmetric "none" algorithm is never
+// included and is always rejected during validation.
+func defaultJWTAlgorithms() []string {
+	return []string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512"}
+}
+
+// applyAuthDefaults fills in defaults for a per-location auth block: the Basic
+// realm and the JWT algorithm allow-list. It is a no-op when nil.
+func applyAuthDefaults(a *AuthConfig) {
+	if a == nil {
+		return
+	}
+	if a.Basic != nil && a.Basic.Realm == "" {
+		a.Basic.Realm = "Restricted"
+	}
+	if a.JWT != nil && len(a.JWT.Algorithms) == 0 {
+		a.JWT.Algorithms = defaultJWTAlgorithms()
+	}
+}
+
+// applyHealthCheckDefaults fills in defaults for an upstream's active
+// health-check block: probe type, interval/timeout, thresholds, and the
+// expected HTTP status set. It is a no-op when nil or disabled so a disabled
+// block does not acquire surprising defaults.
+func applyHealthCheckDefaults(h *HealthCheckConfig) {
+	if h == nil || !h.Enabled {
+		return
+	}
+	if h.Type == "" {
+		h.Type = "http"
+	}
+	if h.Interval == 0 {
+		h.Interval = Duration(5 * time.Second)
+	}
+	if h.Timeout == 0 {
+		h.Timeout = Duration(2 * time.Second)
+	}
+	if h.HealthyThreshold == 0 {
+		h.HealthyThreshold = 2
+	}
+	if h.UnhealthyThreshold == 0 {
+		h.UnhealthyThreshold = 3
+	}
+	if h.Type == "http" && len(h.ExpectStatus) == 0 {
+		h.ExpectStatus = []int{200}
+	}
+}
+
+// applyACMEDefaults fills in defaults for an enabled ACME block on a server.
+// Enabling ACME implies TLS is on (ACME is a certificate source), so it also
+// promotes TLS.Enabled — a [servers.tls.acme] block alone is enough, no
+// separate `enabled = true` on [servers.tls] required. Domains default to the
+// block's server_names; the CA defaults to Let's Encrypt's staging endpoint so
+// production rate limits are never consumed by accident. It is a no-op when
+// ACME is absent or disabled.
+func applyACMEDefaults(srv *ServerConfig) {
+	if srv.TLS == nil || srv.TLS.ACME == nil || !srv.TLS.ACME.Enabled {
+		return
+	}
+	srv.TLS.Enabled = true
+	a := srv.TLS.ACME
+	if a.CA == "" {
+		a.CA = "letsencrypt-staging"
+	}
+	if a.Challenge == "" {
+		a.Challenge = "http-01"
+	}
+	if a.CacheDir == "" {
+		a.CacheDir = "./jul-data/certs"
+	}
+	if len(a.Domains) == 0 {
+		a.Domains = append([]string(nil), srv.ServerNames...)
+	}
+	if a.OCSPStapling == nil {
+		on := true
+		a.OCSPStapling = &on
+	}
+}
+
+// applyHTTP3Defaults fills in defaults for an enabled HTTP/3 block on a server.
+// It is a no-op when HTTP/3 is absent or disabled.
+func applyHTTP3Defaults(srv *ServerConfig) {
+	if srv.HTTP3 == nil || !srv.HTTP3.Enabled {
+		return
+	}
+	if srv.HTTP3.AltSvcMaxAge == 0 {
+		srv.HTTP3.AltSvcMaxAge = 86400
+	}
+}
+
+// defaultCompressionTypes is the MIME allow-list applied when compression is
+// enabled without an explicit list.
+func defaultCompressionTypes() []string {
+	return []string{
+		"text/*",
+		"application/json",
+		"application/javascript",
+		"application/xml",
+		"application/wasm",
+		"image/svg+xml",
+	}
+}

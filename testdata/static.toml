@@ -1,0 +1,13 @@
+[global]
+log_level = "info"
+
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  try_files = ["$uri", "$uri/", "/index.html"]
+  cache_control = "public, max-age=60"

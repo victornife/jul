@@ -1,0 +1,43 @@
+# JWT-authenticated API gateway.
+#
+#   ../../jul -check -config jul.toml
+#   ../../jul -config jul.toml
+#
+# The /api surface requires a valid JWT bearer token, validated against the
+# issuer's JWKS endpoint. Validated claims feed a per-user rate limit. The /
+# surface is public. Authentication is a core feature — no build tag required.
+[global]
+log_level = "info"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  # Public landing page.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "./public"
+  index = ["index.html"]
+
+  # Protected API: a valid bearer token is required. Tokens are verified against
+  # the JWKS document published by the issuer; only asymmetric algorithms are
+  # accepted and "none" is always rejected.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://127.0.0.1:3000"
+
+    [servers.locations.auth.jwt]
+    # Replace with your issuer's JWKS URL (Auth0, Keycloak, Okta, Cognito, ...).
+    jwks_url = "https://issuer.example/.well-known/jwks.json"
+    issuer = "https://issuer.example/"
+    audience = "https://api.example/"
+    algorithms = ["RS256", "ES256"]
+
+    # Per-user rate limit: the key is the validated "sub" claim from the token
+    # above (auth runs before rate limiting), so each authenticated user gets
+    # their own bucket rather than sharing one per IP.
+    [servers.locations.rate_limit]
+    enabled = true
+    key = "jwt:sub"
+    rate = 20
+    burst = 40

@@ -1,0 +1,64 @@
+# Access-control sample: CIDR allow/deny, HTTP Basic, JWT, and forward-auth.
+#
+#   go run ./cmd/jul -check -config testdata/auth.toml
+#
+# Each location applies at most one credential method, optionally behind a CIDR
+# gate (deny wins over allow). Authentication runs ahead of rate limiting, so a
+# "jwt:<claim>" rate-limit key can key on a validated token claim.
+[global]
+log_level = "info"
+
+[[servers]]
+listen = "127.0.0.1:8088"
+server_names = ["localhost"]
+
+  # Public static content, no authentication.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+
+  # Admin surface: restricted to an internal network AND HTTP Basic credentials.
+  # The CIDR gate is evaluated first; only clients inside 10.0.0.0/8 (but not the
+  # quarantined 10.9.0.0/16) reach the password prompt.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/admin" }
+  proxy_pass = "http://127.0.0.1:3000"
+
+    [servers.locations.auth]
+    allow = ["10.0.0.0/8"]
+    deny = ["10.9.0.0/16"]
+
+      [servers.locations.auth.basic]
+      file = "testdata/htpasswd"
+      realm = "Admin Area"
+
+  # API surface: JWT bearer tokens validated against a JWKS endpoint. The
+  # algorithm allow-list defaults to the asymmetric set (RS*/ES*/PS*); "none" is
+  # always rejected. A jwt-keyed rate limit reuses the validated "sub" claim.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://127.0.0.1:3000"
+
+    [servers.locations.auth.jwt]
+    jwks_url = "https://issuer.example/.well-known/jwks.json"
+    issuer = "https://issuer.example/"
+    audience = "https://api.example/"
+    algorithms = ["RS256", "ES256"]
+
+    [servers.locations.rate_limit]
+    enabled = true
+    key = "jwt:sub"
+    rate = 20
+    burst = 40
+
+  # Delegated authorization: each request is mirrored to an external auth service.
+  # A 2xx authorizes the request and the listed response headers are copied onto
+  # the upstream request; any other status is relayed to the client.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/secure" }
+  proxy_pass = "http://127.0.0.1:3000"
+
+    [servers.locations.auth.forward_auth]
+    url = "http://127.0.0.1:4181/auth"
+    auth_response_headers = ["X-Auth-User", "X-Auth-Groups"]

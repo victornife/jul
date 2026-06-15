@@ -1,0 +1,27 @@
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8081"
+server_names = ["example.com"]
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "/srv/example"
+
+[[servers]]
+listen = "127.0.0.1:8081"
+server_names = ["api.example.com"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://backend"
+
+[[upstreams]]
+name = "backend"
+servers = ["127.0.0.1:3000"]

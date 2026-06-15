@@ -1,0 +1,45 @@
+# Active health checking example. Validate with:
+#   jul -check testdata/health.toml
+#
+# Two upstreams demonstrate HTTP and TCP probes; backends are ejected from
+# rotation after consecutive failed probes and restored after consecutive
+# successes, on top of the existing passive (live-traffic) health checking.
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://api"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/db" }
+  proxy_pass = "http://db"
+
+# HTTP probe: GET /healthz must return 200 within the timeout.
+[[upstreams]]
+name = "api"
+strategy = "round_robin"
+servers = ["127.0.0.1:3000", "127.0.0.1:3001"]
+  [upstreams.health_check]
+  enabled = true
+  type = "http"
+  path = "/healthz"
+  interval = "5s"
+  timeout = "2s"
+  healthy_threshold = 2
+  unhealthy_threshold = 3
+  expect_status = [200]
+
+# TCP probe: a successful connection is a passing probe (no path/status).
+[[upstreams]]
+name = "db"
+strategy = "least_conn"
+servers = ["127.0.0.1:5432", "127.0.0.1:5433"]
+  [upstreams.health_check]
+  enabled = true
+  type = "tcp"
+  interval = "3s"
+  timeout = "1s"
+  healthy_threshold = 1
+  unhealthy_threshold = 2

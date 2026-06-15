@@ -1,0 +1,28 @@
+# OpenTelemetry distributed tracing sample.
+#
+#   go run -tags otel ./cmd/jul -check -config testdata/otel.toml
+#
+# Tracing requires a binary built with `-tags otel`; checking this config with a
+# plain build reports that the otel build tag is missing. With tracing enabled,
+# every request starts a server span (with proxy.roundtrip / upstream.request /
+# cache.lookup child spans) exported over OTLP to the collector at `endpoint`,
+# and the active trace id is added to the access log as `trace_id`.
+[global]
+log_level = "info"
+
+[observability.tracing]
+enabled = true
+exporter = "otlp-grpc"          # or "otlp-http"
+endpoint = "localhost:4317"     # collector address (host:port for gRPC)
+sample_ratio = 1.0              # head-sampling probability, 0..1
+service_name = "jul"
+insecure = true                 # local collector listens without TLS
+
+[[servers]]
+listen = "127.0.0.1:8088"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]

@@ -1,0 +1,12 @@
+[global]
+log_level = "info"
+log_format = "json"
+
+[[servers]]
+listen = "127.0.0.1:8099"
+max_header_bytes = "1k"
+client_max_body_size = "16"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+return = 200

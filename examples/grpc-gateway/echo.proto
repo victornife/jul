@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package echo;
+
+import "google/api/annotations.proto";
+
+// EchoService is a tiny unary gRPC service used to demonstrate Jul's
+// gRPC <-> JSON transcoding. The google.api.http options below are what Jul
+// reads (from the compiled descriptor set) to route HTTP requests onto gRPC
+// methods — exactly like grpc-gateway or Envoy's grpc_json_transcoder.
+service EchoService {
+  rpc Echo(EchoRequest) returns (EchoReply) {
+    option (google.api.http) = {
+      post: "/v1/echo"
+      body: "*"
+      additional_bindings {
+        get: "/v1/echo/{id}"
+      }
+    };
+  }
+}
+
+message EchoRequest {
+  string message = 1;
+  string id = 2;
+}
+
+message EchoReply {
+  string message = 1;
+}
