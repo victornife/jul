@@ -1,0 +1,44 @@
+# golangci-lint configuration (schema v2).
+# Linters run against the full opt-in build-tag set so tagged files are checked too.
+version: "2"
+
+run:
+  build-tags:
+    - brotli
+    - zstd
+    - acme
+    - acme_dns
+    - console
+    - otel
+    - grpc
+    - http3
+    - importer
+
+linters:
+  # "standard" = errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  exclusions:
+    generated: lax
+    presets:
+      # Excludes the well-known unchecked-error patterns (Close, Fprintf, Write,
+      # etc.) that errcheck flags by default.
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Test helpers routinely ignore errors on Close / WriteString / httptest.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # JWKS EC-key parsing needs the classic crypto/ecdsa coordinate API
+      # (ecdsa.PublicKey{X,Y} + elliptic.IsOnCurve). A crypto/ecdh rewrite is a
+      # separate change; suppress the Go 1.25/1.26 deprecation warnings here.
+      - path: internal/auth/
+        text: "SA1019"
+        linters:
+          - staticcheck
+      # store documents the cache storage-tier contract implemented by the
+      # in-memory and on-disk tiers; it is intentionally kept for clarity.
+      - path: internal/cache/store\.go
+        text: "type store is unused"
+        linters:
+          - unused

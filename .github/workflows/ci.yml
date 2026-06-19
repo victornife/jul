@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Full opt-in build-tag set; keep in sync with .golangci.yml `run.build-tags`.
+  FULL_TAGS: "brotli zstd acme acme_dns console otel grpc http3 importer"
+
+jobs:
+  build:
+    name: build (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: lean
+            tags: ""
+          - profile: full
+            tags: "brotli zstd acme acme_dns console otel grpc http3 importer"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go vet
+        run: go vet -tags "${{ matrix.tags }}" ./...
+      - name: go build
+        run: go build -tags "${{ matrix.tags }}" ./...
+
+  test:
+    name: test (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: lean
+            tags: ""
+          - profile: full
+            tags: "brotli zstd acme acme_dns console otel grpc http3 importer"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test
+        run: go test -tags "${{ matrix.tags }}" ./...
+
+  race:
+    name: test -race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The race detector needs CGO + a C toolchain, available on the Linux runner.
+      - name: go test -race
+        run: go test -race -tags "${{ env.FULL_TAGS }}" ./...
+
+  format:
+    name: gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt check
+        shell: bash
+        run: |
+          # Exclude the //go:build ignore code generator, which is intentionally
+          # not gofmt-clean.
+          files=$(gofmt -l . | grep -v '^examples/grpc-gateway/gen_descriptor.go$' || true)
+          if [ -n "$files" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$files"
+            exit 1
+          fi
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+
+  vulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: govulncheck
+        run: govulncheck -tags "${{ env.FULL_TAGS }}" ./...
