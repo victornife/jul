@@ -3,9 +3,10 @@
 //
 // The schema mirrors common NGINX concepts (listen, server_name, location,
 // proxy_pass, upstream, ...) but deliberately uses TOML rather than NGINX
-// syntax. Several top-level tables ([[stream]], [[mail]], [plugins]) are
-// reserved for future versions: they are parsed but rejected during validation
-// in v1 so that configs written today fail loudly rather than silently.
+// syntax. Several top-level tables ([[stream]], [[mail]]) are reserved for
+// future versions: they are parsed but rejected during validation in v1 so that
+// configs written today fail loudly rather than silently. The [plugins] table
+// configures WASM plugins and is active in builds with the "wasmplugins" tag.
 package config
 
 // Config is the root configuration document.
@@ -19,11 +20,44 @@ type Config struct {
 	RateLimit     RateLimitConfig     `toml:"rate_limit"`
 	Observability ObservabilityConfig `toml:"observability"`
 
+	// Plugins declares WASM plugins by name ([plugins.NAME]). Locations and
+	// servers reference them by name. Plugins are loaded only in builds with the
+	// "wasmplugins" tag; a lean build refuses any config that declares them.
+	Plugins map[string]PluginConfig `toml:"plugins"`
+
 	// Reserved for future versions. Parsed so that presence can be detected
 	// and rejected with a clear message during validation (see validate.go).
 	Streams []map[string]any `toml:"stream"`
 	Mail    []map[string]any `toml:"mail"`
-	Plugins map[string]any   `toml:"plugins"`
+}
+
+// PluginConfig declares a single WASM plugin. Exactly one of Path or Inline
+// supplies the module bytes. Capabilities (KV, Fetch) default off and must be
+// granted explicitly; Fetch additionally requires AllowedHosts.
+type PluginConfig struct {
+	// Path is the filesystem path to the .wasm module.
+	Path string `toml:"path"`
+	// Inline is the module bytes encoded as standard base64, an alternative to
+	// Path for self-contained configs.
+	Inline string `toml:"inline"`
+	// Type is "middleware" (wraps a handler, may pass through) or "handler"
+	// (a terminal location action). Defaults to "middleware".
+	Type string `toml:"type"`
+	// Config is an arbitrary string map handed to the guest as a JSON object via
+	// the get_config host function.
+	Config map[string]string `toml:"config"`
+	// MemoryLimit caps the guest's linear memory. Zero applies a 16 MiB default.
+	MemoryLimit Size `toml:"memory_limit"`
+	// Timeout bounds a single guest invocation. Zero applies a 100ms default.
+	Timeout Duration `toml:"timeout"`
+	// KV grants access to the plugin key/value store host functions.
+	KV bool `toml:"kv"`
+	// Fetch grants the guarded outbound HTTP fetch host function. Requires
+	// AllowedHosts.
+	Fetch bool `toml:"fetch"`
+	// AllowedHosts is the allowlist of hosts the guest may fetch from when Fetch
+	// is granted.
+	AllowedHosts []string `toml:"allowed_hosts"`
 }
 
 // GlobalConfig holds process-wide settings.
@@ -70,6 +104,11 @@ type ServerConfig struct {
 	// RedirectHTTPS, when set on an HTTP server block, issues a redirect to
 	// the equivalent HTTPS URL. Value is the status code (301 or 308).
 	RedirectHTTPS int `toml:"redirect_https"`
+
+	// Plugins lists middleware plugin names applied to every location in this
+	// server, outermost first. Each name must appear in [plugins]. Requires the
+	// "wasmplugins" build tag.
+	Plugins []string `toml:"plugins"`
 }
 
 // MatchConfig selects requests for a location.
@@ -140,6 +179,16 @@ type LocationConfig struct {
 	// as JSON. It is an action (mutually exclusive with root/proxy_pass/etc.) and
 	// requires a build with the "grpc" tag.
 	GRPCTranscode *GRPCTranscodeConfig `toml:"grpc_transcode"`
+
+	// Plugins lists middleware plugin names applied to this location, composed
+	// around the action (after any server-level plugins, outermost first). Each
+	// name must appear in [plugins]. Requires the "wasmplugins" build tag.
+	Plugins []string `toml:"plugins"`
+
+	// Plugin names a handler plugin that serves this location as its action
+	// (mutually exclusive with root/proxy_pass/etc.). The name must appear in
+	// [plugins] with type = "handler". Requires the "wasmplugins" build tag.
+	Plugin string `toml:"plugin"`
 }
 
 // GRPCTranscodeConfig configures gRPC<->REST/JSON transcoding for a location.

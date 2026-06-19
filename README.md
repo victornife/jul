@@ -35,6 +35,8 @@ interface — all in a single static, dependency-free binary.
   - [TLS](#tls)
   - [Automatic HTTPS (ACME)](#automatic-https-acme)
   - [HTTP/3 (QUIC)](#http3-quic)
+  - [`[plugins]`](#plugins)
+- [WebAssembly plugins](#webassembly-plugins)
 - [Hot reload](#hot-reload)
 - [Admin interface & observability](#admin-interface--observability)
 - [Running real applications behind Jul.IA](#running-real-applications-behind-julia)
@@ -74,11 +76,14 @@ interface — all in a single static, dependency-free binary.
 | **Admin GUI** | Loopback-bound web console (token-auth): live metrics dashboard, upstream health, certificate inventory, config history with one-click rollback, and a setup wizard (`console` build tag) plus health, metrics, cache purge, reload, and config editing |
 | **Developer experience** | Zero-config `jul run --serve`/`--proxy` (no file needed), `jul lint` best-practice checks with CI-friendly exit codes, and `jul fmt` canonical formatting |
 | **Migration** | `jul import nginx` translates an existing NGINX config to Jul.IA TOML, reporting every directive it could not map — opt-in `importer` build tag |
+| **WebAssembly plugins** | Sandboxed request middleware and handlers compiled to WASM and run on the embedded [wazero](https://wazero.io) runtime (pure Go, no cgo): per-plugin memory and time limits, panic isolation, capability-gated key/value store, hot-reloadable — opt-in `wasmplugins` build tag |
 | **Portability** | Single static binary, no runtime dependencies; Windows, Linux, and macOS on amd64/arm64 |
 
-> Note: `[[stream]]`, `[[mail]]`, and `[plugins]` tables are reserved for future
-> versions. They are parsed but **rejected during validation** in v1 so configs
-> fail loudly rather than silently.
+> Note: `[[stream]]` and `[[mail]]` tables are reserved for future versions. They
+> are parsed but **rejected during validation** in v1 so configs fail loudly
+> rather than silently. The `[plugins]` table is active in binaries built with
+> the `wasmplugins` tag; in a binary without that tag a populated `[plugins]`
+> table is rejected at startup.
 
 ---
 
@@ -909,6 +914,104 @@ Notes and current limits:
 
 ---
 
+### `[plugins]`
+
+> Requires a binary built with `-tags wasmplugins`. A populated `[plugins]`
+> table in a binary without that tag is rejected at startup.
+
+Each entry under `[plugins]` declares one WebAssembly module by name. Exactly one
+of `path` (a `.wasm` file) or `inline` (base64-encoded module bytes) supplies the
+code. Capabilities default off and are granted explicitly.
+
+```toml
+[plugins.header-inject]
+path = "./plugins/header-inject.wasm"
+type = "middleware"              # "middleware" (default) or "handler"
+memory_limit = "16m"             # guest linear-memory cap (default 16 MiB)
+timeout = "100ms"                # per-invocation deadline (default 100ms)
+config = { header = "X-Plugin", value = "header-inject" }  # passed to the guest as JSON
+
+[plugins.kv-counter]
+path = "./plugins/kv-counter.wasm"
+kv = true                        # grant the key/value store host functions
+
+# fetch = true                   # grant guarded outbound HTTP (reserved; v1 host
+# allowed_hosts = ["api.example.com"]  #   function is not implemented yet)
+```
+
+| Key | Meaning |
+| --- | ------- |
+| `path` / `inline` | Module source — supply exactly one |
+| `type` | `middleware` (wraps a handler, may pass the request through) or `handler` (terminal location action) |
+| `config` | String map handed to the guest as a JSON object via `get_config` |
+| `memory_limit` | Guest linear-memory ceiling (default 16 MiB) |
+| `timeout` | Deadline for a single invocation; the guest is torn down on overrun (default 100ms) |
+| `kv` | Grant the key/value store host functions (namespaced per plugin) |
+| `fetch` / `allowed_hosts` | Grant guarded outbound HTTP to the listed hosts (validated; host function reserved for a future ABI revision) |
+
+Attach a plugin to traffic by referencing its name. Server- and location-level
+`plugins = [...]` lists run as **middleware** (outermost first); a location
+`plugin = "name"` is a terminal **handler** action:
+
+```toml
+[[servers]]
+listen = "0.0.0.0:8080"
+plugins = ["header-inject"]      # runs for every location on this server
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://backend"
+  plugins = ["kv-counter"]       # additional middleware for this location
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/blocked" }
+  plugin = "request-block"        # terminal handler — no root/proxy_pass here
+```
+
+See [WebAssembly plugins](#webassembly-plugins) for the runtime model and the
+authoring guide.
+
+---
+
+## WebAssembly plugins
+
+Jul.IA can run sandboxed extensions compiled to WebAssembly on the embedded
+[wazero](https://wazero.io) runtime — pure Go, no cgo, so the binary stays a
+single static file. Plugins are opt-in behind the `wasmplugins` build tag.
+
+```bash
+go build -tags wasmplugins -o jul ./cmd/jul
+```
+
+**Runtime model**
+
+- **Two shapes.** A *middleware* plugin wraps the next handler and may either
+  pass the request through (`Continue`) or short-circuit it (`Stop`, writing its
+  own response). A *handler* plugin is a terminal location action.
+- **Sandbox.** Each plugin runs in its own wazero runtime with a configurable
+  linear-memory cap (`memory_limit`) and a per-invocation deadline (`timeout`).
+  A guest that exceeds its time budget is torn down; a guest that panics is
+  contained and the request fails with `500` while the server keeps serving.
+- **Capabilities.** Guests get only what you grant: a namespaced key/value store
+  (`kv = true`) and a reserved guarded-fetch capability. Nothing else — no file
+  system, no ambient network, no host clock beyond the deadline.
+- **Hot reload.** `[plugins]` participates in zero-downtime reload: modules are
+  recompiled into a fresh set and swapped in atomically, with no process restart.
+  A shared compilation cache keeps re-instantiation cheap.
+- **Metrics.** Each invocation updates `jul_plugin_invocations_total{plugin,result}`,
+  `jul_plugin_duration_seconds{plugin}`, and `jul_plugin_panics_total{plugin}`.
+
+**Authoring**
+
+Plugins are ordinary Go programs built for `GOOS=wasip1 GOARCH=wasm` against the
+guest SDK in [`examples/plugins/sdk`](examples/plugins/sdk). The host/guest
+contract is the `jul-abi/v1` ABI. A full authoring guide — the SDK surface, the
+host functions, the caller-allocates buffer convention, and build commands —
+lives in [docs/plugins.md](docs/plugins.md), with runnable examples and their
+build script in [examples/plugins](examples/plugins).
+
+---
+
 ## Hot reload
 
 Jul.IA reloads configuration **without dropping connections**. A reload can be
@@ -1162,6 +1265,7 @@ binary. Combine them as needed:
 | `grpc` | gRPC ↔ JSON transcoding locations (`grpc_transcode`) |
 | `http3` | HTTP/3 over QUIC listeners (`[servers.http3]`) |
 | `importer` | `jul import nginx` config migration tool |
+| `wasmplugins` | WebAssembly plugins (`[plugins]`) on the embedded wazero runtime |
 
 ```bash
 # Full-featured build

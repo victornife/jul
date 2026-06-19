@@ -33,6 +33,9 @@ type Metrics struct {
 	probeDuration  *prometheus.HistogramVec
 	grpcTranscode  *prometheus.CounterVec
 	grpcStreamMsgs *prometheus.CounterVec
+	pluginInvokes  *prometheus.CounterVec
+	pluginDuration *prometheus.HistogramVec
+	pluginPanics   *prometheus.CounterVec
 	listenerConns  prometheus.Gauge
 	http3Conns     prometheus.Gauge
 	certExpiry     *prometheus.GaugeVec
@@ -113,6 +116,19 @@ func NewMetrics() *Metrics {
 			Name: "jul_grpc_transcode_stream_msgs_total",
 			Help: "gRPC-JSON transcoding streamed messages, labeled by gRPC method full name and direction (sent to backend / received from backend).",
 		}, []string{"method", "direction"}),
+		pluginInvokes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_plugin_invocations_total",
+			Help: "WASM plugin invocations, labeled by plugin name and result (continue/stop/error).",
+		}, []string{"plugin", "result"}),
+		pluginDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "jul_plugin_duration_seconds",
+			Help:    "WASM plugin invocation latency in seconds, labeled by plugin name.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"plugin"}),
+		pluginPanics: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_plugin_panics_total",
+			Help: "WASM plugin traps/panics contained by the host, labeled by plugin name.",
+		}, []string{"plugin"}),
 		listenerConns: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "jul_listener_conns",
 			Help: "Current concurrent connections across all listeners.",
@@ -145,6 +161,9 @@ func NewMetrics() *Metrics {
 		m.probeDuration,
 		m.grpcTranscode,
 		m.grpcStreamMsgs,
+		m.pluginInvokes,
+		m.pluginDuration,
+		m.pluginPanics,
 		m.listenerConns,
 		m.http3Conns,
 		m.certExpiry,
@@ -239,6 +258,20 @@ func (m *Metrics) ObserveGRPCTranscode(method, code string) {
 // backend). It is wired into each transcoding handler as its OnStreamMsg hook.
 func (m *Metrics) ObserveGRPCTranscodeStreamMsg(method, direction string) {
 	m.grpcStreamMsgs.WithLabelValues(method, direction).Inc()
+}
+
+// ObservePluginInvocation counts a WASM plugin invocation by plugin name and
+// result ("continue", "stop", or "error") and records its latency. It is wired
+// into the plugin set as its metrics hook.
+func (m *Metrics) ObservePluginInvocation(plugin, result string, latency time.Duration) {
+	m.pluginInvokes.WithLabelValues(plugin, result).Inc()
+	m.pluginDuration.WithLabelValues(plugin).Observe(latency.Seconds())
+}
+
+// ObservePluginPanic counts a WASM plugin trap or panic that the host contained
+// (turning it into a 500 while keeping the server alive).
+func (m *Metrics) ObservePluginPanic(plugin string) {
+	m.pluginPanics.WithLabelValues(plugin).Inc()
 }
 
 // ObserveCertExpiry records a certificate's leaf expiry for domain and counts a

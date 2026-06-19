@@ -104,6 +104,81 @@ func TestValidateRejectsReserved(t *testing.T) {
 	}
 }
 
+func TestValidatePluginsValid(t *testing.T) {
+	cfg := &Config{
+		Servers: []ServerConfig{{
+			Listen:  "127.0.0.1:80",
+			Plugins: []string{"mw"},
+			Locations: []LocationConfig{
+				{Match: MatchConfig{Type: "prefix", Path: "/"}, Plugin: "act"},
+			},
+		}},
+		Plugins: map[string]PluginConfig{
+			"mw":  {Path: "../../testdata/plugins/header-inject.wasm", Type: "middleware"},
+			"act": {Path: "../../testdata/plugins/request-block.wasm", Type: "handler"},
+		},
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidatePluginsErrors(t *testing.T) {
+	good := "../../testdata/plugins/header-inject.wasm"
+	cases := map[string]*Config{
+		"bad type": {
+			Servers: []ServerConfig{{Listen: ":80"}},
+			Plugins: map[string]PluginConfig{"p": {Path: good, Type: "bogus"}},
+		},
+		"no source": {
+			Servers: []ServerConfig{{Listen: ":80"}},
+			Plugins: map[string]PluginConfig{"p": {Type: "middleware"}},
+		},
+		"both sources": {
+			Servers: []ServerConfig{{Listen: ":80"}},
+			Plugins: map[string]PluginConfig{"p": {Path: good, Inline: "AAA=", Type: "middleware"}},
+		},
+		"missing file": {
+			Servers: []ServerConfig{{Listen: ":80"}},
+			Plugins: map[string]PluginConfig{"p": {Path: "nope.wasm", Type: "middleware"}},
+		},
+		"fetch without allowed_hosts": {
+			Servers: []ServerConfig{{Listen: ":80"}},
+			Plugins: map[string]PluginConfig{"p": {Path: good, Fetch: true}},
+		},
+		"unknown ref": {
+			Servers: []ServerConfig{{
+				Listen:    ":80",
+				Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Plugins: []string{"ghost"}}},
+			}},
+		},
+		"wrong type ref": {
+			Servers: []ServerConfig{{
+				Listen:    ":80",
+				Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Plugin: "mw"}},
+			}},
+			Plugins: map[string]PluginConfig{"mw": {Path: good, Type: "middleware"}},
+		},
+		"action conflict": {
+			Servers: []ServerConfig{{
+				Listen: ":80",
+				Locations: []LocationConfig{{
+					Match:  MatchConfig{Type: "prefix", Path: "/"},
+					Plugin: "act", Root: "/var/www",
+				}},
+			}},
+			Plugins: map[string]PluginConfig{"act": {Path: good, Type: "handler"}},
+		},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := Validate(cfg); err == nil {
+				t.Fatalf("expected a validation error for %q", name)
+			}
+		})
+	}
+}
+
 func TestValidateRequiresServerAndListen(t *testing.T) {
 	if err := Validate(&Config{}); err == nil {
 		t.Fatal("expected error when no servers configured")

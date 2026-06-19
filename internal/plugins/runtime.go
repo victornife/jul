@@ -1,0 +1,303 @@
+//go:build wasmplugins
+
+package plugins
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+
+	"jul/internal/config"
+)
+
+// wasmPageSize is the WebAssembly linear-memory page size (64 KiB).
+const wasmPageSize = 1 << 16
+
+// instantiateTimeout bounds module instantiation (running the guest's
+// _initialize), independent of the much shorter per-request call timeout.
+const instantiateTimeout = 10 * time.Second
+
+// Options configures a Manager.
+type Options struct {
+	// Logger receives guest log messages and host diagnostics. Required.
+	Logger *slog.Logger
+	// OnInvocation, when set, is called after each guest invocation with the
+	// plugin name, result ("continue"/"stop"/"error"), and wall-clock duration.
+	OnInvocation func(plugin, result string, d time.Duration)
+	// OnPanic, when set, is called when a guest trap, panic, or timeout is
+	// contained by the host.
+	OnPanic func(plugin string)
+	// KV overrides the key/value backing store. Defaults to an in-memory store.
+	KV KVStore
+}
+
+// Manager owns the process-wide plugin runtime resources: the shared
+// compilation cache (so unchanged modules are recompiled cheaply across
+// reloads) and the key/value store. It is created once and closed at shutdown.
+type Manager struct {
+	log      *slog.Logger
+	cache    wazero.CompilationCache
+	kv       KVStore
+	onInvoke func(string, string, time.Duration)
+	onPanic  func(string)
+}
+
+// NewManager creates a Manager. It never fails in the compiled build, but
+// returns an error type for symmetry with the stub build.
+func NewManager(opts Options) (*Manager, error) {
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+	kv := opts.KV
+	if kv == nil {
+		kv = newMemKV()
+	}
+	onInvoke := opts.OnInvocation
+	if onInvoke == nil {
+		onInvoke = func(string, string, time.Duration) {}
+	}
+	onPanic := opts.OnPanic
+	if onPanic == nil {
+		onPanic = func(string) {}
+	}
+	return &Manager{
+		log:      opts.Logger,
+		cache:    wazero.NewCompilationCache(),
+		kv:       kv,
+		onInvoke: onInvoke,
+		onPanic:  onPanic,
+	}, nil
+}
+
+// Close releases the shared compilation cache.
+func (m *Manager) Close() error {
+	if m == nil || m.cache == nil {
+		return nil
+	}
+	return m.cache.Close(context.Background())
+}
+
+// Build compiles and instantiates every declared plugin into a Set for one
+// configuration generation. On any error the partially built Set is closed and
+// the error returned, so a rejected reload leaks no runtimes.
+func (m *Manager) Build(cfg map[string]config.PluginConfig) (*Set, error) {
+	s := &Set{plugins: make(map[string]*plugin, len(cfg))}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = s.Close()
+		}
+	}()
+	for name, pc := range cfg {
+		p, err := m.compilePlugin(name, pc)
+		if err != nil {
+			return nil, fmt.Errorf("plugin %q: %w", name, err)
+		}
+		s.plugins[name] = p
+	}
+	ok = true
+	return s, nil
+}
+
+// plugin is a compiled, ready-to-run plugin. Instances are pooled because
+// instantiating a Go/wasip1 module (which boots the Go runtime) is expensive
+// relative to a single call.
+type plugin struct {
+	name      string
+	runtime   wazero.Runtime
+	compiled  wazero.CompiledModule
+	pool      sync.Pool // of api.Module
+	timeout   time.Duration
+	isHandler bool
+
+	capKV        bool
+	capFetch     bool
+	allowedHosts []string
+	configJSON   []byte
+	kv           KVStore
+
+	log      *slog.Logger
+	onInvoke func(string, string, time.Duration)
+	onPanic  func(string)
+}
+
+func (m *Manager) compilePlugin(name string, pc config.PluginConfig) (*plugin, error) {
+	wasm, err := loadModule(pc)
+	if err != nil {
+		return nil, err
+	}
+
+	pages := uint32(pc.MemoryLimit.Bytes() / wasmPageSize)
+	if pages == 0 {
+		pages = 256 // 16 MiB
+	}
+
+	cfgJSON := []byte("{}")
+	if len(pc.Config) > 0 {
+		if b, err := json.Marshal(pc.Config); err == nil {
+			cfgJSON = b
+		}
+	}
+
+	p := &plugin{
+		name:         name,
+		timeout:      pc.Timeout.Std(),
+		isHandler:    pc.Type == "handler",
+		capKV:        pc.KV,
+		capFetch:     pc.Fetch,
+		allowedHosts: pc.AllowedHosts,
+		configJSON:   cfgJSON,
+		kv:           m.kv,
+		log:          m.log,
+		onInvoke:     m.onInvoke,
+		onPanic:      m.onPanic,
+	}
+	if p.timeout <= 0 {
+		p.timeout = 100 * time.Millisecond
+	}
+
+	ctx := context.Background()
+	rtCfg := wazero.NewRuntimeConfig().
+		WithCompilationCache(m.cache).
+		WithMemoryLimitPages(pages).
+		WithCloseOnContextDone(true)
+	r := wazero.NewRuntimeWithConfig(ctx, rtCfg)
+
+	closeOnErr := func(err error) (*plugin, error) {
+		_ = r.Close(ctx)
+		return nil, err
+	}
+
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r); err != nil {
+		return closeOnErr(fmt.Errorf("instantiate wasi: %w", err))
+	}
+
+	registrar, ok := abiRegistry[ABIJulV1]
+	if !ok {
+		return closeOnErr(fmt.Errorf("unknown ABI %q", ABIJulV1))
+	}
+	if err := registrar(ctx, r, p); err != nil {
+		return closeOnErr(fmt.Errorf("register host module: %w", err))
+	}
+
+	compiled, err := r.CompileModule(ctx, wasm)
+	if err != nil {
+		return closeOnErr(fmt.Errorf("compile module: %w", err))
+	}
+	if _, ok := compiled.ExportedFunctions()["handle_request"]; !ok {
+		_ = compiled.Close(ctx)
+		return closeOnErr(errors.New("module does not export handle_request (build it against the Jul.IA plugin SDK)"))
+	}
+
+	p.runtime = r
+	p.compiled = compiled
+
+	// Eagerly instantiate one instance so a broken module fails the build (and
+	// thus the reload) rather than the first request.
+	mod, err := p.instantiate()
+	if err != nil {
+		return closeOnErr(fmt.Errorf("instantiate module: %w", err))
+	}
+	p.pool.Put(mod)
+
+	return p, nil
+}
+
+// loadModule reads the plugin's wasm bytes from its path or inline base64.
+func loadModule(pc config.PluginConfig) ([]byte, error) {
+	switch {
+	case pc.Path != "":
+		return os.ReadFile(pc.Path)
+	case pc.Inline != "":
+		return base64.StdEncoding.DecodeString(pc.Inline)
+	default:
+		return nil, errors.New("no module source (set path or inline)")
+	}
+}
+
+// instantiate creates a fresh module instance, running its _initialize reactor
+// start function. Instantiation uses its own timeout, not the per-call one.
+func (p *plugin) instantiate() (api.Module, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), instantiateTimeout)
+	defer cancel()
+	cfg := wazero.NewModuleConfig().
+		WithName("").
+		WithStartFunctions("_initialize")
+	return p.runtime.InstantiateModule(ctx, p.compiled, cfg)
+}
+
+func (p *plugin) acquire() (api.Module, error) {
+	if v := p.pool.Get(); v != nil {
+		return v.(api.Module), nil
+	}
+	return p.instantiate()
+}
+
+func (p *plugin) release(mod api.Module) { p.pool.Put(mod) }
+
+// invoke runs the guest's handle_request for one HTTP request. It returns the
+// guest's action (Continue/Stop), the invocation holding any response the guest
+// produced, and an error if the guest trapped, panicked, or timed out (which the
+// caller turns into a 500). On error the instance is discarded, not pooled,
+// because a trapped module may be in an undefined state.
+func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.Request) (action uint32, inv *invocation, err error) {
+	mod, err := p.acquire()
+	if err != nil {
+		p.onPanic(p.name)
+		return 0, nil, err
+	}
+
+	inv = &invocation{r: r, w: w, log: p.log}
+	ctx, cancel := context.WithTimeout(withInvocation(parent, inv), p.timeout)
+	defer cancel()
+
+	start := time.Now()
+	fn := mod.ExportedFunction("handle_request")
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("plugin %q panicked: %v", p.name, rec)
+			_ = mod.Close(context.Background())
+			p.onPanic(p.name)
+			p.onInvoke(p.name, "error", time.Since(start))
+		}
+	}()
+
+	results, callErr := fn.Call(ctx)
+	dur := time.Since(start)
+	if callErr != nil {
+		_ = mod.Close(context.Background())
+		p.onPanic(p.name)
+		p.onInvoke(p.name, "error", dur)
+		return 0, inv, callErr
+	}
+
+	p.release(mod)
+	action = uint32(results[0])
+	result := "stop"
+	if action == 1 {
+		result = "continue"
+	}
+	p.onInvoke(p.name, result, dur)
+	return action, inv, nil
+}
+
+// close tears down the plugin's runtime, which closes every instance (pooled or
+// in flight) and the compiled module.
+func (p *plugin) close() {
+	if p == nil || p.runtime == nil {
+		return
+	}
+	_ = p.runtime.Close(context.Background())
+}

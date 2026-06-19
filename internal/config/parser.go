@@ -189,6 +189,21 @@ func (c *Config) applyDefaults() {
 			applyAuthDefaults(c.Servers[i].Locations[j].Auth)
 		}
 	}
+
+	// WASM plugin defaults: middleware type, 16 MiB memory cap, 100ms per-call
+	// timeout. Map values are not addressable, so reassign the copy.
+	for name, p := range c.Plugins {
+		if p.Type == "" {
+			p.Type = "middleware"
+		}
+		if p.MemoryLimit == 0 {
+			p.MemoryLimit = Size(16 << 20)
+		}
+		if p.Timeout == 0 {
+			p.Timeout = Duration(100 * time.Millisecond)
+		}
+		c.Plugins[name] = p
+	}
 }
 
 // applyRateLimitDefaults fills in defaults for an enabled rate-limit policy

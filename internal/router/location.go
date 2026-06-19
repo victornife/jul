@@ -19,6 +19,7 @@ const (
 	ActionReturn        = "return"
 	ActionDeny          = "deny"
 	ActionGRPCTranscode = "grpc_transcode"
+	ActionPlugin        = "plugin"
 )
 
 // actionOf derives the action for a location from which fields are set. Deeper
@@ -37,10 +38,12 @@ func actionOf(loc config.LocationConfig) (string, error) {
 		return ActionFastCGI, nil
 	case loc.GRPCTranscode != nil:
 		return ActionGRPCTranscode, nil
+	case loc.Plugin != "":
+		return ActionPlugin, nil
 	case loc.Root != "":
 		return ActionStatic, nil
 	default:
-		return "", fmt.Errorf("location %q has no action (set one of root, proxy_pass, fastcgi_pass, redirect, return, or deny)", loc.Match.Path)
+		return "", fmt.Errorf("location %q has no action (set one of root, proxy_pass, fastcgi_pass, redirect, return, deny, grpc_transcode, or plugin)", loc.Match.Path)
 	}
 }
 

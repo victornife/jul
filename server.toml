@@ -249,3 +249,37 @@ listen = "127.0.0.1:9090"
 #   match = { type = "prefix", path = "/" }
 #   root = "/srv/www/example"
 
+# WebAssembly plugins — requires a binary built with `-tags wasmplugins`.
+# Each [plugins.NAME] entry declares one sandboxed WASM module run on the
+# embedded wazero runtime. Supply the module with exactly one of `path` (a .wasm
+# file) or `inline` (base64 module bytes). Capabilities default off. Reference a
+# plugin from a server/location `plugins = [...]` list to run it as middleware,
+# or a location `plugin = "NAME"` to use it as a terminal handler action.
+# See docs/plugins.md for the authoring guide and examples/plugins for samples.
+#
+# [plugins.header-inject]
+# path = "./plugins/header-inject.wasm"
+# type = "middleware"                # "middleware" (default) or "handler"
+# memory_limit = "16m"               # guest linear-memory cap (default 16 MiB)
+# timeout = "100ms"                  # per-invocation deadline (default 100ms)
+# config = { header = "X-Plugin", value = "header-inject" }  # JSON to the guest
+#
+# [plugins.kv-counter]
+# path = "./plugins/kv-counter.wasm"
+# kv = true                          # grant the key/value store host functions
+#
+# [plugins.request-block]
+# path = "./plugins/request-block.wasm"
+# type = "handler"                   # terminal location action
+#
+# [[servers]]
+# listen = "0.0.0.0:8080"
+# plugins = ["header-inject"]        # middleware for every location on this server
+#   [[servers.locations]]
+#   match = { type = "prefix", path = "/api/" }
+#   proxy_pass = "http://backend"
+#   plugins = ["kv-counter"]         # additional middleware for this location
+#   [[servers.locations]]
+#   match = { type = "exact", path = "/blocked" }
+#   plugin = "request-block"          # terminal handler — no root/proxy_pass here
+

@@ -11,6 +11,7 @@ require (
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/client_model v0.5.0
 	github.com/quic-go/quic-go v0.59.1
+	github.com/tetratelabs/wazero v1.12.0
 	github.com/tufanbarisyildirim/gonginx v0.0.0-20260220081509-8e17ce617db3
 	github.com/yookoala/gofast v0.8.0
 	go.opentelemetry.io/otel v1.43.0

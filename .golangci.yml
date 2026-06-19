@@ -13,6 +13,7 @@ run:
     - grpc
     - http3
     - importer
+    - wasmplugins
 
 linters:
   # "standard" = errcheck, govet, ineffassign, staticcheck, unused.

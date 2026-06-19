@@ -1,0 +1,33 @@
+# Sample config exercising the WebAssembly plugins runtime.
+# Requires a binary built with `-tags wasmplugins`.
+# Build the modules first: examples/plugins/build.ps1 (or build.sh).
+[global]
+log_level = "info"
+
+[plugins.header-inject]
+path = "testdata/plugins/header-inject.wasm"
+type = "middleware"
+config = { header = "X-Plugin", value = "header-inject" }
+
+[plugins.kv-counter]
+path = "testdata/plugins/kv-counter.wasm"
+kv = true
+
+[plugins.request-block]
+path = "testdata/plugins/request-block.wasm"
+type = "handler"
+
+[[servers]]
+listen = "127.0.0.1:8083"
+server_names = ["localhost"]
+plugins = ["header-inject"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  plugins = ["kv-counter"]
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/blocked" }
+  plugin = "request-block"

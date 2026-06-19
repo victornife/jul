@@ -23,9 +23,11 @@ func Validate(c *Config) error {
 	if len(c.Mail) > 0 {
 		errs = append(errs, errors.New("[[mail]] (mail proxy) is reserved for a future version and not supported in v1"))
 	}
-	if len(c.Plugins) > 0 {
-		errs = append(errs, errors.New("[plugins] (dynamic modules/scripting) is reserved for a future version and not supported in v1"))
-	}
+
+	// Validate WASM plugin declarations and index them for reference checks
+	// below. Whether the "wasmplugins" build tag is actually compiled in is
+	// reported at plugin-set build time, mirroring compression/grpc/otel.
+	errs = append(errs, validatePlugins(c.Plugins)...)
 
 	if len(c.Servers) == 0 {
 		errs = append(errs, errors.New("at least one [[servers]] block is required"))
@@ -90,7 +92,12 @@ func Validate(c *Config) error {
 			if err := validateMatch(loc.Match, locWhere); err != nil {
 				errs = append(errs, err)
 			}
-			errs = append(errs, validateLocation(loc, locWhere, upstreamNames)...)
+			errs = append(errs, validateLocation(loc, locWhere, upstreamNames, c.Plugins)...)
+		}
+
+		// Server-level middleware plugins must name middleware plugins.
+		for k, name := range srv.Plugins {
+			errs = append(errs, validatePluginRef(c.Plugins, name, "middleware", fmt.Sprintf("%s.plugins[%d]", where, k))...)
 		}
 
 		if srv.TLS != nil && srv.TLS.Enabled {
@@ -426,7 +433,7 @@ func validateACME(a *ACMEConfig, serverNames []string, where string) []error {
 
 // validateLocation checks a single location for a valid, unambiguous action and
 // that any referenced resources are well-formed.
-func validateLocation(loc LocationConfig, where string, upstreamNames map[string]int) []error {
+func validateLocation(loc LocationConfig, where string, upstreamNames map[string]int, plugins map[string]PluginConfig) []error {
 	var errs []error
 
 	// Count configured actions to catch conflicts (e.g. root + proxy_pass).
@@ -463,6 +470,9 @@ func validateLocation(loc LocationConfig, where string, upstreamNames map[string
 	if loc.GRPCTranscode != nil {
 		actions = append(actions, "grpc_transcode")
 	}
+	if loc.Plugin != "" {
+		actions = append(actions, "plugin")
+	}
 	if len(actions) > 1 {
 		errs = append(errs, fmt.Errorf("%s: conflicting actions %v (set exactly one)", where, actions))
 	}
@@ -472,6 +482,15 @@ func validateLocation(loc LocationConfig, where string, upstreamNames map[string
 	}
 	if loc.GRPCTranscode != nil {
 		errs = append(errs, validateGRPCTranscode(loc.GRPCTranscode, where+".grpc_transcode", upstreamNames)...)
+	}
+
+	// Handler plugin action must reference a "handler" plugin; per-location
+	// middleware plugins must reference "middleware" plugins.
+	if loc.Plugin != "" {
+		errs = append(errs, validatePluginRef(plugins, loc.Plugin, "handler", where+".plugin")...)
+	}
+	for k, name := range loc.Plugins {
+		errs = append(errs, validatePluginRef(plugins, name, "middleware", fmt.Sprintf("%s.plugins[%d]", where, k))...)
 	}
 
 	for k, rw := range loc.Rewrites {
@@ -534,6 +553,70 @@ func validateGRPCTranscode(g *GRPCTranscodeConfig, where string, upstreamNames m
 		errs = append(errs, fmt.Errorf("%s: max_message_size must not be negative", where))
 	}
 	return errs
+}
+
+// validatePlugins checks each [plugins.NAME] declaration: a valid type, exactly
+// one module source (path or inline), a readable path when given, sane limits,
+// and that the fetch capability comes with an allowed-hosts allowlist. Whether
+// the "wasm" build tag is compiled in is reported when the plugin set is built.
+func validatePlugins(plugins map[string]PluginConfig) []error {
+	var errs []error
+	for name, p := range plugins {
+		where := fmt.Sprintf("[plugins.%s]", name)
+		if strings.TrimSpace(name) == "" {
+			errs = append(errs, errors.New("[plugins]: plugin name must not be empty"))
+		}
+		switch strings.TrimSpace(p.Type) {
+		case "", "middleware", "handler":
+		default:
+			errs = append(errs, fmt.Errorf("%s: invalid type %q (want middleware|handler)", where, p.Type))
+		}
+		hasPath := strings.TrimSpace(p.Path) != ""
+		hasInline := strings.TrimSpace(p.Inline) != ""
+		switch {
+		case hasPath && hasInline:
+			errs = append(errs, fmt.Errorf("%s: set exactly one of path or inline, not both", where))
+		case !hasPath && !hasInline:
+			errs = append(errs, fmt.Errorf("%s: a module source is required (set path or inline)", where))
+		}
+		if hasPath {
+			if info, err := os.Stat(p.Path); err != nil {
+				errs = append(errs, fmt.Errorf("%s: path %q: %v", where, p.Path, err))
+			} else if info.IsDir() {
+				errs = append(errs, fmt.Errorf("%s: path %q is a directory, not a .wasm file", where, p.Path))
+			}
+		}
+		if p.MemoryLimit.Bytes() < 0 {
+			errs = append(errs, fmt.Errorf("%s: memory_limit must not be negative", where))
+		}
+		if p.Timeout.Std() < 0 {
+			errs = append(errs, fmt.Errorf("%s: timeout must not be negative", where))
+		}
+		if p.Fetch && len(p.AllowedHosts) == 0 {
+			errs = append(errs, fmt.Errorf("%s: fetch is enabled but allowed_hosts is empty (an allowlist is required)", where))
+		}
+	}
+	return errs
+}
+
+// validatePluginRef checks that a referenced plugin name exists and has the
+// expected type (middleware or handler).
+func validatePluginRef(plugins map[string]PluginConfig, name, wantType, where string) []error {
+	if strings.TrimSpace(name) == "" {
+		return []error{fmt.Errorf("%s: plugin name must not be empty", where)}
+	}
+	p, ok := plugins[name]
+	if !ok {
+		return []error{fmt.Errorf("%s: references unknown plugin %q (declare it under [plugins.%s])", where, name, name)}
+	}
+	got := strings.TrimSpace(p.Type)
+	if got == "" {
+		got = "middleware"
+	}
+	if got != wantType {
+		return []error{fmt.Errorf("%s: plugin %q has type %q but a %q plugin is required here", where, name, got, wantType)}
+	}
+	return nil
 }
 
 // validateProxyPass checks the proxy_pass target form and, for upstream

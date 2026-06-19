@@ -19,6 +19,7 @@ import (
 	"jul/internal/handler"
 	"jul/internal/middleware"
 	"jul/internal/observability"
+	"jul/internal/plugins"
 	"jul/internal/router"
 	"jul/internal/server"
 	"jul/internal/signals"
@@ -172,6 +173,23 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	})
 	defer poolReg.CloseAll()
 
+	// The WASM plugin manager persists across reloads so the compilation cache
+	// (and the key/value store) survive config edits: an unchanged module is
+	// recompiled from cache cheaply, and KV state is retained. Each reload builds
+	// a fresh plugin Set; the previous Set is closed via the generational handler
+	// closers below. In a lean build (no "wasmplugins" tag) the manager is a
+	// no-op and Build rejects any configured plugin, failing the reload clearly.
+	pluginMgr, err := plugins.NewManager(plugins.Options{
+		Logger:       log,
+		OnInvocation: metrics.ObservePluginInvocation,
+		OnPanic:      metrics.ObservePluginPanic,
+	})
+	if err != nil {
+		log.Error("failed to initialize plugin manager", "error", err)
+		return 1
+	}
+	defer func() { _ = pluginMgr.Close() }()
+
 	// liveHandlerClosers holds closers for handlers in the currently serving
 	// configuration that own resources needing explicit teardown on reload —
 	// presently gRPC-transcoding backend connections. A successful reload closes
@@ -212,6 +230,16 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				}
 			}
 		}()
+
+		// Build this generation's WASM plugin set. A lean build (or a malformed
+		// module) fails here, rejecting the reload. The set owns per-plugin wazero
+		// runtimes; register it for generational teardown so the previous set is
+		// closed only after the new handlers are live.
+		pluginSet, err := pluginMgr.Build(c.Plugins)
+		if err != nil {
+			return nil, fmt.Errorf("plugins: %w", err)
+		}
+		stagedHandlerClosers = append(stagedHandlerClosers, pluginSet)
 
 		withCache := func(loc config.LocationConfig, h http.Handler) http.Handler {
 			if loc.Cache && responseCache != nil {
@@ -257,6 +285,13 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					stagedHandlerClosers = append(stagedHandlerClosers, c)
 				}
 				return h, nil
+			},
+			router.ActionPlugin: func(_ config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
+				h := pluginSet.Handler(loc.Plugin)
+				if h == nil {
+					return nil, fmt.Errorf("handler plugin %q is not loaded", loc.Plugin)
+				}
+				return withCache(loc, h), nil
 			},
 		}
 		// Rate limiting is applied per location: a location's own [rate_limit]
@@ -312,14 +347,27 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 
-		// Compose the per-location modifiers so authentication is the OUTERMOST
-		// wrapper: it runs before rate limiting, making validated JWT claims
-		// available to a "jwt:<claim>" rate-limit key. Both stay modifiers that
-		// compose around the action; neither is an action itself.
+		// Compose the per-location modifiers. WASM middleware plugins run
+		// OUTERMOST (edge position) so they can inspect or block a request before
+		// authentication; server-level plugins wrap location-level ones. Inside
+		// the plugins, authentication wraps rate limiting, making validated JWT
+		// claims available to a "jwt:<claim>" rate-limit key. All stay modifiers
+		// that compose around the action; none is an action itself.
 		locModifier := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 			au := locAuth(srv, loc)
 			rl := locRateLimit(srv, loc)
-			if au == nil && rl == nil {
+			var pluginMW []middleware.Middleware
+			for _, name := range srv.Plugins {
+				if mw := pluginSet.Middleware(name); mw != nil {
+					pluginMW = append(pluginMW, mw)
+				}
+			}
+			for _, name := range loc.Plugins {
+				if mw := pluginSet.Middleware(name); mw != nil {
+					pluginMW = append(pluginMW, mw)
+				}
+			}
+			if au == nil && rl == nil && len(pluginMW) == 0 {
 				return nil
 			}
 			return func(next http.Handler) http.Handler {
@@ -329,6 +377,11 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				}
 				if au != nil {
 					h = au(h)
+				}
+				// Apply plugin middleware in reverse so the first-listed wraps
+				// outermost (server plugins before location plugins).
+				for i := len(pluginMW) - 1; i >= 0; i-- {
+					h = pluginMW[i](h)
 				}
 				return h
 			}
