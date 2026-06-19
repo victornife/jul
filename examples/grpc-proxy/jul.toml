@@ -1,0 +1,49 @@
+# Native gRPC passthrough (grpc = true), requires a -tags grpc binary.
+#
+#   go build -tags grpc -o ../../jul ../../cmd/jul
+#   ../../jul -check -config jul.toml
+#   ../../jul -config jul.toml
+#
+# Jul forwards native gRPC end to end over HTTP/2 (trailers preserved, frames
+# flushed immediately) and balances calls across the backend pool. This is
+# different from grpc_transcode, which converts REST/JSON to gRPC.
+[global]
+log_level = "info"
+
+# Plaintext front door. h2c lets gRPC clients connect over cleartext HTTP/2
+# without TLS, in addition to HTTP/1.1.
+[[servers]]
+listen = "127.0.0.1:8095"
+h2c = true
+
+  # grpc = true makes this proxy_pass a native gRPC passthrough. The http://
+  # scheme dials the backend over cleartext HTTP/2 (h2c).
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://grpc-backend"
+  grpc = true
+
+# TLS front door. HTTP/2 is negotiated via ALPN, so h2c is not needed. The
+# https:// backend scheme dials the upstream over HTTP/2 with TLS.
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+
+  [servers.tls]
+  cert = "../../testdata/tls/localhost.crt"
+  key = "../../testdata/tls/localhost.key"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "https://grpc-backend-tls"
+  grpc = true
+
+[[upstreams]]
+name = "grpc-backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:50051", "127.0.0.1:50052"]
+
+[[upstreams]]
+name = "grpc-backend-tls"
+strategy = "least_conn"
+servers = ["127.0.0.1:50061"]

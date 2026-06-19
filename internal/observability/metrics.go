@@ -33,6 +33,7 @@ type Metrics struct {
 	probeDuration  *prometheus.HistogramVec
 	grpcTranscode  *prometheus.CounterVec
 	grpcStreamMsgs *prometheus.CounterVec
+	grpcProxyCalls prometheus.Counter
 	pluginInvokes  *prometheus.CounterVec
 	pluginDuration *prometheus.HistogramVec
 	pluginPanics   *prometheus.CounterVec
@@ -118,6 +119,10 @@ func NewMetrics() *Metrics {
 			Name: "jul_grpc_transcode_stream_msgs_total",
 			Help: "gRPC-JSON transcoding streamed messages, labeled by gRPC method full name and direction (sent to backend / received from backend).",
 		}, []string{"method", "direction"}),
+		grpcProxyCalls: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "jul_grpc_proxy_streams_total",
+			Help: "Native gRPC calls forwarded by the HTTP/2 passthrough proxy (one per call, including each streaming call).",
+		}),
 		pluginInvokes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_plugin_invocations_total",
 			Help: "WASM plugin invocations, labeled by plugin name and result (continue/stop/error).",
@@ -171,6 +176,7 @@ func NewMetrics() *Metrics {
 		m.probeDuration,
 		m.grpcTranscode,
 		m.grpcStreamMsgs,
+		m.grpcProxyCalls,
 		m.pluginInvokes,
 		m.pluginDuration,
 		m.pluginPanics,
@@ -270,6 +276,13 @@ func (m *Metrics) ObserveGRPCTranscode(method, code string) {
 // backend). It is wired into each transcoding handler as its OnStreamMsg hook.
 func (m *Metrics) ObserveGRPCTranscodeStreamMsg(method, direction string) {
 	m.grpcStreamMsgs.WithLabelValues(method, direction).Inc()
+}
+
+// ObserveGRPCProxyStream counts one native gRPC call forwarded by the HTTP/2
+// passthrough proxy. It is wired into each gRPC proxy handler as its onStream
+// hook and fires once per call (including each streaming call).
+func (m *Metrics) ObserveGRPCProxyStream() {
+	m.grpcProxyCalls.Inc()
 }
 
 // ObservePluginInvocation counts a WASM plugin invocation by plugin name and

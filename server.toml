@@ -80,6 +80,21 @@ idle_timeout = "60s"
   #   # stream_mode = "ndjson"         # framing for streamed responses: "ndjson" or "sse"
   #   # max_message_size = "4m"        # per-message ceiling (default 4 MiB)
 
+  # Native gRPC passthrough (binaries built with -tags grpc). Reverse-proxies
+  # real gRPC end to end over HTTP/2 — trailers preserved, streaming frames
+  # flushed immediately — with the upstream pool's load balancing and health.
+  # Set grpc = true on a proxy_pass location; the scheme picks the backend
+  # transport (http:// => cleartext h2c, https:// => HTTP/2 over TLS).
+  # [[servers.locations]]
+  # match = { type = "prefix", path = "/" }
+  # proxy_pass = "http://grpc-backend"   # http:// => h2c, https:// => HTTP/2 TLS
+  # grpc = true
+  #
+  # On a plaintext listener, also accept cleartext HTTP/2 from gRPC clients that
+  # connect without TLS by setting h2c = true on the [[servers]] block above
+  # (unnecessary on a TLS listener, where HTTP/2 is negotiated via ALPN):
+  # h2c = true
+
 [[upstreams]]
 name = "backend"
 strategy = "round_robin"

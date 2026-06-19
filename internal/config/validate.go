@@ -565,6 +565,12 @@ func validateLocation(loc LocationConfig, where string, upstreamNames map[string
 	if loc.ProxyPass != "" {
 		errs = append(errs, validateProxyPass(loc.ProxyPass, where, upstreamNames)...)
 	}
+	// gRPC passthrough (grpc = true) is a flavor of proxy_pass, not a standalone
+	// action; it requires proxy_pass to name the gRPC backend. Whether the build
+	// can serve it (the "grpc" tag) is reported at handler build time.
+	if loc.GRPC && loc.ProxyPass == "" {
+		errs = append(errs, fmt.Errorf("%s: grpc = true requires proxy_pass (the gRPC backend)", where))
+	}
 	if loc.GRPCTranscode != nil {
 		errs = append(errs, validateGRPCTranscode(loc.GRPCTranscode, where+".grpc_transcode", upstreamNames)...)
 	}

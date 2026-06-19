@@ -872,6 +872,38 @@ func TestValidateGRPCTranscode(t *testing.T) {
 	})
 }
 
+func TestValidateGRPCPassthrough(t *testing.T) {
+	base := func(loc LocationConfig) *Config {
+		return &Config{
+			Servers: []ServerConfig{{
+				Listen:    "127.0.0.1:80",
+				H2C:       true,
+				Locations: []LocationConfig{loc},
+			}},
+		}
+	}
+
+	t.Run("grpc passthrough with proxy_pass is valid", func(t *testing.T) {
+		cfg := base(LocationConfig{
+			Match:     MatchConfig{Type: "prefix", Path: "/"},
+			ProxyPass: "http://127.0.0.1:50051",
+			GRPC:      true,
+		})
+		if err := Validate(cfg); err != nil {
+			t.Errorf("valid grpc passthrough rejected: %v", err)
+		}
+	})
+	t.Run("grpc without proxy_pass is rejected", func(t *testing.T) {
+		cfg := base(LocationConfig{
+			Match: MatchConfig{Type: "prefix", Path: "/"},
+			GRPC:  true,
+		})
+		if err := Validate(cfg); err == nil {
+			t.Error("expected error: grpc = true requires proxy_pass")
+		}
+	})
+}
+
 func TestValidateRedirectReturnCombination(t *testing.T) {
 	base := func(loc string) []byte {
 		return []byte("[[servers]]\nlisten = \":8080\"\n\n[[servers.locations]]\nmatch = { type = \"prefix\", path = \"/\" }\n" + loc + "\n")

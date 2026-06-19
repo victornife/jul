@@ -39,6 +39,7 @@ interface — all in a single static, dependency-free binary.
   - [`[[stream]]`](#stream)
 - [WebAssembly plugins](#webassembly-plugins)
 - [L4 stream proxy](#l4-stream-proxy)
+- [gRPC passthrough](#grpc-passthrough)
 - [Hot reload](#hot-reload)
 - [Admin interface & observability](#admin-interface--observability)
 - [Running real applications behind Jul.IA](#running-real-applications-behind-julia)
@@ -62,6 +63,7 @@ interface — all in a single static, dependency-free binary.
 | **Health & failover** | Passive health checking (`max_fails` / `fail_timeout`) plus optional active HTTP/TCP probes (`[upstreams.health_check]`), with automatic retry of idempotent requests against healthy backends |
 | **App gateways** | `fastcgi_pass` (e.g. PHP-FPM) and `uwsgi_pass` (Python/WSGI) with full CGI parameter mapping |
 | **gRPC transcoding** | Expose a gRPC service as a RESTful JSON API via `google.api.http` annotations (`grpc_transcode`) — unary and streaming (server/client/bidi, NDJSON or SSE) — from a compiled descriptor set or server reflection, opt-in `grpc` build tag |
+| **gRPC passthrough** | Reverse-proxy **native gRPC** end to end over HTTP/2 (`grpc = true`) — trailers preserved, streaming frames flushed immediately, load balancing and health checks applied — with cleartext **h2c** inbound (`h2c = true`) for clients without TLS, opt-in `grpc` build tag |
 | **Response cache** | Two-tier (in-memory + optional disk overflow) cache with TTL, `stale-while-revalidate`, and admin purge |
 | **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecar serving for static files |
 | **Rate limiting** | Token-bucket request limiting keyed by client IP, a request header, or a JWT claim, with burst, global or per-location policy, and `429` + `Retry-After`; plus a per-listener concurrent-connection cap |
@@ -369,6 +371,7 @@ A virtual host bound to one listen address. Repeat the table for more listeners.
 | `access_log` / `error_log` | string | Per-server log destinations |
 | `error_pages` | table | Map of status code → file path or redirect URL |
 | `redirect_https` | int | On an HTTP server, redirect to HTTPS with this status (`301` or `308`) |
+| `h2c` | bool | On a plaintext listener, also accept cleartext HTTP/2 (h2c) for native gRPC clients without TLS; ignored on a TLS listener (HTTP/2 is negotiated via ALPN) |
 
 ### `[[servers.locations]]`
 
@@ -401,6 +404,7 @@ match = { type = "prefix", path = "/api/" }   # prefix, exact, or regex
 | `proxy_connect_timeout` | duration | Connection establishment timeout |
 | `proxy_read_timeout` | duration | Response header (time-to-first-byte) timeout |
 | `proxy_send_timeout` | duration | Send timeout |
+| `grpc` | bool | Proxy `proxy_pass` as **native gRPC** over end-to-end HTTP/2 (trailers preserved, no buffering); `http://` dials the backend over cleartext HTTP/2 (h2c), `https://` over HTTP/2 with TLS — requires the `grpc` build tag |
 | `headers` | table | Upstream request headers; values support `$host`, `$remote_addr`, `$scheme`, `$proxy_add_x_forwarded_for` |
 
 **FastCGI / uWSGI:**
@@ -1115,6 +1119,47 @@ A full guide — SNI routing, PROXY protocol, UDP semantics, and worked examples
 
 ---
 
+## gRPC passthrough
+
+Beyond [gRPC ↔ JSON transcoding](#grpc-transcoding), Jul.IA can reverse-proxy
+**native gRPC** unchanged: set `grpc = true` on a `proxy_pass` location and the
+call is forwarded end to end over HTTP/2. This is opt-in behind the same `grpc`
+build tag as transcoding.
+
+```bash
+go build -tags grpc -o jul ./cmd/jul
+```
+
+**Runtime model**
+
+- **End-to-end HTTP/2.** The request is proxied over HTTP/2 with **trailers**
+  (`grpc-status` / `grpc-message`) preserved and response buffering disabled, so
+  server-, client-, and bidirectional-streaming calls flush each frame as it
+  arrives instead of stalling until the call completes.
+- **Backend transport from the scheme.** A `proxy_pass` of `http://…` dials the
+  backend over **cleartext HTTP/2 (h2c)**; `https://…` dials over **HTTP/2 with
+  TLS**. The backend may be a named `[[upstreams]]` pool or a literal
+  `host:port`.
+- **Load balancing & health.** The upstream pool's strategy and passive health
+  checking apply. gRPC streams are not replayable, so a call is **not** retried
+  against another backend mid-stream; a dial failure surfaces as a gateway
+  error.
+- **Cleartext inbound (h2c).** Set `h2c = true` on a plaintext `[[servers]]`
+  block to accept prior-knowledge HTTP/2 from gRPC clients that connect without
+  TLS, alongside HTTP/1.1. On a TLS listener this is unnecessary — HTTP/2 is
+  negotiated through ALPN. (Inbound h2c uses the standard library's HTTP/2
+  support and needs no extra dependency.)
+- **Distinct from transcoding.** `grpc_transcode` converts REST/JSON to gRPC;
+  `grpc = true` proxies real gRPC traffic untouched. Use transcoding to expose a
+  gRPC backend to JSON clients; use passthrough to load-balance gRPC clients.
+- **Metrics.** Each forwarded call increments `jul_grpc_proxy_streams_total`.
+
+Sample configs live in [examples/grpc-proxy](examples/grpc-proxy) and
+[testdata/grpc-proxy.toml](testdata/grpc-proxy.toml); a full guide is in
+[docs/grpc-proxy.md](docs/grpc-proxy.md).
+
+---
+
 ## Hot reload
 
 Jul.IA reloads configuration **without dropping connections**. A reload can be
@@ -1365,7 +1410,7 @@ binary. Combine them as needed:
 | `acme` | Automatic HTTPS (ACME / Let's Encrypt) |
 | `console` | Web console dashboard at the admin root (live metrics UI) |
 | `otel` | OpenTelemetry distributed tracing (OTLP export) |
-| `grpc` | gRPC ↔ JSON transcoding locations (`grpc_transcode`) |
+| `grpc` | gRPC ↔ JSON transcoding locations (`grpc_transcode`) and native gRPC passthrough (`grpc = true`) |
 | `http3` | HTTP/3 over QUIC listeners (`[servers.http3]`) |
 | `importer` | `jul import nginx` config migration tool |
 | `wasmplugins` | WebAssembly plugins (`[plugins]`) on the embedded wazero runtime |

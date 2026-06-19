@@ -124,6 +124,13 @@ type ServerConfig struct {
 	// server block and is compiled only into builds with the "http3" tag.
 	HTTP3 *HTTP3Config `toml:"http3"`
 
+	// H2C enables cleartext HTTP/2 (h2c) on this listener so native gRPC and
+	// other HTTP/2 clients can connect without TLS, in addition to HTTP/1.1. It
+	// only takes effect on a plaintext (non-TLS) listener — TLS listeners already
+	// negotiate HTTP/2 via ALPN. Typically paired with a grpc = true proxy
+	// location (which itself requires the "grpc" build tag).
+	H2C bool `toml:"h2c"`
+
 	// Limits and timeouts (per-server defaults; locations may override).
 	ClientMaxBodySize Size     `toml:"client_max_body_size"`
 	ReadHeaderTimeout Duration `toml:"read_header_timeout"`
@@ -175,6 +182,15 @@ type LocationConfig struct {
 	ProxyConnectTimeout Duration `toml:"proxy_connect_timeout"`
 	ProxyReadTimeout    Duration `toml:"proxy_read_timeout"`
 	ProxySendTimeout    Duration `toml:"proxy_send_timeout"`
+
+	// GRPC turns the proxy_pass into a native gRPC / HTTP-2 passthrough: the
+	// request is forwarded end-to-end over HTTP/2 (preserving trailers such as
+	// grpc-status) with response buffering disabled so streaming frames flush
+	// immediately. A proxy_pass scheme of http:// dials the backend over
+	// cleartext HTTP/2 (h2c); https:// dials over HTTP/2 with TLS. It requires a
+	// build with the "grpc" tag. Distinct from grpc_transcode, which converts
+	// REST/JSON to gRPC; this proxies native gRPC unchanged.
+	GRPC bool `toml:"grpc"`
 
 	// FastCGI / uWSGI.
 	FastCGIPass   string            `toml:"fastcgi_pass"`

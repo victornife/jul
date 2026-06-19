@@ -188,6 +188,12 @@ func (s *Server) bind(addr string) error {
 		IdleTimeout:       s.idleTimeout(addr),
 		MaxHeaderBytes:    s.maxHeaderBytes(addr),
 	}
+	// On a plaintext listener, optionally accept cleartext HTTP/2 (h2c) so
+	// native gRPC clients can connect without TLS. TLS listeners already
+	// negotiate HTTP/2 via ALPN, so this only applies when !tlsOK.
+	if !tlsOK && s.h2cEnabledForAddr(addr) {
+		enableH2C(httpd)
+	}
 	if s.ConnStateHook != nil {
 		httpd.ConnState = s.ConnStateHook
 	}

@@ -290,6 +290,12 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				return handler.NewStaticWithOptions(srv, loc, staticOpts)
 			},
 			router.ActionProxy: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
+				// grpc = true forwards native gRPC over end-to-end HTTP/2
+				// (trailers preserved, no buffering); otherwise it is a plain
+				// HTTP reverse proxy. gRPC passthrough is not cacheable.
+				if loc.GRPC {
+					return handler.NewGRPCProxy(srv, loc, upstreams, poolReg, log, metrics.ObserveGRPCProxyStream)
+				}
 				h, err := handler.NewProxy(srv, loc, upstreams, poolReg, log)
 				if err != nil {
 					return nil, err
