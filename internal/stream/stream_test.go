@@ -21,6 +21,20 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// eventually polls cond for up to ~2s, returning true as soon as it holds. It
+// smooths over the brief scheduling lag between a relay write and its byte
+// accounting without making tests timing-fragile.
+func eventually(cond func() bool) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return cond()
+}
+
 // freeTCPAddr reserves and releases an ephemeral TCP port, returning its
 // address for a listener to bind. There is a small reuse window, acceptable in
 // tests.
@@ -208,7 +222,9 @@ func TestTCPProxyEcho(t *testing.T) {
 	if string(buf) != "ping" {
 		t.Fatalf("echo: got %q want ping", buf)
 	}
-	if ups.Load() < 4 || downs.Load() < 4 {
+	// The downstream byte count is recorded just after the relay writes to the
+	// client, so it can lag the client's read by a scheduling tick; poll for it.
+	if !eventually(func() bool { return ups.Load() >= 4 && downs.Load() >= 4 }) {
 		t.Errorf("byte counters: up=%d down=%d, want >=4 each", ups.Load(), downs.Load())
 	}
 }
