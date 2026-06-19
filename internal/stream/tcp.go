@@ -1,0 +1,140 @@
+//go:build stream
+
+package stream
+
+import (
+	"bufio"
+	"io"
+	"net"
+	"strings"
+	"sync"
+	"time"
+)
+
+// serveTCP accepts connections until the listener is closed and relays each to
+// a backend in its own goroutine.
+func (l *listener) serveTCP() {
+	for {
+		conn, err := l.tcpLn.Accept()
+		if err != nil {
+			if isClosedConn(err) {
+				return
+			}
+			l.server.log.Warn("stream: accept failed", "addr", l.addr, "error", err)
+			time.Sleep(20 * time.Millisecond) // guard against a hot error loop
+			continue
+		}
+		l.wg.Add(1)
+		go func(c net.Conn) {
+			defer l.wg.Done()
+			l.handleTCP(c)
+		}(conn)
+	}
+}
+
+// handleTCP performs the per-connection sequence: optional inbound PROXY header,
+// optional SNI route selection, backend dial, optional outbound PROXY header,
+// and full-duplex relay.
+func (l *listener) handleTCP(client net.Conn) {
+	s := l.server
+	defer client.Close()
+	r := l.route.Load()
+
+	s.connDelta("tcp", 1)
+	defer s.connDelta("tcp", -1)
+
+	// Buffer large enough to peek a whole TLS ClientHello for SNI routing.
+	br := bufio.NewReaderSize(client, tlsRecordMax+512)
+
+	clientAddr := client.RemoteAddr()
+	if r.proxyIn {
+		_ = client.SetReadDeadline(time.Now().Add(r.connectTimeout))
+		src, err := readProxyHeader(br)
+		if err != nil {
+			s.log.Warn("stream: proxy-protocol header rejected", "addr", l.addr, "error", err)
+			return
+		}
+		if src != nil {
+			clientAddr = src
+		}
+		_ = client.SetReadDeadline(time.Time{})
+	}
+
+	pool := r.defaultPool
+	if len(r.sniPools) > 0 {
+		_ = client.SetReadDeadline(time.Now().Add(r.connectTimeout))
+		host := peekSNI(br)
+		_ = client.SetReadDeadline(time.Time{})
+		switch {
+		case host != "" && r.sniPools[strings.ToLower(host)] != nil:
+			pool = r.sniPools[strings.ToLower(host)]
+		case r.sniPools["*"] != nil:
+			pool = r.sniPools["*"]
+		}
+	}
+	if pool == nil {
+		s.log.Warn("stream: no backend route for connection", "addr", l.addr)
+		return
+	}
+
+	backend, b, err := l.dialBackend(pool, "tcp", r.connectTimeout)
+	if err != nil {
+		s.log.Warn("stream: dial backend failed", "addr", l.addr, "error", err)
+		return
+	}
+	defer pool.Release(b)
+	defer backend.Close()
+
+	if r.proxyOut {
+		if err := writeProxyV2(backend, clientAddr, client.LocalAddr()); err != nil {
+			s.log.Warn("stream: write proxy-protocol header", "addr", l.addr, "error", err)
+			return
+		}
+	}
+
+	l.relayTCP(client, backend, br, r.idleTimeout)
+}
+
+// relayTCP copies data in both directions until either side closes, then tears
+// down both connections to unblock the other copy.
+func (l *listener) relayTCP(client, backend net.Conn, clientReader io.Reader, idle time.Duration) {
+	var once sync.Once
+	teardown := func() {
+		_ = client.Close()
+		_ = backend.Close()
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		l.copyStream(backend, clientReader, client, idle, "up")
+		once.Do(teardown)
+	}()
+	go func() {
+		defer wg.Done()
+		l.copyStream(client, backend, backend, idle, "down")
+		once.Do(teardown)
+	}()
+	wg.Wait()
+}
+
+// copyStream copies src->dst, refreshing the idle read deadline on srcConn each
+// iteration and reporting relayed bytes. It returns when either side errors.
+func (l *listener) copyStream(dst io.Writer, src io.Reader, srcConn net.Conn, idle time.Duration, dir string) {
+	buf := make([]byte, 32*1024)
+	for {
+		if idle > 0 {
+			_ = srcConn.SetReadDeadline(time.Now().Add(idle))
+		}
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				return
+			}
+			l.server.addBytes(l.proto, dir, int64(n))
+		}
+		if rerr != nil {
+			return
+		}
+	}
+}

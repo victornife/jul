@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -17,9 +18,6 @@ func Validate(c *Config) error {
 	var errs []error
 
 	// Reject reserved-but-unimplemented features explicitly.
-	if len(c.Streams) > 0 {
-		errs = append(errs, errors.New("[[stream]] (TCP/UDP proxy) is reserved for a future version and not supported in v1"))
-	}
 	if len(c.Mail) > 0 {
 		errs = append(errs, errors.New("[[mail]] (mail proxy) is reserved for a future version and not supported in v1"))
 	}
@@ -149,8 +147,95 @@ func Validate(c *Config) error {
 	errs = append(errs, validateRateLimit(c.RateLimit, "[rate_limit]", false)...)
 	errs = append(errs, validateTracing(c.Observability.Tracing)...)
 	errs = append(errs, validateAccessLog(c.Observability.AccessLog)...)
+	errs = append(errs, validateStreams(c.Streams, upstreamNames)...)
 
 	return errors.Join(errs...)
+}
+
+// validateStreams checks the [[stream]] L4 proxy listeners. It validates
+// structure only (addresses, protocol, target references, mode keywords);
+// whether L4 proxying is compiled in is reported at startup by
+// internal/stream.Check, which fails a lean build that declares any stream.
+func validateStreams(streams []StreamServer, upstreamNames map[string]int) []error {
+	var errs []error
+	seen := map[string]int{}
+	for i, st := range streams {
+		where := fmt.Sprintf("stream[%d]", i)
+		if strings.TrimSpace(st.Listen) == "" {
+			errs = append(errs, fmt.Errorf("%s: 'listen' is required", where))
+		}
+		proto := strings.ToLower(strings.TrimSpace(st.Protocol))
+		switch proto {
+		case "", "tcp", "udp":
+		default:
+			errs = append(errs, fmt.Errorf("%s: invalid protocol %q (want tcp or udp)", where, st.Protocol))
+		}
+		if proto == "" {
+			proto = "tcp"
+		}
+		// One listener may not be claimed by two stream blocks of the same proto.
+		if st.Listen != "" {
+			key := proto + "/" + st.Listen
+			seen[key]++
+			if seen[key] == 2 {
+				errs = append(errs, fmt.Errorf("%s: duplicate %s listener %q", where, proto, st.Listen))
+			}
+		}
+		// A stream must have at least one target: a default proxy_pass and/or
+		// SNI routes.
+		if strings.TrimSpace(st.ProxyPass) == "" && len(st.SNIRoutes) == 0 {
+			errs = append(errs, fmt.Errorf("%s: 'proxy_pass' or 'sni_routes' is required", where))
+		}
+		if strings.TrimSpace(st.ProxyPass) != "" {
+			errs = append(errs, validateStreamTarget(st.ProxyPass, upstreamNames, where+".proxy_pass")...)
+		}
+		for host, target := range st.SNIRoutes {
+			if strings.TrimSpace(host) == "" {
+				errs = append(errs, fmt.Errorf("%s.sni_routes: empty SNI host key", where))
+			}
+			errs = append(errs, validateStreamTarget(target, upstreamNames, fmt.Sprintf("%s.sni_routes[%q]", where, host))...)
+		}
+		// SNI routing, TLS passthrough, and the PROXY protocol are TCP-only in v1.
+		if proto == "udp" {
+			if len(st.SNIRoutes) > 0 {
+				errs = append(errs, fmt.Errorf("%s: 'sni_routes' is only supported for tcp streams", where))
+			}
+			if st.TLSPassthrough {
+				errs = append(errs, fmt.Errorf("%s: 'tls_passthrough' is only supported for tcp streams", where))
+			}
+			if strings.TrimSpace(st.ProxyProtocol) != "" {
+				errs = append(errs, fmt.Errorf("%s: 'proxy_protocol' is only supported for tcp streams", where))
+			}
+		}
+		switch strings.ToLower(strings.TrimSpace(st.ProxyProtocol)) {
+		case "", "in", "out", "both":
+		default:
+			errs = append(errs, fmt.Errorf("%s: invalid proxy_protocol %q (want in, out, or both)", where, st.ProxyProtocol))
+		}
+		if st.ConnectTimeout < 0 {
+			errs = append(errs, fmt.Errorf("%s: 'connect_timeout' must not be negative", where))
+		}
+		if st.IdleTimeout < 0 {
+			errs = append(errs, fmt.Errorf("%s: 'idle_timeout' must not be negative", where))
+		}
+	}
+	return errs
+}
+
+// validateStreamTarget checks that a stream target is either a known upstream
+// name or a literal host:port address.
+func validateStreamTarget(target string, upstreamNames map[string]int, where string) []error {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return []error{fmt.Errorf("%s: target is empty", where)}
+	}
+	if _, ok := upstreamNames[target]; ok {
+		return nil
+	}
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		return []error{fmt.Errorf("%s: target %q is neither a known upstream nor a host:port address", where, target)}
+	}
+	return nil
 }
 
 // validateCompression checks the [compression] block. It validates structure

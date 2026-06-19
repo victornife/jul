@@ -96,12 +96,115 @@ func TestUpstreamServerUnmarshal(t *testing.T) {
 func TestValidateRejectsReserved(t *testing.T) {
 	cfg := &Config{
 		Servers: []ServerConfig{{Listen: "127.0.0.1:80"}},
-		Streams: []map[string]any{{"listen": "1.2.3.4:9000"}},
+		Mail:    []map[string]any{{"listen": "1.2.3.4:25"}},
 	}
 	err := Validate(cfg)
 	if err == nil {
-		t.Fatal("expected error for reserved [[stream]] table")
+		t.Fatal("expected error for reserved [[mail]] table")
 	}
+}
+
+func TestValidateStreams(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Servers: []ServerConfig{{Listen: "127.0.0.1:80"}},
+			Upstreams: []UpstreamConfig{{
+				Name:    "db",
+				Servers: []UpstreamServer{{Address: "127.0.0.1:5432", Weight: 1}},
+			}},
+		}
+	}
+
+	t.Run("valid tcp to upstream", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{Listen: "0.0.0.0:6432", Protocol: "tcp", ProxyPass: "db"}}
+		if err := Validate(c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("valid sni routes to literal addr", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{
+			Listen:    "0.0.0.0:443",
+			Protocol:  "tcp",
+			SNIRoutes: map[string]string{"a.example.com": "127.0.0.1:8443", "*": "db"},
+		}}
+		if err := Validate(c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("valid udp", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{Listen: "0.0.0.0:53", Protocol: "udp", ProxyPass: "127.0.0.1:5353"}}
+		if err := Validate(c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("missing listen", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{ProxyPass: "db"}}
+		if err := Validate(c); err == nil {
+			t.Error("expected error for missing listen")
+		}
+	})
+
+	t.Run("no target", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{Listen: "0.0.0.0:6432"}}
+		if err := Validate(c); err == nil {
+			t.Error("expected error for missing proxy_pass and sni_routes")
+		}
+	})
+
+	t.Run("unknown upstream target", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{Listen: "0.0.0.0:6432", ProxyPass: "nope"}}
+		if err := Validate(c); err == nil {
+			t.Error("expected error: target neither upstream nor host:port")
+		}
+	})
+
+	t.Run("bad protocol", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{Listen: "0.0.0.0:6432", Protocol: "sctp", ProxyPass: "db"}}
+		if err := Validate(c); err == nil {
+			t.Error("expected error for invalid protocol")
+		}
+	})
+
+	t.Run("bad proxy_protocol", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{Listen: "0.0.0.0:6432", ProxyPass: "db", ProxyProtocol: "sideways"}}
+		if err := Validate(c); err == nil {
+			t.Error("expected error for invalid proxy_protocol")
+		}
+	})
+
+	t.Run("udp rejects tcp-only features", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{
+			Listen:    "0.0.0.0:53",
+			Protocol:  "udp",
+			SNIRoutes: map[string]string{"a": "db"},
+		}}
+		if err := Validate(c); err == nil {
+			t.Error("expected error: sni_routes on udp stream")
+		}
+	})
+
+	t.Run("duplicate listener", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{
+			{Listen: "0.0.0.0:6432", Protocol: "tcp", ProxyPass: "db"},
+			{Listen: "0.0.0.0:6432", Protocol: "tcp", ProxyPass: "db"},
+		}
+		if err := Validate(c); err == nil {
+			t.Error("expected error for duplicate tcp listener")
+		}
+	})
 }
 
 func TestValidatePluginsValid(t *testing.T) {

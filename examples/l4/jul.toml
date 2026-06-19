@@ -1,0 +1,65 @@
+# L4 stream proxy example. Build with -tags stream to run:
+#   go build -tags stream -o jul ../../cmd/jul
+#   ./jul --config jul.toml
+# Lint anytime with:
+#   ../../jul lint -config jul.toml
+
+[global]
+log_level = "info"
+log_format = "text"
+
+# An optional HTTP server alongside the stream listeners.
+[[servers]]
+listen = "0.0.0.0:8080"
+server_names = ["example.com"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200
+
+# TCP load balancing to a named upstream pool.
+[[stream]]
+listen = "0.0.0.0:5432"
+proxy_pass = "postgres_pool"
+connect_timeout = "5s"
+idle_timeout = "1h"
+
+# TLS SNI routing — passthrough, TLS is never terminated.
+[[stream]]
+listen = "0.0.0.0:8443"
+  [stream.sni_routes]
+  "api.example.com" = "api_pool"
+  "db.example.com"  = "10.0.0.7:8443"
+  "*"               = "postgres_pool"
+
+# UDP relay (e.g. DNS).
+[[stream]]
+listen = "0.0.0.0:5353"
+protocol = "udp"
+proxy_pass = "dns_pool"
+idle_timeout = "30s"
+
+# TCP that prepends a PROXY v2 header to the backend.
+[[stream]]
+listen = "0.0.0.0:6379"
+proxy_pass = "redis_pool"
+proxy_protocol = "out"
+
+[[upstreams]]
+name = "postgres_pool"
+strategy = "least_conn"
+max_fails = 3
+fail_timeout = "10s"
+servers = ["10.0.0.11:5432", "10.0.0.12:5432"]
+
+[[upstreams]]
+name = "api_pool"
+servers = ["10.0.0.21:8443"]
+
+[[upstreams]]
+name = "dns_pool"
+servers = ["10.0.0.31:53", "10.0.0.32:53"]
+
+[[upstreams]]
+name = "redis_pool"
+servers = ["10.0.0.41:6379"]

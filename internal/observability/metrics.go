@@ -38,6 +38,8 @@ type Metrics struct {
 	pluginPanics   *prometheus.CounterVec
 	listenerConns  prometheus.Gauge
 	http3Conns     prometheus.Gauge
+	streamConns    *prometheus.GaugeVec
+	streamBytes    *prometheus.CounterVec
 	certExpiry     *prometheus.GaugeVec
 	certRenewals   prometheus.Counter
 
@@ -137,6 +139,14 @@ func NewMetrics() *Metrics {
 			Name: "jul_http3_connections",
 			Help: "Current open HTTP/3 (QUIC) connections across all listeners.",
 		}),
+		streamConns: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "jul_stream_active_conns",
+			Help: "Current active L4 stream connections/sessions, labeled by protocol (tcp/udp).",
+		}, []string{"proto"}),
+		streamBytes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_stream_bytes_total",
+			Help: "Bytes relayed by the L4 stream proxy, labeled by protocol (tcp/udp) and direction (up to backend / down to client).",
+		}, []string{"proto", "direction"}),
 		certExpiry: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_tls_cert_expiry_seconds",
 			Help: "Leaf certificate expiry as a Unix timestamp, labeled by domain.",
@@ -166,6 +176,8 @@ func NewMetrics() *Metrics {
 		m.pluginPanics,
 		m.listenerConns,
 		m.http3Conns,
+		m.streamConns,
+		m.streamBytes,
 		m.certExpiry,
 		m.certRenewals,
 		collectors.NewGoCollector(),
@@ -310,6 +322,22 @@ func (m *Metrics) ConnState(_ net.Conn, state http.ConnState) {
 // stays decoupled from observability.
 func (m *Metrics) HTTP3ConnDelta(delta int64) {
 	m.http3Conns.Add(float64(delta))
+}
+
+// StreamConnDelta adjusts the jul_stream_active_conns gauge for proto by delta
+// (+1 when an L4 connection/session opens, -1 when it closes). It is supplied to
+// the stream proxy so that package stays decoupled from observability.
+func (m *Metrics) StreamConnDelta(proto string, delta int64) {
+	m.streamConns.WithLabelValues(proto).Add(float64(delta))
+}
+
+// ObserveStreamBytes adds n bytes relayed by the L4 stream proxy for proto in
+// the given direction ("up" to backend or "down" to client).
+func (m *Metrics) ObserveStreamBytes(proto, direction string, n int64) {
+	if n <= 0 {
+		return
+	}
+	m.streamBytes.WithLabelValues(proto, direction).Add(float64(n))
 }
 
 // hostLabel strips the port so metric cardinality stays bounded by hostname.

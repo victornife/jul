@@ -36,7 +36,9 @@ interface — all in a single static, dependency-free binary.
   - [Automatic HTTPS (ACME)](#automatic-https-acme)
   - [HTTP/3 (QUIC)](#http3-quic)
   - [`[plugins]`](#plugins)
+  - [`[[stream]]`](#stream)
 - [WebAssembly plugins](#webassembly-plugins)
+- [L4 stream proxy](#l4-stream-proxy)
 - [Hot reload](#hot-reload)
 - [Admin interface & observability](#admin-interface--observability)
 - [Running real applications behind Jul.IA](#running-real-applications-behind-julia)
@@ -77,11 +79,14 @@ interface — all in a single static, dependency-free binary.
 | **Developer experience** | Zero-config `jul run --serve`/`--proxy` (no file needed), `jul lint` best-practice checks with CI-friendly exit codes, and `jul fmt` canonical formatting |
 | **Migration** | `jul import nginx` translates an existing NGINX config to Jul.IA TOML, reporting every directive it could not map — opt-in `importer` build tag |
 | **WebAssembly plugins** | Sandboxed request middleware and handlers compiled to WASM and run on the embedded [wazero](https://wazero.io) runtime (pure Go, no cgo): per-plugin memory and time limits, panic isolation, capability-gated key/value store, hot-reloadable — opt-in `wasmplugins` build tag |
+| **L4 stream proxy** | TCP and UDP reverse proxying (`[[stream]]`) with load balancing and health checks across an upstream pool, TLS **SNI routing** by host without terminating, and HAProxy **PROXY protocol** v1/v2 (in and out) to preserve the client address — survives hot reload, opt-in `stream` build tag |
 | **Portability** | Single static binary, no runtime dependencies; Windows, Linux, and macOS on amd64/arm64 |
 
-> Note: `[[stream]]` and `[[mail]]` tables are reserved for future versions. They
-> are parsed but **rejected during validation** in v1 so configs fail loudly
-> rather than silently. The `[plugins]` table is active in binaries built with
+> Note: The `[[mail]]` table is reserved for a future version. It is parsed but
+> **rejected during validation** in v1 so configs fail loudly rather than
+> silently. The `[[stream]]` (L4 proxy) table is active in binaries built with
+> the `stream` tag; in a binary without that tag a populated `[[stream]]` table
+> is rejected at startup. The `[plugins]` table is active in binaries built with
 > the `wasmplugins` tag; in a binary without that tag a populated `[plugins]`
 > table is rejected at startup.
 
@@ -973,6 +978,61 @@ authoring guide.
 
 ---
 
+### `[[stream]]`
+
+> Requires a binary built with `-tags stream`. A populated `[[stream]]` table in
+> a binary without that tag is rejected at startup.
+
+Each `[[stream]]` block is one L4 (TCP or UDP) reverse-proxy listener that
+forwards raw connections — no HTTP parsing. Backends are a named `[[upstreams]]`
+pool (load balancing + health checks apply) or a literal `host:port`.
+
+```toml
+# Plain TCP load balancing to an upstream pool.
+[[stream]]
+listen = "0.0.0.0:5432"
+proxy_pass = "postgres_pool"        # named upstream or "host:port"
+connect_timeout = "10s"
+idle_timeout = "5m"
+
+# TLS SNI routing (passthrough — TLS is never terminated).
+[[stream]]
+listen = "0.0.0.0:443"
+  [stream.sni_routes]
+  "api.example.com" = "api_pool"
+  "db.example.com"  = "10.0.0.7:8443"
+  "*"               = "default_pool"  # catch-all
+
+# UDP relay (e.g. DNS) with PROXY protocol to the backend.
+[[stream]]
+listen = "0.0.0.0:53"
+protocol = "udp"
+proxy_pass = "dns_pool"
+
+[[stream]]
+listen = "0.0.0.0:6379"
+proxy_pass = "redis_pool"
+proxy_protocol = "out"              # prepend a PROXY v2 header to the backend
+```
+
+| Key | Type | Description |
+| --- | ---- | ----------- |
+| `listen` | string | Bind address `host:port` (**required**) |
+| `protocol` | string | `tcp` (default) or `udp` |
+| `proxy_pass` | string | Default backend — a named upstream or a literal `host:port`; used when no SNI route matches (and for non-TLS / UDP streams) |
+| `sni_routes` | table | TLS server-name → backend map. Enables ClientHello SNI inspection on a TCP listener and routes by host **without terminating TLS**. A `"*"` key is a catch-all that takes precedence over `proxy_pass` |
+| `tls_passthrough` | bool | Informational; implied whenever `sni_routes` is set. Jul.IA never terminates TLS on a stream listener in v1 |
+| `proxy_protocol` | string | HAProxy PROXY-protocol handling (TCP only): `""` (off), `"in"` (parse a header from the client), `"out"` (emit a v2 header to the backend), or `"both"` |
+| `connect_timeout` | duration | Backend dial timeout (default `10s`) |
+| `idle_timeout` | duration | Close a relayed connection / UDP session after this idle period (default `5m`) |
+
+Provide at least one of `proxy_pass` or `sni_routes`. UDP listeners are plain
+relays: `sni_routes`, `tls_passthrough`, and `proxy_protocol` are TCP-only and
+rejected on a UDP block. See [L4 stream proxy](#l4-stream-proxy) for the runtime
+model.
+
+---
+
 ## WebAssembly plugins
 
 Jul.IA can run sandboxed extensions compiled to WebAssembly on the embedded
@@ -1009,6 +1069,49 @@ contract is the `jul-abi/v1` ABI. A full authoring guide — the SDK surface, th
 host functions, the caller-allocates buffer convention, and build commands —
 lives in [docs/plugins.md](docs/plugins.md), with runnable examples and their
 build script in [examples/plugins](examples/plugins).
+
+---
+
+## L4 stream proxy
+
+Jul.IA can reverse-proxy raw **TCP** and **UDP** connections (`[[stream]]`)
+alongside its HTTP listeners — databases, message brokers, DNS, game servers,
+or any TLS service you want to route by SNI without terminating. Stream support
+is opt-in behind the `stream` build tag.
+
+```bash
+go build -tags stream -o jul ./cmd/jul
+```
+
+**Runtime model**
+
+- **Pure L4.** Bytes are relayed unchanged in both directions; there is no HTTP
+  parsing. TCP connections are full-duplex; UDP listeners keep a per-client
+  session keyed by source address with idle reaping.
+- **Load balancing & health.** A backend is a named `[[upstreams]]` pool, so the
+  pool's strategy (`round_robin` / `weighted_round_robin` / `least_conn`) and
+  passive health (`max_fails` / `fail_timeout`) apply, with automatic failover
+  to the next healthy backend on a dial error. A literal `host:port` becomes a
+  single-backend pool.
+- **SNI routing (TLS passthrough).** On a TCP listener with `sni_routes`, Jul.IA
+  peeks the TLS ClientHello (without consuming it), reads the SNI host, and
+  routes to the matching backend — **TLS is never terminated**, so certificates
+  and keys stay on the backends. A `"*"` entry catches unmatched names.
+- **PROXY protocol.** `proxy_protocol` preserves the real client address across
+  the proxy hop: `"in"` parses a HAProxy v1/v2 header from the client, `"out"`
+  prepends a v2 header to the backend, `"both"` does both. Implemented in-house
+  (no extra dependency).
+- **Hot reload.** `[[stream]]` participates in zero-downtime reload: routes are
+  rebuilt and swapped atomically, new listeners are bound (with rollback if any
+  bind fails), and removed listeners are drained and stopped — all without a
+  process restart and without disturbing the HTTP listeners.
+- **Metrics.** Active connections are exported as
+  `jul_stream_active_conns{proto}` and relayed traffic as
+  `jul_stream_bytes_total{proto,direction}`.
+
+A full guide — SNI routing, PROXY protocol, UDP semantics, and worked examples
+— lives in [docs/stream-proxy.md](docs/stream-proxy.md), with sample configs in
+[examples/l4](examples/l4).
 
 ---
 
@@ -1266,6 +1369,7 @@ binary. Combine them as needed:
 | `http3` | HTTP/3 over QUIC listeners (`[servers.http3]`) |
 | `importer` | `jul import nginx` config migration tool |
 | `wasmplugins` | WebAssembly plugins (`[plugins]`) on the embedded wazero runtime |
+| `stream` | L4 TCP/UDP stream proxy (`[[stream]]`) with SNI routing and PROXY protocol |
 
 ```bash
 # Full-featured build

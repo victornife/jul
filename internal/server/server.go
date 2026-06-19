@@ -49,6 +49,13 @@ type Server struct {
 	// in builds compiled with the http3 tag.
 	HTTP3ConnHook func(int64)
 
+	// OnReloaded, when set, is invoked with the newly applied configuration at
+	// the end of every successful reload. The composition root uses it to drive
+	// reloads of subsystems that run alongside the HTTP listeners (presently the
+	// L4 stream proxy) without this package importing them. It is not called at
+	// startup; the composition root applies the initial configuration directly.
+	OnReloaded func(*config.Config)
+
 	mu        sync.Mutex
 	cfg       *config.Config
 	listeners map[string]*listenerEntry // keyed by listen address
@@ -283,6 +290,14 @@ func (s *Server) doReload() {
 			s.removeListener(addr)
 			s.log.Info("reload: removed listener", "addr", addr)
 		}
+	}
+
+	// Drive subsystems that run alongside the HTTP listeners (the L4 stream
+	// proxy) from the same validated configuration. They manage their own
+	// listeners and report binding errors internally, so a stream failure does
+	// not roll back the HTTP swap already applied above.
+	if s.OnReloaded != nil {
+		s.OnReloaded(newCfg)
 	}
 
 	s.log.Info("configuration reloaded")

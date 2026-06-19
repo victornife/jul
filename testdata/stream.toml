@@ -1,0 +1,59 @@
+# Sample L4 stream proxy configuration. Validate with:
+#   jul lint -config testdata/stream.toml
+# Requires a binary built with -tags stream to actually run the listeners.
+
+[global]
+log_level = "info"
+log_format = "text"
+
+# An HTTP server can coexist with stream listeners in the same process.
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["example.com"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 204
+
+# Plain TCP load balancing to a named upstream pool.
+[[stream]]
+listen = "127.0.0.1:5432"
+proxy_pass = "postgres_pool"
+connect_timeout = "5s"
+idle_timeout = "1h"
+
+# TLS SNI routing (passthrough — TLS is never terminated).
+[[stream]]
+listen = "127.0.0.1:8443"
+  [stream.sni_routes]
+  "api.example.com" = "api_pool"
+  "db.example.com"  = "127.0.0.1:9443"
+  "*"               = "postgres_pool"
+
+# UDP relay (e.g. DNS).
+[[stream]]
+listen = "127.0.0.1:5353"
+protocol = "udp"
+proxy_pass = "dns_pool"
+idle_timeout = "30s"
+
+# TCP with the PROXY protocol emitted to the backend.
+[[stream]]
+listen = "127.0.0.1:6379"
+proxy_pass = "127.0.0.1:6380"
+proxy_protocol = "out"
+
+[[upstreams]]
+name = "postgres_pool"
+strategy = "least_conn"
+max_fails = 3
+fail_timeout = "10s"
+servers = ["127.0.0.1:55432", "127.0.0.1:55433"]
+
+[[upstreams]]
+name = "api_pool"
+servers = ["127.0.0.1:19443"]
+
+[[upstreams]]
+name = "dns_pool"
+servers = ["127.0.0.1:15353"]

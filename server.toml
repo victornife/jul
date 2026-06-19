@@ -283,3 +283,37 @@ listen = "127.0.0.1:9090"
 #   match = { type = "exact", path = "/blocked" }
 #   plugin = "request-block"          # terminal handler — no root/proxy_pass here
 
+# ---------------------------------------------------------------------------
+# L4 stream proxy ([[stream]]) — requires a binary built with `-tags stream`.
+# Each [[stream]] block reverse-proxies raw TCP or UDP: load balancing + health
+# over an upstream pool, TLS SNI routing without terminating, and the HAProxy
+# PROXY protocol to preserve the client address. See docs/stream-proxy.md and
+# examples/l4 for the full guide.
+#
+# # Plain TCP load balancing to an upstream pool.
+# [[stream]]
+# listen = "0.0.0.0:5432"
+# proxy_pass = "postgres_pool"       # named upstream or a literal host:port
+# connect_timeout = "10s"            # backend dial timeout (default 10s)
+# idle_timeout = "5m"                # close after this idle period (default 5m)
+#
+# # TLS SNI routing — passthrough, TLS is never terminated.
+# [[stream]]
+# listen = "0.0.0.0:443"
+#   [stream.sni_routes]
+#   "api.example.com" = "api_pool"   # named upstream
+#   "db.example.com"  = "10.0.0.7:8443"  # or a literal host:port
+#   "*"               = "default_pool"   # catch-all (beats proxy_pass)
+#
+# # UDP relay (e.g. DNS).
+# [[stream]]
+# listen = "0.0.0.0:53"
+# protocol = "udp"                   # "tcp" (default) or "udp"
+# proxy_pass = "dns_pool"
+#
+# # TCP that prepends a PROXY v2 header to the backend.
+# [[stream]]
+# listen = "0.0.0.0:6379"
+# proxy_pass = "redis_pool"
+# proxy_protocol = "out"             # "" (off), "in", "out", or "both" (TCP only)
+

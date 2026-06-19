@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
@@ -111,6 +112,19 @@ func (c *Config) applyDefaults() {
 			}
 		}
 		applyHealthCheckDefaults(up.HealthCheck)
+	}
+
+	for i := range c.Streams {
+		st := &c.Streams[i]
+		if strings.TrimSpace(st.Protocol) == "" {
+			st.Protocol = "tcp"
+		}
+		if st.ConnectTimeout == 0 {
+			st.ConnectTimeout = Duration(10 * time.Second)
+		}
+		if st.IdleTimeout == 0 {
+			st.IdleTimeout = Duration(5 * time.Minute)
+		}
 	}
 
 	if c.Admin.Enabled && c.Admin.Listen == "" {

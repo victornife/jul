@@ -23,6 +23,7 @@ import (
 	"jul/internal/router"
 	"jul/internal/server"
 	"jul/internal/signals"
+	"jul/internal/stream"
 	"jul/internal/upstream"
 )
 
@@ -157,6 +158,15 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return 1
 	}
 
+	// L4 stream proxying ([[stream]]) is a build-time choice (the "stream" tag).
+	// Fail fast when the configuration declares a stream but this binary cannot
+	// serve it, mirroring the HTTP/3 check. It is a no-op in stream-enabled
+	// builds or when no stream is configured.
+	if err := stream.Check(cfg.Streams); err != nil {
+		log.Error("failed to initialize stream proxy", "error", err)
+		return 1
+	}
+
 	// The rate-limiter store persists across reloads (its janitor is bound to
 	// baseCtx) so token buckets and their accumulated state survive config
 	// edits. Reloads update each bucket's rate/burst in place via a stable scope.
@@ -189,6 +199,25 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return 1
 	}
 	defer func() { _ = pluginMgr.Close() }()
+
+	// The L4 stream proxy persists across reloads so its listeners (and any
+	// in-flight relayed connections) survive config edits: a reload diffs the
+	// desired stream set against the running one. In a lean build (no "stream"
+	// tag) the server is a no-op and Reload rejects any configured stream. The
+	// initial set is applied below before serving; subsequent reloads are driven
+	// by the server's OnReloaded hook.
+	streamSrv := stream.NewServer(stream.Options{
+		Logger: log,
+		Hooks: stream.Hooks{
+			OnConnDelta: metrics.StreamConnDelta,
+			OnBytes:     metrics.ObserveStreamBytes,
+		},
+	})
+	defer func() { _ = streamSrv.Close() }()
+	if err := streamSrv.Reload(cfg.Streams, indexUpstreams(cfg.Upstreams)); err != nil {
+		log.Error("failed to start stream proxy", "error", err)
+		return 1
+	}
 
 	// liveHandlerClosers holds closers for handlers in the currently serving
 	// configuration that own resources needing explicit teardown on reload —
@@ -560,6 +589,14 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = acmeMgr
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
+	// Drive L4 stream-proxy reloads from the same validated config as the HTTP
+	// listeners. Stream binding errors are logged and do not roll back the HTTP
+	// reload (the listener sets are independent).
+	srv.OnReloaded = func(c *config.Config) {
+		if err := streamSrv.Reload(c.Streams, indexUpstreams(c.Upstreams)); err != nil {
+			log.Error("stream proxy reload failed", "error", err)
+		}
+	}
 	if err := srv.Run(ctx, reload); err != nil {
 		log.Error("server exited with error", "error", err)
 		return 1

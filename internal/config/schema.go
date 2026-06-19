@@ -3,10 +3,11 @@
 //
 // The schema mirrors common NGINX concepts (listen, server_name, location,
 // proxy_pass, upstream, ...) but deliberately uses TOML rather than NGINX
-// syntax. Several top-level tables ([[stream]], [[mail]]) are reserved for
-// future versions: they are parsed but rejected during validation in v1 so that
-// configs written today fail loudly rather than silently. The [plugins] table
-// configures WASM plugins and is active in builds with the "wasmplugins" tag.
+// syntax. The [[stream]] table configures L4 (TCP/UDP) proxying and is active
+// in builds with the "stream" tag; [[mail]] is reserved for a future version:
+// it is parsed but rejected during validation so configs written today fail
+// loudly rather than silently. The [plugins] table configures WASM plugins and
+// is active in builds with the "wasmplugins" tag.
 package config
 
 // Config is the root configuration document.
@@ -25,10 +26,47 @@ type Config struct {
 	// "wasmplugins" tag; a lean build refuses any config that declares them.
 	Plugins map[string]PluginConfig `toml:"plugins"`
 
+	// Streams declares L4 (TCP/UDP) reverse-proxy listeners ([[stream]]). They
+	// are served only in builds with the "stream" tag; a lean build refuses any
+	// config that declares them (see internal/stream.Check).
+	Streams []StreamServer `toml:"stream"`
+
 	// Reserved for future versions. Parsed so that presence can be detected
 	// and rejected with a clear message during validation (see validate.go).
-	Streams []map[string]any `toml:"stream"`
-	Mail    []map[string]any `toml:"mail"`
+	Mail []map[string]any `toml:"mail"`
+}
+
+// StreamServer is one L4 (TCP or UDP) reverse-proxy listener ([[stream]]). It
+// forwards raw connections/datagrams to a backend without parsing the
+// application protocol. For TLS it can route by SNI host without terminating
+// (TLS passthrough) and preserve the client address via the PROXY protocol.
+type StreamServer struct {
+	// Listen is the bind address (host:port), e.g. "0.0.0.0:5432".
+	Listen string `toml:"listen"`
+	// Protocol is "tcp" (default) or "udp".
+	Protocol string `toml:"protocol"`
+	// ProxyPass is the default backend: a named upstream or a literal host:port.
+	// It is used when no SNI route matches (or for non-TLS / UDP streams).
+	ProxyPass string `toml:"proxy_pass"`
+	// SNIRoutes maps a TLS server name (SNI host) to a backend (named upstream
+	// or host:port). Setting it enables ClientHello SNI inspection on a TCP
+	// listener and routes by host without terminating TLS. A "*" key is a
+	// catch-all that takes precedence over ProxyPass.
+	SNIRoutes map[string]string `toml:"sni_routes"`
+	// TLSPassthrough documents that the listener forwards TLS unmodified. It is
+	// implied whenever SNIRoutes is set and is informational otherwise. JUL
+	// never terminates TLS on a stream listener in v1.
+	TLSPassthrough bool `toml:"tls_passthrough"`
+	// ProxyProtocol controls HAProxy PROXY-protocol handling (TCP only):
+	// "" (off), "in" (parse a header from the client), "out" (emit a v2 header
+	// to the backend), or "both". It preserves the real client address across
+	// the proxy hop.
+	ProxyProtocol string `toml:"proxy_protocol"`
+	// ConnectTimeout bounds dialing the backend. Zero applies a 10s default.
+	ConnectTimeout Duration `toml:"connect_timeout"`
+	// IdleTimeout closes a relayed connection/UDP session after this period with
+	// no traffic in either direction. Zero applies a 5m default.
+	IdleTimeout Duration `toml:"idle_timeout"`
 }
 
 // PluginConfig declares a single WASM plugin. Exactly one of Path or Inline
