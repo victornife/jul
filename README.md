@@ -57,7 +57,7 @@ interface — all in a single static, dependency-free binary.
 | **Load balancing** | `round_robin`, `weighted_round_robin`, and `least_conn` strategies across an upstream pool |
 | **Health & failover** | Passive health checking (`max_fails` / `fail_timeout`) plus optional active HTTP/TCP probes (`[upstreams.health_check]`), with automatic retry of idempotent requests against healthy backends |
 | **App gateways** | `fastcgi_pass` (e.g. PHP-FPM) and `uwsgi_pass` (Python/WSGI) with full CGI parameter mapping |
-| **gRPC transcoding** | Expose a unary gRPC service as a RESTful JSON API via `google.api.http` annotations (`grpc_transcode`), from a compiled descriptor set or server reflection — opt-in `grpc` build tag |
+| **gRPC transcoding** | Expose a gRPC service as a RESTful JSON API via `google.api.http` annotations (`grpc_transcode`) — unary and streaming (server/client/bidi, NDJSON or SSE) — from a compiled descriptor set or server reflection, opt-in `grpc` build tag |
 | **Response cache** | Two-tier (in-memory + optional disk overflow) cache with TTL, `stale-while-revalidate`, and admin purge |
 | **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecar serving for static files |
 | **Rate limiting** | Token-bucket request limiting keyed by client IP, a request header, or a JWT claim, with burst, global or per-location policy, and `429` + `Retry-After`; plus a per-listener concurrent-connection cap |
@@ -526,9 +526,44 @@ request message. gRPC status codes are translated to the matching HTTP status,
 and per-call results are counted in
 `jul_grpc_transcode_requests_total{method,code}`.
 
-> **MVP scope:** unary methods only (streaming returns `501 Not Implemented`),
-> one backend address per target, and the `Authorization` header is forwarded
-> as gRPC metadata. Streaming and richer header mapping land in a later release.
+#### Streaming methods
+
+Set `streaming = true` to transcode the three streaming RPC kinds in addition to
+unary calls:
+
+| gRPC method kind | Request | Response |
+| --- | --- | --- |
+| **Unary** | one JSON object | one JSON object |
+| **Server-streaming** | one JSON object | a stream of JSON frames, flushed per message |
+| **Client-streaming** | a JSON array *or* newline-delimited JSON objects | one JSON object |
+| **Bidirectional** | a JSON array *or* newline-delimited JSON objects | a stream of JSON frames |
+
+Streamed responses are framed per `stream_mode`:
+
+- `ndjson` (default) — `application/x-ndjson`, one JSON object per line.
+- `sse` — `text/event-stream`, each message as a `data:` event, a terminal
+  `event: end` on success, and `event: error` carrying the gRPC status if the
+  stream fails after it has started.
+
+Each frame is flushed immediately (no buffering), so server-streaming and bidi
+responses arrive incrementally. The request deadline propagates to the gRPC
+call, the `Authorization` header and any `Grpc-Metadata-<key>` request headers
+are forwarded as gRPC metadata, and `max_message_size` (default 4 MiB) caps a
+single encoded message. Streamed messages are counted in
+`jul_grpc_transcode_stream_msgs_total{method,direction}`.
+
+```toml
+[servers.locations.grpc_transcode]
+target           = "grpc-backend"
+descriptor_set   = "/etc/jul/api.pb"
+streaming        = true
+stream_mode      = "ndjson"   # or "sse"
+max_message_size = "4m"
+```
+
+> **Scope:** one backend address per target; streaming uses HTTP/2 request/
+> response framing (NDJSON or SSE) rather than gRPC-Web. A binary built without
+> `-tags grpc` still refuses such a config with a clear error.
 
 ### `[cache]`
 
@@ -961,6 +996,7 @@ persists, and hot-reloads.
 - `jul_http_ratelimited_total`
 - `jul_listener_conns`
 - `jul_grpc_transcode_requests_total` (binaries built with `-tags grpc`)
+- `jul_grpc_transcode_stream_msgs_total` (binaries built with `-tags grpc`)
 
 Example scrape with curl:
 

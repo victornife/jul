@@ -37,6 +37,9 @@ const maxBodyBytes = 4 << 20 // 4 MiB
 type Options struct {
 	Logger   *slog.Logger
 	OnResult func(method, code string)
+	// OnStreamMsg, when set, is called once per streamed message with the gRPC
+	// method full name and direction ("sent"/"recv").
+	OnStreamMsg func(method, direction string)
 	// reflectTimeout bounds the reflection fetch at construction (default 10s).
 	// It is unexported and used only by tests.
 	reflectTimeout time.Duration
@@ -49,8 +52,12 @@ type Transcoder struct {
 	routes        []*route
 	conn          *grpc.ClientConn
 	preserveNames bool
+	streaming     bool
+	streamMode    string
+	maxMsg        int
 	log           *slog.Logger
 	onResult      func(method, code string)
+	onStreamMsg   func(method, direction string)
 }
 
 // New builds a Transcoder from a location's grpc_transcode config. It loads the
@@ -88,9 +95,31 @@ func New(cfg config.GRPCTranscodeConfig, upstreams map[string]config.UpstreamCon
 		routes:        routes,
 		conn:          conn,
 		preserveNames: cfg.PreserveNames,
+		streaming:     cfg.Streaming,
+		streamMode:    normalizeStreamMode(cfg.StreamMode),
+		maxMsg:        maxMessageBytes(cfg.MaxMessageSize),
 		log:           opts.Logger,
 		onResult:      opts.OnResult,
+		onStreamMsg:   opts.OnStreamMsg,
 	}, nil
+}
+
+// normalizeStreamMode lower-cases the configured stream mode and defaults a
+// blank value to "ndjson".
+func normalizeStreamMode(mode string) string {
+	if m := strings.ToLower(strings.TrimSpace(mode)); m != "" {
+		return m
+	}
+	return "ndjson"
+}
+
+// maxMessageBytes resolves the per-message ceiling, applying the default when
+// the configured size is non-positive.
+func maxMessageBytes(s config.Size) int {
+	if n := s.Bytes(); n > 0 {
+		return int(n)
+	}
+	return maxBodyBytes
 }
 
 // Close releases the backend connection.
@@ -138,8 +167,12 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	method := string(rt.method.FullName())
 	if rt.streaming {
-		t.writeError(w, http.StatusNotImplemented, "streaming methods are not supported by the transcoding MVP")
-		t.report(method, http.StatusNotImplemented)
+		if !t.streaming {
+			t.writeError(w, http.StatusNotImplemented, "streaming methods require streaming = true on this grpc_transcode location")
+			t.report(method, http.StatusNotImplemented)
+			return
+		}
+		t.serveStreaming(w, r, rt, vars)
 		return
 	}
 
@@ -374,15 +407,36 @@ func parseScalar(fd protoreflect.FieldDescriptor, s string) (protoreflect.Value,
 
 // outgoingContext forwards a small set of request headers to the gRPC backend as
 // metadata, preserving the request deadline already present on the context.
+// The Authorization header and any "Grpc-Metadata-<key>" headers are mapped to
+// gRPC metadata (the latter following the grpc-gateway convention).
 func outgoingContext(r *http.Request) context.Context {
 	md := metadata.MD{}
 	if a := r.Header.Get("Authorization"); a != "" {
 		md.Set("authorization", a)
 	}
+	for key, values := range r.Header {
+		rest, ok := cutPrefixFold(key, "Grpc-Metadata-")
+		if !ok || rest == "" {
+			continue
+		}
+		md.Append(strings.ToLower(rest), values...)
+	}
 	if len(md) == 0 {
 		return r.Context()
 	}
 	return metadata.NewOutgoingContext(r.Context(), md)
+}
+
+// cutPrefixFold reports whether s starts with prefix (case-insensitively) and
+// returns the remainder. It avoids allocating a lower-cased copy of s.
+func cutPrefixFold(s, prefix string) (string, bool) {
+	if len(s) < len(prefix) {
+		return "", false
+	}
+	if !strings.EqualFold(s[:len(prefix)], prefix) {
+		return "", false
+	}
+	return s[len(prefix):], true
 }
 
 // grpcMethodPath builds the "/package.Service/Method" path for a unary call.

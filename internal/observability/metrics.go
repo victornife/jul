@@ -21,21 +21,22 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry
 
-	requests      *prometheus.CounterVec
-	duration      *prometheus.HistogramVec
-	inflight      prometheus.Gauge
-	cacheEvents   *prometheus.CounterVec
-	compressed    *prometheus.CounterVec
-	ratelimited   *prometheus.CounterVec
-	authDecisions *prometheus.CounterVec
-	upstreamUp    *prometheus.GaugeVec
-	probes        *prometheus.CounterVec
-	probeDuration *prometheus.HistogramVec
-	grpcTranscode *prometheus.CounterVec
-	listenerConns prometheus.Gauge
-	http3Conns    prometheus.Gauge
-	certExpiry    *prometheus.GaugeVec
-	certRenewals  prometheus.Counter
+	requests       *prometheus.CounterVec
+	duration       *prometheus.HistogramVec
+	inflight       prometheus.Gauge
+	cacheEvents    *prometheus.CounterVec
+	compressed     *prometheus.CounterVec
+	ratelimited    *prometheus.CounterVec
+	authDecisions  *prometheus.CounterVec
+	upstreamUp     *prometheus.GaugeVec
+	probes         *prometheus.CounterVec
+	probeDuration  *prometheus.HistogramVec
+	grpcTranscode  *prometheus.CounterVec
+	grpcStreamMsgs *prometheus.CounterVec
+	listenerConns  prometheus.Gauge
+	http3Conns     prometheus.Gauge
+	certExpiry     *prometheus.GaugeVec
+	certRenewals   prometheus.Counter
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -108,6 +109,10 @@ func NewMetrics() *Metrics {
 			Name: "jul_grpc_transcode_requests_total",
 			Help: "gRPC-JSON transcoding requests, labeled by gRPC method full name and HTTP status code.",
 		}, []string{"method", "code"}),
+		grpcStreamMsgs: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_grpc_transcode_stream_msgs_total",
+			Help: "gRPC-JSON transcoding streamed messages, labeled by gRPC method full name and direction (sent to backend / received from backend).",
+		}, []string{"method", "direction"}),
 		listenerConns: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "jul_listener_conns",
 			Help: "Current concurrent connections across all listeners.",
@@ -139,6 +144,7 @@ func NewMetrics() *Metrics {
 		m.probes,
 		m.probeDuration,
 		m.grpcTranscode,
+		m.grpcStreamMsgs,
 		m.listenerConns,
 		m.http3Conns,
 		m.certExpiry,
@@ -226,6 +232,13 @@ func (m *Metrics) ObserveProbe(pool string, success bool, latency time.Duration)
 // any route is recorded with an empty method.
 func (m *Metrics) ObserveGRPCTranscode(method, code string) {
 	m.grpcTranscode.WithLabelValues(method, code).Inc()
+}
+
+// ObserveGRPCTranscodeStreamMsg counts one streamed transcoding message by the
+// gRPC method full name and direction ("sent" to the backend, "recv" from the
+// backend). It is wired into each transcoding handler as its OnStreamMsg hook.
+func (m *Metrics) ObserveGRPCTranscodeStreamMsg(method, direction string) {
+	m.grpcStreamMsgs.WithLabelValues(method, direction).Inc()
 }
 
 // ObserveCertExpiry records a certificate's leaf expiry for domain and counts a

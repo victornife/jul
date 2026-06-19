@@ -525,6 +525,14 @@ func validateGRPCTranscode(g *GRPCTranscodeConfig, where string, upstreamNames m
 			errs = append(errs, fmt.Errorf("%s: descriptor_set %q is a directory, not a file", where, g.DescriptorSet))
 		}
 	}
+	switch strings.ToLower(strings.TrimSpace(g.StreamMode)) {
+	case "", "ndjson", "sse":
+	default:
+		errs = append(errs, fmt.Errorf("%s: stream_mode %q must be \"ndjson\" or \"sse\"", where, g.StreamMode))
+	}
+	if g.MaxMessageSize.Bytes() < 0 {
+		errs = append(errs, fmt.Errorf("%s: max_message_size must not be negative", where))
+	}
 	return errs
 }
 

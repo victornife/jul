@@ -65,9 +65,9 @@ idle_timeout = "60s"
     #   url = "http://127.0.0.1:4181/auth"
     #   auth_response_headers = ["X-Auth-User", "X-Auth-Groups"]
 
-  # gRPC <-> JSON transcoding (binaries built with -tags grpc). Exposes a unary
-  # gRPC service as a RESTful JSON API using the google.api.http annotations
-  # compiled into your .proto. Exactly one descriptor source is required.
+  # gRPC <-> JSON transcoding (binaries built with -tags grpc). Exposes a gRPC
+  # service as a RESTful JSON API using the google.api.http annotations compiled
+  # into your .proto. Exactly one descriptor source is required.
   # [[servers.locations]]
   # match = { type = "prefix", path = "/v1/" }
   #   [servers.locations.grpc_transcode]
@@ -76,6 +76,9 @@ idle_timeout = "60s"
   #   # use_reflection = true          # OR discover via gRPC server reflection
   #   # tls = false                    # dial the backend over TLS (default h2c)
   #   # preserve_proto_field_names = false  # keep snake_case field names in JSON
+  #   # streaming = false              # transcode server/client/bidi streaming methods
+  #   # stream_mode = "ndjson"         # framing for streamed responses: "ndjson" or "sse"
+  #   # max_message_size = "4m"        # per-message ceiling (default 4 MiB)
 
 [[upstreams]]
 name = "backend"

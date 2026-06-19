@@ -678,6 +678,20 @@ func TestValidateGRPCTranscode(t *testing.T) {
 			t.Error("expected error: conflicting actions (grpc_transcode + root)")
 		}
 	})
+	t.Run("valid stream modes accepted", func(t *testing.T) {
+		for _, mode := range []string{"", "ndjson", "sse", "SSE", "NDJSON"} {
+			g := &GRPCTranscodeConfig{Target: "grpcbackend", DescriptorSet: descFile, Streaming: true, StreamMode: mode}
+			if err := Validate(withGRPC(g, nil)); err != nil {
+				t.Errorf("stream_mode %q: unexpected error: %v", mode, err)
+			}
+		}
+	})
+	t.Run("invalid stream mode rejected", func(t *testing.T) {
+		g := &GRPCTranscodeConfig{Target: "grpcbackend", DescriptorSet: descFile, StreamMode: "xml"}
+		if err := Validate(withGRPC(g, nil)); err == nil {
+			t.Error("expected error: invalid stream_mode")
+		}
+	})
 }
 
 func TestValidateRedirectReturnCombination(t *testing.T) {

@@ -102,13 +102,16 @@ curl -s http://localhost:8080/v1/echo/42?message=hi
 
 ## Notes
 
-- **MVP scope.** Unary methods only — streaming RPCs return
-  `501 Not Implemented`. One backend address per target. These limits lift in a
-  later release.
+- **Streaming.** Set `streaming = true` to transcode server-, client-, and
+  bidirectional-streaming methods alongside unary calls. Streamed responses are
+  framed as NDJSON (`application/x-ndjson`) or SSE (`stream_mode = "sse"`) and
+  flushed per message; client-streaming requests accept a JSON array or
+  newline-delimited JSON objects. One backend address per target.
 - **Descriptor vs. reflection.** `descriptor_set` is hermetic and works against
   any backend; `use_reflection` needs the backend to enable gRPC server
   reflection but removes the build step. Set exactly one.
 - **TLS.** Set `tls = true` to dial the backend over TLS; the default is
   plaintext h2c, suitable for a co-located backend.
 - **Observability.** Every call is counted in
-  `jul_grpc_transcode_requests_total{method,code}`.
+  `jul_grpc_transcode_requests_total{method,code}`; streamed messages in
+  `jul_grpc_transcode_stream_msgs_total{method,direction}`.

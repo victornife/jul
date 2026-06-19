@@ -161,6 +161,17 @@ type GRPCTranscodeConfig struct {
 	// PreserveNames keeps original proto field names in JSON output instead of
 	// the default lowerCamelCase.
 	PreserveNames bool `toml:"preserve_proto_field_names"`
+	// Streaming enables transcoding of streaming methods (server-streaming,
+	// client-streaming, and bidirectional). When false, a request to a
+	// streaming method returns 501 Not Implemented as in the unary-only MVP.
+	Streaming bool `toml:"streaming"`
+	// StreamMode selects the wire framing for streamed responses: "ndjson"
+	// (newline-delimited JSON objects, the default) or "sse" (Server-Sent
+	// Events). It has no effect on unary methods.
+	StreamMode string `toml:"stream_mode"`
+	// MaxMessageSize caps a single encoded message (a JSON request frame or a
+	// gRPC reply). Zero applies the 4 MiB default.
+	MaxMessageSize Size `toml:"max_message_size"`
 }
 
 // RewriteConfig is a regex rewrite rule.

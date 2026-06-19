@@ -16,9 +16,10 @@ import (
 // gRPC calls. The returned handler also implements io.Closer (via the
 // Transcoder), so the caller closes it to release the backend connection when
 // the configuration is replaced.
-func NewGRPCTranscode(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, log *slog.Logger, onResult func(method, code string)) (http.Handler, error) {
+func NewGRPCTranscode(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, log *slog.Logger, onResult func(method, code string), onStreamMsg func(method, direction string)) (http.Handler, error) {
 	return transcode.New(*loc.GRPCTranscode, upstreams, transcode.Options{
-		Logger:   log,
-		OnResult: onResult,
+		Logger:      log,
+		OnResult:    onResult,
+		OnStreamMsg: onStreamMsg,
 	})
 }
