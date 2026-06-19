@@ -57,13 +57,17 @@ func (h *history) snapshot(raw []byte) (string, error) {
 	id := time.Now().UTC().Format(historyTimeLayout)
 	name := id + historyExt
 	// Guard against the unlikely sub-millisecond collision by appending a
-	// counter so a rapid pair of writes never clobbers an earlier snapshot.
+	// counter so a rapid pair of writes never clobbers an earlier snapshot. The
+	// separator must sort lexicographically after '.' (the extension delimiter)
+	// so a suffixed snapshot still orders as newer than its unsuffixed sibling
+	// under the reverse-string sort in snapshotFiles; '_' (0x5F) satisfies this
+	// where '-' (0x2D) would not.
 	path := filepath.Join(h.dir, name)
 	for i := 1; ; i++ {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			break
 		}
-		name = fmt.Sprintf("%s-%d%s", id, i, historyExt)
+		name = fmt.Sprintf("%s_%d%s", id, i, historyExt)
 		id = strings.TrimSuffix(name, historyExt)
 		path = filepath.Join(h.dir, name)
 	}
