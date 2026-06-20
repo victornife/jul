@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-This is the consolidated 5-year plan. It pairs with the [vision](vision.md) and
+This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](adr/). **Keep this file current:** whenever a
 feature ships, move its row to *Delivered* and tick the year checklist; whenever
 an ADR is added, link it where relevant.
@@ -114,7 +114,7 @@ When a feature ships:
 
 1. Move its row from *Planned* to *Delivered* and note the build tag.
 2. Update the year completion checklist count.
-3. Update the status snapshot line in [vision.md](vision.md) if the active year
+3. Update the status snapshot line in [vision](../vision/) if the active year
    changed.
 4. If the work involved a durable technical decision, add an ADR under
    [docs/adr/](adr/) and link it here.

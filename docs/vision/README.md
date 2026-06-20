@@ -1,7 +1,7 @@
 # Jul.IA — Vision
 
 > Status snapshot: Year 1 complete; Year 2 in progress (Y2-01 … Y2-05 shipped).
-> Maintained alongside the [roadmap](roadmap.md). Update both whenever a feature
+> Maintained alongside the [roadmap](../roadmap/). Update both whenever a feature
 > ships or an ADR is added.
 
 ## What Jul.IA is
@@ -66,5 +66,5 @@ re-architecting:
 
 ## Related documents
 
-- [Roadmap](roadmap.md) — what's shipped and what's planned (Years 1–5).
+- [Roadmap](../roadmap/) — what's shipped and what's planned (Years 1–5).
 - [Architecture Decision Records](adr/) — durable technical decisions.

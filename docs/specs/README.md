@@ -1,14 +1,14 @@
 # Engineering specs
 
-Detailed, per-feature engineering execution plans behind the [5-year roadmap](../roadmap.md).
+Detailed, per-feature engineering execution plans behind the [5-year roadmap](../roadmap/).
 These are the design source-of-truth: for each feature (`Y#-##`) they capture objective/scope,
 design, config (Go + TOML), new files/interfaces, implementation tasks, dependencies, test plan,
 acceptance/DoD, risks, rollout/build-tags and docs updates.
 
 For the high-level "why" and the delivery status of each feature, see:
 
-- [../vision.md](../vision.md) — product north star and architectural commitments
-- [../roadmap.md](../roadmap.md) — consolidated 5-year plan with status (delivered / in progress / planned)
+- [../vision/](../vision/) — product north star and architectural commitments
+- [../roadmap/](../roadmap/) — consolidated 5-year plan with status (delivered / in progress / planned)
 - [../adr/](../adr/) — architecture decision records
 
 ## Index
@@ -25,4 +25,4 @@ For the high-level "why" and the delivery status of each feature, see:
 
 When a feature's design changes, update its spec section here in the same change.
 When a feature ships, move its roadmap row to **Delivered** and (if a durable decision was made)
-add an ADR. See the maintenance note in [../roadmap.md](../roadmap.md).
+add an ADR. See the maintenance note in [../roadmap/](../roadmap/).

@@ -1,5 +1,5 @@
 <!-- Engineering execution spec. Detailed source-of-truth for the Year 2 — Protocol Gateway + Extensibility roadmap entry.
-     Companion to ../roadmap.md and ../vision.md. Update when a feature's design changes. -->
+     Companion to ../roadmap/ and ../vision/. Update when a feature's design changes. -->
 
 # JUL Engineering Execution Plan — Year 2 (Protocol Gateway + Extensibility Moat)
 
