@@ -1526,6 +1526,12 @@ GOOS=windows GOARCH=arm64 go build -o jul.exe ./cmd/jul
 GOOS=darwin GOARCH=arm64 go build -o jul ./cmd/jul
 ```
 
+The single static, `CGO_ENABLED=0` binary is a deliberate design constraint.
+Jul.IA stays Go-first and admits native (Rust) code only at the edges — as
+sandboxed WebAssembly plugins or, where justified, an opt-in out-of-process
+sidecar — never via cgo in the core. The reasoning and the per-feature rule are
+recorded in [docs/adr/0001-language-strategy.md](docs/adr/0001-language-strategy.md).
+
 **Build all release archives at once** with the bundled script
 ([`scripts/build-release.ps1`](scripts/build-release.ps1)):
 
@@ -1566,8 +1572,10 @@ testdata/           Sample configs and static assets for tests
 ## Troubleshooting
 
 **`invalid configuration` on start or reload** — run `jul --config <file>
---check` to see the validation error. The reserved `[[stream]]`, `[[mail]]`, and
-`[plugins]` tables are intentionally rejected in v1.
+--check` to see the validation error. A populated `[[stream]]` or `[plugins]`
+table is rejected unless the binary was built with its build tag (`stream` and
+`wasmplugins` respectively); the `[[mail]]` table is reserved and always
+rejected.
 
 **502 / 504 from a proxied app** — confirm the backend is running, reachable at
 the configured address, and able to serve concurrent keep-alive connections (see
