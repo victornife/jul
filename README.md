@@ -11,6 +11,10 @@ interface — all in a single static, dependency-free binary.
 - **Language:** Go 1.26
 - **License:** PolyForm Non-Commercial 1.0.0
 
+> Where this is headed: see the [vision](docs/vision.md) and the
+> [roadmap](docs/roadmap.md) (Years 1–5). Durable technical decisions are
+> recorded as [ADRs](docs/adr/).
+
 ---
 
 ## Table of contents
