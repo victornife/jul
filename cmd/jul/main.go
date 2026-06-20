@@ -177,9 +177,11 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// are reused and updated in place when unchanged, and closed when removed or
 	// reshaped. CloseAll stops every checker goroutine on shutdown.
 	poolReg := upstream.NewRegistry(upstream.RegistryOptions{
-		Logger:   log,
-		OnHealth: metrics.ObserveBackendHealth,
-		OnProbe:  metrics.ObserveProbe,
+		Logger:           log,
+		OnHealth:         metrics.ObserveBackendHealth,
+		OnProbe:          metrics.ObserveProbe,
+		OnBackends:       metrics.ObserveUpstreamBackends,
+		OnDiscoveryError: metrics.ObserveDiscoveryError,
 	})
 	defer poolReg.CloseAll()
 

@@ -300,6 +300,83 @@ type UpstreamConfig struct {
 	// so failures are detected (and recoveries observed) without waiting for live
 	// traffic. nil leaves only passive health checking in effect.
 	HealthCheck *HealthCheckConfig `toml:"health_check"`
+
+	// Discovery, when set to a non-static type, resolves the pool's backend set
+	// from an external source (DNS, Consul, Kubernetes) and refreshes it live
+	// without a reload. nil (or type "static"/"") uses the static Servers list.
+	// When discovery is enabled the Servers list is optional and acts only as a
+	// seed/fallback until the first successful resolution.
+	Discovery *DiscoveryConfig `toml:"discovery"`
+}
+
+// DiscoveryConfig configures dynamic backend discovery for an upstream pool. A
+// per-pool refresher goroutine polls the selected source on an interval and
+// applies changes via the pool's state-preserving UpdateBackends, so backends
+// come and go without a restart while passive/active health and load balancing
+// continue to apply.
+type DiscoveryConfig struct {
+	// Type selects the resolver: "dns" (A/AAAA records), "dns_srv" (SRV
+	// records), "consul", or "kubernetes". "static" (or empty) disables
+	// discovery and uses the upstream's Servers list. The "consul" and
+	// "kubernetes" providers require builds with the matching build tag.
+	Type string `toml:"type"`
+	// Target is the resolver query. For "dns" it is "host:port" (the port is
+	// applied to every resolved address, since A/AAAA records carry no port).
+	// For "dns_srv" it is the SRV name (e.g. "_grpc._tcp.svc.example.com"),
+	// which carries port and weight. Unused for consul/kubernetes.
+	Target string `toml:"target"`
+	// Refresh is the polling interval (default 30s).
+	Refresh Duration `toml:"refresh"`
+	// Consul holds Consul-specific settings (Type "consul").
+	Consul *ConsulDiscovery `toml:"consul"`
+	// Kubernetes holds Kubernetes-specific settings (Type "kubernetes").
+	Kubernetes *KubernetesDiscovery `toml:"kubernetes"`
+}
+
+// ConsulDiscovery configures discovery from a Consul service catalog (queried
+// over Consul's HTTP API; no Consul client library is linked in).
+type ConsulDiscovery struct {
+	// Address is the Consul HTTP API base URL (default "http://127.0.0.1:8500").
+	Address string `toml:"address"`
+	// Service is the Consul service name to resolve (required).
+	Service string `toml:"service"`
+	// Tag, when set, restricts results to instances carrying this tag.
+	Tag string `toml:"tag"`
+	// Datacenter, when set, queries a specific datacenter.
+	Datacenter string `toml:"datacenter"`
+	// Token is an optional ACL token sent as X-Consul-Token.
+	Token string `toml:"token"`
+	// PassingOnly restricts results to instances whose health checks are passing
+	// (default true).
+	PassingOnly *bool `toml:"passing_only"`
+}
+
+// KubernetesDiscovery configures discovery from Kubernetes EndpointSlices
+// (queried over the API server's REST API; client-go is not linked in). In a
+// pod the API server URL and service-account credentials are read from the
+// standard in-cluster locations; the fields below override them when running
+// outside a cluster.
+type KubernetesDiscovery struct {
+	// Namespace of the target Service (required).
+	Namespace string `toml:"namespace"`
+	// Service is the Kubernetes Service name whose endpoints are resolved
+	// (required).
+	Service string `toml:"service"`
+	// Port selects the endpoint port by name or number. When empty the first
+	// port of each EndpointSlice is used.
+	Port string `toml:"port"`
+	// APIServer overrides the API server base URL (default from the in-cluster
+	// KUBERNETES_SERVICE_HOST/PORT environment).
+	APIServer string `toml:"api_server"`
+	// Token overrides the bearer token (default: the mounted service-account
+	// token).
+	Token string `toml:"token"`
+	// CAFile overrides the API server CA bundle (default: the mounted
+	// service-account CA). Set InsecureSkipTLSVerify only for local testing.
+	CAFile string `toml:"ca_file"`
+	// InsecureSkipTLSVerify disables API server certificate verification. For
+	// local/testing use only.
+	InsecureSkipTLSVerify bool `toml:"insecure_skip_tls_verify"`
 }
 
 // HealthCheckConfig configures active health checking for an upstream pool.

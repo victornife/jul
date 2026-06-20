@@ -25,6 +25,7 @@ interface — all in a single static, dependency-free binary.
   - [`[[servers]]`](#servers)
   - [`[[servers.locations]]`](#serverslocations)
   - [`[[upstreams]]`](#upstreams)
+  - [`[upstreams.discovery]`](#upstreamsdiscovery)
   - [`[cache]`](#cache)
   - [`[compression]`](#compression)
   - [`[rate_limit]`](#rate_limit)
@@ -40,6 +41,7 @@ interface — all in a single static, dependency-free binary.
 - [WebAssembly plugins](#webassembly-plugins)
 - [L4 stream proxy](#l4-stream-proxy)
 - [gRPC passthrough](#grpc-passthrough)
+- [Service discovery](#service-discovery)
 - [Hot reload](#hot-reload)
 - [Admin interface & observability](#admin-interface--observability)
 - [Running real applications behind Jul.IA](#running-real-applications-behind-julia)
@@ -61,6 +63,7 @@ interface — all in a single static, dependency-free binary.
 | **Reverse proxy** | `proxy_pass` to a concrete URL or a named upstream; per-location connect/read/send timeouts; custom upstream headers with variable expansion |
 | **Load balancing** | `round_robin`, `weighted_round_robin`, and `least_conn` strategies across an upstream pool |
 | **Health & failover** | Passive health checking (`max_fails` / `fail_timeout`) plus optional active HTTP/TCP probes (`[upstreams.health_check]`), with automatic retry of idempotent requests against healthy backends |
+| **Service discovery** | Resolve an upstream's backends dynamically and refresh the pool live without a reload (`[upstreams.discovery]`): **DNS** A/AAAA and **DNS SRV** in every build, plus **Consul** and **Kubernetes** EndpointSlices behind the `consul`/`kubernetes` build tags — failed or empty resolves keep the last-good backends |
 | **App gateways** | `fastcgi_pass` (e.g. PHP-FPM) and `uwsgi_pass` (Python/WSGI) with full CGI parameter mapping |
 | **gRPC transcoding** | Expose a gRPC service as a RESTful JSON API via `google.api.http` annotations (`grpc_transcode`) — unary and streaming (server/client/bidi, NDJSON or SSE) — from a compiled descriptor set or server reflection, opt-in `grpc` build tag |
 | **gRPC passthrough** | Reverse-proxy **native gRPC** end to end over HTTP/2 (`grpc = true`) — trailers preserved, streaming frames flushed immediately, load balancing and health checks applied — with cleartext **h2c** inbound (`h2c = true`) for clients without TLS, opt-in `grpc` build tag |
@@ -502,6 +505,35 @@ servers = ["127.0.0.1:3000", "127.0.0.1:3001"]
 Metrics: `jul_upstream_healthy{pool,backend}` (1 healthy / 0 unhealthy),
 `jul_upstream_probes_total{pool,result}`, and
 `jul_upstream_probe_duration_seconds{pool}`.
+
+#### `[upstreams.discovery]`
+
+Resolve a pool's backends from an external source and refresh them live, with no
+config reload. With discovery enabled the static `servers` list is optional (a
+seed/fallback until the first resolve). `dns` and `dns_srv` work in every build;
+`consul` and `kubernetes` require the matching build tag. See
+[Service discovery](#service-discovery) for the full guide.
+
+| Key | Type | Description |
+| --- | ---- | ----------- |
+| `type` | string | `static` (off), `dns`, `dns_srv`, `consul`, or `kubernetes` |
+| `target` | string | `host:port` for `dns`; the SRV name for `dns_srv` |
+| `refresh` | duration | Poll interval (default `30s`) |
+| `[consul]` | table | `address`, `service`, `tag`, `datacenter`, `token`, `passing_only` |
+| `[kubernetes]` | table | `namespace`, `service`, `port`, `api_server`, `token`, `ca_file`, `insecure_skip_tls_verify` |
+
+```toml
+[[upstreams]]
+name = "api"
+strategy = "round_robin"
+  [upstreams.discovery]
+  type = "dns"
+  target = "api.internal.svc:8080"
+  refresh = "15s"
+```
+
+Metrics: `jul_upstream_backends{pool}` (current backend count) and
+`jul_discovery_errors_total{pool}` (failed/empty resolves; last-good kept).
 
 ### gRPC ↔ JSON transcoding (`grpc` build tag)
 
@@ -1160,6 +1192,63 @@ Sample configs live in [examples/grpc-proxy](examples/grpc-proxy) and
 
 ---
 
+## Service discovery
+
+An upstream's backends are normally a static `servers` list. With an
+`[upstreams.discovery]` block, Jul.IA instead resolves them from an external
+source and refreshes the pool **live** — backends come and go without a config
+reload, while load balancing, passive health, and active probes keep applying.
+
+Four providers are available:
+
+| Type | Source | Build |
+| --- | --- | --- |
+| `dns` | A/AAAA records (port from config) | every build |
+| `dns_srv` | SRV records (host + port + weight) | every build |
+| `consul` | Consul health API | `consul` tag |
+| `kubernetes` | Kubernetes EndpointSlices | `kubernetes` tag |
+
+`dns` and `dns_srv` use the standard-library resolver and are always compiled
+in. `consul` and `kubernetes` are opt-in behind build tags and query the
+provider's documented REST endpoint directly — no `client-go`, no Consul SDK, so
+enabling them adds **no** third-party dependency:
+
+```bash
+go build -tags "consul kubernetes" -o jul ./cmd/jul
+```
+
+A binary built without a provider's tag still parses and validates a discovery
+block of that type but rejects it at load time (startup or reload) with a clear
+error — the same fail-loud model as the other tagged features.
+
+```toml
+[[upstreams]]
+name = "api"
+strategy = "round_robin"
+  [upstreams.discovery]
+  type = "dns"
+  target = "api.internal.svc:8080"   # the port is applied to each resolved address
+  refresh = "15s"
+```
+
+Key behaviours:
+
+- **Keep last-good.** A failed resolve, or one returning zero targets, is logged,
+  counted (`jul_discovery_errors_total`), and skipped — the pool keeps its
+  previous backends, so a provider blip never black-holes traffic.
+- **State-preserving.** Updates merge by address+weight, so surviving backends
+  keep their in-flight count and passive-failure cooldown; new backends are
+  immediately picked up by active health checks.
+- **Atomic reload.** An unchanged discovery block reuses the running pool and its
+  discovered backends; changing any field rebuilds the pool and its refresher.
+
+Metrics: `jul_upstream_backends{pool}` and `jul_discovery_errors_total{pool}`. A
+sample config is in [testdata/discovery.toml](testdata/discovery.toml) and a full
+guide — including the Consul and Kubernetes settings — is in
+[docs/service-discovery.md](docs/service-discovery.md).
+
+---
+
 ## Hot reload
 
 Jul.IA reloads configuration **without dropping connections**. A reload can be
@@ -1415,6 +1504,8 @@ binary. Combine them as needed:
 | `importer` | `jul import nginx` config migration tool |
 | `wasmplugins` | WebAssembly plugins (`[plugins]`) on the embedded wazero runtime |
 | `stream` | L4 TCP/UDP stream proxy (`[[stream]]`) with SNI routing and PROXY protocol |
+| `consul` | Consul service discovery for upstreams (`[upstreams.discovery]` `type = "consul"`) |
+| `kubernetes` | Kubernetes EndpointSlice service discovery (`[upstreams.discovery]` `type = "kubernetes"`) |
 
 ```bash
 # Full-featured build

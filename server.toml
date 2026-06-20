@@ -118,6 +118,28 @@ servers = ["127.0.0.1:3000", "127.0.0.1:3001"]
 #   unhealthy_threshold = 3  # consecutive failures to eject
 #   expect_status = [200]    # acceptable HTTP statuses (http only)
 #   # expect_body = "OK"     # optional: response body must contain this (http only)
+#
+# Dynamic service discovery resolves the backend set from an external source and
+# refreshes the pool live (no reload). With discovery enabled the static
+# `servers` list above is optional (a seed/fallback until the first resolve). A
+# failed or empty resolve keeps the last-good backends. See docs/service-discovery.md.
+#   [upstreams.discovery]
+#   type = "dns"             # dns | dns_srv | consul | kubernetes (static = off)
+#   target = "api.internal.svc:8080"  # dns: host:port; dns_srv: the SRV name
+#   refresh = "30s"          # poll interval (default 30s)
+#   # Consul (requires a build with the "consul" tag):
+#   #   type = "consul"
+#   #   [upstreams.discovery.consul]
+#   #   address = "http://127.0.0.1:8500"
+#   #   service = "web"
+#   #   tag = "v1"           # optional
+#   #   passing_only = true  # default true
+#   # Kubernetes (requires a build with the "kubernetes" tag):
+#   #   type = "kubernetes"
+#   #   [upstreams.discovery.kubernetes]
+#   #   namespace = "default"
+#   #   service = "web"
+#   #   port = "http"        # port name or number (default: first port)
 
 [cache]
 enabled = false

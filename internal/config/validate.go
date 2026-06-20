@@ -48,7 +48,7 @@ func Validate(c *Config) error {
 		default:
 			errs = append(errs, fmt.Errorf("%s: invalid strategy %q (want round_robin|weighted_round_robin|least_conn)", where, up.Strategy))
 		}
-		if len(up.Servers) == 0 {
+		if len(up.Servers) == 0 && !discoveryEnabled(up.Discovery) {
 			errs = append(errs, fmt.Errorf("%s: upstream %q has no servers", where, up.Name))
 		}
 		for j, s := range up.Servers {
@@ -57,6 +57,7 @@ func Validate(c *Config) error {
 			}
 		}
 		errs = append(errs, validateHealthCheck(up.HealthCheck, where+".health_check")...)
+		errs = append(errs, validateDiscovery(up.Discovery, where+".discovery")...)
 	}
 
 	// Detect listen addresses used by both a TLS and a non-TLS server block,
@@ -480,6 +481,71 @@ func validateHealthCheck(h *HealthCheckConfig, where string) []error {
 	}
 	if h.UnhealthyThreshold < 1 {
 		errs = append(errs, fmt.Errorf("%s: unhealthy_threshold must be at least 1", where))
+	}
+	return errs
+}
+
+// discoveryEnabled reports whether a discovery block selects a non-static
+// provider (so the upstream's backend set is resolved dynamically rather than
+// read from the static Servers list).
+func discoveryEnabled(d *DiscoveryConfig) bool {
+	if d == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(d.Type)) {
+	case "", "static":
+		return false
+	default:
+		return true
+	}
+}
+
+// validateDiscovery checks an upstream's dynamic discovery block. It validates
+// the provider type and the per-provider required fields. It is a no-op when nil
+// or static. The "consul"/"kubernetes" types are accepted here regardless of
+// build tags: a build lacking the provider rejects the config at startup/reload
+// (the discoverer factory errors), the same model as other gated features.
+func validateDiscovery(d *DiscoveryConfig, where string) []error {
+	if d == nil {
+		return nil
+	}
+	var errs []error
+	switch strings.ToLower(strings.TrimSpace(d.Type)) {
+	case "", "static":
+		return nil
+	case "dns":
+		if strings.TrimSpace(d.Target) == "" {
+			errs = append(errs, fmt.Errorf("%s: 'target' is required for dns discovery (want host:port)", where))
+		} else if _, port, err := net.SplitHostPort(d.Target); err != nil || strings.TrimSpace(port) == "" {
+			errs = append(errs, fmt.Errorf("%s: dns target %q must be host:port (A/AAAA records carry no port)", where, d.Target))
+		}
+	case "dns_srv":
+		if strings.TrimSpace(d.Target) == "" {
+			errs = append(errs, fmt.Errorf("%s: 'target' is required for dns_srv discovery (the SRV name)", where))
+		}
+	case "consul":
+		if d.Consul == nil || strings.TrimSpace(d.Consul.Service) == "" {
+			errs = append(errs, fmt.Errorf("%s: consul discovery requires [consul] with a 'service'", where))
+		}
+		if d.Consul != nil && strings.TrimSpace(d.Consul.Address) != "" {
+			if u, err := url.Parse(d.Consul.Address); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				errs = append(errs, fmt.Errorf("%s: consul address %q must be an http(s) URL", where, d.Consul.Address))
+			}
+		}
+	case "kubernetes":
+		if d.Kubernetes == nil || strings.TrimSpace(d.Kubernetes.Service) == "" || strings.TrimSpace(d.Kubernetes.Namespace) == "" {
+			errs = append(errs, fmt.Errorf("%s: kubernetes discovery requires [kubernetes] with 'namespace' and 'service'", where))
+		}
+		if d.Kubernetes != nil && strings.TrimSpace(d.Kubernetes.APIServer) != "" {
+			if u, err := url.Parse(d.Kubernetes.APIServer); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				errs = append(errs, fmt.Errorf("%s: kubernetes api_server %q must be an http(s) URL", where, d.Kubernetes.APIServer))
+			}
+		}
+	default:
+		errs = append(errs, fmt.Errorf("%s: invalid type %q (want static|dns|dns_srv|consul|kubernetes)", where, d.Type))
+	}
+	if d.Refresh < 0 {
+		errs = append(errs, fmt.Errorf("%s: refresh must not be negative", where))
 	}
 	return errs
 }

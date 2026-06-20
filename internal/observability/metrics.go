@@ -21,28 +21,30 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry
 
-	requests       *prometheus.CounterVec
-	duration       *prometheus.HistogramVec
-	inflight       prometheus.Gauge
-	cacheEvents    *prometheus.CounterVec
-	compressed     *prometheus.CounterVec
-	ratelimited    *prometheus.CounterVec
-	authDecisions  *prometheus.CounterVec
-	upstreamUp     *prometheus.GaugeVec
-	probes         *prometheus.CounterVec
-	probeDuration  *prometheus.HistogramVec
-	grpcTranscode  *prometheus.CounterVec
-	grpcStreamMsgs *prometheus.CounterVec
-	grpcProxyCalls prometheus.Counter
-	pluginInvokes  *prometheus.CounterVec
-	pluginDuration *prometheus.HistogramVec
-	pluginPanics   *prometheus.CounterVec
-	listenerConns  prometheus.Gauge
-	http3Conns     prometheus.Gauge
-	streamConns    *prometheus.GaugeVec
-	streamBytes    *prometheus.CounterVec
-	certExpiry     *prometheus.GaugeVec
-	certRenewals   prometheus.Counter
+	requests         *prometheus.CounterVec
+	duration         *prometheus.HistogramVec
+	inflight         prometheus.Gauge
+	cacheEvents      *prometheus.CounterVec
+	compressed       *prometheus.CounterVec
+	ratelimited      *prometheus.CounterVec
+	authDecisions    *prometheus.CounterVec
+	upstreamUp       *prometheus.GaugeVec
+	upstreamBackends *prometheus.GaugeVec
+	discoveryErrors  *prometheus.CounterVec
+	probes           *prometheus.CounterVec
+	probeDuration    *prometheus.HistogramVec
+	grpcTranscode    *prometheus.CounterVec
+	grpcStreamMsgs   *prometheus.CounterVec
+	grpcProxyCalls   prometheus.Counter
+	pluginInvokes    *prometheus.CounterVec
+	pluginDuration   *prometheus.HistogramVec
+	pluginPanics     *prometheus.CounterVec
+	listenerConns    prometheus.Gauge
+	http3Conns       prometheus.Gauge
+	streamConns      *prometheus.GaugeVec
+	streamBytes      *prometheus.CounterVec
+	certExpiry       *prometheus.GaugeVec
+	certRenewals     prometheus.Counter
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -102,6 +104,14 @@ func NewMetrics() *Metrics {
 			Name: "jul_upstream_healthy",
 			Help: "Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend.",
 		}, []string{"pool", "backend"}),
+		upstreamBackends: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "jul_upstream_backends",
+			Help: "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",
+		}, []string{"pool"}),
+		discoveryErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_discovery_errors_total",
+			Help: "Failed or empty service-discovery resolves, labeled by pool (last-good backends are kept).",
+		}, []string{"pool"}),
 		probes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_upstream_probes_total",
 			Help: "Active health-check probes, labeled by pool and result (success/failure).",
@@ -172,6 +182,8 @@ func NewMetrics() *Metrics {
 		m.ratelimited,
 		m.authDecisions,
 		m.upstreamUp,
+		m.upstreamBackends,
+		m.discoveryErrors,
 		m.probes,
 		m.probeDuration,
 		m.grpcTranscode,
@@ -250,6 +262,21 @@ func (m *Metrics) ObserveBackendHealth(pool, backend string, healthy bool) {
 		v = 1.0
 	}
 	m.upstreamUp.WithLabelValues(pool, backend).Set(v)
+}
+
+// ObserveUpstreamBackends records the current backend count of a pool as a
+// gauge. It is wired into the upstream pool registry as its OnBackends hook and
+// tracks dynamic service discovery (the count changes as a discoverer resolves
+// new endpoint sets).
+func (m *Metrics) ObserveUpstreamBackends(pool string, n int) {
+	m.upstreamBackends.WithLabelValues(pool).Set(float64(n))
+}
+
+// ObserveDiscoveryError records a failed or empty service-discovery resolve. It
+// is wired into the upstream pool registry as its OnDiscoveryError hook; the
+// pool keeps its last-good backends when this fires.
+func (m *Metrics) ObserveDiscoveryError(pool string) {
+	m.discoveryErrors.WithLabelValues(pool).Inc()
 }
 
 // ObserveProbe records the outcome and latency of a single active health-check

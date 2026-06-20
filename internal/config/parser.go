@@ -112,6 +112,7 @@ func (c *Config) applyDefaults() {
 			}
 		}
 		applyHealthCheckDefaults(up.HealthCheck)
+		applyDiscoveryDefaults(up.Discovery)
 	}
 
 	for i := range c.Streams {
@@ -280,6 +281,32 @@ func applyHealthCheckDefaults(h *HealthCheckConfig) {
 	}
 	if h.Type == "http" && len(h.ExpectStatus) == 0 {
 		h.ExpectStatus = []int{200}
+	}
+}
+
+// applyDiscoveryDefaults fills in defaults for an upstream's dynamic discovery
+// block: a normalized lowercase type, a 30s refresh interval, the default
+// Consul API address, and Consul passing-only health filtering. It is a no-op
+// when nil or static so a disabled block acquires no surprising defaults.
+func applyDiscoveryDefaults(d *DiscoveryConfig) {
+	if d == nil {
+		return
+	}
+	d.Type = strings.ToLower(strings.TrimSpace(d.Type))
+	if d.Type == "" || d.Type == "static" {
+		return
+	}
+	if d.Refresh == 0 {
+		d.Refresh = Duration(30 * time.Second)
+	}
+	if d.Type == "consul" && d.Consul != nil {
+		if strings.TrimSpace(d.Consul.Address) == "" {
+			d.Consul.Address = "http://127.0.0.1:8500"
+		}
+		if d.Consul.PassingOnly == nil {
+			passing := true
+			d.Consul.PassingOnly = &passing
+		}
 	}
 }
 

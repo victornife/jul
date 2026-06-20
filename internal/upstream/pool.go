@@ -41,7 +41,7 @@ type Pool struct {
 // NewPool builds a Pool from an upstream config. scheme is the proxy scheme
 // (http or https) applied to each backend address.
 func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
-	if len(cfg.Servers) == 0 {
+	if len(cfg.Servers) == 0 && !discoveryEnabled(cfg.Discovery) {
 		return nil, fmt.Errorf("upstream %q has no servers", cfg.Name)
 	}
 	maxFails := cfg.MaxFails

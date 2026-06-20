@@ -207,6 +207,110 @@ func TestValidateStreams(t *testing.T) {
 	})
 }
 
+func TestValidateDiscovery(t *testing.T) {
+	base := func(d *DiscoveryConfig) *Config {
+		return &Config{
+			Servers: []ServerConfig{{Listen: "127.0.0.1:80"}},
+			Upstreams: []UpstreamConfig{{
+				Name:      "api",
+				Discovery: d,
+			}},
+		}
+	}
+
+	t.Run("dns valid with no static servers", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "dns", Target: "svc.local:8080"})
+		if err := Validate(c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("dns_srv valid", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "dns_srv", Target: "_grpc._tcp.svc.local"})
+		if err := Validate(c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("consul valid", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "consul", Consul: &ConsulDiscovery{Service: "web", Address: "http://127.0.0.1:8500"}})
+		if err := Validate(c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("kubernetes valid", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "kubernetes", Kubernetes: &KubernetesDiscovery{Namespace: "default", Service: "web"}})
+		if err := Validate(c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("static type with servers still valid", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "static"})
+		c.Upstreams[0].Servers = []UpstreamServer{{Address: "127.0.0.1:80", Weight: 1}}
+		if err := Validate(c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("dns without port rejected", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "dns", Target: "svc.local"})
+		if err := Validate(c); err == nil {
+			t.Error("expected error: dns target without port")
+		}
+	})
+
+	t.Run("dns without target rejected", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "dns"})
+		if err := Validate(c); err == nil {
+			t.Error("expected error: dns without target")
+		}
+	})
+
+	t.Run("dns_srv without target rejected", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "dns_srv"})
+		if err := Validate(c); err == nil {
+			t.Error("expected error: dns_srv without target")
+		}
+	})
+
+	t.Run("consul without service rejected", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "consul", Consul: &ConsulDiscovery{}})
+		if err := Validate(c); err == nil {
+			t.Error("expected error: consul without service")
+		}
+	})
+
+	t.Run("consul bad address rejected", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "consul", Consul: &ConsulDiscovery{Service: "web", Address: "not-a-url"}})
+		if err := Validate(c); err == nil {
+			t.Error("expected error: consul address not http(s)")
+		}
+	})
+
+	t.Run("kubernetes without namespace rejected", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "kubernetes", Kubernetes: &KubernetesDiscovery{Service: "web"}})
+		if err := Validate(c); err == nil {
+			t.Error("expected error: kubernetes without namespace")
+		}
+	})
+
+	t.Run("unknown type rejected", func(t *testing.T) {
+		c := base(&DiscoveryConfig{Type: "etcd", Target: "x"})
+		if err := Validate(c); err == nil {
+			t.Error("expected error: unknown discovery type")
+		}
+	})
+
+	t.Run("static upstream without discovery or servers rejected", func(t *testing.T) {
+		c := base(nil)
+		if err := Validate(c); err == nil {
+			t.Error("expected error: upstream with neither servers nor discovery")
+		}
+	})
+}
+
 func TestValidatePluginsValid(t *testing.T) {
 	cfg := &Config{
 		Servers: []ServerConfig{{

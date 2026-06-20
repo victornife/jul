@@ -1,0 +1,37 @@
+# Dynamic service discovery example. Validate with:
+#   jul -check testdata/discovery.toml
+#
+# Each upstream resolves its backends from an external source and refreshes the
+# pool live (no reload) on the configured interval. A failed or empty resolve
+# keeps the last-good backend set, so a provider blip never black-holes traffic.
+# The "consul" and "kubernetes" types require builds with the matching build tag
+# (the config still validates in a lean build; it is rejected at load time).
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://api"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/grpc" }
+  proxy_pass = "http://grpc"
+
+# DNS A/AAAA discovery: every address behind the name gets the given port.
+[[upstreams]]
+name = "api"
+strategy = "round_robin"
+  [upstreams.discovery]
+  type = "dns"
+  target = "api.internal.svc:8080"
+  refresh = "15s"
+
+# DNS SRV discovery: SRV records carry the host, port, and weight directly.
+[[upstreams]]
+name = "grpc"
+strategy = "least_conn"
+  [upstreams.discovery]
+  type = "dns_srv"
+  target = "_grpc._tcp.svc.cluster.local"
+  refresh = "15s"

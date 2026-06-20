@@ -3,6 +3,8 @@ package upstream
 import (
 	"log/slog"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +40,11 @@ type RegistryOptions struct {
 	Logger   *slog.Logger
 	OnHealth HealthHook // backend health transitions -> gauge
 	OnProbe  ProbeHook  // per-probe outcome -> counter + latency histogram
+	// OnBackends reports a pool's current backend count (static pools at commit,
+	// discovery pools after each successful resolve) -> gauge.
+	OnBackends func(pool string, n int)
+	// OnDiscoveryError reports a failed or empty discovery resolve -> counter.
+	OnDiscoveryError func(pool string)
 }
 
 // poolEntry pairs a live pool with the upstream shape it was built from, so a
@@ -45,10 +52,11 @@ type RegistryOptions struct {
 // While staged during a build it also carries the backend update to apply, which
 // is deferred to Commit so an aborted build never mutates a live pool.
 type poolEntry struct {
-	pool    *Pool
-	meta    upstreamMeta
-	reused  bool                    // staged: reuses a live pool (vs freshly built)
-	pending []config.UpstreamServer // staged: servers to apply at Commit when reused
+	pool      *Pool
+	meta      upstreamMeta
+	reused    bool                    // staged: reuses a live pool (vs freshly built)
+	pending   []config.UpstreamServer // staged: servers to apply at Commit when reused
+	discovery bool                    // pool's backend set is owned by a discovery refresher
 }
 
 // upstreamMeta captures the fields that determine a pool's identity. When any of
@@ -61,6 +69,9 @@ type upstreamMeta struct {
 	maxFails    int
 	failTimeout time.Duration
 	health      config.HealthCheckConfig
+	// discoverySig captures the discovery config so a changed provider rebuilds
+	// the pool (and its refresher) rather than being reused in place.
+	discoverySig string
 }
 
 // equal reports whether two metas describe the same pool shape. It cannot use
@@ -70,6 +81,7 @@ func (m upstreamMeta) equal(o upstreamMeta) bool {
 		m.strategy == o.strategy &&
 		m.maxFails == o.maxFails &&
 		m.failTimeout == o.failTimeout &&
+		m.discoverySig == o.discoverySig &&
 		healthConfigEqual(m.health, o.health)
 }
 
@@ -127,10 +139,11 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 
 	meta := metaOf(up, scheme)
 	if e, ok := r.live[up.Name]; ok && e.meta.equal(meta) {
-		// Same shape: keep the running pool (and its checker). The backend set is
-		// refreshed at Commit (not here) so an aborted build leaves the live pool
-		// untouched, preserving an atomic reload.
-		r.staged[up.Name] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: up.Servers}
+		// Same shape: keep the running pool (and its checker/refresher). The backend
+		// set is refreshed at Commit (not here) so an aborted build leaves the live
+		// pool untouched, preserving an atomic reload. A discovery pool's backends
+		// are owned by its refresher, so its static seed is not re-applied.
+		r.staged[up.Name] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: up.Servers, discovery: discoveryEnabled(up.Discovery)}
 		return e.pool, nil
 	}
 
@@ -141,7 +154,21 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 	if up.HealthCheck != nil && up.HealthCheck.Enabled {
 		pool.StartHealthChecks(*up.HealthCheck, r.opts.OnHealth, r.opts.OnProbe)
 	}
-	r.staged[up.Name] = &poolEntry{pool: pool, meta: meta}
+	disco := discoveryEnabled(up.Discovery)
+	if disco {
+		d, err := newDiscoverer(*up.Discovery)
+		if err != nil {
+			// Stop any health checker already started on this fresh pool so the
+			// rejected build leaks no goroutine, then fail the build.
+			pool.Close()
+			return nil, err
+		}
+		pool.StartDiscovery(d, up.Discovery.Refresh.Std(), DiscoveryHooks{
+			OnBackends: r.opts.OnBackends,
+			OnError:    r.opts.OnDiscoveryError,
+		}, r.opts.Logger)
+	}
+	r.staged[up.Name] = &poolEntry{pool: pool, meta: meta, discovery: disco}
 	return pool, nil
 }
 
@@ -154,7 +181,9 @@ func (r *Registry) Commit() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.staged {
-		if e.reused {
+		// A discovery pool's backends are owned by its refresher; do not overwrite
+		// them with the (possibly empty) static seed on reuse.
+		if e.reused && !e.discovery {
 			e.pool.UpdateBackends(e.pending)
 		}
 	}
@@ -168,6 +197,13 @@ func (r *Registry) Commit() {
 	}
 	r.live = r.staged
 	r.staged = make(map[string]*poolEntry)
+	// Seed the backend-count gauge for every live pool (discovery pools also
+	// update it from their refresher).
+	if r.opts.OnBackends != nil {
+		for name, e := range r.live {
+			r.opts.OnBackends(name, len(e.pool.Backends()))
+		}
+	}
 }
 
 // Abort discards a failed build, closing every freshly created staged pool (a
@@ -237,13 +273,36 @@ func (r *Registry) Snapshot() []PoolStatus {
 // metaOf extracts the identity fields of an upstream.
 func metaOf(up config.UpstreamConfig, scheme string) upstreamMeta {
 	m := upstreamMeta{
-		scheme:      scheme,
-		strategy:    up.Strategy,
-		maxFails:    up.MaxFails,
-		failTimeout: up.FailTimeout.Std(),
+		scheme:       scheme,
+		strategy:     up.Strategy,
+		maxFails:     up.MaxFails,
+		failTimeout:  up.FailTimeout.Std(),
+		discoverySig: discoverySignature(up.Discovery),
 	}
 	if up.HealthCheck != nil {
 		m.health = *up.HealthCheck
 	}
 	return m
+}
+
+// discoverySignature builds a stable string identifying a discovery config, so a
+// reload that changes any provider field rebuilds the pool (and restarts its
+// refresher) rather than reusing the old one. It returns "" for static/no
+// discovery so existing static pools keep being reused unchanged.
+func discoverySignature(d *config.DiscoveryConfig) string {
+	if !discoveryEnabled(d) {
+		return ""
+	}
+	parts := []string{d.Type, d.Target, d.Refresh.Std().String()}
+	if c := d.Consul; c != nil {
+		passing := true
+		if c.PassingOnly != nil {
+			passing = *c.PassingOnly
+		}
+		parts = append(parts, "consul", c.Address, c.Service, c.Tag, c.Datacenter, c.Token, strconv.FormatBool(passing))
+	}
+	if k := d.Kubernetes; k != nil {
+		parts = append(parts, "k8s", k.Namespace, k.Service, k.Port, k.APIServer, k.Token, k.CAFile, strconv.FormatBool(k.InsecureSkipTLSVerify))
+	}
+	return strings.Join(parts, "\x1f")
 }
