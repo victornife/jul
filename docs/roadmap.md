@@ -5,6 +5,9 @@ the [Architecture Decision Records](adr/). **Keep this file current:** whenever 
 feature ships, move its row to *Delivered* and tick the year checklist; whenever
 an ADR is added, link it where relevant.
 
+Detailed per-feature engineering specs (design, config, tasks, DoD) live in
+[specs/](specs/) — one file per year.
+
 Effort uses T-shirt sizing: **M** ≈ weeks · **L** ≈ ~a quarter · **XL** ≈
 multi-quarter.
 
