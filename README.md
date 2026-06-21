@@ -804,6 +804,42 @@ server_names = ["example.com"]
 
 To force HTTPS, add an HTTP server block with `redirect_https = 308`.
 
+### Mutual TLS (client certificates)
+
+Jul can also authenticate the *client* by its certificate. With
+`[servers.tls.client_auth]` it verifies the certificate a client presents
+against a CA bundle during the handshake, optionally checks a CRL and a SAN
+allow-list, and exposes the verified identity to upstreams as `$ssl_client_*`
+proxy variables. Set `require_client_cert` on a location to return 403 when no
+verified certificate is present. It is in core (no build tag).
+
+```toml
+[[servers]]
+listen = "0.0.0.0:443"
+server_names = ["api.example.com"]
+
+  [servers.tls]
+  enabled = true
+  cert = "/etc/jul/server.crt"
+  key  = "/etc/jul/server.key"
+
+    [servers.tls.client_auth]
+    mode = "require"                    # none | request | require
+    ca_file = "/etc/jul/clients-ca.pem"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://127.0.0.1:9000"
+  require_client_cert = true
+    [servers.locations.headers]
+    X-Client-CN = "$ssl_client_cn"
+    X-Client-Verify = "$ssl_client_verify"
+```
+
+The full reference — modes, identity variables, CRL/SAN checks, metrics, and the
+bind-time reload caveat — lives in [docs/mtls.md](docs/mtls.md), with a sample
+config in [testdata/mtls.toml](testdata/mtls.toml).
+
 ### Automatic HTTPS (ACME)
 
 Jul can obtain and renew certificates automatically from an ACME certificate

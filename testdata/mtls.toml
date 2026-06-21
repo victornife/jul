@@ -1,0 +1,55 @@
+# Mutual TLS (client-certificate authentication) example.
+#
+# The server presents its own certificate as usual and additionally verifies
+# the certificate presented by the client against a trusted CA bundle. The
+# verified identity is forwarded to the upstream through $ssl_client_* headers.
+#
+# client_auth is bound when the listener starts (like tls.min_version): editing
+# it takes effect on restart, not on hot reload.
+
+[global]
+log_level = "info"
+log_format = "text"
+
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+
+  [servers.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+  min_version = "1.2"
+
+    # Require every client on this listener to present a certificate signed by
+    # one of the CAs in ca_file. Use mode = "request" to make the certificate
+    # optional at the handshake and enforce it only on selected locations with
+    # require_client_cert.
+    [servers.tls.client_auth]
+    mode = "require"
+    ca_file = "testdata/tls/clients-ca.pem"
+    # Optional: only accept certificates whose SAN is in this allow-list.
+    verify_san = ["svc.internal.example.com"]
+    # Optional: reject certificates whose serial appears in this CRL. The CRL
+    # must be signed by one of the CAs in ca_file.
+    # crl_file = "testdata/tls/clients.crl"
+
+  # Public health check: still reachable, identity is simply forwarded as NONE
+  # when no certificate is presented (mode = "request" listeners).
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  return = 204
+
+  # Protected upstream. The verified client identity is attached to the proxied
+  # request so the backend can authorize on it.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://127.0.0.1:9000"
+  require_client_cert = true
+
+    [servers.locations.headers]
+    X-Client-Verify = "$ssl_client_verify"
+    X-Client-CN = "$ssl_client_cn"
+    X-Client-DN = "$ssl_client_s_dn"
+    X-Client-Serial = "$ssl_client_serial"
+    X-Client-Fingerprint = "$ssl_client_fingerprint"

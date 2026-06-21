@@ -227,6 +227,13 @@ type LocationConfig struct {
 	// location's action. A nil pointer leaves the location unauthenticated.
 	Auth *AuthConfig `toml:"auth"`
 
+	// RequireClientCert rejects a request that arrives without a verified mTLS
+	// client certificate with 403, even when the server's tls.client_auth mode
+	// is "request" (which admits the connection at the handshake). It requires
+	// the enclosing server block to enable tls.client_auth. The verified
+	// identity is exposed to proxy headers as $ssl_client_* variables.
+	RequireClientCert bool `toml:"require_client_cert"`
+
 	// GRPCTranscode, when set, turns this location into a gRPC-JSON transcoder:
 	// it accepts REST/JSON requests, maps them to a gRPC method (unary or, when
 	// streaming is enabled, server/client/bidi streaming) via google.api.http
@@ -429,6 +436,47 @@ type TLSConfig struct {
 	// ACME certificate authority (e.g. Let's Encrypt) instead of loading a
 	// static cert/key. It is mutually exclusive with cert/key in the same block.
 	ACME *ACMEConfig `toml:"acme"`
+	// ClientAuth, when set to a mode other than "none", enables mutual TLS:
+	// client certificates are requested and verified against a CA bundle, and
+	// the verified identity is exposed to proxy headers as $ssl_client_*
+	// variables. A nil pointer (or "none" mode) leaves client authentication
+	// off. Client-auth settings are applied when the listener binds, so changes
+	// take effect on restart rather than hot reload.
+	ClientAuth *ClientAuthConfig `toml:"client_auth"`
+}
+
+// ClientAuthConfig configures mutual TLS (client-certificate authentication)
+// for a server block.
+type ClientAuthConfig struct {
+	// Mode selects enforcement at the TLS handshake:
+	//   "none"    — off (the default).
+	//   "request" — request a client certificate and verify it against ca_file
+	//               if one is presented, but still admit connections without a
+	//               certificate. Pair with a per-location require_client_cert to
+	//               require certificates only on specific locations.
+	//   "require" — reject the handshake unless the client presents a
+	//               certificate that verifies against ca_file.
+	Mode string `toml:"mode"`
+	// CAFile is the PEM bundle of certificate authorities that client
+	// certificates are verified against. Required unless Mode is "none".
+	CAFile string `toml:"ca_file"`
+	// VerifySAN, when non-empty, is an allow-list of subject alternative names
+	// (DNS name, URI, email, or IP). A client certificate is rejected unless at
+	// least one of its SANs matches an entry.
+	VerifySAN []string `toml:"verify_san"`
+	// CRLFile, when set, is a PEM- or DER-encoded certificate revocation list.
+	// A client certificate whose serial number appears in it is rejected. The
+	// CRL's signature is verified against ca_file.
+	CRLFile string `toml:"crl_file"`
+}
+
+// Active reports whether client-certificate authentication is enabled (a
+// non-nil config with a mode other than "" or "none"). It is nil-safe.
+func (c *ClientAuthConfig) Active() bool {
+	if c == nil {
+		return false
+	}
+	return c.Mode != "" && c.Mode != "none"
 }
 
 // ACMEConfig configures automatic certificate management via the ACME protocol.

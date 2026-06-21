@@ -91,6 +91,9 @@ func Validate(c *Config) error {
 			if err := validateMatch(loc.Match, locWhere); err != nil {
 				errs = append(errs, err)
 			}
+			if loc.RequireClientCert && (srv.TLS == nil || !srv.TLS.ClientAuth.Active()) {
+				errs = append(errs, fmt.Errorf("%s: require_client_cert needs the server's tls.client_auth enabled (mode request or require)", locWhere))
+			}
 			errs = append(errs, validateLocation(loc, locWhere, upstreamNames, c.Plugins)...)
 		}
 
@@ -119,6 +122,10 @@ func Validate(c *Config) error {
 			if v := strings.TrimSpace(srv.TLS.MinVersion); v != "" && v != "1.2" && v != "1.3" {
 				errs = append(errs, fmt.Errorf("%s: invalid tls.min_version %q (want 1.2 or 1.3)", where, v))
 			}
+			errs = append(errs, validateClientAuth(srv.TLS.ClientAuth, where+".tls.client_auth")...)
+		}
+		if srv.TLS != nil && srv.TLS.ClientAuth.Active() && !srv.TLS.Enabled {
+			errs = append(errs, fmt.Errorf("%s: tls.client_auth requires tls.enabled = true", where))
 		}
 		if srv.RedirectHTTPS != 0 && srv.RedirectHTTPS != 301 && srv.RedirectHTTPS != 308 {
 			errs = append(errs, fmt.Errorf("%s: redirect_https must be 301 or 308, got %d", where, srv.RedirectHTTPS))
@@ -578,6 +585,40 @@ func validateACME(a *ACMEConfig, serverNames []string, where string) []error {
 	}
 	if len(a.Domains) == 0 && len(serverNames) == 0 {
 		errs = append(errs, fmt.Errorf("%s: no domains to certify (set tls.acme.domains or the server's server_names)", where))
+	}
+	return errs
+}
+
+// validateClientAuth checks a tls.client_auth block. The mode must be one of
+// none|request|require; request and require require a readable CA bundle file
+// to verify presented client certificates against; an optional crl_file, when
+// set, must also be a readable file. where labels the error source.
+func validateClientAuth(ca *ClientAuthConfig, where string) []error {
+	if ca == nil {
+		return nil
+	}
+	var errs []error
+	mode := strings.TrimSpace(ca.Mode)
+	switch mode {
+	case "", "none", "request", "require":
+	default:
+		errs = append(errs, fmt.Errorf("%s: invalid mode %q (want none | request | require)", where, ca.Mode))
+	}
+	if mode == "request" || mode == "require" {
+		if strings.TrimSpace(ca.CAFile) == "" {
+			errs = append(errs, fmt.Errorf("%s: ca_file is required for mode %q", where, mode))
+		} else if fi, err := os.Stat(ca.CAFile); err != nil {
+			errs = append(errs, fmt.Errorf("%s: ca_file %q is not readable: %v", where, ca.CAFile, err))
+		} else if fi.IsDir() {
+			errs = append(errs, fmt.Errorf("%s: ca_file %q is a directory, want a PEM file", where, ca.CAFile))
+		}
+	}
+	if f := strings.TrimSpace(ca.CRLFile); f != "" {
+		if fi, err := os.Stat(f); err != nil {
+			errs = append(errs, fmt.Errorf("%s: crl_file %q is not readable: %v", where, f, err))
+		} else if fi.IsDir() {
+			errs = append(errs, fmt.Errorf("%s: crl_file %q is a directory, want a PEM/DER file", where, f))
+		}
 	}
 	return errs
 }

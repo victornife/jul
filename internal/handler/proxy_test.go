@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/middleware"
 )
 
 func newProxy(t *testing.T, loc config.LocationConfig, ups map[string]config.UpstreamConfig) http.Handler {
@@ -154,5 +155,46 @@ func TestProxyFailover(t *testing.T) {
 		if rec.Code != http.StatusOK || rec.Body.String() != "live" {
 			t.Fatalf("request %d: failover = %d %q", i, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestExpandProxyVarSSLClient(t *testing.T) {
+	id := &middleware.ClientIdentity{
+		Verified:    true,
+		SubjectDN:   "CN=alice,O=Jul",
+		IssuerDN:    "CN=Issuer",
+		CN:          "alice",
+		Serial:      "1234",
+		Fingerprint: "abcd",
+		SANs:        "alice.example.com",
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://edge/", nil)
+	req = req.WithContext(middleware.WithClientIdentity(req.Context(), id))
+
+	if got := expandProxyVar("$ssl_client_cn", req); got != "alice" {
+		t.Errorf("$ssl_client_cn = %q, want alice", got)
+	}
+	if got := expandProxyVar("$ssl_client_s_dn", req); got != "CN=alice,O=Jul" {
+		t.Errorf("$ssl_client_s_dn = %q", got)
+	}
+	if got := expandProxyVar("$ssl_client_serial", req); got != "1234" {
+		t.Errorf("$ssl_client_serial = %q, want 1234", got)
+	}
+	if got := expandProxyVar("$ssl_client_verify", req); got != "SUCCESS" {
+		t.Errorf("$ssl_client_verify = %q, want SUCCESS", got)
+	}
+	combined := expandProxyVar("$ssl_client_cn/$ssl_client_san", req)
+	if combined != "alice/alice.example.com" {
+		t.Errorf("combined = %q, want alice/alice.example.com", combined)
+	}
+}
+
+func TestExpandProxyVarSSLClientAbsent(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "https://edge/", nil)
+	if got := expandProxyVar("$ssl_client_verify", req); got != "NONE" {
+		t.Errorf("$ssl_client_verify without a cert = %q, want NONE", got)
+	}
+	if got := expandProxyVar("$ssl_client_cn", req); got != "" {
+		t.Errorf("$ssl_client_cn without a cert = %q, want empty", got)
 	}
 }

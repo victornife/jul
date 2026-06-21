@@ -1521,3 +1521,132 @@ func TestValidateACMERejectsMixedListener(t *testing.T) {
 		t.Error("expected error: a listener cannot mix ACME and static TLS")
 	}
 }
+
+// clientAuthServer builds a TLS-enabled static-cert server with the given
+// client_auth block and an optional require_client_cert on its single location.
+func clientAuthServer(ca *ClientAuthConfig, requireLoc bool) *Config {
+	return &Config{
+		Servers: []ServerConfig{{
+			Listen:      "0.0.0.0:443",
+			ServerNames: []string{"mtls.example.com"},
+			TLS:         &TLSConfig{Enabled: true, Cert: "/etc/cert.pem", Key: "/etc/key.pem", ClientAuth: ca},
+			Locations: []LocationConfig{{
+				Match:             MatchConfig{Type: "prefix", Path: "/"},
+				Root:              "/srv",
+				RequireClientCert: requireLoc,
+			}},
+		}},
+	}
+}
+
+func TestValidateClientAuthValid(t *testing.T) {
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caFile, []byte("ca"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"request", "require"} {
+		cfg := clientAuthServer(&ClientAuthConfig{Mode: mode, CAFile: caFile}, true)
+		if err := Validate(cfg); err != nil {
+			t.Errorf("mode %q: unexpected error: %v", mode, err)
+		}
+	}
+}
+
+func TestValidateClientAuthBadMode(t *testing.T) {
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	_ = os.WriteFile(caFile, []byte("ca"), 0o600)
+	cfg := clientAuthServer(&ClientAuthConfig{Mode: "bogus", CAFile: caFile}, false)
+	if err := Validate(cfg); err == nil {
+		t.Error("expected error for an invalid client_auth mode")
+	}
+}
+
+func TestValidateClientAuthRequiresCAFile(t *testing.T) {
+	cfg := clientAuthServer(&ClientAuthConfig{Mode: "require"}, false)
+	if err := Validate(cfg); err == nil {
+		t.Error("expected error: require mode needs a ca_file")
+	}
+}
+
+func TestValidateClientAuthMissingCAFile(t *testing.T) {
+	cfg := clientAuthServer(&ClientAuthConfig{Mode: "require", CAFile: "/no/such/ca.pem"}, false)
+	if err := Validate(cfg); err == nil {
+		t.Error("expected error: ca_file must be readable")
+	}
+}
+
+func TestValidateClientAuthRequiresTLS(t *testing.T) {
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	_ = os.WriteFile(caFile, []byte("ca"), 0o600)
+	cfg := &Config{
+		Servers: []ServerConfig{{
+			Listen: "0.0.0.0:8080",
+			TLS:    &TLSConfig{Enabled: false, ClientAuth: &ClientAuthConfig{Mode: "require", CAFile: caFile}},
+		}},
+	}
+	if err := Validate(cfg); err == nil {
+		t.Error("expected error: client_auth requires tls.enabled")
+	}
+}
+
+func TestValidateRequireClientCertNeedsClientAuth(t *testing.T) {
+	cfg := &Config{
+		Servers: []ServerConfig{{
+			Listen:      "0.0.0.0:443",
+			ServerNames: []string{"x.example.com"},
+			TLS:         &TLSConfig{Enabled: true, Cert: "/etc/cert.pem", Key: "/etc/key.pem"},
+			Locations: []LocationConfig{{
+				Match:             MatchConfig{Type: "prefix", Path: "/"},
+				Root:              "/srv",
+				RequireClientCert: true,
+			}},
+		}},
+	}
+	if err := Validate(cfg); err == nil {
+		t.Error("expected error: require_client_cert needs the server's client_auth enabled")
+	}
+}
+
+func TestParseClientAuthTOML(t *testing.T) {
+	src := []byte(`
+[[servers]]
+listen = "0.0.0.0:443"
+server_names = ["mtls.example.com"]
+
+[servers.tls]
+enabled = true
+cert = "/etc/cert.pem"
+key = "/etc/key.pem"
+
+[servers.tls.client_auth]
+mode = "require"
+ca_file = "/etc/clients-ca.pem"
+verify_san = ["svc.example.com"]
+crl_file = "/etc/clients.crl"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/secure" }
+proxy_pass = "http://app"
+require_client_cert = true
+`)
+	var cfg Config
+	if err := toml.Unmarshal(src, &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	ca := cfg.Servers[0].TLS.ClientAuth
+	if ca == nil {
+		t.Fatal("client_auth not parsed")
+	}
+	if ca.Mode != "require" || ca.CAFile != "/etc/clients-ca.pem" || ca.CRLFile != "/etc/clients.crl" {
+		t.Errorf("client_auth = %+v", ca)
+	}
+	if len(ca.VerifySAN) != 1 || ca.VerifySAN[0] != "svc.example.com" {
+		t.Errorf("verify_san = %v", ca.VerifySAN)
+	}
+	if !ca.Active() {
+		t.Error("Active() should be true for mode require")
+	}
+	if !cfg.Servers[0].Locations[0].RequireClientCert {
+		t.Error("require_client_cert not parsed")
+	}
+}

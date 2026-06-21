@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.3 · Updated 2026-06-21
+> Version 1.4 · Updated 2026-06-21
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -54,7 +54,9 @@ the **first GA target**, and most of the bar is now met: published
 [conformance matrices](../grpc-transcoding.md#conformance-matrix), benchmark
 numbers, known-limitations lists, a threat note, parser fuzzing, and a Console
 **Status** surface. The remaining hard gate is the long-running **soak test**
-(the semver tag is cut at the GA release).
+(the semver tag is cut at the GA release). **Y2-07 mTLS** has also shipped
+(Beta): client-certificate auth with `$ssl_client_*` identity variables — see
+[mtls.md](../mtls.md).
 
 | ID | Feature | Tag | Maturity |
 | --- | --- | --- | --- |
@@ -63,6 +65,7 @@ numbers, known-limitations lists, a threat note, parser fuzzing, and a Console
 | Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | Beta |
 | Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | Beta → first GA target (soak test pending) |
 | Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | Beta |
+| Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | Beta |
 
 ---
 
@@ -77,7 +80,6 @@ Done.
 | ID | Feature | Description | Impact / what it unlocks | Effort |
 | --- | --- | --- | --- | --- |
 | Y2-06 | WAF (Coraza + OWASP CRS) | ModSecurity-compatible WAF; embed CRS; block/detect per-location | Edge security without a separate WAF appliance | L |
-| Y2-07 | mTLS client auth + identity vars | Verify client certs; expose `$ssl_client_*`; per-location require | Zero-trust ingress; foundation for fleet and mesh later | M |
 | SEC-1 | Secrets references (pulled earlier from Y5-06) | `env`/`file` secret refs + log redaction + lint for literal secrets; Vault/KMS later | Removes scattered secret handling across ACME/JWT/forward-auth/mTLS/AI keys | M |
 | Y2-09 | Console v2 (reframed) | Live log tail, WASM plugin manager, gRPC route designer — delivered as **continuous per-feature Console panels**, not a monolithic release ([ADR 0004](../adr/0004-console-ui-invariants.md)). **In progress:** a read-only **Status** overview (capabilities active in the running config) shipped as the first continuous panel. | Admin UI grows into an operations cockpit without a big-bang rewrite | L |
 
@@ -180,6 +182,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.4 | Moved **Y2-07 mTLS** from committed-remaining to **Delivered (Beta)**: client-certificate verification against a CA bundle (request/require), per-location `require_client_cert`, `$ssl_client_*` identity proxy variables, signature-verified CRL + SAN allow-list, and the `jul_mtls_handshakes_total` metric — shipped in core (no build tag). | All other rows, IDs, and maturity states; the AI-MVP bet stays sequenced after mTLS (now satisfied). | [mtls.md](../mtls.md), [year-2.md](../specs/year-2.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |
 | 2026-06-21 | 1.3 | Advanced the **first GA target** (Y2-01 transcoding + Y2-04 passthrough): published conformance matrices, benchmark numbers, known-limitations lists, a threat note, path-template fuzzing, and confirmed the Console Status surface — leaving the **soak test** as the only remaining hard GA gate. | Both features stay **Beta**; all other rows, IDs, and maturity states unchanged. | [grpc-transcoding.md](../grpc-transcoding.md), [grpc-proxy.md](../grpc-proxy.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |
 | 2026-06-21 | 1.2 | Recorded the first **continuous Console v2 panel** under Y2-09: a read-only **Status** overview (which capabilities are active in the running config) plus a back-link from the standalone config page to the Console, keeping all screens navigable. | All feature rows, IDs, maturity states, and the Y2-09 framing as continuous per-feature panels. | [ADR 0004](../adr/0004-console-ui-invariants.md); [console.md](../console.md) |
 | 2026-06-21 | 1.1 | Added a **Maturity** column and delivery legend; reclassified all shipped Year 1–2 features from "Delivered" to **Beta** (gRPC transcoding + passthrough named first GA target); demoted Y2-08 to a **deferred, demand-gated** GraphQL *composition* prototype with explicit resolvers; reframed Y2-09 Console v2 as continuous per-feature panels; pulled secrets references earlier (SEC-1); added a **time-boxed** AI Gateway MVP bet; relabeled Years 3–5 as the **Vision horizon (demand-gated)**; fixed `adr/` and `specs/` links after the folder move. | All Year 1–5 feature rows, IDs, descriptions, impact and effort sizing (Years 3–5 preserved verbatim under the horizon banner). | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |

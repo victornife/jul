@@ -393,6 +393,17 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		locModifier := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 			au := locAuth(srv, loc)
 			rl := locRateLimit(srv, loc)
+			// Client-certificate handling applies when the server enables mutual
+			// TLS or the location requires a client certificate. It populates the
+			// $ssl_client_* identity for proxied requests and, when the location
+			// sets require_client_cert, rejects a request that arrives without a
+			// verified certificate with 403. It runs just inside the plugins and
+			// outside authentication so the identity is available to auth and the
+			// upstream.
+			var cc middleware.Middleware
+			if (srv.TLS != nil && srv.TLS.ClientAuth.Active()) || loc.RequireClientCert {
+				cc = middleware.ClientCert(loc.RequireClientCert)
+			}
 			var pluginMW []middleware.Middleware
 			for _, name := range srv.Plugins {
 				if mw := pluginSet.Middleware(name); mw != nil {
@@ -404,7 +415,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					pluginMW = append(pluginMW, mw)
 				}
 			}
-			if au == nil && rl == nil && len(pluginMW) == 0 {
+			if au == nil && rl == nil && cc == nil && len(pluginMW) == 0 {
 				return nil
 			}
 			return func(next http.Handler) http.Handler {
@@ -414,6 +425,9 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				}
 				if au != nil {
 					h = au(h)
+				}
+				if cc != nil {
+					h = cc(h)
 				}
 				// Apply plugin middleware in reverse so the first-listed wraps
 				// outermost (server plugins before location plugins).
@@ -597,6 +611,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = acmeMgr
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
+	srv.MTLSResultHook = metrics.ObserveMTLSHandshake
 	// Drive L4 stream-proxy reloads from the same validated config as the HTTP
 	// listeners. Stream binding errors are logged and do not roll back the HTTP
 	// reload (the listener sets are independent).

@@ -250,13 +250,45 @@ func expandProxyVar(tmpl string, in *http.Request) string {
 	if prior := in.Header.Get("X-Forwarded-For"); prior != "" {
 		xff = prior + ", " + remote
 	}
-	r := strings.NewReplacer(
+	pairs := []string{
 		"$proxy_add_x_forwarded_for", xff,
 		"$remote_addr", remote,
 		"$host", in.Host,
 		"$scheme", scheme,
-	)
-	return r.Replace(tmpl)
+	}
+	if strings.Contains(tmpl, "$ssl_client") {
+		pairs = append(pairs, sslClientPairs(in)...)
+	}
+	return strings.NewReplacer(pairs...).Replace(tmpl)
+}
+
+// sslClientPairs returns the old/new replacement pairs for the $ssl_client_*
+// variables, carrying the verified mutual-TLS client identity from the request
+// context onto upstream headers. When no client certificate was presented every
+// value is empty except $ssl_client_verify, which is "NONE" (and "SUCCESS" when
+// an identity is present), mirroring NGINX semantics.
+func sslClientPairs(in *http.Request) []string {
+	id := middleware.ClientIdentityFrom(in.Context())
+	if id == nil {
+		return []string{
+			"$ssl_client_s_dn", "",
+			"$ssl_client_i_dn", "",
+			"$ssl_client_cn", "",
+			"$ssl_client_serial", "",
+			"$ssl_client_fingerprint", "",
+			"$ssl_client_san", "",
+			"$ssl_client_verify", "NONE",
+		}
+	}
+	return []string{
+		"$ssl_client_s_dn", id.SubjectDN,
+		"$ssl_client_i_dn", id.IssuerDN,
+		"$ssl_client_cn", id.CN,
+		"$ssl_client_serial", id.Serial,
+		"$ssl_client_fingerprint", id.Fingerprint,
+		"$ssl_client_san", id.SANs,
+		"$ssl_client_verify", "SUCCESS",
+	}
 }
 
 // proxyErrorStatus maps a transport error to a gateway status code.

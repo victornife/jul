@@ -260,6 +260,37 @@ listen = "127.0.0.1:9090"
 #   match = { type = "prefix", path = "/" }
 #   root = "/srv/www/example"
 
+# Mutual TLS (client certificates) — in core, no build tag. Add a
+# [servers.tls.client_auth] block to verify the certificate a client presents
+# against a CA bundle. mode is none|request|require. Settings are read when the
+# listener binds (like min_version), so changing them needs a restart. The
+# verified identity is exposed to upstreams as $ssl_client_* header variables;
+# set require_client_cert on a location to return 403 when no cert is present.
+# See docs/mtls.md and testdata/mtls.toml.
+#
+# [[servers]]
+# listen = "0.0.0.0:443"
+# server_names = ["api.example.com"]
+#
+#   [servers.tls]
+#   enabled = true
+#   cert = "/etc/jul/server.crt"
+#   key = "/etc/jul/server.key"
+#
+#     [servers.tls.client_auth]
+#     mode = "require"                 # none | request | require
+#     ca_file = "/etc/jul/clients-ca.pem"   # CA bundle that signs client certs
+#     # verify_san = ["svc.internal.example.com"]   # optional SAN allow-list
+#     # crl_file = "/etc/jul/clients.crl"           # optional revocation list
+#
+#   [[servers.locations]]
+#   match = { type = "prefix", path = "/api" }
+#   proxy_pass = "http://127.0.0.1:9000"
+#   require_client_cert = true         # 403 unless a verified client cert is present
+#     [servers.locations.headers]
+#     X-Client-Verify = "$ssl_client_verify"
+#     X-Client-CN = "$ssl_client_cn"
+
 # HTTP/3 (QUIC) — requires a binary built with `-tags http3`.
 # Add a [servers.http3] block to a TLS-enabled server to also serve HTTP/3 on
 # the same address over UDP. It shares the server's TLS certificate (static or

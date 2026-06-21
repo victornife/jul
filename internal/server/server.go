@@ -49,6 +49,15 @@ type Server struct {
 	// in builds compiled with the http3 tag.
 	HTTP3ConnHook func(int64)
 
+	// MTLSResultHook, when set, is invoked once per mutual-TLS handshake that
+	// presents a client certificate which passed CA-chain verification, with
+	// "verified" or "rejected" (rejected covers a revoked serial or a
+	// disallowed SAN). It lets the composition root count handshakes without
+	// this package importing observability. Handshakes that fail CA-chain
+	// verification are rejected by the stdlib before this hook and are not
+	// reported here.
+	MTLSResultHook func(result string)
+
 	// OnReloaded, when set, is invoked with the newly applied configuration at
 	// the end of every successful reload. The composition root uses it to drive
 	// reloads of subsystems that run alongside the HTTP listeners (presently the
@@ -158,11 +167,27 @@ func (s *Server) bind(addr string) error {
 		dyn := &dynamicCertProvider{}
 		dyn.set(provider)
 		entry.provider = dyn
-		ln = tls.NewListener(ln, &tls.Config{
+		tlsConf := &tls.Config{
 			GetCertificate: dyn.GetCertificate,
 			MinVersion:     minVer,
 			NextProtos:     s.listenerNextProtos(addr),
-		})
+		}
+
+		// Mutual TLS is bound at listener creation, like MinVersion: the CA
+		// bundle, mode, and verifier are read from the config once and apply to
+		// connections accepted on this listener. Changing tls.client_auth takes
+		// effect on restart, not on hot reload.
+		ca, err := clientAuthForAddr(s.cfg.Servers, addr, s.MTLSResultHook)
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("client auth for %s: %w", addr, err)
+		}
+		if ca != nil {
+			tlsConf.ClientAuth = ca.mode
+			tlsConf.ClientCAs = ca.pool
+			tlsConf.VerifyPeerCertificate = ca.verify
+		}
+		ln = tls.NewListener(ln, tlsConf)
 
 		// Start the parallel HTTP/3 (QUIC) listener on the same UDP address when
 		// enabled. It shares dyn.GetCertificate, so ACME/static cert reloads via

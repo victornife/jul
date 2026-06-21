@@ -45,6 +45,7 @@ type Metrics struct {
 	streamBytes      *prometheus.CounterVec
 	certExpiry       *prometheus.GaugeVec
 	certRenewals     prometheus.Counter
+	mtlsHandshakes   *prometheus.CounterVec
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -170,6 +171,10 @@ func NewMetrics() *Metrics {
 			Name: "jul_acme_renewals_total",
 			Help: "ACME certificate renewals observed (expiry advanced for a domain).",
 		}),
+		mtlsHandshakes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_mtls_handshakes_total",
+			Help: "Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total.",
+		}, []string{"result"}),
 		certSeen: make(map[string]int64),
 	}
 	m.startTime = time.Now()
@@ -198,6 +203,7 @@ func NewMetrics() *Metrics {
 		m.streamBytes,
 		m.certExpiry,
 		m.certRenewals,
+		m.mtlsHandshakes,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -362,6 +368,14 @@ func (m *Metrics) ConnState(_ net.Conn, state http.ConnState) {
 // stays decoupled from observability.
 func (m *Metrics) HTTP3ConnDelta(delta int64) {
 	m.http3Conns.Add(float64(delta))
+}
+
+// ObserveMTLSHandshake records a mutual-TLS handshake that presented a
+// CA-verified client certificate, with result "verified" or "rejected". It is
+// installed as Server.MTLSResultHook so the server package stays decoupled from
+// observability.
+func (m *Metrics) ObserveMTLSHandshake(result string) {
+	m.mtlsHandshakes.WithLabelValues(result).Inc()
 }
 
 // StreamConnDelta adjusts the jul_stream_active_conns gauge for proto by delta
