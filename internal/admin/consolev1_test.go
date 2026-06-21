@@ -125,11 +125,11 @@ func TestWizardGeneratesValidConfig(t *testing.T) {
 func TestStatusAPI(t *testing.T) {
 	cfg := &config.Config{
 		Servers: []config.ServerConfig{{
-			TLS:   &config.TLSConfig{Enabled: true},
+			TLS:   &config.TLSConfig{Enabled: true, ClientAuth: &config.ClientAuthConfig{Mode: "require", CAFile: "ca.pem"}},
 			HTTP3: &config.HTTP3Config{Enabled: true},
 			Locations: []config.LocationConfig{
 				{Root: "./public", Cache: true},
-				{ProxyPass: "http://127.0.0.1:9000", Auth: &config.AuthConfig{}},
+				{ProxyPass: "http://127.0.0.1:9000", Auth: &config.AuthConfig{}, RequireClientCert: true},
 				{GRPCTranscode: &config.GRPCTranscodeConfig{Target: "127.0.0.1:50051"}},
 			},
 		}},
@@ -162,7 +162,8 @@ func TestStatusAPI(t *testing.T) {
 	}
 	wantActive := []string{
 		"Virtual hosts", "Static file serving", "Reverse proxy", "Response cache",
-		"Compression", "Rate limiting", "TLS", "Access control (auth)", "HTTP/3 (QUIC)",
+		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)",
+		"Access control (auth)", "HTTP/3 (QUIC)",
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
 		"Prometheus metrics", "Access log",
 	}

@@ -115,26 +115,38 @@ func countUnit(n int, unit string) string {
 // capability, whether it is active and a short detail. The console renders this
 // as the Status overview so an operator can see at a glance what the running
 // build is doing without reading the raw TOML.
+//
+// INVARIANT (ADR 0004, GA criterion 9 in ADR 0003): every user-facing
+// capability MUST appear here as a FeatureStatus row. This is the minimum
+// "self-explanatory Console surface" that is part of every feature's Definition
+// of Done — a feature is not done until an operator can see it is active from
+// the Console. When you add a feature, add its row in the matching group below
+// and assert it in TestStatusAPI; do not ship the feature without it.
 func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	var (
-		tlsServers    int
-		acmeServers   int
-		http3Servers  int
-		h2cServers    int
-		staticLocs    int
-		proxyLocs     int
-		fastcgiLocs   int
-		grpcProxy     int
-		grpcTranscode int
-		authLocs      int
-		cacheLocs     int
-		pluginLocs    int
-		totalLocs     int
+		tlsServers      int
+		mtlsServers     int
+		acmeServers     int
+		http3Servers    int
+		h2cServers      int
+		staticLocs      int
+		proxyLocs       int
+		fastcgiLocs     int
+		grpcProxy       int
+		grpcTranscode   int
+		authLocs        int
+		requireCertLocs int
+		cacheLocs       int
+		pluginLocs      int
+		totalLocs       int
 	)
 	for i := range c.Servers {
 		srv := &c.Servers[i]
 		if srv.TLS != nil && srv.TLS.Enabled {
 			tlsServers++
+			if srv.TLS.ClientAuth.Active() {
+				mtlsServers++
+			}
 			if srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
 				acmeServers++
 			}
@@ -162,6 +174,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 			}
 			if loc.Auth != nil {
 				authLocs++
+			}
+			if loc.RequireClientCert {
+				requireCertLocs++
 			}
 			if loc.Cache {
 				cacheLocs++
@@ -239,6 +254,14 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		sinks = []string{"stdout"}
 	}
 
+	mtlsDetail := ""
+	if mtlsServers > 0 {
+		mtlsDetail = countUnit(mtlsServers, "server block")
+		if requireCertLocs > 0 {
+			mtlsDetail += "; " + countUnit(requireCertLocs, "location") + " require cert"
+		}
+	}
+
 	discDetail := ""
 	if discoveryPools > 0 {
 		kinds := make([]string, 0, len(discoveryKinds))
@@ -259,6 +282,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Traffic", Name: "Rate limiting", Active: c.RateLimit.Enabled, Detail: rlDetail},
 
 		{Group: "Security", Name: "TLS", Active: tlsServers > 0, Detail: countDetailIf(tlsServers, "server block")},
+		{Group: "Security", Name: "Mutual TLS (client certs)", Active: mtlsServers > 0, Detail: mtlsDetail},
 		{Group: "Security", Name: "Automatic HTTPS (ACME)", Active: acmeServers > 0, Detail: countDetailIf(acmeServers, "server block")},
 		{Group: "Security", Name: "Access control (auth)", Active: authLocs > 0, Detail: countDetailIf(authLocs, "location")},
 

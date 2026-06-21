@@ -225,3 +225,25 @@ Two cases are intentionally **not** in this counter:
   per-vhost isolation, give each vhost its own listen address.
 - **SPIFFE/SVID** identity and workload attestation are out of scope (a later
   mesh concern), though SPIFFE URIs in a SAN work with `verify_san` today.
+
+## GA status
+
+Per [ADR 0003](adr/0003-maturity-and-ga.md), mTLS currently ships at **Beta**.
+The table tracks the nine GA criteria; criterion 9 (a self-explanatory Console
+surface) is part of the Definition of Done and is satisfied today.
+
+| # | GA criterion | Status |
+| --- | --- | --- |
+| 1 | Behaviour matrix published | ✅ [modes](#modes) + [identity variables](#identity-variables) tables |
+| 2 | Published benchmark numbers | ☐ pending (handshake-cost benchmark) |
+| 3 | Documented known-limitations | ✅ [Limits](#limits) |
+| 4 | Stable config/API contract (semver-guarded) | ◐ documented; tag at release |
+| 5 | Long-running soak test passed | ☐ pending |
+| 6 | Runnable example + docs | ✅ [testdata/mtls.toml](../testdata/mtls.toml) + this doc |
+| 7 | Security / threat note | ✅ [trust boundary](#identity-variables) + signature-verified CRL |
+| 8 | Fuzzing where parsing is involved | n/a — CA/CRL parsing is stdlib `crypto/x509` (no custom parser) |
+| 9 | Self-explanatory Console surface | ✅ Console **Status** panel reports *Mutual TLS (client certs)* active |
+
+The remaining hard gates to GA are the published **benchmark** (criterion 2) and
+the long-running **soak test** (criterion 5).
+
