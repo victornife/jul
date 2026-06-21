@@ -209,7 +209,7 @@ translation tax is serialization, not dispatch.
 
 ## GA status
 
-Per ADR [0003](adr/0003-maturity-and-ga.md), transcoding is **GA** (with
+Per ADR [0003](adr/0003-maturity-and-ga.md), transcoding is **GA — soak pending** (with
 passthrough). The soak test (criterion 5) is a post-GA gate per
 [ADR 0005](adr/0005-soak-post-ga-gate.md).
 

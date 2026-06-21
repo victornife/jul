@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.7 · Updated 2026-06-21
+> Version 1.8 · Updated 2026-06-21
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -21,10 +21,10 @@ multi-quarter.
 Alpha · **Beta** · **GA** · Deprecated. *Implemented ≠ GA:* a shipped feature is
 **Beta** until it meets the full GA bar. The [GA push](../ga-push.md) is hardening
 shipped features to GA; the soak test is a post-GA gate per
-[ADR 0005](../adr/0005-soak-post-ga-gate.md). GA features so far: the foundational
-**Core HTTP** stack (static, reverse proxy, FastCGI/uWSGI, virtual hosts,
-routing), gRPC transcoding, native gRPC passthrough, mTLS, and TLS + automatic
-HTTPS.
+[ADR 0005](../adr/0005-soak-post-ga-gate.md). GA features so far (all soak
+pending): the foundational **Core HTTP** stack (static, reverse proxy,
+FastCGI/uWSGI, virtual hosts, routing), gRPC transcoding, native gRPC
+passthrough, mTLS, TLS + automatic HTTPS, and authentication.
 
 ---
 
@@ -33,15 +33,16 @@ HTTPS.
 ### Year 1 — Credibility & effortlessness ✅
 
 Shipped (feature-complete for the year). Most rows are **Beta**; **Y1-01 (TLS +
-automatic HTTPS)** has reached **GA** in the [GA push](../ga-push.md) (the soak
-test is a post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md)).
+automatic HTTPS)** and **Y1-04 (authentication)** have reached **GA — soak
+pending** in the [GA push](../ga-push.md) (the soak test is a post-GA gate per
+[ADR 0005](../adr/0005-soak-post-ga-gate.md)).
 
 | ID | Feature | Maturity |
 | --- | --- | --- |
-| Y1-01 | Automatic HTTPS (ACME: HTTP-01, TLS-ALPN-01, OCSP stapling) | **GA** |
+| Y1-01 | Automatic HTTPS (ACME: HTTP-01, TLS-ALPN-01, OCSP stapling) | **GA — soak pending** |
 | Y1-02 | Response compression (gzip core; `brotli`/`zstd` tags) | Beta |
 | Y1-03 | Rate limiting + connection limiting | Beta |
-| Y1-04 | Authentication (Basic, bearer/JWT, forward-auth) | Beta |
+| Y1-04 | Authentication (Basic, bearer/JWT, forward-auth) | **GA — soak pending** |
 | Y1-05 | Active health checks (HTTP/TCP probes) | Beta |
 | Y1-06 | gRPC ↔ JSON transcoding (MVP, `grpc` tag) | Beta |
 | Y1-07 | Console v1 (web dashboard, `console` tag) | Beta |
@@ -54,7 +55,7 @@ test is a post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md)).
 
 Shipped at **Beta**, except the first **GA** features from the
 [GA push](../ga-push.md). gRPC transcoding (Y2-01) + passthrough (Y2-04) and mTLS
-(Y2-07) are now **GA**: published
+(Y2-07) are now **GA — soak pending**: published
 [conformance matrices](../grpc-transcoding.md#conformance-matrix), benchmark
 numbers (including the [mTLS handshake cost](../mtls.md#benchmarks)),
 known-limitations lists, threat notes, parser fuzzing where applicable, a
@@ -64,12 +65,12 @@ post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md).
 
 | ID | Feature | Tag | Maturity |
 | --- | --- | --- | --- |
-| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | **GA** (post-GA soak pending) |
+| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | **GA — soak pending** |
 | Y2-02 | WASM plugin system (wazero) | `wasmplugins` | Beta |
 | Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | Beta |
-| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | **GA** (post-GA soak pending) |
+| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | **GA — soak pending** |
 | Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | Beta |
-| Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | **GA** (post-GA soak pending) |
+| Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | **GA — soak pending** |
 
 ---
 
@@ -186,6 +187,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.8 | **Y1-04 authentication → GA** (GA push) and **relabeled every soak-pending GA feature `GA` → `GA — soak pending`** for honesty (Core HTTP, gRPC transcoding/passthrough, mTLS, TLS+ACME, auth). Published [docs/auth.md](../auth.md) (CIDR/Basic/JWT/forward-auth behaviour matrix, JWKS + algorithm-confusion threat note, limits, GA table); added `BenchmarkBasicVerify`/`BenchmarkJWTValidate` and `FuzzParseJWKS`/`FuzzValidateToken`. | All feature rows, IDs, and the soak post-GA gate ([ADR 0005](../adr/0005-soak-post-ga-gate.md)); only the label wording and the Y1-04 maturity change. | [auth.md](../auth.md), [ga-push.md](../ga-push.md) |
 | 2026-06-21 | 1.7 | **Core HTTP → GA** (GA push). The foundational request stack — static serving, reverse proxy, FastCGI/uWSGI, virtual hosts, and location routing — reaches **GA**: published [docs/core-http.md](../core-http.md) (host/location/static/proxy/FastCGI/balancing matrices, path-traversal + SSRF + CRLF threat note, limits), added router/balancer/static benchmarks and router + FastCGI fuzz targets, contract frozen under the [compatibility policy](../compatibility.md). Soak stays a post-GA gate. | All feature rows, IDs, and (Beta) maturity states; runtime behaviour is unchanged — only the new doc, tests, and the GA label. | [core-http.md](../core-http.md), [ga-push.md](../ga-push.md) |
 | 2026-06-21 | 1.6 | **Y1-01 TLS + automatic HTTPS → GA** (GA push). Published [docs/tls-acme.md](../tls-acme.md) with a behaviour matrix, SNI/ACME/OCSP semantics, a threat note, and benchmark numbers (`BenchmarkTLSHandshakeServerAuth`, `BenchmarkSNICertSelection` — 0-alloc selection); contract frozen under the [compatibility policy](../compatibility.md). Soak stays a post-GA gate ([ADR 0005](../adr/0005-soak-post-ga-gate.md)). | All other rows, IDs, and (Beta) maturity states; runtime behaviour is unchanged — only the maturity label and the new doc. | [tls-acme.md](../tls-acme.md), [ga-push.md](../ga-push.md), [compatibility.md](../compatibility.md) |
 | 2026-06-21 | 1.5 | Declared the **first GA features** in the [GA push](../ga-push.md): **Y2-01 gRPC transcoding**, **Y2-04 gRPC passthrough**, and **Y2-07 mTLS** move Beta → **GA** — closing the mTLS handshake benchmark and adding the semver-guarded [compatibility policy](../compatibility.md). The soak test is reclassified to a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)), so it no longer blocks GA. | All other rows, IDs, descriptions, and (Beta) maturity states; feature behaviour is unchanged — only labels and the contract doc. | [ga-push.md](../ga-push.md), [compatibility.md](../compatibility.md), [mtls.md](../mtls.md#benchmarks); [ADR 0005](../adr/0005-soak-post-ga-gate.md) |

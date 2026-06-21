@@ -181,7 +181,7 @@ re-originating the HTTP/2 stream.
 
 ## GA status
 
-Per ADR [0003](adr/0003-maturity-and-ga.md), native passthrough is **GA** (with
+Per ADR [0003](adr/0003-maturity-and-ga.md), native passthrough is **GA — soak pending** (with
 [transcoding](grpc-transcoding.md)). The soak test (criterion 5) is a post-GA
 gate per [ADR 0005](adr/0005-soak-post-ga-gate.md).
 

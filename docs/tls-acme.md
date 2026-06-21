@@ -1,6 +1,6 @@
 # TLS & automatic HTTPS (ACME)
 
-> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
+> **Maturity:** GA — soak pending (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
 > a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)). Mutual TLS
 > (client certificates) is documented separately in [mtls.md](mtls.md).
 
@@ -188,7 +188,7 @@ go test -run '^$' -bench 'SNICertSelection|TLSHandshakeServerAuth' -benchmem ./i
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), TLS + automatic HTTPS is **GA**. The
+Per [ADR 0003](adr/0003-maturity-and-ga.md), TLS + automatic HTTPS is **GA — soak pending**. The
 soak test (criterion 5) is a post-GA gate per
 [ADR 0005](adr/0005-soak-post-ga-gate.md); the other eight criteria are met.
 

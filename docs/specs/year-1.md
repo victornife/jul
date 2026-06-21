@@ -3,10 +3,11 @@
 
 # JUL Engineering Execution Plan — YEAR 1 (maximum detail)
 
-> Version 1.1 · Updated 2026-06-21 · Maturity: shipped at **Beta** per
+> Version 1.2 · Updated 2026-06-21 · Maturity: shipped at **Beta** per
 > [ADR 0003](../adr/0003-maturity-and-ga.md), except **Y1-01 (TLS + automatic
-> HTTPS)** which is **GA** from the [GA push](../ga-push.md) (soak test is a
-> post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md)).
+> HTTPS)** and **Y1-04 (authentication)** which are **GA — soak pending** from
+> the [GA push](../ga-push.md) (soak test is a post-GA gate per
+> [ADR 0005](../adr/0005-soak-post-ga-gate.md)).
 
 Delivery model: one year per turn; uniform max detail. Each feature has 11 sections:
 Objective/scope · Squad·Priority·Effort · Design · Config(Go+TOML) · New files/interfaces ·
@@ -90,7 +91,7 @@ DEPENDENCIES: caddyserver/certmagic, libdns/* (optional, tag). Inter-feature: Y1
 TEST PLAN: unit — config validation, provider selection, ALPN set. integration — letsencrypt/pebble issuing via HTTP-01 + TLS-ALPN-01 vs real listener; assert served + renew. e2e — testdata/acme.toml vs pebble in CI; expiry metric present.
 ACCEPTANCE: zero->HTTPS <60s on public domain; auto-renew; survives reload; OCSP stapled (openssl s_client -status); staging default in non-prod; clean fallback on failure (no crash).
 RISKS/EDGE: LE rate limits (default staging), :80 reachability (HTTP-01), wildcard needs DNS-01, clock skew, storage perms, renew concurrency. Mitigate: certmagic, staging default, `jul lint` preflight.
-LANDED (2026-06-21) — **GA**: shipped on `golang.org/x/crypto/acme/autocert` (the lean alt), not CertMagic. Challenges: **HTTP-01 + TLS-ALPN-01**; **DNS-01 deferred** (reserved for an `acme_dns` build, rejected in validation today). OCSP stapling implemented for **ACME-issued certs** (default on, fails open); static-file certs are served unstapled. SNI selection is exact→wildcard→fallback; static certs **hot-reload** (atomic provider swap, no rebind); the ACME domain set is fixed at startup. Metrics `jul_tls_cert_expiry_seconds{domain}` + `jul_acme_renewals_total`. No cipher/session-ticket/0-RTT config (stdlib defaults). GA artifacts: [docs/tls-acme.md](../tls-acme.md) (behaviour matrix + threat note + limits), benchmarks `BenchmarkTLSHandshakeServerAuth` + `BenchmarkSNICertSelection` (0-alloc), and the semver-guarded [compatibility policy](../compatibility.md); the long-running soak test is a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)). Console **Status** reports *TLS* and *Automatic HTTPS (ACME)*.
+LANDED (2026-06-21) — **GA — soak pending**: shipped on `golang.org/x/crypto/acme/autocert` (the lean alt), not CertMagic. Challenges: **HTTP-01 + TLS-ALPN-01**; **DNS-01 deferred** (reserved for an `acme_dns` build, rejected in validation today). OCSP stapling implemented for **ACME-issued certs** (default on, fails open); static-file certs are served unstapled. SNI selection is exact→wildcard→fallback; static certs **hot-reload** (atomic provider swap, no rebind); the ACME domain set is fixed at startup. Metrics `jul_tls_cert_expiry_seconds{domain}` + `jul_acme_renewals_total`. No cipher/session-ticket/0-RTT config (stdlib defaults). GA artifacts: [docs/tls-acme.md](../tls-acme.md) (behaviour matrix + threat note + limits), benchmarks `BenchmarkTLSHandshakeServerAuth` + `BenchmarkSNICertSelection` (0-alloc), and the semver-guarded [compatibility policy](../compatibility.md); the long-running soak test is a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)). Console **Status** reports *TLS* and *Automatic HTTPS (ACME)*.
 ROLLOUT/FLAGS/TAGS: tag acme (full builds), enabled=false default, acme_dns tag for providers; min build -> validate error if enabled.
 DOCS: README Auto-HTTPS section + config table; server.toml; testdata/acme.toml; examples/auto-https/README.md; CHANGELOG.
 
@@ -196,6 +197,7 @@ ACCEPTANCE: deny/allow enforced; Basic prompts 401 w/ realm; JWT rejects bad tok
 RISKS/EDGE: JWKS endpoint downtime (cache + stale grace), alg confusion (reject "none", pin algs), bcrypt cost, clock skew (leeway), header injection via forward-auth (sanitize). 
 ROLLOUT/FLAGS/TAGS: core; per-location opt-in.
 DOCS: README Auth/access-control + examples; server.toml; testdata/auth.toml; examples/jwt-auth/README.md; CHANGELOG.
+LANDED (2026-06-21) — **GA — soak pending**: CIDR allow/deny (`RemoteAddr`, deny-wins), HTTP Basic (htpasswd **bcrypt-only**; constant-time + dummy-hash on unknown user), JWT via `golang-jwt/v5` with a built-in **JWKS cache** (15m refresh, 30s fetch-throttle, 1h stale grace, 1 MiB cap) and **algorithm-confusion protection** (allow-list + key/method type-check; `none` rejected), and forward-auth subrequests (X-Forwarded-* probe; response-header copy; 64 KiB cap). Claims surface in request context (rate-limit `jwt:<claim>` key). **Shipped delta:** JWKS uses a built-in cache, not MicahParks/keyfunc; JWT is **asymmetric-only** (RS/ES/PS — no HS, unlike the original HS/RS/ES design). GA artifacts: [docs/auth.md](../auth.md) (behaviour matrix + threat note + limits), benchmarks `BenchmarkBasicVerify` + `BenchmarkJWTValidate`, fuzz `FuzzParseJWKS` + `FuzzValidateToken`, and the semver-guarded [compatibility policy](../compatibility.md); the long-running soak test is a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)). Console **Status** reports *Access control (auth)*.
 
 ================================================================
 ## Y1-05 — Active health checks   [SQ-PROXY · P1 · M]
@@ -400,5 +402,6 @@ DOCS: README HTTP/3 (enable steps, UDP/firewall note, h3 limits); server.toml; C
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.2 | **Y1-04 authentication → GA** (GA push): added a Landed note recording the shipped reality (CIDR/Basic/JWT-JWKS/forward-auth; built-in JWKS cache vs MicahParks/keyfunc; asymmetric-only JWT vs the HS/RS/ES design) and the GA artifacts ([auth.md](../auth.md), benchmarks, fuzz, [compatibility policy](../compatibility.md)). Relabeled Y1-01 + Y1-04 maturity to **GA — soak pending**. | The entire Year-1 spec body and all other features' Beta status. | [auth.md](../auth.md), [ga-push.md](../ga-push.md); [ADR 0005](../adr/0005-soak-post-ga-gate.md) |
 | 2026-06-21 | 1.1 | **Y1-01 TLS + automatic HTTPS → GA** (GA push): added a Landed note recording the shipped reality (autocert not CertMagic; HTTP-01 + TLS-ALPN-01; DNS-01 deferred; OCSP for ACME certs; static-cert hot reload; expiry/renewal metrics) and the GA artifacts ([tls-acme.md](../tls-acme.md), benchmarks, [compatibility policy](../compatibility.md)). | The entire Year-1 spec body and all other features' Beta status. | [tls-acme.md](../tls-acme.md), [ga-push.md](../ga-push.md); [ADR 0005](../adr/0005-soak-post-ga-gate.md) |
 | 2026-06-21 | 1.0 | Added a version stamp and a maturity note (shipped at Beta, not GA); no scope change. | The entire Year-1 spec body. | [review 2026-06-21](../reviews/); [ADR 0003](../adr/0003-maturity-and-ga.md) |

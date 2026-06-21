@@ -11,7 +11,7 @@ your CA reach the backend, and the backend can authorize on *who* they are.
 mTLS is in **core** — no build tag — and uses only the standard library's
 `crypto/x509`.
 
-> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
+> **Maturity:** GA — soak pending (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
 > a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)). It coexists
 > with ACME/static server certificates; the server certificate and the client CA
 > are independent.
@@ -248,7 +248,7 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), mTLS is **GA**. The soak test
+Per [ADR 0003](adr/0003-maturity-and-ga.md), mTLS is **GA — soak pending**. The soak test
 (criterion 5) is a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md) and
 is tracked in the [GA push log](ga-push.md); the other eight criteria are met.
 

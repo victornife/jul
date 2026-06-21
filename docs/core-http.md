@@ -1,6 +1,6 @@
 # Core HTTP
 
-> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
+> **Maturity:** GA — soak pending (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
 > a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)). TLS termination
 > is documented in [tls-acme.md](tls-acme.md); client certificates in
 > [mtls.md](mtls.md).
@@ -229,7 +229,7 @@ go test -run '^$' -bench . -benchmem ./internal/router/ ./internal/upstream/ ./i
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), Core HTTP is **GA**. The soak test
+Per [ADR 0003](adr/0003-maturity-and-ga.md), Core HTTP is **GA — soak pending**. The soak test
 (criterion 5) is a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md);
 the other eight criteria are met.
 
