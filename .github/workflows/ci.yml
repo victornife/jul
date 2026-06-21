@@ -74,6 +74,33 @@ jobs:
       - name: go test -race
         run: go test -race -tags "${{ env.FULL_TAGS }}" ./...
 
+  benchmarks:
+    name: benchmarks (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Perf-gate smoke run: every in-tree Benchmark* must compile and execute
+      # without panicking, with the full opt-in tag set so feature benchmarks
+      # (gRPC, mTLS, ...) are covered. A tiny -benchtime keeps CI minutes low.
+      # This is NOT a nanosecond regression gate -- shared runners are too noisy
+      # for that; the numbers live in docs/<feature>.md and are regenerated on a
+      # quiet machine via `scripts/bench.sh`. Results are uploaded for spot-checks.
+      - name: run benchmark harness
+        env:
+          BENCHTIME: 10x
+          BENCH_TAGS: ${{ env.FULL_TAGS }}
+        run: scripts/bench.sh | tee bench-results.txt
+      - name: upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench-results.txt
+
   format:
     name: gofmt
     runs-on: ubuntu-latest
