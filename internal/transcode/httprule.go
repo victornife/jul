@@ -1,10 +1,11 @@
 //go:build grpc
 
 // Package transcode implements gRPC<->REST/JSON transcoding: it maps REST
-// requests to unary gRPC calls using google.api.http annotations carried in a
-// service's protobuf descriptors, calls the gRPC backend with a dynamically
-// built message, and renders the reply as JSON. It is compiled only with the
-// "grpc" build tag.
+// requests to gRPC calls (unary and, when enabled, server/client/bidi
+// streaming) using google.api.http annotations carried in a service's protobuf
+// descriptors, calls the gRPC backend with a dynamically built message, and
+// renders the reply as JSON (or NDJSON/SSE for streams). It is compiled only
+// with the "grpc" build tag.
 package transcode
 
 import (

@@ -228,10 +228,11 @@ type LocationConfig struct {
 	Auth *AuthConfig `toml:"auth"`
 
 	// GRPCTranscode, when set, turns this location into a gRPC-JSON transcoder:
-	// it accepts REST/JSON requests, maps them to a unary gRPC method via
-	// google.api.http annotations, calls the gRPC backend, and returns the reply
-	// as JSON. It is an action (mutually exclusive with root/proxy_pass/etc.) and
-	// requires a build with the "grpc" tag.
+	// it accepts REST/JSON requests, maps them to a gRPC method (unary or, when
+	// streaming is enabled, server/client/bidi streaming) via google.api.http
+	// annotations, calls the gRPC backend, and returns the reply as JSON. It is
+	// an action (mutually exclusive with root/proxy_pass/etc.) and requires a
+	// build with the "grpc" tag.
 	GRPCTranscode *GRPCTranscodeConfig `toml:"grpc_transcode"`
 
 	// Plugins lists middleware plugin names applied to this location, composed
@@ -266,7 +267,8 @@ type GRPCTranscodeConfig struct {
 	PreserveNames bool `toml:"preserve_proto_field_names"`
 	// Streaming enables transcoding of streaming methods (server-streaming,
 	// client-streaming, and bidirectional). When false, a request to a
-	// streaming method returns 501 Not Implemented as in the unary-only MVP.
+	// streaming method returns 501 Not Implemented (unary methods are always
+	// transcoded).
 	Streaming bool `toml:"streaming"`
 	// StreamMode selects the wire framing for streamed responses: "ndjson"
 	// (newline-delimited JSON objects, the default) or "sse" (Server-Sent

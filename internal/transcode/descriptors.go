@@ -19,7 +19,8 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
-// route binds an HTTP method + path template to a unary gRPC method.
+// route binds an HTTP method + path template to a gRPC method (unary or
+// streaming; see the streaming field).
 type route struct {
 	httpMethod string
 	template   *pathTemplate

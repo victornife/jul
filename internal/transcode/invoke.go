@@ -45,9 +45,10 @@ type Options struct {
 	reflectTimeout time.Duration
 }
 
-// Transcoder maps REST/JSON requests to unary gRPC calls on a backend. It
-// implements http.Handler and io.Closer; closing it releases the backend
-// connection when the configuration is replaced.
+// Transcoder maps REST/JSON requests to gRPC calls on a backend — unary and,
+// when streaming is enabled, server/client/bidi streaming. It implements
+// http.Handler and io.Closer; closing it releases the backend connection when
+// the configuration is replaced.
 type Transcoder struct {
 	routes        []*route
 	conn          *grpc.ClientConn
