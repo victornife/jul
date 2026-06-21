@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.2 · Updated 2026-06-21
+> Version 1.3 · Updated 2026-06-21
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -51,7 +51,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | gRPC ↔ JSON transcoding (Y2-01) | **GA** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
 | gRPC passthrough + h2c (Y2-04) | **GA** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
 | mTLS client auth (Y2-07) | **GA** | none — handshake benchmark + v1 freeze landed | S | ✅ |
-| Core HTTP (static, reverse proxy, FastCGI/uWSGI, vhosts, routing) | Beta | ⑥ docs · ① matrix · ② benchmarks · ⑦ path-traversal/SSRF · ⑧ router/path fuzz | L | ☐ |
+| Core HTTP (static, reverse proxy, FastCGI/uWSGI, vhosts, routing) | **GA** | none — [core-http.md](core-http.md) doc + matrix + threat note + benchmarks + router/FastCGI fuzz landed | L | ✅ |
 | TLS + ACME (Y1-01) | **GA** | none — [tls-acme.md](tls-acme.md) doc + matrix + threat note + benchmarks landed | M | ✅ |
 | Auth (Basic, JWT/JWKS, forward-auth) (Y1-04) | Beta | ⑥ docs · ① matrix · ⑧ JWT/JWKS fuzz · ⑦ threat note · ② verify bench | L | ☐ |
 
@@ -88,11 +88,13 @@ a soak failure is a release-blocking regression.
 | gRPC passthrough + h2c (Y2-04) | 2026-06-21 | ☐ pending |
 | mTLS client auth (Y2-07) | 2026-06-21 | ☐ pending |
 | TLS + ACME (Y1-01) | 2026-06-21 | ☐ pending |
+| Core HTTP (static/proxy/FastCGI/vhosts/routing) | 2026-06-21 | ☐ pending |
 
 ## Changelog
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.3 | **Core HTTP → GA.** Published [core-http.md](core-http.md) (request lifecycle; host/location/static/proxy/FastCGI/balancing matrices; path-traversal + SSRF + CRLF threat note; limits; GA table) and added router, balancer, and static-serve benchmarks plus `FuzzHostScore`/`FuzzMatchLocation` (router) and `FuzzScriptName`/`FuzzParseSocketAddress` (FastCGI). Added Core HTTP to the soak-tracking table. | The waves, plan, and remaining ☐ features; soak stays a post-GA gate. | [core-http.md](core-http.md), [internal/router/router_bench_test.go](../internal/router/router_bench_test.go), [internal/upstream/balancer_bench_test.go](../internal/upstream/balancer_bench_test.go), [internal/handler/fastcgi_fuzz_test.go](../internal/handler/fastcgi_fuzz_test.go) |
 | 2026-06-21 | 1.2 | **TLS + ACME (Y1-01) → GA.** Published [tls-acme.md](tls-acme.md) (behaviour matrix, SNI/ACME/OCSP semantics, threat note, limits, GA table) and added `BenchmarkSNICertSelection` (0-alloc) alongside the existing handshake benchmark. Added Y1-01 to the soak-tracking table. | The waves, plan, and remaining ☐ features; soak stays a post-GA gate. | [tls-acme.md](tls-acme.md), [internal/server/tls_bench_test.go](../internal/server/tls_bench_test.go) |
 | 2026-06-21 | 1.1 | **First three GA features.** Flipped Wave 1 quick wins to **GA**: gRPC transcoding (Y2-01), gRPC passthrough (Y2-04), mTLS (Y2-07). Closed mTLS criterion ② with the [handshake-cost benchmark](mtls.md#benchmarks) (`BenchmarkMTLSHandshake`) and the cross-cutting criterion ④ with the semver-guarded [compatibility policy](compatibility.md); added the three to the soak-tracking table (soak pending, post-GA). | The plan, waves, effort sizing, and the remaining ☐ features; soak stays a post-GA gate (ADR 0005). | [compatibility.md](compatibility.md), [mtls.md](mtls.md#benchmarks), [grpc-transcoding.md](grpc-transcoding.md), [grpc-proxy.md](grpc-proxy.md) |
 | 2026-06-21 | 1.0 | Created the GA push log: the per-feature Beta→GA plan in three waves with effort + gaps, the cross-cutting tasks, and the soak-tracking table. Records the decision (ADR 0005) to treat the soak test as a post-GA gate so GA is declared against the other eight criteria. | The maturity ladder, the other eight GA criteria, and the Console-first invariant (ADR 0004) are unchanged. | [ADR 0003](adr/0003-maturity-and-ga.md), [ADR 0005](adr/0005-soak-post-ga-gate.md) |
