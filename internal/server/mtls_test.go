@@ -30,7 +30,7 @@ type caFixture struct {
 }
 
 // newCA creates a self-signed CA suitable for signing client certificates.
-func newCA(t *testing.T) *caFixture {
+func newCA(t testing.TB) *caFixture {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -61,7 +61,7 @@ func newCA(t *testing.T) *caFixture {
 }
 
 // writePEM writes data to a file under dir and returns its path.
-func writePEM(t *testing.T, dir, name string, data []byte) string {
+func writePEM(t testing.TB, dir, name string, data []byte) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
@@ -73,7 +73,7 @@ func writePEM(t *testing.T, dir, name string, data []byte) string {
 // clientCert mints a client certificate signed by the CA, with the given
 // serial and subject alternative names, and returns the parsed certificate, its
 // key, and a tls.Certificate ready for a client handshake.
-func (ca *caFixture) clientCert(t *testing.T, cn string, serial int64, dns []string, uris []*url.URL) (*x509.Certificate, tls.Certificate) {
+func (ca *caFixture) clientCert(t testing.TB, cn string, serial int64, dns []string, uris []*url.URL) (*x509.Certificate, tls.Certificate) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -107,7 +107,7 @@ func (ca *caFixture) clientCert(t *testing.T, cn string, serial int64, dns []str
 
 // writeCRL creates a CRL signed by the CA revoking the given serials and writes
 // it to a PEM file under dir, returning its path.
-func (ca *caFixture) writeCRL(t *testing.T, dir, name string, serials ...int64) string {
+func (ca *caFixture) writeCRL(t testing.TB, dir, name string, serials ...int64) string {
 	t.Helper()
 	var revoked []x509.RevocationListEntry
 	for _, s := range serials {
