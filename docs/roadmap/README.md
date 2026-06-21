@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.4 · Updated 2026-06-21
+> Version 1.5 · Updated 2026-06-21
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -19,8 +19,10 @@ multi-quarter.
 
 **Maturity** (per [ADR 0003](../adr/0003-maturity-and-ga.md)): Planned · Prototype ·
 Alpha · **Beta** · **GA** · Deprecated. *Implemented ≠ GA:* a shipped feature is
-**Beta** until it meets the full GA bar. The first GA target is gRPC transcoding +
-native gRPC passthrough.
+**Beta** until it meets the full GA bar. The [GA push](../ga-push.md) is hardening
+shipped features to GA; the soak test is a post-GA gate per
+[ADR 0005](../adr/0005-soak-post-ga-gate.md). First GA features: gRPC transcoding,
+native gRPC passthrough, and mTLS.
 
 ---
 
@@ -47,25 +49,24 @@ none has yet cleared the full GA bar in [ADR 0003](../adr/0003-maturity-and-ga.m
 
 ### Year 2 — partial ✅
 
-Shipped at **Beta**. The previous "gRPC transcoding GA" label drops the premature
-*GA* claim — streaming is implemented (server/client/bidi, NDJSON/SSE) but the
-feature is Beta until the full GA bar lands. gRPC transcoding + passthrough is
-the **first GA target**, and most of the bar is now met: published
+Shipped at **Beta**, except the first **GA** features from the
+[GA push](../ga-push.md). gRPC transcoding (Y2-01) + passthrough (Y2-04) and mTLS
+(Y2-07) are now **GA**: published
 [conformance matrices](../grpc-transcoding.md#conformance-matrix), benchmark
-numbers, known-limitations lists, a threat note, parser fuzzing, and a Console
-**Status** surface. The remaining hard gate is the long-running **soak test**
-(the semver tag is cut at the GA release). **Y2-07 mTLS** has also shipped
-(Beta): client-certificate auth with `$ssl_client_*` identity variables — see
-[mtls.md](../mtls.md).
+numbers (including the [mTLS handshake cost](../mtls.md#benchmarks)),
+known-limitations lists, threat notes, parser fuzzing where applicable, a
+semver-guarded [compatibility policy](../compatibility.md), and Console **Status**
+surfaces. The only open item is the long-running **soak test**, reclassified to a
+post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md).
 
 | ID | Feature | Tag | Maturity |
 | --- | --- | --- | --- |
-| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | Beta → first GA target (soak test pending) |
+| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | **GA** (post-GA soak pending) |
 | Y2-02 | WASM plugin system (wazero) | `wasmplugins` | Beta |
 | Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | Beta |
-| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | Beta → first GA target (soak test pending) |
+| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | **GA** (post-GA soak pending) |
 | Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | Beta |
-| Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | Beta |
+| Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | **GA** (post-GA soak pending) |
 
 ---
 
@@ -182,6 +183,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.5 | Declared the **first GA features** in the [GA push](../ga-push.md): **Y2-01 gRPC transcoding**, **Y2-04 gRPC passthrough**, and **Y2-07 mTLS** move Beta → **GA** — closing the mTLS handshake benchmark and adding the semver-guarded [compatibility policy](../compatibility.md). The soak test is reclassified to a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)), so it no longer blocks GA. | All other rows, IDs, descriptions, and (Beta) maturity states; feature behaviour is unchanged — only labels and the contract doc. | [ga-push.md](../ga-push.md), [compatibility.md](../compatibility.md), [mtls.md](../mtls.md#benchmarks); [ADR 0005](../adr/0005-soak-post-ga-gate.md) |
 | 2026-06-21 | 1.4 | Moved **Y2-07 mTLS** from committed-remaining to **Delivered (Beta)**: client-certificate verification against a CA bundle (request/require), per-location `require_client_cert`, `$ssl_client_*` identity proxy variables, signature-verified CRL + SAN allow-list, and the `jul_mtls_handshakes_total` metric — shipped in core (no build tag). | All other rows, IDs, and maturity states; the AI-MVP bet stays sequenced after mTLS (now satisfied). | [mtls.md](../mtls.md), [year-2.md](../specs/year-2.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |
 | 2026-06-21 | 1.3 | Advanced the **first GA target** (Y2-01 transcoding + Y2-04 passthrough): published conformance matrices, benchmark numbers, known-limitations lists, a threat note, path-template fuzzing, and confirmed the Console Status surface — leaving the **soak test** as the only remaining hard GA gate. | Both features stay **Beta**; all other rows, IDs, and maturity states unchanged. | [grpc-transcoding.md](../grpc-transcoding.md), [grpc-proxy.md](../grpc-proxy.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |
 | 2026-06-21 | 1.2 | Recorded the first **continuous Console v2 panel** under Y2-09: a read-only **Status** overview (which capabilities are active in the running config) plus a back-link from the standalone config page to the Console, keeping all screens navigable. | All feature rows, IDs, maturity states, and the Y2-09 framing as continuous per-feature panels. | [ADR 0004](../adr/0004-console-ui-invariants.md); [console.md](../console.md) |

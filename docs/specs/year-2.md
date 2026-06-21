@@ -3,19 +3,21 @@
 
 # JUL Engineering Execution Plan — Year 2 (Protocol Gateway + Extensibility Moat)
 
-> Version 1.4 · Updated 2026-06-21
+> Version 1.5 · Updated 2026-06-21
 >
-> Maturity note: shipped Y2-01…05 are **Beta**, not GA (see
-> [ADR 0003](../adr/0003-maturity-and-ga.md)). gRPC transcoding + passthrough is
-> the **first GA target**; most of the GA bar has now landed — published
-> conformance matrices, benchmarks, known-limitations lists, a threat note, and
-> parser fuzzing (see [grpc-transcoding.md](../grpc-transcoding.md) and
-> [grpc-proxy.md](../grpc-proxy.md)). The remaining hard gate is the
-> long-running **soak test**, so the feature stays **Beta** until then. Y2-07
-> **mTLS has shipped (Beta)** — see [mtls.md](../mtls.md). Y2-08
+> Maturity note: shipped Y2 features are **Beta**, except the first **GA**
+> features from the [GA push](../ga-push.md) (see
+> [ADR 0003](../adr/0003-maturity-and-ga.md)). **Y2-01 gRPC transcoding**,
+> **Y2-04 gRPC passthrough**, and **Y2-07 mTLS** are now **GA** — published
+> conformance matrices, benchmarks (incl. the
+> [mTLS handshake cost](../mtls.md#benchmarks)), known-limitations lists, threat
+> notes, parser fuzzing where applicable, and a semver-guarded
+> [compatibility policy](../compatibility.md). The long-running **soak test** is
+> reclassified to a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)),
+> tracked openly in [ga-push.md](../ga-push.md). Y2-08
 > GraphQL is **deferred / demand-gated** and rescoped to explicit-resolver
 > composition (see [ADR 0002](../adr/0002-protocol-adaptation.md)). The wording
-> "transcoding GA" below is retained as the *target*, not a current claim.
+> "transcoding GA" below is retained as the *target*, now realized.
 
 Goal: turn JUL from "great single-node proxy" into a PROTOCOL GATEWAY + EXTENSIBLE PLATFORM. Headlines: (A) gRPC transcoding GA incl streaming, (B) WASM plugin system (the moat), (C) L4 stream proxy. Plus gRPC passthrough, service discovery, WAF, mTLS, GraphQL (exploratory), Console v2.
 Exit: 3+ community WASM plugins; transcoding handles streaming; L4 TCP/UDP in prod; service discovery against K8s/Consul/DNS; mTLS + WAF available for platform teams.
@@ -33,7 +35,7 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 - Tasks: detect method streaming kind from descriptor -> NDJSON encoder w/ flush -> SSE encoder -> client-stream body decoder -> bidi WS bridge -> trailer mapping -> deadline propagation -> metadata mapping -> errors mid-stream -> jul_grpc_transcode_stream_msgs_total.
 - Deps: same as Y1-06 (protobuf, grpc) + nhooyr/coder websocket (reuse if added). Inter: Y2-09 designer, Y1-04 bearer->metadata.
 - Tests: unit (stream kind detect, NDJSON/SSE framing, trailer map); integration (real server-stream echo -> NDJSON+SSE; client-stream; bidi over WS); e2e example updated.
-- DoD (GA bar, per [ADR 0003](../adr/0003-maturity-and-ga.md)): all 4 method kinds transcode; streaming flushes incrementally (no buffering); deadlines+trailers correct; designer round-trips descriptor->config. A published **conformance matrix** (method kind × HTTP rule × stream mode × pass/fail) + reproducible **benchmarks** + a **known-limitations** doc are mandatory before the *GA* label; until then the feature stays **Beta**. **Landed (2026-06-21):** conformance matrix + benchmarks + known-limitations + threat note now published in [docs/grpc-transcoding.md](../grpc-transcoding.md); path-template parser fuzzed (`FuzzParseTemplate`); the stale "unary" comment is corrected. Remaining GA gate: the long-running soak test. **Shipped delta:** bidi is framed as NDJSON/SSE over HTTP (no WebSocket bridge); `stream_mode` is `ndjson|sse` (the `websocket` mode in the original design was dropped).
+- DoD (GA bar, per [ADR 0003](../adr/0003-maturity-and-ga.md)): all 4 method kinds transcode; streaming flushes incrementally (no buffering); deadlines+trailers correct; designer round-trips descriptor->config. A published **conformance matrix** (method kind × HTTP rule × stream mode × pass/fail) + reproducible **benchmarks** + a **known-limitations** doc are mandatory before the *GA* label; until then the feature stays **Beta**. **GA (2026-06-21):** conformance matrix + benchmarks + known-limitations + threat note published in [docs/grpc-transcoding.md](../grpc-transcoding.md); path-template parser fuzzed (`FuzzParseTemplate`); contract frozen under the [compatibility policy](../compatibility.md). The feature is now **GA**; the long-running soak test is a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)), tracked in [ga-push.md](../ga-push.md). **Shipped delta:** bidi is framed as NDJSON/SSE over HTTP (no WebSocket bridge); `stream_mode` is `ndjson|sse` (the `websocket` mode in the original design was dropped).
 - Risks: backpressure/slow client, half-close semantics, WS proxy infra, large messages. Mitigate limits+timeouts+flush.
 - Rollout: tag grpc; remove "preview" note; streaming opt-in per location.
 - Docs: README gRPC GA (streaming modes table), examples/grpc-gateway streaming, docs/grpc-transcoding.md, CHANGELOG.
@@ -72,7 +74,7 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 - Tasks: h2c inbound (golang.org/x/net/http2/h2c) -> http2.Transport for backend (h2/h2c) -> trailer propagation -> per-frame flush (no buffer) -> gRPC detection/config flag -> error/status mapping -> bidi stream support -> jul_grpc_proxy_streams_total.
 - Deps: golang.org/x/net/http2 (+h2c). Inter: upstream Pool; Y2-01 shares grpc tag.
 - Tests: unit (trailer copy, h2c detect); integration (real gRPC client -> JUL -> gRPC server unary+streaming, trailers intact, h2c cleartext + TLS); bench streaming throughput.
-- DoD: native gRPC unary+streaming pass through with trailers; h2c cleartext + TLS both; no buffering (streaming latency low); LB+health apply. **Landed (2026-06-21):** conformance matrix + benchmarks + known-limitations published in [docs/grpc-proxy.md](../grpc-proxy.md). Remaining GA gate: the long-running soak test.
+- DoD: native gRPC unary+streaming pass through with trailers; h2c cleartext + TLS both; no buffering (streaming latency low); LB+health apply. **GA (2026-06-21):** conformance matrix + benchmarks + known-limitations published in [docs/grpc-proxy.md](../grpc-proxy.md); contract frozen under the [compatibility policy](../compatibility.md). Now **GA**; the long-running soak test is a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)).
 - Risks: trailer support in Go proxy, h2c security (opt-in), flush correctness, HTTP/2 flow control. 
 - Rollout: tag grpc; per-location grpc=true.
 - Docs: README gRPC passthrough vs transcoding table, docs, testdata/grpc-proxy.toml, CHANGELOG.
@@ -111,7 +113,7 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 - Tasks: load ClientCAs -> set ClientAuth per server -> VerifyPeerCertificate (SAN allowlist, optional CRL) -> per-location require enforcement -> extract identity vars to context -> proxy var resolver $ssl_client_* -> jul_mtls_handshakes_total{result}.
 - Deps: stdlib crypto/x509. Inter: Y1-04 context/var pattern, Y1-01 cert provider coexists (server cert via ACME, client CA separate).
 - Tests: unit (CA verify pass/fail, SAN allowlist, var extraction); integration (client w/ valid cert allowed + vars set, no cert -> handshake/403, wrong CA rejected, CRL revoked rejected); e2e testdata/mtls.toml.
-- DoD: require mode rejects missing/invalid client certs; identity vars populate proxy headers; per-location require works; CRL/SAN checks function; coexists with ACME server certs. **Landed (2026-06-21):** shipped at **Beta**. `tls.client_auth` (mode `none\|request\|require`, `ca_file`, `verify_san`, `crl_file`) verifies client certs against a CA bundle; `require_client_cert` enforces per location (403 when absent); identity is exposed as `$ssl_client_s_dn/i_dn/cn/serial/fingerprint/san/verify`; a signature-verified CRL and a SAN allow-list gate acceptance; `jul_mtls_handshakes_total{result}` counts verified/rejected handshakes. See [docs/mtls.md](../mtls.md) and [testdata/mtls.toml](../../testdata/mtls.toml). The Console **Status** panel reports *Mutual TLS (client certs)* active (ADR 0004 DoD criterion 9). **Shipped delta:** `client_auth` is bound when the listener starts (like `tls.min_version`), so it applies on restart, not hot reload; OCSP is not implemented (CRL only); identity is consumed via proxy header variables (no auth-backend wiring beyond headers).
+- DoD: require mode rejects missing/invalid client certs; identity vars populate proxy headers; per-location require works; CRL/SAN checks function; coexists with ACME server certs. **GA (2026-06-21):** `tls.client_auth` (mode `none\|request\|require`, `ca_file`, `verify_san`, `crl_file`) verifies client certs against a CA bundle; `require_client_cert` enforces per location (403 when absent); identity is exposed as `$ssl_client_s_dn/i_dn/cn/serial/fingerprint/san/verify`; a signature-verified CRL and a SAN allow-list gate acceptance; `jul_mtls_handshakes_total{result}` counts verified/rejected handshakes. See [docs/mtls.md](../mtls.md) and [testdata/mtls.toml](../../testdata/mtls.toml). The Console **Status** panel reports *Mutual TLS (client certs)* active (ADR 0004 DoD criterion 9). GA artifacts: [handshake-cost benchmark](../mtls.md#benchmarks) (`BenchmarkMTLSHandshake`) and the semver-guarded [compatibility policy](../compatibility.md); the long-running soak test is a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)). **Shipped delta:** `client_auth` is bound when the listener starts (like `tls.min_version`), so it applies on restart, not hot reload; OCSP is not implemented (CRL only); identity is consumed via proxy header variables (no auth-backend wiring beyond headers).
 - Risks: CRL/OCSP freshness, cert rotation, perf of verify, mixing per-server modes. 
 - Rollout: core; per-server/per-location opt-in.
 - Docs: README mTLS + identity vars table, docs/mtls.md, testdata/mtls.toml, CHANGELOG.
@@ -148,7 +150,7 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 - Perf: extend harness with L4 throughput, gRPC streaming, WASM per-invocation overhead, WAF cost; CI regression gate stays green.
 - Console-first ([ADR 0004](../adr/0004-console-ui-invariants.md)): every Y2 feature ships a lean, self-explanatory Console surface as part of DoD; "done" includes operable + observable from the Console without reading docs. Console v2 (Y2-09) is the sum of these per-feature panels, not a separate monolith.
 - Secrets references (SEC-1, pulled earlier from Y5-06): introduce `env`/`file` secret refs + log redaction + a lint for literal secrets, used by ACME/JWT/forward-auth/mTLS (and the AI MVP key). Vault/KMS/SPIFFE remain later.
-- Maturity/GA ([ADR 0003](../adr/0003-maturity-and-ga.md)): shipped Y2 features are **Beta**; the *GA* label requires the full GA bar (conformance matrix, benchmarks, known-limitations, semver-stable contract, soak test, runnable example+docs, security/threat note, fuzzing, Console surface). gRPC transcoding + passthrough is the first GA target.
+- Maturity/GA ([ADR 0003](../adr/0003-maturity-and-ga.md)): the *GA* label requires the full GA bar (conformance matrix, benchmarks, known-limitations, semver-stable contract, soak test, runnable example+docs, security/threat note, fuzzing, Console surface). The [GA push](../ga-push.md) is hardening shipped features; **Y2-01 transcoding, Y2-04 passthrough, and Y2-07 mTLS are now GA**, with the soak test reclassified to a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)). Remaining Y2 features stay **Beta**.
 - Security: WASM sandbox threat model + audit; WAF tuning guide; mTLS verify paths; fetch SSRF allowlist; fuzz transcode httprule + plugin ABI + PROXY parser.
 - Docs (exhaustive, in sync): every feature updates README feature table+config ref, docs/<feature>.md, testdata/*.toml, examples/<feature>/, CHANGELOG. DoD blocks merge w/o docs.
 - Build/release: extend tag matrix (wasm,stream,waf,graphql,consul,kubernetes); build-min stays lean; document each tag's deps/size delta.
@@ -172,6 +174,7 @@ graph LR
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.5 | **First GA features** from the [GA push](../ga-push.md): Y2-01 transcoding, Y2-04 passthrough, and Y2-07 mTLS move Beta → **GA**. Closed mTLS criterion 2 with the [handshake-cost benchmark](../mtls.md#benchmarks) (`BenchmarkMTLSHandshake`) and criterion 4 fleet-wide with the semver-guarded [compatibility policy](../compatibility.md); the soak test is reclassified to a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)). | Runtime behaviour of all three features and every other Y2 spec; remaining Y2 features stay Beta. | [ga-push.md](../ga-push.md), [compatibility.md](../compatibility.md), [mtls.md](../mtls.md#benchmarks); [ADR 0005](../adr/0005-soak-post-ga-gate.md) |
 | 2026-06-21 | 1.4 | Closed the Y2-07 Console gap: mTLS now surfaces in the Console **Status** panel as *Mutual TLS (client certs)* (active when a server block sets `tls.client_auth` or a location sets `require_client_cert`), satisfying ADR 0004 DoD criterion 9. Added a GA-criteria table to [mtls.md](../mtls.md) so the Console surface is tracked like the gRPC features. | The mTLS runtime behaviour and all other specs unchanged; mTLS stays **Beta**. | [internal/admin/api.go](../../internal/admin/api.go), [mtls.md](../mtls.md); [ADR 0004](../adr/0004-console-ui-invariants.md) |
 | 2026-06-21 | 1.3 | Marked Y2-07 **mTLS shipped (Beta)**: `tls.client_auth` (request/require) verifies client certs against a CA bundle, `require_client_cert` enforces per location, identity is exposed as `$ssl_client_*` proxy variables, a signature-verified CRL + SAN allow-list gate acceptance, and `jul_mtls_handshakes_total` counts verified/rejected handshakes. Recorded the shipped deltas (bind-time like `min_version`, CRL-only / no OCSP, identity via headers). | All squad/quarter plans and the other feature specs unchanged; gRPC features stay Beta. | [mtls.md](../mtls.md), [testdata/mtls.toml](../../testdata/mtls.toml); [ADR 0003](../adr/0003-maturity-and-ga.md) |
 | 2026-06-21 | 1.2 | Recorded the first-GA-target evidence that landed for Y2-01 transcoding and Y2-04 passthrough: published conformance matrices, benchmarks, known-limitations lists, a threat note, and path-template fuzzing; marked the stale `unary` comment fixed; noted the shipped bidi-framing delta (NDJSON/SSE over HTTP, no WebSocket; `stream_mode` = `ndjson\|sse`). | Both features stay **Beta** (soak test is the remaining GA gate); all squad/quarter plans and other feature specs unchanged. | [grpc-transcoding.md](../grpc-transcoding.md), [grpc-proxy.md](../grpc-proxy.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |

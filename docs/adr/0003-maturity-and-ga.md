@@ -1,6 +1,6 @@
 # ADR 0003 — Maturity model, GA bar, and evidence gates
 
-- **Status:** Accepted
+- **Status:** Accepted — *criterion 5 (soak test) amended by [ADR 0005](0005-soak-post-ga-gate.md)* (reclassified to a post-GA gate)
 - **Date:** 2026-06-21
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** every roadmap feature and its status labeling

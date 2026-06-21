@@ -209,23 +209,23 @@ translation tax is serialization, not dispatch.
 
 ## GA status
 
-Per ADR [0003](adr/0003-maturity-and-ga.md), transcoding is the first GA target
-(with passthrough). Current maturity: **Beta**.
+Per ADR [0003](adr/0003-maturity-and-ga.md), transcoding is **GA** (with
+passthrough). The soak test (criterion 5) is a post-GA gate per
+[ADR 0005](adr/0005-soak-post-ga-gate.md).
 
 | # | GA criterion | Status |
 | --- | --- | --- |
 | 1 | Conformance matrix published | ✅ this document |
 | 2 | Published benchmark numbers | ✅ this document + `bench_test.go` |
 | 3 | Documented known-limitations | ✅ this document |
-| 4 | Stable config/API contract (semver-guarded) | ◐ contract documented; tag at release |
-| 5 | Long-running soak test passed | ☐ pending |
+| 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
+| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) — tracked in [ga-push.md](ga-push.md) |
 | 6 | Runnable example + docs | ✅ [examples/grpc-gateway](../examples/grpc-gateway) + this doc |
 | 7 | Security / threat note | ✅ this document |
 | 8 | Fuzzing where parsing is involved | ✅ `FuzzParseTemplate` |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** panel reports gRPC transcoding active |
 
-The remaining hard gate to GA is the long-running **soak test** (criterion 5);
-the semver tag (criterion 4) is cut at the release that declares GA.
+The one open item is the post-GA **soak test** (criterion 5).
 
 ## See also
 
