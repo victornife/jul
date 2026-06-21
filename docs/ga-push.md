@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.4 · Updated 2026-06-21
+> Version 1.5 · Updated 2026-06-21
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -40,7 +40,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Task | Covers | Effort | Status |
 | --- | --- | --- | --- |
 | Freeze v1 config/API + semver policy ([docs/compatibility.md](compatibility.md)) | **4** for every feature | M | ✅ |
-| Perf-gate benchmark harness + CI job | hosts **2** | M | ☐ |
+| Perf-gate benchmark harness ([scripts/bench.sh](../scripts/bench.sh)) + [CI job](../.github/workflows/ci.yml) | hosts **2** | M | ✅ |
 | Fuzz corpus + CI fuzz job (extend `FuzzParseTemplate`) | hosts **8** | S–M | ☐ |
 | `SECURITY.md` umbrella threat model | anchors **7** | S | ☐ |
 
@@ -95,6 +95,7 @@ a soak failure is a release-blocking regression.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.5 | **Cross-cutting: perf-gate benchmark harness + CI job** (hosts criterion ② fleet-wide). Added [scripts/bench.sh](../scripts/bench.sh) — a single harness that runs every in-tree `Benchmark*` with the full opt-in tag set — and a `benchmarks (smoke)` [CI job](../.github/workflows/ci.yml) that runs it on every push/PR so benchmarks must keep compiling and executing without panic. A `.gitattributes` pins `*.sh` to LF. The job is a smoke + artifact gate, **not** a nanosecond regression gate (shared runners are too noisy); doc numbers are regenerated on a quiet machine. | Every feature's runtime behaviour, the waves, the bar, and the documented benchmark numbers; only new CI tooling is added. | [scripts/bench.sh](../scripts/bench.sh), [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
 | 2026-06-21 | 1.4 | **Auth (Y1-04) → GA** — the last Wave 1 feature. Published [auth.md](auth.md) (CIDR/Basic/JWT/forward-auth behaviour matrix; JWKS + algorithm-confusion + username-enum threat note; limits; GA table) and added `BenchmarkBasicVerify`/`BenchmarkJWTValidate` plus `FuzzParseJWKS`/`FuzzValidateToken`. Added Auth to the soak-tracking table. Also **relabeled every GA feature `GA` → `GA — soak pending`** here and across the roadmap/specs/feature docs, since the soak test is still open for all of them. | The waves, plan, the bar, and remaining ☐ features; soak stays a post-GA gate (ADR 0005). | [auth.md](auth.md), [internal/auth/auth_bench_test.go](../internal/auth/auth_bench_test.go), [internal/auth/auth_fuzz_test.go](../internal/auth/auth_fuzz_test.go) |
 | 2026-06-21 | 1.3 | **Core HTTP → GA.** Published [core-http.md](core-http.md) (request lifecycle; host/location/static/proxy/FastCGI/balancing matrices; path-traversal + SSRF + CRLF threat note; limits; GA table) and added router, balancer, and static-serve benchmarks plus `FuzzHostScore`/`FuzzMatchLocation` (router) and `FuzzScriptName`/`FuzzParseSocketAddress` (FastCGI). Added Core HTTP to the soak-tracking table. | The waves, plan, and remaining ☐ features; soak stays a post-GA gate. | [core-http.md](core-http.md), [internal/router/router_bench_test.go](../internal/router/router_bench_test.go), [internal/upstream/balancer_bench_test.go](../internal/upstream/balancer_bench_test.go), [internal/handler/fastcgi_fuzz_test.go](../internal/handler/fastcgi_fuzz_test.go) |
 | 2026-06-21 | 1.2 | **TLS + ACME (Y1-01) → GA.** Published [tls-acme.md](tls-acme.md) (behaviour matrix, SNI/ACME/OCSP semantics, threat note, limits, GA table) and added `BenchmarkSNICertSelection` (0-alloc) alongside the existing handshake benchmark. Added Y1-01 to the soak-tracking table. | The waves, plan, and remaining ☐ features; soak stays a post-GA gate. | [tls-acme.md](tls-acme.md), [internal/server/tls_bench_test.go](../internal/server/tls_bench_test.go) |
