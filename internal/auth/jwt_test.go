@@ -89,13 +89,13 @@ func leftPad(b []byte, size int) []byte {
 }
 
 // signRS256 signs claims with the RSA key and a "kid" header.
-func signRS256(t *testing.T, key *rsa.PrivateKey, kid string, claims jwt.MapClaims) string {
-	t.Helper()
+func signRS256(tb testing.TB, key *rsa.PrivateKey, kid string, claims jwt.MapClaims) string {
+	tb.Helper()
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	tok.Header["kid"] = kid
 	s, err := tok.SignedString(key)
 	if err != nil {
-		t.Fatalf("sign RS256: %v", err)
+		tb.Fatalf("sign RS256: %v", err)
 	}
 	return s
 }
