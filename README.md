@@ -14,7 +14,8 @@ interface — all in a single static, dependency-free binary.
 > Where this is headed: see the [vision](docs/vision/) and the
 > [roadmap](docs/roadmap/) (Years 1–5), with detailed per-feature
 > [engineering specs](docs/specs/). Durable technical decisions are
-> recorded as [ADRs](docs/adr/).
+> recorded as [ADRs](docs/adr/), and how the direction evolves is tracked in
+> the [reviews & decision log](docs/reviews/).
 
 ---
 
