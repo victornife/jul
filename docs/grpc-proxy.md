@@ -133,8 +133,74 @@ request path, which Jul.IA forwards verbatim.
 | Streaming | All four kinds, transparently | Server/client/bidi via NDJSON or SSE |
 | Use when | Load-balancing native gRPC | Exposing gRPC to JSON clients |
 
+## Conformance & limitations
+
+What passthrough supports today, enumerated so the boundary is explicit
+(ADR [0003](adr/0003-maturity-and-ga.md) GA criteria 1 and 3).
+
+| Aspect | Behavior | Supported |
+| --- | --- | --- |
+| Call kinds | unary, server-, client-, bidirectional streaming | ✅ |
+| Trailers | `grpc-status` / `grpc-message` and custom trailers preserved | ✅ |
+| Incremental flush | each frame flushed as it arrives (no buffering) | ✅ |
+| Inbound transport | h2c (`h2c = true`) or HTTP/2 via ALPN on a TLS listener | ✅ |
+| Backend transport | h2c (`http://`) or HTTP/2 over TLS (`https://`) | ✅ |
+| Load balancing | upstream `round_robin` / `weighted_round_robin` / `least_conn` | ✅ |
+| Passive health | `max_fails` / `fail_timeout` per backend | ✅ |
+| Path routing | mixed gRPC + HTTP on one listener by location prefix | ✅ |
+| Mid-stream retry | a started stream is **not** replayed to another backend | ❌ (by design) |
+| Active health probes | gRPC-level health checks (`grpc.health.v1`) | ❌ (passive only) |
+| mTLS to backend | client-certificate origination on the backend dial | ❌ |
+
+A gRPC stream is not replayable, so a connection failure after a call has begun
+surfaces to the client as a gateway error (the backend is marked failed for
+subsequent calls); only calls that never started are routed elsewhere.
+
+## Benchmarks
+
+GA criterion 2. Measured with the in-tree benchmark against an in-process
+loopback gRPC echo backend.
+
+```bash
+go test -tags grpc -run '^$' -bench . -benchmem -benchtime=3s ./internal/handler/
+```
+
+Environment: `windows/amd64`, Virtual CPU @ 3.41 GHz. Absolute latency is
+loopback-dominated — passthrough adds a second hop (client → proxy → backend),
+so its round trip is naturally ~2× a direct call. The allocation delta is the
+stable signal.
+
+| Benchmark | Time/op | Bytes/op | Allocs/op |
+| --- | --- | --- | --- |
+| `GRPCPassthroughUnary` (through the proxy) | ~1.04 ms | ~67 KB | 309 |
+| `GRPCDirectUnary` (baseline, no proxy) | ~325 µs | ~11.5 KB | 165 |
+
+Over a direct call, the passthrough proxy adds roughly **145 allocations and
+~55 KB** per unary call plus one network hop — the cost of terminating and
+re-originating the HTTP/2 stream.
+
+## GA status
+
+Per ADR [0003](adr/0003-maturity-and-ga.md), native passthrough is a first GA
+target (with [transcoding](grpc-transcoding.md)). Current maturity: **Beta**.
+
+| # | GA criterion | Status |
+| --- | --- | --- |
+| 1 | Conformance matrix published | ✅ above |
+| 2 | Published benchmark numbers | ✅ above + `grpcproxy_bench_test.go` |
+| 3 | Documented known-limitations | ✅ above |
+| 4 | Stable config/API contract (semver-guarded) | ◐ documented; tag at release |
+| 5 | Long-running soak test passed | ☐ pending |
+| 6 | Runnable example + docs | ✅ [examples/grpc-proxy](../examples/grpc-proxy) + this doc |
+| 7 | Security / threat note | ✅ keep the listener on loopback / front with TLS; payload never inspected |
+| 8 | Fuzzing where parsing is involved | n/a — passthrough parses no payloads (opaque forward) |
+| 9 | Self-explanatory Console surface | ✅ Console **Status** panel reports gRPC passthrough active |
+
+The remaining hard gate to GA is the long-running **soak test** (criterion 5).
+
 ## See also
 
+- [REST/JSON → gRPC transcoding](grpc-transcoding.md) — the JSON-to-gRPC gateway
 - [examples/grpc-proxy](../examples/grpc-proxy) — runnable sample config
 - [testdata/grpc-proxy.toml](../testdata/grpc-proxy.toml) — `jul -check` sample
 - [examples/grpc-gateway](../examples/grpc-gateway) — the REST/JSON transcoding gateway

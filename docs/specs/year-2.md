@@ -3,15 +3,18 @@
 
 # JUL Engineering Execution Plan — Year 2 (Protocol Gateway + Extensibility Moat)
 
-> Version 1.1 · Updated 2026-06-21
+> Version 1.2 · Updated 2026-06-21
 >
 > Maturity note: shipped Y2-01…05 are **Beta**, not GA (see
 > [ADR 0003](../adr/0003-maturity-and-ga.md)). gRPC transcoding + passthrough is
-> the **first GA target** and must clear the GA bar — including a conformance
-> matrix — before any *GA* label. Y2-08 GraphQL is **deferred / demand-gated** and
-> rescoped to explicit-resolver composition (see
-> [ADR 0002](../adr/0002-protocol-adaptation.md)). The wording "transcoding GA"
-> below is retained as the *target*, not a current claim.
+> the **first GA target**; most of the GA bar has now landed — published
+> conformance matrices, benchmarks, known-limitations lists, a threat note, and
+> parser fuzzing (see [grpc-transcoding.md](../grpc-transcoding.md) and
+> [grpc-proxy.md](../grpc-proxy.md)). The remaining hard gate is the
+> long-running **soak test**, so the feature stays **Beta** until then. Y2-08
+> GraphQL is **deferred / demand-gated** and rescoped to explicit-resolver
+> composition (see [ADR 0002](../adr/0002-protocol-adaptation.md)). The wording
+> "transcoding GA" below is retained as the *target*, not a current claim.
 
 Goal: turn JUL from "great single-node proxy" into a PROTOCOL GATEWAY + EXTENSIBLE PLATFORM. Headlines: (A) gRPC transcoding GA incl streaming, (B) WASM plugin system (the moat), (C) L4 stream proxy. Plus gRPC passthrough, service discovery, WAF, mTLS, GraphQL (exploratory), Console v2.
 Exit: 3+ community WASM plugins; transcoding handles streaming; L4 TCP/UDP in prod; service discovery against K8s/Consul/DNS; mTLS + WAF available for platform teams.
@@ -29,7 +32,7 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 - Tasks: detect method streaming kind from descriptor -> NDJSON encoder w/ flush -> SSE encoder -> client-stream body decoder -> bidi WS bridge -> trailer mapping -> deadline propagation -> metadata mapping -> errors mid-stream -> jul_grpc_transcode_stream_msgs_total.
 - Deps: same as Y1-06 (protobuf, grpc) + nhooyr/coder websocket (reuse if added). Inter: Y2-09 designer, Y1-04 bearer->metadata.
 - Tests: unit (stream kind detect, NDJSON/SSE framing, trailer map); integration (real server-stream echo -> NDJSON+SSE; client-stream; bidi over WS); e2e example updated.
-- DoD (GA bar, per [ADR 0003](../adr/0003-maturity-and-ga.md)): all 4 method kinds transcode; streaming flushes incrementally (no buffering); deadlines+trailers correct; designer round-trips descriptor->config. A published **conformance matrix** (method kind × HTTP rule × stream mode × pass/fail) + reproducible **benchmarks** + a **known-limitations** doc are mandatory before the *GA* label; until then the feature stays **Beta**. (Code follow-up: the stale "unary" comment at handler/grpctranscode.go must be corrected to reflect implemented streaming.)
+- DoD (GA bar, per [ADR 0003](../adr/0003-maturity-and-ga.md)): all 4 method kinds transcode; streaming flushes incrementally (no buffering); deadlines+trailers correct; designer round-trips descriptor->config. A published **conformance matrix** (method kind × HTTP rule × stream mode × pass/fail) + reproducible **benchmarks** + a **known-limitations** doc are mandatory before the *GA* label; until then the feature stays **Beta**. **Landed (2026-06-21):** conformance matrix + benchmarks + known-limitations + threat note now published in [docs/grpc-transcoding.md](../grpc-transcoding.md); path-template parser fuzzed (`FuzzParseTemplate`); the stale "unary" comment is corrected. Remaining GA gate: the long-running soak test. **Shipped delta:** bidi is framed as NDJSON/SSE over HTTP (no WebSocket bridge); `stream_mode` is `ndjson|sse` (the `websocket` mode in the original design was dropped).
 - Risks: backpressure/slow client, half-close semantics, WS proxy infra, large messages. Mitigate limits+timeouts+flush.
 - Rollout: tag grpc; remove "preview" note; streaming opt-in per location.
 - Docs: README gRPC GA (streaming modes table), examples/grpc-gateway streaming, docs/grpc-transcoding.md, CHANGELOG.
@@ -68,7 +71,7 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 - Tasks: h2c inbound (golang.org/x/net/http2/h2c) -> http2.Transport for backend (h2/h2c) -> trailer propagation -> per-frame flush (no buffer) -> gRPC detection/config flag -> error/status mapping -> bidi stream support -> jul_grpc_proxy_streams_total.
 - Deps: golang.org/x/net/http2 (+h2c). Inter: upstream Pool; Y2-01 shares grpc tag.
 - Tests: unit (trailer copy, h2c detect); integration (real gRPC client -> JUL -> gRPC server unary+streaming, trailers intact, h2c cleartext + TLS); bench streaming throughput.
-- DoD: native gRPC unary+streaming pass through with trailers; h2c cleartext + TLS both; no buffering (streaming latency low); LB+health apply.
+- DoD: native gRPC unary+streaming pass through with trailers; h2c cleartext + TLS both; no buffering (streaming latency low); LB+health apply. **Landed (2026-06-21):** conformance matrix + benchmarks + known-limitations published in [docs/grpc-proxy.md](../grpc-proxy.md). Remaining GA gate: the long-running soak test.
 - Risks: trailer support in Go proxy, h2c security (opt-in), flush correctness, HTTP/2 flow control. 
 - Rollout: tag grpc; per-location grpc=true.
 - Docs: README gRPC passthrough vs transcoding table, docs, testdata/grpc-proxy.toml, CHANGELOG.
@@ -168,5 +171,6 @@ graph LR
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.2 | Recorded the first-GA-target evidence that landed for Y2-01 transcoding and Y2-04 passthrough: published conformance matrices, benchmarks, known-limitations lists, a threat note, and path-template fuzzing; marked the stale `unary` comment fixed; noted the shipped bidi-framing delta (NDJSON/SSE over HTTP, no WebSocket; `stream_mode` = `ndjson\|sse`). | Both features stay **Beta** (soak test is the remaining GA gate); all squad/quarter plans and other feature specs unchanged. | [grpc-transcoding.md](../grpc-transcoding.md), [grpc-proxy.md](../grpc-proxy.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |
 | 2026-06-21 | 1.1 | Added a maturity note (Y2-01…05 are Beta, not GA); set gRPC transcoding + passthrough as the first GA target with a mandatory conformance matrix in DoD; rescoped Y2-08 from "GraphQL without resolvers" to a **deferred, demand-gated** explicit-resolver composition prototype; added Console-first (per-feature panels), secrets-references (SEC-1), and GA-bar cross-cutting items; flagged the stale `unary` comment in handler/grpctranscode.go as a code follow-up. | All squad/quarter plans, feature designs, configs, tasks, tests, dependency graph, and the other feature sections. | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |
 | 2026-06-21 | 1.0 | Initial Year-2 engineering execution spec. | — | — |

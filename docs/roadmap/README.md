@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.2 · Updated 2026-06-21
+> Version 1.3 · Updated 2026-06-21
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -49,15 +49,19 @@ none has yet cleared the full GA bar in [ADR 0003](../adr/0003-maturity-and-ga.m
 
 Shipped at **Beta**. The previous "gRPC transcoding GA" label drops the premature
 *GA* claim — streaming is implemented (server/client/bidi, NDJSON/SSE) but the
-feature is Beta until its conformance matrix, benchmarks, and the rest of the GA
-bar land. gRPC transcoding + passthrough is the **first GA target**.
+feature is Beta until the full GA bar lands. gRPC transcoding + passthrough is
+the **first GA target**, and most of the bar is now met: published
+[conformance matrices](../grpc-transcoding.md#conformance-matrix), benchmark
+numbers, known-limitations lists, a threat note, parser fuzzing, and a Console
+**Status** surface. The remaining hard gate is the long-running **soak test**
+(the semver tag is cut at the GA release).
 
 | ID | Feature | Tag | Maturity |
 | --- | --- | --- | --- |
-| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | Beta → first GA target |
+| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | Beta → first GA target (soak test pending) |
 | Y2-02 | WASM plugin system (wazero) | `wasmplugins` | Beta |
 | Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | Beta |
-| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | Beta → first GA target |
+| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | Beta → first GA target (soak test pending) |
 | Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | Beta |
 
 ---
@@ -176,6 +180,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.3 | Advanced the **first GA target** (Y2-01 transcoding + Y2-04 passthrough): published conformance matrices, benchmark numbers, known-limitations lists, a threat note, path-template fuzzing, and confirmed the Console Status surface — leaving the **soak test** as the only remaining hard GA gate. | Both features stay **Beta**; all other rows, IDs, and maturity states unchanged. | [grpc-transcoding.md](../grpc-transcoding.md), [grpc-proxy.md](../grpc-proxy.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |
 | 2026-06-21 | 1.2 | Recorded the first **continuous Console v2 panel** under Y2-09: a read-only **Status** overview (which capabilities are active in the running config) plus a back-link from the standalone config page to the Console, keeping all screens navigable. | All feature rows, IDs, maturity states, and the Y2-09 framing as continuous per-feature panels. | [ADR 0004](../adr/0004-console-ui-invariants.md); [console.md](../console.md) |
 | 2026-06-21 | 1.1 | Added a **Maturity** column and delivery legend; reclassified all shipped Year 1–2 features from "Delivered" to **Beta** (gRPC transcoding + passthrough named first GA target); demoted Y2-08 to a **deferred, demand-gated** GraphQL *composition* prototype with explicit resolvers; reframed Y2-09 Console v2 as continuous per-feature panels; pulled secrets references earlier (SEC-1); added a **time-boxed** AI Gateway MVP bet; relabeled Years 3–5 as the **Vision horizon (demand-gated)**; fixed `adr/` and `specs/` links after the folder move. | All Year 1–5 feature rows, IDs, descriptions, impact and effort sizing (Years 3–5 preserved verbatim under the horizon banner). | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |
 | 2026-06-21 | 1.0 | Initial consolidated 5-year roadmap. | — | — |

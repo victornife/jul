@@ -73,7 +73,7 @@ func echoStream(_ any, stream grpc.ServerStream) error {
 
 // startGRPCEcho starts a cleartext (h2c) gRPC server that echoes any method and
 // returns its address.
-func startGRPCEcho(t *testing.T) string {
+func startGRPCEcho(t testing.TB) string {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -91,7 +91,7 @@ func startGRPCEcho(t *testing.T) string {
 // startGRPCProxyFront builds the gRPC passthrough handler for backendAddr and
 // serves it over h2c on a fresh listener, returning the front address and the
 // stream counter the handler increments per forwarded call.
-func startGRPCProxyFront(t *testing.T, backendAddr string) (string, *atomic.Int64) {
+func startGRPCProxyFront(t testing.TB, backendAddr string) (string, *atomic.Int64) {
 	t.Helper()
 	var streams atomic.Int64
 	loc := config.LocationConfig{
@@ -119,7 +119,7 @@ func startGRPCProxyFront(t *testing.T, backendAddr string) (string, *atomic.Int6
 	return front.Addr().String(), &streams
 }
 
-func dialGRPC(t *testing.T, addr string) *grpc.ClientConn {
+func dialGRPC(t testing.TB, addr string) *grpc.ClientConn {
 	t.Helper()
 	conn, err := grpc.NewClient(
 		"passthrough:///"+addr,

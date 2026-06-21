@@ -64,7 +64,7 @@ func TestHTTPStatusFromCode(t *testing.T) {
 //	    };
 //	  }
 //	}
-func echoFileDescriptorProto(t *testing.T) *descriptorpb.FileDescriptorProto {
+func echoFileDescriptorProto(t testing.TB) *descriptorpb.FileDescriptorProto {
 	t.Helper()
 	strField := func(name string, num int32) *descriptorpb.FieldDescriptorProto {
 		return &descriptorpb.FieldDescriptorProto{
@@ -107,7 +107,7 @@ func echoFileDescriptorProto(t *testing.T) *descriptorpb.FileDescriptorProto {
 // startEchoServer registers a dynamic gRPC echo service backed by the given
 // message descriptors and serves it on a local port. When withReflection is
 // set, the file is registered globally and gRPC server reflection is enabled.
-func startEchoServer(t *testing.T, fd protoreflect.FileDescriptor, withReflection bool) string {
+func startEchoServer(t testing.TB, fd protoreflect.FileDescriptor, withReflection bool) string {
 	t.Helper()
 	reqDesc := fd.Services().Get(0).Methods().Get(0).Input()
 	respDesc := fd.Services().Get(0).Methods().Get(0).Output()
@@ -171,7 +171,7 @@ func startEchoServer(t *testing.T, fd protoreflect.FileDescriptor, withReflectio
 // newEchoTranscoder builds descriptors, starts the echo server, and returns a
 // Transcoder pointed at it. When reflect is true it omits the descriptor file
 // and uses server reflection instead.
-func newEchoTranscoder(t *testing.T, reflect bool) *Transcoder {
+func newEchoTranscoder(t testing.TB, reflect bool) *Transcoder {
 	t.Helper()
 	fdp := echoFileDescriptorProto(t)
 	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
