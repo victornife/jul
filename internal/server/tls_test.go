@@ -18,12 +18,13 @@ import (
 )
 
 // writeSelfSigned creates a self-signed cert/key for the given DNS names and
-// returns their file paths.
-func writeSelfSigned(t *testing.T, dir, name string, dnsNames ...string) (certPath, keyPath string) {
-	t.Helper()
+// returns their file paths. It takes testing.TB so both tests and benchmarks
+// can use it.
+func writeSelfSigned(tb testing.TB, dir, name string, dnsNames ...string) (certPath, keyPath string) {
+	tb.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	tmpl := x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
@@ -37,7 +38,7 @@ func writeSelfSigned(t *testing.T, dir, name string, dnsNames ...string) (certPa
 	}
 	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	certPath = filepath.Join(dir, name+".crt")
 	keyPath = filepath.Join(dir, name+".key")
