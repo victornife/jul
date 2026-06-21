@@ -1,10 +1,11 @@
 # Jul.IA Console
 
 The Console is a loopback-bound web control plane for operating a running
-Jul.IA server: a live metrics dashboard, upstream health, certificate
-inventory, safe configuration editing with version history and one-click
-rollback, and a setup wizard. It ships **inside the single binary** (no external
-assets, no Node build) and is gated by the `console` build tag.
+Jul.IA server: a live metrics dashboard, a runtime-status overview of which
+capabilities are active, upstream health, certificate inventory, safe
+configuration editing with version history and one-click rollback, and a setup
+wizard. It ships **inside the single binary** (no external assets, no Node
+build) and is gated by the `console` build tag.
 
 ## Enabling the console
 
@@ -45,6 +46,17 @@ the root instead; the JSON APIs below that do not require the tag (for example
 Polls `GET /api/stats` every two seconds and shows requests/sec, in-flight
 requests, error rate, cache-hit ratio, connection count, latency (avg/p50/p95/
 p99), a requests/sec sparkline, and a status-class breakdown.
+
+### Status
+
+A read-only overview of which shipped capabilities are active in the **running**
+configuration, grouped into Traffic, Security, Protocols, Upstreams,
+Observability, and Extensibility. Each row reports the capability, its state
+(active/off), and a short detail (counts and kinds only — never tokens, paths,
+or backend addresses). It lets an operator confirm at a glance what the running
+build is actually doing without reading the raw TOML. Backed by
+`GET /api/status`, derived from the parsed configuration; when the config is
+unavailable it renders an empty state.
 
 ### Upstreams
 
@@ -113,6 +125,9 @@ the current config, persists, and hot-reloads.
 ## Limitations (v1)
 
 - No RBAC/SSO or multi-node management (single-token, single-node).
-- No live log streaming (planned with the logging pipeline).
+- No live log streaming yet; access and error logs are written to the
+  configured sinks (server log, file, or syslog) and tailed there.
 - ACME certificate expiry is surfaced via metrics rather than parsed in the
   cert panel.
+- The Status overview reflects the parsed configuration (what is enabled), not
+  per-request live counters.

@@ -20,6 +20,8 @@ const configUIPage = `<!doctype html>
   header .brand { color: #5ac8fa; font-weight: 700; }
   header .ver { color: #8a93a2; font-size: 13px; }
   header .path { margin-left: auto; color: #8a93a2; font-size: 13px; }
+  header .back { color: #5ac8fa; text-decoration: none; font-size: 13px; }
+  header .back:hover { text-decoration: underline; }
   main { max-width: 920px; margin: 0 auto; padding: 24px; }
   .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
   .tabs button { background: #1c212b; color: #cdd3dd; border: 1px solid #2b313d;
@@ -51,6 +53,7 @@ const configUIPage = `<!doctype html>
 </head>
 <body>
 <header>
+  <a class="back" id="backLink" href="/" style="display:none">&larr; Console</a>
   <h1><span class="brand" id="brand">Jul.IA</span> Configuration</h1>
   <span class="ver" id="ver"></span>
   <span class="path" id="path"></span>
@@ -157,6 +160,7 @@ const configUIPage = `<!doctype html>
         document.getElementById('ver').textContent = d.version || '';
         document.getElementById('path').textContent = d.path || '';
         document.getElementById('tokenBox').style.display = d.authRequired ? 'block' : 'none';
+        document.getElementById('backLink').style.display = d.consoleEnabled ? 'inline' : 'none';
         if (d.settings) {
           document.getElementById('logLevel').value = d.settings.log_level || 'info';
           document.getElementById('logFormat').value = d.settings.log_format || 'text';

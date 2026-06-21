@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.1 · Updated 2026-06-21
+> Version 1.2 · Updated 2026-06-21
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -75,7 +75,7 @@ Done.
 | Y2-06 | WAF (Coraza + OWASP CRS) | ModSecurity-compatible WAF; embed CRS; block/detect per-location | Edge security without a separate WAF appliance | L |
 | Y2-07 | mTLS client auth + identity vars | Verify client certs; expose `$ssl_client_*`; per-location require | Zero-trust ingress; foundation for fleet and mesh later | M |
 | SEC-1 | Secrets references (pulled earlier from Y5-06) | `env`/`file` secret refs + log redaction + lint for literal secrets; Vault/KMS later | Removes scattered secret handling across ACME/JWT/forward-auth/mTLS/AI keys | M |
-| Y2-09 | Console v2 (reframed) | Live log tail, WASM plugin manager, gRPC route designer — delivered as **continuous per-feature Console panels**, not a monolithic release ([ADR 0004](../adr/0004-console-ui-invariants.md)) | Admin UI grows into an operations cockpit without a big-bang rewrite | L |
+| Y2-09 | Console v2 (reframed) | Live log tail, WASM plugin manager, gRPC route designer — delivered as **continuous per-feature Console panels**, not a monolithic release ([ADR 0004](../adr/0004-console-ui-invariants.md)). **In progress:** a read-only **Status** overview (capabilities active in the running config) shipped as the first continuous panel. | Admin UI grows into an operations cockpit without a big-bang rewrite | L |
 
 ### Near-term bet ⏳
 
@@ -176,5 +176,6 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.2 | Recorded the first **continuous Console v2 panel** under Y2-09: a read-only **Status** overview (which capabilities are active in the running config) plus a back-link from the standalone config page to the Console, keeping all screens navigable. | All feature rows, IDs, maturity states, and the Y2-09 framing as continuous per-feature panels. | [ADR 0004](../adr/0004-console-ui-invariants.md); [console.md](../console.md) |
 | 2026-06-21 | 1.1 | Added a **Maturity** column and delivery legend; reclassified all shipped Year 1–2 features from "Delivered" to **Beta** (gRPC transcoding + passthrough named first GA target); demoted Y2-08 to a **deferred, demand-gated** GraphQL *composition* prototype with explicit resolvers; reframed Y2-09 Console v2 as continuous per-feature panels; pulled secrets references earlier (SEC-1); added a **time-boxed** AI Gateway MVP bet; relabeled Years 3–5 as the **Vision horizon (demand-gated)**; fixed `adr/` and `specs/` links after the folder move. | All Year 1–5 feature rows, IDs, descriptions, impact and effort sizing (Years 3–5 preserved verbatim under the horizon banner). | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |
 | 2026-06-21 | 1.0 | Initial consolidated 5-year roadmap. | — | — |

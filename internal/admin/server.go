@@ -116,6 +116,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/config", s.handleConfigPage)
 	mux.HandleFunc("/ui", s.handleConfigPage)
 	mux.Handle("/api/stats", s.auth(http.HandlerFunc(s.handleStats)))
+	mux.Handle("/api/status", s.auth(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("/api/config", s.auth(http.HandlerFunc(s.handleConfigGet)))
 	mux.Handle("/api/config/raw", s.auth(http.HandlerFunc(s.handleConfigRaw)))
 	mux.Handle("/api/config/settings", s.auth(http.HandlerFunc(s.handleConfigSettings)))
@@ -352,12 +353,13 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := map[string]any{
-		"product":      s.deps.Product,
-		"version":      s.deps.Version,
-		"path":         s.deps.ConfigPath,
-		"authRequired": s.cfg.Token != "",
-		"rawEditable":  s.deps.WriteConfigRaw != nil,
-		"formEditable": s.deps.LoadConfig != nil && s.deps.SaveConfig != nil,
+		"product":        s.deps.Product,
+		"version":        s.deps.Version,
+		"path":           s.deps.ConfigPath,
+		"authRequired":   s.cfg.Token != "",
+		"rawEditable":    s.deps.WriteConfigRaw != nil,
+		"formEditable":   s.deps.LoadConfig != nil && s.deps.SaveConfig != nil,
+		"consoleEnabled": consoleCompiled && s.cfg.ConsoleEnabled(),
 	}
 	if s.deps.ReadConfigRaw != nil {
 		raw, err := s.deps.ReadConfigRaw()

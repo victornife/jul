@@ -122,6 +122,86 @@ func TestWizardGeneratesValidConfig(t *testing.T) {
 	}
 }
 
+func TestStatusAPI(t *testing.T) {
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			TLS:   &config.TLSConfig{Enabled: true},
+			HTTP3: &config.HTTP3Config{Enabled: true},
+			Locations: []config.LocationConfig{
+				{Root: "./public", Cache: true},
+				{ProxyPass: "http://127.0.0.1:9000", Auth: &config.AuthConfig{}},
+				{GRPCTranscode: &config.GRPCTranscodeConfig{Target: "127.0.0.1:50051"}},
+			},
+		}},
+		Upstreams: []config.UpstreamConfig{{
+			Name:        "api",
+			HealthCheck: &config.HealthCheckConfig{Enabled: true},
+			Discovery:   &config.DiscoveryConfig{Type: "dns"},
+		}},
+		Compression: config.CompressionConfig{Enabled: true, Encoders: []string{"gzip", "br"}},
+		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100},
+		Cache:       config.CacheConfig{Enabled: true},
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		Metrics:    http.NewServeMux(),
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var got []FeatureStatus
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	active := map[string]bool{}
+	for _, f := range got {
+		active[f.Name] = f.Active
+	}
+	wantActive := []string{
+		"Virtual hosts", "Static file serving", "Reverse proxy", "Response cache",
+		"Compression", "Rate limiting", "TLS", "Access control (auth)", "HTTP/3 (QUIC)",
+		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
+		"Prometheus metrics", "Access log",
+	}
+	for _, name := range wantActive {
+		if v, ok := active[name]; !ok {
+			t.Errorf("missing capability %q", name)
+		} else if !v {
+			t.Errorf("capability %q = inactive, want active", name)
+		}
+	}
+	wantInactive := []string{"FastCGI / uWSGI", "gRPC passthrough", "L4 stream proxy", "WASM plugins"}
+	for _, name := range wantInactive {
+		if active[name] {
+			t.Errorf("capability %q = active, want inactive", name)
+		}
+	}
+}
+
+func TestStatusAPINilHookReturnsEmptyArray(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if strings.TrimSpace(rr.Body.String()) != "[]" {
+		t.Errorf("body = %q, want []", rr.Body.String())
+	}
+}
+
+func TestStatusAPIMethodNotAllowed(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/status", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rr.Code)
+	}
+}
+
 func TestWizardRejectsBadInput(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
 	h := s.routes()
@@ -260,6 +340,7 @@ func TestConsoleAPIRequiresToken(t *testing.T) {
 		{http.MethodGet, "/api/upstreams"},
 		{http.MethodGet, "/api/certs"},
 		{http.MethodGet, "/api/history"},
+		{http.MethodGet, "/api/status"},
 		{http.MethodPost, "/api/wizard"},
 		{http.MethodPost, "/api/history/rollback"},
 	}

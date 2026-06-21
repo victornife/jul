@@ -181,6 +181,7 @@
     <div class="brand"><span class="dot"></span> <span id="brandName">Jul.IA</span></div>
     <nav id="nav">
       <a data-view="dashboard"    data-role="viewer"><span class="ico">▦</span> Dashboard</a>
+      <a data-view="status"       data-role="viewer"><span class="ico">◉</span> Status</a>
       <a data-view="config"       data-role="editor"><span class="ico">⚙</span> Configuration</a>
       <a data-view="upstreams"    data-role="viewer"><span class="ico">⤳</span> Upstreams</a>
       <a data-view="certificates" data-role="viewer"><span class="ico">🔒</span> Certificates</a>
@@ -239,6 +240,14 @@
         <h3>Status classes</h3>
         <div class="bars" id="status-bars"></div>
       </div>
+    </section>
+
+    <!-- Status -->
+    <section class="view" id="view-status">
+      <h2>Runtime status</h2>
+      <p class="sub">Which shipped capabilities are active in the running configuration.</p>
+      <div class="toolbar"><button class="btn secondary sm" id="status-refresh">Refresh</button></div>
+      <div id="status-host" class="stack"></div>
     </section>
 
     <!-- Configuration -->
@@ -325,8 +334,8 @@
       <h2>Logs</h2>
       <p class="sub">Live access and error streams.</p>
       <div class="placeholder">
-        <div class="big">Live logs are coming soon.</div>
-        <p>Streaming access and error logs arrive with the logging pipeline (Y2-09).</p>
+        <div class="big">Live log streaming isn't available yet.</div>
+        <p>Access and error logs are written to the configured sinks (the server log, a rotating file, or syslog). Tail them there for now; an in-console live stream is planned.</p>
       </div>
     </section>
   </main>
@@ -566,6 +575,42 @@
     }).catch(function (e) { host.innerHTML = '<div class="err-banner show">' + esc(e.message) + '</div>'; });
   }
 
+  // ----- runtime status overview -----
+  function loadStatus() {
+    var host = document.getElementById("status-host");
+    host.innerHTML = '<div class="muted">Loading…</div>';
+    api("/api/status").then(function (items) {
+      if (!items || !items.length) {
+        host.innerHTML = '<div class="placeholder"><div class="big">Runtime status is unavailable.</div>' +
+          '<p>The running configuration could not be read.</p></div>';
+        return;
+      }
+      var order = [];
+      var groups = {};
+      items.forEach(function (it) {
+        var g = it.group || "Other";
+        if (!groups[g]) { groups[g] = []; order.push(g); }
+        groups[g].push(it);
+      });
+      host.innerHTML = "";
+      order.forEach(function (g) {
+        var rows = groups[g].map(function (it) {
+          var cls = it.active ? "ok" : "";
+          var state = it.active ? "active" : "off";
+          return '<tr><td>' + esc(it.name) + '</td>' +
+            '<td><span class="badge ' + cls + '">' + state + '</span></td>' +
+            '<td class="muted">' + esc(it.detail || "—") + '</td></tr>';
+        }).join("");
+        var panel = document.createElement("div");
+        panel.className = "panel";
+        panel.innerHTML = '<h3>' + esc(g) + '</h3>' +
+          '<table class="tbl"><thead><tr><th>Capability</th><th>State</th><th>Detail</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody></table>';
+        host.appendChild(panel);
+      });
+    }).catch(function (e) { host.innerHTML = '<div class="err-banner show">' + esc(e.message) + '</div>'; });
+  }
+
   // ----- certificate panel -----
   function loadCerts() {
     var host = document.getElementById("cert-host");
@@ -690,7 +735,7 @@
   }
 
   // ----- view router -----
-  var views = ["dashboard", "config", "upstreams", "certificates", "history", "setup", "logs"];
+  var views = ["dashboard", "status", "config", "upstreams", "certificates", "history", "setup", "logs"];
   function showView(name) {
     if (views.indexOf(name) < 0) name = "dashboard";
     views.forEach(function (v) {
@@ -707,6 +752,8 @@
     if (name === "dashboard") {
       refresh();
       pollTimer = setInterval(refresh, POLL_MS);
+    } else if (name === "status") {
+      loadStatus();
     } else if (name === "upstreams") {
       loadUpstreams();
     } else if (name === "certificates") {
@@ -726,6 +773,7 @@
   });
 
   // panel actions
+  document.getElementById("status-refresh").addEventListener("click", loadStatus);
   document.getElementById("up-refresh").addEventListener("click", loadUpstreams);
   document.getElementById("cert-refresh").addEventListener("click", loadCerts);
   document.getElementById("hist-refresh").addEventListener("click", loadHistory);
