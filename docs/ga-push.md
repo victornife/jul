@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.7 · Updated 2026-06-21
+> Version 1.8 · Updated 2026-06-22
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -11,6 +11,10 @@ soak is tracked openly per feature and completed after the label lands.
 This is the execution log for that push. **Keep it current:** tick a feature's
 criteria as they land, flip its row to ✅ when it reaches GA, and add a changelog
 row.
+
+> At a glance: [docs/status.md](status.md) is the canonical maturity +
+> GA-criteria matrix across **all** features (it consolidates the waves and soak
+> table below with each feature's *GA status* table).
 
 ## The bar (per feature, soak excluded)
 
@@ -95,6 +99,7 @@ a soak failure is a release-blocking regression.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-22 | 1.8 | Added a pointer to the new canonical [status matrix](status.md), which consolidates this log's waves + soak table and the per-feature *GA status* tables into one at-a-glance source of truth. | The waves, the bar, the cross-cutting tasks, and the soak table; only a cross-reference is added. | [status.md](status.md) |
 | 2026-06-21 | 1.7 | **Cross-cutting: `SECURITY.md` umbrella threat model** (anchors criterion ⑦ fleet-wide). Added a top-level [SECURITY.md](../SECURITY.md): the edge trust model (config trusted, requests untrusted, no request-selected upstreams/JWKS), hardening defaults, a per-feature threat-note index (Core HTTP, auth, TLS/ACME, mTLS, gRPC transcoding/passthrough, console), the fuzzed-parser inventory, a cryptography summary, and a private vulnerability-reporting policy. **This completes all four cross-cutting tasks** — every GA criterion is now hosted/anchored fleet-wide. | Every feature's runtime behaviour and per-feature threat notes (the umbrella only indexes + links them); the waves and the bar. | [SECURITY.md](../SECURITY.md) |
 | 2026-06-21 | 1.6 | **Cross-cutting: fuzz corpus + CI fuzz job** (hosts criterion ⑧ fleet-wide). Added [scripts/fuzz.sh](../scripts/fuzz.sh) — it discovers every in-tree `Fuzz*` target (auth JWKS/token, router host/location, FastCGI script-name/socket-address, transcode path-template) and runs each for a short `-fuzztime` with the full opt-in tag set — and a `fuzz (smoke)` [CI job](../.github/workflows/ci.yml) that runs it on every push/PR, uploading any minimised crasher as a reproducible regression seed. Seed corpora stay in-code via `f.Add`. | Every feature's runtime behaviour, the waves, the bar, and the existing fuzz targets; only new CI tooling is added. | [scripts/fuzz.sh](../scripts/fuzz.sh), [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
 | 2026-06-21 | 1.5 | **Cross-cutting: perf-gate benchmark harness + CI job** (hosts criterion ② fleet-wide). Added [scripts/bench.sh](../scripts/bench.sh) — a single harness that runs every in-tree `Benchmark*` with the full opt-in tag set — and a `benchmarks (smoke)` [CI job](../.github/workflows/ci.yml) that runs it on every push/PR so benchmarks must keep compiling and executing without panic. A `.gitattributes` pins `*.sh` to LF. The job is a smoke + artifact gate, **not** a nanosecond regression gate (shared runners are too noisy); doc numbers are regenerated on a quiet machine. | Every feature's runtime behaviour, the waves, the bar, and the documented benchmark numbers; only new CI tooling is added. | [scripts/bench.sh](../scripts/bench.sh), [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
