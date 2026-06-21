@@ -3,6 +3,16 @@
 
 # JUL Engineering Execution Plan — Year 2 (Protocol Gateway + Extensibility Moat)
 
+> Version 1.1 · Updated 2026-06-21
+>
+> Maturity note: shipped Y2-01…05 are **Beta**, not GA (see
+> [ADR 0003](../adr/0003-maturity-and-ga.md)). gRPC transcoding + passthrough is
+> the **first GA target** and must clear the GA bar — including a conformance
+> matrix — before any *GA* label. Y2-08 GraphQL is **deferred / demand-gated** and
+> rescoped to explicit-resolver composition (see
+> [ADR 0002](../adr/0002-protocol-adaptation.md)). The wording "transcoding GA"
+> below is retained as the *target*, not a current claim.
+
 Goal: turn JUL from "great single-node proxy" into a PROTOCOL GATEWAY + EXTENSIBLE PLATFORM. Headlines: (A) gRPC transcoding GA incl streaming, (B) WASM plugin system (the moat), (C) L4 stream proxy. Plus gRPC passthrough, service discovery, WAF, mTLS, GraphQL (exploratory), Console v2.
 Exit: 3+ community WASM plugins; transcoding handles streaming; L4 TCP/UDP in prod; service discovery against K8s/Consul/DNS; mTLS + WAF available for platform teams.
 
@@ -19,7 +29,7 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 - Tasks: detect method streaming kind from descriptor -> NDJSON encoder w/ flush -> SSE encoder -> client-stream body decoder -> bidi WS bridge -> trailer mapping -> deadline propagation -> metadata mapping -> errors mid-stream -> jul_grpc_transcode_stream_msgs_total.
 - Deps: same as Y1-06 (protobuf, grpc) + nhooyr/coder websocket (reuse if added). Inter: Y2-09 designer, Y1-04 bearer->metadata.
 - Tests: unit (stream kind detect, NDJSON/SSE framing, trailer map); integration (real server-stream echo -> NDJSON+SSE; client-stream; bidi over WS); e2e example updated.
-- DoD: all 4 method kinds transcode; streaming flushes incrementally (no buffering); deadlines+trailers correct; designer round-trips descriptor->config; preview->GA flag removed.
+- DoD (GA bar, per [ADR 0003](../adr/0003-maturity-and-ga.md)): all 4 method kinds transcode; streaming flushes incrementally (no buffering); deadlines+trailers correct; designer round-trips descriptor->config. A published **conformance matrix** (method kind × HTTP rule × stream mode × pass/fail) + reproducible **benchmarks** + a **known-limitations** doc are mandatory before the *GA* label; until then the feature stays **Beta**. (Code follow-up: the stale "unary" comment at handler/grpctranscode.go must be corrected to reflect implemented streaming.)
 - Risks: backpressure/slow client, half-close semantics, WS proxy infra, large messages. Mitigate limits+timeouts+flush.
 - Rollout: tag grpc; remove "preview" note; streaming opt-in per location.
 - Docs: README gRPC GA (streaming modes table), examples/grpc-gateway streaming, docs/grpc-transcoding.md, CHANGELOG.
@@ -102,18 +112,20 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 - Rollout: core; per-server/per-location opt-in.
 - Docs: README mTLS + identity vars table, docs/mtls.md, testdata/mtls.toml, CHANGELOG.
 
-## Y2-08 GraphQL gateway (exploratory) — SQ-PROTO P2 L
-- Objective: GraphQL front over REST/gRPC backends; schema-first declarative resolvers; persisted queries; depth/complexity limits. HONEST: hard, exploratory; ship behind tag, possibly as WASM plugin first.
-- Design: two-track. Track A (preferred MVP): built-in schema-first gateway using gqlgen or graphql-go executor with a DECLARATIVE resolver map (field -> REST endpoint or gRPC method via Y2-01 transcoder). New ActionGraphQL location action serving /graphql (POST + GET introspection toggle). Track B: deliver as WASM plugin (Y2-02) if built-in proves too heavy. Add query depth+complexity limiting, persisted-query allowlist, APQ. Batch/dataloader for N+1.
+## Y2-08 GraphQL composition prototype (explicit resolvers) — SQ-PROTO · DEFERRED / demand-gated · L
+- Status: **Deferred** behind the GraphQL evidence gate — built only when users need BFF/composition over existing REST/gRPC (see [ADR 0002](../adr/0002-protocol-adaptation.md) and [ADR 0003](../adr/0003-maturity-and-ga.md)). Not on the committed Year-2 track.
+- Objective: a schema-first GraphQL composition layer with **explicit resolvers** over REST/gRPC backends; persisted queries; depth/complexity limits. Explicitly **NOT** "GraphQL without resolvers" and **NOT** auto-generated from proto/OpenAPI.
+- Scope guardrails (ADR 0002): Query + Mutation only (no Subscriptions); resolvers map to gRPC/REST **unary** calls; **no federation**; depth + complexity limits and resolver tracing are required from day one.
+- Design: schema-first gateway using gqlgen or graphql-go executor with a DECLARATIVE resolver map (field -> REST endpoint or gRPC method via Y2-01 transcoder). New ActionGraphQL location action serving /graphql (POST + GET introspection toggle). Add query depth+complexity limiting, persisted-query allowlist, APQ. Batch/dataloader for N+1. Alternative delivery as a WASM plugin (Y2-02) remains possible.
 - Config: GraphQLConfig on LocationConfig (ActionGraphQL): schema_file, resolvers (field->{rest{url,method}|grpc{target,method}}), max_depth, max_complexity, introspection bool, persisted_only bool.
 - New: internal/handler/graphql.go + ActionGraphQL; internal/graphql/{schema.go,resolve.go,limits.go}. Tag graphql.
 - Tasks: schema load -> executor wiring -> declarative resolver -> REST resolver -> gRPC resolver (reuse transcode invoke) -> dataloader batching -> depth+complexity analyzer -> persisted queries/APQ -> introspection toggle -> jul_graphql_requests_total, resolver_errors_total.
 - Deps: 99designs/gqlgen or graph-gophers/graphql-go; dataloader lib. Inter: Y2-01 gRPC invoke; Y2-02 alt delivery.
-- Tests: unit (depth/complexity reject, resolver mapping); integration (query spanning REST+gRPC backends returns merged JSON, persisted-only blocks ad-hoc, introspection toggle); 
-- DoD: declarative schema serves queries over >=1 REST + >=1 gRPC backend; depth+complexity limits enforced; persisted queries; introspection toggle; documented limitations.
-- Risks: schema stitching complexity, N+1 (dataloader), security (introspection/complexity DoS), scope creep -> keep declarative-only, defer federation. 
-- Rollout: tag graphql; clearly "experimental"; off by default.
-- Docs: README GraphQL (experimental, scope+limits), docs/graphql.md, examples/graphql, CHANGELOG.
+- Tests: unit (depth/complexity reject, resolver mapping); integration (query spanning REST+gRPC backends returns merged JSON, persisted-only blocks ad-hoc, introspection toggle).
+- DoD: declarative schema with explicit resolvers serves queries over >=1 REST + >=1 gRPC backend; depth+complexity limits enforced; persisted queries; introspection toggle; documented limitations. Stays **Prototype/Alpha** until the gate trips and the GA bar is met.
+- Risks: schema stitching complexity, N+1 (dataloader), security (introspection/complexity DoS), scope creep -> keep declarative explicit-resolver only, defer federation. 
+- Rollout: tag graphql; clearly "deferred/experimental"; off by default; not built unless the gate trips.
+- Docs: README GraphQL (deferred, explicit-resolver scope+limits), docs/graphql.md, examples/graphql, CHANGELOG.
 
 ## Y2-09 Console v2 (log tail, plugin manager, route designer) — SQ-CONSOLE P0/P1 L
 - Objective: extend Console v1 with live log tail, WASM plugin manager, gRPC transcoding route designer, richer dashboards. Out: RBAC/SSO+multi-node (Y3).
@@ -130,6 +142,9 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 
 ## Cross-cutting Y2
 - Perf: extend harness with L4 throughput, gRPC streaming, WASM per-invocation overhead, WAF cost; CI regression gate stays green.
+- Console-first ([ADR 0004](../adr/0004-console-ui-invariants.md)): every Y2 feature ships a lean, self-explanatory Console surface as part of DoD; "done" includes operable + observable from the Console without reading docs. Console v2 (Y2-09) is the sum of these per-feature panels, not a separate monolith.
+- Secrets references (SEC-1, pulled earlier from Y5-06): introduce `env`/`file` secret refs + log redaction + a lint for literal secrets, used by ACME/JWT/forward-auth/mTLS (and the AI MVP key). Vault/KMS/SPIFFE remain later.
+- Maturity/GA ([ADR 0003](../adr/0003-maturity-and-ga.md)): shipped Y2 features are **Beta**; the *GA* label requires the full GA bar (conformance matrix, benchmarks, known-limitations, semver-stable contract, soak test, runnable example+docs, security/threat note, fuzzing, Console surface). gRPC transcoding + passthrough is the first GA target.
 - Security: WASM sandbox threat model + audit; WAF tuning guide; mTLS verify paths; fetch SSRF allowlist; fuzz transcode httprule + plugin ABI + PROXY parser.
 - Docs (exhaustive, in sync): every feature updates README feature table+config ref, docs/<feature>.md, testdata/*.toml, examples/<feature>/, CHANGELOG. DoD blocks merge w/o docs.
 - Build/release: extend tag matrix (wasm,stream,waf,graphql,consul,kubernetes); build-min stays lean; document each tag's deps/size delta.
@@ -148,3 +163,10 @@ graph LR
   TLS[Y1-01 tls.go] --> Y207[Y2-07 mTLS]
   Y201 --> Y208[Y2-08 GraphQL]
   WASM --> Y208
+
+## Changelog
+
+| Date | Ver | What changed | What stayed | Source |
+| --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.1 | Added a maturity note (Y2-01…05 are Beta, not GA); set gRPC transcoding + passthrough as the first GA target with a mandatory conformance matrix in DoD; rescoped Y2-08 from "GraphQL without resolvers" to a **deferred, demand-gated** explicit-resolver composition prototype; added Console-first (per-feature panels), secrets-references (SEC-1), and GA-bar cross-cutting items; flagged the stale `unary` comment in handler/grpctranscode.go as a code follow-up. | All squad/quarter plans, feature designs, configs, tasks, tests, dependency graph, and the other feature sections. | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |
+| 2026-06-21 | 1.0 | Initial Year-2 engineering execution spec. | — | — |

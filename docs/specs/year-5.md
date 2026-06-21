@@ -3,6 +3,11 @@
 
 # JUL Engineering Execution Plan — Year 5 (Global scale, Mesh & Cloud — commercial completion)
 
+> Version 1.0 · Updated 2026-06-21 · **Vision horizon — demand-gated.** Cloud/mesh/
+> GSLB are not committed; entered only when their evidence gates trip (see
+> [ADR 0003](../adr/0003-maturity-and-ga.md)). The "most powerful" framing below is
+> superseded by the vision's *leanest serious gateway* positioning.
+
 Goal: complete the OSS -> open-core -> CLOUD ladder and the "global, powerful, still friendly" endgame. Headlines: (A) JUL CLOUD (managed SaaS, STAGED: hosted Console + bring-your-own-nodes BEFORE building anycast network), (B) GSLB (geo-routing + multi-region health-aware failover), (C) Service mesh mode (ambient/sidecar, mTLS east-west, SPIFFE/SVID). Plus bot/DDoS mitigation, RUM + synthetic + SLO tracking in Console, secrets/identity integrations (Vault/KMS/SPIFFE), ecosystem maturity (certification, gallery, learning hub).
 Exit: paying JUL Cloud tenants managing their fleets from a hosted Console (BYO nodes); geo-aware multi-region routing+failover; JUL runs as a mesh data plane w/ SPIFFE identities + east-west mTLS; bot/DDoS mitigation live; RUM+SLO in Console; secrets via Vault/KMS; mature ecosystem (certified plugins, templates, docs hub).
 REV3 honored: JUL Cloud STARTS THIN (hosted Console + BYO-nodes), build global anycast + usage billing only once demand proven (avoid capital-heavy upfront). Mesh + GSLB are the "most powerful" endgame; friendliness preserved via Console + AI assist (Y4-05) across all of it.
@@ -163,3 +168,9 @@ graph LR
   Tmpl[Y4-08 templates] --> Eco
   AllSecrets[Y1-01/Y3-02/Y4-01 secrets] --> Secrets
   ALL[every feature] --> Cap[Y5-09 global perf + GA hardening]
+
+## Changelog
+
+| Date | Ver | What changed | What stayed | Source |
+| --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.0 | Added a version stamp and a **Vision horizon — demand-gated** note; flagged that the "most powerful" framing is superseded by the vision's *leanest serious gateway* positioning. No scope change to the spec body. | The entire Year-5 spec body. | [review 2026-06-21](../reviews/); [ADR 0003](../adr/0003-maturity-and-ga.md) |

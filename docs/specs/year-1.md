@@ -3,6 +3,9 @@
 
 # JUL Engineering Execution Plan — YEAR 1 (maximum detail)
 
+> Version 1.0 · Updated 2026-06-21 · Maturity: shipped at **Beta** (not GA) per
+> [ADR 0003](../adr/0003-maturity-and-ga.md).
+
 Delivery model: one year per turn; uniform max detail. Each feature has 11 sections:
 Objective/scope · Squad·Priority·Effort · Design · Config(Go+TOML) · New files/interfaces ·
 Implementation tasks · Dependencies · Test plan · Acceptance(DoD) · Risks/edge ·
@@ -389,3 +392,9 @@ DOCS: README HTTP/3 (enable steps, UDP/firewall note, h3 limits); server.toml; C
 - All P0 (ACME, Console v1, gRPC MVP, Compression, Rate/conn limit) shipped + documented + examples.
 - zero->HTTPS <60s demoable; Console operates config+reload+rollback; OTel trace demoable; gRPC unary transcoding demoable.
 - Perf gate green (within 10-15% NGINX). CI: tests+race+lint+vuln green. README/docs exhaustive and in sync. build-min and build-full both produce working binaries.
+
+## Changelog
+
+| Date | Ver | What changed | What stayed | Source |
+| --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.0 | Added a version stamp and a maturity note (shipped at Beta, not GA); no scope change. | The entire Year-1 spec body. | [review 2026-06-21](../reviews/); [ADR 0003](../adr/0003-maturity-and-ga.md) |

@@ -3,6 +3,12 @@
 
 # JUL Engineering Execution Plan — Year 4 (AI-native + Edge platform)
 
+> Version 1.0 · Updated 2026-06-21 · **Vision horizon — demand-gated.** Entered via
+> the time-boxed AI Gateway MVP (`ai` tag) with a kill/continue gate; the full
+> program is not committed (see [ADR 0003](../adr/0003-maturity-and-ga.md)). The
+> "most powerful" framing below is superseded by the vision's positioning —
+> *leanest serious edge/protocol gateway*, not most-powerful overall.
+
 Goal: deliver on the ".IA" in Jul.IA — make JUL simultaneously the MOST POWERFUL (AI Gateway category, edge compute, CDN-grade cache) and FRIENDLIEST (natural-language ops) light server. Headlines: (A) AI GATEWAY (LLM proxy: multi-provider routing+failover, semantic cache, token rate-limit, guardrails, cost observability), (B) AI-assisted Console (NL->config, anomaly detection, plain-English incidents), (C) Edge compute / WASM FaaS (staged: richer plugins first). Plus CDN-grade caching, 1-click app templates, new standards (Early Hints 103, WebTransport, post-quantum TLS).
 Exit: proxy LLM traffic across >=3 providers w/ failover; semantic cache cuts token spend; per-key token budgets + cost dashboards; guardrails block prompt-injection/PII; Console turns plain English into validated config; edge plugins get KV+fetch+cron; CDN tiering+image-opt+ESI+tag-purge; PQ-TLS + Early Hints + WebTransport.
 REV3 decision honored: AI Gateway is FULL-SCOPE here in Y4 (no early Y2/3 preview). Edge = richer WASM plugins first; full Workers-style FaaS only if ecosystem pulls.
@@ -160,3 +166,9 @@ graph LR
   Mkt[Y3-07 marketplace] --> Tmpl[Y4-08 templates]
   H3[Y1-11 HTTP/3] --> Std[Y4-09 standards]
   TLS[Y1-01 TLS] --> Std
+
+## Changelog
+
+| Date | Ver | What changed | What stayed | Source |
+| --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.0 | Added a version stamp and a **Vision horizon — demand-gated** note; flagged that the "most powerful" framing is superseded by the vision's *leanest serious gateway* positioning and that entry is via the time-boxed AI MVP. No scope change to the spec body. | The entire Year-4 spec body. | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md) |

@@ -3,6 +3,10 @@
 
 # JUL Engineering Execution Plan — Year 3 (Scale, Fleet & Ecosystem — open-core monetization)
 
+> Version 1.0 · Updated 2026-06-21 · **Vision horizon — demand-gated.** Not a
+> committed plan; entered only when fleet/K8s evidence gates trip (see
+> [ADR 0003](../adr/0003-maturity-and-ga.md)).
+
 Goal: take JUL from single-node platform to FLEET-SCALE + ENTERPRISE-READY + K8S-NATIVE. This is where open-core monetization lands. Headlines: (A) multi-node control plane (fleet config sync + staged rollout), (B) Kubernetes Ingress + Gateway API, (C) Console RBAC + SSO/SAML. Plus distributed cache/rate-limit, traffic management, hot binary upgrade, plugin marketplace, audit logging.
 Exit: manage N nodes from one control plane w/ staged rollout+rollback; run as a K8s ingress controller at scale; RBAC+SSO gate the Console; distributed cache+rate-limit across nodes; canary/blue-green/mirroring; signed-plugin marketplace; tamper-evident audit log.
 
@@ -157,3 +161,9 @@ graph LR
   Traffic --> CV3
   WASM[Y2-02 plugins] --> Mkt[Y3-07 marketplace]
   Drain[server graceful drain] --> Upg[Y3-06 hot upgrade]
+
+## Changelog
+
+| Date | Ver | What changed | What stayed | Source |
+| --- | --- | --- | --- | --- |
+| 2026-06-21 | 1.0 | Added a version stamp and a **Vision horizon — demand-gated** note; no scope change. | The entire Year-3 spec body. | [review 2026-06-21](../reviews/); [ADR 0003](../adr/0003-maturity-and-ga.md) |
