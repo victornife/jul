@@ -101,6 +101,33 @@ jobs:
           name: benchmark-results
           path: bench-results.txt
 
+  fuzz:
+    name: fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Active fuzzing burst: every in-tree Fuzz* target must survive a short
+      # -fuzztime without finding a crasher, with the full opt-in tag set so
+      # tagged targets (e.g. FuzzParseTemplate behind `grpc`) are covered.
+      - name: run fuzz harness
+        env:
+          FUZZTIME: 20s
+          FUZZ_TAGS: ${{ env.FULL_TAGS }}
+        run: scripts/fuzz.sh
+      # A crasher is minimised into testdata/fuzz/<Target>/; upload it so the
+      # input is reproducible and can be committed as a permanent regression seed.
+      - name: upload fuzz crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: '**/testdata/fuzz/**'
+          if-no-files-found: ignore
+
   format:
     name: gofmt
     runs-on: ubuntu-latest
