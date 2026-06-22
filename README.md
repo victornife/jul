@@ -16,6 +16,10 @@ interface — all in a single static, dependency-free binary.
 > [engineering specs](docs/specs/). Durable technical decisions are
 > recorded as [ADRs](docs/adr/), and how the direction evolves is tracked in
 > the [reviews & decision log](docs/reviews/).
+>
+> New to HTTP, proxies, TLS, caching, or observability? The
+> [concepts appendix](docs/vision/appendix.md) walks through how a request
+> travels through modern edge infrastructure, from first principles.
 
 ---
 

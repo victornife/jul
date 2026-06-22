@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.9 · Updated 2026-06-22
+> Version 1.10 · Updated 2026-06-22
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -9,7 +9,9 @@ an ADR is added, link it where relevant.
 
 Detailed per-feature engineering specs (design, config, tasks, DoD) live in
 [specs/](../specs/) — one file per year. The product direction behind these
-changes is recorded in the [reviews & decision log](../reviews/).
+changes is recorded in the [reviews & decision log](../reviews/). New to the
+terminology in this plan? The [concepts appendix](../vision/appendix.md) explains
+HTTP, proxies, TLS, caching, and observability from first principles.
 
 Effort uses T-shirt sizing: **M** ≈ weeks · **L** ≈ ~a quarter · **XL** ≈
 multi-quarter.
@@ -191,6 +193,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-22 | 1.10 | Linked the new beginner-friendly [concepts appendix](../vision/appendix.md) (HTTP, proxies, TLS, caching, observability from first principles) from the intro. | All feature rows, IDs, maturity states, and the 5-year plan. | [appendix.md](../vision/appendix.md) |
 | 2026-06-22 | 1.9 | Fixed **Y2-07 mTLS checklist drift**: the Year-2 completion line still listed mTLS as *committed remaining* and counted **5/9** even though it shipped and reached **GA — soak pending** — corrected to **6/9 shipped**, removed Y2-07 from the remaining list, and recorded which shipped features are GA. Added the canonical [status matrix](../status.md) as the single source of truth for maturity + GA criteria and wired it into the Maintenance steps. | All feature rows, IDs, descriptions, and maturity states; only the stale checklist counts/labels change, plus a new cross-reference. | [status.md](../status.md) |
 | 2026-06-21 | 1.8 | **Y1-04 authentication → GA** (GA push) and **relabeled every soak-pending GA feature `GA` → `GA — soak pending`** for honesty (Core HTTP, gRPC transcoding/passthrough, mTLS, TLS+ACME, auth). Published [docs/auth.md](../auth.md) (CIDR/Basic/JWT/forward-auth behaviour matrix, JWKS + algorithm-confusion threat note, limits, GA table); added `BenchmarkBasicVerify`/`BenchmarkJWTValidate` and `FuzzParseJWKS`/`FuzzValidateToken`. | All feature rows, IDs, and the soak post-GA gate ([ADR 0005](../adr/0005-soak-post-ga-gate.md)); only the label wording and the Y1-04 maturity change. | [auth.md](../auth.md), [ga-push.md](../ga-push.md) |
 | 2026-06-21 | 1.7 | **Core HTTP → GA** (GA push). The foundational request stack — static serving, reverse proxy, FastCGI/uWSGI, virtual hosts, and location routing — reaches **GA**: published [docs/core-http.md](../core-http.md) (host/location/static/proxy/FastCGI/balancing matrices, path-traversal + SSRF + CRLF threat note, limits), added router/balancer/static benchmarks and router + FastCGI fuzz targets, contract frozen under the [compatibility policy](../compatibility.md). Soak stays a post-GA gate. | All feature rows, IDs, and (Beta) maturity states; runtime behaviour is unchanged — only the new doc, tests, and the GA label. | [core-http.md](../core-http.md), [ga-push.md](../ga-push.md) |

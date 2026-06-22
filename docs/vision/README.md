@@ -1,6 +1,6 @@
 # Jul.IA — Vision
 
-> Version 1.2 · Updated 2026-06-22
+> Version 1.3 · Updated 2026-06-22
 >
 > Status snapshot: Year 1 shipped (11/11); Year 2 in progress (Y2-01–Y2-05 +
 > Y2-07 shipped — 6/9). Most features are **Beta**; Core HTTP, Y1-01 TLS+ACME,
@@ -125,11 +125,15 @@ example: the AI Gateway MVP behind the `ai` tag).
 - [Engineering specs](../specs/) — detailed per-feature plans.
 - [Architecture Decision Records](../adr/) — durable technical decisions.
 - [Reviews & decision log](../reviews/) — how the product direction evolves.
+- [Concepts appendix](appendix.md) — a beginner-friendly primer on HTTP,
+  proxies, TLS, caching, and observability for readers new to edge
+  infrastructure.
 
 ## Changelog
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-22 | 1.3 | Linked the new beginner-friendly [concepts appendix](appendix.md) — how a request travels through modern edge infrastructure (HTTP, proxies, TLS, caching, observability) — from **Related documents**. | The vision body, pillars, commitments, status snapshot, and demand-gated horizons. | [appendix.md](appendix.md) |
 | 2026-06-22 | 1.2 | Refreshed the status snapshot: added the shipped **Y2-07 mTLS** (Year 2 is now 6/9 shipped, not "Y2-01…Y2-05") and recorded that Core HTTP, Y1-01, Y1-04, Y2-01, Y2-04, and Y2-07 are **GA — soak pending** rather than all-Beta; pointed maturity at the canonical [status matrix](../status.md). | The vision body, pillars, commitments, and the demand-gated horizon. | [status.md](../status.md), [roadmap](../roadmap/) |
 | 2026-06-21 | 1.1 | Repositioned pillar 1 from "most powerful" to "leanest serious gateway"; added commitments *Operable by design / Console-first*, *Explicit adapters not universal conversion*, *Evidence before expansion*; added an evidence-gates table; softened the OSS→open-core→Cloud ladder to a demand-gated horizon with a two-edition (Core/OSS · Full) model; extended non-goals; fixed ADR links after the folder move. | The three-pillar model, the *leanness-wins* tie-breaker, and the single-binary / no-cgo / validate-then-atomic-reload / stable-seams commitments. | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |
 | 2026-06-21 | 1.0 | Initial vision. | — | — |
