@@ -145,7 +145,7 @@ Both are pinned by passthrough conformance tests
 (`TestProxyWebSocketPassthrough` drives a real WebSocket echo with text and
 binary frames; `TestProxyServerSentEventsStreaming` proves events are streamed,
 not buffered). WebSocket upgrades are not available on HTTP/3 listeners (clients
-transparently fall back to HTTP/2 — see [http3.md](http3.md)).
+transparently fall back to HTTP/2 — see [HTTP/3 (QUIC)](../README.md#http3-quic)).
 
 ## FastCGI / uWSGI
 
