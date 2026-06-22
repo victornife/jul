@@ -158,8 +158,11 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			aspan.End()
 			span.SetStatus(resp.StatusCode)
 			// Hold the in-flight slot until the response body is closed so
-			// least-conn balancing reflects the full request lifetime.
-			resp.Body = &releaseBody{ReadCloser: resp.Body, release: func() { t.pool.Release(b) }}
+			// least-conn balancing reflects the full request lifetime. For a
+			// protocol upgrade (101) the body is also writable and ReverseProxy
+			// splices it bidirectionally, so the wrapper preserves
+			// io.ReadWriteCloser (WebSocket / raw stream passthrough).
+			resp.Body = wrapReleaseBody(resp.Body, func() { t.pool.Release(b) })
 			return resp, nil
 		}
 		aspan.RecordError(err)
@@ -188,6 +191,31 @@ func (r *releaseBody) Close() error {
 	r.once.Do(r.release)
 	return r.ReadCloser.Close()
 }
+
+// wrapReleaseBody attaches the in-flight slot release to a response body. A
+// protocol-upgrade (HTTP 101) response carries a writable body that
+// httputil.ReverseProxy type-asserts to io.ReadWriteCloser to splice the
+// upgraded connection (WebSocket, raw TCP-over-HTTP). The plain releaseBody is
+// read-only, which would break that assertion, so upgrade bodies are wrapped in
+// releaseRWBody to keep the Write method exposed.
+func wrapReleaseBody(body io.ReadCloser, release func()) io.ReadCloser {
+	rb := &releaseBody{ReadCloser: body, release: release}
+	if rw, ok := body.(io.ReadWriteCloser); ok {
+		return &releaseRWBody{releaseBody: rb, w: rw}
+	}
+	return rb
+}
+
+// releaseRWBody is wrapReleaseBody's variant for upgrade responses whose body is
+// also writable. Read and Close are promoted from the embedded releaseBody (so
+// the slot is still released exactly once); Write is forwarded to the upgraded
+// connection.
+type releaseRWBody struct {
+	*releaseBody
+	w io.Writer
+}
+
+func (r *releaseRWBody) Write(p []byte) (int, error) { return r.w.Write(p) }
 
 func isIdempotent(method string) bool {
 	switch method {
