@@ -1,0 +1,51 @@
+# Local full-stack test config with Node + Python upstreams.
+
+[global]
+worker_threads = "auto"
+log_level = "info"
+log_format = "text"
+shutdown_timeout = "30s"
+
+[[servers]]
+listen = "127.0.0.1:8088"
+server_names = ["localhost"]
+client_max_body_size = "8m"
+max_header_bytes = "1m"
+read_header_timeout = "10s"
+idle_timeout = "60s"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://backend"
+  cache = true
+
+    [servers.locations.headers]
+    Host = "$host"
+    X-Real-IP = "$remote_addr"
+    X-Forwarded-For = "$proxy_add_x_forwarded_for"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  try_files = ["$uri", "$uri/", "/index.html"]
+
+[[upstreams]]
+name = "backend"
+strategy = "round_robin"
+servers = [
+  "127.0.0.1:3000",
+  "127.0.0.1:3001",
+]
+
+[cache]
+enabled = true
+memory_max_size = "64m"
+default_ttl = "60s"
+stale_if_error = "30s"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9098"
+token = "smoketoken"
+console = true
