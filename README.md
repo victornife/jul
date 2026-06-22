@@ -67,6 +67,7 @@ interface — all in a single static, dependency-free binary.
 | ---- | ---------- |
 | **Static files** | Document root serving, index files, `try_files`, optional directory listing, hidden-file control, `Cache-Control` headers |
 | **Reverse proxy** | `proxy_pass` to a concrete URL or a named upstream; per-location connect/read/send timeouts; custom upstream headers with variable expansion |
+| **WebSocket & SSE** | Transparent passthrough of `Connection: Upgrade` (HTTP `101`) connections — text and binary frames spliced bidirectionally (Apollo GraphQL subscriptions, Socket.IO) — and `text/event-stream` / chunked responses streamed per write, never buffered (Node/Python SSE) |
 | **Load balancing** | `round_robin`, `weighted_round_robin`, and `least_conn` strategies across an upstream pool |
 | **Health & failover** | Passive health checking (`max_fails` / `fail_timeout`) plus optional active HTTP/TCP probes (`[upstreams.health_check]`), with automatic retry of idempotent requests against healthy backends |
 | **Service discovery** | Resolve an upstream's backends dynamically and refresh the pool live without a reload (`[upstreams.discovery]`): **DNS** A/AAAA and **DNS SRV** in every build, plus **Consul** and **Kubernetes** EndpointSlices behind the `consul`/`kubernetes` build tags — failed or empty resolves keep the last-good backends |

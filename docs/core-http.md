@@ -125,7 +125,27 @@ transport that picks a backend from the named (or anonymous) upstream pool.
 | Failover | one retry per backend, **idempotent methods only** (GET/HEAD/OPTIONS/TRACE/PUT/DELETE) and only when the body is re-readable |
 | Timeouts | `proxy_connect_timeout` (default 10s), `proxy_read_timeout`, 90s idle |
 | Connection reuse | `MaxIdleConns` 100, `MaxIdleConnsPerHost` 32, HTTP/2 attempted |
+| WebSocket / SSE | `Connection: Upgrade` (HTTP `101`) spliced bidirectionally; `text/event-stream` and chunked responses streamed (flushed per write, never buffered) |
 | Error mapping | 503 no backend, 504 timeout, 502 connection error |
+
+### WebSocket & streaming passthrough
+
+The reverse proxy transparently carries long-lived streaming protocols with no
+special configuration:
+
+- **WebSocket** — an `Upgrade` request that the backend answers with `101
+  Switching Protocols` is hijacked and spliced bidirectionally, so text and
+  binary frames flow through untouched. This is the transport behind Apollo
+  GraphQL subscriptions (`graphql-ws`) and Socket.IO / engine.io.
+- **Server-Sent Events** — `text/event-stream` (and any chunked or
+  unknown-length) response is flushed to the client per write rather than
+  buffered, so Node/Python SSE endpoints deliver events in real time.
+
+Both are pinned by passthrough conformance tests
+(`TestProxyWebSocketPassthrough` drives a real WebSocket echo with text and
+binary frames; `TestProxyServerSentEventsStreaming` proves events are streamed,
+not buffered). WebSocket upgrades are not available on HTTP/3 listeners (clients
+transparently fall back to HTTP/2 — see [http3.md](http3.md)).
 
 ## FastCGI / uWSGI
 
@@ -235,7 +255,7 @@ the other eight criteria are met.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
-| 1 | Behaviour matrix published | ✅ [host](#virtual-host-matching), [location](#location-matching), [static](#static-file-serving), [proxy](#reverse-proxy), [FastCGI/uWSGI](#fastcgi--uwsgi), [balancing](#load-balancing) tables |
+| 1 | Behaviour matrix published | ✅ [host](#virtual-host-matching), [location](#location-matching), [static](#static-file-serving), [proxy](#reverse-proxy) (incl. [WebSocket/SSE passthrough](#websocket--streaming-passthrough)), [FastCGI/uWSGI](#fastcgi--uwsgi), [balancing](#load-balancing) tables |
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) (routing, balancing, static serve) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
 | 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
