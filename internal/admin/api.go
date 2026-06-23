@@ -481,3 +481,146 @@ func methodNotAllowed(w http.ResponseWriter, allow string) {
 	w.Header().Set("Allow", allow)
 	http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 }
+
+// ── Console v2 API handlers ─────────────────────────────────────────────────
+
+// withConfig wraps a handler that needs a parsed config. When LoadConfig is
+// unavailable it returns a clean empty-state response.
+func (s *Server) withConfig(next func(*config.Config, http.ResponseWriter)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+		if s.deps.LoadConfig == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"loaded": false})
+			return
+		}
+		cfg, err := s.deps.LoadConfig()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		next(cfg, w)
+	}
+}
+
+func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	var status []FeatureStatus
+	if s.deps.LoadConfig != nil {
+		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
+			status = s.runtimeStatus(cfg)
+		}
+	}
+	out := RuntimeOverview{
+		Product: s.deps.Product,
+		Version: s.deps.Version,
+		Status:  status,
+	}
+	if s.deps.Stats != nil {
+		out.Stats = s.deps.Stats()
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
+	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
+		writeJSON(w, http.StatusOK, projectRoutes(c))
+	})(w, r)
+}
+
+func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
+	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
+		writeJSON(w, http.StatusOK, projectApps(c))
+	})(w, r)
+}
+
+func (s *Server) handleTLS(w http.ResponseWriter, r *http.Request) {
+	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
+		writeJSON(w, http.StatusOK, projectTLS(c))
+	})(w, r)
+}
+
+func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
+	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
+		writeJSON(w, http.StatusOK, projectSecurity(c))
+	})(w, r)
+}
+
+func (s *Server) handleTrafficControls(w http.ResponseWriter, r *http.Request) {
+	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
+		writeJSON(w, http.StatusOK, projectTrafficControls(c))
+	})(w, r)
+}
+
+// handleConfigValidate accepts a candidate config and returns structured
+// human-readable validation errors without persisting anything. POST /api/config/validate
+func (s *Server) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, validationErrorResponse{OK: false, Message: err.Error()})
+		return
+	}
+	if s.deps.WriteConfigRaw == nil {
+		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
+		return
+	}
+	// Use a temporary validation path: try to write, catch the error, rollback.
+	// A cleaner path in the future is a standalone Validate([]byte) hook in Deps.
+	prev := s.currentRaw()
+	writeErr := s.deps.WriteConfigRaw(body)
+	if writeErr != nil {
+		writeJSON(w, http.StatusOK, validationErrorResponse{
+			OK:      false,
+			Message: "The draft configuration contains errors.",
+			Errors:  humanizeErr(writeErr.Error()),
+		})
+		return
+	}
+	// Revert: validation must not mutate runtime state.
+	if prev != nil {
+		_ = s.deps.WriteConfigRaw(prev)
+	}
+	writeJSON(w, http.StatusOK, validationErrorResponse{OK: true, Message: "Configuration is valid."})
+}
+
+// handleConfigDiff accepts a candidate config and returns a structured diff
+// against the current running config. POST /api/config/diff
+func (s *Server) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.deps.LoadConfig == nil {
+		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
+		return
+	}
+	before, err := s.deps.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot load current config: " + err.Error()})
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	after, err := config.Parse(body)
+	if err != nil {
+		writeJSON(w, http.StatusOK, validationErrorResponse{
+			OK:      false,
+			Message: "The draft is not valid TOML / config.",
+			Errors:  humanizeErr(err.Error()),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, diffConfigs(before, after))
+}

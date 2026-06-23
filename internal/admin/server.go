@@ -128,6 +128,19 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/history/get", s.auth(http.HandlerFunc(s.handleHistoryGet)))
 	mux.Handle("/api/history/rollback", s.auth(http.HandlerFunc(s.handleHistoryRollback)))
 
+	// Console v2 API routes (read/view endpoints, additive; no /api/v2/ prefix).
+	// These expose structured projections so the SPA never re-parses raw TOML.
+	mux.Handle("/api/runtime/overview", s.auth(http.HandlerFunc(s.handleRuntimeOverview)))
+	mux.Handle("/api/routes", s.auth(http.HandlerFunc(s.handleRoutes)))
+	mux.Handle("/api/apps", s.auth(http.HandlerFunc(s.handleApps)))
+	mux.Handle("/api/tls", s.auth(http.HandlerFunc(s.handleTLS)))
+	mux.Handle("/api/security", s.auth(http.HandlerFunc(s.handleSecurity)))
+	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
+
+	// Console v2 mutating/view endpoints.
+	mux.Handle("/api/config/validate", s.auth(http.HandlerFunc(s.handleConfigValidate)))
+	mux.Handle("/api/config/diff", s.auth(http.HandlerFunc(s.handleConfigDiff)))
+
 	// Console v2 dev route: serves the prebuilt SPA under /console/v2/.
 	// Gated by the console build tag so it does not affect lean builds.
 	if consoleV2Compiled && s.cfg.ConsoleEnabled() {
