@@ -163,6 +163,87 @@ jobs:
         with:
           version: v2.12.2
 
+  console-frontend:
+    name: console frontend (${{ matrix.profile }))
+    runs-on: ubuntu-latest
+    env:
+      CONSOLE_UI: internal/admin/ui
+      CONSOLE_DIST: internal/admin/assets/dist
+      SIZE_BUDGET_GZ_BYTES: 256000 # ~250 KB
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: source
+            install: true
+          - profile: released
+            install: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: ${{ env.CONSOLE_UI }}/package.json
+          cache: pnpm
+          cache-dependency-path: ${{ env.CONSOLE_UI }}/pnpm-lock.yaml
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+          run_install: |
+            - cwd: ${{ env.CONSOLE_UI }}
+              args: [--frozen-lockfile]
+
+      - name: typecheck
+        run: pnpm --dir ${{ env.CONSOLE_UI }} run typecheck
+      - name: lint
+        run: pnpm --dir ${{ env.CONSOLE_UI }} run lint
+      - name: test
+        run: pnpm --dir ${{ env.CONSOLE_UI }} run test
+
+      - name: build
+        id: build
+        run: |
+          set -euo pipefail
+          pnpm --dir ${{ env.CONSOLE_UI }} run build 2>&1 | tee build.log
+
+      - name: size gate
+        run: |
+          set -euo pipefail
+          echo "--- Console v2 bundle size gate ---"
+          # Sum gzip sizes of all non-sourcemap, non-html assets from build output.
+          total=$(grep -oP '\│ gzip:\s+\K[0-9.]+' build.log | awk '{sum+=$1} END {printf "%.0f", sum*1024}')
+          echo "Total initial-route gzip: ${total} bytes (budget: ${{ env.SIZE_BUDGET_GZ_BYTES }} bytes)"
+          if [ "$total" -gt "${{ env.SIZE_BUDGET_GZ_BYTES }}" ]; then
+            echo "ERROR: Console v2 bundle exceeds ~250 KB gz budget."
+            exit 1
+          fi
+          echo "PASS: within budget."
+
+      - name: go build with embedded assets
+        run: go build -tags "console" ./cmd/jul
+
+      - name: drift guard (source profile only)
+        if: matrix.profile == 'source'
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain ${{ env.CONSOLE_DIST }}/)" ]; then
+            echo "ERROR: ${{ env.CONSOLE_DIST }} is out of date."
+            echo "Run 'make console-build' locally and commit the generated assets."
+            git diff --stat ${{ env.CONSOLE_DIST }}/
+            exit 1
+          fi
+          echo "Drift guard: embedded assets are current."
+
+      - name: upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-build-log-${{ matrix.profile }}
+          path: build.log
+
   vulncheck:
     name: govulncheck
     runs-on: ubuntu-latest

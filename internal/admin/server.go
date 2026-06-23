@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -126,6 +127,13 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/history", s.auth(http.HandlerFunc(s.handleHistoryList)))
 	mux.Handle("/api/history/get", s.auth(http.HandlerFunc(s.handleHistoryGet)))
 	mux.Handle("/api/history/rollback", s.auth(http.HandlerFunc(s.handleHistoryRollback)))
+
+	// Console v2 dev route: serves the prebuilt SPA under /console/v2/.
+	// Gated by the console build tag so it does not affect lean builds.
+	if consoleV2Compiled && s.cfg.ConsoleEnabled() {
+		mux.Handle("/console/v2/", http.StripPrefix("/console/v2/", s.handleConsoleV2()))
+	}
+
 	return mux
 }
 
@@ -456,3 +464,27 @@ func (r *Readiness) Set(v bool) { r.ready.Store(v) }
 
 // Ready reports the current readiness state.
 func (r *Readiness) Ready() bool { return r.ready.Load() }
+
+// handleConsoleV2 serves the embedded Console v2 SPA bundle with the
+// appropriate security headers and index.html fallback for client-side routing.
+func (s *Server) handleConsoleV2() http.Handler {
+	fsys, err := fs.Sub(consoleV2Assets(), "assets/dist")
+	if err != nil {
+		s.log.Error("console v2: failed to open embedded filesystem", "err", err)
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "Console v2 unavailable", http.StatusInternalServerError)
+		})
+	}
+	fileServer := http.FileServer(http.FS(fsys))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Security: SPA is self-contained same-origin only.
+		s.writeSecurityHeaders(w)
+		// HTML entry-point needs correct content-type; file server guesses well.
+		// For SPA index fallback: if the path does not match a real file delegate
+		// to index.html so react-router handles sub-routes.
+		if _, err := fsys.Open(r.URL.Path); err != nil {
+			r.URL.Path = "/"
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+}
