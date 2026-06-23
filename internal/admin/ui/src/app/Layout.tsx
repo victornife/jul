@@ -1,8 +1,17 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 
-const nav = [
-  { to: "/", label: "Overview" },
+const NAV = [
+  { to: "/", label: "Overview", exact: true },
+  { to: "/routes", label: "Routes" },
+  { to: "/apps", label: "Apps" },
+  { to: "/tls", label: "TLS" },
+  { to: "/security", label: "Security" },
+  { to: "/traffic", label: "Traffic" },
 ];
+
+function isActive(navTo: string, pathname: string, exact = false): boolean {
+  return exact ? pathname === navTo : pathname.startsWith(navTo);
+}
 
 export function Layout() {
   const loc = useLocation();
@@ -11,14 +20,14 @@ export function Layout() {
       <header className="flex items-center gap-4 border-b border-jul-border bg-jul-surface px-6 py-3">
         <span className="font-bold tracking-wide text-jul-accent">Jul.IA</span>
         <span className="text-xs text-jul-muted">Console v2</span>
-        <nav className="ml-auto flex gap-2">
-          {nav.map((n) => (
+        <nav className="ml-auto flex flex-wrap gap-1">
+          {NAV.map((n) => (
             <Link
               key={n.to}
               to={n.to}
               className={`rounded-md px-3 py-1 text-sm transition-colors ${
-                loc.pathname === n.to
-                  ? "bg-jul-accent text-jul-bg"
+                isActive(n.to, loc.pathname, n.exact)
+                  ? "bg-jul-accent text-jul-bg font-medium"
                   : "text-jul-muted hover:text-jul-text"
               }`}
             >
@@ -33,5 +42,3 @@ export function Layout() {
     </div>
   );
 }
-
-import { Outlet } from "react-router-dom";

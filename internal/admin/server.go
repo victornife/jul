@@ -78,6 +78,8 @@ type Server struct {
 	log   *slog.Logger
 	deps  Deps
 	hist  *history
+	hub   *Hub
+	quit  chan struct{}
 	httpd *http.Server
 }
 
@@ -87,7 +89,14 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 	if !cfg.Enabled {
 		return nil
 	}
-	s := &Server{cfg: cfg, log: log, deps: deps, hist: newHistory(cfg.HistoryDir, cfg.HistoryKeep)}
+	s := &Server{
+		cfg:  cfg,
+		log:  log,
+		deps: deps,
+		hist: newHistory(cfg.HistoryDir, cfg.HistoryKeep),
+		hub:  newHub(),
+		quit: make(chan struct{}),
+	}
 	s.httpd = &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           s.routes(),
@@ -136,6 +145,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/tls", s.auth(http.HandlerFunc(s.handleTLS)))
 	mux.Handle("/api/security", s.auth(http.HandlerFunc(s.handleSecurity)))
 	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
+	mux.Handle("/api/events", s.auth(http.HandlerFunc(s.handleEvents)))
 
 	// Console v2 mutating/view endpoints.
 	mux.Handle("/api/config/validate", s.auth(http.HandlerFunc(s.handleConfigValidate)))
@@ -169,10 +179,14 @@ func (s *Server) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
+		close(s.quit)
+		s.hub.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return s.httpd.Shutdown(shutdownCtx)
 	case err := <-errCh:
+		close(s.quit)
+		s.hub.Close()
 		return err
 	}
 }

@@ -3,6 +3,9 @@ package admin
 import (
 	"fmt"
 	"jul/internal/config"
+	"math"
+	"strconv"
+	"time"
 )
 
 // ── Projection types (v2 API contract) ──────────────────────────────────────
@@ -21,7 +24,7 @@ type RouteProjection struct {
 type LocationProjection struct {
 	Match  string `json:"match"`
 	Type   string `json:"type"`   // exact, prefix, regex
-	Action string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny
+	Action string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny, return
 	Target string `json:"target,omitempty"`
 	Auth   bool   `json:"auth"`
 	Cache  bool   `json:"cache"`
@@ -39,8 +42,10 @@ type AppProjection struct {
 
 // BackendProjection is one backend server in an upstream pool.
 type BackendProjection struct {
-	Address string `json:"address"`
-	Weight  int    `json:"weight"`
+	Address  string `json:"address"`
+	Weight   int    `json:"weight"`
+	Healthy  bool   `json:"healthy,omitempty"`
+	Inflight int64  `json:"inflight,omitempty"`
 }
 
 // TLSProjection is certificate/TLS state for the TLS & Certificates panel.
@@ -158,6 +163,9 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			case loc.Root != "":
 				lp.Action = "static"
 				lp.Target = loc.Root
+			case loc.Return != 0:
+				lp.Action = "return"
+				lp.Target = strconv.Itoa(loc.Return)
 			default:
 				lp.Action = "unknown"
 			}
@@ -168,7 +176,7 @@ func projectRoutes(c *config.Config) []RouteProjection {
 	return out
 }
 
-func projectApps(c *config.Config) []AppProjection {
+func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjection {
 	out := make([]AppProjection, 0, len(c.Upstreams))
 	for i := range c.Upstreams {
 		up := &c.Upstreams[i]
@@ -183,18 +191,35 @@ func projectApps(c *config.Config) []AppProjection {
 		if up.Discovery != nil {
 			ap.Discovery = up.Discovery.Type
 		}
+		livePool, _ := live[up.Name]
+		liveMap := make(map[string]BackendStatus, len(livePool.Backends))
+		for _, b := range livePool.Backends {
+			liveMap[b.Address] = b
+		}
 		for _, b := range up.Servers {
-			ap.Backends = append(ap.Backends, BackendProjection{
-				Address: b.Address,
-				Weight:  b.Weight,
-			})
+			bp := BackendProjection{Address: b.Address, Weight: b.Weight}
+			if lb, ok := liveMap[b.Address]; ok {
+				bp.Healthy = lb.Healthy
+				bp.Inflight = lb.Inflight
+			}
+			ap.Backends = append(ap.Backends, bp)
 		}
 		out = append(out, ap)
 	}
 	return out
 }
 
-func projectTLS(c *config.Config) []CertProjection {
+func projectTLS(c *config.Config, live []CertStatus) []CertProjection {
+	now := time.Now().UTC()
+	liveMap := make(map[string]CertStatus, len(live))
+	for _, cs := range live {
+		for _, sn := range cs.ServerNames {
+			if existing, ok := liveMap[sn]; !ok || existing.NotAfter.IsZero() {
+				liveMap[sn] = cs
+			}
+		}
+	}
+
 	var certs []CertProjection
 	for i := range c.Servers {
 		srv := &c.Servers[i]
@@ -208,6 +233,18 @@ func projectTLS(c *config.Config) []CertProjection {
 			cp.Source = "acme"
 		} else {
 			cp.Source = "file"
+		}
+		// Merge live metadata when available.
+		for _, sn := range srv.ServerNames {
+			if l, ok := liveMap[sn]; ok {
+				if cp.Issuer == "" {
+					cp.Issuer = l.Issuer
+				}
+				if !l.NotAfter.IsZero() {
+					cp.NotAfter = l.NotAfter.UTC().Format(time.RFC3339)
+					cp.DaysLeft = int(math.Round(l.NotAfter.Sub(now).Hours() / 24))
+				}
+			}
 		}
 		certs = append(certs, cp)
 	}

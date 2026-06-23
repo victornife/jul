@@ -534,15 +534,47 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
-	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
-		writeJSON(w, http.StatusOK, projectApps(c))
-	})(w, r)
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	if s.deps.LoadConfig == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"loaded": false})
+		return
+	}
+	cfg, err := s.deps.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	ups := map[string]UpstreamStatus{}
+	if s.deps.Upstreams != nil {
+		for _, u := range s.deps.Upstreams() {
+			ups[u.Name] = u
+		}
+	}
+	writeJSON(w, http.StatusOK, projectApps(cfg, ups))
 }
 
 func (s *Server) handleTLS(w http.ResponseWriter, r *http.Request) {
-	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
-		writeJSON(w, http.StatusOK, projectTLS(c))
-	})(w, r)
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	if s.deps.LoadConfig == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"loaded": false})
+		return
+	}
+	cfg, err := s.deps.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	var certs []CertStatus
+	if s.deps.Certs != nil {
+		certs = s.deps.Certs()
+	}
+	writeJSON(w, http.StatusOK, projectTLS(cfg, certs))
 }
 
 func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
