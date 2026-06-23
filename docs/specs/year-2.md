@@ -3,7 +3,7 @@
 
 # JUL Engineering Execution Plan — Year 2 (Protocol Gateway + Extensibility Moat)
 
-> Version 1.6 · Updated 2026-06-21
+> Version 1.7 · Updated 2026-06-23
 >
 > Maturity note: shipped Y2 features are **Beta**, except the first **GA**
 > features from the [GA push](../ga-push.md) (see
@@ -135,7 +135,7 @@ Build tags added Y2: wasm(plugins), stream, waf, graphql, consul, kubernetes. gR
 
 ## Y2-09 Console v2 (log tail, plugin manager, route designer) — SQ-CONSOLE P0/P1 L
 - Objective: extend Console v1 with live log tail, WASM plugin manager, gRPC transcoding route designer, richer dashboards. Out: RBAC/SSO+multi-node (Y3).
-- Design: build on admin.Server + Preact/Svelte SPA (Y1-07). (1) Log tail: add in-memory ring-buffer log sink (extends Y1-10 sinks) + GET /api/logs/stream (SSE) -> live tail view w/ filter. (2) Plugin manager: /api/plugins (list/enable/disable/upload .wasm) backed by Y2-02 registry + config writes via existing /api/config -> shows invocations/errors metrics. (3) Route designer: /api/transcode/descriptors (upload FileDescriptorSet) -> parse google.api.http -> visual mapping editor -> generate GRPCTranscodeConfig (Y2-01). (4) Dashboards: per-upstream health (Y1-05), stream (Y2-03) + WAF (Y2-06) panels. Seed AI-assisted config stub (suggest config snippets) per REV3 (lightweight, not the Y4 AI pillar).
+- Design: build on admin.Server + a prebuilt **React/TS/Vite/Tailwind SPA** embedded via go:embed ([ADR 0006](../adr/0006-console-v2-stack.md); full spec [console-v2.md](console-v2.md)) — single binary, no Node runtime, no external web assets. (1) Log tail: add in-memory ring-buffer log sink (extends Y1-10 sinks) + GET /api/logs/stream (SSE) -> live tail view w/ filter. (2) Plugin manager: /api/plugins (list/enable/disable/upload .wasm) backed by Y2-02 registry + config writes via existing /api/config -> shows invocations/errors metrics. (3) Route designer: /api/transcode/descriptors (upload FileDescriptorSet) -> parse google.api.http -> visual mapping editor -> generate GRPCTranscodeConfig (Y2-01). (4) Dashboards: per-upstream health (Y1-05), stream (Y2-03) + WAF (Y2-06) panels. Seed AI-assisted config stub (suggest config snippets) per REV3 (lightweight, not the Y4 AI pillar).
 - Config: AdminConfig += LogRingSize int; reuse Console flag.
 - New: web/console views; admin/{logs.go,plugins.go,transcode.go}; observability ring sink; extend Deps. Tag console.
 - Tasks: ring-buffer sink + SSE /api/logs/stream -> log tail UI+filter -> /api/plugins CRUD + upload (size/type validate) -> plugin metrics panel -> descriptor upload+parse -> route designer UI -> config gen+validate-before-apply -> stream/WAF/upstream panels -> AI-suggest stub -> Playwright e2e -> CSP for uploads.

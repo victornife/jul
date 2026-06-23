@@ -1,51 +1,140 @@
-# Local full-stack test config with Node + Python upstreams.
+stream = []
+mail = []
 
 [global]
-worker_threads = "auto"
-log_level = "info"
-log_format = "text"
-shutdown_timeout = "30s"
+worker_threads = 'auto'
+access_log = ''
+error_log = ''
+log_level = 'info'
+log_format = 'json'
+shutdown_timeout = '30s'
 
 [[servers]]
-listen = "127.0.0.1:8088"
-server_names = ["localhost"]
-client_max_body_size = "8m"
-max_header_bytes = "1m"
-read_header_timeout = "10s"
-idle_timeout = "60s"
+listen = '127.0.0.1:8088'
+server_names = ['localhost']
+h2c = false
+client_max_body_size = '8m'
+read_header_timeout = '10s'
+read_timeout = '0s'
+write_timeout = '0s'
+idle_timeout = '1m0s'
+max_header_bytes = '1m'
+access_log = ''
+error_log = ''
+redirect_https = 0
+plugins = []
 
-  [[servers.locations]]
-  match = { type = "prefix", path = "/api/" }
-  proxy_pass = "http://backend"
-  cache = true
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = 'http://backend'
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 0
+deny = false
+rewrites = []
+cache = true
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
 
-    [servers.locations.headers]
-    Host = "$host"
-    X-Real-IP = "$remote_addr"
-    X-Forwarded-For = "$proxy_add_x_forwarded_for"
+[servers.locations.match]
+type = 'prefix'
+path = '/api/'
 
-  [[servers.locations]]
-  match = { type = "prefix", path = "/" }
-  root = "testdata/www"
-  index = ["index.html"]
-  try_files = ["$uri", "$uri/", "/index.html"]
+[servers.locations.headers]
+Host = '$host'
+X-Forwarded-For = '$proxy_add_x_forwarded_for'
+X-Real-IP = '$remote_addr'
+
+[[servers.locations]]
+root = 'testdata/www'
+index = ['index.html']
+try_files = ['$uri', '$uri/', '/index.html']
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 0
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/'
 
 [[upstreams]]
-name = "backend"
-strategy = "round_robin"
-servers = [
-  "127.0.0.1:3000",
-  "127.0.0.1:3001",
-]
+name = 'backend'
+strategy = 'round_robin'
+servers = ['127.0.0.1:3000', '127.0.0.1:3001']
+max_fails = 3
+fail_timeout = '10s'
 
 [cache]
 enabled = true
-memory_max_size = "64m"
-default_ttl = "60s"
-stale_if_error = "30s"
+memory_max_size = '64m'
+disk_path = ''
+disk_max_size = '0'
+default_ttl = '1m0s'
+stale_while_revalidate = '0s'
 
 [admin]
 enabled = true
-listen = "127.0.0.1:9098"
-token = "smoketoken"
+listen = '127.0.0.1:9098'
+token = 'smoketoken'
 console = true
+history_dir = './jul-data/config-history'
+history_keep = 50
+
+[compression]
+enabled = false
+encoders = []
+level = 0
+min_size = '0'
+types = []
+precompressed = false
+
+[rate_limit]
+enabled = false
+key = ''
+rate = 0
+burst = 0
+max_conns = 0
+
+[observability]
+[observability.tracing]
+enabled = false
+exporter = ''
+endpoint = ''
+sample_ratio = 0.0
+service_name = ''
+insecure = false
+
+[observability.access_log]
+sinks = ['stdout']
+file = ''
+format = 'text'
+rotate_max_mb = 100
+rotate_keep = 7

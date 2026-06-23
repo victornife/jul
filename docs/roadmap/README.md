@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.10 · Updated 2026-06-22
+> Version 1.11 · Updated 2026-06-23
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -88,7 +88,7 @@ Done.
 | --- | --- | --- | --- | --- |
 | Y2-06 | WAF (Coraza + OWASP CRS) | ModSecurity-compatible WAF; embed CRS; block/detect per-location | Edge security without a separate WAF appliance | L |
 | SEC-1 | Secrets references (pulled earlier from Y5-06) | `env`/`file` secret refs + log redaction + lint for literal secrets; Vault/KMS later | Removes scattered secret handling across ACME/JWT/forward-auth/mTLS/AI keys | M |
-| Y2-09 | Console v2 (reframed) | Live log tail, WASM plugin manager, gRPC route designer — delivered as **continuous per-feature Console panels**, not a monolithic release ([ADR 0004](../adr/0004-console-ui-invariants.md)). **In progress:** a read-only **Status** overview (capabilities active in the running config) shipped as the first continuous panel. | Admin UI grows into an operations cockpit without a big-bang rewrite | L |
+| Y2-09 | Console v2 (reframed) | Live log tail, WASM plugin manager, gRPC route designer — delivered as **continuous per-feature Console panels** ([ADR 0004](../adr/0004-console-ui-invariants.md)). The hand-written Console v1 is migrated **once** to a prebuilt **React/TS/Vite/Tailwind** SPA, embedded in the binary (**no Node runtime, no external web assets**) — a bounded substrate cutover, after which panels resume continuous evolution ([ADR 0006](../adr/0006-console-v2-stack.md); [spec](../specs/console-v2.md)). **In progress:** a read-only **Status** overview (capabilities active in the running config) shipped as the first continuous panel. | Admin UI grows into an operations cockpit on a typed, testable substrate without an ongoing big-bang | L |
 
 ### Near-term bet ⏳
 
@@ -193,6 +193,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-23 | 1.11 | Recorded the **Console v2 substrate migration** under Y2-09: a one-time cutover from the hand-written v1 to a prebuilt, embedded **React/TS/Vite/Tailwind** SPA (Node-free build, no external assets, ~250 KB gz budget), closing Console GA gaps ① + ⑦ and targeting **GA — soak pending**. | All other feature rows, IDs, and maturity states; the Y2-09 continuous-panels framing stands (the cutover is a bounded exception). | [ADR 0006](../adr/0006-console-v2-stack.md); [console-v2 spec](../specs/console-v2.md) |
 | 2026-06-22 | 1.10 | Linked the new beginner-friendly [concepts appendix](../vision/appendix.md) (HTTP, proxies, TLS, caching, observability from first principles) from the intro. | All feature rows, IDs, maturity states, and the 5-year plan. | [appendix.md](../vision/appendix.md) |
 | 2026-06-22 | 1.9 | Fixed **Y2-07 mTLS checklist drift**: the Year-2 completion line still listed mTLS as *committed remaining* and counted **5/9** even though it shipped and reached **GA — soak pending** — corrected to **6/9 shipped**, removed Y2-07 from the remaining list, and recorded which shipped features are GA. Added the canonical [status matrix](../status.md) as the single source of truth for maturity + GA criteria and wired it into the Maintenance steps. | All feature rows, IDs, descriptions, and maturity states; only the stale checklist counts/labels change, plus a new cross-reference. | [status.md](../status.md) |
 | 2026-06-21 | 1.8 | **Y1-04 authentication → GA** (GA push) and **relabeled every soak-pending GA feature `GA` → `GA — soak pending`** for honesty (Core HTTP, gRPC transcoding/passthrough, mTLS, TLS+ACME, auth). Published [docs/auth.md](../auth.md) (CIDR/Basic/JWT/forward-auth behaviour matrix, JWKS + algorithm-confusion threat note, limits, GA table); added `BenchmarkBasicVerify`/`BenchmarkJWTValidate` and `FuzzParseJWKS`/`FuzzValidateToken`. | All feature rows, IDs, and the soak post-GA gate ([ADR 0005](../adr/0005-soak-post-ga-gate.md)); only the label wording and the Y1-04 maturity change. | [auth.md](../auth.md), [ga-push.md](../ga-push.md) |
