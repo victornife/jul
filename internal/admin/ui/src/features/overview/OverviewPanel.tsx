@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchOverview, type FeatureStatus } from "@/api/client.ts";
+import { Sparkline } from "@/components/Sparkline";
+import { useMetricsHistory } from "@/lib/useMetricsHistory";
 
 // Group status rows by their `group` field.
 function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
@@ -92,6 +94,8 @@ export function OverviewPanel() {
     queryFn: fetchOverview,
     refetchInterval: 2000, // Poll every 2 seconds per Milestone 1.1
   });
+
+  const history = useMetricsHistory(data?.stats);
 
   if (isLoading) {
     return <div className="text-jul-muted">Loading overview…</div>;
@@ -236,6 +240,88 @@ export function OverviewPanel() {
               unit="events"
             />
           </div>
+
+          {/* Sparklines - 2 minute trends */}
+          {history.requestsPerSec.length > 0 && (
+            <div className="space-y-4 pt-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                2-Minute Trends
+              </h3>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                    Request Rate Trend
+                  </div>
+                  <div className="mt-2 h-12">
+                    <Sparkline
+                      data={history.requestsPerSec}
+                      height={48}
+                      width={100}
+                      color="rgb(34, 197, 94)"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-jul-muted">
+                    {history.requestsPerSec.length} samples
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                    Latency Trend
+                  </div>
+                  <div className="mt-2 h-12">
+                    <Sparkline
+                      data={history.latencyAvg}
+                      height={48}
+                      width={100}
+                      color="rgb(59, 130, 246)"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-jul-muted">
+                    {history.latencyAvg.length} samples
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                    Error Rate Trend
+                  </div>
+                  <div className="mt-2 h-12">
+                    <Sparkline
+                      data={history.errorRate}
+                      height={48}
+                      width={100}
+                      color="rgb(239, 68, 68)"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-jul-muted">
+                    {history.errorRate.length} samples
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                    Cache Hit Ratio Trend
+                  </div>
+                  <div className="mt-2 h-12">
+                    <Sparkline
+                      data={history.cacheHitRatio}
+                      height={48}
+                      width={100}
+                      color="rgb(168, 85, 247)"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-jul-muted">
+                    {history.cacheHitRatio.length} samples
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
