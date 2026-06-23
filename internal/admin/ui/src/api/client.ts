@@ -55,11 +55,29 @@ export const FeatureStatusSchema = z.object({
 });
 export type FeatureStatus = z.infer<typeof FeatureStatusSchema>;
 
+export const StatsSnapshotSchema = z.object({
+  available: z.boolean().optional(),
+  uptimeSeconds: z.number(),
+  requestsTotal: z.number(),
+  requestsPerSec: z.number(),
+  inFlight: z.number(),
+  connections: z.number(),
+  errorRate: z.number(),
+  statusClasses: z.record(z.string(), z.number()).optional(),
+  latencyAvgMs: z.number(),
+  latencyP50Ms: z.number(),
+  latencyP95Ms: z.number(),
+  latencyP99Ms: z.number(),
+  cacheHitRatio: z.number(),
+  cacheEvents: z.record(z.string(), z.number()).optional(),
+});
+export type StatsSnapshot = z.infer<typeof StatsSnapshotSchema>;
+
 export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
   status: z.array(FeatureStatusSchema),
-  stats: z.unknown().optional(),
+  stats: StatsSnapshotSchema.optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 
