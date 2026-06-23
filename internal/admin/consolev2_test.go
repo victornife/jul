@@ -310,6 +310,59 @@ func TestConfigValidateDoesNotMutateState(t *testing.T) {
 	}
 }
 
+func TestConfigValidateNeverWritesOrReloads(t *testing.T) {
+	// Validate must be a pure parse+validate: it must never invoke the write
+	// path (which, in production, persists and triggers a live reload). The
+	// previous implementation wrote the draft then reverted, briefly applying
+	// it; this guards against that regression.
+	var writes, reloads int
+	deps := Deps{
+		WriteConfigRaw: func([]byte) error { writes++; return nil },
+		Reload:         func() { reloads++ },
+		LoadConfig:     func() (*config.Config, error) { return &config.Config{}, nil },
+	}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+
+	good := validTOML(t, "./www", ":9090")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/validate", bytes.NewReader(good)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out validationErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Errorf("ok = false, want true; message: %s", out.Message)
+	}
+	if writes != 0 {
+		t.Errorf("WriteConfigRaw called %d times during validate; want 0", writes)
+	}
+	if reloads != 0 {
+		t.Errorf("Reload called %d times during validate; want 0", reloads)
+	}
+}
+
+func TestConfigValidateWorksWithoutWriteHook(t *testing.T) {
+	// Validation is independent of any Deps hook; it must succeed even when raw
+	// editing (WriteConfigRaw) is disabled.
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	good := validTOML(t, "./www", ":9090")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/validate", bytes.NewReader(good)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out validationErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Errorf("ok = false, want true; message: %s", out.Message)
+	}
+}
+
 // ── /api/config/diff ─────────────────────────────────────────────────────────
 
 func TestConfigDiffDetectsChange(t *testing.T) {
@@ -625,7 +678,11 @@ func TestEventsMethodNotAllowed(t *testing.T) {
 // ── CSP headers ──────────────────────────────────────────────────────────────
 
 func TestLegacyPageCSPAllowsInline(t *testing.T) {
-	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	// The dependency-free configuration GUI carries embedded inline scripts and
+	// styles, so its CSP must allow 'unsafe-inline'. It is served at /config only
+	// when the Console v2 SPA is not the active UI, so disable the console here.
+	disabled := false
+	s := newTestServer(t, config.AdminConfig{Console: &disabled}, Deps{})
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/config", nil))
 	csp := rr.Header().Get("Content-Security-Policy")

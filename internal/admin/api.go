@@ -601,27 +601,32 @@ func (s *Server) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{OK: false, Message: err.Error()})
 		return
 	}
-	if s.deps.WriteConfigRaw == nil {
-		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
-		return
-	}
-	// Use a temporary validation path: try to write, catch the error, rollback.
-	// A cleaner path in the future is a standalone Validate([]byte) hook in Deps.
-	prev := s.currentRaw()
-	writeErr := s.deps.WriteConfigRaw(body)
-	if writeErr != nil {
+	// Validation is a pure function of the candidate bytes: parse + validate
+	// with no persistence and no reload. It must never call WriteConfigRaw,
+	// which would briefly apply (and reload) the draft as live configuration.
+	// This keeps /api/config/validate side-effect-free and safe under
+	// concurrent validate/apply requests.
+	if err := validateRaw(body); err != nil {
 		writeJSON(w, http.StatusOK, validationErrorResponse{
 			OK:      false,
 			Message: "The draft configuration contains errors.",
-			Errors:  humanizeErr(writeErr.Error()),
+			Errors:  humanizeErr(err.Error()),
 		})
 		return
 	}
-	// Revert: validation must not mutate runtime state.
-	if prev != nil {
-		_ = s.deps.WriteConfigRaw(prev)
-	}
 	writeJSON(w, http.StatusOK, validationErrorResponse{OK: true, Message: "Configuration is valid."})
+}
+
+// validateRaw parses and fully validates candidate configuration bytes without
+// mutating any runtime state. It mirrors the parse+validate that a write path
+// performs internally, minus persistence and reload, so callers can check a
+// draft safely and idempotently.
+func validateRaw(body []byte) error {
+	cfg, err := config.Parse(body)
+	if err != nil {
+		return err
+	}
+	return config.Validate(cfg)
 }
 
 // handleConfigDiff accepts a candidate config and returns a structured diff

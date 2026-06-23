@@ -51,7 +51,9 @@ export function ObservabilityPanel() {
           }
         });
       },
-      () => setConnected(false),
+      () => {
+        setConnected(false);
+      },
     );
     return cleanup;
   }, []);
@@ -77,11 +79,15 @@ export function ObservabilityPanel() {
           type="text"
           placeholder="Filter by type…"
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          onChange={(e) => {
+            setFilter(e.target.value);
+          }}
           className="ml-auto rounded-md border border-jul-border bg-jul-surface px-3 py-1 text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
         />
         <button
-          onClick={() => setEvents([])}
+          onClick={() => {
+            setEvents([]);
+          }}
           className="rounded-md border border-jul-border px-3 py-1 text-xs text-jul-muted hover:text-jul-text"
         >
           Clear
@@ -96,8 +102,7 @@ export function ObservabilityPanel() {
         ) : (
           <ul
             ref={listRef}
-            className="h-full overflow-y-auto"
-            style={{ maxHeight: "calc(100vh - 220px)" }}
+            className="h-full overflow-y-auto max-h-[calc(100vh-220px)]"
           >
             {filtered.map((ev) => (
               <EventRow key={ev.seq} ev={ev} />

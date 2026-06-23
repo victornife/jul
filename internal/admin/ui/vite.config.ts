@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: "/console/v2/",
+  base: "/",
   root: resolve(__dirname),
   build: {
     outDir: resolve(__dirname, "..", "assets", "dist"),

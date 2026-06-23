@@ -77,7 +77,7 @@ export function TrafficControlsPanel() {
           {data.rate_limit?.enabled ? (
             <div className="space-y-1">
               <KV k="key" v={data.rate_limit.key || "ip"} />
-              <KV k="rate" v={data.rate_limit.rate !== undefined ? `${data.rate_limit.rate}/s` : undefined} />
+              <KV k="rate" v={data.rate_limit.rate !== undefined ? `${String(data.rate_limit.rate)}/s` : undefined} />
               <KV k="burst" v={data.rate_limit.burst} />
             </div>
           ) : (

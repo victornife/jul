@@ -4,9 +4,13 @@ import { z } from "zod";
 
 /** Central auth-token store (sessionStorage so it clears on tab close). */
 export const authToken = {
-  get: () => sessionStorage.getItem("jul_admin_token") ?? "",
-  set: (t: string) => sessionStorage.setItem("jul_admin_token", t),
-  clear: () => sessionStorage.removeItem("jul_admin_token"),
+  get: (): string => sessionStorage.getItem("jul_admin_token") ?? "",
+  set: (t: string): void => {
+    sessionStorage.setItem("jul_admin_token", t);
+  },
+  clear: (): void => {
+    sessionStorage.removeItem("jul_admin_token");
+  },
 };
 
 // ── Typed fetch client ───────────────────────────────────────────────────────
@@ -24,16 +28,12 @@ export class ApiError extends Error {
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = authToken.get();
-  const resp = await fetch(`/api${path}`, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+  const headers = new Headers(init?.headers);
+  headers.set("Accept", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch(`/api${path}`, { ...init, headers });
   if (!resp.ok) {
-    let msg = `${resp.status} ${resp.statusText}`;
+    let msg = `${String(resp.status)} ${resp.statusText}`;
     try {
       const body = (await resp.json()) as { error?: string };
       if (body.error) msg = body.error;
@@ -254,7 +254,103 @@ export async function diffConfig(candidate: string): Promise<ConfigDiff> {
   return ConfigDiffSchema.parse(data);
 }
 
-// ── Events (SSE) ──────────────────────────────────────────────────────────────
+// ── Validate / Apply / Wizard (write flows) ──────────────────────────────────
+
+export const ValidationIssueSchema = z.object({
+  code: z.string(),
+  path: z.string().optional(),
+  summary: z.string(),
+  detail: z.string().optional(),
+  severity: z.string(),
+});
+export type ValidationIssue = z.infer<typeof ValidationIssueSchema>;
+
+export const ValidationResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string().optional(),
+  errors: z.array(ValidationIssueSchema).optional(),
+});
+export type ValidationResult = z.infer<typeof ValidationResultSchema>;
+
+/** Side-effect-free validation of a candidate TOML document. Always HTTP 200. */
+export async function validateConfig(candidate: string): Promise<ValidationResult> {
+  const data = await api<unknown>("/config/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/toml" },
+    body: candidate,
+  });
+  return ValidationResultSchema.parse(data);
+}
+
+/** Raised when /config/apply rejects a candidate (HTTP 400 + structured body). */
+export class ConfigRejectedError extends Error {
+  constructor(
+    message: string,
+    public readonly issues: ValidationIssue[],
+  ) {
+    super(message);
+    this.name = "ConfigRejectedError";
+  }
+}
+
+export const ApplyResultSchema = z.object({
+  ok: z.literal(true),
+  status: z.array(FeatureStatusSchema),
+});
+export type ApplyResult = z.infer<typeof ApplyResultSchema>;
+
+/**
+ * Applies a candidate config through the authoritative write path and resolves
+ * with the post-apply runtime status delta. Rejects with ConfigRejectedError
+ * when the backend refuses the draft, or ApiError on transport failure.
+ */
+export async function applyConfig(candidate: string): Promise<ApplyResult> {
+  const headers = new Headers();
+  headers.set("Accept", "application/json");
+  headers.set("Content-Type", "application/toml");
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/config/apply", { method: "POST", headers, body: candidate });
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    const rejected = ValidationResultSchema.safeParse(data);
+    if (rejected.success) {
+      throw new ConfigRejectedError(
+        rejected.data.message ?? "The configuration was rejected.",
+        rejected.data.errors ?? [],
+      );
+    }
+    throw new ApiError("/config/apply", resp.status, `${String(resp.status)} ${resp.statusText}`);
+  }
+  return ApplyResultSchema.parse(data);
+}
+
+export const WizardInputSchema = z.object({
+  mode: z.enum(["serve", "proxy"]),
+  path: z.string().optional(),
+  target: z.string().optional(),
+  listen: z.string().optional(),
+});
+export type WizardInput = z.infer<typeof WizardInputSchema>;
+
+const WizardResultSchema = z.object({ toml: z.string() });
+
+/** Generates a starter TOML document from wizard inputs (non-mutating). */
+export async function generateConfig(input: WizardInput): Promise<string> {
+  const data = await api<unknown>("/wizard/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return WizardResultSchema.parse(data).toml;
+}
+
+// ── Events (SSE over fetch) ──────────────────────────────────────────────────
 
 export interface SseEvent {
   type: string;
@@ -262,27 +358,114 @@ export interface SseEvent {
   data?: unknown;
 }
 
-/** Opens a GET /api/events SSE stream and returns a cleanup function. */
+/**
+ * Opens the GET /api/events stream and returns a cleanup function. Uses fetch +
+ * ReadableStream rather than EventSource so the bearer token travels in the
+ * Authorization header — never in the URL where it would leak into access logs
+ * — and reconnects with capped exponential backoff until cleaned up.
+ */
 export function subscribeEvents(
   onEvent: (ev: SseEvent) => void,
-  onError?: (err: Event) => void,
+  onError?: (err: unknown) => void,
 ): () => void {
-  const token = authToken.get();
-  // EventSource doesn't support custom headers natively; for token auth we
-  // pass it as a query param only when a token is configured (same-origin
-  // admin, not sensitive over TLS). If no token, EventSource is sufficient.
-  const url = token
-    ? `/api/events?token=${encodeURIComponent(token)}`
-    : "/api/events";
-  const es = new EventSource(url);
-  es.onmessage = (e: MessageEvent) => {
-    try {
-      const ev = JSON.parse(e.data as string) as SseEvent;
-      onEvent(ev);
-    } catch {
-      // ignore malformed frames
-    }
+  const controller = new AbortController();
+  void streamEvents(controller.signal, onEvent, onError);
+  return () => {
+    controller.abort();
   };
-  if (onError) es.onerror = onError;
-  return () => es.close();
+}
+
+async function streamEvents(
+  signal: AbortSignal,
+  onEvent: (ev: SseEvent) => void,
+  onError?: (err: unknown) => void,
+): Promise<void> {
+  let delay = 1000;
+  while (!signalAborted(signal)) {
+    try {
+      const headers = new Headers();
+      headers.set("Accept", "text/event-stream");
+      const token = authToken.get();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+      const resp = await fetch("/api/events", { headers, signal });
+      if (resp.status === 401) {
+        onError?.(new ApiError("/events", 401, "Unauthorized"));
+        return; // auth won't recover on retry
+      }
+      if (!resp.ok || !resp.body) {
+        throw new ApiError("/events", resp.status, `${String(resp.status)} ${resp.statusText}`);
+      }
+      delay = 1000; // a healthy connection resets the backoff
+      await pumpSse(resp.body, onEvent);
+    } catch (err) {
+      if (signalAborted(signal)) return;
+      onError?.(err);
+    }
+    await delayWithAbort(delay, signal);
+    delay = Math.min(delay * 2, 15_000);
+  }
+}
+
+async function pumpSse(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (ev: SseEvent) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const ev = parseSseFrame(frame);
+      if (ev) onEvent(ev);
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+}
+
+function parseSseFrame(frame: string): SseEvent | null {
+  const data: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("data:")) {
+      const v = line.slice(5);
+      data.push(v.startsWith(" ") ? v.slice(1) : v);
+    }
+  }
+  if (data.length === 0) return null;
+  try {
+    return JSON.parse(data.join("\n")) as SseEvent;
+  } catch {
+    return null;
+  }
+}
+
+function delayWithAbort(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
+// Reads signal.aborted through a function call so TypeScript does not flow-narrow
+// the value to a constant inside the reconnect loop (it flips asynchronously).
+function signalAborted(signal: AbortSignal): boolean {
+  return signal.aborted;
+}
+
+/** Reads the per-response CSP style nonce injected into the SPA shell. */
+export function cspNonce(): string {
+  if (typeof document === "undefined") return "";
+  return document.querySelector('meta[name="csp-nonce"]')?.getAttribute("content") ?? "";
 }

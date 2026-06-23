@@ -5,8 +5,11 @@
 package admin
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +17,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -116,15 +120,20 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/cache/purge", s.auth(http.HandlerFunc(s.handlePurge)))
 	mux.Handle("/reload", s.auth(http.HandlerFunc(s.handleReload)))
 
-	// Web console + configuration GUI. The pages themselves are static (no
-	// secrets) and load their data from the auth-protected API endpoints below.
-	// "/" serves the console dashboard when it is compiled in (-tags console)
-	// and enabled; otherwise it serves the configuration page. "/config" and
-	// "/ui" always serve the configuration page so the editor stays reachable
-	// regardless of the console setting.
-	mux.HandleFunc("/", s.handleRoot)
-	mux.HandleFunc("/config", s.handleConfigPage)
-	mux.HandleFunc("/ui", s.handleConfigPage)
+	// Web console + configuration GUI. When the Console v2 SPA is compiled in
+	// (-tags console) and enabled it is the default admin UI: mounted at the
+	// root, it serves its hashed assets and falls back to the SPA shell for the
+	// bare root and every client-side route (so a hard refresh at /config,
+	// /wizard, … resolves). Otherwise — the lean build or an explicitly disabled
+	// console — the dependency-free configuration GUI is served at the root and
+	// stays reachable at /config and /ui.
+	if consoleV2Compiled && s.cfg.ConsoleEnabled() {
+		mux.Handle("/", s.handleConsoleV2())
+	} else {
+		mux.HandleFunc("/", s.handleRoot)
+		mux.HandleFunc("/config", s.handleConfigPage)
+		mux.HandleFunc("/ui", s.handleConfigPage)
+	}
 	mux.Handle("/api/stats", s.auth(http.HandlerFunc(s.handleStats)))
 	mux.Handle("/api/status", s.auth(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("/api/config", s.auth(http.HandlerFunc(s.handleConfigGet)))
@@ -155,11 +164,6 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/config/history/{id}", s.auth(http.HandlerFunc(s.handleConfigHistoryGet)))
 	mux.Handle("/api/config/rollback", s.auth(http.HandlerFunc(s.handleConfigRollback)))
 	mux.Handle("/api/wizard/generate", s.auth(http.HandlerFunc(s.handleWizardGenerate)))
-
-	// Console v2 SPA served at /console/v2/. Gated by the console build tag.
-	if consoleV2Compiled && s.cfg.ConsoleEnabled() {
-		mux.Handle("/console/v2/", http.StripPrefix("/console/v2/", s.handleConsoleV2()))
-	}
 
 	return mux
 }
@@ -282,19 +286,13 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "reload triggered"})
 }
 
-// handleRoot serves the admin root page. When the console is compiled in
-// (-tags console) and enabled in config it serves the console dashboard shell;
-// otherwise it falls back to the configuration page. Any non-root path that
-// reaches this catch-all handler is a 404.
+// handleRoot serves the dependency-free configuration GUI at the admin root.
+// It is registered only when the Console v2 SPA is not the active UI (lean
+// build or an explicitly disabled console); the SPA owns the root otherwise.
+// Any non-root path that reaches this catch-all handler is a 404.
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
-		return
-	}
-	if consoleCompiled && s.cfg.ConsoleEnabled() {
-		s.writeSecurityHeadersLegacy(w)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, consolePage())
 		return
 	}
 	s.serveConfigPage(w)
@@ -332,14 +330,32 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // The legacy config page uses inline scripts/styles and is covered by
 // writeSecurityHeadersLegacy below.
 func (s *Server) writeSecurityHeaders(w http.ResponseWriter) {
+	s.writeSecurityHeadersNonce(w, "")
+}
+
+// writeSecurityHeadersNonce is writeSecurityHeaders with an optional per-response
+// style nonce. The SPA's only inline <style> source is the CodeMirror editor,
+// which stamps the advertised nonce onto the theme elements it injects, so the
+// policy stays free of 'unsafe-inline'. An empty nonce yields the strict
+// style-src 'self' policy used for the hashed static assets.
+func (s *Server) writeSecurityHeadersNonce(w http.ResponseWriter, styleNonce string) {
 	h := w.Header()
-	h.Set("Content-Security-Policy",
-		"default-src 'self'; style-src 'self'; "+
-			"script-src 'self'; img-src 'self' data:; "+
-			"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+	h.Set("Content-Security-Policy", securityCSP(styleNonce))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "no-referrer")
+}
+
+// securityCSP builds the Console v2 Content-Security-Policy. When styleNonce is
+// non-empty the style-src gains a 'nonce-…' source for editor-injected styles.
+func securityCSP(styleNonce string) string {
+	style := "style-src 'self'"
+	if styleNonce != "" {
+		style = "style-src 'self' 'nonce-" + styleNonce + "'"
+	}
+	return "default-src 'self'; " + style + "; " +
+		"script-src 'self'; img-src 'self' data:; " +
+		"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 }
 
 // writeSecurityHeadersLegacy applies the CSP for the legacy config/console v1
@@ -416,7 +432,7 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		"authRequired":   s.cfg.Token != "",
 		"rawEditable":    s.deps.WriteConfigRaw != nil,
 		"formEditable":   s.deps.LoadConfig != nil && s.deps.SaveConfig != nil,
-		"consoleEnabled": consoleCompiled && s.cfg.ConsoleEnabled(),
+		"consoleEnabled": consoleV2Compiled && s.cfg.ConsoleEnabled(),
 	}
 	if s.deps.ReadConfigRaw != nil {
 		raw, err := s.deps.ReadConfigRaw()
@@ -524,22 +540,59 @@ func (s *Server) handleConsoleV2() http.Handler {
 			http.Error(w, "Console v2 unavailable", http.StatusInternalServerError)
 		})
 	}
+	indexHTML, err := fs.ReadFile(fsys, "index.html")
+	if err != nil {
+		s.log.Error("console v2: missing index.html in embedded bundle", "err", err)
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "Console v2 unavailable", http.StatusInternalServerError)
+		})
+	}
 	fileServer := http.FileServer(http.FS(fsys))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Tightened CSP: SPA assets are same-origin embedded only (no inline
-		// scripts, no CDN, no external fonts).
-		s.writeSecurityHeaders(w)
-		// SPA index fallback: open the path on the embedded FS. A missing file
-		// (fs.ErrNotExist) means it is a client-side route, so serve index.html
-		// and let react-router handle it. An empty path maps to "." (the root
-		// dir itself) which always opens successfully, so check for the index.
-		path := r.URL.Path
-		if path == "" || path == "/" {
-			path = "index.html"
+		// Hashed, content-addressed assets (JS/CSS/images) are served verbatim
+		// under the strict static policy. Everything else — the bare root and
+		// any unknown path — is a client-side route, so we serve the SPA shell
+		// with a fresh per-response nonce and let react-router resolve it.
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		if name != "" && name != "index.html" {
+			if f, ferr := fsys.Open(name); ferr == nil {
+				_ = f.Close()
+				s.writeSecurityHeaders(w)
+				fileServer.ServeHTTP(w, r)
+				return
+			}
 		}
-		if _, err := fsys.Open(path); err != nil {
-			r.URL.Path = "/"
-		}
-		fileServer.ServeHTTP(w, r)
+		s.serveConsoleV2Index(w, indexHTML)
 	})
+}
+
+// serveConsoleV2Index writes the SPA shell with a fresh per-response style
+// nonce. CodeMirror injects its theme as inline <style> elements, so the
+// document CSP advertises a nonce that the editor stamps onto them; the SPA
+// reads it from the injected <meta name="csp-nonce"> tag. The shell is marked
+// no-store so each load gets a distinct nonce.
+func (s *Server) serveConsoleV2Index(w http.ResponseWriter, indexHTML []byte) {
+	nonce := newStyleNonce()
+	body := bytes.Replace(indexHTML,
+		[]byte("<head>"),
+		[]byte("<head>\n<meta name=\"csp-nonce\" content=\""+nonce+"\" />"),
+		1)
+	s.writeSecurityHeadersNonce(w, nonce)
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// newStyleNonce returns a base64-encoded 128-bit random CSP nonce.
+func newStyleNonce() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand should never fail; if it ever does, returning an empty
+		// nonce degrades to the strict style-src 'self' policy (editor styles
+		// blocked) rather than panicking the request.
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(b[:])
 }

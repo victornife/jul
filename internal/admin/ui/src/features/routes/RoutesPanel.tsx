@@ -125,7 +125,7 @@ export function RoutesPanel() {
       ) : (
         <div className="space-y-4">
           {data.map((route, i) => (
-            <RouteCard key={`${route.listen}-${i}`} route={route} />
+            <RouteCard key={`${route.listen}-${String(i)}`} route={route} />
           ))}
         </div>
       )}

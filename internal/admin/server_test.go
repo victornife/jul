@@ -193,7 +193,13 @@ func TestUIServed(t *testing.T) {
 
 	rr = httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/does-not-exist", nil))
-	if rr.Code != http.StatusNotFound {
+	if consoleV2Compiled {
+		// With the SPA active, unknown paths are client-side routes: the shell is
+		// served (200) so deep links and refreshes boot the app.
+		if rr.Code != http.StatusOK {
+			t.Fatalf("unknown path (SPA) = %d, want 200", rr.Code)
+		}
+	} else if rr.Code != http.StatusNotFound {
 		t.Fatalf("unknown path = %d, want 404", rr.Code)
 	}
 }
@@ -362,19 +368,27 @@ func TestStatsRequiresAuth(t *testing.T) {
 	}
 }
 
-// TestConfigPageReachable verifies the config editor is always served at
-// /config and /ui regardless of the console build tag/setting.
+// TestConfigPageReachable verifies that /config and /ui resolve to a 200 admin
+// surface. In the lean build (or with the console disabled) they serve the
+// dependency-free configuration GUI; with the Console v2 SPA active they serve
+// the SPA shell so a hard refresh on those client-side routes resolves.
 func TestConfigPageReachable(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{Product: "Jul.IA"})
 	h := s.routes()
 
+	spaActive := consoleV2Compiled // the default config leaves the console enabled
 	for _, path := range []string{"/config", "/ui"} {
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("%s = %d, want 200", path, rr.Code)
 		}
-		if !strings.Contains(rr.Body.String(), "Advanced (raw TOML)") {
+		body := rr.Body.String()
+		if spaActive {
+			if !strings.Contains(body, `id="root"`) {
+				t.Fatalf("%s did not serve the SPA shell", path)
+			}
+		} else if !strings.Contains(body, "Advanced (raw TOML)") {
 			t.Fatalf("%s did not serve the configuration page", path)
 		}
 	}
@@ -383,7 +397,7 @@ func TestConfigPageReachable(t *testing.T) {
 // TestRootServesConfigWithoutConsoleTag verifies that in the default build
 // (console compiled out) the admin root serves the configuration page.
 func TestRootServesConfigWithoutConsoleTag(t *testing.T) {
-	if consoleCompiled {
+	if consoleV2Compiled {
 		t.Skip("console compiled in; covered by console_test.go")
 	}
 	enabled := true

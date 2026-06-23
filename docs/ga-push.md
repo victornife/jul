@@ -72,7 +72,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | OTel tracing + access-log sinks (Y1-10) | Beta | ⑥ docs · ① exporter/sink matrix · ② overhead bench · ⑦ PII note | M | ☐ |
 | Service discovery (Y2-05) | Beta | ① provider matrix · ③ keep-last-good limits · ⑦ K8s-token/SSRF (docs ✅) | M | ☐ |
 | Active health checks (Y1-05) | Beta | ⑥ docs · ① probe matrix · ③ limits | S–M | ☐ |
-| Console v1 (Y1-07) | Beta | ① endpoint/panel matrix · ⑦ formalize CSRF/CSP/auth (security model ✅) | M | ☐ |
+| Console (Y1-07 · Y2-09) | **GA — soak pending** | none — [console.md](console.md) doc + endpoint/panel matrix + CSP-nonce/bearer security model landed; v1 retired by the embedded-SPA substrate cutover (Y2-09) | M | ✅ |
 
 ## Wave 3 — P2 (dev-time CLI tools)
 
@@ -94,12 +94,13 @@ a soak failure is a release-blocking regression.
 | TLS + ACME (Y1-01) | 2026-06-21 | ☐ pending |
 | Core HTTP (static/proxy/FastCGI/vhosts/routing) | 2026-06-21 | ☐ pending |
 | Auth (CIDR/Basic/JWT/forward-auth) (Y1-04) | 2026-06-21 | ☐ pending |
+| Console (Y1-07 · Y2-09) | 2026-06-23 | ☐ pending |
 
 ## Changelog
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
-| 2026-06-22 | 1.8 | Added a pointer to the new canonical [status matrix](status.md), which consolidates this log's waves + soak table and the per-feature *GA status* tables into one at-a-glance source of truth. | The waves, the bar, the cross-cutting tasks, and the soak table; only a cross-reference is added. | [status.md](status.md) |
+| 2026-06-23 | 1.9 | **Console (Y1-07 · Y2-09) → GA — soak pending.** The embedded-SPA substrate cutover (React/TS/Vite, Node-free build, ~250 KB gz budget) flips the v2 console to the default admin UI at `/`, retires the hand-written v1 (`console.html`) and its dev route, and closes the last two Console GA gaps — ① the endpoint/panel matrix and ⑦ the formalised CSP-nonce + constant-time bearer security model. Added Console to the soak-tracking table. | The waves, the bar, and the remaining ☐ features; soak stays a post-GA gate (ADR 0005); ⑧ stays **n/a** (the console adds no custom parser). | [console.md](console.md), [console-v2 spec](../specs/console-v2.md), [status.md](status.md) |
 | 2026-06-21 | 1.7 | **Cross-cutting: `SECURITY.md` umbrella threat model** (anchors criterion ⑦ fleet-wide). Added a top-level [SECURITY.md](../SECURITY.md): the edge trust model (config trusted, requests untrusted, no request-selected upstreams/JWKS), hardening defaults, a per-feature threat-note index (Core HTTP, auth, TLS/ACME, mTLS, gRPC transcoding/passthrough, console), the fuzzed-parser inventory, a cryptography summary, and a private vulnerability-reporting policy. **This completes all four cross-cutting tasks** — every GA criterion is now hosted/anchored fleet-wide. | Every feature's runtime behaviour and per-feature threat notes (the umbrella only indexes + links them); the waves and the bar. | [SECURITY.md](../SECURITY.md) |
 | 2026-06-21 | 1.6 | **Cross-cutting: fuzz corpus + CI fuzz job** (hosts criterion ⑧ fleet-wide). Added [scripts/fuzz.sh](../scripts/fuzz.sh) — it discovers every in-tree `Fuzz*` target (auth JWKS/token, router host/location, FastCGI script-name/socket-address, transcode path-template) and runs each for a short `-fuzztime` with the full opt-in tag set — and a `fuzz (smoke)` [CI job](../.github/workflows/ci.yml) that runs it on every push/PR, uploading any minimised crasher as a reproducible regression seed. Seed corpora stay in-code via `f.Add`. | Every feature's runtime behaviour, the waves, the bar, and the existing fuzz targets; only new CI tooling is added. | [scripts/fuzz.sh](../scripts/fuzz.sh), [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
 | 2026-06-21 | 1.5 | **Cross-cutting: perf-gate benchmark harness + CI job** (hosts criterion ② fleet-wide). Added [scripts/bench.sh](../scripts/bench.sh) — a single harness that runs every in-tree `Benchmark*` with the full opt-in tag set — and a `benchmarks (smoke)` [CI job](../.github/workflows/ci.yml) that runs it on every push/PR so benchmarks must keep compiling and executing without panic. A `.gitattributes` pins `*.sh` to LF. The job is a smoke + artifact gate, **not** a nanosecond regression gate (shared runners are too noisy); doc numbers are regenerated on a quiet machine. | Every feature's runtime behaviour, the waves, the bar, and the documented benchmark numbers; only new CI tooling is added. | [scripts/bench.sh](../scripts/bench.sh), [.github/workflows/ci.yml](../.github/workflows/ci.yml) |

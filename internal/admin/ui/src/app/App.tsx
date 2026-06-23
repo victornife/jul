@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/app/Layout.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
 import { RoutesPanel } from "@/features/routes/RoutesPanel.tsx";
@@ -9,6 +9,7 @@ import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControl
 import { ObservabilityPanel } from "@/features/observability/ObservabilityPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
 import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
+import { WizardPanel } from "@/features/wizard/WizardPanel.tsx";
 
 export function App() {
   return (
@@ -22,7 +23,9 @@ export function App() {
         <Route path="/traffic" element={<TrafficControlsPanel />} />
         <Route path="/observability" element={<ObservabilityPanel />} />
         <Route path="/config" element={<ConfigPanel />} />
+        <Route path="/ui" element={<Navigate to="/config" replace />} />
         <Route path="/history" element={<HistoryPanel />} />
+        <Route path="/wizard" element={<WizardPanel />} />
         <Route
           path="*"
           element={

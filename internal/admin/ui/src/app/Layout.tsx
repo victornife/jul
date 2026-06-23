@@ -10,6 +10,7 @@ const NAV = [
   { to: "/observability", label: "Events" },
   { to: "/config", label: "Config" },
   { to: "/history", label: "History" },
+  { to: "/wizard", label: "Wizard" },
 ];
 
 function isActive(navTo: string, pathname: string, exact = false): boolean {

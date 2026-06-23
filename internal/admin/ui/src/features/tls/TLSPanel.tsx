@@ -91,7 +91,7 @@ export function TLSPanel() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {data.map((cert, i) => (
-            <CertCard key={`${cert.server_names.join(",")}-${i}`} cert={cert} />
+            <CertCard key={`${cert.server_names.join(",")}-${String(i)}`} cert={cert} />
           ))}
         </div>
       )}

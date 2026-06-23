@@ -51,7 +51,7 @@ describe("OverviewSchema", () => {
     const result = OverviewSchema.parse(raw);
     expect(result.product).toBe("Jul.IA");
     expect(result.status).toHaveLength(1);
-    expect(result.status[0]!.active).toBe(true);
+    expect(result.status[0]?.active).toBe(true);
   });
 
   it("rejects a payload missing required fields", () => {
@@ -74,7 +74,7 @@ describe("RouteProjectionSchema", () => {
     const r = RouteProjectionSchema.parse(raw);
     expect(r.listen).toBe(":443");
     expect(r.tls?.enabled).toBe(true);
-    expect(r.locations[0]!.action).toBe("proxy");
+    expect(r.locations[0]?.action).toBe("proxy");
   });
 });
 
@@ -89,7 +89,7 @@ describe("AppProjectionSchema", () => {
     };
     const a = AppProjectionSchema.parse(raw);
     expect(a.discovery).toBe("consul");
-    expect(a.backends[0]!.healthy).toBe(true);
+    expect(a.backends[0]?.healthy).toBe(true);
   });
 });
 

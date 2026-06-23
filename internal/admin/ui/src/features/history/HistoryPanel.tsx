@@ -3,12 +3,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchHistory,
   fetchHistorySnapshot,
+  diffConfig,
   rollback,
   type HistoryEntry,
 } from "@/api/client.ts";
+import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
+import { DiffView } from "@/features/config/DiffView.tsx";
 
 function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
+  if (n < 1024) return `${String(n)} B`;
   return `${(n / 1024).toFixed(1)} KB`;
 }
 
@@ -50,6 +53,58 @@ function SnapshotViewer({ id, onClose }: { readonly id: string; readonly onClose
   );
 }
 
+function RollbackConfirm({
+  id,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  readonly id: string;
+  readonly busy: boolean;
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+}) {
+  const snap = useQuery({
+    queryKey: ["history-snap", id],
+    queryFn: () => fetchHistorySnapshot(id),
+  });
+  const diff = useQuery({
+    queryKey: ["history-rollback-diff", id],
+    queryFn: () => diffConfig(snap.data?.raw ?? ""),
+    enabled: snap.data !== undefined,
+    staleTime: Infinity,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  return (
+    <ConfirmDialog
+      title="Roll back to this snapshot?"
+      confirmLabel="Roll back"
+      danger
+      busy={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
+      <p>
+        Re-applies snapshot <span className="font-mono text-jul-text">{id}</span> as the
+        live configuration and triggers a reload. The current config is snapshotted
+        first, so this is reversible.
+      </p>
+      <div className="mt-3">
+        {snap.isLoading && <p className="text-xs">Loading snapshot…</p>}
+        {diff.isFetching && (
+          <p className="text-xs text-jul-muted">Computing changes vs running…</p>
+        )}
+        {diff.data && <DiffView diff={diff.data} />}
+        {diff.isError && (
+          <p className="text-xs text-jul-danger">Unable to compute diff preview.</p>
+        )}
+      </div>
+    </ConfirmDialog>
+  );
+}
+
 function EntryRow({
   entry,
   onView,
@@ -69,13 +124,17 @@ function EntryRow({
       <td className="px-4 py-3">
         <div className="flex gap-2">
           <button
-            onClick={() => onView(entry.id)}
+            onClick={() => {
+              onView(entry.id);
+            }}
             className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-muted hover:text-jul-text"
           >
             View
           </button>
           <button
-            onClick={() => onRollback(entry.id)}
+            onClick={() => {
+              onRollback(entry.id);
+            }}
             disabled={rolling}
             className="rounded-md border border-jul-danger/40 px-2 py-0.5 text-xs text-jul-danger hover:bg-jul-danger/10 disabled:opacity-50"
           >
@@ -90,6 +149,7 @@ function EntryRow({
 export function HistoryPanel() {
   const qc = useQueryClient();
   const [viewing, setViewing] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [rollingId, setRollingId] = useState<string | null>(null);
 
   const { data, isLoading, isError } = useQuery({
@@ -99,10 +159,13 @@ export function HistoryPanel() {
 
   const rollbackMutation = useMutation({
     mutationFn: (id: string) => rollback(id),
-    onMutate: (id) => setRollingId(id),
+    onMutate: (id) => {
+      setRollingId(id);
+    },
     onSettled: () => {
       setRollingId(null);
-      void qc.invalidateQueries({ queryKey: ["history"] });
+      setConfirmId(null);
+      void qc.invalidateQueries();
     },
   });
 
@@ -114,7 +177,12 @@ export function HistoryPanel() {
       <h1 className="text-xl font-semibold">Config History</h1>
 
       {viewing && (
-        <SnapshotViewer id={viewing} onClose={() => setViewing(null)} />
+        <SnapshotViewer
+          id={viewing}
+          onClose={() => {
+            setViewing(null);
+          }}
+        />
       )}
 
       {data.length === 0 ? (
@@ -135,14 +203,31 @@ export function HistoryPanel() {
                 <EntryRow
                   key={entry.id}
                   entry={entry}
-                  onView={(id) => setViewing(id)}
-                  onRollback={(id) => rollbackMutation.mutate(id)}
+                  onView={(id) => {
+                    setViewing(id);
+                  }}
+                  onRollback={(id) => {
+                    setConfirmId(id);
+                  }}
                   rolling={rollingId === entry.id}
                 />
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {confirmId && (
+        <RollbackConfirm
+          id={confirmId}
+          busy={rollbackMutation.isPending}
+          onConfirm={() => {
+            rollbackMutation.mutate(confirmId);
+          }}
+          onCancel={() => {
+            setConfirmId(null);
+          }}
+        />
       )}
     </div>
   );

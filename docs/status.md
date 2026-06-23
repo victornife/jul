@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.0 · Updated 2026-06-22
+> Version 1.1 · Updated 2026-06-23
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -47,10 +47,12 @@ each linked doc's *GA status* table.
 | gRPC ↔ JSON transcoding | Y2-01 | `grpc` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
 | Native gRPC passthrough + h2c | Y2-04 | `grpc` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [grpc-proxy.md](grpc-proxy.md) |
 | mTLS client auth + `$ssl_client_*` | Y2-07 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
+| Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 
-Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, and mTLS: their parsing
-is delegated to the Go standard library (`crypto/x509`) or is an opaque forward,
-so there is no custom parser to fuzz.
+Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, and the Console:
+their parsing is delegated to the Go standard library (`crypto/x509`,
+`encoding/json`) or the separately-tracked TOML config parser (Y1-08), or is an
+opaque forward — none add a custom parser of their own to fuzz.
 
 ## Beta (shipped; remaining GA gaps)
 
@@ -62,7 +64,6 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | Compression (gzip; brotli/zstd) | Y1-02 | `brotli`,`zstd` | ⑥ docs · ① encoder matrix · ② throughput bench · ⑦ BREACH note |
 | Rate + connection limiting | Y1-03 | core | ⑥ docs · ① key/algorithm matrix · ② limiter bench · ⑦ bypass note |
 | Active health checks | Y1-05 | core | ⑥ docs · ① probe matrix · ③ limits |
-| Console v1 | Y1-07 | `console` | ① endpoint/panel matrix · ⑦ formalize CSRF/CSP/auth (security model ✅) |
 | Zero-config + `jul lint` | Y1-08 | core | ⑥ docs · ① lint-checks matrix · ⑧ TOML config-parser fuzz |
 | NGINX config importer | Y1-09 | `importer` | ⑥ docs · ① directive-support matrix · ⑧ nginx.conf parser fuzz · ③ unmapped-directive limits |
 | OTel tracing + access-log sinks | Y1-10 | `otel` | ⑥ docs · ① exporter/sink matrix · ② overhead bench · ⑦ PII note |
@@ -86,6 +87,7 @@ release-blocking regression. Mirrors the
 | gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ☐ pending |
 | Native gRPC passthrough (Y2-04) | 2026-06-21 | ☐ pending |
 | mTLS client auth (Y2-07) | 2026-06-21 | ☐ pending |
+| Console (Y1-07 · Y2-09) | 2026-06-23 | ☐ pending |
 
 ## Not yet shipped
 

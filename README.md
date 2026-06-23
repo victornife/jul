@@ -1347,7 +1347,7 @@ basic configuration page. Builds **without** the `console` tag serve the
 configuration page at the root instead. `GET /api/stats` is always available
 regardless of the build tag, so it is useful for scripted monitoring too.
 
-The console v1 adds operational panels alongside the dashboard:
+The console adds operational panels alongside the dashboard:
 
 - **Upstreams** — live pools with per-backend health, weight, and in-flight
   counts (backed by `GET /api/upstreams`).
