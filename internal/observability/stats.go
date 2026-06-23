@@ -44,6 +44,9 @@ type StatsSnapshot struct {
 	// have been recorded. CacheEvents holds the cumulative per-state counts.
 	CacheHitRatio float64            `json:"cacheHitRatio"`
 	CacheEvents   map[string]float64 `json:"cacheEvents"`
+
+	// Methods holds cumulative request counts by HTTP method (GET, POST, etc).
+	Methods map[string]float64 `json:"methods"`
 }
 
 // Snapshot gathers the private registry and projects it into a StatsSnapshot.
@@ -63,6 +66,7 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 		UptimeSeconds: time.Since(m.startTime).Seconds(),
 		StatusClasses: map[string]float64{},
 		CacheEvents:   map[string]float64{},
+		Methods:       map[string]float64{},
 	}
 
 	var (
@@ -79,6 +83,9 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 				snap.RequestsTotal += v
 				if class := statusClass(labelValue(metric, "code")); class != "" {
 					snap.StatusClasses[class] += v
+				}
+				if method := labelValue(metric, "method"); method != "" {
+					snap.Methods[method] += v
 				}
 			}
 		case "jul_http_requests_in_flight":

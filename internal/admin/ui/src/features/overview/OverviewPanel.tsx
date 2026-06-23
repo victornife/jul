@@ -241,6 +241,27 @@ export function OverviewPanel() {
             />
           </div>
 
+          {/* HTTP Method Breakdown */}
+          {stats?.methods && Object.keys(stats.methods).length > 0 && (
+            <div className="space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                Requests by HTTP Method
+              </h3>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+                {Object.entries(stats.methods)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([method, count]) => (
+                    <MetricCard
+                      key={method}
+                      label={method}
+                      value={Math.round(count).toLocaleString()}
+                      unit="requests"
+                    />
+                  ))}
+              </div>
+            </div>
+          )}
+
           {/* Sparklines - 2 minute trends */}
           {history.requestsPerSec.length > 0 && (
             <div className="space-y-4 pt-2">

@@ -70,6 +70,7 @@ export const StatsSnapshotSchema = z.object({
   latencyP99Ms: z.number(),
   cacheHitRatio: z.number(),
   cacheEvents: z.record(z.string(), z.number()).optional(),
+  methods: z.record(z.string(), z.number()).optional(),
 });
 export type StatsSnapshot = z.infer<typeof StatsSnapshotSchema>;
 
