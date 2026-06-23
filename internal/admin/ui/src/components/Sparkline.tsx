@@ -51,7 +51,7 @@ export function Sparkline({
       padding +
       availableHeight -
       ((value - min) / range) * availableHeight;
-    points.push(`${x},${y}`);
+    points.push(`${String(x)},${String(y)}`);
   });
 
   return (
@@ -59,7 +59,7 @@ export function Sparkline({
       width={width}
       height={height}
       className={className}
-      viewBox={`0 0 ${width} ${height}`}
+      viewBox={`0 0 ${String(width)} ${String(height)}`}
       preserveAspectRatio="none"
       style={{ display: "block" }}
     >

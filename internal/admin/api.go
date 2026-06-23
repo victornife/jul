@@ -524,6 +524,9 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Stats != nil {
 		out.Stats = s.deps.Stats()
 	}
+	if s.deps.TrafficSources != nil {
+		out.TrafficSources = s.deps.TrafficSources()
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

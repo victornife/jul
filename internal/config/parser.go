@@ -142,6 +142,23 @@ func (c *Config) applyDefaults() {
 		if c.Admin.HistoryKeep == 0 {
 			c.Admin.HistoryKeep = 50
 		}
+		// Admin API rate-limit defaults (Console v2 Milestone 1.6). A zero value
+		// means "unset" and adopts the default; an explicit negative value
+		// disables that limiter. Read limits are generous so legitimate console
+		// polling never trips them; mutations and the high-impact apply path are
+		// stricter; SSE streams are connection-capped.
+		if c.Admin.RateLimitReadPerMin == 0 {
+			c.Admin.RateLimitReadPerMin = 240
+		}
+		if c.Admin.RateLimitWritePerMin == 0 {
+			c.Admin.RateLimitWritePerMin = 60
+		}
+		if c.Admin.RateLimitApplyPerMin == 0 {
+			c.Admin.RateLimitApplyPerMin = 30
+		}
+		if c.Admin.MaxEventConns == 0 {
+			c.Admin.MaxEventConns = 4
+		}
 	}
 
 	if c.Cache.Enabled {

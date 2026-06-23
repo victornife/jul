@@ -5,6 +5,7 @@ import (
 	"jul/internal/config"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,13 +23,22 @@ type RouteProjection struct {
 
 // LocationProjection is a structured location within a route.
 type LocationProjection struct {
-	Match  string `json:"match"`
-	Type   string `json:"type"`   // exact, prefix, regex
-	Action string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny, return
-	Target string `json:"target,omitempty"`
-	Auth   bool   `json:"auth"`
-	Cache  bool   `json:"cache"`
-	Secure bool   `json:"secure"` // TLS required
+	Index       int    `json:"index"`
+	Match       string `json:"match"`
+	Type        string `json:"type"`   // exact, prefix, regex
+	Action      string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny, return
+	Target      string `json:"target,omitempty"`
+	Auth        bool   `json:"auth"`
+	Cache       bool   `json:"cache"`
+	Compression bool   `json:"compression"`
+	RateLimit   bool   `json:"rate_limit"`
+	Secure      bool   `json:"secure"` // TLS required
+	// Upstream is the referenced upstream pool name when Action proxies to a
+	// named upstream (proxy_pass http://<name>); empty for direct host:port.
+	Upstream string `json:"upstream,omitempty"`
+	// Warnings flags likely-misconfigurations the operator should see before
+	// editing (e.g. cache toggled on but the global cache is disabled).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // AppProjection is a structured upstream/app for the Console v2 Apps panel.
@@ -38,6 +48,15 @@ type AppProjection struct {
 	Backends    []BackendProjection `json:"backends"`
 	HealthCheck bool                `json:"health_check"`
 	Discovery   string              `json:"discovery,omitempty"`
+	// Detail fields (Milestone 2.4). Zero values render as "not configured".
+	MaxFails         int      `json:"max_fails,omitempty"`
+	FailTimeout      string   `json:"fail_timeout,omitempty"`
+	HealthCheckType  string   `json:"health_check_type,omitempty"`
+	HealthCheckPath  string   `json:"health_check_path,omitempty"`
+	HealthCheckIntvl string   `json:"health_check_interval,omitempty"`
+	DiscoveryTarget  string   `json:"discovery_target,omitempty"`
+	RoutesUsing      []string `json:"routes_using,omitempty"`
+	Warnings         []string `json:"warnings,omitempty"`
 }
 
 // BackendProjection is one backend server in an upstream pool.
@@ -108,6 +127,9 @@ type RuntimeOverview struct {
 	Version string          `json:"version"`
 	Status  []FeatureStatus `json:"status"` // existing 21-row backbone
 	Stats   interface{}     `json:"stats,omitempty"`
+	// TrafficSources is the bounded top-N projection of request hosts/origins/
+	// referers for the Console Overview Traffic Sources panel (Milestone 1.4).
+	TrafficSources interface{} `json:"traffic_sources,omitempty"`
 }
 
 // ── Projection helpers ──────────────────────────────────────────────────────
@@ -136,11 +158,14 @@ func projectRoutes(c *config.Config) []RouteProjection {
 		for j := range srv.Locations {
 			loc := &srv.Locations[j]
 			lp := LocationProjection{
-				Match:  loc.Match.Path,
-				Type:   loc.Match.Type,
-				Auth:   loc.Auth != nil,
-				Cache:  loc.Cache,
-				Secure: srv.TLS != nil && srv.TLS.Enabled,
+				Index:       j,
+				Match:       loc.Match.Path,
+				Type:        loc.Match.Type,
+				Auth:        loc.Auth != nil,
+				Cache:       loc.Cache,
+				RateLimit:   loc.RateLimit != nil && loc.RateLimit.Enabled,
+				Compression: c.Compression.Enabled,
+				Secure:      srv.TLS != nil && srv.TLS.Enabled,
 			}
 			switch {
 			case loc.GRPCTranscode != nil:
@@ -169,6 +194,8 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			default:
 				lp.Action = "unknown"
 			}
+			lp.Upstream = upstreamRef(lp.Target, lp.Action)
+			lp.Warnings = locationWarnings(c, srv, loc, &lp)
 			rp.Locations = append(rp.Locations, lp)
 		}
 		out = append(out, rp)
@@ -176,20 +203,83 @@ func projectRoutes(c *config.Config) []RouteProjection {
 	return out
 }
 
+// upstreamRef extracts the upstream pool name a proxied target references. A
+// proxy_pass of "http://<name>" without a port and without a dotted host is
+// treated as an upstream reference; concrete host:port targets return "".
+func upstreamRef(target, action string) string {
+	if action != "proxy" && action != "grpc" {
+		return ""
+	}
+	host := target
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	if i := strings.IndexAny(host, "/"); i >= 0 {
+		host = host[:i]
+	}
+	// A bare name (no port, no dot, not an IP) references an upstream pool.
+	if host == "" || strings.Contains(host, ":") || strings.Contains(host, ".") {
+		return ""
+	}
+	return host
+}
+
+// locationWarnings collects likely-misconfiguration notes for a location so the
+// operator sees them before editing (Milestone 2.1 acceptance criteria).
+func locationWarnings(c *config.Config, srv *config.ServerConfig, loc *config.LocationConfig, lp *LocationProjection) []string {
+	var w []string
+	if loc.Cache && !c.Cache.Enabled {
+		w = append(w, "Cache is toggled on for this route, but the global [cache] block is disabled.")
+	}
+	if lp.RateLimit && !c.RateLimit.Enabled && (loc.RateLimit == nil || loc.RateLimit.Rate <= 0) {
+		w = append(w, "Rate limiting is referenced but no rate is configured.")
+	}
+	if loc.RequireClientCert && (srv.TLS == nil || srv.TLS.ClientAuth == nil || !srv.TLS.ClientAuth.Active()) {
+		w = append(w, "This route requires a client certificate, but the server block does not enable mutual TLS.")
+	}
+	if up := upstreamRef(lp.Target, lp.Action); up != "" {
+		found := false
+		for i := range c.Upstreams {
+			if c.Upstreams[i].Name == up {
+				found = true
+				break
+			}
+		}
+		if !found {
+			w = append(w, "This route proxies to upstream \""+up+"\", which is not defined.")
+		}
+	}
+	return w
+}
+
 func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjection {
+	routesByUpstream := routesUsingUpstreams(c)
 	out := make([]AppProjection, 0, len(c.Upstreams))
 	for i := range c.Upstreams {
 		up := &c.Upstreams[i]
 		ap := AppProjection{
-			Name:     up.Name,
-			Strategy: up.Strategy,
-			Backends: make([]BackendProjection, 0, len(up.Servers)),
+			Name:        up.Name,
+			Strategy:    up.Strategy,
+			Backends:    make([]BackendProjection, 0, len(up.Servers)),
+			MaxFails:    up.MaxFails,
+			RoutesUsing: routesByUpstream[up.Name],
+		}
+		if up.FailTimeout > 0 {
+			ap.FailTimeout = string(mustMarshal(up.FailTimeout.MarshalText()))
 		}
 		if up.HealthCheck != nil {
 			ap.HealthCheck = up.HealthCheck.Enabled
+			if up.HealthCheck.Enabled {
+				ap.HealthCheckType = up.HealthCheck.Type
+				ap.HealthCheckPath = up.HealthCheck.Path
+				if up.HealthCheck.Interval > 0 {
+					ap.HealthCheckIntvl = string(mustMarshal(up.HealthCheck.Interval.MarshalText()))
+				}
+			}
 		}
 		if up.Discovery != nil {
 			ap.Discovery = up.Discovery.Type
+			ap.DiscoveryTarget = up.Discovery.Target
 		}
 		livePool, _ := live[up.Name]
 		liveMap := make(map[string]BackendStatus, len(livePool.Backends))
@@ -204,9 +294,45 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 			}
 			ap.Backends = append(ap.Backends, bp)
 		}
+		ap.Warnings = appWarnings(up)
 		out = append(out, ap)
 	}
 	return out
+}
+
+// routesUsingUpstreams maps each upstream pool name to the list of route
+// match patterns that proxy to it, so the App detail view can show which
+// routes depend on an app (Milestone 2.4 acceptance criterion).
+func routesUsingUpstreams(c *config.Config) map[string][]string {
+	out := map[string][]string{}
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		for j := range srv.Locations {
+			loc := &srv.Locations[j]
+			action := "proxy"
+			if loc.GRPC {
+				action = "grpc"
+			}
+			if name := upstreamRef(loc.ProxyPass, action); name != "" {
+				label := srv.Listen + " " + loc.Match.Path
+				out[name] = append(out[name], strings.TrimSpace(label))
+			}
+		}
+	}
+	return out
+}
+
+// appWarnings collects likely-misconfiguration notes for an upstream pool.
+func appWarnings(up *config.UpstreamConfig) []string {
+	var w []string
+	hasDiscovery := up.Discovery != nil && up.Discovery.Type != "" && up.Discovery.Type != "static"
+	if len(up.Servers) == 0 && !hasDiscovery {
+		w = append(w, "This app has no backends and no discovery source configured.")
+	}
+	if up.HealthCheck != nil && up.HealthCheck.Enabled && up.HealthCheck.Type == "http" && up.HealthCheck.Path == "" {
+		w = append(w, "HTTP health checks are enabled but no probe path is set.")
+	}
+	return w
 }
 
 func projectTLS(c *config.Config, live []CertStatus) []CertProjection {

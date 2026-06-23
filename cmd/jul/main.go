@@ -543,15 +543,16 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// source is a TOML file on disk; other sources leave these deps nil and the
 	// GUI degrades to read-only / disabled accordingly.
 	deps := admin.Deps{
-		Product:    productName,
-		Version:    version,
-		ConfigPath: src.Name(),
-		Metrics:    metrics.Handler(),
-		Stats:      metrics.Snapshot,
-		Cache:      adminCache(responseCache),
-		Reload:     triggerReload,
-		Ready:      readyFlag.Ready,
-		LoadConfig: src.Load,
+		Product:        productName,
+		Version:        version,
+		ConfigPath:     src.Name(),
+		Metrics:        metrics.Handler(),
+		Stats:          metrics.Snapshot,
+		TrafficSources: metrics.TrafficSnapshot,
+		Cache:          adminCache(responseCache),
+		Reload:         triggerReload,
+		Ready:          readyFlag.Ready,
+		LoadConfig:     src.Load,
 	}
 	// Live operational panels for the console: upstream health from the pool
 	// registry, and configured-certificate metadata from the current config.

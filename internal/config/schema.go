@@ -670,6 +670,24 @@ type AdminConfig struct {
 	// HistoryKeep bounds how many configuration snapshots are retained; older
 	// snapshots are pruned. It defaults to 50.
 	HistoryKeep int `toml:"history_keep"`
+
+	// RateLimitReadPerMin caps read (GET) admin/API requests per client per
+	// minute. It defaults to 240 when admin is enabled; a non-positive value
+	// disables read rate limiting. (Console v2 Milestone 1.6.)
+	RateLimitReadPerMin int `toml:"rate_limit_read_per_min"`
+	// RateLimitWritePerMin caps mutating (POST/PUT/DELETE) admin requests per
+	// client per minute. It defaults to 60 when admin is enabled; a non-positive
+	// value disables write rate limiting.
+	RateLimitWritePerMin int `toml:"rate_limit_write_per_min"`
+	// RateLimitApplyPerMin caps the high-impact config validate/diff/apply
+	// endpoints per client per minute, separately and more strictly than other
+	// mutations. It defaults to 30 when admin is enabled; a non-positive value
+	// disables it.
+	RateLimitApplyPerMin int `toml:"rate_limit_apply_per_min"`
+	// MaxEventConns bounds concurrent /api/events SSE streams per client to
+	// prevent resource exhaustion. It defaults to 4 when admin is enabled; a
+	// non-positive value disables the connection cap.
+	MaxEventConns int `toml:"max_event_conns"`
 }
 
 // ConsoleEnabled reports whether the web console should be served: it defaults

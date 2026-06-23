@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchApps, type AppProjection, type BackendProjection } from "@/api/client.ts";
+import { AppDetail } from "@/features/apps/AppDetail.tsx";
+import { AppEditor } from "@/features/apps/AppEditor.tsx";
 
 function HealthDot({ healthy }: { readonly healthy: boolean | undefined }) {
   if (healthy === undefined) return null;
@@ -34,12 +37,12 @@ function BackendRow({ b }: { readonly b: BackendProjection }) {
   );
 }
 
-function AppCard({ app }: { readonly app: AppProjection }) {
+function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen: () => void }) {
   const activeCount = app.backends.filter((b) => b.healthy !== false).length;
   const totalCount = app.backends.length;
 
   return (
-    <div className="rounded-lg border border-jul-border bg-jul-surface">
+    <div className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface" onClick={onOpen}>
       <div className="flex flex-wrap items-center gap-3 border-b border-jul-border px-4 py-3">
         <span className="font-semibold text-jul-text">{app.name}</span>
         <span className="rounded-full bg-jul-border px-2 py-0.5 text-xs text-jul-muted">
@@ -53,6 +56,11 @@ function AppCard({ app }: { readonly app: AppProjection }) {
         {app.health_check && (
           <span className="rounded-full bg-jul-success/15 px-2 py-0.5 text-xs text-jul-success">
             health-check
+          </span>
+        )}
+        {app.warnings && app.warnings.length > 0 && (
+          <span className="rounded-full bg-jul-warning/15 px-2 py-0.5 text-xs text-jul-warning">
+            ⚠ {app.warnings.length}
           </span>
         )}
         <span className="ml-auto text-xs text-jul-muted">
@@ -89,20 +97,57 @@ export function AppsPanel() {
     refetchInterval: 5_000,
   });
 
+  const [selected, setSelected] = useState<AppProjection | null>(null);
+  const [creating, setCreating] = useState(false);
+
   if (isLoading) return <div className="text-jul-muted">Loading apps…</div>;
   if (isError || !data) return <div className="text-jul-danger">Failed to load apps.</div>;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Apps &amp; Upstreams</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-semibold">Apps &amp; Upstreams</h1>
+        <button
+          type="button"
+          onClick={() => {
+            setCreating(true);
+          }}
+          className="ml-auto rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
+        >
+          New app
+        </button>
+      </div>
       {data.length === 0 ? (
         <p className="text-jul-muted text-sm">No upstream pools configured.</p>
       ) : (
         <div className="space-y-4">
           {data.map((app) => (
-            <AppCard key={app.name} app={app} />
+            <AppCard
+              key={app.name}
+              app={app}
+              onOpen={() => {
+                setSelected(app);
+              }}
+            />
           ))}
         </div>
+      )}
+
+      {selected && (
+        <AppDetail
+          app={selected}
+          onClose={() => {
+            setSelected(null);
+          }}
+        />
+      )}
+
+      {creating && (
+        <AppEditor
+          onClose={() => {
+            setCreating(false);
+          }}
+        />
       )}
     </div>
   );

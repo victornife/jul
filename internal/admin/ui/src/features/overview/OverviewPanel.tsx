@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchOverview, type FeatureStatus } from "@/api/client.ts";
+import {
+  fetchOverview,
+  type FeatureStatus,
+  type TrafficSources,
+} from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
 
@@ -52,6 +56,71 @@ function MetricCard({
         {unit && <div className="text-sm text-jul-muted">{unit}</div>}
       </div>
       {subtext && <div className="mt-1 text-xs text-jul-muted">{subtext}</div>}
+    </div>
+  );
+}
+
+// TrafficSourcesPanel renders the bounded top-N rollups of where traffic is
+// coming from (Milestone 1.4): top hosts, origins, referer hosts, the CORS
+// preflight count, and the same/cross-origin split. It answers "who is calling
+// me?" without exposing full URLs or any credential.
+function TopList({
+  title,
+  data,
+}: {
+  readonly title: string;
+  readonly data: Record<string, number> | undefined;
+}) {
+  const entries = Object.entries(data ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+  return (
+    <div className="rounded-lg border border-jul-border bg-jul-surface">
+      <div className="border-b border-jul-border px-4 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+          {title}
+        </span>
+      </div>
+      {entries.length === 0 ? (
+        <p className="px-4 py-3 text-xs text-jul-muted">No data yet.</p>
+      ) : (
+        <ul>
+          {entries.map(([key, count]) => (
+            <li
+              key={key}
+              className="flex items-center gap-3 border-b border-jul-border px-4 py-2 last:border-b-0"
+            >
+              <span className="flex-1 truncate font-mono text-xs text-jul-text" title={key}>
+                {key}
+              </span>
+              <span className="text-xs text-jul-muted">
+                {Math.round(count).toLocaleString()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function TrafficSourcesPanel({ sources }: { readonly sources: TrafficSources }) {
+  const preflight = sources.preflight_count ?? 0;
+  const same = sources.same_origin ?? 0;
+  const cross = sources.cross_origin ?? 0;
+  return (
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold text-jul-muted">Traffic Sources</h2>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <MetricCard label="CORS Preflight (OPTIONS)" value={Math.round(preflight)} unit="requests" />
+        <MetricCard label="Same-origin" value={Math.round(same)} unit="requests" />
+        <MetricCard label="Cross-origin" value={Math.round(cross)} unit="requests" />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <TopList title="Top Hosts" data={sources.hosts} />
+        <TopList title="Top Origins" data={sources.origins} />
+        <TopList title="Top Referer Hosts" data={sources.referers} />
+      </div>
     </div>
   );
 }
@@ -112,8 +181,8 @@ export function OverviewPanel() {
   const uptimeMinutes = Math.floor(((stats?.uptimeSeconds ?? 0) % 3600) / 60);
   const uptimeDisplay =
     uptimeHours > 0
-      ? `${uptimeHours}h ${uptimeMinutes}m`
-      : `${uptimeMinutes}m`;
+      ? `${String(uptimeHours)}h ${String(uptimeMinutes)}m`
+      : `${String(uptimeMinutes)}m`;
 
   // Calculate percentage for error rate
   const errorRatePercent = ((stats?.errorRate ?? 0) * 100).toFixed(1);
@@ -242,7 +311,7 @@ export function OverviewPanel() {
           </div>
 
           {/* HTTP Method Breakdown */}
-          {stats?.methods && Object.keys(stats.methods).length > 0 && (
+          {stats.methods && Object.keys(stats.methods).length > 0 && (
             <div className="space-y-4">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                 Requests by HTTP Method
@@ -344,6 +413,11 @@ export function OverviewPanel() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Traffic Sources (Milestone 1.4) */}
+      {data.traffic_sources && (
+        <TrafficSourcesPanel sources={data.traffic_sources} />
       )}
 
       {/* Feature Status */}

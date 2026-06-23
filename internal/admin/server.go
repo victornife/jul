@@ -47,6 +47,10 @@ type Deps struct {
 	// dashboard, polled by the /api/stats endpoint. Nil yields an
 	// "unavailable" snapshot so the console can render an empty state.
 	Stats func() observability.StatsSnapshot
+	// TrafficSources returns the bounded top-N projection of request hosts,
+	// origins, and referers for the Console Overview Traffic Sources panel
+	// (Milestone 1.4). Nil omits the panel.
+	TrafficSources func() observability.TrafficSources
 	// Cache, when non-nil, backs the /cache/purge endpoint.
 	Cache Purger
 	// Reload triggers a configuration reload. It must not block.
@@ -78,13 +82,14 @@ type Deps struct {
 
 // Server is the admin HTTP listener.
 type Server struct {
-	cfg   config.AdminConfig
-	log   *slog.Logger
-	deps  Deps
-	hist  *history
-	hub   *Hub
-	quit  chan struct{}
-	httpd *http.Server
+	cfg     config.AdminConfig
+	log     *slog.Logger
+	deps    Deps
+	hist    *history
+	hub     *Hub
+	limiter *adminLimiter
+	quit    chan struct{}
+	httpd   *http.Server
 }
 
 // New builds an admin Server from config. It returns nil when admin is
@@ -94,12 +99,13 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		return nil
 	}
 	s := &Server{
-		cfg:  cfg,
-		log:  log,
-		deps: deps,
-		hist: newHistory(cfg.HistoryDir, cfg.HistoryKeep),
-		hub:  newHub(),
-		quit: make(chan struct{}),
+		cfg:     cfg,
+		log:     log,
+		deps:    deps,
+		hist:    newHistory(cfg.HistoryDir, cfg.HistoryKeep),
+		hub:     newHub(),
+		limiter: newAdminLimiter(log, cfg.RateLimitReadPerMin, cfg.RateLimitWritePerMin, cfg.RateLimitApplyPerMin, cfg.MaxEventConns),
+		quit:    make(chan struct{}),
 	}
 	s.httpd = &http.Server{
 		Addr:              cfg.Listen,
@@ -150,6 +156,7 @@ func (s *Server) routes() http.Handler {
 	// These expose structured projections so the SPA never re-parses raw TOML.
 	mux.Handle("/api/runtime/overview", s.auth(http.HandlerFunc(s.handleRuntimeOverview)))
 	mux.Handle("/api/routes", s.auth(http.HandlerFunc(s.handleRoutes)))
+	mux.Handle("/api/routes/test", s.auth(http.HandlerFunc(s.handleRouteTest)))
 	mux.Handle("/api/apps", s.auth(http.HandlerFunc(s.handleApps)))
 	mux.Handle("/api/tls", s.auth(http.HandlerFunc(s.handleTLS)))
 	mux.Handle("/api/security", s.auth(http.HandlerFunc(s.handleSecurity)))
@@ -165,7 +172,10 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/config/rollback", s.auth(http.HandlerFunc(s.handleConfigRollback)))
 	mux.Handle("/api/wizard/generate", s.auth(http.HandlerFunc(s.handleWizardGenerate)))
 
-	return mux
+	// Admin API security hardening (Console v2 Milestone 1.6): per-client rate
+	// limiting wraps the whole mux so every endpoint is protected. The SSE
+	// connection cap is enforced inside handleEvents via the same limiter.
+	return s.limiter.rateLimit(mux)
 }
 
 // Run starts the admin listener and shuts it down when ctx is cancelled.
@@ -207,11 +217,10 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			h := r.Header.Get("Authorization")
 			ok := len(h) > len(prefix) && h[:len(prefix)] == prefix &&
 				subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(s.cfg.Token)) == 1
-			// SSE (EventSource) cannot set headers; allow the token as a ?token=
-			// query parameter for GET requests as a fallback.
-			if !ok && r.Method == http.MethodGet {
-				ok = subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(s.cfg.Token)) == 1
-			}
+			// The Console v2 SPA streams /api/events with the bearer token in the
+			// Authorization header over fetch (never EventSource), so no query-token
+			// fallback is offered: a ?token= parameter would leak the credential into
+			// access logs, the browser history, and the Referer header (Milestone 1.5).
 			if !ok {
 				w.Header().Set("WWW-Authenticate", "Bearer")
 				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)

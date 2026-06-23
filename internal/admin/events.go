@@ -101,11 +101,23 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Bound concurrent SSE streams per client to prevent resource exhaustion
+	// (Console v2 Milestone 1.6). A nil limiter (limits disabled) admits all.
+	release, ok := s.limiter.acquireConn(adminClientIP(r))
+	if !ok {
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "429 Too Many Requests", http.StatusTooManyRequests)
+		return
+	}
+	defer release()
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	// Optional CORS header if the console is served cross-origin in some setups.
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// The Console v2 SPA is served same-origin from embedded assets and streams
+	// /api/events with an Authorization header over fetch (see api/client.ts), so
+	// no cross-origin access is granted: a wildcard Access-Control-Allow-Origin
+	// would needlessly widen the attack surface (Milestone 1.5).
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 

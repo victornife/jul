@@ -58,6 +58,12 @@ type Metrics struct {
 	// it backs the console uptime figure.
 	startTime time.Time
 
+	// traffic holds the bounded top-N rollups of request hosts/origins/referers
+	// surfaced on the Console Overview (Console v2 Milestone 1.4). It is a
+	// privacy-preserving, in-memory projection and is never exported as
+	// Prometheus labels (which would be unbounded cardinality).
+	traffic *trafficTracker
+
 	// statsMu guards the rolling state used by Snapshot to derive
 	// rate-over-time figures (requests/sec and the windowed error rate) from
 	// the monotonic counters between successive polls.
@@ -176,6 +182,7 @@ func NewMetrics() *Metrics {
 			Help: "Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total.",
 		}, []string{"result"}),
 		certSeen: make(map[string]int64),
+		traffic:  newTrafficTracker(),
 	}
 	m.startTime = time.Now()
 	reg.MustRegister(
@@ -232,7 +239,17 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		if state := rw.Header().Get("X-Cache"); state != "" {
 			m.cacheEvents.WithLabelValues(state).Inc()
 		}
+		// Fold the request into the bounded traffic-source rollups. Only the Host
+		// and the Origin/Referer hostnames are retained — never the path, query
+		// string, or any credential header (Console v2 Milestone 1.4).
+		m.traffic.record(r.Host, r.Header.Get("Origin"), r.Header.Get("Referer"), r.Method)
 	})
+}
+
+// TrafficSnapshot returns the current bounded traffic-source rollups for the
+// Console Overview. It is safe to call concurrently.
+func (m *Metrics) TrafficSnapshot() TrafficSources {
+	return m.traffic.snapshot()
 }
 
 // ObserveCompression records that a response was compressed with the given

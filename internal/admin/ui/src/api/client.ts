@@ -74,11 +74,22 @@ export const StatsSnapshotSchema = z.object({
 });
 export type StatsSnapshot = z.infer<typeof StatsSnapshotSchema>;
 
+export const TrafficSourcesSchema = z.object({
+  hosts: z.record(z.string(), z.number()).optional(),
+  origins: z.record(z.string(), z.number()).optional(),
+  referers: z.record(z.string(), z.number()).optional(),
+  preflight_count: z.number().optional(),
+  same_origin: z.number().optional(),
+  cross_origin: z.number().optional(),
+});
+export type TrafficSources = z.infer<typeof TrafficSourcesSchema>;
+
 export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
   status: z.array(FeatureStatusSchema),
   stats: StatsSnapshotSchema.optional(),
+  traffic_sources: TrafficSourcesSchema.optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 
@@ -91,13 +102,18 @@ export const TLSProjectionSchema = z.object({
 export type TLSProjection = z.infer<typeof TLSProjectionSchema>;
 
 export const LocationProjectionSchema = z.object({
+  index: z.number().default(0),
   match: z.string(),
   type: z.string(),
   action: z.string(),
   target: z.string().optional(),
   auth: z.boolean(),
   cache: z.boolean(),
+  compression: z.boolean().default(false),
+  rate_limit: z.boolean().default(false),
   secure: z.boolean(),
+  upstream: z.string().optional(),
+  warnings: z.array(z.string()).optional(),
 });
 export type LocationProjection = z.infer<typeof LocationProjectionSchema>;
 
@@ -125,6 +141,14 @@ export const AppProjectionSchema = z.object({
   backends: z.array(BackendProjectionSchema),
   health_check: z.boolean(),
   discovery: z.string().optional(),
+  max_fails: z.number().optional(),
+  fail_timeout: z.string().optional(),
+  health_check_type: z.string().optional(),
+  health_check_path: z.string().optional(),
+  health_check_interval: z.string().optional(),
+  discovery_target: z.string().optional(),
+  routes_using: z.array(z.string()).optional(),
+  warnings: z.array(z.string()).optional(),
 });
 export type AppProjection = z.infer<typeof AppProjectionSchema>;
 
@@ -179,6 +203,43 @@ export function fetchOverview(): Promise<Overview> {
 
 export function fetchRoutes(): Promise<RouteProjection[]> {
   return api<unknown>("/routes").then((d) => z.array(RouteProjectionSchema).parse(d));
+}
+
+// ── Route testing (Milestone 2.3) ────────────────────────────────────────────
+
+export interface RouteTestInput {
+  method?: string;
+  path: string;
+  host?: string;
+  headers?: Record<string, string>;
+}
+
+export const RouteTestResultSchema = z.object({
+  matched: z.boolean(),
+  listen: z.string().optional(),
+  server_names: z.array(z.string()).optional(),
+  match: z.string().optional(),
+  match_type: z.string().optional(),
+  action: z.string().optional(),
+  target: z.string().optional(),
+  upstream: z.string().optional(),
+  auth: z.boolean(),
+  cache: z.boolean(),
+  compression: z.boolean(),
+  rate_limit: z.boolean(),
+  secure: z.boolean(),
+  warnings: z.array(z.string()).optional(),
+  explanation: z.string(),
+});
+export type RouteTestResult = z.infer<typeof RouteTestResultSchema>;
+
+export async function testRoute(input: RouteTestInput): Promise<RouteTestResult> {
+  const data = await api<unknown>("/routes/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return RouteTestResultSchema.parse(data);
 }
 
 export function fetchApps(): Promise<AppProjection[]> {
