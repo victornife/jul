@@ -656,3 +656,136 @@ func (s *Server) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, diffConfigs(before, after))
 }
+
+// handleConfigApply is the authoritative v2 write path: validate → snapshot →
+// write (which triggers reload) → return post-apply runtime delta.
+// POST /api/config/apply
+func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.deps.WriteConfigRaw == nil {
+		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	// Snapshot the current config before applying so the apply is reversible.
+	prev := s.currentRaw()
+
+	if err := s.deps.WriteConfigRaw(body); err != nil {
+		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
+			OK:      false,
+			Message: "The configuration contains errors; no change was applied.",
+			Errors:  humanizeErr(err.Error()),
+		})
+		return
+	}
+	s.recordHistory(prev)
+
+	// Broadcast the apply event to SSE subscribers.
+	s.hub.Broadcast(Event{
+		Type: "config_change",
+		Time: time.Now().UTC(),
+	})
+
+	// Return a post-apply status delta so the UI can reflect what changed.
+	var status []FeatureStatus
+	if s.deps.LoadConfig != nil {
+		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
+			status = s.runtimeStatus(cfg)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": status,
+	})
+}
+
+// handleConfigHistoryList serves the v2 snapshot index at GET /api/config/history.
+func (s *Server) handleConfigHistoryList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	entries, err := s.hist.list()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if entries == nil {
+		entries = []historyEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+// handleConfigHistoryGet serves a single snapshot by path parameter at
+// GET /api/config/history/{id}. The id is validated to prevent path traversal.
+func (s *Server) handleConfigHistoryGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	// Go 1.22+ ServeMux path parameter extraction.
+	id := r.PathValue("id")
+	if id == "" {
+		// Fallback: accept ?id= for compatibility.
+		id = r.URL.Query().Get("id")
+	}
+	raw, err := s.hist.get(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "raw": string(raw)})
+}
+
+// handleConfigRollback re-applies a stored snapshot via the validated write path
+// at POST /api/config/rollback. The running config is snapshotted first so the
+// rollback is itself reversible.
+func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.deps.WriteConfigRaw == nil {
+		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	raw, err := s.hist.get(req.ID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	prev := s.currentRaw()
+	if err := s.deps.WriteConfigRaw(raw); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.recordHistory(prev)
+
+	s.hub.Broadcast(Event{
+		Type: "config_change",
+		Time: time.Now().UTC(),
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled back", "id": req.ID})
+}
+
+// handleWizardGenerate is the non-mutating v2 TOML generation endpoint.
+// It supersedes /api/wizard: identical logic but at POST /api/wizard/generate.
+// POST /api/wizard/generate
+func (s *Server) handleWizardGenerate(w http.ResponseWriter, r *http.Request) {
+	// Delegate to the same logic as the v1 wizard.
+	s.handleWizard(w, r)
+}

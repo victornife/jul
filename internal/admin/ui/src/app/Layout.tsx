@@ -7,6 +7,9 @@ const NAV = [
   { to: "/tls", label: "TLS" },
   { to: "/security", label: "Security" },
   { to: "/traffic", label: "Traffic" },
+  { to: "/observability", label: "Events" },
+  { to: "/config", label: "Config" },
+  { to: "/history", label: "History" },
 ];
 
 function isActive(navTo: string, pathname: string, exact = false): boolean {

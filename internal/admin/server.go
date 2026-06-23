@@ -147,12 +147,16 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
 	mux.Handle("/api/events", s.auth(http.HandlerFunc(s.handleEvents)))
 
-	// Console v2 mutating/view endpoints.
+	// Console v2 write + history endpoints.
 	mux.Handle("/api/config/validate", s.auth(http.HandlerFunc(s.handleConfigValidate)))
 	mux.Handle("/api/config/diff", s.auth(http.HandlerFunc(s.handleConfigDiff)))
+	mux.Handle("/api/config/apply", s.auth(http.HandlerFunc(s.handleConfigApply)))
+	mux.Handle("/api/config/history", s.auth(http.HandlerFunc(s.handleConfigHistoryList)))
+	mux.Handle("/api/config/history/{id}", s.auth(http.HandlerFunc(s.handleConfigHistoryGet)))
+	mux.Handle("/api/config/rollback", s.auth(http.HandlerFunc(s.handleConfigRollback)))
+	mux.Handle("/api/wizard/generate", s.auth(http.HandlerFunc(s.handleWizardGenerate)))
 
-	// Console v2 dev route: serves the prebuilt SPA under /console/v2/.
-	// Gated by the console build tag so it does not affect lean builds.
+	// Console v2 SPA served at /console/v2/. Gated by the console build tag.
 	if consoleV2Compiled && s.cfg.ConsoleEnabled() {
 		mux.Handle("/console/v2/", http.StripPrefix("/console/v2/", s.handleConsoleV2()))
 	}
@@ -270,6 +274,11 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Reload()
+	// Notify SSE subscribers so the Console updates live.
+	s.hub.Broadcast(Event{
+		Type: "reload",
+		Time: time.Now().UTC(),
+	})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "reload triggered"})
 }
 
@@ -283,7 +292,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if consoleCompiled && s.cfg.ConsoleEnabled() {
-		s.writeSecurityHeaders(w)
+		s.writeSecurityHeadersLegacy(w)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = io.WriteString(w, consolePage())
 		return
@@ -300,7 +309,7 @@ func (s *Server) handleConfigPage(w http.ResponseWriter, r *http.Request) {
 // serveConfigPage writes the static configuration GUI page. The page fetches
 // data from the API endpoints, sending the admin token when one is required.
 func (s *Server) serveConfigPage(w http.ResponseWriter) {
-	s.writeSecurityHeaders(w)
+	s.writeSecurityHeadersLegacy(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, configUIPage)
 }
@@ -317,12 +326,25 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.deps.Stats())
 }
 
-// writeSecurityHeaders applies defensive headers to the admin HTML pages. Both
-// the console and config pages are self-contained (inline styles/scripts) and
-// only talk to same-origin /api endpoints, so a strict content-security policy
-// applies (inline is permitted because the assets are first-party and embedded,
-// not user-controlled).
+// writeSecurityHeaders applies defensive HTTP headers to the admin pages.
+// The Console v2 SPA is served from same-origin embedded assets only — no CDN,
+// no external fonts, no inline scripts — so script-src 'self' is safe.
+// The legacy config page uses inline scripts/styles and is covered by
+// writeSecurityHeadersLegacy below.
 func (s *Server) writeSecurityHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Security-Policy",
+		"default-src 'self'; style-src 'self'; "+
+			"script-src 'self'; img-src 'self' data:; "+
+			"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Referrer-Policy", "no-referrer")
+}
+
+// writeSecurityHeadersLegacy applies the CSP for the legacy config/console v1
+// page which contains first-party embedded inline scripts and styles.
+func (s *Server) writeSecurityHeadersLegacy(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Content-Security-Policy",
 		"default-src 'self'; style-src 'self' 'unsafe-inline'; "+
@@ -504,12 +526,18 @@ func (s *Server) handleConsoleV2() http.Handler {
 	}
 	fileServer := http.FileServer(http.FS(fsys))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Security: SPA is self-contained same-origin only.
+		// Tightened CSP: SPA assets are same-origin embedded only (no inline
+		// scripts, no CDN, no external fonts).
 		s.writeSecurityHeaders(w)
-		// HTML entry-point needs correct content-type; file server guesses well.
-		// For SPA index fallback: if the path does not match a real file delegate
-		// to index.html so react-router handles sub-routes.
-		if _, err := fsys.Open(r.URL.Path); err != nil {
+		// SPA index fallback: open the path on the embedded FS. A missing file
+		// (fs.ErrNotExist) means it is a client-side route, so serve index.html
+		// and let react-router handle it. An empty path maps to "." (the root
+		// dir itself) which always opens successfully, so check for the index.
+		path := r.URL.Path
+		if path == "" || path == "/" {
+			path = "index.html"
+		}
+		if _, err := fsys.Open(path); err != nil {
 			r.URL.Path = "/"
 		}
 		fileServer.ServeHTTP(w, r)

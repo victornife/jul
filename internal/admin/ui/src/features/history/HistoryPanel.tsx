@@ -1,0 +1,149 @@
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  fetchHistory,
+  fetchHistorySnapshot,
+  rollback,
+  type HistoryEntry,
+} from "@/api/client.ts";
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  return `${(n / 1024).toFixed(1)} KB`;
+}
+
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function SnapshotViewer({ id, onClose }: { readonly id: string; readonly onClose: () => void }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["history-snap", id],
+    queryFn: () => fetchHistorySnapshot(id),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="flex w-full max-w-3xl flex-col gap-4 rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-sm text-jul-muted">{id}</span>
+          <button
+            onClick={onClose}
+            className="text-jul-muted hover:text-jul-text text-lg leading-none"
+          >
+            ✕
+          </button>
+        </div>
+        {isLoading && <div className="text-jul-muted text-sm">Loading…</div>}
+        {isError && <div className="text-jul-danger text-sm">Failed to load snapshot.</div>}
+        {data && (
+          <pre className="max-h-96 overflow-auto rounded-md border border-jul-border bg-jul-surface p-4 text-xs text-jul-text">
+            {data.raw}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EntryRow({
+  entry,
+  onView,
+  onRollback,
+  rolling,
+}: {
+  readonly entry: HistoryEntry;
+  readonly onView: (id: string) => void;
+  readonly onRollback: (id: string) => void;
+  readonly rolling: boolean;
+}) {
+  return (
+    <tr className="border-b border-jul-border last:border-b-0 hover:bg-jul-surface/60">
+      <td className="px-4 py-3 font-mono text-xs text-jul-muted">{entry.id}</td>
+      <td className="px-4 py-3 text-sm text-jul-text">{formatTime(entry.time)}</td>
+      <td className="px-4 py-3 text-sm text-jul-muted">{formatBytes(entry.size)}</td>
+      <td className="px-4 py-3">
+        <div className="flex gap-2">
+          <button
+            onClick={() => onView(entry.id)}
+            className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-muted hover:text-jul-text"
+          >
+            View
+          </button>
+          <button
+            onClick={() => onRollback(entry.id)}
+            disabled={rolling}
+            className="rounded-md border border-jul-danger/40 px-2 py-0.5 text-xs text-jul-danger hover:bg-jul-danger/10 disabled:opacity-50"
+          >
+            {rolling ? "Rolling back…" : "Rollback"}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+export function HistoryPanel() {
+  const qc = useQueryClient();
+  const [viewing, setViewing] = useState<string | null>(null);
+  const [rollingId, setRollingId] = useState<string | null>(null);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["history"],
+    queryFn: fetchHistory,
+  });
+
+  const rollbackMutation = useMutation({
+    mutationFn: (id: string) => rollback(id),
+    onMutate: (id) => setRollingId(id),
+    onSettled: () => {
+      setRollingId(null);
+      void qc.invalidateQueries({ queryKey: ["history"] });
+    },
+  });
+
+  if (isLoading) return <div className="text-jul-muted">Loading history…</div>;
+  if (isError || !data) return <div className="text-jul-danger">Failed to load history.</div>;
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-xl font-semibold">Config History</h1>
+
+      {viewing && (
+        <SnapshotViewer id={viewing} onClose={() => setViewing(null)} />
+      )}
+
+      {data.length === 0 ? (
+        <p className="text-jul-muted text-sm">No snapshots yet. Apply a config change to create one.</p>
+      ) : (
+        <div className="rounded-lg border border-jul-border bg-jul-surface overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-jul-border text-xs text-jul-muted">
+                <th className="px-4 py-2">ID</th>
+                <th className="px-4 py-2">Time</th>
+                <th className="px-4 py-2">Size</th>
+                <th className="px-4 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((entry) => (
+                <EntryRow
+                  key={entry.id}
+                  entry={entry}
+                  onView={(id) => setViewing(id)}
+                  onRollback={(id) => rollbackMutation.mutate(id)}
+                  rolling={rollingId === entry.id}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
