@@ -79,7 +79,7 @@ client_max_body_size = "8m"
   proxy_pass = "http://backend"
 
     [servers.locations.auth]
-    basic = { file = "testdata/auth/htpasswd", realm = "Admin" }
+    # basic = { file = "testdata/auth/htpasswd", realm = "Admin" }
 
   [[servers.locations]]
   match = { type = "prefix", path = "/static/" }
