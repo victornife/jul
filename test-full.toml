@@ -1,5 +1,9 @@
-# Full-stack local test config for manual Console v2 verification.
-# Run: go run -tags "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes" ./cmd/jul -config test-full.toml
+# Maximum-features local test config for Console v2.
+# Run:
+#   go run -tags "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes" ./cmd/jul -config test-full.toml
+# Backends:
+#   PORT=3000 node tmp/local-apps/node-api.js
+#   PORT=3001 node tmp/local-apps/node-api.js
 
 [global]
 worker_threads = "auto"
@@ -7,17 +11,21 @@ log_level = "debug"
 log_format = "text"
 shutdown_timeout = "10s"
 
-# === TLS + HTTP/3 server (rich) ===========================================
+# === HTTP/3 + TLS + h2c + gRPC + auth + rate-limit server ==================
 [[servers]]
 listen = "127.0.0.1:8443"
 server_names = ["localhost", "api.localhost"]
-h2c = false
+h2c = true
 
   [servers.tls]
   enabled = true
   cert = "testdata/tls/localhost.crt"
   key = "testdata/tls/localhost.key"
-  min_version = "1.3"
+  min_version = "1.2"
+
+  [servers.http3]
+  enabled = true
+  alt_svc_max_age = 86400
 
   [[servers.locations]]
   match = { type = "prefix", path = "/api/v1/users" }
@@ -37,13 +45,20 @@ h2c = false
   match = { type = "exact", path = "/healthz" }
   return = 200
 
+  # gRPC passthrough (native HTTP/2 end-to-end)
+  [[servers.locations]]
+  match = { type = "prefix", path = "/grpc/" }
+  proxy_pass = "http://grpc-backend"
+  grpc = true
+
+  # Static fallback
   [[servers.locations]]
   match = { type = "prefix", path = "/" }
   root = "testdata/www"
   index = ["index.html"]
   try_files = ["$uri", "$uri/", "/index.html"]
 
-# === Plain HTTP server (proxy + auth + compression) =======================
+# === Plain HTTP server (proxy + basic auth + compression) ================
 [[servers]]
 listen = "127.0.0.1:8088"
 server_names = ["web.localhost"]
@@ -60,10 +75,19 @@ client_max_body_size = "8m"
     X-Forwarded-For = "$proxy_add_x_forwarded_for"
 
   [[servers.locations]]
-  match = { type = "prefix", path = "/" }
+  match = { type = "prefix", path = "/admin/" }
+  proxy_pass = "http://backend"
+
+    [servers.locations.auth]
+    basic = { file = "testdata/auth/htpasswd", realm = "Admin" }
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
   root = "testdata/www"
-  index = ["index.html"]
-  try_files = ["$uri", "$uri/", "/index.html"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 204
 
 # === Admin ================================================================
 [admin]
@@ -91,20 +115,35 @@ name = "user-service"
 strategy = "round_robin"
 servers = ["127.0.0.1:4000"]
 
+[[upstreams]]
+name = "grpc-backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:50051", "127.0.0.1:50052"]
+
+# DNS discovery example (resolves localhost → 127.0.0.1 happily)
+[[upstreams]]
+name = "dns-discovered"
+strategy = "round_robin"
+  [upstreams.discovery]
+  type = "dns"
+  target = "localhost:3000"
+  refresh = "30s"
+
 # === Cache ================================================================
 [cache]
 enabled = true
 memory_max_size = "64m"
 default_ttl = "60s"
 stale_while_revalidate = "30s"
+stale_if_error = "30s"
 
 # === Compression ==========================================================
 [compression]
 enabled = true
-encoders = ["gzip", "br"]
+encoders = ["gzip", "br", "zstd"]
 level = 6
 min_size = "1k"
-precompressed = false
+precompressed = true
 
 # === Rate Limiting ========================================================
 [rate_limit]
@@ -112,6 +151,20 @@ enabled = true
 key = "ip"
 rate = 1000
 burst = 2000
+
+# === L4 Stream Proxy (TCP + SNI + UDP) ====================================
+# Requires -tags stream.
+
+[[stream]]
+listen = "127.0.0.1:15432"      # Postgres-style TCP proxy
+proxy_pass = "backend"
+connect_timeout = "5s"
+idle_timeout = "1h"
+
+[[stream]]
+listen = "127.0.0.1:16379"      # Redis-style with PROXY protocol
+proxy_pass = "127.0.0.1:6380"
+proxy_protocol = "out"
 
 # === Observability ========================================================
 [observability.tracing]
