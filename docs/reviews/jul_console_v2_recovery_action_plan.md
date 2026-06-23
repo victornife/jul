@@ -1,10 +1,18 @@
 # Jul Console v2 Recovery and Excellence Plan
 
+> **Reviewed — 2026-06-23 ✅** · Status: **Approved.** This recovery and excellence plan was
+> evaluated and approved; it outlines the strategic roadmap for transforming Console v2 from a
+> technical substrate into a production-ready operations cockpit. The plan is adopted as the
+> authoritative guide for Console v2 implementation across all phases. See the
+> [reviews & decision log](README.md) for the full status mapping.
+
+---
+
+## Overview
+
 > Purpose: Convert the current Console v2 implementation from a technical substrate into the self-explanatory operations cockpit promised by `docs/specs/console-v2.md` and `docs/reviews/jul_console_v2_spike.md`.
 >
 > Audience: Jul maintainers, principal engineers, frontend engineers, backend/API owners, product reviewers, and UX reviewers.
->
-> Status: Action plan derived from the Console v2 implementation audit.
 >
 > Primary principle: The Console must make Jul easier to understand, safer to operate, and friendlier than traditional HTTP servers, reverse proxies, and API gateways. There is no negotiation on simplicity.
 
@@ -388,6 +396,47 @@ Current concerns:
 - `/api/events` remains same-origin by default.
 - Tokens are not encouraged in query strings.
 - Event stream continues working from the React app.
+
+---
+
+## Milestone 1.6 - Admin API Security Hardening
+
+### Build
+
+Protect admin endpoints from abuse and unauthorized access patterns.
+
+Implement:
+
+- rate limiting on admin endpoints (e.g., 100 requests/min per session for read operations, 10 requests/min for mutations),
+- separate stricter limits for `/api/config/apply` and `/api/config/validate` (high-impact operations),
+- connection limiting for `/api/events` SSE stream (max 2 concurrent per auth token),
+- 429 Too Many Requests response with `Retry-After` header,
+- logging of all rate-limit violations for security monitoring,
+- configurable per-endpoint rate limits.
+
+### Backend
+
+Add middleware that enforces rate limits:
+
+- Read endpoints (GET): generous limit
+- Mutating endpoints (POST/PUT/DELETE): strict limit
+- SSE stream: connection-based limit
+
+Return standard HTTP 429 with `Retry-After: <seconds>`.
+
+### Frontend
+
+Show rate-limit status:
+
+- If 429 received, display user-friendly message: "Too many requests. Please wait before retrying."
+- Implement backoff and retry logic with exponential delay.
+
+### Acceptance Criteria
+
+- Endpoints are protected from brute-force or spam abuse.
+- Legitimate users hit limits only under extreme load.
+- Rate-limit violations are logged for security review.
+- SSE connection pool is bounded to prevent resource exhaustion.
 
 ---
 
@@ -894,6 +943,96 @@ Create and use shared primitives:
 
 ---
 
+## Milestone 4.6 - UI State and Preferences Persistence
+
+### Build
+
+Enhance user experience by remembering context and preferences across sessions.
+
+Persistence strategy:
+
+- **localStorage:** theme preference, navigation layout, sidebar collapsed state, time range filter defaults,
+- **URL state:** current view (routes/apps/config), selected route/app ID, active tab,
+- **Backend session:** user-specific preferences (if multi-user), default filters,
+- **Session memory:** temporary draft state, filter panel state (cleared on page reload).
+
+Preferences system:
+
+- Theme: light/dark/system (with system preference detection),
+- Navigation layout: top-bar or left-sidebar,
+- Sidebar collapse preference,
+- Time range defaults for metrics (last hour/6 hours/day),
+- Default filter view when entering Observability,
+- Request sample retention policy,
+- Column visibility preferences in tables.
+
+Add:
+
+- Dedicated "Preferences" or "View" menu with all toggles,
+- "Reset to defaults" option,
+- Conflict resolution strategy (e.g., server state wins if config changes remotely),
+- Graceful handling of version migrations if preferences structure changes.
+
+### UX Rules
+
+- State restores transparently on page load,
+- No visual flickering from stale state,
+- Clear indication when defaults are reset,
+- Mobile and desktop views respect different collapsed/expanded defaults.
+
+### Acceptance Criteria
+
+- User preferences persist across sessions.
+- Sidebar/theme state remembered on return.
+- No data loss if config is updated externally.
+- Preferences UI is easy to find and use.
+
+---
+
+## Milestone 4.7 - Search, Filter, and Discovery
+
+### Build
+
+Make large configurations navigable and relationships discoverable.
+
+Features:
+
+- Unified search box across all configuration types (routes, apps, hostnames, path patterns),
+- Search results ranked by relevance and recent access,
+- Filter panels on major screens:
+  - Routes: by app, by security/cache/compression status, by error rate, by route type (static/proxy/redirect),
+  - Apps: by health status, by number of routes using it, by backend count,
+- "Related items" links: routes using an app, apps servicing a route,
+- "Recently modified" cards for quick access,
+- "Unused apps" indicator (apps with no routes),
+- "Usage count" column showing how many routes reference each app,
+- Tag/label support for manual route grouping (created via bulk operations or manual edit).
+
+### Backend
+
+Add search endpoint:
+
+```text
+GET /api/search?q=<query>&type=<routes|apps|all>
+```
+
+Returns ranked results with context (e.g., "Route /api used by 2 paths on app backend-1").
+
+### Frontend
+
+- Search component with autocomplete,
+- Quick-access favorites or bookmarks for frequently used routes,
+- Filter sidebar persistent across sessions,
+- Clear all filters button.
+
+### Acceptance Criteria
+
+- User can find any route or app by hostname, path, or app name in < 2 seconds.
+- Relationships between routes and apps are immediately visible.
+- Large configurations (100+ routes) are navigable without overwhelming the user.
+
+---
+
 # Phase 5 - Add Operational Depth
 
 ## Goal
@@ -1038,6 +1177,51 @@ Track:
 
 - User can diagnose certificate problems before outage.
 - Expiring cert warnings are actionable.
+
+---
+
+## Milestone 5.7 - Console Health and Usage Observability
+
+### Build
+
+Make the Console itself observable for debugging and operational transparency.
+
+Metrics to track:
+
+- Admin endpoint response times (P50, P95, P99),
+- Admin endpoint error rates by operation (validate, apply, rollback),
+- Frontend JavaScript errors (caught exceptions, network failures) with stack traces,
+- SSE stream connection count and uptime,
+- Config snapshot storage usage,
+- Event buffer ringSize vs. capacity,
+- Recent authentication successes/failures.
+
+Backend changes:
+
+- Add `/api/admin/health` endpoint returning:
+  - Console service status (OK/degraded/error),
+  - Response time statistics,
+  - Recent error summary,
+  - Database/file storage status if applicable.
+
+Frontend instrumentation:
+
+- Capture and report JavaScript errors to backend error log,
+- Track slow network requests (>2s) and report,
+- Display console health status in a subtle footer badge.
+
+Admin panel:
+
+- Show console performance metrics in an optional "Debug" or "Admin Console Status" panel,
+- Surface recent errors with context,
+- Link to console logs if available.
+
+### Acceptance Criteria
+
+- Operators can diagnose why the Console is slow or unresponsive.
+- Frontend errors are recorded for later review.
+- Console health is separable from Jul runtime health.
+- No console observability metric leaks sensitive data.
 
 ---
 
@@ -1195,6 +1379,49 @@ During soak:
 
 ---
 
+## Milestone 6.6 - Audit Logging and Compliance
+
+### Build
+
+Provide complete auditability for compliance, security, and operational debugging.
+
+Audit events to capture:
+
+- Config mutations: add/edit/delete routes, apps, TLS, traffic controls (include user, timestamp, before-and-after diff),
+- Config lifecycle: apply, rollback, reload (include reason if provided),
+- Authentication attempts: success and failure (include method, source IP if available),
+- Admin API access to sensitive operations,
+- Bulk operation transactions (single entry for batch apply/delete),
+- Certificate renewals and TLS events.
+
+Storage:
+
+- Bounded in-memory ring buffer (configurable size, default 10,000 events),
+- Optional persistent export to file, syslog, or external system,
+- Metadata: event ID, timestamp, actor (auth token/user), operation, affected resources.
+
+Sensitive data redaction:
+
+- Never log secret values, tokens, or Authorization headers,
+- Redact cookie contents,
+- Redact request/response bodies.
+
+Audit UI:
+
+- Audit log panel showing recent events with filtering,
+- Ability to export audit log as JSON or CSV,
+- Link from History view to related audit entries,
+- Show who/what/when for every config change.
+
+### Acceptance Criteria
+
+- All config changes are logged and attributed.
+- Audit log cannot be spoofed or tampered with (cryptographic verification optional for GA+).
+- Compliance teams can export and analyze audit data.
+- No sensitive data in audit logs.
+
+---
+
 # 5. Detailed Backlog
 
 ## P0 Backlog
@@ -1206,13 +1433,14 @@ During soak:
 | P0-03 | Add request method/status breakdown | Observability/API | High |
 | P0-04 | Add safe top-N origin projection | Observability/API | High |
 | P0-05 | Tighten SSE auth/CORS | Admin/API | High |
-| P0-06 | Add route detail drawer | Frontend | Critical |
-| P0-07 | Add Route Editor MVP | Frontend/API | Critical |
-| P0-08 | Add App Editor MVP | Frontend/API | High |
-| P0-09 | Expand diff to location/upstream changes | Admin/API | Critical |
-| P0-10 | Add Compression Editor MVP | Frontend/API | High |
-| P0-11 | Expand wizard: app behind Jul | Frontend/API | Critical |
-| P0-12 | Add self-explanatory headers to major screens | UX/Frontend | High |
+| P0-06 | Admin API rate limiting | Admin/API | High |
+| P0-07 | Add route detail drawer | Frontend | Critical |
+| P0-08 | Add Route Editor MVP | Frontend/API | Critical |
+| P0-09 | Add App Editor MVP | Frontend/API | High |
+| P0-10 | Expand diff to location/upstream changes | Admin/API | Critical |
+| P0-11 | Add Compression Editor MVP | Frontend/API | High |
+| P0-12 | Expand wizard: app behind Jul | Frontend/API | Critical |
+| P0-13 | Add self-explanatory headers to major screens | UX/Frontend | High |
 
 ## P1 Backlog
 
@@ -1220,31 +1448,37 @@ During soak:
 | --- | --- | --- | --- |
 | P1-01 | Theme provider and dark/light toggle | Frontend | Medium |
 | P1-02 | Top/sidebar navigation preference | Frontend | Medium |
-| P1-03 | TLS enablement flow | Frontend/API | High |
-| P1-04 | ACME configuration flow | Frontend/API | High |
-| P1-05 | Cache editor | Frontend/API | High |
-| P1-06 | Rate-limit editor | Frontend/API | High |
-| P1-07 | Timeout/body-limit editor | Frontend/API | Medium |
-| P1-08 | Public route/security posture map | Security/API | High |
-| P1-09 | Observability event timeline | Frontend/API | High |
-| P1-10 | Human validation error coverage expansion | Admin/API | High |
-| P1-11 | Empty states rewrite | UX/Frontend | Medium |
-| P1-12 | Shared component system | Frontend | Medium |
+| P1-03 | UI state and preferences persistence | Frontend | Medium |
+| P1-04 | Search, filter, and discovery | Frontend/API | High |
+| P1-05 | TLS enablement flow | Frontend/API | High |
+| P1-06 | ACME configuration flow | Frontend/API | High |
+| P1-07 | Cache editor | Frontend/API | High |
+| P1-08 | Rate-limit editor | Frontend/API | High |
+| P1-09 | Timeout/body-limit editor | Frontend/API | Medium |
+| P1-10 | Public route/security posture map | Security/API | High |
+| P1-11 | Observability event timeline | Frontend/API | High |
+| P1-12 | Human validation error coverage expansion | Admin/API | High |
+| P1-13 | Empty states rewrite | UX/Frontend | Medium |
+| P1-14 | Shared component system | Frontend | Medium |
 
 ## P2 Backlog
 
 | ID | Task | Owner Area | Impact |
 | --- | --- | --- | --- |
-| P2-01 | Request samples ring buffer | Observability/API | High |
-| P2-02 | Top failing routes panel | Observability/Frontend | High |
-| P2-03 | CORS diagnostics | Observability/Frontend | Medium |
-| P2-04 | Upstream health history | Upstream/API | Medium |
-| P2-05 | Certificate renewal history | TLS/API | Medium |
-| P2-06 | Log tail | Observability/API | Medium |
-| P2-07 | gRPC wizard | Frontend/API | Medium |
-| P2-08 | WebSocket/SSE route hints | Frontend/API | Medium |
-| P2-09 | Sanitized support bundle | Admin/API | Medium |
-| P2-10 | Visual regression tests | QA | Medium |
+| P2-01 | Config import and export | Frontend/Admin | High |
+| P2-02 | Bulk configuration operations | Frontend/Admin | High |
+| P2-03 | Console health and usage observability | Observability/Frontend | High |
+| P2-04 | Request samples ring buffer | Observability/API | High |
+| P2-05 | Top failing routes panel | Observability/Frontend | High |
+| P2-06 | CORS diagnostics | Observability/Frontend | Medium |
+| P2-07 | Upstream health history | Upstream/API | Medium |
+| P2-08 | Certificate renewal history | TLS/API | Medium |
+| P2-09 | Audit logging and compliance | Admin/API | High |
+| P2-10 | Log tail | Observability/API | Medium |
+| P2-11 | gRPC wizard | Frontend/API | Medium |
+| P2-12 | WebSocket/SSE route hints | Frontend/API | Medium |
+| P2-13 | Sanitized support bundle | Admin/API | Medium |
+| P2-14 | Visual regression tests | QA | Medium |
 
 ---
 
