@@ -205,8 +205,14 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		if s.cfg.Token != "" {
 			const prefix = "Bearer "
 			h := r.Header.Get("Authorization")
-			if len(h) <= len(prefix) || h[:len(prefix)] != prefix ||
-				subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(s.cfg.Token)) != 1 {
+			ok := len(h) > len(prefix) && h[:len(prefix)] == prefix &&
+				subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(s.cfg.Token)) == 1
+			// SSE (EventSource) cannot set headers; allow the token as a ?token=
+			// query parameter for GET requests as a fallback.
+			if !ok && r.Method == http.MethodGet {
+				ok = subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(s.cfg.Token)) == 1
+			}
+			if !ok {
 				w.Header().Set("WWW-Authenticate", "Bearer")
 				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
 				return

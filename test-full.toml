@@ -1,0 +1,121 @@
+# Full-stack local test config for manual Console v2 verification.
+# Run: go run -tags "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes" ./cmd/jul -config test-full.toml
+
+[global]
+worker_threads = "auto"
+log_level = "debug"
+log_format = "text"
+shutdown_timeout = "10s"
+
+# === TLS + HTTP/3 server (rich) ===========================================
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost", "api.localhost"]
+h2c = false
+
+  [servers.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+  min_version = "1.3"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/v1/users" }
+  proxy_pass = "http://user-service"
+  cache = true
+
+    [servers.locations.auth]
+    jwt = { jwks_url = "https://auth.local/.well-known/jwks.json", audience = "jul" }
+
+    [servers.locations.rate_limit]
+    enabled = true
+    rate = 60
+    burst = 120
+    key = "jwt:sub"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  try_files = ["$uri", "$uri/", "/index.html"]
+
+# === Plain HTTP server (proxy + auth + compression) =======================
+[[servers]]
+listen = "127.0.0.1:8088"
+server_names = ["web.localhost"]
+client_max_body_size = "8m"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://backend"
+  cache = true
+
+    [servers.locations.headers]
+    Host = "$host"
+    X-Real-IP = "$remote_addr"
+    X-Forwarded-For = "$proxy_add_x_forwarded_for"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  try_files = ["$uri", "$uri/", "/index.html"]
+
+# === Admin ================================================================
+[admin]
+enabled = true
+listen = "127.0.0.1:9099"
+token = "smoketoken"
+console = true
+history_dir = "./jul-data/config-history"
+
+# === Upstreams ============================================================
+[[upstreams]]
+name = "backend"
+strategy = "least_conn"
+servers = ["127.0.0.1:3000", "127.0.0.1:3001"]
+
+  [upstreams.health_check]
+  enabled = true
+  type = "http"
+  path = "/healthz"
+  interval = "5s"
+  timeout = "2s"
+
+[[upstreams]]
+name = "user-service"
+strategy = "round_robin"
+servers = ["127.0.0.1:4000"]
+
+# === Cache ================================================================
+[cache]
+enabled = true
+memory_max_size = "64m"
+default_ttl = "60s"
+stale_while_revalidate = "30s"
+
+# === Compression ==========================================================
+[compression]
+enabled = true
+encoders = ["gzip", "br"]
+level = 6
+min_size = "1k"
+precompressed = false
+
+# === Rate Limiting ========================================================
+[rate_limit]
+enabled = true
+key = "ip"
+rate = 1000
+burst = 2000
+
+# === Observability ========================================================
+[observability.tracing]
+enabled = false
+
+[observability.access_log]
+sinks = ["stdout"]
