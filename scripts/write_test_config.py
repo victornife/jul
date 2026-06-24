@@ -1,4 +1,6 @@
-# Maximum-features local test config for Console v2.
+import sys
+
+config = r"""# Maximum-features local test config for Console v2.
 # Run:
 #   go run -tags "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes" ./cmd/jul -config test-full.toml
 # Backends:
@@ -30,6 +32,7 @@ read_header_timeout = "10s"
 read_timeout = "30s"
 write_timeout = "30s"
 idle_timeout = "60s"
+error_pages = { 404 = "testdata/www/404.html", 500 = "testdata/www/50x.html" }
 
   [servers.tls]
   enabled = true
@@ -40,7 +43,7 @@ idle_timeout = "60s"
     [servers.tls.client_auth]
     mode = "request"
     ca_file = "testdata/tls/clients-ca.pem"
-    # verify_san = ["localhost"]  # string list
+    verify_san = { dns = ["localhost"] }
 
   [servers.http3]
   enabled = true
@@ -292,7 +295,10 @@ servers = ["127.0.0.1:4000"]
 [[upstreams]]
 name = "grpc-backend"
 strategy = "weighted_round_robin"
-servers = ["127.0.0.1:50051", "127.0.0.1:50052"]
+servers = [
+  { address = "127.0.0.1:50051", weight = 3 },
+  { address = "127.0.0.1:50052", weight = 1 }
+]
 
 # DNS discovery example
 [[upstreams]]
@@ -303,6 +309,14 @@ strategy = "round_robin"
   target = "localhost:3000"
   refresh = "30s"
 
+# Static discovery example
+[[upstreams]]
+name = "static-discovered"
+strategy = "round_robin"
+  [upstreams.discovery]
+  type = "static"
+  target = "127.0.0.1:3000"
+  refresh = "30s"
 
 # === Cache ================================================================
 [cache]
@@ -367,3 +381,7 @@ file = "./jul-data/access.log"
 format = "json"
 rotate_max_mb = 10
 rotate_keep = 3
+"""
+
+open('test-full.toml', 'w', encoding='utf-8').write(config)
+print('OK')
