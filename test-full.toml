@@ -378,7 +378,8 @@ rotate_keep = 3
 [waf]
 enabled = true
 mode = "detect"
-crs_enabled = true
-paranoia = 1
-inline_rules = "SecRule REQUEST_URI \"@contains /admin\" \"id:1000,phase:1,allow,log\""
+crs_enabled = false  # disabled: embedded CRS has Windows path bug
+block_status = 403
+directives_files = ["testdata/waf/local-rules.conf"]
+inline_rules = ""
 response_body_check = false
