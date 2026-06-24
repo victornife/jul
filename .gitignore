@@ -16,6 +16,9 @@ coverage.txt
 
 # Local runtime data (config-history snapshots, access logs, ...)
 /jul-data/
+/tmp/
+*.pid
+*.log
 
 # OS / editor
 .DS_Store
