@@ -1,6 +1,6 @@
 # Maximum-features local test config for Console v2.
 # Run:
-#   go run -tags "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes" ./cmd/jul -config test-full.toml
+#   go run -tags "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes waf" ./cmd/jul -config test-full.toml
 # Backends:
 #   PORT=3000 node tmp/local-apps/node-api.js
 #   PORT=3001 node tmp/local-apps/node-api.js
@@ -163,7 +163,7 @@ server_names = ["localhost"]
 
   [servers.tls.acme]
   enabled = true
-  email = "ops@example.com"
+  email = "${file:testdata/secrets/acme-email.txt}"
   ca = "letsencrypt-staging"
   challenge = "http-01"
   cache_dir = "./jul-data/certs"
@@ -256,7 +256,7 @@ plugins = ["header-injector"]
 [admin]
 enabled = true
 listen = "127.0.0.1:10199"
-token = "smoketoken"
+token = "${file:testdata/secrets/admin-token.txt}"
 console = true
 history_dir = "./jul-data/config-history"
 history_keep = 50
@@ -367,3 +367,18 @@ file = "./jul-data/access.log"
 format = "json"
 rotate_max_mb = 10
 rotate_keep = 3
+
+# === Secrets (tests ${env:VAR} and ${file:PATH} resolution) ==============
+# Set these environment variables before running:
+#   $env:JUL_ADMIN_TOKEN="smoketoken"
+#   $env:JUL_ACME_EMAIL="ops@example.com"
+# Then uncomment the ${env:...} lines below to test secret resolution.
+
+# === WAF (requires -tags waf) ============================================
+[waf]
+enabled = true
+mode = "detect"
+crs_enabled = true
+paranoia = 1
+inline_rules = "SecRule REQUEST_URI \"@contains /admin\" \"id:1000,phase:1,allow,log\""
+response_body_check = false
