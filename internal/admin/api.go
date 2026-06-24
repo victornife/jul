@@ -136,6 +136,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		grpcTranscode   int
 		authLocs        int
 		requireCertLocs int
+		wafLocs         int
 		cacheLocs       int
 		pluginLocs      int
 		totalLocs       int
@@ -177,6 +178,16 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 			}
 			if loc.RequireClientCert {
 				requireCertLocs++
+			}
+			// A location is WAF-protected when it has its own enabled [waf]
+			// override, or it inherits an enabled global [waf] (and does not
+			// override it with a disabled block).
+			if loc.WAF != nil {
+				if loc.WAF.Enabled {
+					wafLocs++
+				}
+			} else if c.WAF.Enabled {
+				wafLocs++
 			}
 			if loc.Cache {
 				cacheLocs++
@@ -272,6 +283,22 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		discDetail = countUnit(discoveryPools, "pool") + " (" + strings.Join(kinds, ", ") + ")"
 	}
 
+	// Secret references (${env:}/${file:}) resolved at load time; counted from
+	// the unresolved config so the panel shows usage without exposing values.
+	secretRefs := config.CountSecretRefs(c)
+
+	// WAF detail names the enforcement mode of the effective policy alongside
+	// the protected-location count, so the panel distinguishes blocking from
+	// detection-only at a glance.
+	wafDetail := ""
+	if wafLocs > 0 {
+		mode := c.WAF.Mode
+		if mode == "" {
+			mode = "block"
+		}
+		wafDetail = countUnit(wafLocs, "location") + " (" + mode + ")"
+	}
+
 	return []FeatureStatus{
 		{Group: "Traffic", Name: "Virtual hosts", Active: len(c.Servers) > 0, Detail: vhostDetail},
 		{Group: "Traffic", Name: "Static file serving", Active: staticLocs > 0, Detail: countDetailIf(staticLocs, "location")},
@@ -285,6 +312,8 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Security", Name: "Mutual TLS (client certs)", Active: mtlsServers > 0, Detail: mtlsDetail},
 		{Group: "Security", Name: "Automatic HTTPS (ACME)", Active: acmeServers > 0, Detail: countDetailIf(acmeServers, "server block")},
 		{Group: "Security", Name: "Access control (auth)", Active: authLocs > 0, Detail: countDetailIf(authLocs, "location")},
+		{Group: "Security", Name: "Web application firewall (WAF)", Active: wafLocs > 0, Detail: wafDetail},
+		{Group: "Security", Name: "Secret references", Active: secretRefs > 0, Detail: countDetailIf(secretRefs, "reference")},
 
 		{Group: "Protocols", Name: "HTTP/3 (QUIC)", Active: http3Servers > 0, Detail: countDetailIf(http3Servers, "server block")},
 		{Group: "Protocols", Name: "Cleartext HTTP/2 (h2c)", Active: h2cServers > 0, Detail: countDetailIf(h2cServers, "server block")},

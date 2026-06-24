@@ -46,6 +46,7 @@ type Metrics struct {
 	certExpiry       *prometheus.GaugeVec
 	certRenewals     prometheus.Counter
 	mtlsHandshakes   *prometheus.CounterVec
+	wafEvents        *prometheus.CounterVec
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -117,6 +118,10 @@ func NewMetrics() *Metrics {
 			Name: "jul_auth_decisions_total",
 			Help: "Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny).",
 		}, []string{"method", "result"}),
+		wafEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_waf_events_total",
+			Help: "Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID.",
+		}, []string{"action", "rule"}),
 		upstreamUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_upstream_healthy",
 			Help: "Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend.",
@@ -226,6 +231,7 @@ func NewMetrics() *Metrics {
 		m.certExpiry,
 		m.certRenewals,
 		m.mtlsHandshakes,
+		m.wafEvents,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -332,6 +338,14 @@ func (m *Metrics) ObserveRateLimited(kind string) {
 // OnDecision hook (the auth package cannot import observability directly).
 func (m *Metrics) ObserveAuthDecision(method, result string) {
 	m.authDecisions.WithLabelValues(method, result).Inc()
+}
+
+// ObserveWAFEvent records a web-application-firewall rule match. action is the
+// enforcement mode (block/detect) and rule is the matched rule's ID; both are
+// fixed/low-cardinality. It is wired into the WAF as its OnEvent hook (the waf
+// package cannot import observability directly).
+func (m *Metrics) ObserveWAFEvent(action, rule string) {
+	m.wafEvents.WithLabelValues(action, rule).Inc()
 }
 
 // ObserveBackendHealth records an active health-check verdict for a backend as

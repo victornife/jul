@@ -90,6 +90,17 @@ type SecurityProjection struct {
 	ClientAuth       string `json:"client_auth,omitempty"`
 	BodyLimit        string `json:"body_limit,omitempty"`
 	RequireCertCount int    `json:"require_cert_count"`
+	// WAFEnabled reports whether any location is protected by the web
+	// application firewall (the global [waf] or a per-location override).
+	WAFEnabled bool `json:"waf_enabled"`
+	// WAFMode is the enforcement mode ("block" or "detect") of the effective
+	// WAF policy, when one is enabled.
+	WAFMode string `json:"waf_mode,omitempty"`
+	// WAFLocations is the number of locations the WAF protects.
+	WAFLocations int `json:"waf_locations"`
+	// SecretRefs is the number of ${env:}/${file:} secret references in the
+	// configuration. The values themselves are never projected.
+	SecretRefs int `json:"secret_refs"`
 }
 
 // TrafficControlsProjection is the traffic/observability settings panel.
@@ -395,9 +406,41 @@ func projectSecurity(c *config.Config) SecurityProjection {
 			if loc.RequireClientCert {
 				sp.RequireCertCount++
 			}
+			// Resolve the WAF policy that applies to this location (its own
+			// override or the global policy) and count protected locations,
+			// recording the mode of the first one seen.
+			if w := effectiveWAFPolicy(c, loc); w != nil && w.Enabled {
+				sp.WAFEnabled = true
+				sp.WAFLocations++
+				if sp.WAFMode == "" {
+					sp.WAFMode = wafModeOrDefault(w.Mode)
+				}
+			}
 		}
 	}
+	sp.SecretRefs = config.CountSecretRefs(c)
 	return sp
+}
+
+// effectiveWAFPolicy returns the WAF policy that applies to a location: its own
+// [waf] override when present, otherwise the global [waf] policy. It returns nil
+// when no policy applies.
+func effectiveWAFPolicy(c *config.Config, loc *config.LocationConfig) *config.WAFConfig {
+	if loc.WAF != nil {
+		return loc.WAF
+	}
+	if c.WAF.Enabled {
+		return &c.WAF
+	}
+	return nil
+}
+
+// wafModeOrDefault returns the configured WAF mode, defaulting to "block".
+func wafModeOrDefault(mode string) string {
+	if mode == "" {
+		return "block"
+	}
+	return mode
 }
 
 func projectTrafficControls(c *config.Config) TrafficControlsProjection {

@@ -107,6 +107,40 @@ func Lint(c *Config) []Diagnostic {
 		})
 	}
 
+	// Literal secrets in sensitive fields. Prefer a ${env:NAME} or ${file:/path}
+	// reference (SEC-1) so the secret is not committed in the config file and is
+	// redacted from logs. The lint never echoes the value itself.
+	if c.Admin.Enabled && c.Admin.Token != "" && !containsSecretRef(c.Admin.Token) {
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Field:    "[admin].token",
+			Message:  "admin token is a literal value in the config file",
+			Hint:     `reference a secret instead, e.g. token = "${env:JUL_ADMIN_TOKEN}" or "${file:/run/secrets/admin-token}"`,
+		})
+	}
+	for i := range c.Upstreams {
+		d := c.Upstreams[i].Discovery
+		if d == nil {
+			continue
+		}
+		if d.Consul != nil && d.Consul.Token != "" && !containsSecretRef(d.Consul.Token) {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    fmt.Sprintf("upstreams[%d].discovery.consul.token", i),
+				Message:  "Consul ACL token is a literal value in the config file",
+				Hint:     `reference a secret instead, e.g. token = "${env:CONSUL_TOKEN}"`,
+			})
+		}
+		if d.Kubernetes != nil && d.Kubernetes.Token != "" && !containsSecretRef(d.Kubernetes.Token) {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    fmt.Sprintf("upstreams[%d].discovery.kubernetes.token", i),
+				Message:  "Kubernetes bearer token is a literal value in the config file",
+				Hint:     `reference a secret instead, e.g. token = "${file:/var/run/secrets/kubernetes.io/serviceaccount/token}"`,
+			})
+		}
+	}
+
 	// Compression is a cheap, broadly beneficial default.
 	if !c.Compression.Enabled {
 		diags = append(diags, Diagnostic{

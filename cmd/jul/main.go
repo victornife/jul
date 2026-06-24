@@ -20,11 +20,13 @@ import (
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/plugins"
+	"jul/internal/redact"
 	"jul/internal/router"
 	"jul/internal/server"
 	"jul/internal/signals"
 	"jul/internal/stream"
 	"jul/internal/upstream"
+	"jul/internal/waf"
 )
 
 // version is overridable at build time via -ldflags "-X main.version=...".
@@ -89,8 +91,19 @@ func run() int {
 // baseCtx is cancelled. The base context and reload signal are supplied by the
 // caller (console signal handling, or the Windows service control manager).
 func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source, cfg *config.Config) int {
-	log := observability.NewLogger(os.Stderr, cfg.Global.LogLevel, cfg.Global.LogFormat)
+	// Wrap the log sink so any secret value resolved from a ${env:}/${file:}
+	// reference (SEC-1) is masked even if a message or attribute interpolates it.
+	log := observability.NewLogger(redact.Writer(os.Stderr), cfg.Global.LogLevel, cfg.Global.LogFormat)
 	log.Info("starting "+productName, "version", version, "config", src.Name())
+
+	// Resolve secret references (${env:NAME}, ${file:/path}) once, up front, so
+	// every one-time consumer below (admin token, ACME account, tracing) reads
+	// resolved credentials. The handler factory re-resolves on each reload; the
+	// admin/on-disk views keep the unresolved references (SEC-1).
+	if err := config.ExpandSecrets(cfg); err != nil {
+		log.Error("failed to resolve secret references", "error", err)
+		return 1
+	}
 
 	// The response cache persists across reloads, so it is created once and
 	// captured by the handler factory below.
@@ -167,6 +180,15 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return 1
 	}
 
+	// The web application firewall ([waf]) is a build-time choice (the "waf"
+	// tag). Fail fast when the configuration enables it but this binary cannot
+	// enforce rules, mirroring the stream/HTTP3 checks. It is a no-op in
+	// WAF-enabled builds or when no WAF is configured.
+	if err := waf.Check(cfg); err != nil {
+		log.Error("failed to initialize WAF", "error", err)
+		return 1
+	}
+
 	// The rate-limiter store persists across reloads (its janitor is bound to
 	// baseCtx) so token buckets and their accumulated state survive config
 	// edits. Reloads update each bucket's rate/burst in place via a stable scope.
@@ -238,6 +260,13 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// invoked at startup and on every reload, so all routing state (router,
 	// upstream pools, content handlers) is reconstructed atomically.
 	factory := func(c *config.Config) (map[string]http.Handler, error) {
+		// Resolve secret references (${env:NAME}, ${file:/path}) in place before
+		// the runtime reads any credential. Resolved values register with redact
+		// for log masking. The admin/on-disk views keep the unresolved references,
+		// so secrets never reach the console or the config file (SEC-1).
+		if err := config.ExpandSecrets(c); err != nil {
+			return nil, fmt.Errorf("secrets: %w", err)
+		}
 		upstreams := indexUpstreams(c.Upstreams)
 
 		// Reconcile the upstream pool set for this build: Begin stages a new
@@ -384,6 +413,39 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 
+		// Firewalls are built once per reload, keyed by location scope. The
+		// effective policy for a location is its own [waf] override when set,
+		// otherwise the global [waf] policy. Building here means a rule-compile
+		// error (a bad SecLang file or CRS asset) fails the reload with a clear
+		// message instead of surfacing per request. In a lean build (no "waf"
+		// tag) waf.New is never reached because waf.Check already rejected the
+		// configuration at startup.
+		wafByScope := make(map[string]*waf.Firewall)
+		for i := range c.Servers {
+			for j := range c.Servers[i].Locations {
+				loc := c.Servers[i].Locations[j]
+				wcfg, ok := effectiveWAF(c, loc)
+				if !ok {
+					continue
+				}
+				fw, err := waf.New(wcfg, waf.Options{
+					Logger: log,
+					Hooks:  waf.Hooks{OnEvent: metrics.ObserveWAFEvent},
+				})
+				if err != nil {
+					return nil, fmt.Errorf("location %s: %w", wafScope(c.Servers[i], loc), err)
+				}
+				wafByScope[wafScope(c.Servers[i], loc)] = fw
+			}
+		}
+		locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
+			fw := wafByScope[wafScope(srv, loc)]
+			if fw == nil {
+				return nil
+			}
+			return fw.Middleware()
+		}
+
 		// Compose the per-location modifiers. WASM middleware plugins run
 		// OUTERMOST (edge position) so they can inspect or block a request before
 		// authentication; server-level plugins wrap location-level ones. Inside
@@ -393,6 +455,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		locModifier := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 			au := locAuth(srv, loc)
 			rl := locRateLimit(srv, loc)
+			wf := locWAF(srv, loc)
 			// Client-certificate handling applies when the server enables mutual
 			// TLS or the location requires a client certificate. It populates the
 			// $ssl_client_* identity for proxied requests and, when the location
@@ -415,11 +478,19 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					pluginMW = append(pluginMW, mw)
 				}
 			}
-			if au == nil && rl == nil && cc == nil && len(pluginMW) == 0 {
+			if au == nil && rl == nil && cc == nil && wf == nil && len(pluginMW) == 0 {
 				return nil
 			}
 			return func(next http.Handler) http.Handler {
 				h := next
+				// The WAF runs just inside authentication and outside rate
+				// limiting: an authenticated identity is available to rules,
+				// while a request blocked by a rule is rejected before the
+				// action runs. It sits before the global compression layer so
+				// rules inspect the response body uncompressed.
+				if wf != nil {
+					h = wf(h)
+				}
 				if rl != nil {
 					h = rl(h)
 				}
@@ -652,6 +723,22 @@ func rateKeyKind(spec string) string {
 // pre-built Authenticator back to the location during router construction.
 func authScope(srv config.ServerConfig, loc config.LocationConfig) string {
 	return srv.Listen + "|" + strings.Join(srv.ServerNames, ",") + "|" + loc.Match.Path
+}
+
+// wafScope builds a stable identity for a location's WAF policy, used to map a
+// pre-built Firewall back to the location during router construction.
+func wafScope(srv config.ServerConfig, loc config.LocationConfig) string {
+	return srv.Listen + "|" + strings.Join(srv.ServerNames, ",") + "|" + loc.Match.Path
+}
+
+// effectiveWAF resolves the WAF policy that applies to a location: its own [waf]
+// override when present, otherwise the global [waf] policy. The bool reports
+// whether an enabled policy applies (so the caller builds a firewall).
+func effectiveWAF(c *config.Config, loc config.LocationConfig) (config.WAFConfig, bool) {
+	if loc.WAF != nil {
+		return *loc.WAF, loc.WAF.Enabled
+	}
+	return c.WAF, c.WAF.Enabled
 }
 
 // uniqueListenAddrs returns the distinct listen addresses across server blocks.

@@ -129,10 +129,29 @@ func TestLintCleanConfigHasNoWarnings(t *testing.T) {
 			Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}},
 		}},
 		Compression: CompressionConfig{Enabled: true},
-		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "secret"},
+		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "${env:JUL_ADMIN_TOKEN}"},
 	}
 	if diags := Lint(c); len(diags) != 0 {
 		t.Errorf("expected no warnings, got:\n%s", lintMessages(diags))
+	}
+}
+
+func TestLintLiteralSecret(t *testing.T) {
+	literal := &Config{
+		Servers:     []ServerConfig{{Listen: ":80", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}},
+		Compression: CompressionConfig{Enabled: true},
+		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "literal-token"},
+	}
+	if !hasWarning(Lint(literal), "literal value") {
+		t.Error("expected a literal-secret warning for a plain admin token")
+	}
+	ref := &Config{
+		Servers:     []ServerConfig{{Listen: ":80", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}},
+		Compression: CompressionConfig{Enabled: true},
+		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "${env:JUL_ADMIN_TOKEN}"},
+	}
+	if hasWarning(Lint(ref), "literal value") {
+		t.Error("a secret-reference token should not warn")
 	}
 }
 
