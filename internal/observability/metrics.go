@@ -64,6 +64,16 @@ type Metrics struct {
 	// Prometheus labels (which would be unbounded cardinality).
 	traffic *trafficTracker
 
+	// samples is the bounded ring buffer of recent requests for the Console v2
+	// Request Samples panel (Milestone 5.1). routeFailures is the bounded
+	// per-path failure rollup for the Top Failing Routes panel (Milestone 5.2).
+	// health and certs track upstream-health and certificate-renewal histories
+	// (Milestones 5.5 and 5.6). All are in-memory and bounded.
+	samples       *requestSampleBuffer
+	routeFailures *routeFailureTracker
+	health        *healthHistoryTracker
+	certs         *certHistoryTracker
+
 	// statsMu guards the rolling state used by Snapshot to derive
 	// rate-over-time figures (requests/sec and the windowed error rate) from
 	// the monotonic counters between successive polls.
@@ -183,6 +193,11 @@ func NewMetrics() *Metrics {
 		}, []string{"result"}),
 		certSeen: make(map[string]int64),
 		traffic:  newTrafficTracker(),
+
+		samples:       newRequestSampleBuffer(requestSampleCap),
+		routeFailures: newRouteFailureTracker(routeFailureCap),
+		health:        newHealthHistoryTracker(),
+		certs:         newCertHistoryTracker(),
 	}
 	m.startTime = time.Now()
 	reg.MustRegister(
@@ -243,7 +258,51 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		// and the Origin/Referer hostnames are retained — never the path, query
 		// string, or any credential header (Console v2 Milestone 1.4).
 		m.traffic.record(r.Host, r.Header.Get("Origin"), r.Header.Get("Referer"), r.Method)
+
+		// Capture a privacy-preserving sample of the request and fold its outcome
+		// into the per-path failure rollup (Console v2 Milestones 5.1 and 5.2).
+		durationMs := time.Since(start).Seconds() * 1000
+		status := rw.Status()
+		m.samples.record(RequestSample{
+			Time:        start.UTC(),
+			Method:      r.Method,
+			Path:        r.URL.Path,
+			Host:        host,
+			Status:      status,
+			DurationMs:  durationMs,
+			CacheState:  rw.Header().Get("X-Cache"),
+			Compressed:  rw.Header().Get("Content-Encoding") != "",
+			RateLimited: status == http.StatusTooManyRequests,
+			Origin:      r.Header.Get("Origin"),
+			UserAgent:   r.Header.Get("User-Agent"),
+		})
+		m.routeFailures.record(r.URL.Path, status, durationMs)
 	})
+}
+
+// RequestSamples returns the bounded ring buffer of recent requests, newest
+// first, for the Console v2 Request Samples panel (Milestone 5.1).
+func (m *Metrics) RequestSamples() []RequestSample {
+	return m.samples.snapshot()
+}
+
+// FailingRoutes returns the top n paths ranked by recent failures for the
+// Console v2 Top Failing Routes panel (Milestone 5.2). A non-positive n returns
+// all tracked failing paths.
+func (m *Metrics) FailingRoutes(n int) []RouteFailure {
+	return m.routeFailures.snapshot(n)
+}
+
+// UpstreamHealthHistory returns the per-backend up/down history for the Console
+// v2 Upstream Health History panel (Milestone 5.5).
+func (m *Metrics) UpstreamHealthHistory() []BackendHealthHistory {
+	return m.health.snapshot()
+}
+
+// CertRenewalHistory returns the per-domain certificate renewal history for the
+// Console v2 Certificate Renewal History panel (Milestone 5.6).
+func (m *Metrics) CertRenewalHistory() []CertRenewalHistory {
+	return m.certs.snapshot()
 }
 
 // TrafficSnapshot returns the current bounded traffic-source rollups for the
@@ -285,6 +344,9 @@ func (m *Metrics) ObserveBackendHealth(pool, backend string, healthy bool) {
 		v = 1.0
 	}
 	m.upstreamUp.WithLabelValues(pool, backend).Set(v)
+	// Record up/down transitions for the Console v2 health-history panel
+	// (Milestone 5.5). The tracker only appends on an actual state change.
+	m.health.record(pool, backend, healthy)
 }
 
 // ObserveUpstreamBackends records the current backend count of a pool as a
@@ -362,9 +424,20 @@ func (m *Metrics) ObserveCertExpiry(domain string, notAfter time.Time) {
 	prev, ok := m.certSeen[domain]
 	if ok && ts > prev {
 		m.certRenewals.Inc()
+		// Record the renewal for the Console v2 certificate-history panel
+		// (Milestone 5.6). Issuer/staging are unknown at this hook and left
+		// blank; the advancing expiry is the renewal signal.
+		m.certs.recordRenewal(domain, notAfter, "", false)
 	}
 	m.certSeen[domain] = ts
 	m.certMu.Unlock()
+}
+
+// ObserveCertRenewalError records a failed certificate renewal attempt for the
+// Console v2 certificate-history panel (Milestone 5.6). errMsg should already be
+// a short, non-sensitive description (no key material, no tokens).
+func (m *Metrics) ObserveCertRenewalError(domain, errMsg string) {
+	m.certs.recordError(domain, errMsg)
 }
 
 // ConnState maintains the listenerConns gauge of concurrent connections. It is

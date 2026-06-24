@@ -454,6 +454,233 @@ export async function generateConfig(input: WizardInput): Promise<string> {
   return WizardResultSchema.parse(data).toml;
 }
 
+// ── Operational depth (Phase 5) ─────────────────────────────────────────────
+
+export const RequestSampleSchema = z.object({
+  time: z.string(),
+  method: z.string(),
+  path: z.string(),
+  host: z.string().optional(),
+  status: z.number(),
+  duration_ms: z.number().optional(),
+  cache_state: z.string().optional(),
+  compressed: z.boolean().optional(),
+  rate_limited: z.boolean().optional(),
+  origin: z.string().optional(),
+  user_agent: z.string().optional(),
+});
+export type RequestSample = z.infer<typeof RequestSampleSchema>;
+
+export function fetchRequestSamples(): Promise<RequestSample[]> {
+  return api<unknown>("/observability/requests").then((d) =>
+    z.array(RequestSampleSchema).parse(d),
+  );
+}
+
+export const RouteFailureSchema = z.object({
+  path: z.string(),
+  total: z.number(),
+  status_4xx: z.number(),
+  status_5xx: z.number(),
+  error_rate: z.number(),
+  latency_p95_ms: z.number(),
+  last_error_class: z.string().optional(),
+});
+export type RouteFailure = z.infer<typeof RouteFailureSchema>;
+
+export function fetchFailingRoutes(limit = 20): Promise<RouteFailure[]> {
+  return api<unknown>(`/observability/failing-routes?limit=${String(limit)}`).then((d) =>
+    z.array(RouteFailureSchema).parse(d),
+  );
+}
+
+export const HealthEventSchema = z.object({
+  time: z.string(),
+  healthy: z.boolean(),
+});
+
+export const BackendHealthHistorySchema = z.object({
+  pool: z.string(),
+  backend: z.string(),
+  healthy: z.boolean(),
+  transitions: z.number(),
+  flapping: z.boolean(),
+  last_up: z.string().optional(),
+  last_down: z.string().optional(),
+  recent: z.array(HealthEventSchema).optional(),
+});
+export type BackendHealthHistory = z.infer<typeof BackendHealthHistorySchema>;
+
+export function fetchUpstreamHistory(): Promise<BackendHealthHistory[]> {
+  return api<unknown>("/observability/upstream-history").then((d) =>
+    z.array(BackendHealthHistorySchema).parse(d),
+  );
+}
+
+export const CertRenewalEventSchema = z.object({
+  time: z.string(),
+  success: z.boolean(),
+  error: z.string().optional(),
+  not_after: z.string().optional(),
+  issuer: z.string().optional(),
+  staging: z.boolean().optional(),
+});
+
+export const CertRenewalHistorySchema = z.object({
+  domain: z.string(),
+  next_expiry: z.string().optional(),
+  days_left: z.number(),
+  issuer: z.string().optional(),
+  staging: z.boolean().optional(),
+  last_attempt: z.string().optional(),
+  last_success: z.string().optional(),
+  last_error: z.string().optional(),
+  last_error_time: z.string().optional(),
+  recent: z.array(CertRenewalEventSchema).optional(),
+});
+export type CertRenewalHistory = z.infer<typeof CertRenewalHistorySchema>;
+
+export function fetchCertHistory(): Promise<CertRenewalHistory[]> {
+  return api<unknown>("/observability/cert-history").then((d) =>
+    z.array(CertRenewalHistorySchema).parse(d),
+  );
+}
+
+export const TimelineEventSchema = z.object({
+  time: z.string(),
+  category: z.string(),
+  type: z.string(),
+  severity: z.string(),
+  message: z.string(),
+  ref: z.string().optional(),
+});
+export type TimelineEvent = z.infer<typeof TimelineEventSchema>;
+
+export function fetchTimeline(): Promise<TimelineEvent[]> {
+  return api<unknown>("/observability/timeline").then((d) =>
+    z.array(TimelineEventSchema).parse(d),
+  );
+}
+
+// ── Console health & frontend error reporting (Milestone 5.7) ────────────────
+
+export const ClientErrorSchema = z.object({
+  time: z.string(),
+  message: z.string(),
+  source: z.string().optional(),
+  line: z.number().optional(),
+  col: z.number().optional(),
+});
+export type ClientError = z.infer<typeof ClientErrorSchema>;
+
+export const ConsoleHealthSchema = z.object({
+  status: z.string(),
+  requests: z.number(),
+  errors: z.number(),
+  latency_p50: z.number(),
+  latency_p95: z.number(),
+  latency_p99: z.number(),
+  sse_conns: z.number(),
+  client_errors: z.array(ClientErrorSchema).optional(),
+});
+export type ConsoleHealth = z.infer<typeof ConsoleHealthSchema>;
+
+export function fetchConsoleHealth(): Promise<ConsoleHealth> {
+  return api<unknown>("/admin/health").then((d) => ConsoleHealthSchema.parse(d));
+}
+
+/**
+ * Reports a frontend JavaScript error to the Console's bounded error sink
+ * (Milestone 5.7). Best-effort: failures are swallowed so the reporter never
+ * cascades into more error noise. The backend redacts and caps the payload.
+ */
+export function reportClientError(input: {
+  message: string;
+  source?: string;
+  line?: number;
+  col?: number;
+}): void {
+  const token = authToken.get();
+  const headers = new Headers();
+  headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  void fetch("/api/admin/client-errors", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(input),
+    keepalive: true,
+  }).catch(() => {
+    // Swallow: the reporter must never throw.
+  });
+}
+
+// ── Audit log (Milestone 6.6) ────────────────────────────────────────────────
+
+export const AuditEventSchema = z.object({
+  id: z.number(),
+  time: z.string(),
+  actor: z.string(),
+  operation: z.string(),
+  resource: z.string().optional(),
+  result: z.string(),
+  detail: z.string().optional(),
+  source_ip: z.string().optional(),
+});
+export type AuditEvent = z.infer<typeof AuditEventSchema>;
+
+export interface AuditFilter {
+  op?: string | undefined;
+  result?: string | undefined;
+  limit?: number | undefined;
+}
+
+export function fetchAudit(filter: AuditFilter = {}): Promise<AuditEvent[]> {
+  const params = new URLSearchParams();
+  if (filter.op) params.set("op", filter.op);
+  if (filter.result) params.set("result", filter.result);
+  if (filter.limit) params.set("limit", String(filter.limit));
+  const qs = params.toString();
+  return api<unknown>(`/audit${qs ? `?${qs}` : ""}`).then((d) =>
+    z.array(AuditEventSchema).parse(d),
+  );
+}
+
+/** Builds the relative path for an audit export (used for tests and links). */
+export function auditExportUrl(format: "json" | "csv", filter: AuditFilter = {}): string {
+  const params = new URLSearchParams();
+  params.set("format", format);
+  if (filter.op) params.set("op", filter.op);
+  if (filter.result) params.set("result", filter.result);
+  return `/api/audit/export?${params.toString()}`;
+}
+
+/**
+ * Downloads an audit export. The export endpoint requires the bearer token in
+ * the Authorization header, which a plain anchor download cannot supply, so the
+ * file is fetched and saved via an object URL.
+ */
+export async function downloadAuditExport(
+  format: "json" | "csv",
+  filter: AuditFilter = {},
+): Promise<void> {
+  const headers = new Headers();
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch(auditExportUrl(format, filter), { headers });
+  if (!resp.ok) {
+    throw new ApiError("/audit/export", resp.status, `${String(resp.status)} ${resp.statusText}`);
+  }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `audit.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ── Events (SSE over fetch) ──────────────────────────────────────────────────
 
 export interface SseEvent {

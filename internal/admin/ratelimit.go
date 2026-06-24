@@ -157,6 +157,22 @@ func (l *adminLimiter) acquireConn(ip string) (release func(), ok bool) {
 	}, true
 }
 
+// eventConnCount returns the total number of live SSE connections across all
+// clients, for the Console health endpoint (Milestone 5.7). A nil limiter
+// reports zero.
+func (l *adminLimiter) eventConnCount() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	total := 0
+	for _, c := range l.buckets {
+		total += c.conns
+	}
+	return total
+}
+
 // gcLocked evicts idle client entries with no live connections so the maps stay
 // bounded under churny IP spaces. The caller must hold l.mu.
 func (l *adminLimiter) gcLocked() {

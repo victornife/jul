@@ -8,6 +8,9 @@ import { SecurityPanel } from "@/features/security/SecurityPanel.tsx";
 import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControlsPanel.tsx";
 import { SearchPanel } from "@/features/search/SearchPanel.tsx";
 import { ObservabilityPanel } from "@/features/observability/ObservabilityPanel.tsx";
+import { OperationsPanel } from "@/features/operations/OperationsPanel.tsx";
+import { TimelinePanel } from "@/features/observability/TimelinePanel.tsx";
+import { AuditPanel } from "@/features/security/AuditPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
 import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
 import { WizardPanel } from "@/features/wizard/WizardPanel.tsx";
@@ -24,6 +27,9 @@ export function App() {
         <Route path="/traffic" element={<TrafficControlsPanel />} />
         <Route path="/search" element={<SearchPanel />} />
         <Route path="/observability" element={<ObservabilityPanel />} />
+        <Route path="/operations" element={<OperationsPanel />} />
+        <Route path="/timeline" element={<TimelinePanel />} />
+        <Route path="/audit" element={<AuditPanel />} />
         <Route path="/config" element={<ConfigPanel />} />
         <Route path="/ui" element={<Navigate to="/config" replace />} />
         <Route path="/history" element={<HistoryPanel />} />

@@ -554,6 +554,13 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		Ready:          readyFlag.Ready,
 		LoadConfig:     src.Load,
 	}
+	// Operational-depth panels (Console v2 Phase 5): recent request samples, the
+	// top failing routes, upstream health history, and certificate renewal
+	// history — all bounded, privacy-preserving, in-memory projections.
+	deps.RequestSamples = metrics.RequestSamples
+	deps.FailingRoutes = metrics.FailingRoutes
+	deps.UpstreamHealthHistory = metrics.UpstreamHealthHistory
+	deps.CertRenewalHistory = metrics.CertRenewalHistory
 	// Live operational panels for the console: upstream health from the pool
 	// registry, and configured-certificate metadata from the current config.
 	deps.Upstreams = func() []admin.UpstreamStatus { return adaptUpstreams(poolReg.Snapshot()) }

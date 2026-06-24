@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useTheme, type ThemePreference } from "@/lib/theme.ts";
 import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.ts";
+import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
 
 const NAV = [
   { to: "/", label: "Overview", exact: true },
@@ -12,6 +13,9 @@ const NAV = [
   { to: "/traffic", label: "Traffic" },
   { to: "/search", label: "Search" },
   { to: "/observability", label: "Events" },
+  { to: "/operations", label: "Operations" },
+  { to: "/timeline", label: "Timeline" },
+  { to: "/audit", label: "Audit" },
   { to: "/config", label: "Config" },
   { to: "/history", label: "History" },
   { to: "/wizard", label: "Wizard" },
@@ -191,6 +195,7 @@ export function Layout() {
 
   const controls = (
     <div className="flex items-center gap-2">
+      <ConsoleHealthBadge />
       <PreferenceMenu layout={layout} onLayout={setLayout} />
     </div>
   );

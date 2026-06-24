@@ -78,18 +78,35 @@ type Deps struct {
 	// Certs returns configured-certificate metadata (subject, expiry; never key
 	// material) for the console certificate panel. Nil yields an empty list.
 	Certs func() []CertStatus
+
+	// RequestSamples returns the bounded ring buffer of recent requests for the
+	// Console v2 Request Samples panel (Milestone 5.1). Nil omits the panel.
+	RequestSamples func() []observability.RequestSample
+	// FailingRoutes returns the top-n paths ranked by recent failures for the
+	// Console v2 Top Failing Routes panel (Milestone 5.2). Nil omits the panel.
+	FailingRoutes func(n int) []observability.RouteFailure
+	// UpstreamHealthHistory returns per-backend up/down history for the Console
+	// v2 Upstream Health History panel (Milestone 5.5). Nil omits the panel.
+	UpstreamHealthHistory func() []observability.BackendHealthHistory
+	// CertRenewalHistory returns per-domain certificate renewal history for the
+	// Console v2 Certificate Renewal History panel (Milestone 5.6). Nil omits
+	// the panel.
+	CertRenewalHistory func() []observability.CertRenewalHistory
 }
 
 // Server is the admin HTTP listener.
 type Server struct {
-	cfg     config.AdminConfig
-	log     *slog.Logger
-	deps    Deps
-	hist    *history
-	hub     *Hub
-	limiter *adminLimiter
-	quit    chan struct{}
-	httpd   *http.Server
+	cfg      config.AdminConfig
+	log      *slog.Logger
+	deps     Deps
+	hist     *history
+	hub      *Hub
+	limiter  *adminLimiter
+	timeline *eventHistory
+	audit    *auditLog
+	health   *consoleHealth
+	quit     chan struct{}
+	httpd    *http.Server
 }
 
 // New builds an admin Server from config. It returns nil when admin is
@@ -99,13 +116,16 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		return nil
 	}
 	s := &Server{
-		cfg:     cfg,
-		log:     log,
-		deps:    deps,
-		hist:    newHistory(cfg.HistoryDir, cfg.HistoryKeep),
-		hub:     newHub(),
-		limiter: newAdminLimiter(log, cfg.RateLimitReadPerMin, cfg.RateLimitWritePerMin, cfg.RateLimitApplyPerMin, cfg.MaxEventConns),
-		quit:    make(chan struct{}),
+		cfg:      cfg,
+		log:      log,
+		deps:     deps,
+		hist:     newHistory(cfg.HistoryDir, cfg.HistoryKeep),
+		hub:      newHub(),
+		limiter:  newAdminLimiter(log, cfg.RateLimitReadPerMin, cfg.RateLimitWritePerMin, cfg.RateLimitApplyPerMin, cfg.MaxEventConns),
+		timeline: newEventHistory(timelineCap),
+		audit:    newAuditLog(auditCap),
+		health:   newConsoleHealth(),
+		quit:     make(chan struct{}),
 	}
 	s.httpd = &http.Server{
 		Addr:              cfg.Listen,
@@ -163,6 +183,22 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
 	mux.Handle("/api/events", s.auth(http.HandlerFunc(s.handleEvents)))
 
+	// Console v2 Phase 5 — operational depth: recent request samples, top
+	// failing routes, the merged config/runtime timeline, upstream-health and
+	// certificate-renewal histories, plus the Console's own health and a
+	// frontend-error sink (Milestones 5.1–5.7).
+	mux.Handle("/api/observability/requests", s.auth(http.HandlerFunc(s.handleRequestSamples)))
+	mux.Handle("/api/observability/failing-routes", s.auth(http.HandlerFunc(s.handleFailingRoutes)))
+	mux.Handle("/api/observability/timeline", s.auth(http.HandlerFunc(s.handleTimeline)))
+	mux.Handle("/api/observability/upstream-history", s.auth(http.HandlerFunc(s.handleUpstreamHistory)))
+	mux.Handle("/api/observability/cert-history", s.auth(http.HandlerFunc(s.handleCertHistory)))
+	mux.Handle("/api/admin/health", s.auth(http.HandlerFunc(s.handleConsoleHealth)))
+	mux.Handle("/api/admin/client-errors", s.auth(http.HandlerFunc(s.handleClientError)))
+
+	// Console v2 Milestone 6.6 — audit log and export.
+	mux.Handle("/api/audit", s.auth(http.HandlerFunc(s.handleAudit)))
+	mux.Handle("/api/audit/export", s.auth(http.HandlerFunc(s.handleAuditExport)))
+
 	// Console v2 write + history endpoints.
 	mux.Handle("/api/config/validate", s.auth(http.HandlerFunc(s.handleConfigValidate)))
 	mux.Handle("/api/config/diff", s.auth(http.HandlerFunc(s.handleConfigDiff)))
@@ -175,7 +211,9 @@ func (s *Server) routes() http.Handler {
 	// Admin API security hardening (Console v2 Milestone 1.6): per-client rate
 	// limiting wraps the whole mux so every endpoint is protected. The SSE
 	// connection cap is enforced inside handleEvents via the same limiter.
-	return s.limiter.rateLimit(mux)
+	// The console-health observer (Milestone 5.7) wraps the limited mux so it
+	// records the real per-request latency and status of every admin call.
+	return s.observeConsole(s.limiter.rateLimit(mux))
 }
 
 // Run starts the admin listener and shuts it down when ctx is cancelled.
@@ -293,11 +331,9 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Reload()
-	// Notify SSE subscribers so the Console updates live.
-	s.hub.Broadcast(Event{
-		Type: "reload",
-		Time: time.Now().UTC(),
-	})
+	s.recordAudit("config.reload", "config", "success", "reload triggered via admin API", adminClientIP(r))
+	// Notify SSE subscribers and the timeline so the Console updates live.
+	s.emit("config", "reload", "info", "Configuration reload triggered.")
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "reload triggered"})
 }
 

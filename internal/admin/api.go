@@ -686,6 +686,8 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	prev := s.currentRaw()
 
 	if err := s.deps.WriteConfigRaw(body); err != nil {
+		s.recordAudit("config.apply", "config", "failure", "rejected: invalid configuration", adminClientIP(r))
+		s.emit("config", "apply_failed", "error", "Configuration apply was rejected (invalid).")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
 			OK:      false,
 			Message: "The configuration contains errors; no change was applied.",
@@ -694,12 +696,10 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordHistory(prev)
+	s.recordAudit("config.apply", "config", "success", "configuration applied and reloaded", adminClientIP(r))
 
-	// Broadcast the apply event to SSE subscribers.
-	s.hub.Broadcast(Event{
-		Type: "config_change",
-		Time: time.Now().UTC(),
-	})
+	// Record the apply on the timeline and broadcast it to SSE subscribers.
+	s.emit("config", "apply", "info", "Configuration applied and reloaded.")
 
 	// Return a post-apply status delta so the UI can reflect what changed.
 	var status []FeatureStatus
@@ -778,15 +778,14 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	prev := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(raw); err != nil {
+		s.recordAudit("config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID, adminClientIP(r))
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	s.recordHistory(prev)
+	s.recordAudit("config.rollback", "config", "success", "rolled back to snapshot "+req.ID, adminClientIP(r))
 
-	s.hub.Broadcast(Event{
-		Type: "config_change",
-		Time: time.Now().UTC(),
-	})
+	s.emit("config", "rollback", "warning", "Configuration rolled back to a previous snapshot.")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled back", "id": req.ID})
 }
 
