@@ -33,6 +33,25 @@ export function savePreference(key: string, value: unknown): void {
 }
 
 /**
+ * Clears every persisted UI preference (Milestone 4.6 "Reset to defaults").
+ * Removes all namespaced jul_pref:* entries plus the separately-keyed theme
+ * preference, then reloads so components re-read their fallbacks.
+ */
+export function resetPreferences(): void {
+  try {
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(PREFIX)) toRemove.push(k);
+    }
+    for (const k of toRemove) localStorage.removeItem(k);
+    localStorage.removeItem("jul_theme");
+  } catch {
+    // ignore storage failure
+  }
+}
+
+/**
  * usePersistentState is useState that mirrors its value to localStorage under a
  * namespaced preference key, restoring it on next load.
  */

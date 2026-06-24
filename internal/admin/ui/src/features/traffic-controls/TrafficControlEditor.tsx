@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
-import { fetchRawConfig, type TrafficControls } from "@/api/client.ts";
+import {
+  fetchRawConfig,
+  fetchStats,
+  fetchRoutes,
+  purgeCache,
+  type TrafficControls,
+} from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import {
   upsertTopLevelTable,
@@ -161,6 +168,38 @@ const DEFAULT_COMPRESSION_TYPES = [
   "image/svg+xml",
 ];
 
+// AffectedRoutes lists the route paths that opt into a given edge feature, so an
+// operator can preview which routes a global change touches (Milestones 3.1–3.3).
+function AffectedRoutes({
+  title,
+  paths,
+  emptyHint,
+}: {
+  readonly title: string;
+  readonly paths: string[];
+  readonly emptyHint: string;
+}) {
+  return (
+    <div className="space-y-1 rounded-md border border-jul-border bg-jul-surface p-3">
+      <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">{title}</span>
+      {paths.length === 0 ? (
+        <p className="text-xs text-jul-muted">{emptyHint}</p>
+      ) : (
+        <ul className="flex flex-wrap gap-1.5">
+          {paths.map((p) => (
+            <li
+              key={p}
+              className="rounded-full bg-jul-accent/15 px-2 py-0.5 font-mono text-xs text-jul-accent"
+            >
+              {p}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export interface TrafficControlEditorProps {
   readonly kind: TrafficEditorKind;
   readonly current: TrafficControls;
@@ -176,6 +215,32 @@ export interface TrafficControlEditorProps {
 export function TrafficControlEditor({ kind, current, onClose }: TrafficControlEditorProps) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
+  const [purgeMsg, setPurgeMsg] = useState<string | null>(null);
+
+  // Live observability for the cache and rate-limit editors (Milestones 3.2/3.3):
+  // the cache hit ratio and the rate-limited request counts come from the runtime
+  // stats snapshot; the route list resolves which routes opt into each feature.
+  const stats = useQuery({
+    queryKey: ["stats"],
+    queryFn: fetchStats,
+    enabled: kind === "cache" || kind === "rate_limit",
+    refetchInterval: 5_000,
+  });
+  const routes = useQuery({
+    queryKey: ["routes"],
+    queryFn: fetchRoutes,
+    enabled: kind === "compression" || kind === "cache" || kind === "rate_limit",
+  });
+
+  async function onPurge(): Promise<void> {
+    setPurgeMsg(null);
+    try {
+      await purgeCache();
+      setPurgeMsg("Cache purged.");
+    } catch {
+      setPurgeMsg("Could not purge the cache.");
+    }
+  }
 
   const [compression, setCompression] = useState<CompressionDraft>({
     enabled: current.compression?.enabled ?? false,
@@ -203,6 +268,11 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
     readTimeout: "30s",
     writeTimeout: "30s",
     idleTimeout: "60s",
+    proxyConnectTimeout: "5s",
+    proxyReadTimeout: "30s",
+    proxySendTimeout: "30s",
+    maxFails: 3,
+    failTimeout: "10s",
   });
 
   let fragment = "";
@@ -328,6 +398,14 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                     setCompression((d) => ({ ...d, precompressed: v }));
                   }}
                 />
+                <AffectedRoutes
+                  title="Routes that opt into compression"
+                  paths={(routes.data ?? [])
+                    .flatMap((r) => r.locations)
+                    .filter((l) => l.compression)
+                    .map((l) => l.match)}
+                  emptyHint="No route sets a per-location compression override; the global setting applies everywhere."
+                />
               </>
             )}
           </>
@@ -380,8 +458,55 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                     setCache((d) => ({ ...d, staleWhileRevalidate: v }));
                   }}
                 />
+                <AffectedRoutes
+                  title="Routes that opt into caching"
+                  paths={(routes.data ?? [])
+                    .flatMap((r) => r.locations)
+                    .filter((l) => l.cache)
+                    .map((l) => l.match)}
+                  emptyHint="No route opts into caching yet — enable it per route from the Route editor."
+                />
               </>
             )}
+
+            <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                Cache effectiveness
+              </span>
+              {stats.data?.available ? (
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <span className="text-jul-text">
+                    Hit ratio:{" "}
+                    <span className="font-mono text-jul-accent">
+                      {((stats.data.cacheHitRatio || 0) * 100).toFixed(1)}%
+                    </span>
+                  </span>
+                  <span className="text-jul-muted">
+                    HIT {Math.round(stats.data.cacheEvents?.["HIT"] ?? 0).toLocaleString()}
+                  </span>
+                  <span className="text-jul-muted">
+                    MISS {Math.round(stats.data.cacheEvents?.["MISS"] ?? 0).toLocaleString()}
+                  </span>
+                  <span className="text-jul-muted">
+                    BYPASS {Math.round(stats.data.cacheEvents?.["BYPASS"] ?? 0).toLocaleString()}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-jul-muted">No cache activity recorded yet.</p>
+              )}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onPurge();
+                  }}
+                  className="rounded-md border border-jul-danger/50 px-3 py-1 text-xs font-medium text-jul-danger hover:bg-jul-danger/10"
+                >
+                  Purge cache now
+                </button>
+                {purgeMsg && <span className="text-xs text-jul-muted">{purgeMsg}</span>}
+              </div>
+            </div>
           </>
         )}
 
@@ -430,6 +555,39 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 />
               </>
             )}
+
+            <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                Rate-limited requests
+              </span>
+              {stats.data?.available && Object.keys(stats.data.rateLimited ?? {}).length > 0 ? (
+                <ul className="space-y-1">
+                  {Object.entries(stats.data.rateLimited ?? {})
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([keyKind, count]) => (
+                      <li key={keyKind} className="flex justify-between text-sm">
+                        <span className="font-mono text-jul-text">{keyKind}</span>
+                        <span className="text-jul-muted">
+                          {Math.round(count).toLocaleString()} rejected
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-jul-muted">
+                  No requests have been rate-limited yet (or rate limiting is inactive).
+                </p>
+              )}
+            </div>
+
+            <AffectedRoutes
+              title="Routes that opt into rate limiting"
+              paths={(routes.data ?? [])
+                .flatMap((r) => r.locations)
+                .filter((l) => l.rate_limit)
+                .map((l) => l.match)}
+              emptyHint="No route sets a per-location rate-limit override; the global setting applies everywhere."
+            />
           </>
         )}
 
@@ -473,6 +631,74 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 setLimits((d) => ({ ...d, idleTimeout: v }));
               }}
             />
+
+            <div className="space-y-1 border-t border-jul-border pt-4">
+              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                Upstream timeouts
+              </span>
+              <p className="text-xs text-jul-muted">
+                Timeouts stop Jul from waiting forever for a slow backend. They apply to a proxied
+                location, so place them under the [[servers.locations]] block that proxies.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <TextField
+                label="Connect timeout"
+                hint="Dialling the backend."
+                value={limits.proxyConnectTimeout}
+                placeholder="5s"
+                onChange={(v) => {
+                  setLimits((d) => ({ ...d, proxyConnectTimeout: v }));
+                }}
+              />
+              <TextField
+                label="Read timeout"
+                hint="Reading the response."
+                value={limits.proxyReadTimeout}
+                placeholder="30s"
+                onChange={(v) => {
+                  setLimits((d) => ({ ...d, proxyReadTimeout: v }));
+                }}
+              />
+              <TextField
+                label="Send timeout"
+                hint="Sending the request."
+                value={limits.proxySendTimeout}
+                placeholder="30s"
+                onChange={(v) => {
+                  setLimits((d) => ({ ...d, proxySendTimeout: v }));
+                }}
+              />
+            </div>
+
+            <div className="space-y-1 border-t border-jul-border pt-4">
+              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                Retries & fail-over
+              </span>
+              <p className="text-xs text-jul-muted">
+                Retries can help with temporary backend failures, but too many retries can make
+                incidents worse. Jul retires a backend after max_fails failures and brings it back
+                after fail_timeout. These apply per upstream pool.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <NumberField
+                label="Max fails"
+                value={limits.maxFails}
+                onChange={(v) => {
+                  setLimits((d) => ({ ...d, maxFails: v }));
+                }}
+              />
+              <TextField
+                label="Fail timeout"
+                hint="How long a failed backend stays retired."
+                value={limits.failTimeout}
+                placeholder="10s"
+                onChange={(v) => {
+                  setLimits((d) => ({ ...d, failTimeout: v }));
+                }}
+              />
+            </div>
           </>
         )}
 

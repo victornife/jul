@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useTheme, type ThemePreference } from "@/lib/theme.ts";
-import { usePersistentState } from "@/lib/usePersistentState.ts";
+import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.ts";
 
 const NAV = [
   { to: "/", label: "Overview", exact: true },
@@ -28,50 +29,127 @@ const THEME_LABEL: Record<ThemePreference, string> = {
 
 const THEME_ORDER: ThemePreference[] = ["system", "light", "dark"];
 
-function ThemeToggle() {
-  const { preference, setPreference } = useTheme();
-  const next = (): void => {
-    const i = THEME_ORDER.indexOf(preference);
-    setPreference(THEME_ORDER[(i + 1) % THEME_ORDER.length] ?? "system");
-  };
-  return (
-    <button
-      type="button"
-      onClick={next}
-      title="Toggle theme (system / light / dark)"
-      aria-label={`Theme: ${preference}. Click to change.`}
-      className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent"
-    >
-      {THEME_LABEL[preference]}
-    </button>
-  );
-}
-
 type NavLayout = "top" | "side";
 
 function isNavLayout(v: unknown): v is NavLayout {
   return v === "top" || v === "side";
 }
 
-function LayoutToggle({
+// PreferenceMenu (Milestone 4.5/4.6) collects the View preferences — theme,
+// navigation layout — into one discoverable popover and offers a single
+// "Reset to defaults" action that clears every persisted preference.
+function PreferenceMenu({
   layout,
-  onChange,
+  onLayout,
 }: {
   readonly layout: NavLayout;
-  readonly onChange: (v: NavLayout) => void;
+  readonly onLayout: (v: NavLayout) => void;
 }) {
+  const { preference, setPreference } = useTheme();
+  const [open, setOpen] = useState(false);
+
   return (
-    <button
-      type="button"
-      onClick={() => {
-        onChange(layout === "top" ? "side" : "top");
-      }}
-      title="Toggle navigation layout (top bar / sidebar)"
-      aria-label={`Navigation layout: ${layout === "top" ? "top bar" : "sidebar"}. Click to change.`}
-      className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent"
-    >
-      {layout === "top" ? "⬒ Top" : "◧ Side"}
-    </button>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="View & preferences"
+        className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent"
+      >
+        ⚙ View
+      </button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close preferences"
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => {
+              setOpen(false);
+            }}
+          />
+          <div
+            role="menu"
+            className="absolute right-0 z-20 mt-1 w-60 space-y-3 rounded-md border border-jul-border bg-jul-surface p-3 shadow-lg"
+          >
+            <div className="space-y-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                Theme
+              </span>
+              <div className="flex gap-1">
+                {THEME_ORDER.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => {
+                      setPreference(t);
+                    }}
+                    className={`flex-1 rounded-md border px-2 py-1 text-xs ${
+                      preference === t
+                        ? "border-jul-accent bg-jul-accent/15 text-jul-accent"
+                        : "border-jul-border text-jul-text hover:bg-jul-bg"
+                    }`}
+                  >
+                    {THEME_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                Navigation
+              </span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLayout("top");
+                  }}
+                  className={`flex-1 rounded-md border px-2 py-1 text-xs ${
+                    layout === "top"
+                      ? "border-jul-accent bg-jul-accent/15 text-jul-accent"
+                      : "border-jul-border text-jul-text hover:bg-jul-bg"
+                  }`}
+                >
+                  ⬒ Top bar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLayout("side");
+                  }}
+                  className={`flex-1 rounded-md border px-2 py-1 text-xs ${
+                    layout === "side"
+                      ? "border-jul-accent bg-jul-accent/15 text-jul-accent"
+                      : "border-jul-border text-jul-text hover:bg-jul-bg"
+                  }`}
+                >
+                  ◧ Sidebar
+                </button>
+              </div>
+            </div>
+
+            <div className="border-t border-jul-border pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  resetPreferences();
+                  window.location.reload();
+                }}
+                className="w-full rounded-md border border-jul-danger/50 px-2 py-1 text-xs font-medium text-jul-danger hover:bg-jul-danger/10"
+              >
+                Reset to defaults
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -85,9 +163,7 @@ function NavLinks({
   return (
     <nav
       className={
-        orientation === "row"
-          ? "flex flex-wrap gap-1"
-          : "flex flex-col gap-1"
+        orientation === "row" ? "flex flex-wrap gap-1" : "flex flex-col gap-1"
       }
       aria-label="Primary"
     >
@@ -115,8 +191,7 @@ export function Layout() {
 
   const controls = (
     <div className="flex items-center gap-2">
-      <LayoutToggle layout={layout} onChange={setLayout} />
-      <ThemeToggle />
+      <PreferenceMenu layout={layout} onLayout={setLayout} />
     </div>
   );
 

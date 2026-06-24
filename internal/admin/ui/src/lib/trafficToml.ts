@@ -173,6 +173,13 @@ export interface LimitsDraft {
   readTimeout: string; // server read timeout, e.g. "30s"
   writeTimeout: string; // server write timeout
   idleTimeout: string; // keep-alive idle timeout
+  // Upstream / proxy timeouts (per-location keys).
+  proxyConnectTimeout: string; // proxy_connect_timeout, e.g. "5s"
+  proxyReadTimeout: string; // proxy_read_timeout, e.g. "30s"
+  proxySendTimeout: string; // proxy_send_timeout, e.g. "30s"
+  // Retry behaviour (passive health checks, per-upstream keys).
+  maxFails: number; // max_fails — how many failures retire a backend
+  failTimeout: string; // fail_timeout — how long a backend stays retired
 }
 
 /**
@@ -180,15 +187,50 @@ export interface LimitsDraft {
  * relevant [[servers]] block. Unlike the global tables, timeouts and the body
  * limit are per-server, so this is emitted as standalone keys for the operator
  * to place under their chosen server block rather than upserted automatically.
+ *
+ * Upstream timeouts are per-location proxy keys and retries are per-upstream
+ * passive-health keys, so each group is emitted under a clearly labelled
+ * comment describing where it belongs (Milestone 3.4).
  */
 export function generateLimitsToml(d: LimitsDraft): string {
-  const lines: string[] = [];
-  if (d.bodyLimit.trim()) lines.push(`client_max_body_size = ${tomlString(d.bodyLimit.trim())}`);
-  if (d.readTimeout.trim()) lines.push(`read_timeout = ${tomlString(d.readTimeout.trim())}`);
-  if (d.writeTimeout.trim()) lines.push(`write_timeout = ${tomlString(d.writeTimeout.trim())}`);
-  if (d.idleTimeout.trim()) lines.push(`idle_timeout = ${tomlString(d.idleTimeout.trim())}`);
-  if (lines.length === 0) return "# No limits set — all values left at their defaults.";
-  return lines.join("\n");
+  const sections: string[] = [];
+
+  const server: string[] = [];
+  if (d.bodyLimit.trim()) server.push(`client_max_body_size = ${tomlString(d.bodyLimit.trim())}`);
+  if (d.readTimeout.trim()) server.push(`read_timeout = ${tomlString(d.readTimeout.trim())}`);
+  if (d.writeTimeout.trim()) server.push(`write_timeout = ${tomlString(d.writeTimeout.trim())}`);
+  if (d.idleTimeout.trim()) server.push(`idle_timeout = ${tomlString(d.idleTimeout.trim())}`);
+  if (server.length > 0) {
+    sections.push(["# Under the [[servers]] block:", ...server].join("\n"));
+  }
+
+  const proxy: string[] = [];
+  if (d.proxyConnectTimeout.trim())
+    proxy.push(`proxy_connect_timeout = ${tomlString(d.proxyConnectTimeout.trim())}`);
+  if (d.proxyReadTimeout.trim())
+    proxy.push(`proxy_read_timeout = ${tomlString(d.proxyReadTimeout.trim())}`);
+  if (d.proxySendTimeout.trim())
+    proxy.push(`proxy_send_timeout = ${tomlString(d.proxySendTimeout.trim())}`);
+  if (proxy.length > 0) {
+    sections.push(
+      ["# Under the proxied [[servers.locations]] block:", ...proxy].join("\n"),
+    );
+  }
+
+  const retry: string[] = [];
+  if (d.maxFails > 0) retry.push(`max_fails = ${String(Math.floor(d.maxFails))}`);
+  if (d.failTimeout.trim()) retry.push(`fail_timeout = ${tomlString(d.failTimeout.trim())}`);
+  if (retry.length > 0) {
+    sections.push(
+      [
+        "# Under the [[upstreams]] block (passive retry / fail-over):",
+        ...retry,
+      ].join("\n"),
+    );
+  }
+
+  if (sections.length === 0) return "# No limits set — all values left at their defaults.";
+  return sections.join("\n\n");
 }
 
 export function limitsWarnings(d: LimitsDraft): string[] {
@@ -198,6 +240,12 @@ export function limitsWarnings(d: LimitsDraft): string[] {
   }
   if (/^\d+\s*g/i.test(d.bodyLimit.trim())) {
     w.push("A multi-gigabyte body limit can let a single upload exhaust memory or disk.");
+  }
+  if (d.proxyReadTimeout.trim() === "0" || d.proxyConnectTimeout.trim() === "0") {
+    w.push("An upstream timeout of 0 lets a slow backend hold a connection indefinitely.");
+  }
+  if (d.maxFails > 10) {
+    w.push("A high max_fails keeps sending traffic to a failing backend before retiring it.");
   }
   return w;
 }

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchApps, type AppProjection, type BackendProjection } from "@/api/client.ts";
 import { AppDetail } from "@/features/apps/AppDetail.tsx";
 import { AppEditor } from "@/features/apps/AppEditor.tsx";
+import { PageHeader, Button, EmptyState } from "@/components/ui.tsx";
+import { usePersistentState } from "@/lib/usePersistentState.ts";
 
 function HealthDot({ healthy }: { readonly healthy: boolean | undefined }) {
   if (healthy === undefined) return null;
@@ -90,6 +92,23 @@ function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen
   );
 }
 
+// Filters narrow the app list (Milestone 4.7): by backend health and by whether
+// any route references the app. They run client-side over the projection and
+// persist across sessions.
+type HealthFilter = "all" | "healthy" | "degraded";
+type UsageFilter = "all" | "used" | "unused";
+
+function appMatches(app: AppProjection, health: HealthFilter, usage: UsageFilter): boolean {
+  const total = app.backends.length;
+  const healthy = app.backends.filter((b) => b.healthy !== false).length;
+  if (health === "healthy" && (total === 0 || healthy < total)) return false;
+  if (health === "degraded" && healthy === total) return false;
+  const used = (app.routes_using ?? []).length > 0;
+  if (usage === "used" && !used) return false;
+  if (usage === "unused" && used) return false;
+  return true;
+}
+
 export function AppsPanel() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["apps"],
@@ -99,29 +118,120 @@ export function AppsPanel() {
 
   const [selected, setSelected] = useState<AppProjection | null>(null);
   const [creating, setCreating] = useState(false);
+  const [healthFilter, setHealthFilter] = usePersistentState<HealthFilter>(
+    "apps_health_filter",
+    "all",
+  );
+  const [usageFilter, setUsageFilter] = usePersistentState<UsageFilter>(
+    "apps_usage_filter",
+    "all",
+  );
+
+  const filtersActive = healthFilter !== "all" || usageFilter !== "all";
+
+  const filtered = useMemo(
+    () => (data ?? []).filter((app) => appMatches(app, healthFilter, usageFilter)),
+    [data, healthFilter, usageFilter],
+  );
 
   if (isLoading) return <div className="text-jul-muted">Loading apps…</div>;
   if (isError || !data) return <div className="text-jul-danger">Failed to load apps.</div>;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">Apps &amp; Upstreams</h1>
-        <button
-          type="button"
-          onClick={() => {
-            setCreating(true);
-          }}
-          className="ml-auto rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
-        >
-          New app
-        </button>
-      </div>
+      <PageHeader
+        title="Apps & Upstreams"
+        description="An app is a named pool of backend instances that routes proxy to by name. Jul balances traffic across the healthy backends and can run active health checks. Click an app to see which routes depend on it."
+        actions={
+          <Button
+            variant="primary"
+            onClick={() => {
+              setCreating(true);
+            }}
+          >
+            New app
+          </Button>
+        }
+      />
+
+      {data.length > 0 && (
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-jul-text">Health</span>
+            <select
+              value={healthFilter}
+              onChange={(e) => {
+                setHealthFilter(e.target.value as HealthFilter);
+              }}
+              className="rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+            >
+              <option value="all">All apps</option>
+              <option value="healthy">All backends healthy</option>
+              <option value="degraded">Has unhealthy backend</option>
+            </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-jul-text">Usage</span>
+            <select
+              value={usageFilter}
+              onChange={(e) => {
+                setUsageFilter(e.target.value as UsageFilter);
+              }}
+              className="rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+            >
+              <option value="all">Any usage</option>
+              <option value="used">Used by a route</option>
+              <option value="unused">Unused</option>
+            </select>
+          </label>
+          {filtersActive && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setHealthFilter("all");
+                setUsageFilter("all");
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
+        </div>
+      )}
+
       {data.length === 0 ? (
-        <p className="text-jul-muted text-sm">No upstream pools configured.</p>
+        <EmptyState
+          title="No apps are configured yet"
+          description="Add an app when you want Jul to send traffic to a backend service such as Express, Apollo, FastAPI, Django, or a Go API. An app groups one or more backend instances that routes can proxy to by name."
+          action={
+            <Button
+              variant="primary"
+              onClick={() => {
+                setCreating(true);
+              }}
+            >
+              New app
+            </Button>
+          }
+        />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="No apps match these filters"
+          description="No app matches the selected health and usage filters. Clear the filters to see every configured app."
+          action={
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setHealthFilter("all");
+                setUsageFilter("all");
+              }}
+            >
+              Clear filters
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-4">
-          {data.map((app) => (
+          {filtered.map((app) => (
             <AppCard
               key={app.name}
               app={app}

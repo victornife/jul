@@ -47,6 +47,11 @@ type StatsSnapshot struct {
 
 	// Methods holds cumulative request counts by HTTP method (GET, POST, etc).
 	Methods map[string]float64 `json:"methods"`
+
+	// RateLimited holds cumulative counts of requests rejected by rate limiting,
+	// keyed by the key kind (ip/header/jwt). It powers the Rate Limit editor's
+	// observability section (Console v2 Milestone 3.3).
+	RateLimited map[string]float64 `json:"rateLimited"`
 }
 
 // Snapshot gathers the private registry and projects it into a StatsSnapshot.
@@ -67,6 +72,7 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 		StatusClasses: map[string]float64{},
 		CacheEvents:   map[string]float64{},
 		Methods:       map[string]float64{},
+		RateLimited:   map[string]float64{},
 	}
 
 	var (
@@ -99,6 +105,14 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 					continue
 				}
 				snap.CacheEvents[state] += metric.GetCounter().GetValue()
+			}
+		case "jul_http_ratelimited_total":
+			for _, metric := range mf.GetMetric() {
+				kind := labelValue(metric, "key")
+				if kind == "" {
+					kind = "other"
+				}
+				snap.RateLimited[kind] += metric.GetCounter().GetValue()
 			}
 		case "jul_http_request_duration_seconds":
 			for _, metric := range mf.GetMetric() {

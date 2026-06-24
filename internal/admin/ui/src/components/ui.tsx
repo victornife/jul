@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 // Shared component system for Console v2 (Milestone 4.5). These primitives wrap
 // the semantic jul-* design tokens so every screen looks consistent in both
@@ -228,5 +228,215 @@ export function Toggle({
       />
       {label}
     </label>
+  );
+}
+
+// ── Select ───────────────────────────────────────────────────────────────────
+
+export function Select({
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+}: {
+  readonly label?: string;
+  readonly hint?: string;
+  readonly value: string;
+  readonly options: { value: string; label: string }[];
+  readonly onChange: (v: string) => void;
+}) {
+  return (
+    <label className="block space-y-1">
+      {label && <span className="text-sm font-medium text-jul-text">{label}</span>}
+      <select
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
+        className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {hint && <span className="text-xs text-jul-muted">{hint}</span>}
+    </label>
+  );
+}
+
+// ── Switch ───────────────────────────────────────────────────────────────────
+
+// Switch is a styled on/off control. Unlike Toggle (a labelled checkbox) it
+// renders the familiar sliding pill and is used where the on/off state is the
+// primary affordance.
+export function Switch({
+  label,
+  checked,
+  onChange,
+}: {
+  readonly label?: string;
+  readonly checked: boolean;
+  readonly onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-jul-text">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => {
+          onChange(!checked);
+        }}
+        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-jul-accent ${
+          checked ? "bg-jul-accent" : "bg-jul-border"
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-jul-bg transition-transform ${
+            checked ? "translate-x-4" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+      {label}
+    </label>
+  );
+}
+
+// ── StatusPill ─────────────────────────────────────────────────────────────--
+
+// StatusPill is a Badge with a leading status dot for active/inactive (or
+// healthy/unhealthy) state, standardising how the Console signals liveness.
+export function StatusPill({
+  active,
+  labels,
+}: {
+  readonly active: boolean;
+  readonly labels?: { on: string; off: string };
+}) {
+  const on = labels?.on ?? "active";
+  const off = labels?.off ?? "inactive";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
+        active ? "bg-jul-success/15 text-jul-success" : "bg-jul-border text-jul-muted"
+      }`}
+    >
+      <span
+        className={`inline-block h-1.5 w-1.5 rounded-full ${
+          active ? "bg-jul-success" : "bg-jul-muted"
+        }`}
+      />
+      {active ? on : off}
+    </span>
+  );
+}
+
+// ── Tooltip ──────────────────────────────────────────────────────────────────
+
+// Tooltip wraps children with a hover/focus description. It uses the native
+// title attribute for accessibility plus a styled popover on hover.
+export function Tooltip({
+  text,
+  children,
+}: {
+  readonly text: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <span className="group relative inline-flex" title={text}>
+      {children}
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-jul-border bg-jul-surface px-2 py-1 text-xs text-jul-text opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
+// ── Modal ──────────────────────────────────────────────────────────────────--
+
+export function Modal({
+  title,
+  children,
+  onClose,
+  footer,
+}: {
+  readonly title: string;
+  readonly children: ReactNode;
+  readonly onClose: () => void;
+  readonly footer?: ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute inset-0 cursor-default bg-black/50"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="relative z-50 w-full max-w-lg space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5 shadow-xl"
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-jul-text">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close dialog"
+            className="rounded-md px-2 py-1 text-jul-muted hover:text-jul-text"
+          >
+            ✕
+          </button>
+        </div>
+        <div>{children}</div>
+        {footer && <div className="flex justify-end gap-2">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────--
+
+export function Tabs({
+  tabs,
+  initial,
+}: {
+  readonly tabs: { id: string; label: string; content: ReactNode }[];
+  readonly initial?: string;
+}) {
+  const [active, setActive] = useState(initial ?? tabs[0]?.id ?? "");
+  const current = tabs.find((t) => t.id === active) ?? tabs[0];
+  return (
+    <div className="space-y-3">
+      <div role="tablist" className="flex gap-1 border-b border-jul-border">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={t.id === active}
+            onClick={() => {
+              setActive(t.id);
+            }}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors ${
+              t.id === active
+                ? "border-jul-accent text-jul-text"
+                : "border-transparent text-jul-muted hover:text-jul-text"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel">{current?.content}</div>
+    </div>
   );
 }

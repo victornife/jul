@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchRoutes, type RouteProjection, type LocationProjection } from "@/api/client.ts";
 import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
 import { RouteEditor } from "@/features/routes/RouteEditor.tsx";
 import { RouteTester } from "@/features/routes/RouteTester.tsx";
+import { PageHeader, Button, EmptyState } from "@/components/ui.tsx";
+import { usePersistentState } from "@/lib/usePersistentState.ts";
 import type { RouteDraft } from "@/lib/routeToml.ts";
 
 const ACTION_COLORS: Record<string, string> = {
@@ -74,9 +76,11 @@ function LocationRow({
 
 function RouteCard({
   route,
+  locations,
   onOpen,
 }: {
   readonly route: RouteProjection;
+  readonly locations: LocationProjection[];
   readonly onOpen: (loc: LocationProjection) => void;
 }) {
   const tags: string[] = [];
@@ -105,8 +109,8 @@ function RouteCard({
         </span>
       </div>
 
-      {route.locations.length === 0 ? (
-        <p className="px-4 py-3 text-xs text-jul-muted">No locations configured.</p>
+      {locations.length === 0 ? (
+        <p className="px-4 py-3 text-xs text-jul-muted">No locations match the current filter.</p>
       ) : (
         <table className="w-full text-left text-sm">
           <thead>
@@ -119,7 +123,7 @@ function RouteCard({
             </tr>
           </thead>
           <tbody>
-            {route.locations.map((loc, i) => (
+            {locations.map((loc, i) => (
               <LocationRow
                 key={i}
                 loc={loc}
@@ -140,6 +144,34 @@ interface Selection {
   readonly loc: LocationProjection;
 }
 
+// Filters narrow the route list (Milestone 4.7): by action/type and by the
+// edge features applied to a location. They run entirely client-side over the
+// projection the API already serves and persist across sessions.
+type ActionFilter = "all" | "proxy" | "static" | "redirect" | "deny" | "return";
+type FeatureFilter = "all" | "auth" | "cache" | "compression" | "rate_limit" | "warnings";
+
+function locationMatches(
+  loc: LocationProjection,
+  action: ActionFilter,
+  feature: FeatureFilter,
+): boolean {
+  if (action !== "all" && loc.action !== action) return false;
+  switch (feature) {
+    case "auth":
+      return loc.auth;
+    case "cache":
+      return loc.cache;
+    case "compression":
+      return loc.compression;
+    case "rate_limit":
+      return loc.rate_limit;
+    case "warnings":
+      return (loc.warnings ?? []).length > 0;
+    default:
+      return true;
+  }
+}
+
 export function RoutesPanel() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["routes"],
@@ -149,44 +181,147 @@ export function RoutesPanel() {
   const [selected, setSelected] = useState<Selection | null>(null);
   const [creating, setCreating] = useState<Partial<RouteDraft> | null>(null);
   const [testing, setTesting] = useState(false);
+  const [actionFilter, setActionFilter] = usePersistentState<ActionFilter>(
+    "routes_action_filter",
+    "all",
+  );
+  const [featureFilter, setFeatureFilter] = usePersistentState<FeatureFilter>(
+    "routes_feature_filter",
+    "all",
+  );
+
+  const filtersActive = actionFilter !== "all" || featureFilter !== "all";
+
+  const filtered = useMemo(() => {
+    const src = data ?? [];
+    return src
+      .map((route) => ({
+        route,
+        locations: route.locations.filter((loc) =>
+          locationMatches(loc, actionFilter, featureFilter),
+        ),
+      }))
+      .filter((r) => !filtersActive || r.locations.length > 0);
+  }, [data, actionFilter, featureFilter, filtersActive]);
 
   if (isLoading) return <div className="text-jul-muted">Loading routes…</div>;
   if (isError || !data) return <div className="text-jul-danger">Failed to load routes.</div>;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">Routes</h1>
-        <div className="ml-auto flex gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setTesting(true);
-            }}
-            className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text hover:bg-jul-surface"
-          >
-            Test route
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCreating({});
-            }}
-            className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
-          >
-            New route
-          </button>
+      <PageHeader
+        title="Routes"
+        description="Routes decide what Jul does with incoming requests. A route can serve files, proxy to an app, redirect, deny, or connect to a protocol adapter. Click any route to inspect its effective configuration, or create one through the guided editor."
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setTesting(true);
+              }}
+            >
+              Test route
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setCreating({});
+              }}
+            >
+              New route
+            </Button>
+          </>
+        }
+      />
+
+      {data.length > 0 && (
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-jul-text">Action</span>
+            <select
+              value={actionFilter}
+              onChange={(e) => {
+                setActionFilter(e.target.value as ActionFilter);
+              }}
+              className="rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+            >
+              <option value="all">All actions</option>
+              <option value="proxy">Proxy</option>
+              <option value="static">Static</option>
+              <option value="redirect">Redirect</option>
+              <option value="deny">Deny</option>
+              <option value="return">Return</option>
+            </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-jul-text">Feature</span>
+            <select
+              value={featureFilter}
+              onChange={(e) => {
+                setFeatureFilter(e.target.value as FeatureFilter);
+              }}
+              className="rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+            >
+              <option value="all">Any feature</option>
+              <option value="auth">Auth enabled</option>
+              <option value="cache">Cache enabled</option>
+              <option value="compression">Compression enabled</option>
+              <option value="rate_limit">Rate limited</option>
+              <option value="warnings">Has warnings</option>
+            </select>
+          </label>
+          {filtersActive && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setActionFilter("all");
+                setFeatureFilter("all");
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
         </div>
-      </div>
+      )}
 
       {data.length === 0 ? (
-        <p className="text-jul-muted text-sm">No server blocks configured.</p>
+        <EmptyState
+          title="No routes are configured yet"
+          description="A route tells Jul what to do when a request matches a host and path — serve a folder, proxy to an app such as Express, FastAPI, or a Go API, redirect, or deny. Create your first route to start handling traffic."
+          action={
+            <Button
+              variant="primary"
+              onClick={() => {
+                setCreating({});
+              }}
+            >
+              New route
+            </Button>
+          }
+        />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="No routes match these filters"
+          description="No location matches the selected action and feature filters. Clear the filters to see every configured route."
+          action={
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setActionFilter("all");
+                setFeatureFilter("all");
+              }}
+            >
+              Clear filters
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-4">
-          {data.map((route, i) => (
+          {filtered.map(({ route, locations }, i) => (
             <RouteCard
               key={`${route.listen}-${String(i)}`}
               route={route}
+              locations={locations}
               onOpen={(loc) => {
                 setSelected({ route, loc });
               }}

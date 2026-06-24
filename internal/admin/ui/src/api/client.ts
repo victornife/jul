@@ -71,6 +71,7 @@ export const StatsSnapshotSchema = z.object({
   cacheHitRatio: z.number(),
   cacheEvents: z.record(z.string(), z.number()).optional(),
   methods: z.record(z.string(), z.number()).optional(),
+  rateLimited: z.record(z.string(), z.number()).optional(),
 });
 export type StatsSnapshot = z.infer<typeof StatsSnapshotSchema>;
 
@@ -256,6 +257,29 @@ export function fetchSecurity(): Promise<SecurityProjection> {
 
 export function fetchTrafficControls(): Promise<TrafficControls> {
   return api<unknown>("/traffic-controls").then((d) => TrafficControlsSchema.parse(d));
+}
+
+/** Fetches the runtime stats snapshot directly (used by traffic-control editors). */
+export function fetchStats(): Promise<StatsSnapshot> {
+  return api<unknown>("/stats").then((d) => StatsSnapshotSchema.parse(d));
+}
+
+/**
+ * Purges the response cache (Milestone 3.2). With no key the whole cache is
+ * cleared; a key removes a single entry. The admin endpoint lives at the server
+ * root (/cache/purge), not under /api, so this bypasses the /api-prefixed
+ * client helper.
+ */
+export async function purgeCache(key?: string): Promise<void> {
+  const headers = new Headers();
+  headers.set("Accept", "application/json");
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const url = key ? `/cache/purge?key=${encodeURIComponent(key)}` : "/cache/purge";
+  const resp = await fetch(url, { method: "POST", headers });
+  if (!resp.ok) {
+    throw new ApiError("/cache/purge", resp.status, `${String(resp.status)} ${resp.statusText}`);
+  }
 }
 
 // ── History ──────────────────────────────────────────────────────────────────
