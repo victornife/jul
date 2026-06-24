@@ -165,3 +165,39 @@ export function rateLimitWarnings(d: RateLimitDraft): string[] {
   }
   return w;
 }
+
+// ── Limits: timeouts, retries, body size (Milestone 3.4) ─────────────────────
+
+export interface LimitsDraft {
+  bodyLimit: string; // client_max_body_size, e.g. "10m"
+  readTimeout: string; // server read timeout, e.g. "30s"
+  writeTimeout: string; // server write timeout
+  idleTimeout: string; // keep-alive idle timeout
+}
+
+/**
+ * Generates a snippet of server-level limits the operator merges into the
+ * relevant [[servers]] block. Unlike the global tables, timeouts and the body
+ * limit are per-server, so this is emitted as standalone keys for the operator
+ * to place under their chosen server block rather than upserted automatically.
+ */
+export function generateLimitsToml(d: LimitsDraft): string {
+  const lines: string[] = [];
+  if (d.bodyLimit.trim()) lines.push(`client_max_body_size = ${tomlString(d.bodyLimit.trim())}`);
+  if (d.readTimeout.trim()) lines.push(`read_timeout = ${tomlString(d.readTimeout.trim())}`);
+  if (d.writeTimeout.trim()) lines.push(`write_timeout = ${tomlString(d.writeTimeout.trim())}`);
+  if (d.idleTimeout.trim()) lines.push(`idle_timeout = ${tomlString(d.idleTimeout.trim())}`);
+  if (lines.length === 0) return "# No limits set — all values left at their defaults.";
+  return lines.join("\n");
+}
+
+export function limitsWarnings(d: LimitsDraft): string[] {
+  const w: string[] = [];
+  if (d.readTimeout.trim() === "0" || d.writeTimeout.trim() === "0") {
+    w.push("A timeout of 0 disables the deadline entirely, which can leak slow-loris connections.");
+  }
+  if (/^\d+\s*g/i.test(d.bodyLimit.trim())) {
+    w.push("A multi-gigabyte body limit can let a single upload exhaust memory or disk.");
+  }
+  return w;
+}

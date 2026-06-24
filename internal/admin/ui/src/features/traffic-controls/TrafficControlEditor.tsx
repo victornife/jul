@@ -8,15 +8,18 @@ import {
   generateCompressionToml,
   generateCacheToml,
   generateRateLimitToml,
+  generateLimitsToml,
   compressionWarnings,
   cacheWarnings,
   rateLimitWarnings,
+  limitsWarnings,
   type CompressionDraft,
   type CacheDraft,
   type RateLimitDraft,
+  type LimitsDraft,
 } from "@/lib/trafficToml.ts";
 
-export type TrafficEditorKind = "compression" | "cache" | "rate_limit";
+export type TrafficEditorKind = "compression" | "cache" | "rate_limit" | "limits";
 
 function TextField({
   label,
@@ -143,6 +146,11 @@ const TITLES: Record<TrafficEditorKind, { title: string; subtitle: string }> = {
     subtitle:
       "Rate limiting bounds how many requests a client may make. Choose a key (client IP, a header, or a JWT claim), a sustained rate, and a burst allowance.",
   },
+  limits: {
+    title: "Limits & timeouts",
+    subtitle:
+      "Request limits and timeouts protect the server from slow or oversized requests. These apply per server block, so the generated keys are placed under the [[servers]] block you choose in the editor.",
+  },
 };
 
 const DEFAULT_COMPRESSION_TYPES = [
@@ -190,6 +198,12 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
     burst: current.rate_limit?.burst ?? 0,
     maxConns: 0,
   });
+  const [limits, setLimits] = useState<LimitsDraft>({
+    bodyLimit: "10m",
+    readTimeout: "30s",
+    writeTimeout: "30s",
+    idleTimeout: "60s",
+  });
 
   let fragment = "";
   let table = "";
@@ -210,6 +224,11 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
       table = "rate_limit";
       warnings = rateLimitWarnings(rateLimit);
       break;
+    case "limits":
+      fragment = generateLimitsToml(limits);
+      table = "";
+      warnings = limitsWarnings(limits);
+      break;
   }
 
   function toggleEncoder(value: string, on: boolean): void {
@@ -229,7 +248,14 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
     setError(null);
     try {
       const raw = await fetchRawConfig();
-      setPendingDraft(upsertTopLevelTable(raw.raw ?? "", table, fragment));
+      // The global tables are upserted automatically. Per-server limits are
+      // appended as a commented snippet for the operator to place under the
+      // server block they intend, since there can be many [[servers]] blocks.
+      const next =
+        table === ""
+          ? `${(raw.raw ?? "").trimEnd()}\n\n# Limits & timeouts — move these keys under the [[servers]] block they apply to:\n${fragment}\n`
+          : upsertTopLevelTable(raw.raw ?? "", table, fragment);
+      setPendingDraft(next);
       void navigate("/config");
     } catch {
       setError("Could not load the current configuration to merge this change.");
@@ -404,6 +430,49 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 />
               </>
             )}
+          </>
+        )}
+
+        {kind === "limits" && (
+          <>
+            <TextField
+              label="Max request body size"
+              hint="Rejects bodies larger than this (e.g. 10m)."
+              value={limits.bodyLimit}
+              placeholder="10m"
+              onChange={(v) => {
+                setLimits((d) => ({ ...d, bodyLimit: v }));
+              }}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <TextField
+                label="Read timeout"
+                hint="Max time to read a request."
+                value={limits.readTimeout}
+                placeholder="30s"
+                onChange={(v) => {
+                  setLimits((d) => ({ ...d, readTimeout: v }));
+                }}
+              />
+              <TextField
+                label="Write timeout"
+                hint="Max time to write a response."
+                value={limits.writeTimeout}
+                placeholder="30s"
+                onChange={(v) => {
+                  setLimits((d) => ({ ...d, writeTimeout: v }));
+                }}
+              />
+            </div>
+            <TextField
+              label="Idle timeout"
+              hint="Keep-alive idle connection timeout."
+              value={limits.idleTimeout}
+              placeholder="60s"
+              onChange={(v) => {
+                setLimits((d) => ({ ...d, idleTimeout: v }));
+              }}
+            />
           </>
         )}
 

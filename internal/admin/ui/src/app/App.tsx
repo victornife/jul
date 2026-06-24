@@ -6,6 +6,7 @@ import { AppsPanel } from "@/features/apps/AppsPanel.tsx";
 import { TLSPanel } from "@/features/tls/TLSPanel.tsx";
 import { SecurityPanel } from "@/features/security/SecurityPanel.tsx";
 import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControlsPanel.tsx";
+import { SearchPanel } from "@/features/search/SearchPanel.tsx";
 import { ObservabilityPanel } from "@/features/observability/ObservabilityPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
 import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
@@ -21,6 +22,7 @@ export function App() {
         <Route path="/tls" element={<TLSPanel />} />
         <Route path="/security" element={<SecurityPanel />} />
         <Route path="/traffic" element={<TrafficControlsPanel />} />
+        <Route path="/search" element={<SearchPanel />} />
         <Route path="/observability" element={<ObservabilityPanel />} />
         <Route path="/config" element={<ConfigPanel />} />
         <Route path="/ui" element={<Navigate to="/config" replace />} />

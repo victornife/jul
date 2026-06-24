@@ -149,6 +149,21 @@ export function TrafficControlsPanel() {
             </p>
           )}
         </SectionCard>
+
+        {/* Limits & Timeouts (Milestone 3.4) */}
+        <SectionCard
+          title="Limits & Timeouts"
+          active={false}
+          onEdit={() => {
+            setEditing("limits");
+          }}
+        >
+          <p className="text-xs text-jul-muted">
+            Per-server request body limit and read/write/idle timeouts. Configure these to
+            protect the server from oversized or slow requests; the generated keys are placed
+            under the server block you choose in the editor.
+          </p>
+        </SectionCard>
       </div>
 
       {editing && (
