@@ -1,0 +1,436 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Drawer } from "@/components/Drawer.tsx";
+import { fetchRawConfig, type TrafficControls } from "@/api/client.ts";
+import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import {
+  upsertTopLevelTable,
+  generateCompressionToml,
+  generateCacheToml,
+  generateRateLimitToml,
+  compressionWarnings,
+  cacheWarnings,
+  rateLimitWarnings,
+  type CompressionDraft,
+  type CacheDraft,
+  type RateLimitDraft,
+} from "@/lib/trafficToml.ts";
+
+export type TrafficEditorKind = "compression" | "cache" | "rate_limit";
+
+function TextField({
+  label,
+  hint,
+  value,
+  placeholder,
+  onChange,
+}: {
+  readonly label: string;
+  readonly hint?: string;
+  readonly value: string;
+  readonly placeholder?: string;
+  readonly onChange: (v: string) => void;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-sm font-medium text-jul-text">{label}</span>
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
+        className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
+      />
+      {hint && <span className="text-xs text-jul-muted">{hint}</span>}
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: number;
+  readonly onChange: (v: number) => void;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-sm font-medium text-jul-text">{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(e) => {
+          onChange(Math.max(0, Number(e.target.value) || 0));
+        }}
+        className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+      />
+    </label>
+  );
+}
+
+function Toggle({
+  label,
+  checked,
+  onChange,
+}: {
+  readonly label: string;
+  readonly checked: boolean;
+  readonly onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-jul-text">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => {
+          onChange(e.target.checked);
+        }}
+        className="h-4 w-4 rounded border-jul-border bg-jul-surface accent-jul-accent"
+      />
+      {label}
+    </label>
+  );
+}
+
+function CheckboxGroup({
+  label,
+  options,
+  selected,
+  onToggle,
+}: {
+  readonly label: string;
+  readonly options: string[];
+  readonly selected: string[];
+  readonly onToggle: (value: string, on: boolean) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <span className="text-sm font-medium text-jul-text">{label}</span>
+      <div className="flex flex-wrap gap-3">
+        {options.map((o) => (
+          <Toggle
+            key={o}
+            label={o}
+            checked={selected.includes(o)}
+            onChange={(on) => {
+              onToggle(o, on);
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const TITLES: Record<TrafficEditorKind, { title: string; subtitle: string }> = {
+  compression: {
+    title: "Compression",
+    subtitle:
+      "Compression reduces response size before sending data to clients. It usually helps HTML, CSS, JavaScript, JSON, and SVG; it usually does not help images, video, or archives.",
+  },
+  cache: {
+    title: "Cache",
+    subtitle:
+      "The response cache stores upstream responses so repeat requests are served from memory or disk. Avoid caching authenticated or per-user responses.",
+  },
+  rate_limit: {
+    title: "Rate limiting",
+    subtitle:
+      "Rate limiting bounds how many requests a client may make. Choose a key (client IP, a header, or a JWT claim), a sustained rate, and a burst allowance.",
+  },
+};
+
+const DEFAULT_COMPRESSION_TYPES = [
+  "text/*",
+  "application/json",
+  "application/javascript",
+  "application/xml",
+  "image/svg+xml",
+];
+
+export interface TrafficControlEditorProps {
+  readonly kind: TrafficEditorKind;
+  readonly current: TrafficControls;
+  readonly onClose: () => void;
+}
+
+/**
+ * Guided editor for the global traffic-control tables (Phase 3, Milestones
+ * 3.1–3.3). It never writes directly: it upserts the relevant top-level table
+ * into the running config and hands the draft to the Config editor where it
+ * flows through Validate → Diff → Apply → Rollback.
+ */
+export function TrafficControlEditor({ kind, current, onClose }: TrafficControlEditorProps) {
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+
+  const [compression, setCompression] = useState<CompressionDraft>({
+    enabled: current.compression?.enabled ?? false,
+    encoders: current.compression?.encoders ?? ["gzip"],
+    minSize: "1k",
+    types: DEFAULT_COMPRESSION_TYPES,
+    precompressed: false,
+  });
+  const [cache, setCache] = useState<CacheDraft>({
+    enabled: current.cache?.enabled ?? false,
+    memoryMaxSize: current.cache?.memory_max ?? "64m",
+    diskPath: current.cache?.disk_path ?? "",
+    defaultTTL: current.cache?.default_ttl ?? "60s",
+    staleWhileRevalidate: "",
+  });
+  const [rateLimit, setRateLimit] = useState<RateLimitDraft>({
+    enabled: current.rate_limit?.enabled ?? false,
+    key: current.rate_limit?.key ?? "ip",
+    rate: current.rate_limit?.rate ?? 100,
+    burst: current.rate_limit?.burst ?? 0,
+    maxConns: 0,
+  });
+
+  let fragment = "";
+  let table = "";
+  let warnings: string[] = [];
+  switch (kind) {
+    case "compression":
+      fragment = generateCompressionToml(compression);
+      table = "compression";
+      warnings = compressionWarnings(compression);
+      break;
+    case "cache":
+      fragment = generateCacheToml(cache);
+      table = "cache";
+      warnings = cacheWarnings(cache);
+      break;
+    case "rate_limit":
+      fragment = generateRateLimitToml(rateLimit);
+      table = "rate_limit";
+      warnings = rateLimitWarnings(rateLimit);
+      break;
+  }
+
+  function toggleEncoder(value: string, on: boolean): void {
+    setCompression((d) => ({
+      ...d,
+      encoders: on ? [...d.encoders, value] : d.encoders.filter((e) => e !== value),
+    }));
+  }
+  function toggleType(value: string, on: boolean): void {
+    setCompression((d) => ({
+      ...d,
+      types: on ? [...d.types, value] : d.types.filter((t) => t !== value),
+    }));
+  }
+
+  async function openInEditor(): Promise<void> {
+    setError(null);
+    try {
+      const raw = await fetchRawConfig();
+      setPendingDraft(upsertTopLevelTable(raw.raw ?? "", table, fragment));
+      void navigate("/config");
+    } catch {
+      setError("Could not load the current configuration to merge this change.");
+    }
+  }
+
+  const meta = TITLES[kind];
+
+  return (
+    <Drawer
+      title={`Edit ${meta.title.toLowerCase()}`}
+      subtitle="Review and apply safely in the editor."
+      onClose={onClose}
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          {error && <span className="text-xs text-jul-danger">{error}</span>}
+          <button
+            type="button"
+            onClick={() => {
+              void openInEditor();
+            }}
+            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
+          >
+            Review in editor →
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-5">
+        <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
+          {meta.subtitle}
+        </p>
+
+        {kind === "compression" && (
+          <>
+            <Toggle
+              label="Enable compression"
+              checked={compression.enabled}
+              onChange={(v) => {
+                setCompression((d) => ({ ...d, enabled: v }));
+              }}
+            />
+            {compression.enabled && (
+              <>
+                <CheckboxGroup
+                  label="Encoders"
+                  options={["gzip", "br", "zstd"]}
+                  selected={compression.encoders}
+                  onToggle={toggleEncoder}
+                />
+                <TextField
+                  label="Minimum size"
+                  hint="Responses smaller than this are not compressed."
+                  value={compression.minSize}
+                  placeholder="1k"
+                  onChange={(v) => {
+                    setCompression((d) => ({ ...d, minSize: v }));
+                  }}
+                />
+                <CheckboxGroup
+                  label="Content types"
+                  options={DEFAULT_COMPRESSION_TYPES}
+                  selected={compression.types}
+                  onToggle={toggleType}
+                />
+                <Toggle
+                  label="Serve precompressed .br/.gz sidecars for static files"
+                  checked={compression.precompressed}
+                  onChange={(v) => {
+                    setCompression((d) => ({ ...d, precompressed: v }));
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
+
+        {kind === "cache" && (
+          <>
+            <Toggle
+              label="Enable cache"
+              checked={cache.enabled}
+              onChange={(v) => {
+                setCache((d) => ({ ...d, enabled: v }));
+              }}
+            />
+            {cache.enabled && (
+              <>
+                <TextField
+                  label="Memory max size"
+                  hint="In-memory tier cap, e.g. 64m."
+                  value={cache.memoryMaxSize}
+                  placeholder="64m"
+                  onChange={(v) => {
+                    setCache((d) => ({ ...d, memoryMaxSize: v }));
+                  }}
+                />
+                <TextField
+                  label="Disk path (optional)"
+                  hint="Enables a disk overflow tier when set."
+                  value={cache.diskPath}
+                  placeholder="/var/cache/jul"
+                  onChange={(v) => {
+                    setCache((d) => ({ ...d, diskPath: v }));
+                  }}
+                />
+                <TextField
+                  label="Default TTL"
+                  hint="Used when upstream gives no explicit freshness."
+                  value={cache.defaultTTL}
+                  placeholder="60s"
+                  onChange={(v) => {
+                    setCache((d) => ({ ...d, defaultTTL: v }));
+                  }}
+                />
+                <TextField
+                  label="Stale-while-revalidate (optional)"
+                  hint="Serve stale entries this long while refreshing."
+                  value={cache.staleWhileRevalidate}
+                  placeholder="10s"
+                  onChange={(v) => {
+                    setCache((d) => ({ ...d, staleWhileRevalidate: v }));
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
+
+        {kind === "rate_limit" && (
+          <>
+            <Toggle
+              label="Enable rate limiting"
+              checked={rateLimit.enabled}
+              onChange={(v) => {
+                setRateLimit((d) => ({ ...d, enabled: v }));
+              }}
+            />
+            {rateLimit.enabled && (
+              <>
+                <TextField
+                  label="Key"
+                  hint='Client identity: "ip", "header:X-Api-Key", or "jwt:sub".'
+                  value={rateLimit.key}
+                  placeholder="ip"
+                  onChange={(v) => {
+                    setRateLimit((d) => ({ ...d, key: v }));
+                  }}
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <NumberField
+                    label="Rate (req/s)"
+                    value={rateLimit.rate}
+                    onChange={(v) => {
+                      setRateLimit((d) => ({ ...d, rate: v }));
+                    }}
+                  />
+                  <NumberField
+                    label="Burst"
+                    value={rateLimit.burst}
+                    onChange={(v) => {
+                      setRateLimit((d) => ({ ...d, burst: v }));
+                    }}
+                  />
+                </div>
+                <NumberField
+                  label="Max connections (0 = unlimited)"
+                  value={rateLimit.maxConns}
+                  onChange={(v) => {
+                    setRateLimit((d) => ({ ...d, maxConns: v }));
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
+
+        {warnings.length > 0 && (
+          <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-jul-warning">
+              Risk warnings
+            </span>
+            <ul className="list-disc space-y-1 pl-4">
+              {warnings.map((w) => (
+                <li key={w} className="text-xs text-jul-warning">
+                  {w}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="space-y-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+            Generated TOML
+          </span>
+          <pre className="overflow-auto rounded-md border border-jul-border bg-jul-surface p-3 font-mono text-xs leading-relaxed text-jul-text">
+            {fragment}
+          </pre>
+        </div>
+      </div>
+    </Drawer>
+  );
+}

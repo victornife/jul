@@ -1,13 +1,20 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchTrafficControls } from "@/api/client.ts";
+import {
+  TrafficControlEditor,
+  type TrafficEditorKind,
+} from "@/features/traffic-controls/TrafficControlEditor.tsx";
 
 function SectionCard({
   title,
   active,
+  onEdit,
   children,
 }: {
   readonly title: string;
   readonly active: boolean;
+  readonly onEdit: () => void;
   readonly children: React.ReactNode;
 }) {
   return (
@@ -23,6 +30,13 @@ function SectionCard({
         >
           {active ? "enabled" : "disabled"}
         </span>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+        >
+          Edit
+        </button>
       </div>
       <div className="px-4 py-3">{children}</div>
     </div>
@@ -45,17 +59,34 @@ export function TrafficControlsPanel() {
     queryFn: fetchTrafficControls,
   });
 
+  const [editing, setEditing] = useState<TrafficEditorKind | null>(null);
+
   if (isLoading) return <div className="text-jul-muted">Loading traffic controls…</div>;
   if (isError || !data)
     return <div className="text-jul-danger">Failed to load traffic controls.</div>;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Traffic Controls</h1>
+      {/* Self-explanatory header (Milestone 4.3) */}
+      <div className="space-y-1">
+        <h1 className="text-xl font-semibold">Traffic Controls</h1>
+        <p className="max-w-3xl text-sm text-jul-muted">
+          Traffic controls shape how Jul handles requests and responses: compression,
+          caching, and rate limits. Changes here are generated as configuration and
+          applied safely through validate → diff → apply, so nothing takes effect until
+          you confirm.
+        </p>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {/* Compression */}
-        <SectionCard title="Compression" active={data.compression?.enabled ?? false}>
+        <SectionCard
+          title="Compression"
+          active={data.compression?.enabled ?? false}
+          onEdit={() => {
+            setEditing("compression");
+          }}
+        >
           {data.compression?.enabled ? (
             <div className="space-y-1">
               <KV
@@ -68,12 +99,21 @@ export function TrafficControlsPanel() {
               />
             </div>
           ) : (
-            <p className="text-xs text-jul-muted">No compression configured.</p>
+            <p className="text-xs text-jul-muted">
+              Compression is off. Enable it to shrink text, JSON, and SVG responses before
+              they are sent to clients.
+            </p>
           )}
         </SectionCard>
 
         {/* Rate Limiting */}
-        <SectionCard title="Rate Limiting" active={data.rate_limit?.enabled ?? false}>
+        <SectionCard
+          title="Rate Limiting"
+          active={data.rate_limit?.enabled ?? false}
+          onEdit={() => {
+            setEditing("rate_limit");
+          }}
+        >
           {data.rate_limit?.enabled ? (
             <div className="space-y-1">
               <KV k="key" v={data.rate_limit.key || "ip"} />
@@ -81,12 +121,21 @@ export function TrafficControlsPanel() {
               <KV k="burst" v={data.rate_limit.burst} />
             </div>
           ) : (
-            <p className="text-xs text-jul-muted">No rate limit configured.</p>
+            <p className="text-xs text-jul-muted">
+              No rate limit configured. Add one to protect upstreams from spikes and abuse,
+              keyed by client IP, a header, or a JWT claim.
+            </p>
           )}
         </SectionCard>
 
         {/* Cache */}
-        <SectionCard title="Cache" active={data.cache?.enabled ?? false}>
+        <SectionCard
+          title="Cache"
+          active={data.cache?.enabled ?? false}
+          onEdit={() => {
+            setEditing("cache");
+          }}
+        >
           {data.cache?.enabled ? (
             <div className="space-y-1">
               <KV k="default TTL" v={data.cache.default_ttl} />
@@ -94,10 +143,23 @@ export function TrafficControlsPanel() {
               {data.cache.disk_path && <KV k="disk" v="enabled" />}
             </div>
           ) : (
-            <p className="text-xs text-jul-muted">No cache configured.</p>
+            <p className="text-xs text-jul-muted">
+              No cache configured. Enable it to serve repeat responses from memory or disk
+              and reduce upstream load — avoid caching authenticated or per-user responses.
+            </p>
           )}
         </SectionCard>
       </div>
+
+      {editing && (
+        <TrafficControlEditor
+          kind={editing}
+          current={data}
+          onClose={() => {
+            setEditing(null);
+          }}
+        />
+      )}
     </div>
   );
 }

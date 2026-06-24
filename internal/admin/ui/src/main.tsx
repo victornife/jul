@@ -4,6 +4,11 @@ import "@/styles/globals.css";
 import { Providers } from "@/app/providers.tsx";
 import { App } from "@/app/App.tsx";
 import { authToken } from "@/api/client.ts";
+import { initThemeEarly } from "@/lib/theme.ts";
+
+// Apply the persisted theme before first paint to avoid a flash of the wrong
+// palette (Milestone 4.1).
+initThemeEarly();
 
 // Bootstrap: if the operator visits the console via a shared link that
 // includes the auth token in the query string (e.g. /?token=<secret>),

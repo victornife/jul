@@ -14,11 +14,39 @@
   --font-family-mono: ui-monospace, Menlo, Consolas, monospace;
 }
 
+/*
+ * Theme tokens. The @theme block above defines the dark defaults (the historic
+ * Console look). The light palette is applied by overriding the same CSS custom
+ * properties when the document carries data-theme="light" (Milestone 4.1). The
+ * ThemeProvider sets data-theme on <html> from the persisted preference, with
+ * "system" resolving via prefers-color-scheme. Components reference only the
+ * semantic jul-* tokens, so no raw colors leak in and both themes stay readable.
+ */
+:root[data-theme="light"] {
+  --color-jul-bg: #f7f8fa;
+  --color-jul-surface: #ffffff;
+  --color-jul-border: #d8dde6;
+  --color-jul-text: #1b1f27;
+  --color-jul-muted: #5b6473;
+  --color-jul-accent: #0a84d6;
+  --color-jul-success: #1f9d3f;
+  --color-jul-warning: #b8860b;
+  --color-jul-danger: #d23b3b;
+}
+
 @layer base {
   :root {
     color-scheme: light dark;
   }
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
   body {
     font-family: var(--font-family-sans);
+    background-color: var(--color-jul-bg);
+    color: var(--color-jul-text);
   }
 }
