@@ -332,12 +332,49 @@ func pluginDetail(declared, locs int) string {
 	return d
 }
 
-// wizardInput is the setup-wizard request: serve a directory or proxy a target.
+// wizardInput is the setup-wizard request. It supports several guided flows
+// beyond the original serve/proxy: putting an application behind Jul (an
+// upstream pool with one or more backends, an optional health check, and a
+// proxy route), with framework presets supplying friendly defaults.
 type wizardInput struct {
-	Mode   string `json:"mode"`   // "serve" | "proxy"
+	// Mode selects the flow: "serve" (static directory), "proxy" (single
+	// target), or "app" (an application behind Jul with an upstream pool).
+	Mode   string `json:"mode"`
 	Path   string `json:"path"`   // serve: directory to serve
 	Target string `json:"target"` // proxy: upstream target
 	Listen string `json:"listen"` // optional listen address
+
+	// App-mode fields.
+	Name        string   `json:"name"`         // app/upstream name (app mode)
+	Backends    []string `json:"backends"`     // backend host:port list (app mode)
+	Preset      string   `json:"preset"`       // framework preset (app mode)
+	RoutePath   string   `json:"route_path"`   // path prefix to mount the app on (app mode)
+	HealthCheck bool     `json:"health_check"` // enable active health checks (app mode)
+	HealthPath  string   `json:"health_path"`  // health-check path (app mode)
+	Strategy    string   `json:"strategy"`     // load-balancing strategy (app mode)
+}
+
+// appPreset captures the friendly defaults a framework preset contributes. The
+// presets only influence copy and defaults — they never create
+// framework-specific magic.
+type appPreset struct {
+	Strategy    string
+	HealthPath  string
+	HealthCheck bool
+}
+
+// appPresets maps the supported framework presets to friendly defaults. An
+// unknown or empty preset falls back to a generic HTTP app.
+var appPresets = map[string]appPreset{
+	"node":    {Strategy: "round_robin", HealthPath: "/health", HealthCheck: true},
+	"express": {Strategy: "round_robin", HealthPath: "/health", HealthCheck: true},
+	"apollo":  {Strategy: "round_robin", HealthPath: "/.well-known/apollo/server-health", HealthCheck: true},
+	"fastapi": {Strategy: "round_robin", HealthPath: "/health", HealthCheck: true},
+	"django":  {Strategy: "round_robin", HealthPath: "/healthz", HealthCheck: true},
+	"flask":   {Strategy: "round_robin", HealthPath: "/healthz", HealthCheck: true},
+	"go":      {Strategy: "least_conn", HealthPath: "/healthz", HealthCheck: true},
+	"grpc":    {Strategy: "least_conn", HealthPath: "", HealthCheck: false},
+	"generic": {Strategy: "round_robin", HealthPath: "/health", HealthCheck: false},
 }
 
 // handleWizard synthesizes a starter configuration from the wizard inputs and
@@ -355,22 +392,30 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	var cfg *config.Config
+	var (
+		cfg    *config.Config
+		bagErr string
+	)
 	switch strings.ToLower(strings.TrimSpace(in.Mode)) {
 	case "serve":
 		if strings.TrimSpace(in.Path) == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "serve mode requires a directory path"})
-			return
+			bagErr = "serve mode requires a directory path"
+			break
 		}
 		cfg = config.ServeDir(in.Path, in.Listen)
 	case "proxy":
 		if strings.TrimSpace(in.Target) == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "proxy mode requires a target"})
-			return
+			bagErr = "proxy mode requires a target"
+			break
 		}
 		cfg = config.ProxyTarget(in.Target, in.Listen)
+	case "app":
+		cfg, bagErr = wizardAppConfig(in)
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `mode must be "serve" or "proxy"`})
+		bagErr = `mode must be "serve", "proxy", or "app"`
+	}
+	if bagErr != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": bagErr})
 		return
 	}
 	if err := config.Validate(cfg); err != nil {
@@ -383,6 +428,100 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"toml": string(toml)})
+}
+
+// wizardAppConfig builds an "app behind Jul" configuration: a named upstream
+// pool with the supplied backends, an optional active health check, and a
+// reverse-proxy route mounting the app at route_path. Framework presets supply
+// friendly defaults for strategy and health-check path. It returns a non-empty
+// error string when the inputs are insufficient.
+func wizardAppConfig(in wizardInput) (*config.Config, string) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, "app mode requires a name"
+	}
+	var backends []config.UpstreamServer
+	for _, b := range in.Backends {
+		addr := strings.TrimSpace(b)
+		if addr == "" {
+			continue
+		}
+		backends = append(backends, config.UpstreamServer{Address: addr, Weight: 1})
+	}
+	if len(backends) == 0 {
+		return nil, "app mode requires at least one backend (host:port)"
+	}
+
+	preset := appPresets[strings.ToLower(strings.TrimSpace(in.Preset))]
+	if preset.Strategy == "" {
+		preset = appPresets["generic"]
+	}
+	strategy := strings.TrimSpace(in.Strategy)
+	if strategy == "" {
+		strategy = preset.Strategy
+	}
+
+	listen := in.Listen
+	if strings.TrimSpace(listen) == "" {
+		listen = config.DefaultZeroConfigListen
+	}
+	routePath := strings.TrimSpace(in.RoutePath)
+	if routePath == "" {
+		routePath = "/"
+	}
+
+	up := config.UpstreamConfig{
+		Name:     name,
+		Strategy: strategy,
+		Servers:  backends,
+	}
+
+	// Health checks: enable when the operator asked for it or the preset
+	// defaults to it and a path is resolvable.
+	wantHC := in.HealthCheck || preset.HealthCheck
+	hcPath := strings.TrimSpace(in.HealthPath)
+	if hcPath == "" {
+		hcPath = preset.HealthPath
+	}
+	if wantHC && hcPath != "" {
+		up.HealthCheck = &config.HealthCheckConfig{
+			Enabled:            true,
+			Type:               "http",
+			Path:               hcPath,
+			Interval:           config.Duration(5 * time.Second),
+			Timeout:            config.Duration(2 * time.Second),
+			HealthyThreshold:   2,
+			UnhealthyThreshold: 3,
+			ExpectStatus:       []int{200},
+		}
+	}
+
+	loc := config.LocationConfig{
+		Match:     config.MatchConfig{Type: "prefix", Path: routePath},
+		ProxyPass: "http://" + name,
+	}
+	if strings.EqualFold(strings.TrimSpace(in.Preset), "grpc") {
+		loc.GRPC = true
+	}
+
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen:    listen,
+			Locations: []config.LocationConfig{loc},
+		}},
+		Upstreams: []config.UpstreamConfig{up},
+		Compression: config.CompressionConfig{
+			Enabled:  true,
+			Encoders: []string{"gzip"},
+			MinSize:  config.Size(1 << 10),
+			Types: []string{
+				"text/html", "text/css", "text/plain",
+				"application/json", "application/javascript",
+				"application/xml", "image/svg+xml",
+			},
+		},
+	}
+	return cfg, ""
 }
 
 // handleHistoryList serves the configuration snapshot index, newest first.

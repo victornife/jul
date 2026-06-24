@@ -181,6 +181,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/tls", s.auth(http.HandlerFunc(s.handleTLS)))
 	mux.Handle("/api/security", s.auth(http.HandlerFunc(s.handleSecurity)))
 	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
+	mux.Handle("/api/search", s.auth(http.HandlerFunc(s.handleSearch)))
 	mux.Handle("/api/events", s.auth(http.HandlerFunc(s.handleEvents)))
 
 	// Console v2 Phase 5 — operational depth: recent request samples, top

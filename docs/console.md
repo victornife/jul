@@ -101,11 +101,68 @@ Generates a starter configuration without hand-writing TOML:
 - **Serve a directory** — static file server for a folder.
 - **Reverse-proxy a target** — proxy all requests to `http://host:port`,
   `host:port`, or `:port`.
+- **Put an app behind Jul** — create a load-balanced upstream pool from one or
+  more `host:port` backends plus a reverse-proxy route that mounts it. A
+  framework **preset** (Express/Node, Apollo, FastAPI, Django/Flask, Go, gRPC,
+  or generic) seeds friendly defaults for the load-balancing strategy and the
+  active health-check path; the operator can edit everything before applying.
+  Presets only influence copy and defaults — they create no framework-specific
+  magic.
 
-`POST /api/wizard` returns the generated TOML for review (it is validated first,
-so the wizard never proposes a config the editor would reject). Click **Apply &
-reload** to write it through `POST /api/config/raw`, which validates, snapshots
-the current config, persists, and hot-reloads.
+`POST /api/wizard` (and the v2 alias `POST /api/wizard/generate`) returns the
+generated TOML for review (it is validated first, so the wizard never proposes a
+config the editor would reject). Click **Apply & reload** to write it through
+`POST /api/config/raw`, which validates, snapshots the current config, persists,
+and hot-reloads.
+
+### Search & discovery
+
+`GET /api/search?q=<query>&type=<routes|apps|all>` ranks routes and apps by
+match quality and reflects the relationships between them — which upstream a
+route targets, which routes use an app, and which apps are unused — so large
+configurations stay navigable. Results carry only abstract labels (paths,
+action kinds, pool names, counts); never tokens, certificate material, or
+credentials. The Search panel debounces the query and persists it across
+sessions.
+
+### Structured diff
+
+`POST /api/config/diff` returns a human-auditable, structured before/after
+report used by the apply flow. Beyond server add/remove and listen/TLS changes,
+it explains the operational consequences of changes to:
+
+- **Routes/locations** — action and target changes, plus auth, cache,
+  rate-limit, body-size, and per-route proxy-timeout toggles, with warnings
+  (e.g. caching an authenticated route, disabling auth, retargeting traffic).
+- **TLS** — enable/disable, certificate/key changes, minimum-version changes
+  (warning when weakened), ACME enable/disable and CA/challenge changes, and
+  mutual-TLS mode/CA/CRL changes.
+- **Upstreams** — strategy, backend add/remove and weight changes, `max_fails`
+  and `fail_timeout` (retry/passive-health) changes, active-health-check and
+  discovery toggles.
+- **Server timeouts and body limits**, and the global **cache**,
+  **compression**, and **rate-limit** blocks.
+
+### Guided editors — scope (v2)
+
+The Routes and Apps panels provide **guided creation** that generates a
+complete `[[servers]]`/`[[upstreams]]` TOML fragment and routes it through the
+validated **Validate → Diff → Apply → Rollback** pipeline — the editors never
+write directly, so an invalid draft never replaces the running config.
+
+> **Append-as-draft semantics.** Editing an existing route or app opens it as a
+> new draft block appended to the raw config, which the operator reviews in the
+> editor before applying. In-place *replace/rename* of an existing block is
+> intentionally **not** performed automatically: rewriting TOML in the browser
+> would risk dropping comments and formatting, and the validated apply path plus
+> the structured diff already make append-then-prune a safe, auditable workflow.
+> Automatic in-place replace/rename is tracked as a follow-up.
+
+The TLS, Security (auth/mTLS), and ACME panels are **read-only inventories** in
+v2; guided enablement/editing for TLS, ACME, mutual-TLS, and auth rules is a
+pending P1 item. Until then, change those settings through the validated raw
+TOML editor, which the structured diff annotates with the consequences listed
+above.
 
 ## Security model
 

@@ -435,10 +435,18 @@ export async function applyConfig(candidate: string): Promise<ApplyResult> {
 }
 
 export const WizardInputSchema = z.object({
-  mode: z.enum(["serve", "proxy"]),
+  mode: z.enum(["serve", "proxy", "app"]),
   path: z.string().optional(),
   target: z.string().optional(),
   listen: z.string().optional(),
+  // App-mode fields (put an application behind Jul).
+  name: z.string().optional(),
+  backends: z.array(z.string()).optional(),
+  preset: z.string().optional(),
+  route_path: z.string().optional(),
+  health_check: z.boolean().optional(),
+  health_path: z.string().optional(),
+  strategy: z.string().optional(),
 });
 export type WizardInput = z.infer<typeof WizardInputSchema>;
 
@@ -452,6 +460,38 @@ export async function generateConfig(input: WizardInput): Promise<string> {
     body: JSON.stringify(input),
   });
   return WizardResultSchema.parse(data).toml;
+}
+
+// ── Search & discovery (/api/search) ─────────────────────────────────────────
+
+export const SearchResultSchema = z.object({
+  kind: z.enum(["route", "app"]),
+  title: z.string(),
+  detail: z.string(),
+  score: z.number(),
+  target: z.string().optional(),
+  upstream: z.string().optional(),
+  routes: z.array(z.string()).optional(),
+  badges: z.array(z.string()).optional(),
+});
+export type SearchResult = z.infer<typeof SearchResultSchema>;
+
+/**
+ * Ranked discovery across routes and apps via the backend /api/search endpoint.
+ * The server reflects route↔app relationships (which app a route targets, which
+ * routes use an app, and which apps are unused) so the UI does not re-derive them.
+ */
+export function searchConfig(
+  query: string,
+  type: "all" | "routes" | "apps" = "all",
+): Promise<SearchResult[]> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (type !== "all") params.set("type", type);
+  const qs = params.toString();
+  return api<unknown>(`/search${qs ? `?${qs}` : ""}`).then((d) =>
+    z.array(SearchResultSchema).parse(d),
+  );
 }
 
 // ── Operational depth (Phase 5) ─────────────────────────────────────────────

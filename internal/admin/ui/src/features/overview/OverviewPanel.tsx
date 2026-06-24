@@ -337,7 +337,7 @@ export function OverviewPanel() {
               <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                 2-Minute Trends
               </h3>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Request Rate Trend
@@ -358,24 +358,6 @@ export function OverviewPanel() {
 
                 <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                    Latency Trend
-                  </div>
-                  <div className="mt-2 h-12">
-                    <Sparkline
-                      data={history.latencyAvg}
-                      height={48}
-                      width={100}
-                      color="rgb(59, 130, 246)"
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-jul-muted">
-                    {history.latencyAvg.length} samples
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Error Rate Trend
                   </div>
                   <div className="mt-2 h-12">
@@ -389,6 +371,60 @@ export function OverviewPanel() {
                   </div>
                   <div className="mt-1 text-xs text-jul-muted">
                     {history.errorRate.length} samples
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                    P95 Latency Trend
+                  </div>
+                  <div className="mt-2 h-12">
+                    <Sparkline
+                      data={history.latencyP95}
+                      height={48}
+                      width={100}
+                      color="rgb(59, 130, 246)"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-jul-muted">
+                    {history.latencyP95.length} samples
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                    In-flight Trend
+                  </div>
+                  <div className="mt-2 h-12">
+                    <Sparkline
+                      data={history.inFlight}
+                      height={48}
+                      width={100}
+                      color="rgb(234, 179, 8)"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-jul-muted">
+                    {history.inFlight.length} samples
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                    Avg Latency Trend
+                  </div>
+                  <div className="mt-2 h-12">
+                    <Sparkline
+                      data={history.latencyAvg}
+                      height={48}
+                      width={100}
+                      color="rgb(14, 165, 233)"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-jul-muted">
+                    {history.latencyAvg.length} samples
                   </div>
                 </div>
 

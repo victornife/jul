@@ -5,20 +5,20 @@ import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.t
 import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
 
 const NAV = [
-  { to: "/", label: "Overview", exact: true },
-  { to: "/routes", label: "Routes" },
-  { to: "/apps", label: "Apps" },
-  { to: "/tls", label: "TLS" },
-  { to: "/security", label: "Security" },
-  { to: "/traffic", label: "Traffic" },
-  { to: "/search", label: "Search" },
-  { to: "/observability", label: "Events" },
-  { to: "/operations", label: "Operations" },
-  { to: "/timeline", label: "Timeline" },
-  { to: "/audit", label: "Audit" },
-  { to: "/config", label: "Config" },
-  { to: "/history", label: "History" },
-  { to: "/wizard", label: "Wizard" },
+  { to: "/", label: "Overview", glyph: "▣", exact: true },
+  { to: "/routes", label: "Routes", glyph: "⇄" },
+  { to: "/apps", label: "Apps", glyph: "▦" },
+  { to: "/tls", label: "TLS", glyph: "🔒" },
+  { to: "/security", label: "Security", glyph: "🛡" },
+  { to: "/traffic", label: "Traffic", glyph: "📈" },
+  { to: "/search", label: "Search", glyph: "🔍" },
+  { to: "/observability", label: "Events", glyph: "⚡" },
+  { to: "/operations", label: "Operations", glyph: "🛠" },
+  { to: "/timeline", label: "Timeline", glyph: "🕒" },
+  { to: "/audit", label: "Audit", glyph: "📋" },
+  { to: "/config", label: "Config", glyph: "⚙" },
+  { to: "/history", label: "History", glyph: "↩" },
+  { to: "/wizard", label: "Wizard", glyph: "✨" },
 ];
 
 function isActive(navTo: string, pathname: string, exact = false): boolean {
@@ -39,15 +39,23 @@ function isNavLayout(v: unknown): v is NavLayout {
   return v === "top" || v === "side";
 }
 
+function isBool(v: unknown): v is boolean {
+  return typeof v === "boolean";
+}
+
 // PreferenceMenu (Milestone 4.5/4.6) collects the View preferences — theme,
 // navigation layout — into one discoverable popover and offers a single
 // "Reset to defaults" action that clears every persisted preference.
 function PreferenceMenu({
   layout,
   onLayout,
+  collapsed,
+  onCollapsed,
 }: {
   readonly layout: NavLayout;
   readonly onLayout: (v: NavLayout) => void;
+  readonly collapsed: boolean;
+  readonly onCollapsed: (v: boolean) => void;
 }) {
   const { preference, setPreference } = useTheme();
   const [open, setOpen] = useState(false);
@@ -136,6 +144,18 @@ function PreferenceMenu({
                   ◧ Sidebar
                 </button>
               </div>
+              {layout === "side" && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-jul-text">
+                  <input
+                    type="checkbox"
+                    checked={collapsed}
+                    onChange={(e) => {
+                      onCollapsed(e.target.checked);
+                    }}
+                  />
+                  Collapse sidebar to icons
+                </label>
+              )}
             </div>
 
             <div className="border-t border-jul-border pt-2">
@@ -160,9 +180,11 @@ function PreferenceMenu({
 function NavLinks({
   pathname,
   orientation,
+  collapsed = false,
 }: {
   readonly pathname: string;
   readonly orientation: "row" | "col";
+  readonly collapsed?: boolean;
 }) {
   return (
     <nav
@@ -176,13 +198,19 @@ function NavLinks({
           key={n.to}
           to={n.to}
           aria-current={isActive(n.to, pathname, n.exact) ? "page" : undefined}
-          className={`rounded-md px-3 py-1 text-sm transition-colors ${
+          title={collapsed ? n.label : undefined}
+          className={`flex items-center gap-2 rounded-md py-1 text-sm transition-colors ${
+            collapsed ? "justify-center px-2" : "px-3"
+          } ${
             isActive(n.to, pathname, n.exact)
               ? "bg-jul-accent text-jul-bg font-medium"
               : "text-jul-muted hover:text-jul-text"
           }`}
         >
-          {n.label}
+          <span aria-hidden className={collapsed ? "text-base" : "text-sm"}>
+            {n.glyph}
+          </span>
+          {!collapsed && <span>{n.label}</span>}
         </Link>
       ))}
     </nav>
@@ -192,23 +220,54 @@ function NavLinks({
 export function Layout() {
   const loc = useLocation();
   const [layout, setLayout] = usePersistentState<NavLayout>("nav_layout", "top", isNavLayout);
+  const [collapsed, setCollapsed] = usePersistentState<boolean>(
+    "nav_collapsed",
+    false,
+    isBool,
+  );
 
   const controls = (
     <div className="flex items-center gap-2">
       <ConsoleHealthBadge />
-      <PreferenceMenu layout={layout} onLayout={setLayout} />
+      <PreferenceMenu
+        layout={layout}
+        onLayout={setLayout}
+        collapsed={collapsed}
+        onCollapsed={setCollapsed}
+      />
     </div>
   );
 
   if (layout === "side") {
     return (
       <div className="flex h-screen bg-jul-bg text-jul-text">
-        <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-jul-border bg-jul-surface px-4 py-4">
-          <div className="flex items-baseline gap-2">
-            <span className="font-bold tracking-wide text-jul-accent">Jul.IA</span>
-            <span className="text-xs text-jul-muted">v2</span>
+        <aside
+          className={`flex shrink-0 flex-col gap-4 border-r border-jul-border bg-jul-surface py-4 ${
+            collapsed ? "w-16 px-2" : "w-56 px-4"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            {collapsed ? (
+              <span className="mx-auto font-bold tracking-wide text-jul-accent">J</span>
+            ) : (
+              <div className="flex items-baseline gap-2">
+                <span className="font-bold tracking-wide text-jul-accent">Jul.IA</span>
+                <span className="text-xs text-jul-muted">v2</span>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setCollapsed(!collapsed);
+              }}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="rounded-md border border-jul-border px-1.5 py-0.5 text-xs text-jul-muted hover:text-jul-text"
+            >
+              {collapsed ? "»" : "«"}
+            </button>
           </div>
-          <NavLinks pathname={loc.pathname} orientation="col" />
+          <NavLinks pathname={loc.pathname} orientation="col" collapsed={collapsed} />
           <div className="mt-auto">{controls}</div>
         </aside>
         <main className="flex-1 overflow-auto p-6">

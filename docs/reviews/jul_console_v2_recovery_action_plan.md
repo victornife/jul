@@ -8,6 +8,26 @@
 
 ---
 
+## Principal-review follow-up (2026-06-24)
+
+A principal-engineer review flagged gaps between the plan and the implementation.
+Resolution status:
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| **Diff depth (P0)** | ✅ Done | `diffConfigs` now covers locations (action/target), auth, cache, rate limit, body size, per-route proxy timeouts; TLS cert/min-version/ACME/mTLS; upstream strategy, backends, weights, `max_fails`/`fail_timeout`, health checks, discovery; and global cache/compression/rate-limit blocks, each with operational warnings. Covered by `diff_test.go`. |
+| **Wizard beyond serve/proxy (P0)** | ✅ Done | Added an **app** mode (`mode:"app"`) that builds a load-balanced upstream pool + proxy route with framework presets (Express/Apollo/FastAPI/Django/Flask/Go/gRPC/generic) and optional health checks. Backend `wizardAppConfig` + `wizard_app_test.go`; UI exposes it in `WizardPanel`. |
+| **Search endpoint (P0)** | ✅ Done | Implemented `GET /api/search?q=&type=` with server-side ranking and route↔app relationships (`search.go`, `search_test.go`); `SearchPanel` now consumes it. |
+| **Route/App edit = append-as-draft (P0)** | ✅ Documented | Scope made explicit in `docs/console.md`: guided **creation** generates a validated draft block; in-place replace/rename is intentionally not auto-performed (browser TOML rewriting risks comment/format loss) and is tracked as a follow-up. |
+| **TLS/ACME/auth/mTLS editors (P1)** | ⏳ Pending | Marked explicitly as pending P1 in `docs/console.md`; panels remain read-only inventories. The structured diff now annotates the consequences of changing these via the raw editor. |
+| **Nav collapsed mode** | ✅ Done | Sidebar layout gains a persisted collapsed icon-rail mode with a toggle in the View menu and inline collapse button (`Layout.tsx`). |
+| **Overview sparklines (p95, in-flight)** | ✅ Done | `useMetricsHistory` now tracks p95 latency and in-flight alongside request rate, error rate, avg latency, and cache-hit ratio; `OverviewPanel` renders the full trend set. |
+
+All Go (`go test ./...`, incl. `-tags console`) and frontend
+(`tsc`, `vitest`, `vite build`) checks pass after these changes.
+
+---
+
 ## Overview
 
 > Purpose: Convert the current Console v2 implementation from a technical substrate into the self-explanatory operations cockpit promised by `docs/specs/console-v2.md` and `docs/reviews/jul_console_v2_spike.md`.

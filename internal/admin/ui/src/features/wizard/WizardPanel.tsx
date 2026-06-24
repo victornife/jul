@@ -4,7 +4,17 @@ import { useNavigate } from "react-router-dom";
 import { generateConfig, type WizardInput } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
-type Mode = "serve" | "proxy";
+type Mode = "serve" | "proxy" | "app";
+
+const PRESETS: { id: string; label: string }[] = [
+  { id: "generic", label: "Generic HTTP app" },
+  { id: "express", label: "Express / Node.js" },
+  { id: "apollo", label: "Apollo GraphQL" },
+  { id: "fastapi", label: "FastAPI" },
+  { id: "django", label: "Django / Flask" },
+  { id: "go", label: "Go HTTP app" },
+  { id: "grpc", label: "gRPC backend" },
+];
 
 function Field({
   label,
@@ -44,6 +54,13 @@ export function WizardPanel() {
   const [listen, setListen] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
 
+  // App-mode state.
+  const [appName, setAppName] = useState("");
+  const [backends, setBackends] = useState("");
+  const [preset, setPreset] = useState("generic");
+  const [routePath, setRoutePath] = useState("/");
+  const [healthCheck, setHealthCheck] = useState(true);
+
   const generate = useMutation({
     mutationFn: (input: WizardInput) => generateConfig(input),
     onSuccess: (toml) => {
@@ -51,14 +68,37 @@ export function WizardPanel() {
     },
   });
 
-  const ready = mode === "serve" ? path.trim() !== "" : target.trim() !== "";
+  function backendList(): string[] {
+    return backends
+      .split(/[\n,]/)
+      .map((b) => b.trim())
+      .filter((b) => b !== "");
+  }
+
+  const ready =
+    mode === "serve"
+      ? path.trim() !== ""
+      : mode === "proxy"
+        ? target.trim() !== ""
+        : appName.trim() !== "" && backendList().length > 0;
 
   function onGenerate(): void {
-    const input: WizardInput = {
-      mode,
-      listen: listen.trim() || undefined,
-      ...(mode === "serve" ? { path: path.trim() } : { target: target.trim() }),
-    };
+    let input: WizardInput;
+    if (mode === "serve") {
+      input = { mode, listen: listen.trim() || undefined, path: path.trim() };
+    } else if (mode === "proxy") {
+      input = { mode, listen: listen.trim() || undefined, target: target.trim() };
+    } else {
+      input = {
+        mode,
+        listen: listen.trim() || undefined,
+        name: appName.trim(),
+        backends: backendList(),
+        preset,
+        route_path: routePath.trim() || "/",
+        health_check: healthCheck,
+      };
+    }
     generate.mutate(input);
   }
 
@@ -79,9 +119,9 @@ export function WizardPanel() {
 
       <div className="space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5">
         <div className="space-y-1">
-          <span className="text-sm font-medium text-jul-text">Mode</span>
-          <div className="flex gap-2">
-            {(["serve", "proxy"] as const).map((m) => (
+          <span className="text-sm font-medium text-jul-text">What do you want to do?</span>
+          <div className="flex flex-wrap gap-2">
+            {(["serve", "proxy", "app"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -94,13 +134,17 @@ export function WizardPanel() {
                     : "border border-jul-border text-jul-muted hover:text-jul-text"
                 }`}
               >
-                {m === "serve" ? "Serve a directory" : "Proxy a target"}
+                {m === "serve"
+                  ? "Serve a directory"
+                  : m === "proxy"
+                    ? "Proxy a target"
+                    : "Put an app behind Jul"}
               </button>
             ))}
           </div>
         </div>
 
-        {mode === "serve" ? (
+        {mode === "serve" && (
           <Field
             label="Directory"
             hint="Absolute path of the static files to serve."
@@ -108,7 +152,9 @@ export function WizardPanel() {
             placeholder="/var/www/site"
             onChange={setPath}
           />
-        ) : (
+        )}
+
+        {mode === "proxy" && (
           <Field
             label="Upstream target"
             hint="URL of the backend to proxy to."
@@ -116,6 +162,74 @@ export function WizardPanel() {
             placeholder="http://127.0.0.1:8080"
             onChange={setTarget}
           />
+        )}
+
+        {mode === "app" && (
+          <div className="space-y-4">
+            <p className="text-xs text-jul-muted">
+              An app puts one or more backend instances behind Jul as a load-balanced upstream
+              pool, then mounts a reverse-proxy route to it. Presets pick sensible defaults — you
+              can edit everything before applying.
+            </p>
+            <Field
+              label="App name"
+              hint="Used as the upstream pool name (letters, numbers, dashes)."
+              value={appName}
+              placeholder="backend"
+              onChange={setAppName}
+            />
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-jul-text">Backends</span>
+              <textarea
+                value={backends}
+                placeholder={"127.0.0.1:3000\n127.0.0.1:3001"}
+                onChange={(e) => {
+                  setBackends(e.target.value);
+                }}
+                rows={3}
+                className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
+              />
+              <span className="text-xs text-jul-muted">
+                One <code>host:port</code> per line (or comma-separated). Add several to load-balance.
+              </span>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-jul-text">Framework preset</span>
+              <select
+                value={preset}
+                onChange={(e) => {
+                  setPreset(e.target.value);
+                }}
+                className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+              >
+                {PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-jul-muted">
+                Presets only influence defaults (strategy, health-check path) — no framework magic.
+              </span>
+            </label>
+            <Field
+              label="Mount path"
+              hint="Path prefix the app is served on."
+              value={routePath}
+              placeholder="/"
+              onChange={setRoutePath}
+            />
+            <label className="flex items-center gap-2 text-sm text-jul-text">
+              <input
+                type="checkbox"
+                checked={healthCheck}
+                onChange={(e) => {
+                  setHealthCheck(e.target.checked);
+                }}
+              />
+              Enable active health checks
+            </label>
+          </div>
         )}
 
         <Field
