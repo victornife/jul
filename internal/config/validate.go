@@ -94,6 +94,9 @@ func Validate(c *Config) error {
 			if loc.RequireClientCert && (srv.TLS == nil || !srv.TLS.ClientAuth.Active()) {
 				errs = append(errs, fmt.Errorf("%s: require_client_cert needs the server's tls.client_auth enabled (mode request or require)", locWhere))
 			}
+			if loc.WAF != nil {
+				errs = append(errs, validateWAF(*loc.WAF, locWhere+".waf")...)
+			}
 			errs = append(errs, validateLocation(loc, locWhere, upstreamNames, c.Plugins)...)
 		}
 
@@ -153,6 +156,7 @@ func Validate(c *Config) error {
 
 	errs = append(errs, validateCompression(c.Compression)...)
 	errs = append(errs, validateRateLimit(c.RateLimit, "[rate_limit]", false)...)
+	errs = append(errs, validateWAF(c.WAF, "[waf]")...)
 	errs = append(errs, validateTracing(c.Observability.Tracing)...)
 	errs = append(errs, validateAccessLog(c.Observability.AccessLog)...)
 	errs = append(errs, validateStreams(c.Streams, upstreamNames)...)
@@ -370,6 +374,37 @@ func validateRateLimit(c RateLimitConfig, where string, perLocation bool) []erro
 		errs = append(errs, fmt.Errorf("%s max_conns is listener-global and not allowed on a location override", where))
 	} else if c.MaxConns < 0 {
 		errs = append(errs, fmt.Errorf("%s max_conns must be >= 0", where))
+	}
+	return errs
+}
+
+// validateWAF checks a WAF policy (global or per-location override). It assumes
+// defaults have been applied (mode "block", block status 403, body limit). It
+// validates the keyword fields and the embedded-CRS paranoia range; the SecLang
+// rules themselves are validated by the WAF engine at build time. where labels
+// the error source.
+func validateWAF(c WAFConfig, where string) []error {
+	if !c.Enabled {
+		return nil
+	}
+	var errs []error
+	if c.Mode != "block" && c.Mode != "detect" {
+		errs = append(errs, fmt.Errorf("%s invalid mode %q (want block or detect)", where, c.Mode))
+	}
+	if c.BlockStatus < 100 || c.BlockStatus > 599 {
+		errs = append(errs, fmt.Errorf("%s block_status must be a valid HTTP status (100–599), got %d", where, c.BlockStatus))
+	}
+	if c.Paranoia < 0 || c.Paranoia > 4 {
+		errs = append(errs, fmt.Errorf("%s paranoia must be between 1 and 4, got %d", where, c.Paranoia))
+	}
+	if c.Paranoia != 0 && !c.CRSEnabled {
+		errs = append(errs, fmt.Errorf("%s paranoia applies only when crs_enabled = true", where))
+	}
+	if !c.CRSEnabled && len(c.DirectivesFiles) == 0 && strings.TrimSpace(c.InlineRules) == "" {
+		errs = append(errs, fmt.Errorf("%s enabled but has no rules; set crs_enabled, directives_files, or inline_rules", where))
+	}
+	if c.RequestBodyLimit < 0 {
+		errs = append(errs, fmt.Errorf("%s request_body_limit must be >= 0", where))
 	}
 	return errs
 }

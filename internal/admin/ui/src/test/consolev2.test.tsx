@@ -119,9 +119,15 @@ describe("SecurityProjectionSchema", () => {
       auth_enabled: true,
       client_auth: "require",
       require_cert_count: 3,
+      waf_enabled: true,
+      waf_mode: "block",
+      waf_locations: 2,
+      secret_refs: 1,
     });
     expect(s.auth_enabled).toBe(true);
     expect(s.require_cert_count).toBe(3);
+    expect(s.waf_enabled).toBe(true);
+    expect(s.secret_refs).toBe(1);
   });
 });
 
@@ -355,6 +361,10 @@ describe("SecurityPanel", () => {
             auth_enabled: true,
             client_auth: "require",
             require_cert_count: 2,
+            waf_enabled: true,
+            waf_mode: "detect",
+            waf_locations: 3,
+            secret_refs: 2,
           }),
       }),
     );
@@ -374,5 +384,16 @@ describe("SecurityPanel", () => {
   it("renders require cert count", async () => {
     render(<SecurityPanel />, { wrapper: Wrapper });
     expect(await screen.findByText(/2 locations require cert/i)).toBeInTheDocument();
+  });
+
+  it("renders WAF mode and location count", async () => {
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText("detect")).toBeInTheDocument();
+    expect(await screen.findByText(/3 locations/i)).toBeInTheDocument();
+  });
+
+  it("renders secret reference count", async () => {
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText(/2 references/i)).toBeInTheDocument();
   });
 });

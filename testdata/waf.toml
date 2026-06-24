@@ -1,0 +1,52 @@
+# Web application firewall (WAF) example.
+#
+# Build with the "waf" tag to run this (e.g. `go build -tags waf ./cmd/jul`).
+# A lean build refuses to start when the WAF is enabled.
+#
+# The WAF inspects requests (and optionally responses) against SecLang rules via
+# the Coraza engine. With crs_enabled the OWASP Core Rule Set ships inside the
+# binary, so there is nothing to download or mount. Roll new rules out in
+# "detect" mode first, watch jul_waf_events_total, then switch to "block".
+
+[global]
+log_level = "info"
+log_format = "text"
+
+# Process-wide default policy: the embedded OWASP CRS in blocking mode.
+[waf]
+enabled = true
+crs_enabled = true        # load the embedded OWASP Core Rule Set
+mode = "block"            # block (default) | detect
+block_status = 403        # status returned when a request is blocked
+paranoia = 1              # CRS paranoia level 1-4 (higher = stricter)
+request_body_limit = "128kb"
+response_body_check = false
+
+# A small inline tuning rule appended after the CRS. Note the explicit "log"
+# action so the match is counted in jul_waf_events_total{action,rule}.
+inline_rules = """
+SecRule REQUEST_HEADERS:User-Agent "@contains sqlmap" \
+  "id:100001,phase:1,deny,status:403,log,msg:'blocked scanner'"
+"""
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  # Inherits the global block-mode CRS policy.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:9000"
+
+  # Per-location override: an upload endpoint that allows larger bodies and only
+  # observes (detect) instead of blocking. An override replaces the global
+  # policy wholesale, so the rule sources to keep are repeated here.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/upload" }
+  proxy_pass = "http://127.0.0.1:9001"
+
+    [servers.locations.waf]
+    enabled = true
+    crs_enabled = true
+    mode = "detect"
+    request_body_limit = "8mb"

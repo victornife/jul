@@ -167,6 +167,10 @@ export const SecurityProjectionSchema = z.object({
   client_auth: z.string().optional(),
   body_limit: z.string().optional(),
   require_cert_count: z.number(),
+  waf_enabled: z.boolean(),
+  waf_mode: z.string().optional(),
+  waf_locations: z.number(),
+  secret_refs: z.number(),
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
 

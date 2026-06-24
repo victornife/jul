@@ -1,0 +1,197 @@
+//go:build waf
+
+package waf
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+
+	"jul/internal/config"
+)
+
+// newOKHandler is the protected action: it returns 200 and a fixed body so a
+// test can tell a request that reached the action from one the WAF blocked.
+func newOKHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "reached-action")
+	})
+}
+
+// eventRecorder captures WAF events for assertions.
+type eventRecorder struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (e *eventRecorder) onEvent(action, rule string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, action+":"+rule)
+}
+
+func (e *eventRecorder) count() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.events)
+}
+
+// buildAndServe builds a firewall from cfg (applying defaults as the loader
+// would), wraps an OK handler, and serves req against it, returning the recorder.
+func buildAndServe(t *testing.T, cfg config.WAFConfig, req *http.Request) (*httptest.ResponseRecorder, *eventRecorder) {
+	t.Helper()
+	applyTestDefaults(&cfg)
+	rec := &eventRecorder{}
+	fw, err := New(cfg, Options{Hooks: Hooks{OnEvent: rec.onEvent}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h := fw.Middleware()(newOKHandler())
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr, rec
+}
+
+// applyTestDefaults mirrors the loader defaults so tests construct WAFConfig
+// values directly without going through the TOML parser.
+func applyTestDefaults(c *config.WAFConfig) {
+	if c.Mode == "" {
+		c.Mode = "block"
+	}
+	if c.BlockStatus == 0 {
+		c.BlockStatus = 403
+	}
+	if c.RequestBodyLimit == 0 {
+		c.RequestBodyLimit = config.Size(128 << 10)
+	}
+}
+
+func TestFirewallBlocksInlineRule(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:     true,
+		Mode:        "block",
+		InlineRules: `SecRule REQUEST_URI "@contains /forbidden" "id:100,phase:1,deny,status:403,log,msg:'blocked path'"`,
+	}
+	req := httptest.NewRequest(http.MethodGet, "/forbidden/page", nil)
+	rr, rec := buildAndServe(t, cfg, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), "reached-action") {
+		t.Error("request reached the action but should have been blocked")
+	}
+	if rec.count() == 0 {
+		t.Error("expected at least one WAF event to be recorded")
+	}
+}
+
+func TestFirewallAllowsCleanRequest(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:     true,
+		Mode:        "block",
+		InlineRules: `SecRule REQUEST_URI "@contains /forbidden" "id:100,phase:1,deny,status:403"`,
+	}
+	req := httptest.NewRequest(http.MethodGet, "/allowed/page", nil)
+	rr, _ := buildAndServe(t, cfg, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "reached-action") {
+		t.Error("clean request did not reach the action")
+	}
+}
+
+func TestFirewallDetectModeRecordsButAllows(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:     true,
+		Mode:        "detect",
+		InlineRules: `SecRule REQUEST_URI "@contains /forbidden" "id:100,phase:1,deny,status:403,log,msg:'would block'"`,
+	}
+	req := httptest.NewRequest(http.MethodGet, "/forbidden/page", nil)
+	rr, rec := buildAndServe(t, cfg, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (detect mode must not block)", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "reached-action") {
+		t.Error("detect-mode request did not reach the action")
+	}
+	if rec.count() == 0 {
+		t.Error("expected the matched rule to be recorded in detect mode")
+	}
+}
+
+func TestFirewallRequestBodyLimitRejectsOversizedBody(t *testing.T) {
+	// A rule inspects the request body; the body limit caps how much is read.
+	cfg := config.WAFConfig{
+		Enabled:          true,
+		Mode:             "block",
+		RequestBodyLimit: config.Size(16),
+		InlineRules: strings.Join([]string{
+			`SecRequestBodyAccess On`,
+			`SecRequestBodyLimitAction ProcessPartial`,
+			`SecRule REQUEST_BODY "@contains attack" "id:101,phase:2,deny,status:403,msg:'body match'"`,
+		}, "\n"),
+	}
+	// The marker sits beyond the 16-byte limit, so a ProcessPartial body is not
+	// fully inspected — the request is allowed. This asserts the limit is wired.
+	body := strings.NewReader(strings.Repeat("A", 32) + "attack")
+	req := httptest.NewRequest(http.MethodPost, "/submit", body)
+	req.Header.Set("Content-Type", "text/plain")
+	rr, _ := buildAndServe(t, cfg, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (marker beyond body limit must not match)", rr.Code)
+	}
+}
+
+func TestFirewallCRSBlocksSQLi(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:    true,
+		Mode:       "block",
+		CRSEnabled: true,
+	}
+	// A classic SQL-injection probe in a query parameter. CRS anomaly scoring
+	// crosses the inbound threshold and rule 949110 blocks the request.
+	req := httptest.NewRequest(http.MethodGet, "/?id=1%27%20OR%20%271%27%3D%271", nil)
+	rr, rec := buildAndServe(t, cfg, req)
+
+	if rr.Code == http.StatusOK {
+		t.Errorf("status = %d, want a block (SQLi should be rejected by CRS)", rr.Code)
+	}
+	if rec.count() == 0 {
+		t.Error("expected CRS rule events to be recorded for the SQLi probe")
+	}
+}
+
+func TestFirewallCRSAllowsCleanRequest(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:    true,
+		Mode:       "block",
+		CRSEnabled: true,
+	}
+	req := httptest.NewRequest(http.MethodGet, "/products?page=2&sort=name", nil)
+	rr, _ := buildAndServe(t, cfg, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (a clean request must pass CRS)", rr.Code)
+	}
+}
+
+func TestNewRejectsBadDirectives(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:     true,
+		Mode:        "block",
+		InlineRules: `this is not valid seclang @@@`,
+	}
+	applyTestDefaults(&cfg)
+	if _, err := New(cfg, Options{}); err == nil {
+		t.Error("expected an error compiling invalid SecLang directives")
+	}
+}

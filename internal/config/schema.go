@@ -21,6 +21,12 @@ type Config struct {
 	RateLimit     RateLimitConfig     `toml:"rate_limit"`
 	Observability ObservabilityConfig `toml:"observability"`
 
+	// WAF is the global web-application-firewall policy ([waf]). It applies to
+	// every location unless a location sets its own [servers.locations.waf]
+	// override. It is enforced only in builds with the "waf" tag; a lean build
+	// refuses any configuration that enables it (see internal/waf.Check).
+	WAF WAFConfig `toml:"waf"`
+
 	// Plugins declares WASM plugins by name ([plugins.NAME]). Locations and
 	// servers reference them by name. Plugins are loaded only in builds with the
 	// "wasmplugins" tag; a lean build refuses any config that declares them.
@@ -96,6 +102,41 @@ type PluginConfig struct {
 	// AllowedHosts is the allowlist of hosts the guest may fetch from when Fetch
 	// is granted.
 	AllowedHosts []string `toml:"allowed_hosts"`
+}
+
+// WAFConfig configures the Coraza-based web application firewall, either
+// globally ([waf]) or as a per-location override ([servers.locations.waf]). It
+// is enforced only in builds with the "waf" tag; a lean build refuses any
+// configuration that enables it (see internal/waf.Check).
+type WAFConfig struct {
+	// Enabled turns the firewall on for the scope it appears in.
+	Enabled bool `toml:"enabled"`
+	// Mode is "block" (default) — a rule interruption returns BlockStatus — or
+	// "detect", which records and logs the event but lets the request proceed.
+	Mode string `toml:"mode"`
+	// BlockStatus is the HTTP status returned when a request is blocked in
+	// "block" mode. Zero applies 403. A rule may override it via its own status.
+	BlockStatus int `toml:"block_status"`
+	// DirectivesFiles lists SecLang rule files to load, in order, before the
+	// CRS (when crs_enabled) and InlineRules.
+	DirectivesFiles []string `toml:"directives_files"`
+	// InlineRules is a SecLang snippet appended last (after files and the CRS).
+	// It is handy for small allow-list or tuning rules without a separate file.
+	InlineRules string `toml:"inline_rules"`
+	// CRSEnabled loads the embedded OWASP Core Rule Set with zero external
+	// setup (the rules ship inside the binary in builds with the "waf" tag).
+	CRSEnabled bool `toml:"crs_enabled"`
+	// Paranoia sets the CRS blocking paranoia level (1–4) when CRSEnabled is
+	// set. Zero leaves the CRS default (1). Higher levels catch more attacks at
+	// the cost of more false positives.
+	Paranoia int `toml:"paranoia"`
+	// RequestBodyLimit caps how many request-body bytes are buffered for
+	// inspection. Zero applies a 128 KiB default.
+	RequestBodyLimit Size `toml:"request_body_limit"`
+	// ResponseBodyCheck enables inspection of response bodies (CRS phase 4).
+	// It buffers the response up to Coraza's response-body limit and so adds
+	// latency and memory; leave it off unless outbound rules are needed.
+	ResponseBodyCheck bool `toml:"response_body_check"`
 }
 
 // GlobalConfig holds process-wide settings.
@@ -226,6 +267,12 @@ type LocationConfig struct {
 	// HTTP Basic, JWT, forward-auth) as a modifier composed around the
 	// location's action. A nil pointer leaves the location unauthenticated.
 	Auth *AuthConfig `toml:"auth"`
+
+	// WAF, when set, overrides the global [waf] policy for this location: the
+	// pointer fully replaces the global policy (it is not merged). A nil pointer
+	// inherits the global [waf] policy. It is enforced only in builds with the
+	// "waf" tag.
+	WAF *WAFConfig `toml:"waf"`
 
 	// RequireClientCert rejects a request that arrives without a verified mTLS
 	// client certificate with 403, even when the server's tls.client_auth mode

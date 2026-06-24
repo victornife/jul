@@ -183,6 +183,7 @@ func (c *Config) applyDefaults() {
 	}
 
 	applyRateLimitDefaults(&c.RateLimit)
+	applyWAFDefaults(&c.WAF)
 
 	if c.Observability.Tracing.Enabled {
 		t := &c.Observability.Tracing
@@ -219,6 +220,7 @@ func (c *Config) applyDefaults() {
 		for j := range c.Servers[i].Locations {
 			applyRateLimitDefaults(c.Servers[i].Locations[j].RateLimit)
 			applyAuthDefaults(c.Servers[i].Locations[j].Auth)
+			applyWAFDefaults(c.Servers[i].Locations[j].WAF)
 		}
 	}
 
@@ -249,6 +251,24 @@ func applyRateLimitDefaults(rl *RateLimitConfig) {
 	}
 	if rl.Burst == 0 {
 		rl.Burst = rl.Rate
+	}
+}
+
+// applyWAFDefaults fills in defaults for a WAF policy: the enforcement mode, the
+// block status, and the request-body buffer limit. It is a no-op when nil or
+// disabled so a disabled block does not acquire surprising defaults.
+func applyWAFDefaults(w *WAFConfig) {
+	if w == nil || !w.Enabled {
+		return
+	}
+	if w.Mode == "" {
+		w.Mode = "block"
+	}
+	if w.BlockStatus == 0 {
+		w.BlockStatus = 403
+	}
+	if w.RequestBodyLimit == 0 {
+		w.RequestBodyLimit = Size(128 << 10) // 128 KiB
 	}
 }
 

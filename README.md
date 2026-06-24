@@ -52,6 +52,8 @@ interface — all in a single static, dependency-free binary.
 - [L4 stream proxy](#l4-stream-proxy)
 - [gRPC passthrough](#grpc-passthrough)
 - [Service discovery](#service-discovery)
+- [Web application firewall](#web-application-firewall)
+- [Secrets references](#secrets-references)
 - [Hot reload](#hot-reload)
 - [Admin interface & observability](#admin-interface--observability)
 - [Running real applications behind Jul.IA](#running-real-applications-behind-julia)
@@ -82,6 +84,8 @@ interface — all in a single static, dependency-free binary.
 | **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecar serving for static files |
 | **Rate limiting** | Token-bucket request limiting keyed by client IP, a request header, or a JWT claim, with burst, global or per-location policy, and `429` + `Retry-After`; plus a per-listener concurrent-connection cap |
 | **Access control** | Per-location CIDR allow/deny lists plus one credential method — HTTP Basic (bcrypt `htpasswd`), JWT bearer tokens validated against a JWKS endpoint (asymmetric algorithms only, `none` rejected), or forward-auth to an external service |
+| **WAF** | ModSecurity-compatible web application firewall ([Coraza](https://github.com/corazawaf/coraza)) with the **OWASP Core Rule Set embedded** in the binary (`[waf]`, global or per-location): `block`/`detect` modes, paranoia levels, your own SecLang files or inline rules, request/response body inspection, and a `jul_waf_events_total` metric — opt-in `waf` build tag ([docs/waf.md](docs/waf.md)) |
+| **Secrets references** | Keep credentials out of the config file: any string field accepts `${env:NAME}`, `${file:/path}`, or `${secret:/path}` references resolved at serve time, resolved values are **masked from logs**, and `jul lint` flags literal admin/Consul/Kubernetes tokens — core, no build tag ([docs/secrets.md](docs/secrets.md)) |
 | **TLS** | TLS 1.2/1.3 termination per server block, configurable minimum version, optional HTTP→HTTPS redirect |
 | **Automatic HTTPS** | ACME (Let's Encrypt) certificate issuance and auto-renewal via the HTTP-01 challenge, on-disk cache — opt-in `acme` build tag |
 | **HTTP/3** | HTTP/3 over QUIC on the same address (UDP), sharing the server's TLS certificates (static or ACME, including reloads), advertised to clients via an `Alt-Svc` header — opt-in `http3` build tag |
@@ -104,7 +108,9 @@ interface — all in a single static, dependency-free binary.
 > the `stream` tag; in a binary without that tag a populated `[[stream]]` table
 > is rejected at startup. The `[plugins]` table is active in binaries built with
 > the `wasmplugins` tag; in a binary without that tag a populated `[plugins]`
-> table is rejected at startup.
+> table is rejected at startup. The `[waf]` table (and per-location `waf`
+> override) is active in binaries built with the `waf` tag; in a binary without
+> that tag an enabled WAF config is rejected at startup.
 
 ---
 
@@ -1296,6 +1302,96 @@ guide — including the Consul and Kubernetes settings — is in
 
 ---
 
+## Web application firewall
+
+Jul.IA can run requests (and optionally responses) through a
+ModSecurity-compatible web application firewall built on
+[Coraza](https://github.com/corazawaf/coraza) (pure Go). The
+[OWASP Core Rule Set](https://coreruleset.org/) is **embedded in the binary**, so
+a SQLi/XSS/RCE ruleset is one flag away — nothing to download or mount. The WAF
+is opt-in behind the `waf` build tag:
+
+```bash
+go build -tags waf -o jul ./cmd/jul
+```
+
+A lean binary still parses `[waf]` but refuses to start when it is enabled, so a
+missing tag fails loudly instead of serving unprotected.
+
+Configure it globally under `[waf]`, or per location with
+`[servers.locations.waf]` (an override replaces the global policy for that
+location). The smallest useful config turns on the embedded CRS:
+
+```toml
+[waf]
+enabled = true
+crs_enabled = true        # embedded OWASP Core Rule Set
+mode = "block"            # block (default) | detect
+paranoia = 1              # CRS paranoia 1-4 (higher = stricter)
+```
+
+Key behaviours:
+
+- **Block or detect.** `mode = "block"` returns `block_status` (403 by default)
+  and stops the request; `mode = "detect"` records and logs matches but lets it
+  through — roll new rules out in detect mode, watch the metric, then switch to
+  block.
+- **Your rules too.** `directives_files` includes SecLang files and
+  `inline_rules` appends a snippet, with or without the CRS; they are applied
+  after the CRS so they can tune it, and the mode line is applied last so it
+  always wins.
+- **Body inspection.** Request bodies are buffered up to `request_body_limit`
+  (128 KiB default); set `response_body_check = true` to also inspect responses.
+- **Ordering.** The WAF runs after auth and rate limiting and before response
+  compression, so it sees the original bodies.
+
+Metric: `jul_waf_events_total{action,rule}` counts logged rule matches. A sample
+config is in [testdata/waf.toml](testdata/waf.toml) and the full guide
+(tuning, paranoia, custom rules) is in [docs/waf.md](docs/waf.md).
+
+---
+
+## Secrets references
+
+Sensitive values should not be literals in `jul.toml`. Any string field accepts a
+reference that is resolved at serve time (and on every reload):
+
+| Reference | Resolves to |
+| --------- | ----------- |
+| `${env:NAME}` | the environment variable `NAME` |
+| `${file:/path}` | the file's contents (one trailing newline trimmed) |
+| `${secret:/path}` | same as `${file:}` today; reserved for a future secret-manager backend |
+
+```toml
+[admin]
+enabled = true
+token = "${env:JUL_ADMIN_TOKEN}"
+
+[[upstreams]]
+name = "api"
+  [upstreams.discovery.consul]
+  address = "consul:8500"
+  service = "api"
+  token = "${file:/run/secrets/consul-token}"
+```
+
+Key behaviours:
+
+- **Resolved everywhere.** Every string field is walked recursively; a value may
+  mix literal text with references (`"Bearer ${env:API_TOKEN}"`).
+- **Masked in logs.** Resolved values are registered with the redactor and
+  replaced with `***` wherever they would appear in a log line.
+- **Fail loud.** A missing env var, an unreadable file, or an unknown scheme
+  (e.g. `${vault:…}`) fails startup/reload with a joined error listing every
+  problem — never a silent empty value.
+- **Off the surfaces.** Disk, admin API, and Console keep the unexpanded
+  references; the Console only *counts* them. `jul lint` flags literal
+  `admin.token` and Consul/Kubernetes tokens.
+
+This is core (no build tag). The full guide is in [docs/secrets.md](docs/secrets.md).
+
+---
+
 ## Hot reload
 
 Jul.IA reloads configuration **without dropping connections**. A reload can be
@@ -1550,6 +1646,7 @@ binary. Combine them as needed:
 | `http3` | HTTP/3 over QUIC listeners (`[servers.http3]`) |
 | `importer` | `jul import nginx` config migration tool |
 | `wasmplugins` | WebAssembly plugins (`[plugins]`) on the embedded wazero runtime |
+| `waf` | Web application firewall (`[waf]`) on the Coraza engine with the embedded OWASP CRS |
 | `stream` | L4 TCP/UDP stream proxy (`[[stream]]`) with SNI routing and PROXY protocol |
 | `consul` | Consul service discovery for upstreams (`[upstreams.discovery]` `type = "consul"`) |
 | `kubernetes` | Kubernetes EndpointSlice service discovery (`[upstreams.discovery]` `type = "kubernetes"`) |

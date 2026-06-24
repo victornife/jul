@@ -202,9 +202,10 @@ func TestTLSProjection(t *testing.T) {
 
 func TestSecurityProjection(t *testing.T) {
 	cfg := &config.Config{
+		WAF: config.WAFConfig{Enabled: true, Mode: "detect"},
 		Servers: []config.ServerConfig{{
 			Locations: []config.LocationConfig{
-				{Auth: &config.AuthConfig{}, RequireClientCert: true},
+				{Auth: &config.AuthConfig{}, RequireClientCert: true, Headers: map[string]string{"X-Token": "${env:JUL_X_TOKEN}"}},
 			},
 		}},
 	}
@@ -225,6 +226,12 @@ func TestSecurityProjection(t *testing.T) {
 	}
 	if out.RequireCertCount != 1 {
 		t.Errorf("require_cert_count = %d, want 1", out.RequireCertCount)
+	}
+	if !out.WAFEnabled || out.WAFMode != "detect" || out.WAFLocations != 1 {
+		t.Errorf("WAF projection = {enabled:%v mode:%q locations:%d}, want {true detect 1}", out.WAFEnabled, out.WAFMode, out.WAFLocations)
+	}
+	if out.SecretRefs != 1 {
+		t.Errorf("secret_refs = %d, want 1", out.SecretRefs)
 	}
 }
 

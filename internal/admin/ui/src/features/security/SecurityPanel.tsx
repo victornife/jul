@@ -64,6 +64,36 @@ export function SecurityPanel() {
             <span className="text-jul-muted text-xs">no locations</span>
           )}
         </Row>
+        <Row label="Web app firewall">
+          {data.waf_enabled ? (
+            <span className="flex items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  data.waf_mode === "detect"
+                    ? "bg-jul-warning/15 text-jul-warning"
+                    : "bg-jul-success/15 text-jul-success"
+                }`}
+              >
+                {data.waf_mode ?? "block"}
+              </span>
+              <span className="text-jul-muted text-xs">
+                {data.waf_locations} location{data.waf_locations > 1 ? "s" : ""}
+              </span>
+            </span>
+          ) : (
+            <OnOff on={false} />
+          )}
+        </Row>
+        <Row label="Secret references">
+          {data.secret_refs > 0 ? (
+            <span className="text-sm">
+              {data.secret_refs} reference{data.secret_refs > 1 ? "s" : ""}{" "}
+              <span className="text-jul-muted text-xs">(masked in logs)</span>
+            </span>
+          ) : (
+            <span className="text-jul-muted text-xs">none</span>
+          )}
+        </Row>
         <Row label="Body limit">
           {data.body_limit ? (
             <span className="font-mono text-sm">{data.body_limit}</span>

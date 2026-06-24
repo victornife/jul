@@ -174,7 +174,7 @@ func TestStatusAPI(t *testing.T) {
 			t.Errorf("capability %q = inactive, want active", name)
 		}
 	}
-	wantInactive := []string{"FastCGI / uWSGI", "gRPC passthrough", "L4 stream proxy", "WASM plugins"}
+	wantInactive := []string{"FastCGI / uWSGI", "gRPC passthrough", "L4 stream proxy", "WASM plugins", "Secret references", "Web application firewall (WAF)"}
 	for _, name := range wantInactive {
 		if active[name] {
 			t.Errorf("capability %q = active, want inactive", name)

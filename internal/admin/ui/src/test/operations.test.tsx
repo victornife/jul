@@ -149,7 +149,7 @@ describe("reportClientError", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/admin/client-errors");
     expect(init.method).toBe("POST");
-    expect(String(init.body)).toContain("boom");
+    expect(init.body as string).toContain("boom");
   });
 });
 

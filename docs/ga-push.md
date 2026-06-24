@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.8 · Updated 2026-06-22
+> Version 1.10 · Updated 2026-06-24
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -71,6 +71,8 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | HTTP/3 over QUIC (Y1-11) | Beta | ⑥ docs · ① QUIC/Alt-Svc matrix · ② bench · ③ bind-time/no-WS · ⑦ 0-RTT/amplification | M | ☐ |
 | OTel tracing + access-log sinks (Y1-10) | Beta | ⑥ docs · ① exporter/sink matrix · ② overhead bench · ⑦ PII note | M | ☐ |
 | Service discovery (Y2-05) | Beta | ① provider matrix · ③ keep-last-good limits · ⑦ K8s-token/SSRF (docs ✅) | M | ☐ |
+| WAF (Y2-06) | Beta | ① rule/CRS/mode matrix · ② request-overhead bench · ⑦ false-positive/bypass note (docs ✅) | M–L | ☐ |
+| Secrets references (SEC-1) | Beta | ① ref-source matrix · ② resolve-cost bench · ⑦ leak/precedence note (docs ✅) | S–M | ☐ |
 | Active health checks (Y1-05) | Beta | ⑥ docs · ① probe matrix · ③ limits | S–M | ☐ |
 | Console (Y1-07 · Y2-09) | **GA — soak pending** | none — [console.md](console.md) doc + endpoint/panel matrix + CSP-nonce/bearer security model landed; v1 retired by the embedded-SPA substrate cutover (Y2-09) | M | ✅ |
 
@@ -100,6 +102,7 @@ a soak failure is a release-blocking regression.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-24 | 1.10 | Added the two newly shipped **Beta** features to Wave 2: **Y2-06 WAF** (`waf`) and **SEC-1 secrets references** (core). Both ship with docs ([waf.md](waf.md), [secrets.md](secrets.md)) and a Console surface (⑥ + ⑨ met); their remaining GA gaps are the behaviour matrix (①), a benchmark (②), and a threat note (⑦). ⑧ is **n/a** for both (Coraza owns SecLang parsing; secret references reuse the config parser). | The waves, the bar, and the GA — soak-pending features; soak stays a post-GA gate (ADR 0005). | [waf.md](waf.md), [secrets.md](secrets.md), [status.md](status.md) |
 | 2026-06-23 | 1.9 | **Console (Y1-07 · Y2-09) → GA — soak pending.** The embedded-SPA substrate cutover (React/TS/Vite, Node-free build, ~250 KB gz budget) flips the v2 console to the default admin UI at `/`, retires the hand-written v1 (`console.html`) and its dev route, and closes the last two Console GA gaps — ① the endpoint/panel matrix and ⑦ the formalised CSP-nonce + constant-time bearer security model. Added Console to the soak-tracking table. | The waves, the bar, and the remaining ☐ features; soak stays a post-GA gate (ADR 0005); ⑧ stays **n/a** (the console adds no custom parser). | [console.md](console.md), [console-v2 spec](../specs/console-v2.md), [status.md](status.md) |
 | 2026-06-21 | 1.7 | **Cross-cutting: `SECURITY.md` umbrella threat model** (anchors criterion ⑦ fleet-wide). Added a top-level [SECURITY.md](../SECURITY.md): the edge trust model (config trusted, requests untrusted, no request-selected upstreams/JWKS), hardening defaults, a per-feature threat-note index (Core HTTP, auth, TLS/ACME, mTLS, gRPC transcoding/passthrough, console), the fuzzed-parser inventory, a cryptography summary, and a private vulnerability-reporting policy. **This completes all four cross-cutting tasks** — every GA criterion is now hosted/anchored fleet-wide. | Every feature's runtime behaviour and per-feature threat notes (the umbrella only indexes + links them); the waves and the bar. | [SECURITY.md](../SECURITY.md) |
 | 2026-06-21 | 1.6 | **Cross-cutting: fuzz corpus + CI fuzz job** (hosts criterion ⑧ fleet-wide). Added [scripts/fuzz.sh](../scripts/fuzz.sh) — it discovers every in-tree `Fuzz*` target (auth JWKS/token, router host/location, FastCGI script-name/socket-address, transcode path-template) and runs each for a short `-fuzztime` with the full opt-in tag set — and a `fuzz (smoke)` [CI job](../.github/workflows/ci.yml) that runs it on every push/PR, uploading any minimised crasher as a reproducible regression seed. Seed corpora stay in-code via `f.Add`. | Every feature's runtime behaviour, the waves, the bar, and the existing fuzz targets; only new CI tooling is added. | [scripts/fuzz.sh](../scripts/fuzz.sh), [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
