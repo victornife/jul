@@ -78,6 +78,32 @@ func run() int {
 		return 1
 	}
 	if checkOnly {
+		// Deep-check: expand secrets and dry-run build every runtime component
+		// that could fail later (WAF rule compilation, auth init, etc.).
+		wafExtra := func(c *config.Config) error {
+			if err := waf.Check(c); err != nil {
+				return err
+			}
+			if waf.Compiled {
+				for i := range c.Servers {
+					for j := range c.Servers[i].Locations {
+						loc := c.Servers[i].Locations[j]
+						wcfg, ok := effectiveWAF(c, loc)
+						if !ok {
+							continue
+						}
+						if _, err := waf.New(wcfg, waf.Options{}); err != nil {
+							return fmt.Errorf("waf: %w", err)
+						}
+					}
+				}
+			}
+			return nil
+		}
+		if err := config.PreflightClone(cfg, wafExtra); err != nil {
+			fmt.Fprintf(os.Stderr, "invalid configuration in %s:\n%v\n", src.Name(), err)
+			return 1
+		}
 		fmt.Printf("configuration %s is valid\n", src.Name())
 		return 0
 	}
@@ -646,11 +672,31 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		path := ts.Path
 		deps.ReadConfigRaw = func() ([]byte, error) { return os.ReadFile(path) }
 		deps.WriteConfigRaw = func(data []byte) error {
-			c, err := config.Parse(data)
+			cfg, err := config.Parse(data)
 			if err != nil {
 				return err
 			}
-			if err := config.Validate(c); err != nil {
+			wafExtra := func(c *config.Config) error {
+				if err := waf.Check(c); err != nil {
+					return err
+				}
+				if waf.Compiled {
+					for i := range c.Servers {
+						for j := range c.Servers[i].Locations {
+							loc := c.Servers[i].Locations[j]
+							wcfg, ok := effectiveWAF(c, loc)
+							if !ok {
+								continue
+							}
+							if _, err := waf.New(wcfg, waf.Options{}); err != nil {
+								return fmt.Errorf("waf: %w", err)
+							}
+						}
+					}
+				}
+				return nil
+			}
+			if err := config.PreflightClone(cfg, wafExtra); err != nil {
 				return err
 			}
 			if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -660,7 +706,27 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
-			if err := config.Validate(c); err != nil {
+			wafExtra := func(clone *config.Config) error {
+				if err := waf.Check(clone); err != nil {
+					return err
+				}
+				if waf.Compiled {
+					for i := range clone.Servers {
+						for j := range clone.Servers[i].Locations {
+							loc := clone.Servers[i].Locations[j]
+							wcfg, ok := effectiveWAF(clone, loc)
+							if !ok {
+								continue
+							}
+							if _, err := waf.New(wcfg, waf.Options{}); err != nil {
+								return fmt.Errorf("waf: %w", err)
+							}
+						}
+					}
+				}
+				return nil
+			}
+			if err := config.PreflightClone(c, wafExtra); err != nil {
 				return err
 			}
 			data, err := config.Marshal(c)

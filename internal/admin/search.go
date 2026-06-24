@@ -119,20 +119,36 @@ func searchRoutes(c *config.Config, q string) []SearchResult {
 				detail += " · " + hosts
 			}
 			if loc.Target != "" {
-				detail += " · " + loc.Target
+				detail += " · " + sanitizeTarget(loc.Target)
 			}
 			out = append(out, SearchResult{
 				Kind:     "route",
 				Title:    loc.Match + " (" + loc.Type + ")",
 				Detail:   detail,
 				Score:    score + 5, // routes rank slightly above apps on ties
-				Target:   loc.Target,
+				Target:   sanitizeTarget(loc.Target),
 				Upstream: loc.Upstream,
 				Badges:   badges,
 			})
 		}
 	}
 	return out
+}
+
+// sanitizeTarget removes userinfo (user:password@) from a URL before exposing
+// it in search results so credentials are not leaked through the console.
+func sanitizeTarget(s string) string {
+	if !strings.Contains(s, "://") {
+		return s
+	}
+	i := strings.Index(s, "://")
+	scheme := s[:i+3]
+	rest := s[i+3:]
+	at := strings.Index(rest, "@")
+	if at < 0 {
+		return s
+	}
+	return scheme + "***@" + rest[at+1:]
 }
 
 func searchApps(c *config.Config, q string) []SearchResult {

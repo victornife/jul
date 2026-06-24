@@ -195,3 +195,26 @@ func TestNewRejectsBadDirectives(t *testing.T) {
 		t.Error("expected an error compiling invalid SecLang directives")
 	}
 }
+
+func TestFirewallBlockStatusCustom(t *testing.T) {
+	// A deny rule without an explicit status: Coraza hardcodes 403, but the
+	// Firewall wrapper rewrites it to the configured block_status.
+	cfg := config.WAFConfig{
+		Enabled:     true,
+		Mode:        "block",
+		BlockStatus: 451,
+		InlineRules: `SecRule REQUEST_URI "@contains /forbidden" "id:100,phase:1,deny,log,msg:'blocked path'"`,
+	}
+	req := httptest.NewRequest(http.MethodGet, "/forbidden/page", nil)
+	rr, rec := buildAndServe(t, cfg, req)
+
+	if rr.Code != 451 {
+		t.Errorf("status = %d, want 451", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), "reached-action") {
+		t.Error("request reached the action but should have been blocked")
+	}
+	if rec.count() == 0 {
+		t.Error("expected at least one WAF event to be recorded")
+	}
+}

@@ -401,3 +401,38 @@ func defaultCompressionTypes() []string {
 		"image/svg+xml",
 	}
 }
+
+// Clone returns a deep copy of the configuration by round-tripping through
+// TOML. This is used by Preflight so secret expansion can operate on a
+// temporary copy without mutating the raw (on-disk / admin-facing) config.
+func (c *Config) Clone() (*Config, error) {
+	data, err := Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("clone config: %w", err)
+	}
+	return Parse(data)
+}
+
+// PreflightClone clones the config, expands secret references on the clone,
+// and runs structural validation so that checks which inspect files or URLs
+// (e.g. ca_file, jwks_url) work correctly when the value comes from a secret
+// reference. Optional extra validators (e.g. a dry-run WAF build) are run
+// against the expanded clone. The original config is never modified.
+func PreflightClone(c *Config, extra ...func(*Config) error) error {
+	clone, err := c.Clone()
+	if err != nil {
+		return err
+	}
+	if err := ExpandSecrets(clone); err != nil {
+		return err
+	}
+	if err := Validate(clone); err != nil {
+		return err
+	}
+	for _, fn := range extra {
+		if err := fn(clone); err != nil {
+			return err
+		}
+	}
+	return nil
+}

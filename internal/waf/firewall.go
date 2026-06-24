@@ -27,7 +27,8 @@ const Compiled = true
 
 // Firewall wraps a configured Coraza engine and exposes it as a middleware.
 type Firewall struct {
-	waf coraza.WAF
+	waf         coraza.WAF
+	blockStatus int
 }
 
 // New builds a Firewall from a WAF policy. It assembles the SecLang directive
@@ -58,15 +59,52 @@ func New(cfg config.WAFConfig, opts Options) (*Firewall, error) {
 	if err != nil {
 		return nil, fmt.Errorf("waf: compiling rules: %w", err)
 	}
-	return &Firewall{waf: w}, nil
+	bs := cfg.BlockStatus
+	if bs == 0 {
+		bs = 403
+	}
+	return &Firewall{waf: w, blockStatus: bs}, nil
 }
 
 // Middleware returns the per-location middleware that runs each request (and,
 // when response_body_check is set, each response) through the engine. A blocked
-// request is short-circuited by Coraza with the configured status.
+// request is short-circuited by Coraza with the block_status configured in the
+// policy (default 403). Because Coraza v3 hardcodes 403 when a rule does not
+// carry an explicit status action, we intercept the WriteHeader call to apply
+// the configured status.
 func (f *Firewall) Middleware() middleware.Middleware {
 	return func(next http.Handler) http.Handler {
-		return corazahttp.WrapHandler(f.waf, next)
+		h := corazahttp.WrapHandler(f.waf, next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			bw := &blockStatusWriter{ResponseWriter: w, status: f.blockStatus}
+			h.ServeHTTP(bw, r)
+		})
+	}
+}
+
+// blockStatusWriter intercepts a 403 status written by Coraza so that the
+// configured block_status is applied instead. It passes through everything else
+// unchanged.
+type blockStatusWriter struct {
+	http.ResponseWriter
+	status  int
+	written bool
+}
+
+func (w *blockStatusWriter) WriteHeader(code int) {
+	if w.written {
+		return
+	}
+	w.written = true
+	if code == http.StatusForbidden {
+		code = w.status
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *blockStatusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
 }
 

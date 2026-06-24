@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/waf"
 )
 
 // UpstreamStatus is the console view of one upstream pool. The composition root
@@ -378,7 +379,7 @@ type wizardInput struct {
 	Backends    []string `json:"backends"`     // backend host:port list (app mode)
 	Preset      string   `json:"preset"`       // framework preset (app mode)
 	RoutePath   string   `json:"route_path"`   // path prefix to mount the app on (app mode)
-	HealthCheck bool     `json:"health_check"` // enable active health checks (app mode)
+	HealthCheck *bool    `json:"health_check"` // enable active health checks (app mode); nil = use preset default
 	HealthPath  string   `json:"health_path"`  // health-check path (app mode)
 	Strategy    string   `json:"strategy"`     // load-balancing strategy (app mode)
 }
@@ -505,9 +506,12 @@ func wizardAppConfig(in wizardInput) (*config.Config, string) {
 		Servers:  backends,
 	}
 
-	// Health checks: enable when the operator asked for it or the preset
-	// defaults to it and a path is resolvable.
-	wantHC := in.HealthCheck || preset.HealthCheck
+	// Health checks: use the operator's explicit choice when supplied;
+	// otherwise fall back to the preset default. A path is still required.
+	wantHC := preset.HealthCheck
+	if in.HealthCheck != nil {
+		wantHC = *in.HealthCheck
+	}
 	hcPath := strings.TrimSpace(in.HealthPath)
 	if hcPath == "" {
 		hcPath = preset.HealthPath
@@ -529,13 +533,15 @@ func wizardAppConfig(in wizardInput) (*config.Config, string) {
 		Match:     config.MatchConfig{Type: "prefix", Path: routePath},
 		ProxyPass: "http://" + name,
 	}
-	if strings.EqualFold(strings.TrimSpace(in.Preset), "grpc") {
+	isGRPC := strings.EqualFold(strings.TrimSpace(in.Preset), "grpc")
+	if isGRPC {
 		loc.GRPC = true
 	}
 
 	cfg := &config.Config{
 		Servers: []config.ServerConfig{{
 			Listen:    listen,
+			H2C:       isGRPC,
 			Locations: []config.LocationConfig{loc},
 		}},
 		Upstreams: []config.UpstreamConfig{up},
@@ -797,7 +803,39 @@ func validateRaw(body []byte) error {
 	if err != nil {
 		return err
 	}
-	return config.Validate(cfg)
+	// Preflight: expand secrets on a clone so structural checks (file paths,
+	// URLs) work against resolved values. In lean builds without the "waf" tag
+	// waf.New returns a clear error, so we only try it when the WAF is enabled
+	// and the binary supports it.
+	wafExtra := func(c *config.Config) error {
+		if !waf.Compiled {
+			return waf.Check(c)
+		}
+		for i := range c.Servers {
+			for j := range c.Servers[i].Locations {
+				loc := c.Servers[i].Locations[j]
+				wcfg, ok := effectiveWAF(c, loc)
+				if !ok {
+					continue
+				}
+				if _, err := waf.New(wcfg, waf.Options{}); err != nil {
+					return fmt.Errorf("waf: %w", err)
+				}
+			}
+		}
+		return nil
+	}
+	return config.PreflightClone(cfg, wafExtra)
+}
+
+// effectiveWAF resolves the WAF policy for a location: the location override
+// when present, otherwise the global policy. The bool reports whether an
+// enabled policy applies.
+func effectiveWAF(c *config.Config, loc config.LocationConfig) (config.WAFConfig, bool) {
+	if loc.WAF != nil {
+		return *loc.WAF, loc.WAF.Enabled
+	}
+	return c.WAF, c.WAF.Enabled
 }
 
 // handleConfigDiff accepts a candidate config and returns a structured diff

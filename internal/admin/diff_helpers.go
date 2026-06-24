@@ -175,6 +175,63 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, d *Conf
 		d.warn("Changing the target of route %s on %s redirects matching traffic to a different backend or destination.", key, server)
 	}
 
+	// WAF toggle per location
+	bWAF := b.WAF != nil && b.WAF.Enabled
+	aWAF := a.WAF != nil && a.WAF.Enabled
+	if bWAF != aWAF {
+		action := "Enable"
+		if !aWAF {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "waf", Name: name, Detail: fmt.Sprintf("%s WAF on route %s", action, key)}, "route "+name+" waf")
+		if action == "Enable" {
+			d.warn("Enabling WAF on route %s on %s may reject legitimate requests while rules are tuned.", key, server)
+		} else {
+			d.warn("Disabling WAF on route %s on %s removes rule inspection for that route.", key, server)
+		}
+	} else if aWAF && bWAF {
+		// Both enabled — diff key fields
+		bw, aw := *b.WAF, *a.WAF
+		if bw.Mode != aw.Mode {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: bw.Mode, After: aw.Mode, Detail: "Change WAF mode on route " + key}, "route "+name+" waf mode")
+			if bw.Mode == "block" && aw.Mode == "detect" {
+				d.warn("Switching WAF to detect mode on route %s on %s stops blocking threats.", key, server)
+			}
+		}
+		if bw.BlockStatus != aw.BlockStatus {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bw.BlockStatus), After: fmt.Sprintf("%d", aw.BlockStatus), Detail: "Change WAF block status on route " + key}, "route "+name+" waf block_status")
+		}
+		if bw.Paranoia != aw.Paranoia {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bw.Paranoia), After: fmt.Sprintf("%d", aw.Paranoia), Detail: "Change WAF paranoia level on route " + key}, "route "+name+" waf paranoia")
+			if aw.Paranoia < bw.Paranoia {
+				d.warn("Lowering WAF paranoia on route %s on %s reduces rule coverage.", key, server)
+			}
+		}
+		if bw.CRSEnabled != aw.CRSEnabled {
+			action := "Enable"
+			if !aw.CRSEnabled {
+				action = "Disable"
+			}
+			d.mod(DiffEntry{Kind: "waf", Name: name, Detail: fmt.Sprintf("%s CRS on route %s", action, key)}, "route "+name+" waf crs")
+			if !aw.CRSEnabled {
+				d.warn("Disabling CRS on route %s on %s removes the core rule set.", key, server)
+			}
+		}
+		if bw.RequestBodyLimit != aw.RequestBodyLimit {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: sizeStr(bw.RequestBodyLimit), After: sizeStr(aw.RequestBodyLimit), Detail: "Change WAF request body limit on route " + key}, "route "+name+" waf body_limit")
+			if aw.RequestBodyLimit.Bytes() == 0 && bw.RequestBodyLimit.Bytes() != 0 {
+				d.warn("Removing the WAF request body limit on route %s on %s allows arbitrarily large uploads to be inspected.", key, server)
+			}
+		}
+		bf, af := strings.Join(bw.DirectivesFiles, ","), strings.Join(aw.DirectivesFiles, ",")
+		if bf != af {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: orNone(bf), After: orNone(af), Detail: "Change WAF directive files on route " + key}, "route "+name+" waf directives_files")
+		}
+		if strings.TrimSpace(bw.InlineRules) != strings.TrimSpace(aw.InlineRules) {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Detail: "Change WAF inline rules on route " + key}, "route "+name+" waf inline_rules")
+		}
+	}
+
 	// Auth toggle.
 	if (b.Auth != nil) != (a.Auth != nil) {
 		action := "Enable"
@@ -431,5 +488,63 @@ func diffGlobalRateLimit(before, after *config.Config, d *ConfigDiff) {
 	}
 	if b.MaxConns != a.MaxConns {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: "global", Before: fmt.Sprintf("%d", b.MaxConns), After: fmt.Sprintf("%d", a.MaxConns), Detail: "Change max concurrent connections"}, "rate limit max conns")
+	}
+}
+
+// diffGlobalWAF compares the global [waf] block.
+func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
+	b, a := before.WAF, after.WAF
+	if b.Enabled != a.Enabled {
+		action := "Enable"
+		if !a.Enabled {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: action + " global WAF"}, "waf global")
+		if !a.Enabled {
+			d.warn("Disabling the global WAF removes rule inspection from routes that do not have a per-location override.")
+		}
+		return
+	}
+	if !a.Enabled {
+		return
+	}
+	if b.Mode != a.Mode {
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: b.Mode, After: a.Mode, Detail: "Change global WAF mode"}, "waf global mode")
+		if b.Mode == "block" && a.Mode == "detect" {
+			d.warn("Switching global WAF to detect mode stops blocking threats.")
+		}
+	}
+	if b.BlockStatus != a.BlockStatus {
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: fmt.Sprintf("%d", b.BlockStatus), After: fmt.Sprintf("%d", a.BlockStatus), Detail: "Change global WAF block status"}, "waf global block_status")
+	}
+	if b.Paranoia != a.Paranoia {
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: fmt.Sprintf("%d", b.Paranoia), After: fmt.Sprintf("%d", a.Paranoia), Detail: "Change global WAF paranoia level"}, "waf global paranoia")
+		if a.Paranoia < b.Paranoia {
+			d.warn("Lowering global WAF paranoia reduces rule coverage.")
+		}
+	}
+	if b.CRSEnabled != a.CRSEnabled {
+		action := "Enable"
+		if !a.CRSEnabled {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: action + " global CRS"}, "waf global crs")
+		if !a.CRSEnabled {
+			d.warn("Disabling the global CRS removes the core rule set.")
+		}
+	}
+	if b.RequestBodyLimit != a.RequestBodyLimit {
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: sizeStr(b.RequestBodyLimit), After: sizeStr(a.RequestBodyLimit), Detail: "Change global WAF request body limit on global"}, "waf global body_limit")
+		if a.RequestBodyLimit.Bytes() == 0 && b.RequestBodyLimit.Bytes() != 0 {
+			d.warn("Removing the global WAF request body limit allows arbitrarily large uploads to be inspected.")
+		}
+	}
+}
+
+func diffSecretRefs(before, after *config.Config, d *ConfigDiff) {
+	bN := config.CountSecretRefs(before)
+	aN := config.CountSecretRefs(after)
+	if bN != aN {
+		d.mod(DiffEntry{Kind: "secrets", Name: "global", Before: fmt.Sprintf("%d", bN), After: fmt.Sprintf("%d", aN), Detail: "Change secret reference count"}, "secret refs")
 	}
 }

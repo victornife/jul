@@ -867,6 +867,11 @@ func validateProxyPass(pass, where string, upstreamNames map[string]int) []error
 	if !strings.Contains(u.Host, ":") && upstreamNames[u.Host] == 0 && !strings.Contains(u.Host, ".") {
 		return []error{fmt.Errorf("%s: proxy_pass references unknown upstream %q", where, u.Host)}
 	}
+	// Reject embedded credentials so secrets are not stored in the config file
+	// and do not leak through search projections.
+	if u.User != nil {
+		return []error{fmt.Errorf("%s: proxy_pass must not contain credentials (use headers or TLS for authentication)", where)}
+	}
 	return nil
 }
 
