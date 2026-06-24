@@ -11,6 +11,15 @@ log_level = "debug"
 log_format = "text"
 shutdown_timeout = "10s"
 
+# === WASM Plugins (requires -tags wasmplugins) ============================
+[plugins.header-injector]
+path = "testdata/plugins/header-inject.wasm"
+type = "middleware"
+
+[plugins.request-blocker]
+path = "testdata/plugins/request-block.wasm"
+type = "handler"
+
 # === HTTP/3 + TLS + h2c + gRPC + auth + rate-limit server ==================
 [[servers]]
 listen = "127.0.0.1:8443"
@@ -45,24 +54,89 @@ h2c = true
   match = { type = "exact", path = "/healthz" }
   return = 200
 
-  # gRPC passthrough (native HTTP/2 end-to-end)
+  # gRPC passthrough
   [[servers.locations]]
   match = { type = "prefix", path = "/grpc/" }
   proxy_pass = "http://grpc-backend"
   grpc = true
 
-  # Static fallback
+  # gRPC transcoding (REST -> gRPC)
+  [[servers.locations]]
+  match = { type = "prefix", path = "/v1/" }
+    [servers.locations.grpc_transcode]
+    target = "grpc-backend"
+    descriptor_set = "testdata/grpc/api.pb"
+    tls = false
+    preserve_proto_field_names = false
+    streaming = false
+
   [[servers.locations]]
   match = { type = "prefix", path = "/" }
   root = "testdata/www"
   index = ["index.html"]
   try_files = ["$uri", "$uri/", "/index.html"]
 
-# === Plain HTTP server (proxy + basic auth + compression) ================
+# === mTLS server ===========================================================
+[[servers]]
+listen = "127.0.0.1:8444"
+server_names = ["mtls.localhost"]
+
+  [servers.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+  min_version = "1.2"
+
+    [servers.tls.client_auth]
+    mode = "request"
+    ca_file = "testdata/tls/clients-ca.pem"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://backend"
+  require_client_cert = true
+
+    [servers.locations.headers]
+    X-Client-Verify = "$ssl_client_verify"
+    X-Client-CN = "$ssl_client_cn"
+
+# === ACME staging server ===================================================
+[[servers]]
+listen = "127.0.0.1:8445"
+server_names = ["localhost"]
+
+  [servers.tls.acme]
+  enabled = true
+  email = "ops@example.com"
+  ca = "letsencrypt-staging"
+  challenge = "http-01"
+  cache_dir = "./jul-data/certs"
+  ocsp_stapling = true
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  return = 200
+
+# === Plain HTTP companion for ACME ========================================
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+redirect_https = 308
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200
+
+# === Plain HTTP server =====================================================
 [[servers]]
 listen = "127.0.0.1:8088"
 server_names = ["web.localhost"]
 client_max_body_size = "8m"
+plugins = ["header-injector"]
 
   [[servers.locations]]
   match = { type = "prefix", path = "/api/" }
@@ -79,7 +153,18 @@ client_max_body_size = "8m"
   proxy_pass = "http://backend"
 
     [servers.locations.auth]
-    # basic = { file = "testdata/auth/htpasswd", realm = "Admin" }
+    basic = { file = "testdata/auth/htpasswd", realm = "Admin" }
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/forward-auth/" }
+  proxy_pass = "http://backend"
+
+    [servers.locations.auth]
+    forward_auth = { url = "http://127.0.0.1:4181/auth", auth_response_headers = ["X-Auth-User", "X-Auth-Groups"] }
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/plugin/" }
+  plugin = "request-blocker"
 
   [[servers.locations]]
   match = { type = "prefix", path = "/static/" }
@@ -120,7 +205,7 @@ name = "grpc-backend"
 strategy = "round_robin"
 servers = ["127.0.0.1:50051", "127.0.0.1:50052"]
 
-# DNS discovery example (resolves localhost → 127.0.0.1 happily)
+# DNS discovery example
 [[upstreams]]
 name = "dns-discovered"
 strategy = "round_robin"
@@ -152,23 +237,35 @@ key = "ip"
 rate = 1000
 burst = 2000
 
-# === L4 Stream Proxy (TCP + SNI + UDP) ====================================
-# Requires -tags stream.
-
+# === L4 Stream Proxy ======================================================
 [[stream]]
-listen = "127.0.0.1:15432"      # Postgres-style TCP proxy
+listen = "127.0.0.1:15432"
 proxy_pass = "backend"
 connect_timeout = "5s"
 idle_timeout = "1h"
 
 [[stream]]
-listen = "127.0.0.1:16379"      # Redis-style with PROXY protocol
+listen = "127.0.0.1:16379"
 proxy_pass = "127.0.0.1:6380"
 proxy_protocol = "out"
 
+[[stream]]
+listen = "127.0.0.1:15353"
+protocol = "udp"
+proxy_pass = "127.0.0.1:15354"
+idle_timeout = "30s"
+
+[[stream]]
+listen = "127.0.0.1:18443"
+  [stream.sni_routes]
+  "api.localhost" = "backend"
+  "*"               = "user-service"
+
 # === Observability ========================================================
 [observability.tracing]
-enabled = false
+enabled = true
+endpoint = "http://127.0.0.1:4317"
+service_name = "jul-test"
 
 [observability.access_log]
 sinks = ["stdout"]
