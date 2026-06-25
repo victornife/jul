@@ -38,6 +38,21 @@ type patchRequest struct {
 	Enabled *bool  `json:"enabled,omitempty"` // route_toggle_cache / route_toggle_rate_limit
 	Address string `json:"address,omitempty"` // upstream_add_backend / upstream_remove_backend
 	Weight  int    `json:"weight,omitempty"`  // upstream_add_backend (defaults to 1)
+
+	// server_set_limits payload. Each field is an optional string-typed size or
+	// duration (e.g. "10m", "30s"); only non-empty fields are applied, so the
+	// edit is sparse. An empty string leaves the existing value untouched.
+	Limits *serverLimits `json:"limits,omitempty"`
+}
+
+// serverLimits carries the per-server limit/timeout fields the editor can set.
+type serverLimits struct {
+	ClientMaxBodySize string `json:"client_max_body_size,omitempty"`
+	ReadHeaderTimeout string `json:"read_header_timeout,omitempty"`
+	ReadTimeout       string `json:"read_timeout,omitempty"`
+	WriteTimeout      string `json:"write_timeout,omitempty"`
+	IdleTimeout       string `json:"idle_timeout,omitempty"`
+	MaxHeaderBytes    string `json:"max_header_bytes,omitempty"`
 }
 
 // applyPatch mutates c in place according to req, returning a human-readable
@@ -128,9 +143,86 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		up.Servers = append(up.Servers[:idx], up.Servers[idx+1:]...)
 		return fmt.Sprintf("upstream %s removed backend %s", req.Upstream, addr), nil
 
+	case "server_set_limits":
+		return applyServerLimits(c, req)
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}
+}
+
+// applyServerLimits sets the per-server limit/timeout fields on the server block
+// addressed by Listen. Only non-empty fields in req.Limits are applied, so the
+// edit is sparse; each value is parsed through its config type so a malformed
+// size/duration is rejected (without mutating) rather than silently dropped.
+func applyServerLimits(c *config.Config, req patchRequest) (string, error) {
+	if req.Limits == nil {
+		return "", fmt.Errorf("server_set_limits: limits payload is required")
+	}
+	srv, err := findServer(c, req.Listen)
+	if err != nil {
+		return "", err
+	}
+	applied := make([]string, 0, 6)
+	setSize := func(name, val string, dst *config.Size) error {
+		if strings.TrimSpace(val) == "" {
+			return nil
+		}
+		var s config.Size
+		if err := s.UnmarshalText([]byte(val)); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		*dst = s
+		applied = append(applied, fmt.Sprintf("%s=%s", name, val))
+		return nil
+	}
+	setDur := func(name, val string, dst *config.Duration) error {
+		if strings.TrimSpace(val) == "" {
+			return nil
+		}
+		var d config.Duration
+		if err := d.UnmarshalText([]byte(val)); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		*dst = d
+		applied = append(applied, fmt.Sprintf("%s=%s", name, val))
+		return nil
+	}
+	if err := setSize("client_max_body_size", req.Limits.ClientMaxBodySize, &srv.ClientMaxBodySize); err != nil {
+		return "", err
+	}
+	if err := setDur("read_header_timeout", req.Limits.ReadHeaderTimeout, &srv.ReadHeaderTimeout); err != nil {
+		return "", err
+	}
+	if err := setDur("read_timeout", req.Limits.ReadTimeout, &srv.ReadTimeout); err != nil {
+		return "", err
+	}
+	if err := setDur("write_timeout", req.Limits.WriteTimeout, &srv.WriteTimeout); err != nil {
+		return "", err
+	}
+	if err := setDur("idle_timeout", req.Limits.IdleTimeout, &srv.IdleTimeout); err != nil {
+		return "", err
+	}
+	if err := setSize("max_header_bytes", req.Limits.MaxHeaderBytes, &srv.MaxHeaderBytes); err != nil {
+		return "", err
+	}
+	if len(applied) == 0 {
+		return "", fmt.Errorf("server_set_limits: no limit fields provided")
+	}
+	return fmt.Sprintf("server %s limits updated (%s)", req.Listen, strings.Join(applied, ", ")), nil
+}
+
+// findServer returns a pointer to the first server block bound to listen.
+func findServer(c *config.Config, listen string) (*config.ServerConfig, error) {
+	if strings.TrimSpace(listen) == "" {
+		return nil, fmt.Errorf("server target requires a listen address")
+	}
+	for i := range c.Servers {
+		if c.Servers[i].Listen == listen {
+			return &c.Servers[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no server found for listen %q", listen)
 }
 
 func onOff(b bool) string {

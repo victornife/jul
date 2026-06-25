@@ -10,6 +10,7 @@ import {
   type TrafficControls,
 } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import { patchConfig, ConfigRejectedError } from "@/api/client.ts";
 import {
   upsertTopLevelTable,
   generateCompressionToml,
@@ -226,11 +227,20 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
     enabled: kind === "cache" || kind === "rate_limit",
     refetchInterval: 5_000,
   });
+  // Every editor kind needs the route list now: compression/cache/rate-limit to
+  // show affected routes, and limits to pick the target [[servers]] block — so
+  // the query is always enabled.
   const routes = useQuery({
     queryKey: ["routes"],
     queryFn: fetchRoutes,
-    enabled: kind === "compression" || kind === "cache" || kind === "rate_limit",
   });
+
+  // The limits editor targets a concrete [[servers]] block (P3-15): the operator
+  // picks a listener and the server-level fields are applied in place via the
+  // structured patch API, instead of emitting a commented snippet to hand-place.
+  const listenAddrs = Array.from(new Set((routes.data ?? []).map((r) => r.listen)));
+  const [targetListen, setTargetListen] = useState("");
+  const effectiveListen = targetListen || listenAddrs[0] || "";
 
   async function onPurge(): Promise<void> {
     setPurgeMsg(null);
@@ -316,15 +326,38 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
 
   async function openInEditor(): Promise<void> {
     setError(null);
+    // The limits editor applies the server-level fields in place to the chosen
+    // [[servers]] block via the structured patch API, so there is no snippet to
+    // hand-place. The patched candidate is handed to the Config editor for the
+    // usual diff review + apply.
+    if (kind === "limits") {
+      if (effectiveListen === "") {
+        setError("No server block is available to apply limits to.");
+        return;
+      }
+      try {
+        const res = await patchConfig({
+          op: "server_set_limits",
+          listen: effectiveListen,
+          limits: {
+            client_max_body_size: limits.bodyLimit,
+            read_timeout: limits.readTimeout,
+            write_timeout: limits.writeTimeout,
+            idle_timeout: limits.idleTimeout,
+          },
+        });
+        setPendingDraft(res.candidate);
+        void navigate("/config");
+      } catch (err) {
+        setError(
+          err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.",
+        );
+      }
+      return;
+    }
     try {
       const raw = await fetchRawConfig();
-      // The global tables are upserted automatically. Per-server limits are
-      // appended as a commented snippet for the operator to place under the
-      // server block they intend, since there can be many [[servers]] blocks.
-      const next =
-        table === ""
-          ? `${(raw.raw ?? "").trimEnd()}\n\n# Limits & timeouts — move these keys under the [[servers]] block they apply to:\n${fragment}\n`
-          : upsertTopLevelTable(raw.raw ?? "", table, fragment);
+      const next = upsertTopLevelTable(raw.raw ?? "", table, fragment);
       setPendingDraft(next);
       void navigate("/config");
     } catch {
@@ -593,6 +626,31 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
 
         {kind === "limits" && (
           <>
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-jul-text">Apply to server</span>
+              <select
+                value={effectiveListen}
+                onChange={(e) => {
+                  setTargetListen(e.target.value);
+                }}
+                className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+              >
+                {listenAddrs.length === 0 ? (
+                  <option value="">(no server blocks found)</option>
+                ) : (
+                  listenAddrs.map((addr) => (
+                    <option key={addr} value={addr}>
+                      {addr}
+                    </option>
+                  ))
+                )}
+              </select>
+              <span className="text-xs text-jul-muted">
+                The body-size and server timeouts below are applied in place to this [[servers]]
+                block via a structured edit — you review the diff before it is saved.
+              </span>
+            </label>
+
             <TextField
               label="Max request body size"
               hint="Rejects bodies larger than this (e.g. 10m)."
@@ -637,8 +695,9 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 Upstream timeouts
               </span>
               <p className="text-xs text-jul-muted">
-                Timeouts stop Jul from waiting forever for a slow backend. They apply to a proxied
-                location, so place them under the [[servers.locations]] block that proxies.
+                Timeouts stop Jul from waiting forever for a slow backend. These apply per proxied
+                location and are <strong>not</strong> part of the in-place server edit above; copy
+                them from the generated TOML below into the relevant [[servers.locations]] block.
               </p>
             </div>
             <div className="grid grid-cols-3 gap-3">
@@ -678,7 +737,8 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
               <p className="text-xs text-jul-muted">
                 Retries can help with temporary backend failures, but too many retries can make
                 incidents worse. Jul retires a backend after max_fails failures and brings it back
-                after fail_timeout. These apply per upstream pool.
+                after fail_timeout. These apply per upstream pool and are <strong>not</strong> part
+                of the in-place server edit above; copy them from the generated TOML below.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -719,7 +779,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
 
         <div className="space-y-1">
           <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-            Generated TOML
+            {kind === "limits" ? "Reference TOML (upstream/retry keys)" : "Generated TOML"}
           </span>
           <pre className="overflow-auto rounded-md border border-jul-border bg-jul-surface p-3 font-mono text-xs leading-relaxed text-jul-text">
             {fragment}

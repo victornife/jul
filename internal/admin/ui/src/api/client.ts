@@ -369,12 +369,22 @@ export async function diffConfig(candidate: string): Promise<ConfigDiff> {
  * and full diff for review — it does not persist. The caller then applies the
  * candidate through the existing applyConfig path.
  */
+export interface ServerLimitsPatch {
+  client_max_body_size?: string;
+  read_header_timeout?: string;
+  read_timeout?: string;
+  write_timeout?: string;
+  idle_timeout?: string;
+  max_header_bytes?: string;
+}
+
 export type ConfigPatch =
   | { op: "route_set_target"; listen: string; path: string; target: string }
   | { op: "route_toggle_cache"; listen: string; path: string; enabled: boolean }
   | { op: "route_toggle_rate_limit"; listen: string; path: string; enabled: boolean }
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
-  | { op: "upstream_remove_backend"; upstream: string; address: string };
+  | { op: "upstream_remove_backend"; upstream: string; address: string }
+  | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch };
 
 export const PatchResultSchema = z.object({
   ok: z.literal(true),
