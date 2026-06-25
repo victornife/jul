@@ -167,6 +167,13 @@ write directly, so an invalid draft never replaces the running config.
 > the structured diff already make append-then-prune a safe, auditable workflow.
 > Automatic in-place replace/rename is tracked as a follow-up.
 
+The Apps "New app" editor can optionally **mount the app on a route** in the
+same step (default on for a new app): alongside the `[[upstreams]]` pool it
+generates a reverse-proxy `[[servers]]` block whose location proxies a chosen
+path to the pool, so a newly created app actually serves traffic instead of
+existing only as a backend. Both blocks go through the same Validate → Diff →
+Apply pipeline.
+
 The TLS, Security (auth/mTLS), and ACME panels are **read-only inventories** in
 v2; guided enablement/editing for TLS, ACME, mutual-TLS, and auth rules is a
 pending P1 item. Until then, change those settings through the validated raw

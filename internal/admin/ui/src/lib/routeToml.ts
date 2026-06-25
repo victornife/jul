@@ -227,6 +227,39 @@ export function generateAppToml(d: AppDraft): string {
   return lines.join("\n");
 }
 
+/**
+ * Options for mounting a newly created app on a route (P2-13). When provided,
+ * generateAppWithRouteToml appends a reverse-proxy [[servers]] block whose
+ * location targets the app pool, so a new app can actually serve traffic
+ * instead of only existing as a backend pool.
+ */
+export interface MountRouteOptions {
+  listen: string;
+  path: string;
+}
+
+/**
+ * Generates the [[upstreams]] block for an app and, when mount is given, a
+ * matching reverse-proxy [[servers]] block that proxies the chosen path to the
+ * app pool (proxy_pass = "http://<name>"). This unifies "create an app" with
+ * "serve it" — the gap that previously left a new app unreachable.
+ */
+export function generateAppWithRouteToml(d: AppDraft, mount?: MountRouteOptions): string {
+  const upstream = generateAppToml(d);
+  if (!mount) return upstream;
+  const name = d.name.trim();
+  const listen = mount.listen.trim() || ":8080";
+  const path = mount.path.trim() || "/";
+  const lines: string[] = [];
+  lines.push("[[servers]]");
+  lines.push(`listen = ${tomlString(listen)}`);
+  lines.push("");
+  lines.push("  [[servers.locations]]");
+  lines.push(`  match = { type = "prefix", path = ${tomlString(path)} }`);
+  lines.push(`  proxy_pass = ${tomlString(`http://${name}`)}`);
+  return `${upstream}\n\n${lines.join("\n")}`;
+}
+
 /** Appends a generated TOML fragment to the running raw config. */
 export function appendFragment(raw: string, fragment: string): string {
   const base = raw.trimEnd();

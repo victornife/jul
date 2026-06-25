@@ -5,7 +5,7 @@ import { fetchRawConfig } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import {
   appendFragment,
-  generateAppToml,
+  generateAppWithRouteToml,
   type AppDraft,
   type BackendDraft,
 } from "@/lib/routeToml.ts";
@@ -20,13 +20,48 @@ interface Preset {
 }
 
 const PRESETS: Preset[] = [
-  { id: "node", label: "Express / Node.js", placeholder: "127.0.0.1:3000", hint: "Typical Node.js apps listen on :3000." },
-  { id: "apollo", label: "Apollo GraphQL", placeholder: "127.0.0.1:4000", hint: "Apollo Server defaults to :4000." },
-  { id: "fastapi", label: "FastAPI", placeholder: "127.0.0.1:8000", hint: "Uvicorn/FastAPI defaults to :8000." },
-  { id: "django", label: "Django / Flask", placeholder: "127.0.0.1:8000", hint: "Django/Flask dev servers use :8000/:5000." },
-  { id: "go", label: "Go HTTP app", placeholder: "127.0.0.1:8080", hint: "Go services commonly listen on :8080." },
-  { id: "generic", label: "Generic HTTP app", placeholder: "127.0.0.1:8080", hint: "Any HTTP backend." },
-  { id: "grpc", label: "gRPC backend", placeholder: "127.0.0.1:50051", hint: "gRPC services commonly listen on :50051." },
+  {
+    id: "node",
+    label: "Express / Node.js",
+    placeholder: "127.0.0.1:3000",
+    hint: "Typical Node.js apps listen on :3000.",
+  },
+  {
+    id: "apollo",
+    label: "Apollo GraphQL",
+    placeholder: "127.0.0.1:4000",
+    hint: "Apollo Server defaults to :4000.",
+  },
+  {
+    id: "fastapi",
+    label: "FastAPI",
+    placeholder: "127.0.0.1:8000",
+    hint: "Uvicorn/FastAPI defaults to :8000.",
+  },
+  {
+    id: "django",
+    label: "Django / Flask",
+    placeholder: "127.0.0.1:8000",
+    hint: "Django/Flask dev servers use :8000/:5000.",
+  },
+  {
+    id: "go",
+    label: "Go HTTP app",
+    placeholder: "127.0.0.1:8080",
+    hint: "Go services commonly listen on :8080.",
+  },
+  {
+    id: "generic",
+    label: "Generic HTTP app",
+    placeholder: "127.0.0.1:8080",
+    hint: "Any HTTP backend.",
+  },
+  {
+    id: "grpc",
+    label: "gRPC backend",
+    placeholder: "127.0.0.1:50051",
+    hint: "gRPC services commonly listen on :50051.",
+  },
 ];
 
 function TextField({
@@ -87,9 +122,18 @@ export function AppEditor({ initial, onClose }: AppEditorProps) {
     healthCheckPath: initial?.healthCheckPath ?? "/healthz",
     healthCheckInterval: initial?.healthCheckInterval ?? "5s",
   });
+  // Mount-on-route (P2-13): default ON for a new app so it can actually serve
+  // traffic, not just exist as a backend pool. Editing an existing app starts
+  // OFF — the pool already exists and likely already has routes.
+  const [mountRoute, setMountRoute] = useState(!initial?.name);
+  const [routeListen, setRouteListen] = useState(":8080");
+  const [routePath, setRoutePath] = useState("/");
   const [error, setError] = useState<string | null>(null);
 
-  const fragment = generateAppToml(draft);
+  const fragment = generateAppWithRouteToml(
+    draft,
+    mountRoute ? { listen: routeListen, path: routePath } : undefined,
+  );
 
   function set<K extends keyof AppDraft>(key: K, value: AppDraft[K]): void {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -262,6 +306,42 @@ export function AppEditor({ initial, onClose }: AppEditorProps) {
                 onChange={(v) => {
                   set("healthCheckInterval", v);
                 }}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
+          <label className="flex items-center gap-2 text-sm text-jul-text">
+            <input
+              type="checkbox"
+              checked={mountRoute}
+              onChange={(e) => {
+                setMountRoute(e.target.checked);
+              }}
+              className="h-4 w-4 rounded border-jul-border bg-jul-surface accent-jul-accent"
+            />
+            Mount this app on a route
+          </label>
+          <span className="block text-xs text-jul-muted">
+            Adds a reverse-proxy server block so requests reach this app. Without it the app is only
+            a backend pool and serves no traffic until a route targets it.
+          </span>
+          {mountRoute && (
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <TextField
+                label="Listen"
+                value={routeListen}
+                placeholder=":8080"
+                hint="Address the route binds to."
+                onChange={setRouteListen}
+              />
+              <TextField
+                label="Path prefix"
+                value={routePath}
+                placeholder="/"
+                hint="Requests under this prefix proxy to the app."
+                onChange={setRoutePath}
               />
             </div>
           )}
