@@ -3,7 +3,10 @@ package admin
 import (
 	"encoding/csv"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,13 +33,19 @@ type AuditEvent struct {
 	SourceIP  string    `json:"source_ip,omitempty"`
 }
 
-// auditLog is a fixed-size ring buffer of audit events with a monotonic id.
+// auditLog is a fixed-size ring buffer of audit events with a monotonic id and
+// an optional durable JSONL sink. The ring buffer keeps recent events cheap to
+// query for the console; the sink (when configured) appends every event to a
+// file so the trail survives restarts and ring overwrite (P2-12).
 type auditLog struct {
 	mu     sync.Mutex
 	buf    []AuditEvent
 	next   int
 	full   bool
 	nextID int64
+
+	sink *os.File     // nil when no durable sink is configured
+	log  *slog.Logger // for sink write errors; nil-safe via helper
 }
 
 func newAuditLog(capacity int) *auditLog {
@@ -44,6 +53,49 @@ func newAuditLog(capacity int) *auditLog {
 		capacity = auditCap
 	}
 	return &auditLog{buf: make([]AuditEvent, capacity)}
+}
+
+// newAuditLogWithSink builds an audit log that also appends every event as JSONL
+// to path. The directory is created if missing. A failure to open the sink is
+// logged and degrades to the in-memory-only ring buffer rather than failing
+// startup, so a misconfigured durable path never takes the admin API down.
+func newAuditLogWithSink(capacity int, path string, log *slog.Logger) *auditLog {
+	a := newAuditLog(capacity)
+	a.log = log
+	if strings.TrimSpace(path) == "" {
+		return a
+	}
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			auditLogWarn(log, "audit sink directory could not be created", path, err)
+			return a
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	if err != nil {
+		auditLogWarn(log, "audit sink file could not be opened", path, err)
+		return a
+	}
+	a.sink = f
+	return a
+}
+
+// Close releases the durable sink, if any. It is safe to call on a nil sink.
+func (a *auditLog) Close() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sink != nil {
+		err := a.sink.Close()
+		a.sink = nil
+		return err
+	}
+	return nil
+}
+
+func auditLogWarn(log *slog.Logger, msg, path string, err error) {
+	if log != nil {
+		log.Warn(msg, "path", path, "err", err)
+	}
 }
 
 func (a *auditLog) record(ev AuditEvent) {
@@ -59,6 +111,17 @@ func (a *auditLog) record(ev AuditEvent) {
 	a.next = (a.next + 1) % len(a.buf)
 	if a.next == 0 {
 		a.full = true
+	}
+	// Append to the durable sink while holding the lock so concurrent records
+	// produce well-formed, non-interleaved JSONL lines. The redacted event is
+	// what is persisted, so the file carries no secrets.
+	if a.sink != nil {
+		if line, err := json.Marshal(ev); err == nil {
+			line = append(line, '\n')
+			if _, werr := a.sink.Write(line); werr != nil {
+				auditLogWarn(a.log, "audit sink write failed", a.sink.Name(), werr)
+			}
+		}
 	}
 	a.mu.Unlock()
 }

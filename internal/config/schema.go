@@ -735,6 +735,14 @@ type AdminConfig struct {
 	// prevent resource exhaustion. It defaults to 4 when admin is enabled; a
 	// non-positive value disables the connection cap.
 	MaxEventConns int `toml:"max_event_conns"`
+
+	// AuditLogFile, when set, enables a durable append-only audit sink: every
+	// audit event is also written as one JSON object per line (JSONL) to this
+	// file, in addition to the bounded in-memory ring buffer. This makes the
+	// audit trail survive restarts and ring-buffer overwrite, for compliance and
+	// incident review (P2-12). Empty disables the durable sink. The directory is
+	// created if missing; failures are logged and never block request handling.
+	AuditLogFile string `toml:"audit_log_file"`
 }
 
 // ConsoleEnabled reports whether the web console should be served: it defaults

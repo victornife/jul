@@ -123,7 +123,7 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		hub:      newHub(),
 		limiter:  newAdminLimiter(log, cfg.RateLimitReadPerMin, cfg.RateLimitWritePerMin, cfg.RateLimitApplyPerMin, cfg.MaxEventConns),
 		timeline: newEventHistory(timelineCap),
-		audit:    newAuditLog(auditCap),
+		audit:    newAuditLogWithSink(auditCap, cfg.AuditLogFile, log),
 		health:   newConsoleHealth(),
 		quit:     make(chan struct{}),
 	}
@@ -239,12 +239,18 @@ func (s *Server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		close(s.quit)
 		s.hub.Close()
+		if s.audit != nil {
+			_ = s.audit.Close()
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return s.httpd.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		close(s.quit)
 		s.hub.Close()
+		if s.audit != nil {
+			_ = s.audit.Close()
+		}
 		return err
 	}
 }

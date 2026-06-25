@@ -173,6 +173,27 @@ pending P1 item. Until then, change those settings through the validated raw
 TOML editor, which the structured diff annotates with the consequences listed
 above.
 
+### Audit log
+
+Security- and config-relevant actions (apply, rollback, reload, auth failures)
+are recorded as attributable, metadata-only events — never tokens, credentials,
+or bodies. By default they live in a bounded in-memory ring buffer (10,000
+events) queryable at `GET /api/audit` and exportable as JSON/CSV.
+
+For compliance or incident review, set a durable sink so the trail survives
+restarts and ring-buffer overwrite:
+
+```toml
+[admin]
+audit_log_file = "./jul-data/audit.jsonl"   # append-only JSONL; one event per line
+```
+
+Each event is appended as one JSON object per line, after the same redaction
+applied to the in-memory copy. The parent directory is created if missing; if
+the sink cannot be opened the server logs a warning and continues with the
+in-memory buffer rather than failing startup. Actor identity is currently the
+shared-token `"operator"`; per-user attribution arrives with RBAC/SSO.
+
 ## Security model
 
 - **Authentication:** all data and mutating APIs require the bearer token when
