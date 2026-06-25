@@ -1,5 +1,14 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import type { LocationProjection, RouteProjection } from "@/api/client.ts";
+import {
+  patchConfig,
+  ConfigRejectedError,
+  type ConfigPatch,
+  type LocationProjection,
+  type RouteProjection,
+} from "@/api/client.ts";
+import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
 function Row({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
   return (
@@ -79,6 +88,118 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
   return lines.join("\n");
 }
 
+// QuickEdits performs true in-place edits via the structured patch API (Wave B):
+// the server applies the change to the parsed config and returns the candidate
+// TOML, which we hand to the Config editor for diff review + apply. Unlike
+// "Edit as new route" (which appends a draft block), these modify the existing
+// route, so there are no duplicate blocks to prune.
+function QuickEdits({
+  route,
+  loc,
+}: {
+  readonly route: RouteProjection;
+  readonly loc: LocationProjection;
+}) {
+  const navigate = useNavigate();
+  const [target, setTarget] = useState(loc.target ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function runPatch(patch: ConfigPatch): Promise<void> {
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await patchConfig(patch);
+      setPendingDraft(res.candidate);
+      void navigate("/config");
+    } catch (err) {
+      setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canSetTarget = loc.action === "proxy";
+
+  return (
+    <div className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+          Quick edits (in place)
+        </span>
+        <span className="text-xs text-jul-muted">opens a diff to review &amp; apply</span>
+      </div>
+
+      {canSetTarget && (
+        <div className="space-y-1">
+          <span className="text-sm font-medium text-jul-text">Proxy target</span>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={target}
+              placeholder="http://app"
+              onChange={(e) => {
+                setTarget(e.target.value);
+              }}
+              className="flex-1 rounded-md border border-jul-border bg-jul-bg px-3 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
+            />
+            <button
+              type="button"
+              disabled={busy || target.trim() === "" || target === loc.target}
+              onClick={() => {
+                void runPatch({
+                  op: "route_set_target",
+                  listen: route.listen,
+                  path: loc.match,
+                  target: target.trim(),
+                });
+              }}
+              className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              Set target →
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            void runPatch({
+              op: "route_toggle_cache",
+              listen: route.listen,
+              path: loc.match,
+              enabled: !loc.cache,
+            });
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.cache ? "Disable cache" : "Enable cache"} →
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            void runPatch({
+              op: "route_toggle_rate_limit",
+              listen: route.listen,
+              path: loc.match,
+              enabled: !loc.rate_limit,
+            });
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.rate_limit ? "Disable rate limit" : "Enable rate limit"} →
+        </button>
+      </div>
+
+      {error && <p className="text-xs text-jul-danger">{error}</p>}
+    </div>
+  );
+}
+
 export interface RouteDetailProps {
   readonly route: RouteProjection;
   readonly loc: LocationProjection;
@@ -154,6 +275,8 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           <Flag on={loc.rate_limit} label="rate limit" />
           <Flag on={loc.secure} label="TLS" />
         </div>
+
+        <QuickEdits route={route} loc={loc} />
 
         <div className="space-y-1">
           <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">

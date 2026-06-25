@@ -360,6 +360,65 @@ export async function diffConfig(candidate: string): Promise<ConfigDiff> {
   return ConfigDiffSchema.parse(data);
 }
 
+// ── Structured config patch (Wave B) ─────────────────────────────────────────
+
+/**
+ * A single structured edit to the running configuration. Each op targets an
+ * existing object (a route by listen+path, or an upstream by name) and the
+ * server applies it to the PARSED config model, returning the candidate TOML
+ * and full diff for review — it does not persist. The caller then applies the
+ * candidate through the existing applyConfig path.
+ */
+export type ConfigPatch =
+  | { op: "route_set_target"; listen: string; path: string; target: string }
+  | { op: "route_toggle_cache"; listen: string; path: string; enabled: boolean }
+  | { op: "route_toggle_rate_limit"; listen: string; path: string; enabled: boolean }
+  | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
+  | { op: "upstream_remove_backend"; upstream: string; address: string };
+
+export const PatchResultSchema = z.object({
+  ok: z.literal(true),
+  summary: z.string(),
+  candidate: z.string(),
+  diff: ConfigDiffSchema,
+});
+export type PatchResult = z.infer<typeof PatchResultSchema>;
+
+/**
+ * Applies a structured edit server-side and resolves with the candidate TOML +
+ * diff for review. Rejects with ConfigRejectedError when the edit cannot be
+ * applied (target not found, invalid op, last backend, …).
+ */
+export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
+  const headers = new Headers();
+  headers.set("Accept", "application/json");
+  headers.set("Content-Type", "application/json");
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/config/patch", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(patch),
+  });
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    const rejected = ValidationResultSchema.safeParse(data);
+    if (rejected.success) {
+      throw new ConfigRejectedError(
+        rejected.data.message ?? "The edit was rejected.",
+        rejected.data.errors ?? [],
+      );
+    }
+    throw new ApiError("/config/patch", resp.status, `${String(resp.status)} ${resp.statusText}`);
+  }
+  return PatchResultSchema.parse(data);
+}
+
 // ── Validate / Apply / Wizard (write flows) ──────────────────────────────────
 
 export const ValidationIssueSchema = z.object({
