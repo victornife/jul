@@ -204,6 +204,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/config/validate", s.auth(http.HandlerFunc(s.handleConfigValidate)))
 	mux.Handle("/api/config/diff", s.auth(http.HandlerFunc(s.handleConfigDiff)))
 	mux.Handle("/api/config/apply", s.auth(http.HandlerFunc(s.handleConfigApply)))
+	mux.Handle("/api/config/patch", s.auth(http.HandlerFunc(s.handleConfigPatch)))
 	mux.Handle("/api/config/history", s.auth(http.HandlerFunc(s.handleConfigHistoryList)))
 	mux.Handle("/api/config/history/{id}", s.auth(http.HandlerFunc(s.handleConfigHistoryGet)))
 	mux.Handle("/api/config/rollback", s.auth(http.HandlerFunc(s.handleConfigRollback)))
