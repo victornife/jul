@@ -4,22 +4,57 @@ import { useTheme, type ThemePreference } from "@/lib/theme.ts";
 import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.ts";
 import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
 
-const NAV = [
-  { to: "/", label: "Overview", glyph: "▣", exact: true },
-  { to: "/routes", label: "Routes", glyph: "⇄" },
-  { to: "/apps", label: "Apps", glyph: "▦" },
-  { to: "/tls", label: "TLS", glyph: "🔒" },
-  { to: "/security", label: "Security", glyph: "🛡" },
-  { to: "/traffic", label: "Traffic", glyph: "📈" },
-  { to: "/search", label: "Search", glyph: "🔍" },
-  { to: "/observability", label: "Events", glyph: "⚡" },
-  { to: "/operations", label: "Operations", glyph: "🛠" },
-  { to: "/timeline", label: "Timeline", glyph: "🕒" },
-  { to: "/audit", label: "Audit", glyph: "📋" },
-  { to: "/config", label: "Config", glyph: "⚙" },
-  { to: "/history", label: "History", glyph: "↩" },
-  { to: "/wizard", label: "Wizard", glyph: "✨" },
+interface NavItem {
+  readonly to: string;
+  readonly label: string;
+  readonly glyph: string;
+  readonly exact?: boolean;
+}
+
+// Information architecture is task-driven, not feature-list driven (P1-7): the
+// primary destinations are grouped into the three things an operator actually
+// does — watch the system, change its configuration, and do so safely. Search
+// is deliberately not in a group; it is a global action in the header/sidebar
+// controls so it stays reachable from anywhere without competing with the
+// task groups.
+interface NavGroup {
+  readonly label: string;
+  readonly items: readonly NavItem[];
+}
+
+const NAV_GROUPS: readonly NavGroup[] = [
+  {
+    label: "Operate",
+    items: [
+      { to: "/", label: "Overview", glyph: "▣", exact: true },
+      { to: "/operations", label: "Operations", glyph: "🛠" },
+      { to: "/timeline", label: "Timeline", glyph: "🕒" },
+      { to: "/observability", label: "Events", glyph: "⚡" },
+    ],
+  },
+  {
+    label: "Configure",
+    items: [
+      { to: "/routes", label: "Routes", glyph: "⇄" },
+      { to: "/apps", label: "Apps", glyph: "▦" },
+      { to: "/traffic", label: "Traffic", glyph: "📈" },
+      { to: "/security", label: "Security", glyph: "🛡" },
+      { to: "/tls", label: "TLS", glyph: "🔒" },
+    ],
+  },
+  {
+    label: "Change safely",
+    items: [
+      { to: "/wizard", label: "Wizard", glyph: "✨" },
+      { to: "/config", label: "Config", glyph: "⚙" },
+      { to: "/history", label: "History", glyph: "↩" },
+      { to: "/audit", label: "Audit", glyph: "📋" },
+    ],
+  },
 ];
+
+// SEARCH_ITEM is the global discovery action, kept out of the task groups.
+const SEARCH_ITEM: NavItem = { to: "/search", label: "Search", glyph: "🔍" };
 
 function isActive(navTo: string, pathname: string, exact = false): boolean {
   return exact ? pathname === navTo : pathname.startsWith(navTo);
@@ -177,6 +212,36 @@ function PreferenceMenu({
   );
 }
 
+function NavItemLink({
+  n,
+  pathname,
+  collapsed,
+}: {
+  readonly n: NavItem;
+  readonly pathname: string;
+  readonly collapsed: boolean;
+}) {
+  return (
+    <Link
+      to={n.to}
+      aria-current={isActive(n.to, pathname, n.exact) ? "page" : undefined}
+      title={collapsed ? n.label : undefined}
+      className={`flex items-center gap-2 rounded-md py-1 text-sm transition-colors ${
+        collapsed ? "justify-center px-2" : "px-3"
+      } ${
+        isActive(n.to, pathname, n.exact)
+          ? "bg-jul-accent text-jul-bg font-medium"
+          : "text-jul-muted hover:text-jul-text"
+      }`}
+    >
+      <span aria-hidden className={collapsed ? "text-base" : "text-sm"}>
+        {n.glyph}
+      </span>
+      {!collapsed && <span>{n.label}</span>}
+    </Link>
+  );
+}
+
 function NavLinks({
   pathname,
   orientation,
@@ -186,32 +251,34 @@ function NavLinks({
   readonly orientation: "row" | "col";
   readonly collapsed?: boolean;
 }) {
+  // The sidebar shows the task groups with headers; the top bar keeps a single
+  // flat row (group order preserved) so the header stays compact. Search leads
+  // both layouts as the global discovery action.
+  if (orientation === "col") {
+    return (
+      <nav className="flex flex-col gap-4" aria-label="Primary">
+        <NavItemLink n={SEARCH_ITEM} pathname={pathname} collapsed={collapsed} />
+        {NAV_GROUPS.map((g) => (
+          <div key={g.label} className="flex flex-col gap-1">
+            {!collapsed && (
+              <span className="px-3 pt-1 text-[10px] font-semibold uppercase tracking-wider text-jul-muted">
+                {g.label}
+              </span>
+            )}
+            {collapsed && <span className="mx-auto h-px w-6 bg-jul-border" aria-hidden />}
+            {g.items.map((n) => (
+              <NavItemLink key={n.to} n={n} pathname={pathname} collapsed={collapsed} />
+            ))}
+          </div>
+        ))}
+      </nav>
+    );
+  }
   return (
-    <nav
-      className={
-        orientation === "row" ? "flex flex-wrap gap-1" : "flex flex-col gap-1"
-      }
-      aria-label="Primary"
-    >
-      {NAV.map((n) => (
-        <Link
-          key={n.to}
-          to={n.to}
-          aria-current={isActive(n.to, pathname, n.exact) ? "page" : undefined}
-          title={collapsed ? n.label : undefined}
-          className={`flex items-center gap-2 rounded-md py-1 text-sm transition-colors ${
-            collapsed ? "justify-center px-2" : "px-3"
-          } ${
-            isActive(n.to, pathname, n.exact)
-              ? "bg-jul-accent text-jul-bg font-medium"
-              : "text-jul-muted hover:text-jul-text"
-          }`}
-        >
-          <span aria-hidden className={collapsed ? "text-base" : "text-sm"}>
-            {n.glyph}
-          </span>
-          {!collapsed && <span>{n.label}</span>}
-        </Link>
+    <nav className="flex flex-wrap gap-1" aria-label="Primary">
+      <NavItemLink n={SEARCH_ITEM} pathname={pathname} collapsed={false} />
+      {NAV_GROUPS.flatMap((g) => g.items).map((n) => (
+        <NavItemLink key={n.to} n={n} pathname={pathname} collapsed={false} />
       ))}
     </nav>
   );
