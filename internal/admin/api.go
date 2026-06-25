@@ -139,6 +139,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		authLocs        int
 		requireCertLocs int
 		wafLocs         int
+		wafBlockLocs    int
+		wafDetectLocs   int
+		wafCRSLocs      int
 		cacheLocs       int
 		pluginLocs      int
 		totalLocs       int
@@ -183,13 +186,25 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 			}
 			// A location is WAF-protected when it has its own enabled [waf]
 			// override, or it inherits an enabled global [waf] (and does not
-			// override it with a disabled block).
-			if loc.WAF != nil {
-				if loc.WAF.Enabled {
-					wafLocs++
-				}
-			} else if c.WAF.Enabled {
+			// override it with a disabled block). Track the effective
+			// enforcement mode and CRS state per location so the status detail
+			// reports the real distribution rather than just the global mode:
+			// a location override may run in a different mode than [waf], and a
+			// global-disabled config can still protect locations that opt in.
+			if wcfg, ok := effectiveWAF(c, *loc); ok {
 				wafLocs++
+				mode := wcfg.Mode
+				if mode == "" {
+					mode = "block"
+				}
+				if mode == "detect" {
+					wafDetectLocs++
+				} else {
+					wafBlockLocs++
+				}
+				if wcfg.CRSEnabled {
+					wafCRSLocs++
+				}
 			}
 			if loc.Cache {
 				cacheLocs++
@@ -289,16 +304,34 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	// the unresolved config so the panel shows usage without exposing values.
 	secretRefs := config.CountSecretRefs(c)
 
-	// WAF detail names the enforcement mode of the effective policy alongside
-	// the protected-location count, so the panel distinguishes blocking from
-	// detection-only at a glance.
+	// WAF detail reports the real distribution of effective enforcement modes
+	// across protected locations, so the panel never claims a single global
+	// mode that some locations do not actually run in. A mixed deployment shows
+	// "3 locations: 2 block, 1 detect"; a uniform one collapses to a single
+	// mode. CRS coverage is appended when any protected location enables it.
 	wafDetail := ""
 	if wafLocs > 0 {
-		mode := c.WAF.Mode
-		if mode == "" {
-			mode = "block"
+		modes := make([]string, 0, 2)
+		if wafBlockLocs > 0 {
+			modes = append(modes, fmt.Sprintf("%d block", wafBlockLocs))
 		}
-		wafDetail = countUnit(wafLocs, "location") + " (" + mode + ")"
+		if wafDetectLocs > 0 {
+			modes = append(modes, fmt.Sprintf("%d detect", wafDetectLocs))
+		}
+		wafDetail = countUnit(wafLocs, "location")
+		switch {
+		case wafBlockLocs > 0 && wafDetectLocs > 0:
+			// Mixed modes: spell out the split so an operator is not misled
+			// into thinking every route blocks (or every route only detects).
+			wafDetail += ": " + strings.Join(modes, ", ")
+		case wafDetectLocs > 0:
+			wafDetail += " (detect)"
+		default:
+			wafDetail += " (block)"
+		}
+		if wafCRSLocs > 0 {
+			wafDetail += "; CRS on " + countUnit(wafCRSLocs, "location")
+		}
 	}
 
 	return []FeatureStatus{

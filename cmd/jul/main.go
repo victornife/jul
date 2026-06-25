@@ -902,7 +902,25 @@ func validateRuntimeConfig(c *config.Config) error {
 			}
 			return nil
 		}
-		return authExtra(clone)
+		if err := authExtra(clone); err != nil {
+			return err
+		}
+		// Dry-run the compression middleware so a configured encoder that is not
+		// compiled into this build (br/zstd behind their tags) fails the
+		// preflight here, before the config file is written, instead of only at
+		// the asynchronous reload — keeping admin "apply" truthful: a rejected
+		// build never reports success. Mirrors the WAF/auth dry-runs above.
+		if clone.Compression.Enabled {
+			if _, err := middleware.NewCompression(middleware.CompressionOptions{
+				Encoders: clone.Compression.Encoders,
+				Level:    clone.Compression.Level,
+				MinSize:  clone.Compression.MinSize.Bytes(),
+				Types:    clone.Compression.Types,
+			}); err != nil {
+				return fmt.Errorf("compression: %w", err)
+			}
+		}
+		return nil
 	}
 	return config.PreflightClone(c, wafExtra)
 }

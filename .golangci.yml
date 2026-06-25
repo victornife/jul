@@ -17,6 +17,7 @@ run:
     - stream
     - consul
     - kubernetes
+    - waf
 
 linters:
   # "standard" = errcheck, govet, ineffassign, staticcheck, unused.

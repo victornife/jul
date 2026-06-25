@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.2 · Updated 2026-06-24
+> Version 1.3 · Updated 2026-06-25
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -93,7 +93,9 @@ release-blocking regression. Mirrors the
 
 ## Not yet shipped
 
-Committed remaining (Year 2): **Y2-09** Console v2 (continuous panels).
+Committed remaining (Year 2): **none** — Y2-09 Console v2 (continuous panels)
+has shipped and is tracked above as part of the **Console (operations cockpit)**
+row (Y1-07 · Y2-09), now *GA — soak pending*.
 Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 **AI-MVP** AI Gateway. Years 3–5 are the demand-gated vision horizon. See the
 [roadmap](roadmap/README.md) for the full plan.
@@ -102,5 +104,6 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-06-25 | 1.3 | Reconciled the **Console** entry: Y2-09 Console v2 (continuous panels) is part of the shipped, *GA — soak pending* Console (operations cockpit) row, so it is removed from *Not yet shipped* (committed remaining is now none). | [console.md](console.md) |
 | 2026-06-24 | 1.2 | Added **Y2-06 WAF** (`waf`) and **SEC-1 secrets references** (core) to the **Beta** table with their remaining GA gaps, and removed them from *Not yet shipped* (committed remaining is now just Y2-09 Console v2). | [waf.md](waf.md), [secrets.md](secrets.md), [year-2.md](specs/year-2.md) |
 | 2026-06-22 | 1.0 | Created the canonical feature-status + GA-criteria matrix, consolidating the per-feature *GA status* tables, the [GA push](ga-push.md) waves, and the [roadmap](roadmap/README.md) maturity column into one source of truth. | per-feature docs, [ga-push.md](ga-push.md), [roadmap](roadmap/README.md) |

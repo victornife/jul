@@ -451,6 +451,13 @@ func validateAuth(a *AuthConfig, where string) []error {
 	if methods > 1 {
 		errs = append(errs, fmt.Errorf("%s: at most one of basic, jwt, forward_auth may be set", where))
 	}
+	// Reject an auth block that enforces nothing: with no CIDR allow/deny gate
+	// and no credential method, the authenticator falls through and permits
+	// every request, so an enabled-looking "auth = {}" would silently allow
+	// traffic while the Console reports the location as protected.
+	if methods == 0 && len(a.Allow) == 0 && len(a.Deny) == 0 {
+		errs = append(errs, fmt.Errorf("%s: auth is configured but enforces nothing; set a CIDR allow/deny list or one of basic, jwt, forward_auth", where))
+	}
 	if a.Basic != nil && strings.TrimSpace(a.Basic.File) == "" {
 		errs = append(errs, fmt.Errorf("%s.basic: 'file' is required", where))
 	}

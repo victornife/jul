@@ -670,6 +670,19 @@ func TestValidateAuth(t *testing.T) {
 			t.Errorf("valid CIDR auth rejected: %v", err)
 		}
 	})
+	t.Run("empty auth block enforces nothing", func(t *testing.T) {
+		// An auth block with no CIDR gate and no credential method builds an
+		// authenticator that falls through and permits every request, while the
+		// Console reports the location as protected. Validation must reject it
+		// so a guided "Require auth" toggle cannot emit silently-inert "auth = {}".
+		err := Validate(withAuth(AuthConfig{}))
+		if err == nil {
+			t.Fatal("expected error for an auth block that enforces nothing")
+		}
+		if !strings.Contains(err.Error(), "enforces nothing") {
+			t.Errorf("error = %q, want it to mention 'enforces nothing'", err.Error())
+		}
+	})
 	t.Run("invalid allow cidr", func(t *testing.T) {
 		if err := Validate(withAuth(AuthConfig{Allow: []string{"not-a-cidr"}})); err == nil {
 			t.Error("expected error for invalid allow CIDR")
