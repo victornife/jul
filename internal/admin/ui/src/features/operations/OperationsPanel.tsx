@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchRequestSamples,
@@ -12,6 +13,8 @@ import {
   type CertRenewalHistory,
   type ConsoleHealth,
 } from "@/api/client.ts";
+import { TimelinePanel } from "@/features/observability/TimelinePanel.tsx";
+import { ObservabilityPanel } from "@/features/observability/ObservabilityPanel.tsx";
 
 // ── small presentational helpers ─────────────────────────────────────────────
 
@@ -34,9 +37,7 @@ function Section({
   return (
     <section className="space-y-3" aria-label={title}>
       <div className="flex items-baseline gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-jul-muted">
-          {title}
-        </h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-jul-muted">{title}</h2>
         {hint !== undefined && <span className="text-xs text-jul-muted">{hint}</span>}
       </div>
       <div className="rounded-lg border border-jul-border bg-jul-surface">{children}</div>
@@ -89,19 +90,38 @@ function RequestSamplesTable({ samples }: { readonly samples: RequestSample[] })
       <table className="w-full text-left text-xs">
         <thead className="sticky top-0 bg-jul-surface text-jul-muted">
           <tr className="border-b border-jul-border">
-            <th scope="col" className="px-3 py-2 font-medium">Time</th>
-            <th scope="col" className="px-3 py-2 font-medium">Method</th>
-            <th scope="col" className="px-3 py-2 font-medium">Path</th>
-            <th scope="col" className="px-3 py-2 font-medium">Status</th>
-            <th scope="col" className="px-3 py-2 font-medium">Duration</th>
-            <th scope="col" className="px-3 py-2 font-medium">Flags</th>
-            <th scope="col" className="px-3 py-2 font-medium">Origin / UA</th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Time
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Method
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Path
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Status
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Duration
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Flags
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Origin / UA
+            </th>
           </tr>
         </thead>
         <tbody className="font-mono">
           {samples.map((s, i) => (
-            <tr key={`${s.time}-${String(i)}`} className="border-b border-jul-border last:border-b-0">
-              <td className="px-3 py-1.5 text-jul-muted">{new Date(s.time).toLocaleTimeString()}</td>
+            <tr
+              key={`${s.time}-${String(i)}`}
+              className="border-b border-jul-border last:border-b-0"
+            >
+              <td className="px-3 py-1.5 text-jul-muted">
+                {new Date(s.time).toLocaleTimeString()}
+              </td>
               <td className="px-3 py-1.5 text-jul-text">{s.method}</td>
               <td className="max-w-xs truncate px-3 py-1.5 text-jul-text">{s.path}</td>
               <td className={`px-3 py-1.5 font-semibold ${statusColor(s.status)}`}>{s.status}</td>
@@ -139,12 +159,24 @@ function FailingRoutesTable({ routes }: { readonly routes: RouteFailure[] }) {
       <table className="w-full text-left text-xs">
         <thead className="sticky top-0 bg-jul-surface text-jul-muted">
           <tr className="border-b border-jul-border">
-            <th scope="col" className="px-3 py-2 font-medium">Route</th>
-            <th scope="col" className="px-3 py-2 font-medium">4xx</th>
-            <th scope="col" className="px-3 py-2 font-medium">5xx</th>
-            <th scope="col" className="px-3 py-2 font-medium">Error rate</th>
-            <th scope="col" className="px-3 py-2 font-medium">p95</th>
-            <th scope="col" className="px-3 py-2 font-medium">Last error</th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Route
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              4xx
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              5xx
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Error rate
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              p95
+            </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Last error
+            </th>
           </tr>
         </thead>
         <tbody className="font-mono">
@@ -173,7 +205,10 @@ function UpstreamHistoryList({ backends }: { readonly backends: BackendHealthHis
   return (
     <ul className="divide-y divide-jul-border">
       {backends.map((b) => (
-        <li key={`${b.pool}|${b.backend}`} className="flex flex-wrap items-center gap-3 px-4 py-3 text-xs">
+        <li
+          key={`${b.pool}|${b.backend}`}
+          className="flex flex-wrap items-center gap-3 px-4 py-3 text-xs"
+        >
           <span
             className={`h-2.5 w-2.5 shrink-0 rounded-full ${b.healthy ? "bg-jul-success" : "bg-jul-danger"}`}
             aria-hidden="true"
@@ -261,8 +296,8 @@ function OriginsCors() {
         <div className="flex items-center justify-between text-xs text-jul-muted">
           <span className="font-medium">Top origins</span>
           <span>
-            preflight {String(ts?.preflight_count ?? 0)} · same {String(ts?.same_origin ?? 0)} · cross{" "}
-            {String(ts?.cross_origin ?? 0)}
+            preflight {String(ts?.preflight_count ?? 0)} · same {String(ts?.same_origin ?? 0)} ·
+            cross {String(ts?.cross_origin ?? 0)}
           </span>
         </div>
         {origins.length === 0 ? (
@@ -297,9 +332,9 @@ function OriginsCors() {
   );
 }
 
-// ── Operations panel ─────────────────────────────────────────────────────────
+// ── Diagnostics tab (the request/route/upstream/cert depth) ──────────────────
 
-export function OperationsPanel() {
+function DiagnosticsTab() {
   const health = useQuery({ queryKey: ["console-health"], queryFn: fetchConsoleHealth });
   const samples = useQuery({ queryKey: ["request-samples"], queryFn: fetchRequestSamples });
   const failing = useQuery({ queryKey: ["failing-routes"], queryFn: () => fetchFailingRoutes(20) });
@@ -308,14 +343,6 @@ export function OperationsPanel() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold">Operations</h1>
-        <p className="mt-1 text-sm text-jul-muted">
-          Recent behavior, failing routes, upstream and certificate health, and the Console&apos;s
-          own vitals. All views are bounded and privacy-preserving.
-        </p>
-      </div>
-
       <Section title="Console health" hint="the admin API’s own vitals">
         {health.data ? (
           <div className="p-3">
@@ -361,6 +388,70 @@ export function OperationsPanel() {
       <Section title="Origins & CORS" hint="top origins / referers · preflight counts">
         <OriginsCors />
       </Section>
+    </div>
+  );
+}
+
+// ── Operations workspace (C-4: Events + Timeline folded in as tabs) ──────────
+
+export type OperationsTab = "diagnostics" | "events" | "timeline";
+
+const TABS: ReadonlyArray<{ id: OperationsTab; label: string; to: string; hint: string }> = [
+  {
+    id: "diagnostics",
+    label: "Diagnostics",
+    to: "/operations",
+    hint: "samples, failing routes, health",
+  },
+  { id: "events", label: "Events", to: "/operations/events", hint: "live SSE stream" },
+  {
+    id: "timeline",
+    label: "Timeline",
+    to: "/operations/timeline",
+    hint: "merged config & runtime history",
+  },
+];
+
+// OperationsPanel is the single troubleshooting workspace (P2-10): the live
+// Events stream and the merged Timeline are folded in as tabs alongside the
+// diagnostics depth, so an operator has one obvious place to investigate rather
+// than choosing between Events, Timeline, and Operations. Audit stays separate
+// because it is a compliance/security surface, not a troubleshooting view.
+export function OperationsPanel({ tab = "diagnostics" }: { readonly tab?: OperationsTab }) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">Operations</h1>
+        <p className="mt-1 text-sm text-jul-muted">
+          The troubleshooting workspace: recent behavior and health, the live event stream, and the
+          merged config/runtime timeline. All views are bounded and privacy-preserving.
+        </p>
+      </div>
+
+      <nav className="flex gap-1 border-b border-jul-border" aria-label="Operations views">
+        {TABS.map((t) => {
+          const active = t.id === tab;
+          return (
+            <Link
+              key={t.id}
+              to={t.to}
+              title={t.hint}
+              aria-current={active ? "page" : undefined}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+                active
+                  ? "border-jul-accent font-medium text-jul-text"
+                  : "border-transparent text-jul-muted hover:text-jul-text"
+              }`}
+            >
+              {t.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {tab === "diagnostics" && <DiagnosticsTab />}
+      {tab === "events" && <ObservabilityPanel />}
+      {tab === "timeline" && <TimelinePanel />}
     </div>
   );
 }

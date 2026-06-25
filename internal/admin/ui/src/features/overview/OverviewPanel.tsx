@@ -1,9 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  fetchOverview,
-  type FeatureStatus,
-  type TrafficSources,
-} from "@/api/client.ts";
+import { fetchOverview, type FeatureStatus, type TrafficSources } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
 
@@ -23,13 +19,40 @@ function StatusBadge({ active }: { readonly active: boolean }) {
   return (
     <span
       className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-        active
-          ? "bg-jul-success/15 text-jul-success"
-          : "bg-jul-border text-jul-muted"
+        active ? "bg-jul-success/15 text-jul-success" : "bg-jul-border text-jul-muted"
       }`}
     >
       {active ? "active" : "inactive"}
     </span>
+  );
+}
+
+// HealthChip is one signal in the at-a-glance summary band (P3-14): a coarse
+// healthy/warn/down tone plus a one-line value, so an operator sees "is anything
+// on fire?" before scrolling into the dense metric grids below.
+type Tone = "ok" | "warn" | "down" | "idle";
+
+const TONE_CLASS: Record<Tone, string> = {
+  ok: "border-jul-success/40 bg-jul-success/10 text-jul-success",
+  warn: "border-jul-warning/40 bg-jul-warning/10 text-jul-warning",
+  down: "border-jul-danger/40 bg-jul-danger/10 text-jul-danger",
+  idle: "border-jul-border bg-jul-surface text-jul-muted",
+};
+
+function HealthChip({
+  label,
+  value,
+  tone,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly tone: Tone;
+}) {
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${TONE_CLASS[tone]}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{label}</div>
+      <div className="mt-1 text-sm font-semibold">{value}</div>
+    </div>
   );
 }
 
@@ -46,9 +69,7 @@ function MetricCard({
 }) {
   return (
     <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
-      <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-        {label}
-      </div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">{label}</div>
       <div className="mt-2 flex items-baseline gap-2">
         <div className="text-2xl font-bold text-jul-text">
           {typeof value === "number" ? value.toLocaleString() : value}
@@ -93,9 +114,7 @@ function TopList({
               <span className="flex-1 truncate font-mono text-xs text-jul-text" title={key}>
                 {key}
               </span>
-              <span className="text-xs text-jul-muted">
-                {Math.round(count).toLocaleString()}
-              </span>
+              <span className="text-xs text-jul-muted">{Math.round(count).toLocaleString()}</span>
             </li>
           ))}
         </ul>
@@ -112,7 +131,11 @@ function TrafficSourcesPanel({ sources }: { readonly sources: TrafficSources }) 
     <div className="space-y-4">
       <h2 className="text-sm font-semibold text-jul-muted">Traffic Sources</h2>
       <div className="grid gap-4 sm:grid-cols-3">
-        <MetricCard label="CORS Preflight (OPTIONS)" value={Math.round(preflight)} unit="requests" />
+        <MetricCard
+          label="CORS Preflight (OPTIONS)"
+          value={Math.round(preflight)}
+          unit="requests"
+        />
         <MetricCard label="Same-origin" value={Math.round(same)} unit="requests" />
         <MetricCard label="Cross-origin" value={Math.round(cross)} unit="requests" />
       </div>
@@ -125,13 +148,7 @@ function TrafficSourcesPanel({ sources }: { readonly sources: TrafficSources }) 
   );
 }
 
-function StatusGroup({
-  name,
-  rows,
-}: {
-  readonly name: string;
-  readonly rows: FeatureStatus[];
-}) {
+function StatusGroup({ name, rows }: { readonly name: string; readonly rows: FeatureStatus[] }) {
   return (
     <div className="rounded-lg border border-jul-border bg-jul-surface">
       <div className="border-b border-jul-border px-4 py-2">
@@ -176,6 +193,49 @@ export function OverviewPanel() {
   const groups = groupBy(data.status, (r) => r.group);
   const stats = data.stats;
 
+  // Derive the coarse health signals for the summary band. Each is intentionally
+  // simple and defensive (stats may be unavailable): the band answers "healthy /
+  // degraded / action needed" at a glance; details live in the grids below.
+  const errRate = stats?.errorRate ?? 0;
+  const p95 = stats?.latencyP95Ms ?? 0;
+  const summary: Array<{ label: string; value: string; tone: Tone }> = [];
+  if (stats?.available) {
+    summary.push({
+      label: "Traffic",
+      value: `${(stats.requestsPerSec || 0).toFixed(1)} req/s`,
+      tone: (stats.requestsPerSec || 0) > 0 ? "ok" : "idle",
+    });
+    summary.push({
+      label: "Errors (5xx)",
+      value: `${(errRate * 100).toFixed(1)}%`,
+      tone: errRate >= 0.05 ? "down" : errRate > 0 ? "warn" : "ok",
+    });
+    summary.push({
+      label: "Latency p95",
+      value: `${p95.toFixed(0)} ms`,
+      tone: p95 >= 1000 ? "down" : p95 >= 250 ? "warn" : "ok",
+    });
+  }
+  // Backend health from the Upstreams status group (counts only; coarse tone).
+  const upstreamRows = data.status.filter((r) => r.group === "Upstreams");
+  if (upstreamRows.length > 0) {
+    const anyInactive = upstreamRows.some((r) => !r.active);
+    summary.push({
+      label: "Backends",
+      value: anyInactive ? "attention" : "healthy",
+      tone: anyInactive ? "warn" : "ok",
+    });
+  }
+  // Certificate risk from the Security group detail text, if present.
+  const certRow = data.status.find((r) => r.group === "Security" && /cert|tls|acme/i.test(r.name));
+  if (certRow) {
+    summary.push({
+      label: "Certificates",
+      value: certRow.active ? "ok" : "off",
+      tone: certRow.active ? "ok" : "idle",
+    });
+  }
+
   // Format uptime
   const uptimeHours = Math.floor((stats?.uptimeSeconds ?? 0) / 3600);
   const uptimeMinutes = Math.floor(((stats?.uptimeSeconds ?? 0) % 3600) / 60);
@@ -194,17 +254,23 @@ export function OverviewPanel() {
     <div className="space-y-6">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold">{data.product}</h1>
-        {data.version && (
-          <span className="text-xs text-jul-muted">v{data.version}</span>
-        )}
+        {data.version && <span className="text-xs text-jul-muted">v{data.version}</span>}
       </div>
+
+      {/* At-a-glance health summary (P3-14): coarse signals first, raw metric
+          grids below for progressive disclosure. */}
+      {summary.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {summary.map((s) => (
+            <HealthChip key={s.label} label={s.label} value={s.value} tone={s.tone} />
+          ))}
+        </div>
+      )}
 
       {/* Live Traffic Cards */}
       {stats?.available && (
         <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-jul-muted">
-            Live Traffic
-          </h2>
+          <h2 className="text-sm font-semibold text-jul-muted">Live Traffic</h2>
 
           {/* Top Row: Key Metrics */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -219,11 +285,7 @@ export function OverviewPanel() {
               unit="req/s"
               subtext={`${(stats.requestsTotal || 0).toLocaleString()} total`}
             />
-            <MetricCard
-              label="In-flight"
-              value={Math.round(stats.inFlight || 0)}
-              unit="requests"
-            />
+            <MetricCard label="In-flight" value={Math.round(stats.inFlight || 0)} unit="requests" />
             <MetricCard
               label="Active Connections"
               value={Math.round(stats.connections || 0)}
@@ -265,23 +327,17 @@ export function OverviewPanel() {
             />
             <MetricCard
               label="2xx Success"
-              value={Math.round(
-                stats.statusClasses?.["2xx"] || 0
-              ).toLocaleString()}
+              value={Math.round(stats.statusClasses?.["2xx"] || 0).toLocaleString()}
               unit="responses"
             />
             <MetricCard
               label="4xx Client Errors"
-              value={Math.round(
-                stats.statusClasses?.["4xx"] || 0
-              ).toLocaleString()}
+              value={Math.round(stats.statusClasses?.["4xx"] || 0).toLocaleString()}
               unit="responses"
             />
             <MetricCard
               label="3xx Redirects"
-              value={Math.round(
-                stats.statusClasses?.["3xx"] || 0
-              ).toLocaleString()}
+              value={Math.round(stats.statusClasses?.["3xx"] || 0).toLocaleString()}
               unit="responses"
             />
           </div>
@@ -296,16 +352,12 @@ export function OverviewPanel() {
             />
             <MetricCard
               label="Cache Misses"
-              value={Math.round(
-                stats.cacheEvents?.["MISS"] || 0
-              ).toLocaleString()}
+              value={Math.round(stats.cacheEvents?.["MISS"] || 0).toLocaleString()}
               unit="events"
             />
             <MetricCard
               label="Cache Bypasses"
-              value={Math.round(
-                stats.cacheEvents?.["BYPASS"] || 0
-              ).toLocaleString()}
+              value={Math.round(stats.cacheEvents?.["BYPASS"] || 0).toLocaleString()}
               unit="events"
             />
           </div>
@@ -452,18 +504,14 @@ export function OverviewPanel() {
       )}
 
       {/* Traffic Sources (Milestone 1.4) */}
-      {data.traffic_sources && (
-        <TrafficSourcesPanel sources={data.traffic_sources} />
-      )}
+      {data.traffic_sources && <TrafficSourcesPanel sources={data.traffic_sources} />}
 
       {/* Feature Status */}
       {groups.size === 0 ? (
         <p className="text-jul-muted text-sm">No status rows available.</p>
       ) : (
         <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-jul-muted">
-            Capabilities & Configuration
-          </h2>
+          <h2 className="text-sm font-semibold text-jul-muted">Capabilities & Configuration</h2>
           <div className="grid gap-4 lg:grid-cols-2">
             {Array.from(groups.entries()).map(([group, rows]) => (
               <StatusGroup key={group} name={group} rows={rows} />
@@ -474,4 +522,3 @@ export function OverviewPanel() {
     </div>
   );
 }
-

@@ -28,9 +28,9 @@ const NAV_GROUPS: readonly NavGroup[] = [
     label: "Operate",
     items: [
       { to: "/", label: "Overview", glyph: "▣", exact: true },
+      // Operations is the consolidated troubleshooting workspace; Events and
+      // Timeline live inside it as tabs (C-4) rather than as separate nav nouns.
       { to: "/operations", label: "Operations", glyph: "🛠" },
-      { to: "/timeline", label: "Timeline", glyph: "🕒" },
-      { to: "/observability", label: "Events", glyph: "⚡" },
     ],
   },
   {

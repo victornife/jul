@@ -7,9 +7,7 @@ import { TLSPanel } from "@/features/tls/TLSPanel.tsx";
 import { SecurityPanel } from "@/features/security/SecurityPanel.tsx";
 import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControlsPanel.tsx";
 import { SearchPanel } from "@/features/search/SearchPanel.tsx";
-import { ObservabilityPanel } from "@/features/observability/ObservabilityPanel.tsx";
 import { OperationsPanel } from "@/features/operations/OperationsPanel.tsx";
-import { TimelinePanel } from "@/features/observability/TimelinePanel.tsx";
 import { AuditPanel } from "@/features/security/AuditPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
 import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
@@ -26,9 +24,13 @@ export function App() {
         <Route path="/security" element={<SecurityPanel />} />
         <Route path="/traffic" element={<TrafficControlsPanel />} />
         <Route path="/search" element={<SearchPanel />} />
-        <Route path="/observability" element={<ObservabilityPanel />} />
-        <Route path="/operations" element={<OperationsPanel />} />
-        <Route path="/timeline" element={<TimelinePanel />} />
+        <Route path="/operations" element={<OperationsPanel tab="diagnostics" />} />
+        <Route path="/operations/events" element={<OperationsPanel tab="events" />} />
+        <Route path="/operations/timeline" element={<OperationsPanel tab="timeline" />} />
+        {/* C-4: Events and Timeline are now tabs of Operations; keep the old
+            paths working by redirecting into the consolidated workspace. */}
+        <Route path="/observability" element={<Navigate to="/operations/events" replace />} />
+        <Route path="/timeline" element={<Navigate to="/operations/timeline" replace />} />
         <Route path="/audit" element={<AuditPanel />} />
         <Route path="/config" element={<ConfigPanel />} />
         <Route path="/ui" element={<Navigate to="/config" replace />} />
@@ -36,11 +38,7 @@ export function App() {
         <Route path="/wizard" element={<WizardPanel />} />
         <Route
           path="*"
-          element={
-            <div className="p-8 text-center text-jul-muted">
-              Page not found.
-            </div>
-          }
+          element={<div className="p-8 text-center text-jul-muted">Page not found.</div>}
         />
       </Route>
     </Routes>
