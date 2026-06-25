@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { useTheme, type ThemePreference } from "@/lib/theme.ts";
 import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.ts";
 import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
+import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
 
 interface NavItem {
   readonly to: string;
@@ -55,6 +56,15 @@ const NAV_GROUPS: readonly NavGroup[] = [
 
 // SEARCH_ITEM is the global discovery action, kept out of the task groups.
 const SEARCH_ITEM: NavItem = { to: "/search", label: "Search", glyph: "🔍" };
+
+// COMMANDS flattens every destination (Search first, then each group's items)
+// into the command-palette list, tagging each with its group for display and
+// filtering. Derived once from the same source of truth as the nav so the two
+// never drift.
+const COMMANDS: readonly CommandItem[] = [
+  { ...SEARCH_ITEM, group: "Global" },
+  ...NAV_GROUPS.flatMap((g) => g.items.map((n) => ({ ...n, group: g.label }))),
+];
 
 function isActive(navTo: string, pathname: string, exact = false): boolean {
   return exact ? pathname === navTo : pathname.startsWith(navTo);
@@ -287,11 +297,7 @@ function NavLinks({
 export function Layout() {
   const loc = useLocation();
   const [layout, setLayout] = usePersistentState<NavLayout>("nav_layout", "top", isNavLayout);
-  const [collapsed, setCollapsed] = usePersistentState<boolean>(
-    "nav_collapsed",
-    false,
-    isBool,
-  );
+  const [collapsed, setCollapsed] = usePersistentState<boolean>("nav_collapsed", false, isBool);
 
   const controls = (
     <div className="flex items-center gap-2">
@@ -304,6 +310,10 @@ export function Layout() {
       />
     </div>
   );
+
+  // The palette is mounted once at the layout root so its Ctrl/Cmd+K shortcut is
+  // available on every page.
+  const palette = <CommandPalette commands={COMMANDS} />;
 
   if (layout === "side") {
     return (
@@ -340,6 +350,7 @@ export function Layout() {
         <main className="flex-1 overflow-auto p-6">
           <Outlet />
         </main>
+        {palette}
       </div>
     );
   }
@@ -357,6 +368,7 @@ export function Layout() {
       <main className="flex-1 overflow-auto p-6">
         <Outlet />
       </main>
+      {palette}
     </div>
   );
 }
