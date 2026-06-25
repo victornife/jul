@@ -81,10 +81,13 @@ func (f *Firewall) Close() error { return nil }
 // filesystem so both "@owasp_crs/..." includes and user files on disk resolve;
 // otherwise it is the OS filesystem alone.
 func rootFS(cfg config.WAFConfig) fs.FS {
+	var root fs.FS
 	if cfg.CRSEnabled {
-		return mergefs.Merge(coreruleset.FS, mergefsio.OSFS)
+		root = mergefs.Merge(coreruleset.FS, mergefsio.OSFS)
+	} else {
+		root = mergefsio.OSFS
 	}
-	return mergefsio.OSFS
+	return &normalizeFS{inner: root}
 }
 
 // buildDirectives assembles the SecLang program in a deterministic order:
