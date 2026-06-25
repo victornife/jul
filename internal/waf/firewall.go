@@ -109,9 +109,13 @@ func buildDirectives(cfg config.WAFConfig) (string, error) {
 	}
 	// SecDefaultAction sets the default deny status for rules without an
 	// explicit status action.  We emit it before user rules so inline rules
-	// inherit the configured block_status.  We skip it when CRS is enabled
-	// because the embedded CRS setup files (@crs-setup.conf.example) already
-	// define their own SecDefaultAction and Coraza rejects duplicates.
+	// inherit the configured block_status.
+	//
+	// When CRS is enabled we skip our SecDefaultAction because the embedded
+	// @crs-setup.conf.example already defines its own for phases 1–4 and
+	// Coraza rejects duplicates.  Consequently CRS-scored anomaly blocks use
+	// the CRS setup's default status (403) rather than block_status.
+	// See docs/waf.md for work-arounds (inline_rule overrides, directives_files).
 	if !cfg.CRSEnabled {
 		for phase := 1; phase <= 4; phase++ {
 			fmt.Fprintf(&b, "SecDefaultAction \"phase:%d,deny,status:%d,log\"\n", phase, bs)
