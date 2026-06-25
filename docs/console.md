@@ -27,8 +27,17 @@ Build with the tag and browse to the admin root:
 ```bash
 go build -tags console -o jul ./cmd/jul
 ./jul -config server.toml
-# open http://127.0.0.1:9090/ and paste the token into the top-right box
+# open http://127.0.0.1:9090/ — the console prompts for the admin token on the
+# first request and stores it in this tab's session storage
 ```
+
+When `[admin].token` is set, the console shows a token prompt the first time an
+API call is rejected with 401; paste the token there. It is kept in
+sessionStorage (cleared when the tab closes) and sent as `Authorization: Bearer
+…` — never in the URL. A `?token=<secret>` query parameter is still accepted for
+local-dev convenience but is discouraged: the bootstrap path stores it, strips
+it from the visible URL, and logs a console warning, because URL tokens leak
+into access logs, browser history, and the Referer header.
 
 Binaries built **without** `-tags console` serve the basic configuration page at
 the root instead; the JSON APIs below that do not require the tag (for example

@@ -13,6 +13,23 @@ export const authToken = {
   },
 };
 
+/**
+ * Name of the window event dispatched whenever any admin API call returns 401.
+ * The AuthGate listens for it to surface a first-class token prompt instead of
+ * relying on the ?token= query parameter, which leaks the credential into
+ * access logs, history, and the Referer header (P1-8). Centralizing the signal
+ * here means every fetch path — the typed api() helper and the raw fetch flows
+ * (apply/patch/events/audit-export) — can advertise an auth failure uniformly.
+ */
+export const UNAUTHORIZED_EVENT = "jul:unauthorized";
+
+/** Broadcasts that the admin API rejected the current token (or its absence). */
+export function notifyUnauthorized(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+  }
+}
+
 // ── Typed fetch client ───────────────────────────────────────────────────────
 
 export class ApiError extends Error {
@@ -33,6 +50,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch(`/api${path}`, { ...init, headers });
   if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
     let msg = `${String(resp.status)} ${resp.statusText}`;
     try {
       const body = (await resp.json()) as { error?: string };
@@ -417,6 +435,7 @@ export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
     data = null;
   }
   if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
     const rejected = ValidationResultSchema.safeParse(data);
     if (rejected.success) {
       throw new ConfigRejectedError(
@@ -499,6 +518,7 @@ export async function applyConfig(candidate: string): Promise<ApplyResult> {
     data = null;
   }
   if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
     const rejected = ValidationResultSchema.safeParse(data);
     if (rejected.success) {
       throw new ConfigRejectedError(
@@ -833,6 +853,7 @@ async function streamEvents(
       if (token) headers.set("Authorization", `Bearer ${token}`);
       const resp = await fetch("/api/events", { headers, signal });
       if (resp.status === 401) {
+        notifyUnauthorized();
         onError?.(new ApiError("/events", 401, "Unauthorized"));
         return; // auth won't recover on retry
       }
