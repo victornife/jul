@@ -10,6 +10,7 @@ import {
   tlsWarnings,
   type ACMEChallenge,
   type ACMEEnvironment,
+  type ClientAuthMode,
   type TLSDraft,
   type TLSMinVersion,
   type TLSMode,
@@ -237,6 +238,57 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
 
         <div className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-3">
           <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+            Mutual TLS (client certificates)
+          </span>
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-jul-text">Client-certificate mode</span>
+            <select
+              value={draft.clientAuthMode}
+              onChange={(e) => {
+                set("clientAuthMode", e.target.value as ClientAuthMode);
+              }}
+              className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+            >
+              <option value="none">Off (no client certificates)</option>
+              <option value="request">Request (verify if presented, allow anonymous)</option>
+              <option value="require">Require (reject without a verified client cert)</option>
+            </select>
+          </label>
+          {draft.clientAuthMode !== "none" && (
+            <>
+              <TextField
+                label="Client CA bundle"
+                hint="PEM bundle of the CA(s) that sign accepted client certificates."
+                value={draft.clientCAFile}
+                placeholder="/etc/jul/clients-ca.pem"
+                onChange={(v) => {
+                  set("clientCAFile", v);
+                }}
+              />
+              <TextField
+                label="CRL file (optional)"
+                hint="PEM/DER certificate revocation list to reject revoked client certs."
+                value={draft.clientCRLFile}
+                placeholder="/etc/jul/clients.crl"
+                onChange={(v) => {
+                  set("clientCRLFile", v);
+                }}
+              />
+              <TextField
+                label="Allowed client SANs (optional)"
+                hint="Comma-separated. Restrict to client certs whose SAN matches one of these."
+                value={draft.clientVerifySAN}
+                placeholder="svc-a.internal, svc-b.internal"
+                onChange={(v) => {
+                  set("clientVerifySAN", v);
+                }}
+              />
+            </>
+          )}
+        </div>
+
+        <div className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-3">
+          <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
             What this server serves
           </span>
           <label className="block space-y-1">
@@ -268,6 +320,17 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
               set("target", v);
             }}
           />
+          <label className="flex items-center gap-2 text-sm text-jul-text">
+            <input
+              type="checkbox"
+              checked={draft.requireClientCert}
+              onChange={(e) => {
+                set("requireClientCert", e.target.checked);
+              }}
+              className="h-4 w-4 rounded border-jul-border bg-jul-surface accent-jul-accent"
+            />
+            Require a verified client certificate on this location
+          </label>
         </div>
 
         {warnings.length > 0 && (

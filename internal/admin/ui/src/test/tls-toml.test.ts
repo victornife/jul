@@ -91,6 +91,63 @@ describe("generateTLSToml static", () => {
   });
 });
 
+describe("generateTLSToml mutual TLS", () => {
+  it("omits client_auth when mode is none", () => {
+    const toml = generateTLSToml(
+      draft({ serverNames: "x.test", mode: "acme", acmeEmail: "o@x.test", target: "http://app" }),
+    );
+    expect(toml).not.toContain("[servers.tls.client_auth]");
+    expect(toml).not.toContain("require_client_cert");
+  });
+
+  it("emits a client_auth block with ca_file, crl, and verify_san", () => {
+    const toml = generateTLSToml(
+      draft({
+        serverNames: "x.test",
+        mode: "static",
+        certFile: "/c.pem",
+        keyFile: "/k.pem",
+        clientAuthMode: "require",
+        clientCAFile: "/etc/jul/clients-ca.pem",
+        clientCRLFile: "/etc/jul/clients.crl",
+        clientVerifySAN: "svc-a.internal, svc-b.internal",
+        requireClientCert: true,
+        target: "http://app",
+      }),
+    );
+    expect(toml).toContain("[servers.tls.client_auth]");
+    expect(toml).toContain('mode = "require"');
+    expect(toml).toContain('ca_file = "/etc/jul/clients-ca.pem"');
+    expect(toml).toContain('crl_file = "/etc/jul/clients.crl"');
+    expect(toml).toContain('verify_san = ["svc-a.internal", "svc-b.internal"]');
+    expect(toml).toContain("require_client_cert = true");
+  });
+
+  it("keeps [servers.tls] bare keys (cert/key) before the sub-tables", () => {
+    // TOML binds bare keys to the most recently opened table, so cert/key must
+    // be emitted before [servers.tls.client_auth] / [servers.tls.acme].
+    const toml = generateTLSToml(
+      draft({
+        serverNames: "x.test",
+        mode: "static",
+        certFile: "/c.pem",
+        keyFile: "/k.pem",
+        clientAuthMode: "request",
+        clientCAFile: "/ca.pem",
+        target: "http://app",
+      }),
+    );
+    const certIdx = toml.indexOf("cert =");
+    const keyIdx = toml.indexOf("key =");
+    const clientAuthIdx = toml.indexOf("[servers.tls.client_auth]");
+    expect(certIdx).toBeGreaterThan(-1);
+    expect(keyIdx).toBeGreaterThan(-1);
+    expect(clientAuthIdx).toBeGreaterThan(-1);
+    expect(certIdx).toBeLessThan(clientAuthIdx);
+    expect(keyIdx).toBeLessThan(clientAuthIdx);
+  });
+});
+
 describe("tlsWarnings", () => {
   it("warns when ACME lacks an email", () => {
     expect(
@@ -141,5 +198,35 @@ describe("tlsWarnings", () => {
         }),
       ),
     ).toHaveLength(0);
+  });
+
+  it("warns when mutual TLS lacks a client-CA bundle", () => {
+    expect(
+      tlsWarnings(
+        draft({
+          mode: "static",
+          certFile: "/c.pem",
+          keyFile: "/k.pem",
+          serverNames: "x.test",
+          target: "http://app",
+          clientAuthMode: "require",
+        }),
+      ).some((w) => w.includes("client-CA")),
+    ).toBe(true);
+  });
+
+  it("warns when require-client-cert is set without mutual TLS", () => {
+    expect(
+      tlsWarnings(
+        draft({
+          mode: "static",
+          certFile: "/c.pem",
+          keyFile: "/k.pem",
+          serverNames: "x.test",
+          target: "http://app",
+          requireClientCert: true,
+        }),
+      ).some((w) => w.includes("Require client certificate")),
+    ).toBe(true);
   });
 });

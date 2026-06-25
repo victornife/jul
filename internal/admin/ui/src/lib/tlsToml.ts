@@ -14,6 +14,10 @@ export type ACMEEnvironment = "staging" | "production";
 export type ACMEChallenge = "http-01" | "tls-alpn-01";
 export type TLSMinVersion = "" | "1.2" | "1.3";
 export type TLSRouteAction = "static" | "proxy";
+// Mutual-TLS client-auth mode. "none" omits the client_auth block; "request"
+// verifies a presented client cert but still allows anonymous clients; "require"
+// rejects any connection without a CA-verified client certificate.
+export type ClientAuthMode = "none" | "request" | "require";
 
 export interface TLSDraft {
   listen: string;
@@ -31,11 +35,21 @@ export interface TLSDraft {
   acmeChallenge: ACMEChallenge;
   acmeDomains: string; // optional; defaults to server_names
 
+  // mutual TLS (client certificates). clientAuthMode "none" disables it.
+  clientAuthMode: ClientAuthMode;
+  clientCAFile: string; // CA bundle that signs accepted client certs
+  clientCRLFile: string; // optional revocation list
+  clientVerifySAN: string; // optional comma-separated allowed client SANs
+
   // a TLS server block needs something to serve; generate one location so the
   // result is a valid, useful block rather than a bare listener.
   action: TLSRouteAction;
   path: string;
   target: string;
+  // requireClientCert sets require_client_cert on the location, rejecting
+  // requests without a verified client certificate (independent of the
+  // listener mode "request" which only verifies when one is presented).
+  requireClientCert: boolean;
 }
 
 export function emptyTLSDraft(): TLSDraft {
@@ -50,9 +64,14 @@ export function emptyTLSDraft(): TLSDraft {
     acmeEnvironment: "staging",
     acmeChallenge: "http-01",
     acmeDomains: "",
+    clientAuthMode: "none",
+    clientCAFile: "",
+    clientCRLFile: "",
+    clientVerifySAN: "",
     action: "proxy",
     path: "/",
     target: "",
+    requireClientCert: false,
   };
 }
 
@@ -97,6 +116,12 @@ export function tlsWarnings(d: TLSDraft): string[] {
     if (!d.certFile.trim()) warn.push("Static TLS needs a certificate file path.");
     if (!d.keyFile.trim()) warn.push("Static TLS needs a private-key file path.");
   }
+  if (d.clientAuthMode !== "none" && !d.clientCAFile.trim()) {
+    warn.push("Mutual TLS needs a client-CA bundle file to verify client certificates.");
+  }
+  if (d.requireClientCert && d.clientAuthMode === "none") {
+    warn.push("“Require client certificate” needs mutual TLS enabled (request or require).");
+  }
   if (d.action === "static" && !d.target.trim()) {
     warn.push("Static file serving needs a root directory.");
   }
@@ -121,10 +146,28 @@ export function generateTLSToml(d: TLSDraft): string {
   if (d.minVersion) {
     lines.push(`  min_version = ${tomlString(d.minVersion)}`);
   }
+  // Emit ALL bare keys of [servers.tls] (enabled, min_version, cert, key)
+  // BEFORE any sub-table header. Once a sub-table like [servers.tls.client_auth]
+  // or [servers.tls.acme] is opened, subsequent bare keys would bind to that
+  // sub-table instead of [servers.tls], producing invalid configuration.
   if (d.mode === "static") {
     lines.push(`  cert = ${tomlString(d.certFile.trim())}`);
     lines.push(`  key = ${tomlString(d.keyFile.trim())}`);
-  } else {
+  }
+  if (d.clientAuthMode !== "none") {
+    lines.push("");
+    lines.push("    [servers.tls.client_auth]");
+    lines.push(`    mode = ${tomlString(d.clientAuthMode)}`);
+    lines.push(`    ca_file = ${tomlString(d.clientCAFile.trim())}`);
+    if (d.clientCRLFile.trim()) {
+      lines.push(`    crl_file = ${tomlString(d.clientCRLFile.trim())}`);
+    }
+    const sans = splitCsv(d.clientVerifySAN);
+    if (sans.length > 0) {
+      lines.push(`    verify_san = ${tomlStringArray(sans)}`);
+    }
+  }
+  if (d.mode === "acme") {
     lines.push("");
     lines.push("    [servers.tls.acme]");
     lines.push("    enabled = true");
@@ -143,6 +186,9 @@ export function generateTLSToml(d: TLSDraft): string {
     lines.push(`  root = ${tomlString(d.target.trim())}`);
   } else {
     lines.push(`  proxy_pass = ${tomlString(d.target.trim())}`);
+  }
+  if (d.requireClientCert) {
+    lines.push("  require_client_cert = true");
   }
   return lines.join("\n");
 }
