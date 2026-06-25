@@ -49,6 +49,15 @@ describe("generateWafToml", () => {
     expect(toml).toContain('inline_rules = """');
     expect(toml).toContain('SecRule ARGS "@rx evil" "id:1,deny"');
   });
+
+  it("emits response_body_check only when enabled", () => {
+    expect(generateWafToml(draft({ responseBodyCheck: false }))).not.toContain(
+      "response_body_check",
+    );
+    expect(generateWafToml(draft({ responseBodyCheck: true }))).toContain(
+      "response_body_check = true",
+    );
+  });
 });
 
 describe("wafWarnings", () => {

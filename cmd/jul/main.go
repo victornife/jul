@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"jul/internal/admin"
@@ -242,6 +244,22 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		log.Error("failed to start stream proxy", "error", err)
 		return 1
 	}
+	// lastStreamReload publishes the outcome of the most recent stream-proxy
+	// reload for the console Overview. The stream listener set is reloaded
+	// asynchronously after the HTTP reload swap (OnReloaded), so its success or
+	// failure cannot be reported in the synchronous apply response; the console
+	// surfaces it by polling. Empty means no stream is configured (nothing to
+	// report); "ok" means the running stream set matches the applied config; a
+	// "failed: ..." value means the last reload was rejected and the previously
+	// bound listeners are still serving the prior set.
+	var lastStreamReload atomic.Pointer[string]
+	{
+		initial := ""
+		if len(cfg.Streams) > 0 {
+			initial = "ok"
+		}
+		lastStreamReload.Store(&initial)
+	}
 
 	// liveHandlerClosers holds closers for handlers in the currently serving
 	// configuration that own resources needing explicit teardown on reload —
@@ -256,10 +274,23 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 	}()
 
-	// factory rebuilds the per-listen-address handler tree from a config. It is
-	// invoked at startup and on every reload, so all routing state (router,
-	// upstream pools, content handlers) is reconstructed atomically.
-	factory := func(c *config.Config) (map[string]http.Handler, error) {
+	// buildMu serializes every handler-tree build (startup, reload, and admin
+	// preflight) so the generational pool registry's Begin..Commit span is never
+	// interleaved by a concurrent build. Request serving never takes this lock —
+	// handlers are swapped atomically — so it only gates the (infrequent) builds.
+	var buildMu sync.Mutex
+
+	// buildHandlers rebuilds the per-listen-address handler tree from a config.
+	// It is invoked at startup and on every reload, so all routing state (router,
+	// upstream pools, content handlers) is reconstructed atomically. When commit
+	// is true the freshly built generation is promoted (staged pools committed,
+	// the previous generation's handler closers torn down); when false the build
+	// is a throwaway preflight whose staged pools and closers are released by the
+	// deferred abort, leaving the live serving state untouched.
+	buildHandlers := func(c *config.Config, commit bool) (map[string]http.Handler, error) {
+		buildMu.Lock()
+		defer buildMu.Unlock()
+
 		// Resolve secret references (${env:NAME}, ${file:/path}) in place before
 		// the runtime reads any credential. Resolved values register with redact
 		// for log masking. The admin/on-disk views keep the unresolved references,
@@ -318,7 +349,18 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 		builders := map[string]router.Builder{
 			router.ActionStatic: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
-				return handler.NewStaticWithOptions(srv, loc, staticOpts)
+				h, err := handler.NewStaticWithOptions(srv, loc, staticOpts)
+				if err != nil {
+					return nil, err
+				}
+				// The static handler holds an os.Root directory handle open for
+				// its lifetime; register it for generational teardown so the
+				// previous generation's root is closed when this config is
+				// replaced (otherwise the FD leaks until GC finalizes it).
+				if c, ok := h.(io.Closer); ok {
+					stagedHandlerClosers = append(stagedHandlerClosers, c)
+				}
+				return h, nil
 			},
 			router.ActionProxy: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 				// grpc = true forwards native gRPC over end-to-end HTTP/2
@@ -573,17 +615,58 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			handlers[addr] = h
 		}
 
-		// The build succeeded: promote the staged pools and close any pools the
-		// previous generation no longer needs. The deferred Abort becomes a no-op.
-		poolReg.Commit()
-		// Adopt this generation's handler closers and tear down the previous
-		// generation's (e.g. gRPC backend connections that are no longer served).
-		for _, c := range liveHandlerClosers {
-			_ = c.Close()
+		// The build succeeded. A committing build promotes the staged pools and
+		// closes any pools the previous generation no longer needs (the deferred
+		// Abort becomes a no-op), then adopts this generation's handler closers and
+		// tears down the previous generation's (e.g. gRPC backend connections no
+		// longer served). A preflight build (commit == false) leaves committed
+		// false, so the deferred Abort releases the staged pools and closers and the
+		// live generation is untouched; the returned handlers are discarded.
+		if commit {
+			poolReg.Commit()
+			for _, c := range liveHandlerClosers {
+				_ = c.Close()
+			}
+			liveHandlerClosers = stagedHandlerClosers
+			committed = true
 		}
-		liveHandlerClosers = stagedHandlerClosers
-		committed = true
 		return handlers, nil
+	}
+
+	// factory adapts buildHandlers to the server's reload hook: a reload always
+	// commits the new generation.
+	factory := func(c *config.Config) (map[string]http.Handler, error) {
+		return buildHandlers(c, true)
+	}
+
+	// preflightBuild dry-runs the full composition root on a CLONE of the config
+	// to prove it will build before it is persisted, without disturbing the live
+	// runtime. Cloning is essential: ExpandSecrets resolves secret references in
+	// place and SaveConfig marshals the caller's config after preflight, so
+	// building on the original could write resolved secrets to disk. The recover
+	// guard turns a panic in an edge configuration into a rejection instead of
+	// crashing the admin goroutine, and prevents a panicking config from ever
+	// reaching the asynchronous reload.
+	preflightBuild := func(c *config.Config) (err error) {
+		clone, cerr := c.Clone()
+		if cerr != nil {
+			return fmt.Errorf("clone config for preflight: %w", cerr)
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("configuration rejected: building it panicked: %v", r)
+			}
+		}()
+		// buildHandlers expands secrets on the clone in place, so the stream
+		// preflight below sees the same resolved targets the reload will use.
+		if _, err = buildHandlers(clone, false); err != nil {
+			return err
+		}
+		// The L4 stream listeners reload independently of the HTTP handlers, so
+		// prove they build too before the config is accepted; otherwise a bad
+		// [[stream]] block would surface only in the asynchronous OnReloaded,
+		// after "applied" was already reported.
+		return streamSrv.PreflightBuild(clone.Streams, indexUpstreams(clone.Upstreams))
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -642,28 +725,30 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 		return adaptCerts(server.InspectCerts(c.Servers))
 	}
-	// applyPreflight runs the full deep preflight AND dry-runs the stateful
-	// builders that the package-level validateRuntimeConfig cannot reach because
-	// it has no access to the runtime managers: presently the WASM plugin set.
-	// Building (and immediately closing) a plugin set here exercises the exact
-	// wazero compile path the reload's factory will use, so a module that fails
-	// to compile aborts the admin write BEFORE the file is persisted, instead of
-	// only at the asynchronous reload where the old runtime keeps serving while
-	// audit/history have already recorded success. The manager's compilation
-	// cache makes the throwaway build cheap. Together with the compression
-	// encoder dry-run inside validateRuntimeConfig, this means a config that
-	// passes applyPreflight is guaranteed to build, so the subsequent reload
-	// cannot fail for configuration reasons — making "applied" truthful.
+	// StreamStatus reports the most recent L4 stream-proxy reload outcome for the
+	// console Overview (see lastStreamReload). It is empty when no stream is
+	// configured, so the console omits the panel in the common HTTP-only case.
+	deps.StreamStatus = func() string {
+		if p := lastStreamReload.Load(); p != nil {
+			return *p
+		}
+		return ""
+	}
+	// applyPreflight is the truthfulness gate for every config write: a config
+	// that passes it is guaranteed to build, so the subsequent asynchronous reload
+	// cannot fail for configuration reasons and "applied" stays honest. It runs the
+	// cheap structural + stateless validation first (validateRuntimeConfig also
+	// gates WAF config in lean builds), then preflightBuild, which dry-runs the
+	// ENTIRE composition root — the same factory the reload uses — on a clone:
+	// plugins, static roots, proxy/gRPC/FastCGI handlers, auth, WAF, router and
+	// compression. Any error (or panic) aborts the write before the file is
+	// persisted, instead of surfacing only at the reload where the old runtime
+	// keeps serving while audit/history have already recorded success.
 	applyPreflight := func(c *config.Config) error {
 		if err := validateRuntimeConfig(c); err != nil {
 			return err
 		}
-		set, err := pluginMgr.Build(c.Plugins)
-		if err != nil {
-			return fmt.Errorf("plugins: %w", err)
-		}
-		_ = set.Close()
-		return nil
+		return preflightBuild(c)
 	}
 	if ts, ok := src.(*config.TOMLSource); ok {
 		path := ts.Path
@@ -720,7 +805,15 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.OnReloaded = func(c *config.Config) {
 		if err := streamSrv.Reload(c.Streams, indexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)
+			msg := "failed: " + err.Error()
+			lastStreamReload.Store(&msg)
+			return
 		}
+		ok := ""
+		if len(c.Streams) > 0 {
+			ok = "ok"
+		}
+		lastStreamReload.Store(&ok)
 	}
 	if err := srv.Run(ctx, reload); err != nil {
 		log.Error("server exited with error", "error", err)

@@ -37,6 +37,8 @@ describe("patchConfig", () => {
     const res = await patchConfig({
       op: "route_set_target",
       listen: ":8080",
+      server_names: [],
+      match_type: "prefix",
       path: "/api",
       target: "http://new",
     });
@@ -58,7 +60,7 @@ describe("patchConfig", () => {
   it("throws ApiError on a non-structured transport failure", async () => {
     mockFetch(() => new Response("boom", { status: 500 }));
     await expect(
-      patchConfig({ op: "route_toggle_cache", listen: ":80", path: "/", enabled: true }),
+      patchConfig({ op: "route_toggle_cache", listen: ":80", server_names: [], match_type: "prefix", path: "/", enabled: true }),
     ).rejects.toBeInstanceOf(ApiError);
   });
 });

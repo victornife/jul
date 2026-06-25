@@ -57,6 +57,16 @@ describe("OverviewSchema", () => {
   it("rejects a payload missing required fields", () => {
     expect(() => OverviewSchema.parse({ product: "x" })).toThrow();
   });
+
+  it("parses an optional stream_status reload outcome", () => {
+    const result = OverviewSchema.parse({
+      product: "Jul.IA",
+      version: "1.0.0",
+      status: [],
+      stream_status: "failed: stream: listen tcp :5353: address already in use",
+    });
+    expect(result.stream_status).toMatch(/^failed:/);
+  });
 });
 
 describe("RouteProjectionSchema", () => {

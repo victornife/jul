@@ -138,10 +138,6 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		grpcTranscode   int
 		authLocs        int
 		requireCertLocs int
-		wafLocs         int
-		wafBlockLocs    int
-		wafDetectLocs   int
-		wafCRSLocs      int
 		cacheLocs       int
 		pluginLocs      int
 		totalLocs       int
@@ -183,28 +179,6 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 			}
 			if loc.RequireClientCert {
 				requireCertLocs++
-			}
-			// A location is WAF-protected when it has its own enabled [waf]
-			// override, or it inherits an enabled global [waf] (and does not
-			// override it with a disabled block). Track the effective
-			// enforcement mode and CRS state per location so the status detail
-			// reports the real distribution rather than just the global mode:
-			// a location override may run in a different mode than [waf], and a
-			// global-disabled config can still protect locations that opt in.
-			if wcfg, ok := effectiveWAF(c, *loc); ok {
-				wafLocs++
-				mode := wcfg.Mode
-				if mode == "" {
-					mode = "block"
-				}
-				if mode == "detect" {
-					wafDetectLocs++
-				} else {
-					wafBlockLocs++
-				}
-				if wcfg.CRSEnabled {
-					wafCRSLocs++
-				}
 			}
 			if loc.Cache {
 				cacheLocs++
@@ -309,6 +283,15 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	// mode that some locations do not actually run in. A mixed deployment shows
 	// "3 locations: 2 block, 1 detect"; a uniform one collapses to a single
 	// mode. CRS coverage is appended when any protected location enables it.
+	//
+	// The coverage counts come from wafDistribution, the same helper
+	// projectSecurity uses, so this status row and the Security panel always
+	// agree on the WAF mix.
+	wd := wafDistribution(c)
+	wafLocs := wd.Locations
+	wafBlockLocs := wd.BlockLocs
+	wafDetectLocs := wd.DetectLocs
+	wafCRSLocs := wd.CRSLocs
 	wafDetail := ""
 	if wafLocs > 0 {
 		modes := make([]string, 0, 2)
@@ -734,6 +717,9 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.deps.TrafficSources != nil {
 		out.TrafficSources = s.deps.TrafficSources()
+	}
+	if s.deps.StreamStatus != nil {
+		out.StreamStatus = s.deps.StreamStatus()
 	}
 	writeJSON(w, http.StatusOK, out)
 }

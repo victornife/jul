@@ -122,8 +122,30 @@ func TestProxyGatewayTimeout(t *testing.T) {
 }
 
 func TestResolveTargetInvalid(t *testing.T) {
-	if _, _, err := resolvePool(config.LocationConfig{ProxyPass: "not-a-url"}, nil, nil); err == nil {
+	if _, _, _, err := resolvePool(config.LocationConfig{ProxyPass: "not-a-url"}, nil, nil); err == nil {
 		t.Fatal("expected error for invalid proxy_pass")
+	}
+}
+
+func TestProxyZeroBackendDiscoveryNoPanic(t *testing.T) {
+	// A discovery-backed upstream resolves its backends live, so at build time
+	// the pool can legitimately have zero backends. Building the proxy must not
+	// panic (regression: NewProxy previously indexed pool.Backends()[0]).
+	loc := config.LocationConfig{ProxyPass: "http://disco"}
+	ups := map[string]config.UpstreamConfig{
+		"disco": {
+			Name:      "disco",
+			Discovery: &config.DiscoveryConfig{Type: "dns", Target: "svc.internal:80"},
+		},
+	}
+	h := newProxy(t, loc, ups)
+
+	// With no backends resolved yet, a request degrades to a gateway error
+	// instead of panicking.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://edge/", nil))
+	if rec.Code < 500 {
+		t.Fatalf("status = %d, want a 5xx gateway error for an empty pool", rec.Code)
 	}
 }
 

@@ -24,7 +24,7 @@ func patchTestConfig() *config.Config {
 
 func TestApplyPatchRouteSetTarget(t *testing.T) {
 	c := patchTestConfig()
-	if _, err := applyPatch(c, patchRequest{Op: "route_set_target", Listen: ":8080", Path: "/api", Target: "http://new"}); err != nil {
+	if _, err := applyPatch(c, patchRequest{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/api", Target: "http://new"}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if got := c.Servers[0].Locations[0].ProxyPass; got != "http://new" {
@@ -34,7 +34,7 @@ func TestApplyPatchRouteSetTarget(t *testing.T) {
 
 func TestApplyPatchRouteToggleCache(t *testing.T) {
 	c := patchTestConfig()
-	if _, err := applyPatch(c, patchRequest{Op: "route_toggle_cache", Listen: ":8080", Path: "/api", Enabled: boolPtr(true)}); err != nil {
+	if _, err := applyPatch(c, patchRequest{Op: "route_toggle_cache", Listen: ":8080", MatchType: "prefix", Path: "/api", Enabled: boolPtr(true)}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if !c.Servers[0].Locations[0].Cache {
@@ -44,11 +44,110 @@ func TestApplyPatchRouteToggleCache(t *testing.T) {
 
 func TestApplyPatchRouteToggleRateLimit(t *testing.T) {
 	c := patchTestConfig()
-	if _, err := applyPatch(c, patchRequest{Op: "route_toggle_rate_limit", Listen: ":8080", Path: "/api", Enabled: boolPtr(true)}); err != nil {
+	if _, err := applyPatch(c, patchRequest{Op: "route_toggle_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", Enabled: boolPtr(true)}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if c.Servers[0].Locations[0].RateLimit == nil || !c.Servers[0].Locations[0].RateLimit.Enabled {
 		t.Error("rate limit not enabled")
+	}
+}
+
+// TestApplyPatchRouteTargetingDisambiguation proves the route target resolves to
+// exactly one location even when a listen is shared by several virtual hosts and
+// a path is reused under different match types: the wrong match type or wrong
+// server-name set must not be silently patched, and a request that omits the
+// disambiguators when the target is ambiguous must be rejected.
+func TestApplyPatchRouteTargetingDisambiguation(t *testing.T) {
+	newCfg := func() *config.Config {
+		return &config.Config{
+			Servers: []config.ServerConfig{
+				{
+					Listen:      ":443",
+					ServerNames: []string{"a.example"},
+					Locations: []config.LocationConfig{
+						{Match: config.MatchConfig{Type: "prefix", Path: "/api"}, ProxyPass: "http://a-prefix"},
+						{Match: config.MatchConfig{Type: "exact", Path: "/api"}, ProxyPass: "http://a-exact"},
+					},
+				},
+				{
+					Listen:      ":443",
+					ServerNames: []string{"b.example"},
+					Locations: []config.LocationConfig{
+						{Match: config.MatchConfig{Type: "prefix", Path: "/api"}, ProxyPass: "http://b-prefix"},
+					},
+				},
+			},
+		}
+	}
+
+	// Targets the exact-match location on vhost a.example only.
+	c := newCfg()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_set_target", Listen: ":443", ServerNames: []string{"a.example"},
+		MatchType: "exact", Path: "/api", Target: "http://new",
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if c.Servers[0].Locations[1].ProxyPass != "http://new" {
+		t.Errorf("exact location not updated: %q", c.Servers[0].Locations[1].ProxyPass)
+	}
+	if c.Servers[0].Locations[0].ProxyPass != "http://a-prefix" || c.Servers[1].Locations[0].ProxyPass != "http://b-prefix" {
+		t.Error("a different location was modified")
+	}
+
+	// Targets vhost b.example specifically (same listen, same path+type as a's prefix).
+	c = newCfg()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_set_target", Listen: ":443", ServerNames: []string{"b.example"},
+		MatchType: "prefix", Path: "/api", Target: "http://new-b",
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if c.Servers[1].Locations[0].ProxyPass != "http://new-b" || c.Servers[0].Locations[0].ProxyPass != "http://a-prefix" {
+		t.Error("server-name disambiguation targeted the wrong vhost")
+	}
+
+	// A wrong server-name set matches nothing.
+	c = newCfg()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_set_target", Listen: ":443", ServerNames: []string{"missing.example"},
+		MatchType: "prefix", Path: "/api", Target: "http://x",
+	}); err == nil {
+		t.Error("expected not-found error for an unknown server-name set")
+	}
+
+	// A wrong match type matches nothing even though the path exists.
+	c = newCfg()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_set_target", Listen: ":443", ServerNames: []string{"a.example"},
+		MatchType: "regex", Path: "/api", Target: "http://x",
+	}); err == nil {
+		t.Error("expected not-found error for a mismatched match type")
+	}
+}
+
+// TestApplyPatchRouteAmbiguousRejected proves a target that resolves to more
+// than one location is refused rather than silently patching the first.
+func TestApplyPatchRouteAmbiguousRejected(t *testing.T) {
+	c := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen:      ":443",
+			ServerNames: []string{"a.example"},
+			Locations: []config.LocationConfig{
+				{Match: config.MatchConfig{Type: "prefix", Path: "/api"}, ProxyPass: "http://one"},
+				{Match: config.MatchConfig{Type: "prefix", Path: "/api"}, ProxyPass: "http://two"},
+			},
+		}},
+	}
+	_, err := applyPatch(c, patchRequest{
+		Op: "route_set_target", Listen: ":443", ServerNames: []string{"a.example"},
+		MatchType: "prefix", Path: "/api", Target: "http://x",
+	})
+	if err == nil {
+		t.Fatal("expected an ambiguous-target error, got nil")
+	}
+	if c.Servers[0].Locations[0].ProxyPass != "http://one" || c.Servers[0].Locations[1].ProxyPass != "http://two" {
+		t.Error("an ambiguous patch must not mutate any location")
 	}
 }
 

@@ -71,6 +71,41 @@ export interface WAFEditorProps {
   readonly onClose: () => void;
 }
 
+// hasGlobalWAFConfig reports whether a global [waf] policy already exists in the
+// running config. When it does, the editor must seed from it so a save never
+// silently drops fields the form surfaces from a prior configuration; when it
+// does not, the editor falls back to the safe new-user defaults.
+function hasGlobalWAFConfig(p: SecurityProjection): boolean {
+  return (
+    p.waf_global_enabled ||
+    p.waf_crs_enabled ||
+    p.waf_response_body_check ||
+    Boolean(p.waf_global_mode) ||
+    Boolean(p.waf_request_body_limit) ||
+    Boolean(p.waf_inline_rules) ||
+    (p.waf_block_status ?? 0) > 0 ||
+    (p.waf_directives_files?.length ?? 0) > 0
+  );
+}
+
+// seedDraftFromProjection maps the projected global [waf] policy into an editor
+// draft so every field round-trips: opening and re-saving the editor without
+// changes must reproduce the same policy rather than clobber CRS, paranoia,
+// response-body inspection, rule files, or inline rules.
+function seedDraftFromProjection(p: SecurityProjection): WAFDraft {
+  return {
+    enabled: p.waf_global_enabled,
+    mode: p.waf_global_mode === "block" ? "block" : "detect",
+    blockStatus: p.waf_block_status ?? 0,
+    crsEnabled: p.waf_crs_enabled,
+    paranoia: p.waf_paranoia && p.waf_paranoia >= 1 ? p.waf_paranoia : 1,
+    directivesFiles: (p.waf_directives_files ?? []).join("\n"),
+    inlineRules: p.waf_inline_rules ?? "",
+    requestBodyLimit: p.waf_request_body_limit ?? "",
+    responseBodyCheck: p.waf_response_body_check,
+  };
+}
+
 /**
  * Guided WAF editor (Wave A). It edits the global [waf] table, upserts it into
  * the running config, and hands the draft to the Config editor where it flows
@@ -81,11 +116,9 @@ export interface WAFEditorProps {
 export function WAFEditor({ current, onClose }: WAFEditorProps) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<WAFDraft>(() => ({
-    ...emptyWAFDraft(),
-    enabled: current.waf_enabled,
-    mode: current.waf_mode === "block" ? "block" : "detect",
-  }));
+  const [draft, setDraft] = useState<WAFDraft>(() =>
+    hasGlobalWAFConfig(current) ? seedDraftFromProjection(current) : emptyWAFDraft(),
+  );
 
   const fragment = generateWafToml(draft);
   const warnings = wafWarnings(draft);
@@ -201,6 +234,20 @@ export function WAFEditor({ current, onClose }: WAFEditorProps) {
                 set("requestBodyLimit", v);
               }}
             />
+
+            <div className="space-y-1">
+              <Toggle
+                label="Inspect response bodies (CRS phase 4)"
+                checked={draft.responseBodyCheck}
+                onChange={(v) => {
+                  set("responseBodyCheck", v);
+                }}
+              />
+              <span className="block text-xs text-jul-muted">
+                Buffers responses to run outbound rules. Adds latency and memory; leave off unless
+                you need response-side detections.
+              </span>
+            </div>
 
             <label className="block space-y-1">
               <span className="text-sm font-medium text-jul-text">

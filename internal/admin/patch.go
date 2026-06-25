@@ -19,16 +19,25 @@ import (
 // the most common fields, exactly the P1-4 recommendation.
 //
 // Targets address an existing object:
-//   - a route location by its server Listen + match Path
+//   - a route location by its server Listen + ServerNames set and the location's
+//     Match type + Path (all four, so a patch is never silently applied to the
+//     wrong vhost when listens repeat or the wrong location when paths repeat)
 //   - an upstream pool by Name
 //
 // Exactly one operation is performed per request.
 type patchRequest struct {
 	Op string `json:"op"`
 
-	// Route-location target (route_* ops).
-	Listen string `json:"listen,omitempty"`
-	Path   string `json:"path,omitempty"`
+	// Route-location target (route_* ops). A location is addressed by its
+	// server's Listen + ServerNames set and the location's Match type + Path.
+	// ServerNames disambiguates name-based virtual hosts that share a listen;
+	// MatchType disambiguates locations that share a path under different match
+	// types (prefix/exact/regex). The console sends all of them from the route
+	// projection so the target resolves to exactly one location.
+	Listen      string   `json:"listen,omitempty"`
+	ServerNames []string `json:"server_names,omitempty"`
+	MatchType   string   `json:"match_type,omitempty"`
+	Path        string   `json:"path,omitempty"`
 
 	// Upstream target (upstream_* ops).
 	Upstream string `json:"upstream,omitempty"`
@@ -61,7 +70,7 @@ type serverLimits struct {
 func applyPatch(c *config.Config, req patchRequest) (string, error) {
 	switch req.Op {
 	case "route_set_target":
-		loc, err := findLocation(c, req.Listen, req.Path)
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
 		if err != nil {
 			return "", err
 		}
@@ -72,7 +81,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s proxy_pass set to %s", req.Listen, req.Path, req.Target), nil
 
 	case "route_toggle_cache":
-		loc, err := findLocation(c, req.Listen, req.Path)
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
 		if err != nil {
 			return "", err
 		}
@@ -83,7 +92,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s cache %s", req.Listen, req.Path, onOff(*req.Enabled)), nil
 
 	case "route_toggle_rate_limit":
-		loc, err := findLocation(c, req.Listen, req.Path)
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
 		if err != nil {
 			return "", err
 		}
@@ -232,23 +241,60 @@ func onOff(b bool) string {
 	return "disabled"
 }
 
-// findLocation returns a pointer to the location matching listen + match path,
-// so a mutation updates the config in place.
-func findLocation(c *config.Config, listen, path string) (*config.LocationConfig, error) {
+// findLocation returns a pointer to the single location uniquely identified by
+// its server's listen address and ServerNames set plus the location's match
+// type and path, so a mutation updates exactly the intended route in place.
+// Matching on listen + path alone (the earlier behavior) could silently target
+// the wrong virtual host when several server blocks share a listen, or the
+// wrong location when a path repeats under different match types. The console
+// always sends the full coordinates from the route projection; a target that
+// resolves to more than one location is rejected rather than guessed.
+func findLocation(c *config.Config, listen string, serverNames []string, matchType, path string) (*config.LocationConfig, error) {
 	if strings.TrimSpace(listen) == "" || strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("route target requires both listen and path")
 	}
+	var found *config.LocationConfig
+	matches := 0
 	for i := range c.Servers {
-		if c.Servers[i].Listen != listen {
+		srv := &c.Servers[i]
+		if srv.Listen != listen || !stringSetsEqual(srv.ServerNames, serverNames) {
 			continue
 		}
-		for j := range c.Servers[i].Locations {
-			if c.Servers[i].Locations[j].Match.Path == path {
-				return &c.Servers[i].Locations[j], nil
+		for j := range srv.Locations {
+			loc := &srv.Locations[j]
+			if loc.Match.Path == path && loc.Match.Type == matchType {
+				found = loc
+				matches++
 			}
 		}
 	}
-	return nil, fmt.Errorf("no route found for listen %q path %q", listen, path)
+	switch {
+	case matches == 0:
+		return nil, fmt.Errorf("no route found for listen %q names %v match %q path %q", listen, serverNames, matchType, path)
+	case matches > 1:
+		return nil, fmt.Errorf("route target is ambiguous: %d locations match listen %q names %v match %q path %q", matches, listen, serverNames, matchType, path)
+	default:
+		return found, nil
+	}
+}
+
+// stringSetsEqual reports whether a and b contain the same elements regardless
+// of order (multiset equality, so repeated server names are compared exactly).
+func stringSetsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, s := range a {
+		counts[s]++
+	}
+	for _, s := range b {
+		counts[s]--
+		if counts[s] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // findUpstream returns a pointer to the upstream pool with the given name.

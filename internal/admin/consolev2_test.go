@@ -83,6 +83,60 @@ func TestRuntimeOverviewOK(t *testing.T) {
 	}
 }
 
+// TestRuntimeOverviewStreamStatus proves the L4 stream-proxy reload outcome is
+// surfaced on the overview so the console can warn that a stream config was
+// rejected while the prior listeners keep serving (the apply response cannot
+// carry it because stream reload is asynchronous).
+func TestRuntimeOverviewStreamStatus(t *testing.T) {
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Locations: []config.LocationConfig{{ProxyPass: "http://localhost:9000"}},
+		}},
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		Product:      "Jul.IA",
+		Version:      "1.2.3",
+		LoadConfig:   func() (*config.Config, error) { return cfg, nil },
+		StreamStatus: func() string { return "failed: stream: listen tcp :5353: address already in use" },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(out.StreamStatus, "failed:") {
+		t.Errorf("stream_status = %q, want a failed: prefix", out.StreamStatus)
+	}
+}
+
+// TestRuntimeOverviewStreamStatusOmitted proves the field is omitted entirely
+// when no StreamStatus dep is wired (the common HTTP-only case), so the console
+// shows no stream panel.
+func TestRuntimeOverviewStreamStatusOmitted(t *testing.T) {
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Locations: []config.LocationConfig{{ProxyPass: "http://localhost:9000"}},
+		}},
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		Product:    "Jul.IA",
+		Version:    "1.2.3",
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), "stream_status") {
+		t.Errorf("stream_status should be omitted, body = %s", rr.Body.String())
+	}
+}
+
 func TestRuntimeOverviewMethodNotAllowed(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
 	rr := httptest.NewRecorder()
@@ -232,6 +286,59 @@ func TestSecurityProjection(t *testing.T) {
 	}
 	if out.SecretRefs != 1 {
 		t.Errorf("secret_refs = %d, want 1", out.SecretRefs)
+	}
+}
+
+// TestSecurityProjectionWAFDistributionAndGlobal proves the projection reports
+// the real per-location enforcement mix and exposes the global [waf] policy
+// verbatim, so the Security panel is truthful and the guided editor can seed
+// from the running config instead of clobbering unshown fields.
+func TestSecurityProjectionWAFDistributionAndGlobal(t *testing.T) {
+	cfg := &config.Config{
+		WAF: config.WAFConfig{
+			Enabled:           true,
+			Mode:              "detect",
+			CRSEnabled:        true,
+			Paranoia:          2,
+			BlockStatus:       406,
+			ResponseBodyCheck: true,
+			RequestBodyLimit:  config.Size(128 << 10),
+			DirectivesFiles:   []string{"/etc/jul/waf/a.conf"},
+			InlineRules:       `SecRule ARGS "@rx evil" "id:1,deny"`,
+		},
+		Servers: []config.ServerConfig{{
+			Locations: []config.LocationConfig{
+				// Inherits the global detect+CRS policy.
+				{Match: config.MatchConfig{Path: "/a"}},
+				// Overrides to block, no CRS.
+				{Match: config.MatchConfig{Path: "/b"}, WAF: &config.WAFConfig{Enabled: true, Mode: "block"}},
+				// Opts out entirely.
+				{Match: config.MatchConfig{Path: "/c"}, WAF: &config.WAFConfig{Enabled: false}},
+			},
+		}},
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/security", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out SecurityProjection
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Distribution: 2 protected (/a detect+CRS, /b block), /c opted out.
+	if out.WAFLocations != 2 || out.WAFBlockLocs != 1 || out.WAFDetectLocs != 1 || out.WAFCRSLocs != 1 {
+		t.Errorf("distribution = {locs:%d block:%d detect:%d crs:%d}, want {2 1 1 1}",
+			out.WAFLocations, out.WAFBlockLocs, out.WAFDetectLocs, out.WAFCRSLocs)
+	}
+	// Global [waf] verbatim for the editor seed.
+	if !out.WAFGlobalEnabled || out.WAFGlobalMode != "detect" || !out.WAFCRSEnabled ||
+		out.WAFParanoia != 2 || out.WAFBlockStatus != 406 || !out.WAFResponseBodyCheck ||
+		out.WAFRequestBodyLimit != "128k" || len(out.WAFDirectivesFiles) != 1 || out.WAFInlineRules == "" {
+		t.Errorf("global WAF projection = %+v", out)
 	}
 }
 

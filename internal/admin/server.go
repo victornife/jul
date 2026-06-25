@@ -58,6 +58,14 @@ type Deps struct {
 	// Ready reports whether the server is ready to receive traffic.
 	Ready func() bool
 
+	// StreamStatus reports the most recent L4 stream-proxy reload outcome for the
+	// Console Overview. Because stream listeners reload asynchronously after the
+	// HTTP swap, their success/failure cannot be returned in the synchronous
+	// apply response; the console polls this instead. It returns "" when no
+	// stream is configured (panel omitted), "ok" when the running stream set
+	// matches the applied config, and "failed: <reason>" when the last reload was
+	// rejected and the prior listeners are still serving. Nil omits the field.
+	StreamStatus func() string
 	// ReadConfigRaw returns the raw configuration file contents for the GUI
 	// editor. Nil disables config viewing/editing.
 	ReadConfigRaw func() ([]byte, error)

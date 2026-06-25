@@ -1,8 +1,32 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSecurity } from "@/api/client.ts";
+import { fetchSecurity, type SecurityProjection } from "@/api/client.ts";
 import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
+
+// wafIsMixed reports whether protected locations run a mix of block and detect
+// modes, in which case a single mode badge would mislead.
+function wafIsMixed(d: SecurityProjection): boolean {
+  return (d.waf_block_locs ?? 0) > 0 && (d.waf_detect_locs ?? 0) > 0;
+}
+
+// wafCoverageSummary describes how many locations the WAF protects and, when
+// the modes differ or the CRS is partially applied, the exact split — so the
+// panel reports the real posture rather than implying one uniform policy.
+function wafCoverageSummary(d: SecurityProjection): string {
+  const locs = `${d.waf_locations} location${d.waf_locations === 1 ? "" : "s"}`;
+  const parts: string[] = [];
+  if (wafIsMixed(d)) {
+    parts.push(`${d.waf_block_locs ?? 0} block, ${d.waf_detect_locs ?? 0} detect`);
+  }
+  const crs = d.waf_crs_locs ?? 0;
+  if (crs > 0 && crs < d.waf_locations) {
+    parts.push(`CRS on ${crs}`);
+  } else if (crs > 0) {
+    parts.push("CRS");
+  }
+  return parts.length > 0 ? `${locs} (${parts.join("; ")})` : locs;
+}
 
 function Row({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
   return (
@@ -68,16 +92,14 @@ export function SecurityPanel() {
               <>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    data.waf_mode === "detect"
+                    wafIsMixed(data) || data.waf_mode === "detect"
                       ? "bg-jul-warning/15 text-jul-warning"
                       : "bg-jul-success/15 text-jul-success"
                   }`}
                 >
-                  {data.waf_mode ?? "block"}
+                  {wafIsMixed(data) ? "mixed" : (data.waf_mode ?? "block")}
                 </span>
-                <span className="text-jul-muted text-xs">
-                  {data.waf_locations} location{data.waf_locations > 1 ? "s" : ""}
-                </span>
+                <span className="text-jul-muted text-xs">{wafCoverageSummary(data)}</span>
               </>
             ) : (
               <OnOff on={false} />

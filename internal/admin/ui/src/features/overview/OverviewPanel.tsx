@@ -257,6 +257,24 @@ export function OverviewPanel() {
         {data.version && <span className="text-xs text-jul-muted">v{data.version}</span>}
       </div>
 
+      {/* L4 stream-proxy reload failure (Fix2): stream listeners reload
+          asynchronously after the HTTP swap, so a rejected stream config cannot
+          surface in the apply response. The prior listeners keep serving, so
+          this is a degraded-but-serving warning, not an outage. */}
+      {data.stream_status?.startsWith("failed:") && (
+        <div
+          role="alert"
+          className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm text-jul-warning"
+        >
+          <span className="font-semibold">L4 stream proxy reload failed.</span>{" "}
+          The previously bound stream listeners are still serving the last good
+          configuration.{" "}
+          <span className="text-jul-muted">
+            {data.stream_status.replace(/^failed:\s*/, "")}
+          </span>
+        </div>
+      )}
+
       {/* At-a-glance health summary (P3-14): coarse signals first, raw metric
           grids below for progressive disclosure. */}
       {summary.length > 0 && (

@@ -109,6 +109,11 @@ export const OverviewSchema = z.object({
   status: z.array(FeatureStatusSchema),
   stats: StatsSnapshotSchema.optional(),
   traffic_sources: TrafficSourcesSchema.optional(),
+  // stream_status is the most recent L4 stream-proxy reload outcome: "ok",
+  // "failed: <reason>", or absent when no stream is configured. Stream
+  // listeners reload asynchronously after the HTTP swap, so this is the only
+  // truthful signal of their state and is surfaced by polling.
+  stream_status: z.string().optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 
@@ -188,6 +193,22 @@ export const SecurityProjectionSchema = z.object({
   waf_enabled: z.boolean(),
   waf_mode: z.string().optional(),
   waf_locations: z.number(),
+  // Per-mode distribution of protected locations, so the panel shows the real
+  // block/detect/CRS mix rather than implying one global mode.
+  waf_block_locs: z.number().optional().default(0),
+  waf_detect_locs: z.number().optional().default(0),
+  waf_crs_locs: z.number().optional().default(0),
+  // The global [waf] policy, so the guided editor seeds from the real config
+  // instead of clobbering unshown fields on save.
+  waf_global_enabled: z.boolean().optional().default(false),
+  waf_global_mode: z.string().optional(),
+  waf_block_status: z.number().optional(),
+  waf_crs_enabled: z.boolean().optional().default(false),
+  waf_paranoia: z.number().optional(),
+  waf_request_body_limit: z.string().optional(),
+  waf_response_body_check: z.boolean().optional().default(false),
+  waf_directives_files: z.array(z.string()).optional(),
+  waf_inline_rules: z.string().optional(),
   secret_refs: z.number(),
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
@@ -382,10 +403,10 @@ export async function diffConfig(candidate: string): Promise<ConfigDiff> {
 
 /**
  * A single structured edit to the running configuration. Each op targets an
- * existing object (a route by listen+path, or an upstream by name) and the
- * server applies it to the PARSED config model, returning the candidate TOML
- * and full diff for review — it does not persist. The caller then applies the
- * candidate through the existing applyConfig path.
+ * existing object (a route by listen + server_names + match type + path, or an
+ * upstream by name) and the server applies it to the PARSED config model,
+ * returning the candidate TOML and full diff for review — it does not persist.
+ * The caller then applies the candidate through the existing applyConfig path.
  */
 export interface ServerLimitsPatch {
   client_max_body_size?: string;
@@ -396,10 +417,21 @@ export interface ServerLimitsPatch {
   max_header_bytes?: string;
 }
 
+// Route ops address a location by the full coordinates the route projection
+// exposes — listen, the server's server_names set, and the location's match
+// type + path — so a patch can never land on the wrong virtual host (shared
+// listen) or the wrong location (path reused under a different match type).
+export type RouteTarget = {
+  listen: string;
+  server_names: string[];
+  match_type: string;
+  path: string;
+};
+
 export type ConfigPatch =
-  | { op: "route_set_target"; listen: string; path: string; target: string }
-  | { op: "route_toggle_cache"; listen: string; path: string; enabled: boolean }
-  | { op: "route_toggle_rate_limit"; listen: string; path: string; enabled: boolean }
+  | ({ op: "route_set_target"; target: string } & RouteTarget)
+  | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
+  | ({ op: "route_toggle_rate_limit"; enabled: boolean } & RouteTarget)
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch };

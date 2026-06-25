@@ -150,6 +150,8 @@ function QuickEdits({
                 void runPatch({
                   op: "route_set_target",
                   listen: route.listen,
+                  server_names: route.server_names ?? [],
+                  match_type: loc.type,
                   path: loc.match,
                   target: target.trim(),
                 });
@@ -170,6 +172,8 @@ function QuickEdits({
             void runPatch({
               op: "route_toggle_cache",
               listen: route.listen,
+              server_names: route.server_names ?? [],
+              match_type: loc.type,
               path: loc.match,
               enabled: !loc.cache,
             });
@@ -185,6 +189,8 @@ function QuickEdits({
             void runPatch({
               op: "route_toggle_rate_limit",
               listen: route.listen,
+              server_names: route.server_names ?? [],
+              match_type: loc.type,
               path: loc.match,
               enabled: !loc.rate_limit,
             });

@@ -93,6 +93,60 @@ func humanizeErr(raw string) []validationError {
 				Severity: "error",
 			},
 		},
+		{
+			token: "static root",
+			err: validationError{
+				Code:     "bad_static_root",
+				Summary:  "A static location's root directory could not be opened.",
+				Detail:   "Check that the root path exists and is readable by the server.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "invalid proxy_pass",
+			err: validationError{
+				Code:     "bad_proxy_pass",
+				Summary:  "A proxy_pass value is not a valid URL or upstream name.",
+				Detail:   "Use http(s)://host:port or http://upstream-name.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "plugins:",
+			err: validationError{
+				Code:     "plugin_build",
+				Summary:  "A WASM plugin failed to load or compile.",
+				Detail:   "Check the plugin's path and that the module is valid for this build.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "secrets:",
+			err: validationError{
+				Code:     "secret_resolve",
+				Summary:  "A secret reference could not be resolved.",
+				Detail:   "Check that ${env:NAME} / ${file:/path} references resolve to a readable value.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "waf:",
+			err: validationError{
+				Code:     "waf_build",
+				Summary:  "A WAF policy failed to compile.",
+				Detail:   "Check the SecLang directives, rule files, and CRS assets.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "auth:",
+			err: validationError{
+				Code:     "auth_build",
+				Summary:  "An authentication policy failed to initialise.",
+				Detail:   "Check the auth type and its files (e.g. htpasswd path, JWKS / issuer settings).",
+				Severity: "error",
+			},
+		},
 	}
 
 	var out []validationError

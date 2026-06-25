@@ -20,6 +20,7 @@ export interface WAFDraft {
   directivesFiles: string; // newline/comma-separated SecLang file paths
   inlineRules: string; // SecLang snippet appended last
   requestBodyLimit: string; // size, e.g. "128k"; blank = server default
+  responseBodyCheck: boolean; // inspect response bodies (CRS phase 4)
 }
 
 export function emptyWAFDraft(): WAFDraft {
@@ -32,6 +33,7 @@ export function emptyWAFDraft(): WAFDraft {
     directivesFiles: "",
     inlineRules: "",
     requestBodyLimit: "",
+    responseBodyCheck: false,
   };
 }
 
@@ -100,6 +102,9 @@ export function generateWafToml(d: WAFDraft): string {
   }
   if (d.requestBodyLimit.trim()) {
     lines.push(`request_body_limit = ${tomlString(d.requestBodyLimit.trim())}`);
+  }
+  if (d.responseBodyCheck) {
+    lines.push(`response_body_check = true`);
   }
   if (d.inlineRules.trim()) {
     // Emit as a TOML multi-line basic string so SecLang directives survive.

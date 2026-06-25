@@ -30,14 +30,17 @@ import (
 //
 // onStream, when non-nil, is invoked once per forwarded gRPC call.
 func NewGRPCProxy(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger, onStream func()) (http.Handler, error) {
-	pool, basePath, err := resolvePool(loc, upstreams, reg)
+	pool, basePath, scheme, err := resolvePool(loc, upstreams, reg)
 	if err != nil {
 		return nil, err
 	}
 
-	rep := pool.Backends()[0].URL
-	tlsBackend := rep.Scheme == "https"
-	target := &url.URL{Scheme: rep.Scheme, Host: rep.Host, Path: basePath}
+	// scheme comes from proxy_pass, not a backend: a discovery-backed pool can
+	// have zero backends at build time, and the per-backend scheme/host are set
+	// on every request by the balancing transport anyway. https:// selects an
+	// h2-over-TLS transport; http:// selects cleartext h2c.
+	tlsBackend := scheme == "https"
+	target := &url.URL{Scheme: scheme, Path: basePath}
 
 	rp := &httputil.ReverseProxy{
 		// FlushInterval -1 flushes every write immediately: gRPC streaming

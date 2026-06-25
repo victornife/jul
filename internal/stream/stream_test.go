@@ -184,6 +184,53 @@ func newTestServer(t *testing.T, hooks Hooks) *Server {
 	return s
 }
 
+// TestPreflightBuildDoesNotBind proves PreflightBuild validates a stream config
+// without binding any socket or registering a listener: the live set stays
+// empty and the address remains free afterwards. This is what lets the admin
+// apply-time gate reject a bad [[stream]] block up front without disturbing the
+// running listeners.
+func TestPreflightBuildDoesNotBind(t *testing.T) {
+	backend, stop := tcpEcho(t)
+	defer stop()
+	addr := freeTCPAddr(t)
+
+	s := newTestServer(t, Hooks{})
+	if err := s.PreflightBuild([]config.StreamServer{{
+		Listen: addr, Protocol: "tcp", ProxyPass: backend,
+	}}, nil); err != nil {
+		t.Fatalf("preflight valid config: %v", err)
+	}
+	s.mu.Lock()
+	n := len(s.listeners)
+	s.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("preflight registered %d listeners, want 0", n)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("address held after preflight (socket not released): %v", err)
+	}
+	_ = ln.Close()
+}
+
+// TestPreflightBuildRejectsDuplicate proves PreflightBuild applies the same
+// duplicate-listener rule as Reload, so an ambiguous config is rejected at apply
+// time rather than during the asynchronous reload.
+func TestPreflightBuildRejectsDuplicate(t *testing.T) {
+	backend, stop := tcpEcho(t)
+	defer stop()
+	addr := freeTCPAddr(t)
+
+	s := newTestServer(t, Hooks{})
+	err := s.PreflightBuild([]config.StreamServer{
+		{Listen: addr, Protocol: "tcp", ProxyPass: backend},
+		{Listen: addr, Protocol: "tcp", ProxyPass: backend},
+	}, nil)
+	if err == nil {
+		t.Fatal("preflight accepted a duplicate listener, want error")
+	}
+}
+
 func TestTCPProxyEcho(t *testing.T) {
 	backend, stop := tcpEcho(t)
 	defer stop()

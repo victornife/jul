@@ -163,6 +163,37 @@ func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]conf
 	return nil
 }
 
+// PreflightBuild validates that the desired stream configuration can be built
+// without binding any socket or mutating the running listeners. It runs the
+// same Phase 1 as Reload — building every route and rejecting duplicate
+// listener keys — then closes the throwaway routes. A nil return means a
+// subsequent Reload cannot be rejected for configuration reasons; only a socket
+// bind can still fail, and Reload performs that under the lock without touching
+// the live set until it succeeds. PreflightBuild does not take s.mu because it
+// neither reads nor writes the live listener set.
+func (s *Server) PreflightBuild(streams []config.StreamServer, upstreams map[string]config.UpstreamConfig) error {
+	seen := make(map[string]struct{}, len(streams))
+	var built []*route
+	for i := range streams {
+		st := streams[i]
+		proto := normProto(st.Protocol)
+		key := proto + "|" + st.Listen
+		if _, dup := seen[key]; dup {
+			closeRoutes(built)
+			return fmt.Errorf("stream: duplicate %s listener %q", proto, st.Listen)
+		}
+		seen[key] = struct{}{}
+		r, err := s.buildRoute(st, upstreams)
+		if err != nil {
+			closeRoutes(built)
+			return err
+		}
+		built = append(built, r)
+	}
+	closeRoutes(built)
+	return nil
+}
+
 // Close stops every listener and releases all sockets.
 func (s *Server) Close() error {
 	s.mu.Lock()

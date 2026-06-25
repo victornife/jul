@@ -30,15 +30,17 @@ import (
 //
 // srv is part of the router.Builder signature but is not needed here.
 func NewProxy(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
-	pool, basePath, err := resolvePool(loc, upstreams, reg)
+	pool, basePath, scheme, err := resolvePool(loc, upstreams, reg)
 	if err != nil {
 		return nil, err
 	}
 
-	// Representative target supplies scheme and base path for path joining;
-	// the balancing transport overrides the host per selected backend.
-	rep := pool.Backends()[0].URL
-	target := &url.URL{Scheme: rep.Scheme, Host: rep.Host, Path: basePath}
+	// The target supplies the scheme and base path for path joining; the
+	// balancing transport overrides the scheme and host per selected backend on
+	// every request. The scheme comes from proxy_pass (not a backend) because a
+	// discovery-backed pool can legitimately have zero backends at build time,
+	// so indexing a backend here would panic.
+	target := &url.URL{Scheme: scheme, Path: basePath}
 
 	rp := &httputil.ReverseProxy{
 		Transport: &balancingTransport{pool: pool, base: newProxyTransport(loc), log: log},
@@ -72,18 +74,18 @@ func NewProxy(_ config.ServerConfig, loc config.LocationConfig, upstreams map[st
 // concrete URL builds an anonymous pool-of-one outside the registry. When reg is
 // nil (for example in unit tests) named upstreams are built directly without
 // lifecycle management.
-func resolvePool(loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, string, error) {
+func resolvePool(loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, string, string, error) {
 	u, err := url.Parse(loc.ProxyPass)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		return nil, "", fmt.Errorf("invalid proxy_pass %q (want http(s)://host:port or http://upstream-name)", loc.ProxyPass)
+		return nil, "", "", fmt.Errorf("invalid proxy_pass %q (want http(s)://host:port or http://upstream-name)", loc.ProxyPass)
 	}
 	if up, ok := upstreams[u.Host]; ok {
 		if reg != nil {
 			pool, err := reg.For(up, u.Scheme)
-			return pool, u.Path, err
+			return pool, u.Path, u.Scheme, err
 		}
 		pool, err := upstream.NewPool(up, u.Scheme)
-		return pool, u.Path, err
+		return pool, u.Path, u.Scheme, err
 	}
 	// Concrete URL: a pool of one backend.
 	single := config.UpstreamConfig{
@@ -93,7 +95,7 @@ func resolvePool(loc config.LocationConfig, upstreams map[string]config.Upstream
 		MaxFails: 3,
 	}
 	pool, err := upstream.NewPool(single, u.Scheme)
-	return pool, u.Path, err
+	return pool, u.Path, u.Scheme, err
 }
 
 // balancingTransport selects a backend per request, marks passive health, and

@@ -28,5 +28,15 @@ func (s *Server) Reload(streams []config.StreamServer, _ map[string]config.Upstr
 	return nil
 }
 
+// PreflightBuild mirrors Reload's contract for the stub: a non-empty stream set
+// cannot be built without the "stream" tag, so it is rejected; an empty set is a
+// no-op success. This keeps the apply-time preflight gate honest in lean builds.
+func (s *Server) PreflightBuild(streams []config.StreamServer, _ map[string]config.UpstreamConfig) error {
+	if len(streams) > 0 {
+		return errors.New("stream proxy requires a build with -tags stream")
+	}
+	return nil
+}
+
 // Close is a no-op for the stub.
 func (s *Server) Close() error { return nil }

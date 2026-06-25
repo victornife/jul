@@ -93,11 +93,35 @@ type SecurityProjection struct {
 	// WAFEnabled reports whether any location is protected by the web
 	// application firewall (the global [waf] or a per-location override).
 	WAFEnabled bool `json:"waf_enabled"`
-	// WAFMode is the enforcement mode ("block" or "detect") of the effective
-	// WAF policy, when one is enabled.
+	// WAFMode is the enforcement mode ("block" or "detect") of the first
+	// protected location seen, kept for backward compatibility; the per-mode
+	// distribution below is the authoritative summary.
 	WAFMode string `json:"waf_mode,omitempty"`
 	// WAFLocations is the number of locations the WAF protects.
 	WAFLocations int `json:"waf_locations"`
+	// WAFBlockLocs/WAFDetectLocs/WAFCRSLocs break the protected locations down by
+	// effective enforcement mode and CRS coverage, so the Security panel reports
+	// the real mix rather than implying every route shares the global mode. They
+	// are computed by the same wafDistribution helper the Overview status row
+	// uses, so the two views can never disagree.
+	WAFBlockLocs  int `json:"waf_block_locs"`
+	WAFDetectLocs int `json:"waf_detect_locs"`
+	WAFCRSLocs    int `json:"waf_crs_locs"`
+	// The global [waf] policy verbatim, so the guided WAF editor can seed from
+	// the real configuration instead of clobbering fields it does not display
+	// (CRS, paranoia, response-body inspection, rule files, inline rules) when
+	// the operator saves. WAFGlobalEnabled distinguishes "global WAF is on" from
+	// the location-level WAFEnabled above (a location may opt in while [waf] is
+	// off, and vice versa).
+	WAFGlobalEnabled     bool     `json:"waf_global_enabled"`
+	WAFGlobalMode        string   `json:"waf_global_mode,omitempty"`
+	WAFBlockStatus       int      `json:"waf_block_status,omitempty"`
+	WAFCRSEnabled        bool     `json:"waf_crs_enabled"`
+	WAFParanoia          int      `json:"waf_paranoia,omitempty"`
+	WAFRequestBodyLimit  string   `json:"waf_request_body_limit,omitempty"`
+	WAFResponseBodyCheck bool     `json:"waf_response_body_check"`
+	WAFDirectivesFiles   []string `json:"waf_directives_files,omitempty"`
+	WAFInlineRules       string   `json:"waf_inline_rules,omitempty"`
 	// SecretRefs is the number of ${env:}/${file:} secret references in the
 	// configuration. The values themselves are never projected.
 	SecretRefs int `json:"secret_refs"`
@@ -141,6 +165,11 @@ type RuntimeOverview struct {
 	// TrafficSources is the bounded top-N projection of request hosts/origins/
 	// referers for the Console Overview Traffic Sources panel (Milestone 1.4).
 	TrafficSources interface{} `json:"traffic_sources,omitempty"`
+	// StreamStatus is the most recent L4 stream-proxy reload outcome: "ok",
+	// "failed: <reason>", or empty when no stream is configured. Because stream
+	// listeners reload asynchronously after the HTTP swap, the console surfaces
+	// the outcome here (polled) rather than in the apply response.
+	StreamStatus string `json:"stream_status,omitempty"`
 }
 
 // ── Projection helpers ──────────────────────────────────────────────────────
@@ -406,16 +435,31 @@ func projectSecurity(c *config.Config) SecurityProjection {
 			if loc.RequireClientCert {
 				sp.RequireCertCount++
 			}
-			// Resolve the WAF policy that applies to this location (its own
-			// override or the global policy) and count protected locations,
-			// recording the mode of the first one seen.
-			if w := effectiveWAFPolicy(c, loc); w != nil && w.Enabled {
-				sp.WAFEnabled = true
-				sp.WAFLocations++
-				if sp.WAFMode == "" {
-					sp.WAFMode = wafModeOrDefault(w.Mode)
-				}
-			}
+		}
+	}
+	// WAF coverage across all locations, shared with runtimeStatus so the
+	// Security panel and the Overview status row can never disagree.
+	d := wafDistribution(c)
+	sp.WAFEnabled = d.Locations > 0
+	sp.WAFLocations = d.Locations
+	sp.WAFMode = d.FirstMode
+	sp.WAFBlockLocs = d.BlockLocs
+	sp.WAFDetectLocs = d.DetectLocs
+	sp.WAFCRSLocs = d.CRSLocs
+	// The global [waf] policy verbatim, so the guided WAF editor seeds from the
+	// real configuration instead of clobbering unshown fields on save.
+	g := c.WAF
+	sp.WAFGlobalEnabled = g.Enabled
+	sp.WAFGlobalMode = g.Mode
+	sp.WAFBlockStatus = g.BlockStatus
+	sp.WAFCRSEnabled = g.CRSEnabled
+	sp.WAFParanoia = g.Paranoia
+	sp.WAFResponseBodyCheck = g.ResponseBodyCheck
+	sp.WAFDirectivesFiles = g.DirectivesFiles
+	sp.WAFInlineRules = g.InlineRules
+	if g.RequestBodyLimit > 0 {
+		if b, err := g.RequestBodyLimit.MarshalText(); err == nil {
+			sp.WAFRequestBodyLimit = string(b)
 		}
 	}
 	sp.SecretRefs = config.CountSecretRefs(c)
@@ -441,6 +485,49 @@ func wafModeOrDefault(mode string) string {
 		return "block"
 	}
 	return mode
+}
+
+// wafDist summarizes how the effective WAF policy is applied across all
+// locations: how many are protected and, of those, how many enforce (block) vs.
+// only detect, plus how many load the CRS. FirstMode is the enforcement mode of
+// the first protected location seen.
+type wafDist struct {
+	Locations  int
+	BlockLocs  int
+	DetectLocs int
+	CRSLocs    int
+	FirstMode  string
+}
+
+// wafDistribution computes the per-location WAF coverage. Both projectSecurity
+// (Security panel) and runtimeStatus (Overview status row) resolve WAF coverage
+// through this single helper so the two surfaces never report a different mix.
+func wafDistribution(c *config.Config) wafDist {
+	var d wafDist
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		for j := range srv.Locations {
+			loc := &srv.Locations[j]
+			w := effectiveWAFPolicy(c, loc)
+			if w == nil || !w.Enabled {
+				continue
+			}
+			d.Locations++
+			mode := wafModeOrDefault(w.Mode)
+			if d.FirstMode == "" {
+				d.FirstMode = mode
+			}
+			if mode == "detect" {
+				d.DetectLocs++
+			} else {
+				d.BlockLocs++
+			}
+			if w.CRSEnabled {
+				d.CRSLocs++
+			}
+		}
+	}
+	return d
 }
 
 func projectTrafficControls(c *config.Config) TrafficControlsProjection {

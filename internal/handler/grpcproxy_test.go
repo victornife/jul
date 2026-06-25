@@ -133,6 +133,22 @@ func dialGRPC(t testing.TB, addr string) *grpc.ClientConn {
 	return conn
 }
 
+func TestGRPCProxyZeroBackendDiscoveryNoPanic(t *testing.T) {
+	// A discovery-backed gRPC upstream can have zero backends at build time;
+	// building the passthrough handler must not panic (regression:
+	// NewGRPCProxy previously indexed pool.Backends()[0]).
+	loc := config.LocationConfig{ProxyPass: "http://disco", GRPC: true}
+	ups := map[string]config.UpstreamConfig{
+		"disco": {
+			Name:      "disco",
+			Discovery: &config.DiscoveryConfig{Type: "dns", Target: "svc.internal:50051"},
+		},
+	}
+	if _, err := NewGRPCProxy(config.ServerConfig{}, loc, ups, nil, grpcTestLogger(), nil); err != nil {
+		t.Fatalf("NewGRPCProxy with empty discovery pool: %v", err)
+	}
+}
+
 func TestGRPCProxyUnary(t *testing.T) {
 	backend := startGRPCEcho(t)
 	front, streams := startGRPCProxyFront(t, backend)
