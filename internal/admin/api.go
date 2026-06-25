@@ -917,6 +917,15 @@ func (s *Server) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 
 // handleConfigApply is the authoritative v2 write path: validate → snapshot →
 // write (which triggers reload) → return post-apply runtime delta.
+//
+// Truthfulness contract: WriteConfigRaw runs the composition root's full apply
+// preflight (deep validation plus a dry-run of every runtime builder that can
+// fail — WAF, auth, compression, and the WASM plugin set) BEFORE persisting the
+// file. A configuration that passes therefore cannot fail the subsequent build,
+// so the only remaining gap between "saved" and "serving" is the asynchronous
+// reload itself. The response and audit/timeline copy say "saved; reloading"
+// rather than the past-tense "reloaded" so the operator is not told the live
+// runtime switched at a moment when the swap may still be in flight.
 // POST /api/config/apply
 func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -946,12 +955,16 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordHistory(prev)
-	s.recordAudit("config.apply", "config", "success", "configuration applied and reloaded", adminClientIP(r))
+	s.recordAudit("config.apply", "config", "success", "configuration validated and saved; live runtime reloading", adminClientIP(r))
 
 	// Record the apply on the timeline and broadcast it to SSE subscribers.
-	s.emit("config", "apply", "info", "Configuration applied and reloaded.")
+	s.emit("config", "apply", "info", "Configuration validated and saved; the live runtime is reloading.")
 
-	// Return a post-apply status delta so the UI can reflect what changed.
+	// Return a post-apply status delta so the UI can reflect what changed. It is
+	// derived from the persisted configuration: the apply preflight guarantees
+	// the runtime will build this config, but the reload that swaps it in is
+	// asynchronous, so "pending_reload" tells the UI this is the configuration
+	// taking effect rather than a confirmation that the swap has completed.
 	var status []FeatureStatus
 	if s.deps.LoadConfig != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
@@ -959,8 +972,10 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"status": status,
+		"ok":             true,
+		"pending_reload": true,
+		"message":        "Configuration validated and saved. The live runtime is reloading to apply it.",
+		"status":         status,
 	})
 }
 

@@ -302,9 +302,7 @@ export const HistorySnapshotSchema = z.object({
 export type HistorySnapshot = z.infer<typeof HistorySnapshotSchema>;
 
 export function fetchHistory(): Promise<HistoryEntry[]> {
-  return api<unknown>("/config/history").then((d) =>
-    z.array(HistoryEntrySchema).parse(d),
-  );
+  return api<unknown>("/config/history").then((d) => z.array(HistoryEntrySchema).parse(d));
 }
 
 export function fetchHistorySnapshot(id: string): Promise<HistorySnapshot> {
@@ -403,6 +401,12 @@ export class ConfigRejectedError extends Error {
 
 export const ApplyResultSchema = z.object({
   ok: z.literal(true),
+  // pending_reload reflects the server's truthfulness contract: the config has
+  // been validated and persisted, but the live runtime swap is asynchronous, so
+  // the status below is the configuration taking effect, not a confirmation
+  // that the running runtime has already switched. Optional for back-compat.
+  pending_reload: z.boolean().optional(),
+  message: z.string().optional(),
   status: z.array(FeatureStatusSchema),
 });
 export type ApplyResult = z.infer<typeof ApplyResultSchema>;
@@ -516,9 +520,7 @@ export const RequestSampleSchema = z.object({
 export type RequestSample = z.infer<typeof RequestSampleSchema>;
 
 export function fetchRequestSamples(): Promise<RequestSample[]> {
-  return api<unknown>("/observability/requests").then((d) =>
-    z.array(RequestSampleSchema).parse(d),
-  );
+  return api<unknown>("/observability/requests").then((d) => z.array(RequestSampleSchema).parse(d));
 }
 
 export const RouteFailureSchema = z.object({
@@ -601,9 +603,7 @@ export const TimelineEventSchema = z.object({
 export type TimelineEvent = z.infer<typeof TimelineEventSchema>;
 
 export function fetchTimeline(): Promise<TimelineEvent[]> {
-  return api<unknown>("/observability/timeline").then((d) =>
-    z.array(TimelineEventSchema).parse(d),
-  );
+  return api<unknown>("/observability/timeline").then((d) => z.array(TimelineEventSchema).parse(d));
 }
 
 // ── Console health & frontend error reporting (Milestone 5.7) ────────────────

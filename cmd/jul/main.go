@@ -642,6 +642,29 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 		return adaptCerts(server.InspectCerts(c.Servers))
 	}
+	// applyPreflight runs the full deep preflight AND dry-runs the stateful
+	// builders that the package-level validateRuntimeConfig cannot reach because
+	// it has no access to the runtime managers: presently the WASM plugin set.
+	// Building (and immediately closing) a plugin set here exercises the exact
+	// wazero compile path the reload's factory will use, so a module that fails
+	// to compile aborts the admin write BEFORE the file is persisted, instead of
+	// only at the asynchronous reload where the old runtime keeps serving while
+	// audit/history have already recorded success. The manager's compilation
+	// cache makes the throwaway build cheap. Together with the compression
+	// encoder dry-run inside validateRuntimeConfig, this means a config that
+	// passes applyPreflight is guaranteed to build, so the subsequent reload
+	// cannot fail for configuration reasons — making "applied" truthful.
+	applyPreflight := func(c *config.Config) error {
+		if err := validateRuntimeConfig(c); err != nil {
+			return err
+		}
+		set, err := pluginMgr.Build(c.Plugins)
+		if err != nil {
+			return fmt.Errorf("plugins: %w", err)
+		}
+		_ = set.Close()
+		return nil
+	}
 	if ts, ok := src.(*config.TOMLSource); ok {
 		path := ts.Path
 		deps.ReadConfigRaw = func() ([]byte, error) { return os.ReadFile(path) }
@@ -650,7 +673,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil {
 				return err
 			}
-			if err := validateRuntimeConfig(cfg); err != nil {
+			if err := applyPreflight(cfg); err != nil {
 				return err
 			}
 			if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -660,7 +683,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
-			if err := validateRuntimeConfig(c); err != nil {
+			if err := applyPreflight(c); err != nil {
 				return err
 			}
 			data, err := config.Marshal(c)

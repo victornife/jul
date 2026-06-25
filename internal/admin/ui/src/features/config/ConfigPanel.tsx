@@ -25,11 +25,7 @@ function EditorFallback() {
   );
 }
 
-function ValidationPill({
-  state,
-}: {
-  readonly state: "idle" | "checking" | "valid" | "invalid";
-}) {
+function ValidationPill({ state }: { readonly state: "idle" | "checking" | "valid" | "invalid" }) {
   const map = {
     idle: { label: "Not checked", cls: "bg-jul-border/40 text-jul-muted" },
     checking: { label: "Checking…", cls: "bg-jul-accent/15 text-jul-accent" },
@@ -44,9 +40,10 @@ function AppliedSummary({ status }: { readonly status: FeatureStatus[] }) {
   const active = status.filter((s) => s.active).length;
   return (
     <div className="rounded-md border border-jul-success/40 bg-jul-success/10 p-3 text-sm text-jul-text">
-      <p className="font-medium text-jul-success">Configuration applied.</p>
+      <p className="font-medium text-jul-success">Configuration validated and saved.</p>
       <p className="text-xs text-jul-muted">
-        {active} of {status.length} capabilities active in the new runtime.
+        The live runtime is reloading to apply it. {active} of {status.length} capabilities are
+        active in the saved configuration.
       </p>
     </div>
   );
@@ -119,9 +116,7 @@ export function ConfigPanel() {
     return (
       <div className="space-y-2">
         <h1 className="text-xl font-semibold">Configuration</h1>
-        <p className="text-sm text-jul-muted">
-          Raw config not available (read hook not wired).
-        </p>
+        <p className="text-sm text-jul-muted">Raw config not available (read hook not wired).</p>
       </div>
     );
   }
@@ -190,9 +185,7 @@ export function ConfigPanel() {
           {applyError && (
             <div className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm">
               <p className="font-medium text-jul-danger">
-                {applyError instanceof ConfigRejectedError
-                  ? applyError.message
-                  : "Apply failed."}
+                {applyError instanceof ConfigRejectedError ? applyError.message : "Apply failed."}
               </p>
               {applyError instanceof ConfigRejectedError &&
                 applyError.issues.map((iss, i) => (
@@ -231,9 +224,7 @@ export function ConfigPanel() {
               </h3>
               {diff.isFetching && <p className="text-xs text-jul-muted">Computing diff…</p>}
               {diff.data && <DiffView diff={diff.data} />}
-              {diff.isError && (
-                <p className="text-xs text-jul-danger">Unable to compute diff.</p>
-              )}
+              {diff.isError && <p className="text-xs text-jul-danger">Unable to compute diff.</p>}
             </div>
           )}
 
@@ -258,8 +249,10 @@ export function ConfigPanel() {
           }}
         >
           <p>
-            This writes the new configuration and triggers a live reload of the proxy.
-            The current configuration is snapshotted first, so you can roll back from
+            This validates the new configuration, writes it, and triggers a live reload of the
+            proxy. The draft is fully preflighted before it is saved, so a config that is accepted
+            here is guaranteed to build; the reload that swaps it into the live runtime happens
+            moments later. The current configuration is snapshotted first, so you can roll back from
             the History panel.
           </p>
           {diff.data && <p className="mt-2 text-jul-text">{diff.data.summary}</p>}

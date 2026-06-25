@@ -180,7 +180,7 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(counters.apply).toBe(1);
     });
-    expect(await screen.findByText("Configuration applied.")).toBeInTheDocument();
+    expect(await screen.findByText("Configuration validated and saved.")).toBeInTheDocument();
   });
 });
 
