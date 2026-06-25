@@ -27,8 +27,7 @@ const Compiled = true
 
 // Firewall wraps a configured Coraza engine and exposes it as a middleware.
 type Firewall struct {
-	waf         coraza.WAF
-	blockStatus int
+	waf coraza.WAF
 }
 
 // New builds a Firewall from a WAF policy. It assembles the SecLang directive
@@ -59,52 +58,16 @@ func New(cfg config.WAFConfig, opts Options) (*Firewall, error) {
 	if err != nil {
 		return nil, fmt.Errorf("waf: compiling rules: %w", err)
 	}
-	bs := cfg.BlockStatus
-	if bs == 0 {
-		bs = 403
-	}
-	return &Firewall{waf: w, blockStatus: bs}, nil
+	return &Firewall{waf: w}, nil
 }
 
 // Middleware returns the per-location middleware that runs each request (and,
 // when response_body_check is set, each response) through the engine. A blocked
-// request is short-circuited by Coraza with the block_status configured in the
-// policy (default 403). Because Coraza v3 hardcodes 403 when a rule does not
-// carry an explicit status action, we intercept the WriteHeader call to apply
-// the configured status.
+// request is short-circuited by Coraza with the status configured in the
+// SecLang program.
 func (f *Firewall) Middleware() middleware.Middleware {
 	return func(next http.Handler) http.Handler {
-		h := corazahttp.WrapHandler(f.waf, next)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			bw := &blockStatusWriter{ResponseWriter: w, status: f.blockStatus}
-			h.ServeHTTP(bw, r)
-		})
-	}
-}
-
-// blockStatusWriter intercepts a 403 status written by Coraza so that the
-// configured block_status is applied instead. It passes through everything else
-// unchanged.
-type blockStatusWriter struct {
-	http.ResponseWriter
-	status  int
-	written bool
-}
-
-func (w *blockStatusWriter) WriteHeader(code int) {
-	if w.written {
-		return
-	}
-	w.written = true
-	if code == http.StatusForbidden {
-		code = w.status
-	}
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *blockStatusWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+		return corazahttp.WrapHandler(f.waf, next)
 	}
 }
 
@@ -126,14 +89,31 @@ func rootFS(cfg config.WAFConfig) fs.FS {
 
 // buildDirectives assembles the SecLang program in a deterministic order:
 //
-//  1. the embedded CRS (recommended base, setup, optional paranoia override,
-//     then the rules) when crs_enabled;
-//  2. each user directive file, included so its own relative includes resolve;
-//  3. the inline rules snippet;
-//  4. the enforcement-mode override last, so "block"/"detect" always wins over
-//     any SecRuleEngine set by an included file.
+//  1. SecDefaultAction (all phases) with the configured block_status so that
+//     any rule using the generic "block" action or no explicit disruptive
+//     action inherits "deny,status:<block_status>" instead of Coraza's
+//     hardcoded 403 fallback.
+//  2. the embedded CRS when crs_enabled;
+//  3. each user directive file;
+//  4. the inline rules snippet;
+//  5. the enforcement-mode override last, so "block"/"detect" always wins.
 func buildDirectives(cfg config.WAFConfig) (string, error) {
 	var b strings.Builder
+
+	bs := cfg.BlockStatus
+	if bs == 0 {
+		bs = 403
+	}
+	// SecDefaultAction sets the default deny status for rules without an
+	// explicit status action.  We emit it before user rules so inline rules
+	// inherit the configured block_status.  We skip it when CRS is enabled
+	// because the embedded CRS setup files (@crs-setup.conf.example) already
+	// define their own SecDefaultAction and Coraza rejects duplicates.
+	if !cfg.CRSEnabled {
+		for phase := 1; phase <= 4; phase++ {
+			fmt.Fprintf(&b, "SecDefaultAction \"phase:%d,deny,status:%d,log\"\n", phase, bs)
+		}
+	}
 
 	if cfg.CRSEnabled {
 		b.WriteString("Include @coraza.conf-recommended\n")

@@ -88,7 +88,7 @@ func diffServers(before, after *config.Config, d *ConfigDiff) {
 		diffServerTimeouts(name, b, srv, d)
 		diffServerBodyLimit(name, b, srv, d)
 		diffServerTLS(name, b.TLS, srv.TLS, d)
-		diffLocations(name, b.Locations, srv.Locations, d)
+		diffLocations(name, b.Locations, srv.Locations, before.WAF, after.WAF, d)
 	}
 	for _, name := range sortedKeys(bs) {
 		if _, ok := as[name]; !ok {

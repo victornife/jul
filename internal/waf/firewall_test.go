@@ -197,8 +197,9 @@ func TestNewRejectsBadDirectives(t *testing.T) {
 }
 
 func TestFirewallBlockStatusCustom(t *testing.T) {
-	// A deny rule without an explicit status: Coraza hardcodes 403, but the
-	// Firewall wrapper rewrites it to the configured block_status.
+	// A deny rule without an explicit status: SecDefaultAction (which now
+	// comes before user rules) supplies the status, so block_status=451 is
+	// applied instead of Coraza's hardcoded 403 fallback.
 	cfg := config.WAFConfig{
 		Enabled:     true,
 		Mode:        "block",
@@ -216,5 +217,38 @@ func TestFirewallBlockStatusCustom(t *testing.T) {
 	}
 	if rec.count() == 0 {
 		t.Error("expected at least one WAF event to be recorded")
+	}
+}
+
+func TestFirewallDoesNotRewriteDownstream403(t *testing.T) {
+	// Regression: a clean request that reaches the action and gets a genuine
+	// 403 from the backend must NOT be rewritten to the WAF block_status.
+	cfg := config.WAFConfig{
+		Enabled:     true,
+		Mode:        "block",
+		BlockStatus: 451,
+		InlineRules: `SecRule REQUEST_URI "@contains /forbidden" "id:100,phase:1,deny,status:403,log,msg:'blocked path'"`,
+	}
+	applyTestDefaults(&cfg)
+	fw, err := New(cfg, Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// The action returns 403 — this is a legitimate backend response.
+	action := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "backend says no", http.StatusForbidden)
+	})
+	h := fw.Middleware()(action)
+
+	req := httptest.NewRequest(http.MethodGet, "/allowed/page", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("downstream 403 rewritten to %d; must remain 403", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "backend says no") {
+		t.Error("clean request should reach the action")
 	}
 }

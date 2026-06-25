@@ -333,7 +333,7 @@ max_conns = 0
 
 # === L4 Stream Proxy ======================================================
 [[stream]]
-listen = "127.0.0.1:35432"
+listen = "127.0.0.1:35433"
 proxy_pass = "backend"
 connect_timeout = "5s"
 idle_timeout = "1h"

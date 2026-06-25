@@ -73,37 +73,11 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	if err := config.Validate(cfg); err != nil {
+	if err := validateRuntimeConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "invalid configuration in %s:\n%v\n", src.Name(), err)
 		return 1
 	}
 	if checkOnly {
-		// Deep-check: expand secrets and dry-run build every runtime component
-		// that could fail later (WAF rule compilation, auth init, etc.).
-		wafExtra := func(c *config.Config) error {
-			if err := waf.Check(c); err != nil {
-				return err
-			}
-			if waf.Compiled {
-				for i := range c.Servers {
-					for j := range c.Servers[i].Locations {
-						loc := c.Servers[i].Locations[j]
-						wcfg, ok := effectiveWAF(c, loc)
-						if !ok {
-							continue
-						}
-						if _, err := waf.New(wcfg, waf.Options{}); err != nil {
-							return fmt.Errorf("waf: %w", err)
-						}
-					}
-				}
-			}
-			return nil
-		}
-		if err := config.PreflightClone(cfg, wafExtra); err != nil {
-			fmt.Fprintf(os.Stderr, "invalid configuration in %s:\n%v\n", src.Name(), err)
-			return 1
-		}
 		fmt.Printf("configuration %s is valid\n", src.Name())
 		return 0
 	}
@@ -676,27 +650,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil {
 				return err
 			}
-			wafExtra := func(c *config.Config) error {
-				if err := waf.Check(c); err != nil {
-					return err
-				}
-				if waf.Compiled {
-					for i := range c.Servers {
-						for j := range c.Servers[i].Locations {
-							loc := c.Servers[i].Locations[j]
-							wcfg, ok := effectiveWAF(c, loc)
-							if !ok {
-								continue
-							}
-							if _, err := waf.New(wcfg, waf.Options{}); err != nil {
-								return fmt.Errorf("waf: %w", err)
-							}
-						}
-					}
-				}
-				return nil
-			}
-			if err := config.PreflightClone(cfg, wafExtra); err != nil {
+			if err := validateRuntimeConfig(cfg); err != nil {
 				return err
 			}
 			if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -706,27 +660,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
-			wafExtra := func(clone *config.Config) error {
-				if err := waf.Check(clone); err != nil {
-					return err
-				}
-				if waf.Compiled {
-					for i := range clone.Servers {
-						for j := range clone.Servers[i].Locations {
-							loc := clone.Servers[i].Locations[j]
-							wcfg, ok := effectiveWAF(clone, loc)
-							if !ok {
-								continue
-							}
-							if _, err := waf.New(wcfg, waf.Options{}); err != nil {
-								return fmt.Errorf("waf: %w", err)
-							}
-						}
-					}
-				}
-				return nil
-			}
-			if err := config.PreflightClone(c, wafExtra); err != nil {
+			if err := validateRuntimeConfig(c); err != nil {
 				return err
 			}
 			data, err := config.Marshal(c)
@@ -752,7 +686,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	readyFlag.Set(true)
 
-	srv := server.New(cfg, log, factory, src, config.Validate)
+	srv := server.New(cfg, log, factory, src, validateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = acmeMgr
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
@@ -928,4 +862,47 @@ func adaptCerts(in []server.CertSummary) []admin.CertStatus {
 		})
 	}
 	return out
+}
+
+// validateRuntimeConfig performs a deep preflight of the configuration:
+// clones, expands secret references, validates structurally, and then
+// dry-runs every runtime component that could fail during serve/reload
+// (WAF rule compilation, auth initialisation, etc.).  The original config
+// is never modified.
+func validateRuntimeConfig(c *config.Config) error {
+	wafExtra := func(clone *config.Config) error {
+		if err := waf.Check(clone); err != nil {
+			return err
+		}
+		if waf.Compiled {
+			for i := range clone.Servers {
+				for j := range clone.Servers[i].Locations {
+					loc := clone.Servers[i].Locations[j]
+					wcfg, ok := effectiveWAF(clone, loc)
+					if !ok {
+						continue
+					}
+					if _, err := waf.New(wcfg, waf.Options{}); err != nil {
+						return fmt.Errorf("waf: %w", err)
+					}
+				}
+			}
+		}
+		authExtra := func(c2 *config.Config) error {
+			for i := range c2.Servers {
+				for j := range c2.Servers[i].Locations {
+					loc := c2.Servers[i].Locations[j]
+					if loc.Auth == nil {
+						continue
+					}
+					if _, err := auth.New(*loc.Auth, auth.Options{}); err != nil {
+						return fmt.Errorf("auth: %w", err)
+					}
+				}
+			}
+			return nil
+		}
+		return authExtra(clone)
+	}
+	return config.PreflightClone(c, wafExtra)
 }

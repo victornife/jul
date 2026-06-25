@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"jul/internal/auth"
 	"jul/internal/config"
 	"jul/internal/waf"
 )
@@ -804,9 +805,8 @@ func validateRaw(body []byte) error {
 		return err
 	}
 	// Preflight: expand secrets on a clone so structural checks (file paths,
-	// URLs) work against resolved values. In lean builds without the "waf" tag
-	// waf.New returns a clear error, so we only try it when the WAF is enabled
-	// and the binary supports it.
+	// URLs) work against resolved values, then dry-run every runtime component
+	// that can fail during reload (WAF rule compilation, auth init, etc.).
 	wafExtra := func(c *config.Config) error {
 		if !waf.Compiled {
 			return waf.Check(c)
@@ -820,6 +820,17 @@ func validateRaw(body []byte) error {
 				}
 				if _, err := waf.New(wcfg, waf.Options{}); err != nil {
 					return fmt.Errorf("waf: %w", err)
+				}
+			}
+		}
+		for i := range c.Servers {
+			for j := range c.Servers[i].Locations {
+				loc := c.Servers[i].Locations[j]
+				if loc.Auth == nil {
+					continue
+				}
+				if _, err := auth.New(*loc.Auth, auth.Options{}); err != nil {
+					return fmt.Errorf("auth: %w", err)
 				}
 			}
 		}

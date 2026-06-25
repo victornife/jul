@@ -142,7 +142,7 @@ func locationIndex(locs []config.LocationConfig) map[string]*config.LocationConf
 // reporting additions, removals, and per-field modifications with operational
 // consequences (action/target, auth, cache, compression, rate limit, body
 // size, proxy timeouts).
-func diffLocations(server string, before, after []config.LocationConfig, d *ConfigDiff) {
+func diffLocations(server string, before, after []config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, d *ConfigDiff) {
 	bs, as := locationIndex(before), locationIndex(after)
 	for _, key := range sortedKeys(as) {
 		a := as[key]
@@ -152,7 +152,7 @@ func diffLocations(server string, before, after []config.LocationConfig, d *Conf
 			d.add(DiffEntry{Kind: "location", Name: name, After: locationAction(a) + " → " + orNone(locationTarget(a)), Detail: "Add route " + key + " on " + server}, "route "+name)
 			continue
 		}
-		diffLocationFields(server, key, b, a, d)
+		diffLocationFields(server, key, b, a, beforeGlobWAF, afterGlobWAF, d)
 	}
 	for _, key := range sortedKeys(bs) {
 		if _, ok := as[key]; !ok {
@@ -164,7 +164,7 @@ func diffLocations(server string, before, after []config.LocationConfig, d *Conf
 	}
 }
 
-func diffLocationFields(server, key string, b, a *config.LocationConfig, d *ConfigDiff) {
+func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, d *ConfigDiff) {
 	name := server + " " + key
 
 	if locationAction(b) != locationAction(a) {
@@ -175,12 +175,14 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, d *Conf
 		d.warn("Changing the target of route %s on %s redirects matching traffic to a different backend or destination.", key, server)
 	}
 
-	// WAF toggle per location
-	bWAF := b.WAF != nil && b.WAF.Enabled
-	aWAF := a.WAF != nil && a.WAF.Enabled
-	if bWAF != aWAF {
+	// Effective WAF diff (inherits global policy when loc.WAF is nil).
+	bEffWAF := locationEffectiveWAF(b, beforeGlobWAF)
+	aEffWAF := locationEffectiveWAF(a, afterGlobWAF)
+	bWAFOn := bEffWAF != nil
+	aWAFOn := aEffWAF != nil
+	if bWAFOn != aWAFOn {
 		action := "Enable"
-		if !aWAF {
+		if !aWAFOn {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "waf", Name: name, Detail: fmt.Sprintf("%s WAF on route %s", action, key)}, "route "+name+" waf")
@@ -189,45 +191,44 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, d *Conf
 		} else {
 			d.warn("Disabling WAF on route %s on %s removes rule inspection for that route.", key, server)
 		}
-	} else if aWAF && bWAF {
-		// Both enabled — diff key fields
-		bw, aw := *b.WAF, *a.WAF
-		if bw.Mode != aw.Mode {
-			d.mod(DiffEntry{Kind: "waf", Name: name, Before: bw.Mode, After: aw.Mode, Detail: "Change WAF mode on route " + key}, "route "+name+" waf mode")
-			if bw.Mode == "block" && aw.Mode == "detect" {
+	} else if aWAFOn && bWAFOn {
+		// Both enabled — compare effective policy fields
+		if bEffWAF.Mode != aEffWAF.Mode {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: bEffWAF.Mode, After: aEffWAF.Mode, Detail: "Change WAF mode on route " + key}, "route "+name+" waf mode")
+			if bEffWAF.Mode == "block" && aEffWAF.Mode == "detect" {
 				d.warn("Switching WAF to detect mode on route %s on %s stops blocking threats.", key, server)
 			}
 		}
-		if bw.BlockStatus != aw.BlockStatus {
-			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bw.BlockStatus), After: fmt.Sprintf("%d", aw.BlockStatus), Detail: "Change WAF block status on route " + key}, "route "+name+" waf block_status")
+		if bEffWAF.BlockStatus != aEffWAF.BlockStatus {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bEffWAF.BlockStatus), After: fmt.Sprintf("%d", aEffWAF.BlockStatus), Detail: "Change WAF block status on route " + key}, "route "+name+" waf block_status")
 		}
-		if bw.Paranoia != aw.Paranoia {
-			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bw.Paranoia), After: fmt.Sprintf("%d", aw.Paranoia), Detail: "Change WAF paranoia level on route " + key}, "route "+name+" waf paranoia")
-			if aw.Paranoia < bw.Paranoia {
+		if bEffWAF.Paranoia != aEffWAF.Paranoia {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bEffWAF.Paranoia), After: fmt.Sprintf("%d", aEffWAF.Paranoia), Detail: "Change WAF paranoia level on route " + key}, "route "+name+" waf paranoia")
+			if aEffWAF.Paranoia < bEffWAF.Paranoia {
 				d.warn("Lowering WAF paranoia on route %s on %s reduces rule coverage.", key, server)
 			}
 		}
-		if bw.CRSEnabled != aw.CRSEnabled {
+		if bEffWAF.CRSEnabled != aEffWAF.CRSEnabled {
 			action := "Enable"
-			if !aw.CRSEnabled {
+			if !aEffWAF.CRSEnabled {
 				action = "Disable"
 			}
 			d.mod(DiffEntry{Kind: "waf", Name: name, Detail: fmt.Sprintf("%s CRS on route %s", action, key)}, "route "+name+" waf crs")
-			if !aw.CRSEnabled {
+			if !aEffWAF.CRSEnabled {
 				d.warn("Disabling CRS on route %s on %s removes the core rule set.", key, server)
 			}
 		}
-		if bw.RequestBodyLimit != aw.RequestBodyLimit {
-			d.mod(DiffEntry{Kind: "waf", Name: name, Before: sizeStr(bw.RequestBodyLimit), After: sizeStr(aw.RequestBodyLimit), Detail: "Change WAF request body limit on route " + key}, "route "+name+" waf body_limit")
-			if aw.RequestBodyLimit.Bytes() == 0 && bw.RequestBodyLimit.Bytes() != 0 {
+		if bEffWAF.RequestBodyLimit != aEffWAF.RequestBodyLimit {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: sizeStr(bEffWAF.RequestBodyLimit), After: sizeStr(aEffWAF.RequestBodyLimit), Detail: "Change WAF request body limit on route " + key}, "route "+name+" waf body_limit")
+			if aEffWAF.RequestBodyLimit.Bytes() == 0 && bEffWAF.RequestBodyLimit.Bytes() != 0 {
 				d.warn("Removing the WAF request body limit on route %s on %s allows arbitrarily large uploads to be inspected.", key, server)
 			}
 		}
-		bf, af := strings.Join(bw.DirectivesFiles, ","), strings.Join(aw.DirectivesFiles, ",")
+		bf, af := strings.Join(bEffWAF.DirectivesFiles, ","), strings.Join(aEffWAF.DirectivesFiles, ",")
 		if bf != af {
 			d.mod(DiffEntry{Kind: "waf", Name: name, Before: orNone(bf), After: orNone(af), Detail: "Change WAF directive files on route " + key}, "route "+name+" waf directives_files")
 		}
-		if strings.TrimSpace(bw.InlineRules) != strings.TrimSpace(aw.InlineRules) {
+		if strings.TrimSpace(bEffWAF.InlineRules) != strings.TrimSpace(aEffWAF.InlineRules) {
 			d.mod(DiffEntry{Kind: "waf", Name: name, Detail: "Change WAF inline rules on route " + key}, "route "+name+" waf inline_rules")
 		}
 	}
@@ -547,4 +548,21 @@ func diffSecretRefs(before, after *config.Config, d *ConfigDiff) {
 	if bN != aN {
 		d.mod(DiffEntry{Kind: "secrets", Name: "global", Before: fmt.Sprintf("%d", bN), After: fmt.Sprintf("%d", aN), Detail: "Change secret reference count"}, "secret refs")
 	}
+}
+
+// locationEffectiveWAF returns the WAF policy that applies to a location,
+// taking inheritance from the global policy into account.  If the location
+// does not define a WAF block at all, the global policy is returned (when
+// enabled).  A nil result means no WAF protection for this location.
+func locationEffectiveWAF(loc *config.LocationConfig, global config.WAFConfig) *config.WAFConfig {
+	if loc.WAF != nil {
+		if loc.WAF.Enabled {
+			return loc.WAF
+		}
+		return nil
+	}
+	if global.Enabled {
+		return &global
+	}
+	return nil
 }
