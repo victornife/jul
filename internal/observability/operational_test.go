@@ -10,6 +10,30 @@ import (
 
 // ── request samples (Milestone 5.1) ──────────────────────────────────────────
 
+func TestSanitizePathRedactsSensitiveSegments(t *testing.T) {
+	cases := map[string]string{
+		"/users/12345/profile":                        "/users/:id/profile",
+		"/orgs/acme/users/jane@example.com":           "/orgs/acme/users/:email",
+		"/files/550e8400-e29b-41d4-a716-446655440000": "/files/:id",
+		"/sessions/a1b2c3d4e5f6a7b8c9d0e1f2":          "/sessions/:id",
+		"/keys/sk-live-AbC123dEf456GhI789jkl":         "/keys/:token",
+		"/dashboard/settings":                         "/dashboard/settings",
+		"/":                                           "/",
+		"/api/v1/health":                              "/api/v1/health",
+	}
+	for in, want := range cases {
+		if got := sanitizePath(in); got != want {
+			t.Errorf("sanitizePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSanitizePathStripsQueryThenRedacts(t *testing.T) {
+	if got := sanitizePath("/users/99999?token=secret#frag"); got != "/users/:id" {
+		t.Errorf("got %q, want /users/:id", got)
+	}
+}
+
 func TestRequestSampleBufferNewestFirst(t *testing.T) {
 	b := newRequestSampleBuffer(8)
 	for i := 0; i < 3; i++ {

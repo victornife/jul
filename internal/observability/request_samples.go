@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -88,14 +89,65 @@ func (b *requestSampleBuffer) snapshot() []RequestSample {
 	return out
 }
 
+// Path-segment redaction patterns (P2-11). Poorly designed APIs embed IDs,
+// emails, tokens, and tenant names directly in the path, so even with the query
+// string removed a raw path can carry PII or secrets. We normalize high-entropy
+// or obviously-sensitive segments to coarse placeholders, which also collapses
+// per-entity paths into a single template (e.g. /users/:id) — better for the
+// failing-routes rollup and far safer to display in an admin console.
+var (
+	reUUID  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	reEmail = regexp.MustCompile(`^[^@\s/]+@[^@\s/]+\.[^@\s/]+$`)
+	reHex   = regexp.MustCompile(`^[0-9a-fA-F]{16,}$`)
+	reNum   = regexp.MustCompile(`^\d{3,}$`)
+	// A token-ish segment: long and mixing letters and digits (e.g. API keys,
+	// session ids, base64-ish blobs). Kept conservative to avoid masking normal
+	// resource names like "dashboard" or "settings".
+	reMixed = regexp.MustCompile(`^[A-Za-z0-9._-]{20,}$`)
+	reHasD  = regexp.MustCompile(`\d`)
+	reHasA  = regexp.MustCompile(`[A-Za-z]`)
+)
+
+// redactSegment maps a single path segment to a placeholder when it looks like
+// an identifier, email, or token; otherwise it returns the segment unchanged.
+func redactSegment(seg string) string {
+	switch {
+	case seg == "":
+		return seg
+	case reEmail.MatchString(seg):
+		return ":email"
+	case reUUID.MatchString(seg):
+		return ":id"
+	case reNum.MatchString(seg):
+		return ":id"
+	case reHex.MatchString(seg):
+		return ":id"
+	case reMixed.MatchString(seg) && reHasD.MatchString(seg) && reHasA.MatchString(seg):
+		return ":token"
+	default:
+		return seg
+	}
+}
+
 // sanitizePath strips any query string (defense in depth — r.URL.Path already
-// excludes it) and caps the stored length so the buffer cannot be bloated.
+// excludes it), redacts identifier/email/token-like segments to placeholders so
+// the stored path carries no PII or secrets, and caps the stored length so the
+// buffer cannot be bloated.
 func sanitizePath(path string) string {
 	if i := strings.IndexAny(path, "?#"); i >= 0 {
 		path = path[:i]
 	}
 	if path == "" {
 		return "/"
+	}
+	if strings.Contains(path, "/") {
+		segs := strings.Split(path, "/")
+		for i, seg := range segs {
+			segs[i] = redactSegment(seg)
+		}
+		path = strings.Join(segs, "/")
+	} else {
+		path = redactSegment(path)
 	}
 	if len(path) > samplePathMaxLen {
 		return path[:samplePathMaxLen]
