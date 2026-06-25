@@ -134,6 +134,21 @@ is the default and the most production-safe; raising it catches more subtle
 attacks at the cost of more false positives, which is why the recommended path
 is to raise paranoia in `detect` mode first.
 
+### `block_status` and the CRS
+
+Custom `block_status` (for example `block_status = 451`) is injected via a
+leading `SecDefaultAction` so that rules without an explicit `status:` action
+inherit it.  When the CRS is loaded (`crs_enabled = true`) the embedded
+`@crs-setup.conf.example` also defines `SecDefaultAction` for each phase.
+Because Coraza does **not** allow the same phase to be declared twice, Jul.IA
+does **not** emit its own `SecDefaultAction` when `crs_enabled = true`.  As a
+result CRS-triggered anomaly blocks use the status configured by the CRS setup
+(403 by default) rather than `block_status`.
+
+If you need a custom block status with the CRS, either:
+1. Apply a post-files override such as `SecDefaultAction` in `inline_rules`, or
+2. Set up a per-rule `status:` action inside a custom `directives_files` entry.
+
 ## Custom rules
 
 Bring your own SecLang rules with `directives_files` (paths on disk) and/or
