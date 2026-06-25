@@ -6,7 +6,7 @@ import { RouteEditor } from "@/features/routes/RouteEditor.tsx";
 import { RouteTester } from "@/features/routes/RouteTester.tsx";
 import { PageHeader, Button, EmptyState } from "@/components/ui.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
-import type { RouteDraft } from "@/lib/routeToml.ts";
+import { emptyAuthDraft, type RouteDraft } from "@/lib/routeToml.ts";
 
 const ACTION_COLORS: Record<string, string> = {
   proxy: "bg-jul-accent/15 text-jul-accent",
@@ -344,8 +344,7 @@ export function RoutesPanel() {
               listen: route.listen,
               serverNames: route.server_names?.join(", ") ?? "",
               path: loc.match,
-              matchType:
-                loc.type === "exact" || loc.type === "regex" ? loc.type : "prefix",
+              matchType: loc.type === "exact" || loc.type === "regex" ? loc.type : "prefix",
               action:
                 loc.action === "proxy" ||
                 loc.action === "static" ||
@@ -355,7 +354,12 @@ export function RoutesPanel() {
                   ? loc.action
                   : "proxy",
               target: loc.target ?? "",
-              auth: loc.auth,
+              // The route projection only reports whether auth is present, not
+              // which method or its parameters. When the source location had
+              // auth, preselect the CIDR method so the editor's warning prompts
+              // the operator to re-enter a concrete policy rather than silently
+              // carrying over an empty (allow-all) block; otherwise leave it off.
+              auth: loc.auth ? { ...emptyAuthDraft(), method: "cidr" } : emptyAuthDraft(),
               cache: loc.cache,
               rateLimit: loc.rate_limit,
             });

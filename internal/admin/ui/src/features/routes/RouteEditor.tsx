@@ -5,7 +5,11 @@ import { fetchRawConfig } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import {
   appendFragment,
+  authWarnings,
+  emptyAuthDraft,
   generateRouteToml,
+  type AuthDraft,
+  type AuthMethod,
   type RouteAction,
   type RouteDraft,
 } from "@/lib/routeToml.ts";
@@ -72,6 +76,142 @@ const ACTIONS: { value: RouteAction; label: string }[] = [
   { value: "return", label: "Return status" },
 ];
 
+const AUTH_METHODS: { value: AuthMethod; label: string; hint: string }[] = [
+  { value: "none", label: "No authentication", hint: "Anyone who matches the route is allowed." },
+  {
+    value: "cidr",
+    label: "IP allow / deny (CIDR)",
+    hint: "Permit or reject clients by IP range. Deny wins over allow.",
+  },
+  {
+    value: "basic",
+    label: "HTTP Basic (htpasswd)",
+    hint: "Username/password checked against a bcrypt htpasswd file.",
+  },
+  {
+    value: "jwt",
+    label: "JWT bearer (JWKS)",
+    hint: "Validate bearer tokens against an issuer's JWKS endpoint.",
+  },
+  {
+    value: "forward",
+    label: "Forward-auth (external)",
+    hint: "Delegate the decision to an external HTTP endpoint.",
+  },
+];
+
+/**
+ * AuthFields renders the method-specific inputs for the selected auth method.
+ * Picking a concrete method (instead of a bare on/off toggle) is what lets the
+ * editor emit auth TOML that actually enforces something — the old toggle
+ * emitted "auth = {}", which the server treats as allow-all.
+ */
+function AuthFields({
+  auth,
+  onChange,
+}: {
+  readonly auth: AuthDraft;
+  readonly onChange: (next: AuthDraft) => void;
+}) {
+  function patch<K extends keyof AuthDraft>(key: K, value: AuthDraft[K]): void {
+    onChange({ ...auth, [key]: value });
+  }
+  switch (auth.method) {
+    case "none":
+      return null;
+    case "cidr":
+      return (
+        <div className="space-y-3">
+          <TextField
+            label="Allow CIDRs"
+            hint="Comma- or space-separated, e.g. 10.0.0.0/8 192.168.1.0/24. Leave blank to allow all not denied."
+            value={auth.allow}
+            placeholder="10.0.0.0/8, 192.168.1.0/24"
+            onChange={(v) => {
+              patch("allow", v);
+            }}
+          />
+          <TextField
+            label="Deny CIDRs"
+            hint="Evaluated first; a match is rejected with 403."
+            value={auth.deny}
+            placeholder="203.0.113.0/24"
+            onChange={(v) => {
+              patch("deny", v);
+            }}
+          />
+        </div>
+      );
+    case "basic":
+      return (
+        <div className="space-y-3">
+          <TextField
+            label="htpasswd file"
+            hint="Path on the server to a bcrypt htpasswd file."
+            value={auth.basicFile}
+            placeholder="/etc/jul/htpasswd"
+            onChange={(v) => {
+              patch("basicFile", v);
+            }}
+          />
+          <TextField
+            label="Realm (optional)"
+            hint="Shown in the browser auth prompt. Defaults to “Restricted”."
+            value={auth.basicRealm}
+            placeholder="Restricted"
+            onChange={(v) => {
+              patch("basicRealm", v);
+            }}
+          />
+        </div>
+      );
+    case "jwt":
+      return (
+        <div className="space-y-3">
+          <TextField
+            label="JWKS URL"
+            hint="Must be https. The issuer's JSON Web Key Set endpoint."
+            value={auth.jwtJwksUrl}
+            placeholder="https://issuer.example/.well-known/jwks.json"
+            onChange={(v) => {
+              patch("jwtJwksUrl", v);
+            }}
+          />
+          <TextField
+            label="Issuer (optional)"
+            hint="When set, must equal the token's iss claim."
+            value={auth.jwtIssuer}
+            placeholder="https://issuer.example/"
+            onChange={(v) => {
+              patch("jwtIssuer", v);
+            }}
+          />
+          <TextField
+            label="Audience (optional)"
+            hint="When set, must be present in the token's aud claim."
+            value={auth.jwtAudience}
+            placeholder="api://jul"
+            onChange={(v) => {
+              patch("jwtAudience", v);
+            }}
+          />
+        </div>
+      );
+    case "forward":
+      return (
+        <TextField
+          label="Forward-auth URL"
+          hint="http(s) endpoint that receives a subrequest and approves or rejects it."
+          value={auth.forwardUrl}
+          placeholder="http://127.0.0.1:4181/auth"
+          onChange={(v) => {
+            patch("forwardUrl", v);
+          }}
+        />
+      );
+  }
+}
+
 function targetHint(action: RouteAction): { label: string; placeholder: string } | null {
   switch (action) {
     case "static":
@@ -107,7 +247,7 @@ export function RouteEditor({ initial, onClose }: RouteEditorProps) {
     matchType: initial?.matchType ?? "prefix",
     action: initial?.action ?? "proxy",
     target: initial?.target ?? "",
-    auth: initial?.auth ?? false,
+    auth: initial?.auth ?? emptyAuthDraft(),
     cache: initial?.cache ?? false,
     compression: initial?.compression ?? false,
     rateLimit: initial?.rateLimit ?? false,
@@ -116,6 +256,7 @@ export function RouteEditor({ initial, onClose }: RouteEditorProps) {
 
   const fragment = generateRouteToml(draft);
   const th = targetHint(draft.action);
+  const authWarn = authWarnings(draft.auth);
 
   function set<K extends keyof RouteDraft>(key: K, value: RouteDraft[K]): void {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -154,9 +295,9 @@ export function RouteEditor({ initial, onClose }: RouteEditorProps) {
     >
       <div className="space-y-5">
         <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
-          A route tells Jul what to do when an incoming request matches a host and path.
-          This editor builds the configuration for you; nothing is applied until you
-          review the diff and confirm in the editor.
+          A route tells Jul what to do when an incoming request matches a host and path. This editor
+          builds the configuration for you; nothing is applied until you review the diff and confirm
+          in the editor.
         </p>
 
         <TextField
@@ -231,13 +372,64 @@ export function RouteEditor({ initial, onClose }: RouteEditorProps) {
           />
         )}
 
+        <div className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-3">
+          <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+            Authentication
+          </span>
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-jul-text">Method</span>
+            <select
+              value={draft.auth.method}
+              onChange={(e) => {
+                set("auth", { ...draft.auth, method: e.target.value as AuthMethod });
+              }}
+              className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+            >
+              {AUTH_METHODS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-jul-muted">
+              {AUTH_METHODS.find((m) => m.value === draft.auth.method)?.hint}
+            </span>
+          </label>
+          <AuthFields
+            auth={draft.auth}
+            onChange={(next) => {
+              set("auth", next);
+            }}
+          />
+          {authWarn.length > 0 && (
+            <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2">
+              {authWarn.map((wn, i) => (
+                <p key={`aw-${String(i)}`} className="text-xs text-jul-warning">
+                  {wn}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
           <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
             Edge rules
           </span>
-          <Toggle label="Require auth" checked={draft.auth} onChange={(v) => { set("auth", v); }} />
-          <Toggle label="Cache responses" checked={draft.cache} onChange={(v) => { set("cache", v); }} />
-          <Toggle label="Rate limit" checked={draft.rateLimit} onChange={(v) => { set("rateLimit", v); }} />
+          <Toggle
+            label="Cache responses"
+            checked={draft.cache}
+            onChange={(v) => {
+              set("cache", v);
+            }}
+          />
+          <Toggle
+            label="Rate limit"
+            checked={draft.rateLimit}
+            onChange={(v) => {
+              set("rateLimit", v);
+            }}
+          />
         </div>
 
         <div className="space-y-1">

@@ -70,7 +70,12 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
   if (loc.action === "deny") lines.push("  deny = true");
   if (loc.cache) lines.push("  cache = true");
   if (loc.rate_limit) lines.push("  rate_limit = { enabled = true }");
-  if (loc.auth) lines.push("  auth = { }");
+  // The route projection reports only that an auth policy is present, not its
+  // method or parameters (which can carry secrets). Show a placeholder comment
+  // rather than a literal "auth = {}", which would read as a valid—but inert,
+  // allow-all—block and misrepresent the effective policy.
+  if (loc.auth)
+    lines.push("  # auth = { … }  (a policy is configured; see the raw config for details)");
   return lines.join("\n");
 }
 
@@ -121,13 +126,21 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           <Row label="Listener" value={<span className="font-mono">{route.listen}</span>} />
           <Row
             label="Host names"
-            value={route.server_names && route.server_names.length > 0 ? route.server_names.join(", ") : "any host"}
+            value={
+              route.server_names && route.server_names.length > 0
+                ? route.server_names.join(", ")
+                : "any host"
+            }
           />
           <Row label="Path match" value={<span className="font-mono">{loc.match}</span>} />
           <Row label="Match type" value={loc.type} />
           <Row label="Action" value={loc.action} />
-          {loc.target && <Row label="Target" value={<span className="font-mono">{loc.target}</span>} />}
-          {loc.upstream && <Row label="Upstream" value={<span className="font-mono">{loc.upstream}</span>} />}
+          {loc.target && (
+            <Row label="Target" value={<span className="font-mono">{loc.target}</span>} />
+          )}
+          {loc.upstream && (
+            <Row label="Upstream" value={<span className="font-mono">{loc.upstream}</span>} />
+          )}
           <Row
             label="TLS"
             value={route.tls?.enabled ? `enabled${route.tls.acme ? " (ACME)" : ""}` : "off"}
