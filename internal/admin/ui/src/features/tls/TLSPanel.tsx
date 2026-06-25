@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchTLS, type CertProjection } from "@/api/client.ts";
+import { PageHeader, Button } from "@/components/ui.tsx";
+import { TLSEditor } from "@/features/tls/TLSEditor.tsx";
 
 function daysLeftColor(days: number | undefined): string {
   if (days === undefined) return "text-jul-muted";
@@ -36,17 +39,13 @@ function CertCard({ cert }: { readonly cert: CertProjection }) {
         {cert.issuer && (
           <>
             <dt className="text-jul-muted">Issuer</dt>
-            <dd className="col-span-1 sm:col-span-2 font-mono text-jul-text">
-              {cert.issuer}
-            </dd>
+            <dd className="col-span-1 sm:col-span-2 font-mono text-jul-text">{cert.issuer}</dd>
           </>
         )}
         {cert.not_after && (
           <>
             <dt className="text-jul-muted">Expires</dt>
-            <dd className="col-span-1 sm:col-span-2 font-mono text-jul-text">
-              {cert.not_after}
-            </dd>
+            <dd className="col-span-1 sm:col-span-2 font-mono text-jul-text">{cert.not_after}</dd>
           </>
         )}
         {daysLeft !== undefined && (
@@ -63,6 +62,7 @@ function CertCard({ cert }: { readonly cert: CertProjection }) {
 }
 
 export function TLSPanel() {
+  const [creating, setCreating] = useState(false);
   const { data, isLoading, isError } = useQuery({
     queryKey: ["tls"],
     queryFn: fetchTLS,
@@ -71,29 +71,50 @@ export function TLSPanel() {
   if (isLoading) return <div className="text-jul-muted">Loading TLS certificates…</div>;
   if (isError || !data) return <div className="text-jul-danger">Failed to load TLS info.</div>;
 
-  const expiringSoon = data.filter(
-    (c) => c.days_left !== undefined && c.days_left <= 30,
-  );
+  const expiringSoon = data.filter((c) => c.days_left !== undefined && c.days_left <= 30);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">TLS &amp; Certificates</h1>
+      <PageHeader
+        title="TLS & Certificates"
+        description="Secure a listener with a certificate — automatically via ACME / Let's Encrypt, or with your own cert and key. The guided editor builds a TLS server block and routes it through the validated apply pipeline."
+        actions={
+          <Button
+            variant="primary"
+            onClick={() => {
+              setCreating(true);
+            }}
+          >
+            New TLS server
+          </Button>
+        }
+      />
 
       {expiringSoon.length > 0 && (
         <div className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm text-jul-warning">
-          ⚠ {expiringSoon.length} certificate{expiringSoon.length > 1 ? "s" : ""} expiring
-          within 30 days.
+          ⚠ {expiringSoon.length} certificate{expiringSoon.length > 1 ? "s" : ""} expiring within 30
+          days.
         </div>
       )}
 
       {data.length === 0 ? (
-        <p className="text-jul-muted text-sm">No TLS-enabled server blocks.</p>
+        <p className="text-jul-muted text-sm">
+          No TLS-enabled server blocks. Use “New TLS server” to add one.
+        </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {data.map((cert, i) => (
             <CertCard key={`${cert.server_names.join(",")}-${String(i)}`} cert={cert} />
           ))}
         </div>
+      )}
+
+      {creating && (
+        <TLSEditor
+          onClose={() => {
+            setCreating(false);
+          }}
+        />
       )}
     </div>
   );
