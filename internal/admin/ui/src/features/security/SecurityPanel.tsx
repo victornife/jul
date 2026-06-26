@@ -7,21 +7,21 @@ import { SecretHelper } from "@/features/security/SecretHelper.tsx";
 // wafIsMixed reports whether protected locations run a mix of block and detect
 // modes, in which case a single mode badge would mislead.
 function wafIsMixed(d: SecurityProjection): boolean {
-  return (d.waf_block_locs ?? 0) > 0 && (d.waf_detect_locs ?? 0) > 0;
+  return d.waf_block_locs > 0 && d.waf_detect_locs > 0;
 }
 
 // wafCoverageSummary describes how many locations the WAF protects and, when
 // the modes differ or the CRS is partially applied, the exact split — so the
 // panel reports the real posture rather than implying one uniform policy.
 function wafCoverageSummary(d: SecurityProjection): string {
-  const locs = `${d.waf_locations} location${d.waf_locations === 1 ? "" : "s"}`;
+  const locs = `${String(d.waf_locations)} location${d.waf_locations === 1 ? "" : "s"}`;
   const parts: string[] = [];
   if (wafIsMixed(d)) {
-    parts.push(`${d.waf_block_locs ?? 0} block, ${d.waf_detect_locs ?? 0} detect`);
+    parts.push(`${String(d.waf_block_locs)} block, ${String(d.waf_detect_locs)} detect`);
   }
-  const crs = d.waf_crs_locs ?? 0;
+  const crs = d.waf_crs_locs;
   if (crs > 0 && crs < d.waf_locations) {
-    parts.push(`CRS on ${crs}`);
+    parts.push(`CRS on ${String(crs)}`);
   } else if (crs > 0) {
     parts.push("CRS");
   }

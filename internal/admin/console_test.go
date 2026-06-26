@@ -11,8 +11,6 @@ import (
 	"jul/internal/config"
 )
 
-func boolPtr(b bool) *bool { return &b }
-
 // TestRootServesConsoleWhenEnabled verifies that with the console tag and
 // console enabled (the default), the admin root serves the console shell.
 func TestRootServesConsoleWhenEnabled(t *testing.T) {

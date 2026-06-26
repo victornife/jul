@@ -6,6 +6,11 @@ import (
 	"jul/internal/config"
 )
 
+// boolPtr returns a pointer to b, for building *bool patch fields in tests. It
+// lives here (an untagged test file) so both the default and -tags console test
+// builds can use it.
+func boolPtr(b bool) *bool { return &b }
+
 func patchTestConfig() *config.Config {
 	return &config.Config{
 		Servers: []config.ServerConfig{{
