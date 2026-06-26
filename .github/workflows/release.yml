@@ -1,0 +1,72 @@
+name: Release
+
+# Release gate: building a version tag publishes artifacts only after the full
+# build/test gate AND the ADR-0005 soak gate are green. A red soak blocks the
+# release job, so a regression cannot ship under a tag ("block tag on red").
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with .github/workflows/ci.yml `env.FULL_TAGS`.
+  FULL_TAGS: "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+
+jobs:
+  gate:
+    name: release gate (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go vet
+        run: go vet -tags "${{ env.FULL_TAGS }}" ./...
+      - name: go build
+        run: go build -tags "${{ env.FULL_TAGS }}" ./...
+      - name: go test
+        run: go test -tags "${{ env.FULL_TAGS }}" ./...
+
+  soak:
+    name: soak gate (ADR 0005)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # ADR 0005 reclassifies the long-running soak to a post-GA gate and makes a
+      # soak failure a release-blocking regression. This runs the soak harness for
+      # several minutes; a red run fails the job and blocks `release` below.
+      - name: soak
+        env:
+          SOAK_DURATION: 5m
+          SOAK_WORKERS: 32
+        run: scripts/soak.sh
+
+  release:
+    name: release
+    needs: [gate, soak]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Reaching here proves the build/test gate AND the ADR-0005 soak gate are
+      # green for this tag. Build the release binary and publish it as a workflow
+      # artifact; attaching it to a GitHub Release is wired here when publishing
+      # is enabled (needs `permissions: contents: write`).
+      - name: build release binary
+        run: go build -tags "${{ env.FULL_TAGS }}" -o jul ./cmd/jul
+      - name: upload release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: jul-${{ github.ref_name }}
+          path: jul

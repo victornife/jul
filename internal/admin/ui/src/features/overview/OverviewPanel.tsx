@@ -275,6 +275,24 @@ export function OverviewPanel() {
         </div>
       )}
 
+      {/* Durable audit-trail degraded (Fix8/P3-08): the audit sink could not be
+          opened or a write failed, so the compliance trail is not being
+          persisted. Recording still works in memory, so this is degraded — not
+          an outage — but it must be loud, not silent. */}
+      {data.audit_sink?.configured && !data.audit_sink.healthy && (
+        <div
+          role="alert"
+          className="rounded-lg border border-jul-danger/40 bg-jul-danger/10 px-4 py-3 text-sm text-jul-danger"
+        >
+          <span className="font-semibold">Durable audit trail degraded.</span>{" "}
+          Audit events are still recorded in memory, but the durable log is not
+          being written, so the trail will not survive a restart.{" "}
+          {data.audit_sink.error && (
+            <span className="text-jul-muted">{data.audit_sink.error}</span>
+          )}
+        </div>
+      )}
+
       {/* At-a-glance health summary (P3-14): coarse signals first, raw metric
           grids below for progressive disclosure. */}
       {summary.length > 0 && (

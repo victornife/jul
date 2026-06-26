@@ -741,8 +741,19 @@ type AdminConfig struct {
 	// file, in addition to the bounded in-memory ring buffer. This makes the
 	// audit trail survive restarts and ring-buffer overwrite, for compliance and
 	// incident review (P2-12). Empty disables the durable sink. The directory is
-	// created if missing; failures are logged and never block request handling.
+	// created if missing; a sink that cannot be opened or written is surfaced as
+	// a degraded audit_sink in the runtime overview rather than silently dropped,
+	// and never blocks request handling (P3-08 fail-loud).
 	AuditLogFile string `toml:"audit_log_file"`
+	// AuditLogRotateMaxMB is the size in megabytes at which the durable audit
+	// sink rotates to a timestamped backup. Defaults to 100 when a durable sink
+	// is configured. Only applies when AuditLogFile is set.
+	AuditLogRotateMaxMB int `toml:"audit_log_rotate_max_mb"`
+	// AuditLogRotateKeep bounds how many rotated audit backups are retained;
+	// older backups are pruned. Defaults to 14 when a durable sink is configured.
+	// Audit logs are intentionally not deleted by age (no MaxAge): retention is
+	// governed only by size and backup count so a quiet system keeps its trail.
+	AuditLogRotateKeep int `toml:"audit_log_rotate_keep"`
 }
 
 // ConsoleEnabled reports whether the web console should be served: it defaults

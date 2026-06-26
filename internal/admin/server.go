@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -115,6 +116,10 @@ type Server struct {
 	health   *consoleHealth
 	quit     chan struct{}
 	httpd    *http.Server
+	// applyMu serializes config writes (raw apply and structured patch apply) so
+	// optimistic-concurrency checks and the write they guard are atomic, closing
+	// the read-modify-write race between concurrent edits (P2-12).
+	applyMu sync.Mutex
 }
 
 // New builds an admin Server from config. It returns nil when admin is
@@ -131,7 +136,7 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		hub:      newHub(),
 		limiter:  newAdminLimiter(log, cfg.RateLimitReadPerMin, cfg.RateLimitWritePerMin, cfg.RateLimitApplyPerMin, cfg.MaxEventConns),
 		timeline: newEventHistory(timelineCap),
-		audit:    newAuditLogWithSink(auditCap, cfg.AuditLogFile, log),
+		audit:    newAuditLogWithSink(auditCap, cfg.AuditLogFile, cfg.AuditLogRotateMaxMB, cfg.AuditLogRotateKeep, log),
 		health:   newConsoleHealth(),
 		quit:     make(chan struct{}),
 	}
@@ -213,6 +218,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/config/diff", s.auth(http.HandlerFunc(s.handleConfigDiff)))
 	mux.Handle("/api/config/apply", s.auth(http.HandlerFunc(s.handleConfigApply)))
 	mux.Handle("/api/config/patch", s.auth(http.HandlerFunc(s.handleConfigPatch)))
+	mux.Handle("/api/config/patch/apply", s.auth(http.HandlerFunc(s.handleConfigPatchApply)))
 	mux.Handle("/api/config/history", s.auth(http.HandlerFunc(s.handleConfigHistoryList)))
 	mux.Handle("/api/config/history/{id}", s.auth(http.HandlerFunc(s.handleConfigHistoryGet)))
 	mux.Handle("/api/config/rollback", s.auth(http.HandlerFunc(s.handleConfigRollback)))

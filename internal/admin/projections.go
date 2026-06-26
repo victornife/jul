@@ -170,6 +170,11 @@ type RuntimeOverview struct {
 	// listeners reload asynchronously after the HTTP swap, the console surfaces
 	// the outcome here (polled) rather than in the apply response.
 	StreamStatus string `json:"stream_status,omitempty"`
+	// AuditSink reports durable audit-trail health (P3-08). It is present only
+	// when a durable audit sink is configured, so an operator can see at a glance
+	// whether the compliance trail is actually being persisted; a degraded sink
+	// (open or write failure) is surfaced here rather than silently dropped.
+	AuditSink *AuditSinkStatus `json:"audit_sink,omitempty"`
 }
 
 // ── Projection helpers ──────────────────────────────────────────────────────

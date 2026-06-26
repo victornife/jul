@@ -152,6 +152,12 @@ func Validate(c *Config) error {
 		if c.Admin.HistoryKeep < 0 {
 			errs = append(errs, errors.New("[admin] 'history_keep' must not be negative"))
 		}
+		if c.Admin.AuditLogRotateMaxMB < 0 {
+			errs = append(errs, errors.New("[admin] 'audit_log_rotate_max_mb' must not be negative"))
+		}
+		if c.Admin.AuditLogRotateKeep < 0 {
+			errs = append(errs, errors.New("[admin] 'audit_log_rotate_keep' must not be negative"))
+		}
 	}
 
 	errs = append(errs, validateCompression(c.Compression)...)

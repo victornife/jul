@@ -193,12 +193,23 @@ restarts and ring-buffer overwrite:
 ```toml
 [admin]
 audit_log_file = "./jul-data/audit.jsonl"   # append-only JSONL; one event per line
+audit_log_rotate_max_mb = 100               # rotate to a backup at this size (default 100)
+audit_log_rotate_keep = 14                  # retained rotated backups (default 14)
 ```
 
 Each event is appended as one JSON object per line, after the same redaction
-applied to the in-memory copy. The parent directory is created if missing; if
-the sink cannot be opened the server logs a warning and continues with the
-in-memory buffer rather than failing startup. Actor identity is currently the
+applied to the in-memory copy. The parent directory is created if missing. The
+sink rotates at `audit_log_rotate_max_mb` and retains `audit_log_rotate_keep`
+timestamped backups; rotation is by size and count only — backups are never
+deleted by age, so a quiet system keeps its full trail.
+
+The durable sink is **fail-loud**: if the file cannot be opened at startup, or a
+write fails later, the server keeps recording in memory (so the admin API is
+never taken down) **and** surfaces a degraded `audit_sink` on the runtime
+overview (`GET /api/runtime/overview`), which the Console renders as a banner —
+rather than silently dropping the trail. Durability favors immediate writes over
+per-event `fsync`: events are written as they happen but not flushed to stable
+storage on every record, an explicit trade-off. Actor identity is currently the
 shared-token `"operator"`; per-user attribution arrives with RBAC/SSO.
 
 ## Security model

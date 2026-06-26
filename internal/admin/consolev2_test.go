@@ -146,6 +146,79 @@ func TestRuntimeOverviewMethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestRuntimeOverviewAuditSinkHealthy proves a configured, writable durable
+// audit sink surfaces a healthy audit_sink on the overview (P3-08).
+func TestRuntimeOverviewAuditSinkHealthy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	cfg := &config.Config{}
+	s := newTestServer(t, config.AdminConfig{AuditLogFile: path}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.AuditSink == nil {
+		t.Fatal("audit_sink should be present when a durable sink is configured")
+	}
+	if !out.AuditSink.Configured || !out.AuditSink.Healthy {
+		t.Errorf("audit_sink = %+v, want configured+healthy", out.AuditSink)
+	}
+}
+
+// TestRuntimeOverviewAuditSinkDegraded proves an unopenable durable sink is
+// surfaced as a degraded audit_sink rather than silently dropped (P3-08).
+func TestRuntimeOverviewAuditSinkDegraded(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed blocker: %v", err)
+	}
+	cfg := &config.Config{}
+	s := newTestServer(t, config.AdminConfig{AuditLogFile: filepath.Join(blocker, "audit.jsonl")}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.AuditSink == nil {
+		t.Fatal("audit_sink should be present when a durable sink is configured")
+	}
+	if out.AuditSink.Healthy {
+		t.Error("audit_sink.healthy = true, want false for an unopenable sink")
+	}
+	if out.AuditSink.Error == "" {
+		t.Error("audit_sink.error should explain the degradation")
+	}
+}
+
+// TestRuntimeOverviewAuditSinkOmitted proves the field is omitted entirely when
+// no durable audit sink is configured (the common in-memory-only case).
+func TestRuntimeOverviewAuditSinkOmitted(t *testing.T) {
+	cfg := &config.Config{}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), "audit_sink") {
+		t.Errorf("audit_sink should be omitted, body = %s", rr.Body.String())
+	}
+}
+
 // ── /api/routes ──────────────────────────────────────────────────────────────
 
 func TestRoutesProjection(t *testing.T) {
@@ -607,6 +680,212 @@ func TestConfigPatchPreviewValidCandidateHasNoErrors(t *testing.T) {
 	}
 	if len(out.ValidationErrors) != 0 {
 		t.Errorf("validation_errors = %+v, want none for a valid candidate", out.ValidationErrors)
+	}
+}
+
+// ── /api/config/patch/apply (server-side atomic batch + conflict) ─────────────
+
+// v2ProxyWriteServer is a file-backed harness seeded with a proxy config (one
+// location at prefix "/") so structured patch-apply tests can persist
+// route_set_target edits and observe them survive a reload-from-disk. The seed
+// is produced via ProxyTarget so it carries full defaults and passes Validate.
+func v2ProxyWriteServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), "server.toml")
+	seed, err := config.Marshal(config.ProxyTarget("127.0.0.1:9000", ":8080"))
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, seed, 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	deps := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		WriteConfigRaw: func(data []byte) error {
+			c, err := config.Parse(data)
+			if err != nil {
+				return err
+			}
+			if err := config.Validate(c); err != nil {
+				return err
+			}
+			return os.WriteFile(cfgPath, data, 0o644)
+		},
+		LoadConfig: func() (*config.Config, error) {
+			raw, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return nil, err
+			}
+			return config.Parse(raw)
+		},
+	}
+	cfg := config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}
+	return newTestServer(t, cfg, deps), cfgPath
+}
+
+// TestConfigPatchApplyPersistsAtomically proves the server-side apply computes
+// the edit entirely from a freshly-loaded config and persists it through the
+// validated preflight, returning a fresh version the client can use for the
+// next optimistic-concurrency check.
+func TestConfigPatchApplyPersistsAtomically(t *testing.T) {
+	s, cfgPath := v2ProxyWriteServer(t)
+	body, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{
+		{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9100"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		OK            bool   `json:"ok"`
+		PendingReload bool   `json:"pending_reload"`
+		Version       string `json:"version"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK || !out.PendingReload {
+		t.Fatalf("ok=%v pending_reload=%v, want both true", out.OK, out.PendingReload)
+	}
+	if out.Version == "" {
+		t.Error("version should be returned for the next optimistic-concurrency check")
+	}
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	c, err := config.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse back: %v", err)
+	}
+	if got := c.Servers[0].Locations[0].ProxyPass; got != "http://127.0.0.1:9100" {
+		t.Errorf("proxy_pass = %q, want the patched target persisted", got)
+	}
+}
+
+// TestConfigPatchApplyRejectsStaleBaseVersion proves optimistic concurrency: an
+// apply carrying a base version that no longer matches the live config is
+// rejected with 409 and writes nothing, so a stale edit cannot clobber a
+// concurrent change.
+func TestConfigPatchApplyRejectsStaleBaseVersion(t *testing.T) {
+	s, cfgPath := v2ProxyWriteServer(t)
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+	body, err := json.Marshal(patchApplyRequest{
+		BaseVersion: "deadbeefdeadbeef",
+		Ops: []patchRequest{
+			{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9100"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+	var out conflictResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.Conflict || out.CurrentVersion == "" {
+		t.Errorf("conflict body = %+v, want conflict=true and a current_version", out)
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("config was modified despite a stale-version conflict")
+	}
+}
+
+// TestConfigPatchApplyAcceptsMatchingBaseVersion proves the preview's
+// base_version round-trips: applying with the version the preview reported is
+// accepted, confirming preview and apply agree on the config fingerprint.
+func TestConfigPatchApplyAcceptsMatchingBaseVersion(t *testing.T) {
+	s, _ := v2ProxyWriteServer(t)
+	op := patchRequest{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9100"}
+
+	pv, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal preview: %v", err)
+	}
+	prr := httptest.NewRecorder()
+	s.routes().ServeHTTP(prr, httptest.NewRequest(http.MethodPost, "/api/config/patch", bytes.NewReader(pv)))
+	if prr.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want 200; body: %s", prr.Code, prr.Body.String())
+	}
+	var preview struct {
+		BaseVersion string `json:"base_version"`
+	}
+	if err := json.Unmarshal(prr.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if preview.BaseVersion == "" {
+		t.Fatal("preview did not return base_version")
+	}
+
+	body, err := json.Marshal(patchApplyRequest{BaseVersion: preview.BaseVersion, Ops: []patchRequest{op}})
+	if err != nil {
+		t.Fatalf("marshal apply: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("apply status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestConfigPatchApplyAbortsBatchOnBadOp proves the batch is all-or-nothing: a
+// later op that cannot be applied aborts the whole apply with 400 and persists
+// nothing, even though an earlier op in the batch was valid.
+func TestConfigPatchApplyAbortsBatchOnBadOp(t *testing.T) {
+	s, cfgPath := v2ProxyWriteServer(t)
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+	body, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{
+		{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9100"},
+		{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/nonexistent", Target: "http://127.0.0.1:9200"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("config was modified despite a failing op in the batch (not atomic)")
+	}
+}
+
+// TestConfigPatchApplyRejectsEmptyOps proves an apply with no operations is a
+// client error rather than a no-op write.
+func TestConfigPatchApplyRejectsEmptyOps(t *testing.T) {
+	s, _ := v2ProxyWriteServer(t)
+	body, err := json.Marshal(patchApplyRequest{Ops: nil})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
 	}
 }
 

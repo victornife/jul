@@ -103,6 +103,17 @@ export const TrafficSourcesSchema = z.object({
 });
 export type TrafficSources = z.infer<typeof TrafficSourcesSchema>;
 
+// AuditSinkStatus mirrors the backend AuditSinkStatus: the health of the durable
+// audit trail, surfaced so a broken sink is visible rather than silently dropped.
+export const AuditSinkStatusSchema = z.object({
+  configured: z.boolean(),
+  path: z.string().optional(),
+  healthy: z.boolean(),
+  error: z.string().optional(),
+  write_failures: z.number().optional(),
+});
+export type AuditSinkStatus = z.infer<typeof AuditSinkStatusSchema>;
+
 export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
@@ -114,6 +125,10 @@ export const OverviewSchema = z.object({
   // listeners reload asynchronously after the HTTP swap, so this is the only
   // truthful signal of their state and is surfaced by polling.
   stream_status: z.string().optional(),
+  // audit_sink reports durable audit-trail health (P3-08). Present only when a
+  // durable audit sink is configured; a degraded sink (open or write failure)
+  // is surfaced here so the broken compliance trail is visible, not silent.
+  audit_sink: AuditSinkStatusSchema.optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 
@@ -452,6 +467,10 @@ export const PatchResultSchema = z.object({
   summary: z.string(),
   candidate: z.string(),
   diff: ConfigDiffSchema,
+  // base_version fingerprints the config this candidate was computed from. The
+  // UI echoes it back to applyPatchBatch so a stale edit is rejected (409)
+  // instead of silently clobbering a concurrent change.
+  base_version: z.string().optional(),
   // validation_errors is present when the candidate fails the cheap preview
   // validation (parse + structural/WAF/auth checks). The edit still produced a
   // diff, but applying it would be rejected — the UI surfaces these as warnings.
@@ -567,6 +586,95 @@ export async function applyConfig(candidate: string): Promise<ApplyResult> {
     throw new ApiError("/config/apply", resp.status, `${String(resp.status)} ${resp.statusText}`);
   }
   return ApplyResultSchema.parse(data);
+}
+
+// ConfigConflictError is thrown when applyPatchBatch is rejected with 409
+// because the live config changed since the edit was prepared. currentVersion
+// lets the caller reload, recompute, and retry.
+export class ConfigConflictError extends Error {
+  constructor(
+    message: string,
+    public readonly currentVersion?: string,
+  ) {
+    super(message);
+    this.name = "ConfigConflictError";
+  }
+}
+
+const ConflictBodySchema = z.object({
+  conflict: z.boolean().optional(),
+  message: z.string().optional(),
+  current_version: z.string().optional(),
+});
+
+export const PatchApplyResultSchema = z.object({
+  ok: z.literal(true),
+  // pending_reload mirrors applyConfig: persisted and validated, but the live
+  // runtime swap is asynchronous.
+  pending_reload: z.boolean().optional(),
+  // version is the fresh config fingerprint for the next optimistic-concurrency
+  // check after this apply lands.
+  version: z.string().optional(),
+  summary: z.array(z.string()),
+  diff: ConfigDiffSchema,
+  message: z.string().optional(),
+});
+export type PatchApplyResult = z.infer<typeof PatchApplyResultSchema>;
+
+/**
+ * Applies a batch of structured edits server-side, atomically. The server
+ * recomputes every op from a freshly-loaded config and persists the result
+ * through the authoritative write path, so the client never renders or trusts a
+ * candidate. When baseVersion is supplied and the live config has since changed,
+ * the apply is rejected with ConfigConflictError (optimistic concurrency).
+ * Rejects with ConfigRejectedError when an op cannot be applied or the result is
+ * invalid, or ApiError on transport failure.
+ */
+export async function applyPatchBatch(
+  ops: ConfigPatch[],
+  baseVersion?: string,
+): Promise<PatchApplyResult> {
+  const headers = new Headers();
+  headers.set("Accept", "application/json");
+  headers.set("Content-Type", "application/json");
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/config/patch/apply", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ base_version: baseVersion, ops }),
+  });
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
+    if (resp.status === 409) {
+      const conflict = ConflictBodySchema.safeParse(data);
+      throw new ConfigConflictError(
+        conflict.success && conflict.data.message
+          ? conflict.data.message
+          : "The configuration changed since this edit was prepared; reload and try again.",
+        conflict.success ? conflict.data.current_version : undefined,
+      );
+    }
+    const rejected = ValidationResultSchema.safeParse(data);
+    if (rejected.success) {
+      throw new ConfigRejectedError(
+        rejected.data.message ?? "The edit was rejected.",
+        rejected.data.errors ?? [],
+      );
+    }
+    throw new ApiError(
+      "/config/patch/apply",
+      resp.status,
+      `${String(resp.status)} ${resp.statusText}`,
+    );
+  }
+  return PatchApplyResultSchema.parse(data);
 }
 
 export const WizardInputSchema = z.object({

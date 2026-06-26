@@ -128,6 +128,26 @@ jobs:
           path: '**/testdata/fuzz/**'
           if-no-files-found: ignore
 
+  soak:
+    name: soak (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Smoke run of the ADR-0005 soak gate: a short, sustained burst through the
+      # reverse-proxy data path must complete with zero request errors, a steady
+      # goroutine count, and bounded heap growth. This keeps the soak harness from
+      # rotting between releases; the full multi-minute gate runs on a version tag
+      # in .github/workflows/release.yml.
+      - name: run soak harness (smoke)
+        env:
+          SOAK_DURATION: 20s
+          SOAK_WORKERS: 24
+        run: scripts/soak.sh
+
   format:
     name: gofmt
     runs-on: ubuntu-latest

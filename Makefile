@@ -1,4 +1,4 @@
-.PHONY: build test bench fuzz format lint vulncheck clean \
+.PHONY: build test bench fuzz soak format lint vulncheck clean \
         console-dev console-build console-check build-console
 
 # ── Default ──────────────────────────────────────────────────────────
@@ -13,6 +13,11 @@ bench:
 
 fuzz:
 	scripts/fuzz.sh
+
+# Post-GA soak gate (ADR 0005). Override SOAK_DURATION/SOAK_WORKERS for a longer,
+# release-style run, e.g. `SOAK_DURATION=5m SOAK_WORKERS=32 make soak`.
+soak:
+	scripts/soak.sh
 
 format:
 	gofmt -w .

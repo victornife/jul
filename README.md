@@ -1,5 +1,7 @@
 # Jul.IA
 
+[![CI](https://github.com/victornife/jul/actions/workflows/ci.yml/badge.svg)](https://github.com/victornife/jul/actions/workflows/ci.yml)
+
 **Jul.IA** is an NGINX-inspired HTTP edge server written in Go and configured
 entirely through TOML. It bundles reverse-proxying with load balancing, static
 file serving, FastCGI/uWSGI application gateways, a two-tier response cache, TLS

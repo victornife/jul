@@ -67,6 +67,24 @@ describe("OverviewSchema", () => {
     });
     expect(result.stream_status).toMatch(/^failed:/);
   });
+
+  it("parses a degraded audit_sink health report", () => {
+    const result = OverviewSchema.parse({
+      product: "Jul.IA",
+      version: "1.0.0",
+      status: [],
+      audit_sink: {
+        configured: true,
+        path: "/var/log/jul/audit.jsonl",
+        healthy: false,
+        error: "open /var/log/jul/audit.jsonl: permission denied",
+        write_failures: 3,
+      },
+    });
+    expect(result.audit_sink?.configured).toBe(true);
+    expect(result.audit_sink?.healthy).toBe(false);
+    expect(result.audit_sink?.write_failures).toBe(3);
+  });
 });
 
 describe("RouteProjectionSchema", () => {

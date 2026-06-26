@@ -721,6 +721,9 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	if s.deps.StreamStatus != nil {
 		out.StreamStatus = s.deps.StreamStatus()
 	}
+	if s.audit != nil {
+		out.AuditSink = s.audit.statusReport()
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -927,6 +930,11 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// Serialize with the structured-patch apply path so concurrent writes cannot
+	// interleave (P2-12): the snapshot, write, and history record are atomic.
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
 	// Snapshot the current config before applying so the apply is reversible.
 	prev := s.currentRaw()
 

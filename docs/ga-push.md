@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.10 · Updated 2026-06-24
+> Version 1.11 · Updated 2026-06-26
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -46,6 +46,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Freeze v1 config/API + semver policy ([docs/compatibility.md](compatibility.md)) | **4** for every feature | M | ✅ |
 | Perf-gate benchmark harness ([scripts/bench.sh](../scripts/bench.sh)) + [CI job](../.github/workflows/ci.yml) | hosts **2** | M | ✅ |
 | Fuzz corpus + CI fuzz job ([scripts/fuzz.sh](../scripts/fuzz.sh)) | hosts **8** | S–M | ✅ |
+| Soak harness + release gate ([scripts/soak.sh](../scripts/soak.sh)) + [CI smoke](../.github/workflows/ci.yml) + [release gate](../.github/workflows/release.yml) | enforces **5** (post-GA) | S–M | ✅ |
 | [`SECURITY.md`](../SECURITY.md) umbrella threat model | anchors **7** | S | ✅ |
 
 ## Wave 1 — P0 (foundation + quick wins)
@@ -86,7 +87,13 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 ## Soak tracking (post-GA gate, per ADR 0005)
 
 The one deferred criterion. A GA feature is added here and its soak run tracked;
-a soak failure is a release-blocking regression.
+a soak failure is a release-blocking regression. The gate is **enforced**, not
+just asserted: [scripts/soak.sh](../scripts/soak.sh) runs the in-tree `TestSoak`
+(sustained traffic through the reverse-proxy data path with zero-error,
+steady-goroutine, and bounded-heap assertions), a `soak (smoke)` [CI job](../.github/workflows/ci.yml)
+keeps the harness green on every push, and the [release workflow](../.github/workflows/release.yml)
+runs the full multi-minute soak on a version tag — a red soak blocks the release
+job (block tag on red).
 
 | Feature | GA on | Soak status |
 | --- | --- | --- |
@@ -102,6 +109,7 @@ a soak failure is a release-blocking regression.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-26 | 1.11 | **Cross-cutting: soak harness + enforced release gate** (makes criterion ⑤ a real gate, per [ADR 0005](adr/0005-soak-post-ga-gate.md)). Added [scripts/soak.sh](../scripts/soak.sh) wrapping an in-tree `TestSoak` (behind the `soak` build tag) that drives sustained concurrent traffic through the reverse-proxy data path and asserts zero request errors, a steady goroutine count, and bounded post-GC heap growth (a leak gate); a `soak (smoke)` [CI job](../.github/workflows/ci.yml) runs a short burst on every push so the harness cannot rot; and a tag-triggered [release workflow](../.github/workflows/release.yml) runs the full multi-minute soak and gates the release job on it — a red soak blocks the tagged release. Added a CI status badge to the [README](../README.md). | The waves, the bar, and the GA — soak-pending features; soak stays a post-GA gate (ADR 0005) — it is now enforced rather than only tracked in prose. | [scripts/soak.sh](../scripts/soak.sh), [.github/workflows/release.yml](../.github/workflows/release.yml), [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
 | 2026-06-24 | 1.10 | Added the two newly shipped **Beta** features to Wave 2: **Y2-06 WAF** (`waf`) and **SEC-1 secrets references** (core). Both ship with docs ([waf.md](waf.md), [secrets.md](secrets.md)) and a Console surface (⑥ + ⑨ met); their remaining GA gaps are the behaviour matrix (①), a benchmark (②), and a threat note (⑦). ⑧ is **n/a** for both (Coraza owns SecLang parsing; secret references reuse the config parser). | The waves, the bar, and the GA — soak-pending features; soak stays a post-GA gate (ADR 0005). | [waf.md](waf.md), [secrets.md](secrets.md), [status.md](status.md) |
 | 2026-06-23 | 1.9 | **Console (Y1-07 · Y2-09) → GA — soak pending.** The embedded-SPA substrate cutover (React/TS/Vite, Node-free build, ~250 KB gz budget) flips the v2 console to the default admin UI at `/`, retires the hand-written v1 (`console.html`) and its dev route, and closes the last two Console GA gaps — ① the endpoint/panel matrix and ⑦ the formalised CSP-nonce + constant-time bearer security model. Added Console to the soak-tracking table. | The waves, the bar, and the remaining ☐ features; soak stays a post-GA gate (ADR 0005); ⑧ stays **n/a** (the console adds no custom parser). | [console.md](console.md), [console-v2 spec](../specs/console-v2.md), [status.md](status.md) |
 | 2026-06-21 | 1.7 | **Cross-cutting: `SECURITY.md` umbrella threat model** (anchors criterion ⑦ fleet-wide). Added a top-level [SECURITY.md](../SECURITY.md): the edge trust model (config trusted, requests untrusted, no request-selected upstreams/JWKS), hardening defaults, a per-feature threat-note index (Core HTTP, auth, TLS/ACME, mTLS, gRPC transcoding/passthrough, console), the fuzzed-parser inventory, a cryptography summary, and a private vulnerability-reporting policy. **This completes all four cross-cutting tasks** — every GA criterion is now hosted/anchored fleet-wide. | Every feature's runtime behaviour and per-feature threat notes (the umbrella only indexes + links them); the waves and the bar. | [SECURITY.md](../SECURITY.md) |

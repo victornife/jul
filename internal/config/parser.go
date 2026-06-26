@@ -159,6 +159,18 @@ func (c *Config) applyDefaults() {
 		if c.Admin.MaxEventConns == 0 {
 			c.Admin.MaxEventConns = 4
 		}
+		// Durable audit-sink rotation defaults (P3-08). Only meaningful when a
+		// durable path is configured; a zero value adopts the default. Audit
+		// retention favors keeping the trail, so the backup count is generous
+		// and age-based deletion is left disabled.
+		if c.Admin.AuditLogFile != "" {
+			if c.Admin.AuditLogRotateMaxMB == 0 {
+				c.Admin.AuditLogRotateMaxMB = 100
+			}
+			if c.Admin.AuditLogRotateKeep == 0 {
+				c.Admin.AuditLogRotateKeep = 14
+			}
+		}
 	}
 
 	if c.Cache.Enabled {

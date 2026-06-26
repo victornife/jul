@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/csv"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // auditCap bounds the number of audit events retained in the in-memory ring
@@ -36,7 +39,13 @@ type AuditEvent struct {
 // auditLog is a fixed-size ring buffer of audit events with a monotonic id and
 // an optional durable JSONL sink. The ring buffer keeps recent events cheap to
 // query for the console; the sink (when configured) appends every event to a
-// file so the trail survives restarts and ring overwrite (P2-12).
+// rotating file so the trail survives restarts and ring overwrite (P2-12).
+//
+// The sink is fail-loud (P3-08): a path that cannot be opened at startup or a
+// write that fails later is recorded as a degraded status surfaced in the
+// runtime overview, rather than being silently dropped. Durability is favored
+// over per-write fsync — events are written immediately but not flushed to
+// stable storage on every record, an explicit, documented trade-off.
 type auditLog struct {
 	mu     sync.Mutex
 	buf    []AuditEvent
@@ -44,8 +53,29 @@ type auditLog struct {
 	full   bool
 	nextID int64
 
-	sink *os.File     // nil when no durable sink is configured
-	log  *slog.Logger // for sink write errors; nil-safe via helper
+	sinkPath      string         // configured durable path; "" when no sink requested
+	sink          io.WriteCloser // rotating JSONL sink; nil when unconfigured or degraded
+	sinkErr       error          // why the sink is unavailable (open failure), if any
+	writeErr      error          // most recent write failure, if any
+	writeFailures int            // count of failed durable writes since startup
+	log           *slog.Logger   // for sink errors; nil-safe via helper
+}
+
+// AuditSinkStatus reports the health of the durable audit sink so a broken or
+// degraded compliance trail is visible in the Console rather than silently
+// dropped (P3-08). It is omitted from the overview when no durable sink is
+// configured.
+type AuditSinkStatus struct {
+	// Configured is true when a durable audit path is set in [admin].
+	Configured bool `json:"configured"`
+	// Path is the configured durable audit-log file.
+	Path string `json:"path,omitempty"`
+	// Healthy is true when the sink is open and the last write succeeded.
+	Healthy bool `json:"healthy"`
+	// Error explains why the sink is degraded (open failure or last write error).
+	Error string `json:"error,omitempty"`
+	// WriteFailures counts durable writes that failed since startup.
+	WriteFailures int `json:"write_failures,omitempty"`
 }
 
 func newAuditLog(capacity int) *auditLog {
@@ -56,28 +86,47 @@ func newAuditLog(capacity int) *auditLog {
 }
 
 // newAuditLogWithSink builds an audit log that also appends every event as JSONL
-// to path. The directory is created if missing. A failure to open the sink is
-// logged and degrades to the in-memory-only ring buffer rather than failing
-// startup, so a misconfigured durable path never takes the admin API down.
-func newAuditLogWithSink(capacity int, path string, log *slog.Logger) *auditLog {
+// to path, rotating at maxMB megabytes and retaining keep backups. The directory
+// is created if missing. A path that cannot be opened degrades to the in-memory
+// ring buffer AND records the failure as a degraded sink status (surfaced in the
+// runtime overview) so a misconfigured durable path is loud, not silent, while
+// never taking the admin API down.
+func newAuditLogWithSink(capacity int, path string, maxMB, keep int, log *slog.Logger) *auditLog {
 	a := newAuditLog(capacity)
 	a.log = log
 	if strings.TrimSpace(path) == "" {
 		return a
 	}
+	a.sinkPath = path
+	// Eagerly verify the sink is writable so a misconfigured path is surfaced at
+	// startup rather than only when the first event would have been persisted.
+	if err := ensureAuditSinkWritable(path); err != nil {
+		a.sinkErr = err
+		auditLogWarn(log, "audit sink unavailable; durable trail disabled", path, err)
+		return a
+	}
+	a.sink = &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    maxMB,
+		MaxBackups: keep,
+		LocalTime:  true,
+	}
+	return a
+}
+
+// ensureAuditSinkWritable creates the parent directory and confirms the audit
+// path can be opened for appending, returning the underlying error otherwise.
+func ensureAuditSinkWritable(path string) error {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
-			auditLogWarn(log, "audit sink directory could not be created", path, err)
-			return a
+			return err
 		}
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
-		auditLogWarn(log, "audit sink file could not be opened", path, err)
-		return a
+		return err
 	}
-	a.sink = f
-	return a
+	return f.Close()
 }
 
 // Close releases the durable sink, if any. It is safe to call on a nil sink.
@@ -90,6 +139,29 @@ func (a *auditLog) Close() error {
 		return err
 	}
 	return nil
+}
+
+// statusReport returns the durable-sink health, or nil when no durable sink is
+// configured (so the overview omits the field entirely).
+func (a *auditLog) statusReport() *AuditSinkStatus {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sinkPath == "" {
+		return nil
+	}
+	st := &AuditSinkStatus{
+		Configured:    true,
+		Path:          a.sinkPath,
+		Healthy:       a.sink != nil && a.writeErr == nil,
+		WriteFailures: a.writeFailures,
+	}
+	switch {
+	case a.sinkErr != nil:
+		st.Error = a.sinkErr.Error()
+	case a.writeErr != nil:
+		st.Error = a.writeErr.Error()
+	}
+	return st
 }
 
 func auditLogWarn(log *slog.Logger, msg, path string, err error) {
@@ -114,12 +186,18 @@ func (a *auditLog) record(ev AuditEvent) {
 	}
 	// Append to the durable sink while holding the lock so concurrent records
 	// produce well-formed, non-interleaved JSONL lines. The redacted event is
-	// what is persisted, so the file carries no secrets.
+	// what is persisted, so the file carries no secrets. Write failures are
+	// recorded (not just logged) so the degraded sink is surfaced in status
+	// (P3-08); a later successful write clears the condition.
 	if a.sink != nil {
 		if line, err := json.Marshal(ev); err == nil {
 			line = append(line, '\n')
 			if _, werr := a.sink.Write(line); werr != nil {
-				auditLogWarn(a.log, "audit sink write failed", a.sink.Name(), werr)
+				a.writeErr = werr
+				a.writeFailures++
+				auditLogWarn(a.log, "audit sink write failed", a.sinkPath, werr)
+			} else {
+				a.writeErr = nil
 			}
 		}
 	}

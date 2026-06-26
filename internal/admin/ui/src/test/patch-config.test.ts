@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { patchConfig, ConfigRejectedError, ApiError } from "@/api/client.ts";
+import {
+  patchConfig,
+  applyPatchBatch,
+  ConfigRejectedError,
+  ConfigConflictError,
+  ApiError,
+} from "@/api/client.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -96,3 +102,74 @@ describe("patchConfig", () => {
     ).rejects.toBeInstanceOf(ApiError);
   });
 });
+
+describe("applyPatchBatch", () => {
+  const op = {
+    op: "route_set_target" as const,
+    listen: ":8080",
+    server_names: [],
+    match_type: "prefix",
+    path: "/",
+    target: "http://127.0.0.1:9100",
+  };
+
+  it("posts ops + base_version and returns the new version on success", async () => {
+    let seenUrl = "";
+    let seenBody = "";
+    mockFetch((url, init) => {
+      seenUrl = url;
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        pending_reload: true,
+        version: "feedfacefeedface",
+        summary: ["route :8080/ proxy_pass set to http://127.0.0.1:9100"],
+        diff: { summary: "1 change" },
+        message: "Structured patch validated and saved.",
+      });
+    });
+    const res = await applyPatchBatch([op], "deadbeefdeadbeef");
+    expect(seenUrl).toBe("/api/config/patch/apply");
+    expect(JSON.parse(seenBody)).toMatchObject({
+      base_version: "deadbeefdeadbeef",
+      ops: [{ op: "route_set_target", target: "http://127.0.0.1:9100" }],
+    });
+    expect(res.version).toBe("feedfacefeedface");
+    expect(res.pending_reload).toBe(true);
+    expect(res.summary).toHaveLength(1);
+  });
+
+  it("throws ConfigConflictError with current_version on a 409", async () => {
+    mockFetch(() =>
+      json(
+        {
+          ok: false,
+          conflict: true,
+          message: "The configuration changed since this edit was prepared; reload and try again.",
+          current_version: "abc123abc123abc1",
+        },
+        409,
+      ),
+    );
+    try {
+      await applyPatchBatch([op], "stalestalestale0");
+      expect.unreachable("expected a conflict");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigConflictError);
+      expect((err as ConfigConflictError).currentVersion).toBe("abc123abc123abc1");
+    }
+  });
+
+  it("throws ConfigRejectedError on a 400 structured rejection", async () => {
+    mockFetch(() =>
+      json({ ok: false, message: "Operation 2 could not be applied; no change was made.", errors: [] }, 400),
+    );
+    await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ConfigRejectedError);
+  });
+
+  it("throws ApiError on a non-structured transport failure", async () => {
+    mockFetch(() => new Response("boom", { status: 500 }));
+    await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
