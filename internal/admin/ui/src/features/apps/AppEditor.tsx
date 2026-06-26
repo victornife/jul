@@ -132,7 +132,7 @@ export function AppEditor({ initial, onClose }: AppEditorProps) {
 
   const fragment = generateAppWithRouteToml(
     draft,
-    mountRoute ? { listen: routeListen, path: routePath } : undefined,
+    mountRoute ? { listen: routeListen, path: routePath, grpc: presetId === "grpc" } : undefined,
   );
 
   function set<K extends keyof AppDraft>(key: K, value: AppDraft[K]): void {

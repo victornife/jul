@@ -361,10 +361,21 @@ func (s *Server) handleConfigPatch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"ok":        true,
 		"summary":   summary,
 		"candidate": string(candidate),
 		"diff":      diffConfigs(beforeCfg, cfg),
-	})
+	}
+	// Cheap preview validation: parse the candidate and run the same structural,
+	// secret-expansion, and WAF/auth dry-run checks as /api/config/validate, so
+	// the operator sees problems BEFORE confirming the apply. This is advisory —
+	// the authoritative, heavier full-factory preflight still runs at apply time
+	// (WriteConfigRaw -> applyPreflight). A failing check does not block the
+	// preview: the diff is still returned so the operator can see what the edit
+	// would do, with the errors surfaced alongside it.
+	if verr := validateRaw(candidate); verr != nil {
+		resp["validation_errors"] = humanizeErr(verr.Error())
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

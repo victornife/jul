@@ -236,6 +236,11 @@ export function generateAppToml(d: AppDraft): string {
 export interface MountRouteOptions {
   listen: string;
   path: string;
+  // grpc, when true, mounts the route as a native gRPC passthrough: the
+  // location gets grpc = true and the generated cleartext listener gets
+  // h2c = true so gRPC clients can negotiate HTTP/2 without TLS. Without it a
+  // gRPC backend would be proxied as plain HTTP/1.1 and never work.
+  grpc?: boolean;
 }
 
 /**
@@ -253,10 +258,17 @@ export function generateAppWithRouteToml(d: AppDraft, mount?: MountRouteOptions)
   const lines: string[] = [];
   lines.push("[[servers]]");
   lines.push(`listen = ${tomlString(listen)}`);
+  // gRPC needs end-to-end HTTP/2. The generated listener is cleartext (no TLS
+  // block is emitted here), so enable h2c to let native gRPC clients negotiate
+  // HTTP/2 without TLS; the matching location below sets grpc = true.
+  if (mount.grpc) lines.push(`h2c = true`);
   lines.push("");
   lines.push("  [[servers.locations]]");
   lines.push(`  match = { type = "prefix", path = ${tomlString(path)} }`);
   lines.push(`  proxy_pass = ${tomlString(`http://${name}`)}`);
+  // grpc = true proxies the native gRPC stream unchanged (http:// dials the
+  // backend over h2c). Requires a server build with the "grpc" tag.
+  if (mount.grpc) lines.push(`  grpc = true`);
   return `${upstream}\n\n${lines.join("\n")}`;
 }
 

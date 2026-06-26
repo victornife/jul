@@ -436,11 +436,26 @@ export type ConfigPatch =
   | { op: "upstream_remove_backend"; upstream: string; address: string }
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch };
 
+// ValidationIssue mirrors the backend validationError shape (code/path/summary/
+// detail/severity). Shared by the patch preview and the validate/apply flows.
+export const ValidationIssueSchema = z.object({
+  code: z.string(),
+  path: z.string().optional(),
+  summary: z.string(),
+  detail: z.string().optional(),
+  severity: z.string(),
+});
+export type ValidationIssue = z.infer<typeof ValidationIssueSchema>;
+
 export const PatchResultSchema = z.object({
   ok: z.literal(true),
   summary: z.string(),
   candidate: z.string(),
   diff: ConfigDiffSchema,
+  // validation_errors is present when the candidate fails the cheap preview
+  // validation (parse + structural/WAF/auth checks). The edit still produced a
+  // diff, but applying it would be rejected — the UI surfaces these as warnings.
+  validation_errors: z.array(ValidationIssueSchema).optional(),
 });
 export type PatchResult = z.infer<typeof PatchResultSchema>;
 
@@ -481,15 +496,6 @@ export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
 }
 
 // ── Validate / Apply / Wizard (write flows) ──────────────────────────────────
-
-export const ValidationIssueSchema = z.object({
-  code: z.string(),
-  path: z.string().optional(),
-  summary: z.string(),
-  detail: z.string().optional(),
-  severity: z.string(),
-});
-export type ValidationIssue = z.infer<typeof ValidationIssueSchema>;
 
 export const ValidationResultSchema = z.object({
   ok: z.boolean(),

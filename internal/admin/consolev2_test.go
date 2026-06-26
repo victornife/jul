@@ -512,6 +512,104 @@ func TestConfigDiffInvalidBodyReturnsError(t *testing.T) {
 	}
 }
 
+// ── /api/config/patch (preview validation) ───────────────────────────────────
+
+// patchProxyConfig returns a minimal, validate-passing config with a single
+// proxy location so patch-preview tests can flip the target between a valid and
+// an unbuildable value.
+func patchProxyConfig() *config.Config {
+	return &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: ":8080",
+			Locations: []config.LocationConfig{{
+				Match:     config.MatchConfig{Type: "prefix", Path: "/api"},
+				ProxyPass: "http://127.0.0.1:9000",
+			}},
+		}},
+	}
+}
+
+// TestConfigPatchPreviewSurfacesValidationErrors proves the patch preview runs
+// the cheap candidate validation and returns validation_errors when the edit
+// would produce a config that fails to validate — while still returning the
+// diff and never persisting anything.
+func TestConfigPatchPreviewSurfacesValidationErrors(t *testing.T) {
+	var writes int
+	deps := Deps{
+		LoadConfig:     func() (*config.Config, error) { return patchProxyConfig(), nil },
+		WriteConfigRaw: func([]byte) error { writes++; return nil },
+	}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+
+	// Point the route at a single-label host that is neither an IP nor a known
+	// upstream: validateProxyPass rejects it as an unknown-upstream typo.
+	body, err := json.Marshal(patchRequest{
+		Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Target: "http://ghost",
+	})
+	if err != nil {
+		t.Fatalf("marshal patch: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		OK               bool              `json:"ok"`
+		Candidate        string            `json:"candidate"`
+		ValidationErrors []validationError `json:"validation_errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Error("ok = false, want true (the patch still applied to the model)")
+	}
+	if out.Candidate == "" {
+		t.Error("candidate should still be returned so the operator sees the diff")
+	}
+	if len(out.ValidationErrors) == 0 {
+		t.Error("validation_errors should be present for an unbuildable candidate")
+	}
+	if writes != 0 {
+		t.Errorf("WriteConfigRaw called %d times during preview; want 0", writes)
+	}
+}
+
+// TestConfigPatchPreviewValidCandidateHasNoErrors proves a valid edit returns no
+// validation_errors, so the field is a true signal rather than always-on noise.
+func TestConfigPatchPreviewValidCandidateHasNoErrors(t *testing.T) {
+	deps := Deps{LoadConfig: func() (*config.Config, error) { return patchProxyConfig(), nil }}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+
+	body, err := json.Marshal(patchRequest{
+		Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Target: "http://127.0.0.1:9100",
+	})
+	if err != nil {
+		t.Fatalf("marshal patch: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		OK               bool              `json:"ok"`
+		ValidationErrors []validationError `json:"validation_errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Error("ok = false, want true")
+	}
+	if len(out.ValidationErrors) != 0 {
+		t.Errorf("validation_errors = %+v, want none for a valid candidate", out.ValidationErrors)
+	}
+}
+
 // ── /api/config/apply ────────────────────────────────────────────────────────
 
 func TestConfigApplyPersistsAndReturnsStatus(t *testing.T) {

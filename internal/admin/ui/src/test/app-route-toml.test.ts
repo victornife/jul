@@ -41,4 +41,22 @@ describe("generateAppWithRouteToml (P2-13 mount-on-route)", () => {
     const out = generateAppWithRouteToml(appDraft(), { listen: ":80", path: "/" });
     expect(out.indexOf("[[upstreams]]")).toBeLessThan(out.indexOf("[[servers]]"));
   });
+
+  it("emits grpc=true on the location and h2c=true on the listener for a gRPC mount", () => {
+    const out = generateAppWithRouteToml(appDraft(), { listen: ":8080", path: "/", grpc: true });
+    // The cleartext listener must enable h2c so gRPC clients can use HTTP/2.
+    expect(out).toContain("h2c = true");
+    // The location proxies the native gRPC stream unchanged.
+    expect(out).toContain("grpc = true");
+    expect(out).toContain('proxy_pass = "http://api"');
+    // h2c belongs to the server block (before the location), grpc to the location.
+    expect(out.indexOf("h2c = true")).toBeLessThan(out.indexOf("[[servers.locations]]"));
+    expect(out.indexOf("[[servers.locations]]")).toBeLessThan(out.indexOf("grpc = true"));
+  });
+
+  it("omits grpc/h2c for a non-gRPC mount", () => {
+    const out = generateAppWithRouteToml(appDraft(), { listen: ":8080", path: "/" });
+    expect(out).not.toContain("h2c = true");
+    expect(out).not.toContain("grpc = true");
+  });
 });

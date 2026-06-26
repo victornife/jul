@@ -45,7 +45,39 @@ describe("patchConfig", () => {
     expect(res.summary).toContain("proxy_pass set to http://new");
     expect(res.candidate).toContain('listen = ":8080"');
     expect(res.diff.summary).toBe("1 change");
+    expect(res.validation_errors).toBeUndefined();
     expect(JSON.parse(seenBody)).toMatchObject({ op: "route_set_target", target: "http://new" });
+  });
+
+  it("surfaces validation_errors when the candidate would not build", async () => {
+    mockFetch(() =>
+      json({
+        ok: true,
+        summary: "route :8080/api proxy_pass set to http://ghost",
+        candidate: 'listen = ":8080"\n',
+        diff: { summary: "1 change" },
+        validation_errors: [
+          {
+            code: "unknown",
+            path: "",
+            summary: "proxy_pass references unknown upstream \"ghost\"",
+            detail: "",
+            severity: "error",
+          },
+        ],
+      }),
+    );
+    const res = await patchConfig({
+      op: "route_set_target",
+      listen: ":8080",
+      server_names: [],
+      match_type: "prefix",
+      path: "/api",
+      target: "http://ghost",
+    });
+    expect(res.candidate).toContain('listen = ":8080"');
+    expect(res.validation_errors).toHaveLength(1);
+    expect(res.validation_errors?.[0]?.summary).toContain("unknown upstream");
   });
 
   it("throws ConfigRejectedError on a 400 structured rejection", async () => {
