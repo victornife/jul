@@ -266,7 +266,7 @@ export function RouteEditor({ initial, onClose }: RouteEditorProps) {
     setError(null);
     try {
       const raw = await fetchRawConfig();
-      setPendingDraft(appendFragment(raw.raw ?? "", fragment));
+      setPendingDraft({ kind: "toml", toml: appendFragment(raw.raw ?? "", fragment) });
       void navigate("/config");
     } catch {
       setError("Could not load the current configuration to merge this route.");

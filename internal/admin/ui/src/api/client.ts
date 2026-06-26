@@ -617,6 +617,8 @@ export const PatchApplyResultSchema = z.object({
   version: z.string().optional(),
   summary: z.array(z.string()),
   diff: ConfigDiffSchema,
+  // status is the post-apply runtime delta derived from the persisted config.
+  status: z.array(FeatureStatusSchema).optional(),
   message: z.string().optional(),
 });
 export type PatchApplyResult = z.infer<typeof PatchApplyResultSchema>;

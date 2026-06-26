@@ -523,12 +523,24 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	s.emit("config", "apply", "info", "Structured patch validated and saved; the live runtime is reloading.")
 
 	beforeCfg, _ := config.Parse(before)
+	// Return a post-apply status delta so the UI can reflect what changed. It is
+	// derived from the persisted configuration: the apply preflight guarantees
+	// the runtime will build this config, but the reload that swaps it in is
+	// asynchronous, so "pending_reload" tells the UI this is the configuration
+	// taking effect rather than a confirmation that the swap has completed.
+	var status []FeatureStatus
+	if s.deps.LoadConfig != nil {
+		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
+			status = s.runtimeStatus(cfg)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"pending_reload": true,
 		"version":        configVersion(candidate),
 		"summary":        summaries,
 		"diff":           diffConfigs(beforeCfg, cfg),
+		"status":         status,
 		"message":        "Structured patch validated and saved. The live runtime is reloading to apply it.",
 	})
 }

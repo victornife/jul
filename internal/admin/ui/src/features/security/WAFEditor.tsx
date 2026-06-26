@@ -131,7 +131,7 @@ export function WAFEditor({ current, onClose }: WAFEditorProps) {
     setError(null);
     try {
       const raw = await fetchRawConfig();
-      setPendingDraft(upsertTopLevelTable(raw.raw ?? "", "waf", fragment));
+      setPendingDraft({ kind: "toml", toml: upsertTopLevelTable(raw.raw ?? "", "waf", fragment) });
       void navigate("/config");
     } catch {
       setError("Could not load the current configuration to merge this WAF change.");

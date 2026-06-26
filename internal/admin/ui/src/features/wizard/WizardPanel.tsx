@@ -104,7 +104,7 @@ export function WizardPanel() {
 
   function openInEditor(): void {
     if (preview === null) return;
-    setPendingDraft(preview);
+    setPendingDraft({ kind: "toml", toml: preview });
     void navigate("/config");
   }
 

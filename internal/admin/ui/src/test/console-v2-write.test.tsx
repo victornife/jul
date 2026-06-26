@@ -221,6 +221,8 @@ describe("WizardPanel", () => {
 
     const open = await screen.findByRole("button", { name: /Open in editor/ });
     fireEvent.click(open);
-    expect(takePendingDraft()).toContain('listen = ":80"');
+    const draft = takePendingDraft();
+    expect(draft?.kind).toBe("toml");
+    expect((draft as { kind: "toml"; toml: string })?.toml).toContain('listen = ":80"');
   });
 });

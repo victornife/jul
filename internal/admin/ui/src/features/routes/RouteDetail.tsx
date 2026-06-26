@@ -110,7 +110,13 @@ function QuickEdits({
     setBusy(true);
     try {
       const res = await patchConfig(patch);
-      setPendingDraft(res.candidate);
+      setPendingDraft({
+        kind: "patch",
+        ops: [patch],
+        baseVersion: res.base_version,
+        previewDiff: res.diff,
+        candidate: res.candidate,
+      });
       void navigate("/config");
     } catch (err) {
       setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");

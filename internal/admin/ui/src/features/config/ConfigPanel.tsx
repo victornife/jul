@@ -1,13 +1,17 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   applyConfig,
+  applyPatchBatch,
   diffConfig,
   fetchRawConfig,
   validateConfig,
   ConfigRejectedError,
+  ConfigConflictError,
   type FeatureStatus,
+  type ConfigDiff,
 } from "@/api/client.ts";
+import type { PendingDraft } from "@/lib/configDraftHandoff.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
@@ -56,58 +60,107 @@ export function ConfigPanel() {
     queryFn: fetchRawConfig,
   });
 
+  // Raw editor state
   const [draft, setDraft] = useState<string | null>(null);
   const [baseline, setBaseline] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [applied, setApplied] = useState<FeatureStatus[] | null>(null);
 
-  // Seed the editor once the raw config arrives. A pending wizard handoff, if
-  // present, becomes the draft so the operator lands on a ready-to-review diff
-  // against the running config.
+  // Patch draft state: when a structured patch is handed off, the editor shows
+  // the candidate read-only and the diff is pre-computed; applying uses the
+  // atomic patch endpoint rather than raw apply.
+  const [patchDraft, setPatchDraft] = useState<PendingDraft & { kind: "patch" } | null>(null);
+  const [conflictVersion, setConflictVersion] = useState<string | undefined>();
+
+  // Seed the editor once the raw config arrives. A pending handoff, if present,
+  // becomes the draft so the operator lands on a ready-to-review diff.
   useEffect(() => {
-    if (data && draft === null) {
+    if (data && draft === null && patchDraft === null) {
       const raw = data.raw ?? "";
       const handoff = takePendingDraft();
-      setBaseline(raw);
-      setDraft(handoff ?? raw);
+      if (handoff) {
+        if (handoff.kind === "toml") {
+          setBaseline(raw);
+          setDraft(handoff.toml);
+        } else {
+          setPatchDraft(handoff);
+          setBaseline(raw);
+          // Seed the editor with the candidate so the operator can review the
+          // full context while knowing the apply will be atomic.
+          setDraft(handoff.candidate ?? raw);
+        }
+      } else {
+        setBaseline(raw);
+        setDraft(raw);
+      }
     }
-  }, [data, draft]);
+  }, [data, draft, patchDraft]);
 
   const current = draft ?? "";
-  const dirty = draft !== null && draft !== baseline;
-  const debounced = useDebouncedValue(current, 400);
+  const isPatchMode = patchDraft !== null;
+  const dirty = isPatchMode || (draft !== null && draft !== baseline);
+  const debounced = useDebouncedValue(isPatchMode ? "" : current, 400);
 
   const validation = useQuery({
     queryKey: ["config-validate", debounced],
     queryFn: () => validateConfig(debounced),
-    enabled: draft !== null && debounced.length > 0,
+    enabled: !isPatchMode && draft !== null && debounced.length > 0,
     staleTime: Infinity,
     refetchInterval: false,
     refetchOnWindowFocus: false,
     retry: false,
   });
 
-  const valid = validation.data?.ok === true;
+  const valid = isPatchMode || validation.data?.ok === true;
 
-  const diff = useQuery({
+  const rawDiff = useQuery({
     queryKey: ["config-diff", debounced],
     queryFn: () => diffConfig(debounced),
-    enabled: dirty && valid,
+    enabled: !isPatchMode && dirty && valid,
     staleTime: Infinity,
     refetchInterval: false,
     refetchOnWindowFocus: false,
     retry: false,
   });
 
-  const apply = useMutation({
+  // In patch mode the diff is pre-computed; in raw mode it is fetched.
+  const previewDiff: ConfigDiff | undefined = useMemo(
+    () => patchDraft?.previewDiff ?? rawDiff.data,
+    [patchDraft, rawDiff.data],
+  );
+
+  const applyRaw = useMutation({
     mutationFn: () => applyConfig(current),
     onSuccess: (res) => {
       setBaseline(current);
-      setApplied(res.status);
+      setApplied(res.status ?? []);
       setConfirming(false);
       void qc.invalidateQueries();
     },
+    onError: () => {
+      // Leave error for the UI
+    },
   });
+
+  const applyPatch = useMutation({
+    mutationFn: () =>
+      applyPatchBatch(patchDraft!.ops, patchDraft!.baseVersion ?? conflictVersion),
+    onSuccess: (res) => {
+      setPatchDraft(null);
+      setApplied(res.status ?? []);
+      setConfirming(false);
+      setConflictVersion(undefined);
+      void qc.invalidateQueries();
+    },
+    onError: (err) => {
+      if (err instanceof ConfigConflictError) {
+        setConflictVersion(err.currentVersion);
+      }
+    },
+  });
+
+  const applyActive = isPatchMode ? applyPatch : applyRaw;
+  const applyError = applyActive.error;
 
   if (isLoading) return <div className="text-jul-muted">Loading configuration…</div>;
   if (isError || !data) return <div className="text-jul-danger">Failed to load configuration.</div>;
@@ -121,15 +174,16 @@ export function ConfigPanel() {
     );
   }
 
-  const pill: "idle" | "checking" | "valid" | "invalid" = validation.isFetching
-    ? "checking"
-    : validation.data === undefined
-      ? "idle"
-      : valid
-        ? "valid"
-        : "invalid";
+  const pill: "idle" | "checking" | "valid" | "invalid" = isPatchMode
+    ? "valid"
+    : validation.isFetching
+      ? "checking"
+      : validation.data === undefined
+        ? "idle"
+        : valid
+          ? "valid"
+          : "invalid";
   const issues = validation.data?.errors ?? [];
-  const applyError = apply.error;
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -138,15 +192,23 @@ export function ConfigPanel() {
         {data.path && <span className="font-mono text-xs text-jul-muted">{data.path}</span>}
         <ValidationPill state={pill} />
         {dirty && <span className="text-xs text-jul-warning">● unsaved changes</span>}
+        {isPatchMode && (
+          <span className="rounded-full border border-jul-accent/30 bg-jul-accent/10 px-2 py-0.5 text-xs text-jul-accent">
+            atomic patch
+          </span>
+        )}
         <div className="ml-auto flex gap-2">
           <button
             type="button"
             onClick={() => {
               setDraft(baseline);
+              setPatchDraft(null);
               setApplied(null);
-              apply.reset();
+              setConflictVersion(undefined);
+              applyRaw.reset();
+              applyPatch.reset();
             }}
-            disabled={!dirty || apply.isPending}
+            disabled={!dirty || applyActive.isPending}
             className="rounded-md border border-jul-border px-3 py-1 text-sm text-jul-muted hover:text-jul-text disabled:opacity-40"
           >
             Reset
@@ -156,10 +218,10 @@ export function ConfigPanel() {
             onClick={() => {
               setConfirming(true);
             }}
-            disabled={!dirty || !valid || apply.isPending}
+            disabled={!dirty || !valid || applyActive.isPending}
             className="rounded-md bg-jul-accent px-3 py-1 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
-            Apply changes
+            {isPatchMode ? "Apply patch" : "Apply changes"}
           </button>
         </div>
       </div>
@@ -170,6 +232,7 @@ export function ConfigPanel() {
             {draft !== null && (
               <CodeEditor
                 value={draft}
+                readOnly={isPatchMode}
                 onChange={(next) => {
                   setDraft(next);
                   if (applied) setApplied(null);
@@ -185,7 +248,11 @@ export function ConfigPanel() {
           {applyError && (
             <div className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm">
               <p className="font-medium text-jul-danger">
-                {applyError instanceof ConfigRejectedError ? applyError.message : "Apply failed."}
+                {applyError instanceof ConfigRejectedError
+                  ? applyError.message
+                  : applyError instanceof ConfigConflictError
+                    ? "Conflict — another change was applied while you were editing."
+                    : "Apply failed."}
               </p>
               {applyError instanceof ConfigRejectedError &&
                 applyError.issues.map((iss, i) => (
@@ -194,6 +261,30 @@ export function ConfigPanel() {
                     {iss.detail ? ` — ${iss.detail}` : ""}
                   </p>
                 ))}
+              {applyError instanceof ConfigConflictError && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPatchDraft(null);
+                      setApplied(null);
+                      setConflictVersion(undefined);
+                      applyPatch.reset();
+                      void qc.invalidateQueries();
+                      // Reload the latest raw config to start fresh.
+                      const handoff = takePendingDraft();
+                      if (handoff && handoff.kind === "toml") {
+                        setDraft(handoff.toml);
+                      } else {
+                        setDraft(data.raw ?? "");
+                      }
+                    }}
+                    className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
+                  >
+                    Reload latest config
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -222,9 +313,13 @@ export function ConfigPanel() {
               <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                 Pending changes
               </h3>
-              {diff.isFetching && <p className="text-xs text-jul-muted">Computing diff…</p>}
-              {diff.data && <DiffView diff={diff.data} />}
-              {diff.isError && <p className="text-xs text-jul-danger">Unable to compute diff.</p>}
+              {!isPatchMode && rawDiff.isFetching && (
+                <p className="text-xs text-jul-muted">Computing diff…</p>
+              )}
+              {previewDiff && <DiffView diff={previewDiff} />}
+              {!isPatchMode && rawDiff.isError && (
+                <p className="text-xs text-jul-danger">Unable to compute diff.</p>
+              )}
             </div>
           )}
 
@@ -238,24 +333,36 @@ export function ConfigPanel() {
 
       {confirming && (
         <ConfirmDialog
-          title="Apply configuration?"
+          title={isPatchMode ? "Apply atomic patch?" : "Apply configuration?"}
           confirmLabel="Apply now"
-          busy={apply.isPending}
+          busy={applyActive.isPending}
           onConfirm={() => {
-            apply.mutate();
+            applyActive.mutate();
           }}
           onCancel={() => {
             setConfirming(false);
           }}
         >
-          <p>
-            This validates the new configuration, writes it, and triggers a live reload of the
-            proxy. The draft is fully preflighted before it is saved, so a config that is accepted
-            here is guaranteed to build; the reload that swaps it into the live runtime happens
-            moments later. The current configuration is snapshotted first, so you can roll back from
-            the History panel.
-          </p>
-          {diff.data && <p className="mt-2 text-jul-text">{diff.data.summary}</p>}
+          {isPatchMode ? (
+            <>
+              <p>
+                This applies the structured edit atomically server-side. The config is validated
+                and persisted; if another operator changed config since this edit was prepared,
+                the apply will be rejected so no change is lost.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                This validates the new configuration, writes it, and triggers a live reload of the
+                proxy. The draft is fully preflighted before it is saved, so a config that is
+                accepted here is guaranteed to build; the reload that swaps it into the live
+                runtime happens moments later. The current configuration is snapshotted first, so
+                you can roll back from the History panel.
+              </p>
+            </>
+          )}
+          {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
         </ConfirmDialog>
       )}
     </div>

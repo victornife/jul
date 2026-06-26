@@ -346,7 +346,24 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
             idle_timeout: limits.idleTimeout,
           },
         });
-        setPendingDraft(res.candidate);
+        setPendingDraft({
+          kind: "patch",
+          ops: [
+            {
+              op: "server_set_limits",
+              listen: effectiveListen,
+              limits: {
+                client_max_body_size: limits.bodyLimit,
+                read_timeout: limits.readTimeout,
+                write_timeout: limits.writeTimeout,
+                idle_timeout: limits.idleTimeout,
+              },
+            },
+          ],
+          baseVersion: res.base_version,
+          previewDiff: res.diff,
+          candidate: res.candidate,
+        });
         void navigate("/config");
       } catch (err) {
         setError(
@@ -358,7 +375,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
     try {
       const raw = await fetchRawConfig();
       const next = upsertTopLevelTable(raw.raw ?? "", table, fragment);
-      setPendingDraft(next);
+      setPendingDraft({ kind: "toml", toml: next });
       void navigate("/config");
     } catch {
       setError("Could not load the current configuration to merge this change.");
