@@ -12,10 +12,13 @@ export type PendingDraft =
   | {
       kind: "patch";
       ops: ConfigPatch[];
-      baseVersion?: string;
+      // Optional, and may be passed explicitly as undefined (the patch preview
+      // does not always carry a base_version), so under exactOptionalPropertyTypes
+      // the union member must accept undefined rather than only an absent key.
+      baseVersion?: string | undefined;
       previewDiff: ConfigDiff;
       /** Candidate TOML for read-only display in the config editor. */
-      candidate?: string;
+      candidate?: string | undefined;
     };
 
 let pending: PendingDraft | null = null;

@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -104,6 +104,29 @@ describe("RouteProjectionSchema", () => {
     expect(r.tls?.enabled).toBe(true);
     expect(r.locations[0]?.action).toBe("proxy");
   });
+
+  it("parses a per-location WAF override and defaults crs_enabled", () => {
+    const raw = {
+      listen: ":8080",
+      http3: false,
+      h2c: false,
+      locations: [
+        {
+          match: "/admin",
+          type: "prefix",
+          action: "proxy",
+          auth: false,
+          cache: false,
+          secure: false,
+          waf: { enabled: true, mode: "detect" },
+        },
+      ],
+    };
+    const r = RouteProjectionSchema.parse(raw);
+    expect(r.locations[0]?.waf?.enabled).toBe(true);
+    expect(r.locations[0]?.waf?.mode).toBe("detect");
+    expect(r.locations[0]?.waf?.crs_enabled).toBe(false);
+  });
 });
 
 describe("AppProjectionSchema", () => {
@@ -156,6 +179,25 @@ describe("SecurityProjectionSchema", () => {
     expect(s.require_cert_count).toBe(3);
     expect(s.waf_enabled).toBe(true);
     expect(s.secret_refs).toBe(1);
+  });
+
+  it("parses per-location WAF overrides with a CRS default", () => {
+    const s = SecurityProjectionSchema.parse({
+      auth_enabled: false,
+      require_cert_count: 0,
+      waf_enabled: true,
+      waf_locations: 1,
+      secret_refs: 0,
+      location_wafs: [
+        { listen: ":8080", path: "/admin", enabled: true, mode: "block", crs_enabled: true },
+        { listen: ":8080", path: "/public", enabled: false },
+      ],
+    });
+    expect(s.location_wafs).toHaveLength(2);
+    expect(s.location_wafs?.[0]?.mode).toBe("block");
+    expect(s.location_wafs?.[0]?.crs_enabled).toBe(true);
+    // crs_enabled defaults to false when the server omits it.
+    expect(s.location_wafs?.[1]?.crs_enabled).toBe(false);
   });
 });
 
@@ -423,5 +465,261 @@ describe("SecurityPanel", () => {
   it("renders secret reference count", async () => {
     render(<SecurityPanel />, { wrapper: Wrapper });
     expect(await screen.findByText(/2 references/i)).toBeInTheDocument();
+  });
+});
+
+describe("SecurityPanel per-location WAF disclosure", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function stubSecurity(payload: Record<string, unknown>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(payload),
+      }),
+    );
+  }
+
+  it("lists per-location overrides and labels the global edit truthfully", async () => {
+    stubSecurity({
+      auth_enabled: false,
+      require_cert_count: 0,
+      waf_enabled: true,
+      waf_mode: "block",
+      waf_locations: 2,
+      waf_block_locs: 2,
+      secret_refs: 0,
+      location_wafs: [
+        { listen: ":8080", path: "/admin", enabled: true, mode: "block", crs_enabled: true },
+        { listen: ":8080", path: "/public", enabled: false },
+      ],
+    });
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    // The override rows are shown so the operator sees routes run their own policy.
+    expect(await screen.findByText(/:8080 \/admin — block, CRS/)).toBeInTheDocument();
+    expect(await screen.findByText(/:8080 \/public — disabled/)).toBeInTheDocument();
+    // The disclosure makes clear editing changes only the global policy, and the
+    // button is relabelled accordingly so it is not mistaken for a per-route edit.
+    expect(await screen.findByText(/2 locations override the global policy/i)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Edit global" })).toBeInTheDocument();
+  });
+
+  it("does not show the disclosure when no per-location overrides exist", async () => {
+    stubSecurity({
+      auth_enabled: false,
+      require_cert_count: 0,
+      waf_enabled: true,
+      waf_mode: "block",
+      waf_locations: 1,
+      waf_block_locs: 1,
+      secret_refs: 0,
+    });
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    // The plain "Edit" label confirms the global-only path; no override notice.
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.queryByText(/override the global policy/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("SecurityPanel per-location WAF editor", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const override = {
+    listen: ":8080",
+    path: "/admin",
+    match_type: "prefix",
+    server_names: [],
+    enabled: true,
+    mode: "block",
+    crs_enabled: true,
+  };
+
+  // stubSecurityAndPatch routes the security GET to a projection carrying one
+  // per-location override, and captures the body of any /api/config/patch POST
+  // so a test can assert the structured op the editor dispatched.
+  function stubSecurityAndPatch(onPatch: (body: string) => void) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (typeof url === "string" && url.includes("/api/config/patch")) {
+          onPatch(typeof init?.body === "string" ? init.body : "");
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                ok: true,
+                summary: "ok",
+                candidate: 'listen = ":8080"\n',
+                diff: { summary: "1 change" },
+              }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              auth_enabled: false,
+              require_cert_count: 0,
+              waf_enabled: true,
+              waf_mode: "block",
+              waf_locations: 1,
+              waf_block_locs: 1,
+              secret_refs: 0,
+              location_wafs: [override],
+            }),
+        });
+      }),
+    );
+  }
+
+  it("opens the editor seeded from the override and saves a location_waf_set", async () => {
+    let body = "";
+    stubSecurityAndPatch((b) => {
+      body = b;
+    });
+    render(<SecurityPanel />, { wrapper: Wrapper });
+
+    // The per-location row carries its own Edit button (the global one is
+    // relabelled "Edit global" while overrides exist), so "Edit" resolves to the
+    // single override row.
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+    // The drawer identifies the exact route it targets.
+    expect(await screen.findByText(/Override for :8080 \/admin/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Review in editor/ }));
+
+    await waitFor(() => {
+      expect(body).not.toBe("");
+    });
+    // The seeded values round-trip into a structured set op on the right target.
+    expect(JSON.parse(body)).toMatchObject({
+      op: "location_waf_set",
+      listen: ":8080",
+      path: "/admin",
+      match_type: "prefix",
+      waf: { enabled: true, mode: "block", crs_enabled: true },
+    });
+  });
+
+  it("clears the override with a location_waf_clear op", async () => {
+    let body = "";
+    stubSecurityAndPatch((b) => {
+      body = b;
+    });
+    render(<SecurityPanel />, { wrapper: Wrapper });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear override" }));
+
+    await waitFor(() => {
+      expect(body).not.toBe("");
+    });
+    expect(JSON.parse(body)).toMatchObject({
+      op: "location_waf_clear",
+      listen: ":8080",
+      path: "/admin",
+    });
+  });
+});
+
+// ── RouteDetail per-location WAF ───────────────────────────────────────────────
+
+import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
+import type { RouteProjection, LocationProjection } from "@/api/client.ts";
+
+describe("RouteDetail per-location WAF", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const route: RouteProjection = {
+    listen: ":8080",
+    server_names: [],
+    http3: false,
+    h2c: false,
+    locations: [],
+  };
+
+  function loc(over?: LocationProjection["waf"]): LocationProjection {
+    return {
+      index: 0,
+      match: "/admin",
+      type: "prefix",
+      action: "deny",
+      auth: false,
+      cache: false,
+      compression: false,
+      rate_limit: false,
+      secure: false,
+      waf: over,
+    };
+  }
+
+  // stubPatch captures the body of the /api/config/patch POST the editor fires.
+  function stubPatch(onPatch: (body: string) => void) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        onPatch(typeof init?.body === "string" ? init.body : "");
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              ok: true,
+              summary: "ok",
+              candidate: 'listen = ":8080"\n',
+              diff: { summary: "1 change" },
+            }),
+        });
+      }),
+    );
+  }
+
+  it("offers to add an override on an inheriting route and seeds detect defaults", async () => {
+    let body = "";
+    stubPatch((b) => {
+      body = b;
+    });
+    render(<RouteDetail route={route} loc={loc()} onClose={vi.fn()} onEdit={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
+
+    // An inheriting location offers "Add"; opening it shows the create copy and
+    // hides the clear action (nothing to clear yet).
+    fireEvent.click(screen.getByRole("button", { name: /Add WAF override/ }));
+    expect(await screen.findByText("Add per-location WAF")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear override" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Review in editor/ }));
+    await waitFor(() => {
+      expect(body).not.toBe("");
+    });
+    expect(JSON.parse(body)).toMatchObject({
+      op: "location_waf_set",
+      listen: ":8080",
+      path: "/admin",
+      match_type: "prefix",
+      waf: { enabled: true, mode: "detect", crs_enabled: false },
+    });
+  });
+
+  it("offers to edit an existing override seeded from its state", async () => {
+    stubPatch(() => {
+      /* not exercised here */
+    });
+    render(
+      <RouteDetail
+        route={route}
+        loc={loc({ enabled: true, mode: "block", crs_enabled: true })}
+        onClose={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    // An override present ⇒ the button says "Edit" and the editor exposes Clear.
+    fireEvent.click(screen.getByRole("button", { name: /Edit WAF override/ }));
+    expect(await screen.findByText("Edit per-location WAF")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear override" })).toBeInTheDocument();
   });
 });

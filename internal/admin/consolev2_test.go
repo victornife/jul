@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -412,6 +413,28 @@ func TestSecurityProjectionWAFDistributionAndGlobal(t *testing.T) {
 		out.WAFParanoia != 2 || out.WAFBlockStatus != 406 || !out.WAFResponseBodyCheck ||
 		out.WAFRequestBodyLimit != "128k" || len(out.WAFDirectivesFiles) != 1 || out.WAFInlineRules == "" {
 		t.Errorf("global WAF projection = %+v", out)
+	}
+	// Per-location overrides are disclosed truthfully: /b (block) and /c (opted
+	// out) define their own [waf]; /a inherits the global policy and so is NOT
+	// listed. The Security panel relies on this to avoid presenting the single
+	// global "Edit" as if it governed every route.
+	if len(out.LocationWAFs) != 2 {
+		t.Fatalf("location_wafs = %d entries, want 2: %+v", len(out.LocationWAFs), out.LocationWAFs)
+	}
+	var bOverride, cOverride *LocationWAFProjection
+	for i := range out.LocationWAFs {
+		switch out.LocationWAFs[i].Path {
+		case "/b":
+			bOverride = &out.LocationWAFs[i]
+		case "/c":
+			cOverride = &out.LocationWAFs[i]
+		}
+	}
+	if bOverride == nil || !bOverride.Enabled || bOverride.Mode != "block" || bOverride.CRSEnabled {
+		t.Errorf("/b override = %+v, want enabled block without CRS", bOverride)
+	}
+	if cOverride == nil || cOverride.Enabled {
+		t.Errorf("/c override = %+v, want a disabled override", cOverride)
 	}
 }
 
@@ -889,7 +912,60 @@ func TestConfigPatchApplyRejectsEmptyOps(t *testing.T) {
 	}
 }
 
-// ── /api/config/apply ────────────────────────────────────────────────────────
+// TestConfigPatchApplyRestartRequiredMapsTo409 proves the structured-patch apply
+// path shares the raw path's restart-required classification: a write rejected
+// with ErrRestartRequired returns 409 restart_required:true (not a generic 400),
+// and persists nothing.
+func TestConfigPatchApplyRestartRequiredMapsTo409(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "server.toml")
+	seed, err := config.Marshal(config.ProxyTarget("127.0.0.1:9000", ":8080"))
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, seed, 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	deps := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		WriteConfigRaw: func([]byte) error {
+			return fmt.Errorf("%w: automatic HTTPS (ACME) domains or issuer changed", ErrRestartRequired)
+		},
+		LoadConfig: func() (*config.Config, error) {
+			raw, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return nil, err
+			}
+			return config.Parse(raw)
+		},
+	}
+	s := newTestServer(t, config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}, deps)
+
+	body, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{
+		{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9100"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+	var out restartRequiredResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.RestartRequired || out.OK {
+		t.Errorf("body = %+v, want restart_required=true and ok=false", out)
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(seed, after) {
+		t.Error("config was modified despite a restart-required refusal")
+	}
+}
 
 func TestConfigApplyPersistsAndReturnsStatus(t *testing.T) {
 	s, cfgPath := v2WriteServer(t)
@@ -955,6 +1031,144 @@ func TestConfigApplyMethodNotAllowed(t *testing.T) {
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/config/apply", nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rr.Code)
+	}
+}
+
+// TestConfigGetReturnsBaseVersion proves GET /api/config exposes the
+// optimistic-concurrency fingerprint the raw editor sends back on apply.
+func TestConfigGetReturnsBaseVersion(t *testing.T) {
+	s, _ := v2WriteServer(t)
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		BaseVersion string `json:"base_version"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.BaseVersion == "" {
+		t.Error("GET /api/config should return a non-empty base_version")
+	}
+}
+
+// TestConfigApplyRejectsStaleBaseVersion proves a raw apply carrying a stale
+// base_version is rejected with 409 and persists nothing, closing the raw-edit
+// lost-update hole (P5). An empty base_version still skips the check.
+func TestConfigApplyRejectsStaleBaseVersion(t *testing.T) {
+	s, cfgPath := v2WriteServer(t)
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+	alt := validTOML(t, "./newroot", ":8282")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply?base_version=deadbeefdeadbeef", bytes.NewReader(alt)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+	var out conflictResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.Conflict || out.CurrentVersion == "" {
+		t.Errorf("conflict body = %+v, want conflict=true and a current_version", out)
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("config was modified despite a stale-version conflict")
+	}
+}
+
+// TestConfigApplyAcceptsMatchingBaseVersion proves the base_version reported by
+// GET /api/config round-trips: applying with it is accepted, and the response
+// carries a fresh version for the next edit so a follow-up save does not trip a
+// spurious conflict.
+func TestConfigApplyAcceptsMatchingBaseVersion(t *testing.T) {
+	s, _ := v2WriteServer(t)
+	grr := httptest.NewRecorder()
+	s.routes().ServeHTTP(grr, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	var got struct {
+		BaseVersion string `json:"base_version"`
+	}
+	if err := json.Unmarshal(grr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode get: %v", err)
+	}
+	if got.BaseVersion == "" {
+		t.Fatal("GET did not return base_version")
+	}
+	alt := validTOML(t, "./newroot", ":8282")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply?base_version="+got.BaseVersion, bytes.NewReader(alt)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode apply: %v", err)
+	}
+	if out.Version == "" {
+		t.Error("apply response should carry a fresh version for the next edit")
+	}
+}
+
+// TestConfigApplyRestartRequiredMapsTo409 proves the raw apply path classifies a
+// write rejected with ErrRestartRequired (a valid change that cannot hot-apply,
+// e.g. an ACME domain change) as a distinct 409 carrying restart_required:true,
+// not a generic 400 "invalid config" — and that nothing was persisted, since the
+// write path returns the sentinel before writing.
+func TestConfigApplyRestartRequiredMapsTo409(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "server.toml")
+	initial := validTOML(t, "./public", ":8080")
+	if err := os.WriteFile(cfgPath, initial, 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	deps := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		// Mirror the composition root refusing a restart-required change: return
+		// the sentinel without writing.
+		WriteConfigRaw: func([]byte) error {
+			return fmt.Errorf("%w: automatic HTTPS (ACME) domains or issuer changed", ErrRestartRequired)
+		},
+		LoadConfig: func() (*config.Config, error) {
+			raw, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return nil, err
+			}
+			return config.Parse(raw)
+		},
+	}
+	s := newTestServer(t, config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}, deps)
+
+	alt := validTOML(t, "./newroot", ":8282")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(alt)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+	var out restartRequiredResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.RestartRequired || out.OK {
+		t.Errorf("body = %+v, want restart_required=true and ok=false", out)
+	}
+	if !strings.Contains(out.Message, "restart") {
+		t.Errorf("message %q should mention a restart", out.Message)
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(initial, after) {
+		t.Error("config was modified despite a restart-required refusal")
 	}
 }
 

@@ -36,9 +36,24 @@ type LocationProjection struct {
 	// Upstream is the referenced upstream pool name when Action proxies to a
 	// named upstream (proxy_pass http://<name>); empty for direct host:port.
 	Upstream string `json:"upstream,omitempty"`
+	// WAF is the location's own [waf] override state, present only when the
+	// location defines one (otherwise it inherits the global policy). It lets the
+	// route editor truthfully offer to add, edit, or remove a per-location WAF
+	// override and show its current mode/CRS.
+	WAF *LocationWAFState `json:"waf,omitempty"`
 	// Warnings flags likely-misconfigurations the operator should see before
 	// editing (e.g. cache toggled on but the global cache is disabled).
 	Warnings []string `json:"warnings,omitempty"`
+}
+
+// LocationWAFState summarises a location's own [waf] override for the route
+// editor: the three knobs the guided per-location editor controls. It mirrors
+// the policy fields of LocationWAFProjection without repeating the location
+// coordinates (the route already provides them).
+type LocationWAFState struct {
+	Enabled    bool   `json:"enabled"`
+	Mode       string `json:"mode,omitempty"`
+	CRSEnabled bool   `json:"crs_enabled"`
 }
 
 // AppProjection is a structured upstream/app for the Console v2 Apps panel.
@@ -122,9 +137,30 @@ type SecurityProjection struct {
 	WAFResponseBodyCheck bool     `json:"waf_response_body_check"`
 	WAFDirectivesFiles   []string `json:"waf_directives_files,omitempty"`
 	WAFInlineRules       string   `json:"waf_inline_rules,omitempty"`
+	// LocationWAFs lists the locations that define their own [waf] override.
+	// Such an override REPLACES the global policy for that location wholesale, so
+	// surfacing it is the truthful disclosure that the WAF is configured
+	// per-location — the Security panel must not present the single global "Edit"
+	// as if it governed every route. Empty when only the global policy applies.
+	LocationWAFs []LocationWAFProjection `json:"location_wafs,omitempty"`
 	// SecretRefs is the number of ${env:}/${file:} secret references in the
 	// configuration. The values themselves are never projected.
 	SecretRefs int `json:"secret_refs"`
+}
+
+// LocationWAFProjection describes one location whose [waf] override differs from
+// the global policy. The identity fields mirror the structured-patch location
+// selector (listen + server_names + match type/path) so a future guided editor
+// can target the exact block; the policy fields summarise the override so the
+// panel can show its mode and CRS state without exposing rule contents.
+type LocationWAFProjection struct {
+	Listen      string   `json:"listen"`
+	ServerNames []string `json:"server_names,omitempty"`
+	MatchType   string   `json:"match_type,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Enabled     bool     `json:"enabled"`
+	Mode        string   `json:"mode,omitempty"`
+	CRSEnabled  bool     `json:"crs_enabled"`
 }
 
 // TrafficControlsProjection is the traffic/observability settings panel.
@@ -240,6 +276,13 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				lp.Action = "unknown"
 			}
 			lp.Upstream = upstreamRef(lp.Target, lp.Action)
+			if loc.WAF != nil {
+				lp.WAF = &LocationWAFState{
+					Enabled:    loc.WAF.Enabled,
+					Mode:       wafModeOrDefault(loc.WAF.Mode),
+					CRSEnabled: loc.WAF.CRSEnabled,
+				}
+			}
 			lp.Warnings = locationWarnings(c, srv, loc, &lp)
 			rp.Locations = append(rp.Locations, lp)
 		}
@@ -439,6 +482,19 @@ func projectSecurity(c *config.Config) SecurityProjection {
 			}
 			if loc.RequireClientCert {
 				sp.RequireCertCount++
+			}
+			// A non-nil loc.WAF is a per-location override that replaces the
+			// global policy for this location, so disclose it explicitly.
+			if loc.WAF != nil {
+				sp.LocationWAFs = append(sp.LocationWAFs, LocationWAFProjection{
+					Listen:      srv.Listen,
+					ServerNames: srv.ServerNames,
+					MatchType:   loc.Match.Type,
+					Path:        loc.Match.Path,
+					Enabled:     loc.WAF.Enabled,
+					Mode:        wafModeOrDefault(loc.WAF.Mode),
+					CRSEnabled:  loc.WAF.CRSEnabled,
+				})
 			}
 		}
 	}

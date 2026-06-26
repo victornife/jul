@@ -66,6 +66,128 @@ func TestMinTLSVersion(t *testing.T) {
 	}
 }
 
+// TestPreflightTLS proves the apply preflight rejects broken file-based TLS
+// certificates up front, while skipping plaintext and ACME-served addresses
+// (whose certificates are obtained at handshake time).
+func TestPreflightTLS(t *testing.T) {
+	dir := t.TempDir()
+	cert, key := writeSelfSigned(t, dir, "good", "example.com")
+
+	t.Run("valid file pair passes", func(t *testing.T) {
+		servers := []config.ServerConfig{{
+			Listen: ":443",
+			TLS:    &config.TLSConfig{Enabled: true, Cert: cert, Key: key},
+		}}
+		if err := PreflightTLS(servers); err != nil {
+			t.Fatalf("PreflightTLS: %v", err)
+		}
+	})
+
+	t.Run("missing cert file fails", func(t *testing.T) {
+		servers := []config.ServerConfig{{
+			Listen: ":443",
+			TLS:    &config.TLSConfig{Enabled: true, Cert: filepath.Join(dir, "nope.crt"), Key: key},
+		}}
+		if err := PreflightTLS(servers); err == nil {
+			t.Fatal("expected an error for a missing certificate file")
+		}
+	})
+
+	t.Run("cert/key mismatch fails", func(t *testing.T) {
+		_, otherKey := writeSelfSigned(t, dir, "other", "other.com")
+		servers := []config.ServerConfig{{
+			Listen: ":443",
+			TLS:    &config.TLSConfig{Enabled: true, Cert: cert, Key: otherKey},
+		}}
+		if err := PreflightTLS(servers); err == nil {
+			t.Fatal("expected an error for a cert/key mismatch")
+		}
+	})
+
+	t.Run("plaintext server skipped", func(t *testing.T) {
+		servers := []config.ServerConfig{{Listen: ":80"}}
+		if err := PreflightTLS(servers); err != nil {
+			t.Fatalf("plaintext server should pass: %v", err)
+		}
+	})
+
+	t.Run("acme address skips file validation", func(t *testing.T) {
+		// No cert/key files are set, but ACME is enabled for the address, so the
+		// certificate is obtained at handshake time — preflight must not fail.
+		servers := []config.ServerConfig{{
+			Listen: ":443",
+			TLS: &config.TLSConfig{
+				Enabled: true,
+				ACME:    &config.ACMEConfig{Enabled: true, Domains: []string{"example.com"}},
+			},
+		}}
+		if err := PreflightTLS(servers); err != nil {
+			t.Fatalf("acme-enabled address should skip file validation: %v", err)
+		}
+	})
+}
+
+// TestACMERestartRequired pins the hot-apply policy for ACME changes: the
+// autocert manager freezes its issued-domain set and issuer at startup, so
+// introducing ACME or changing those parameters requires a restart, while an
+// unchanged set or removing ACME entirely can hot-apply on the next reload.
+func TestACMERestartRequired(t *testing.T) {
+	acme := func(domains ...string) []config.ServerConfig {
+		return []config.ServerConfig{{
+			Listen: ":443",
+			TLS: &config.TLSConfig{
+				Enabled: true,
+				ACME:    &config.ACMEConfig{Enabled: true, Email: "ops@example.com", Domains: domains},
+			},
+		}}
+	}
+	plain := func() []config.ServerConfig {
+		return []config.ServerConfig{{Listen: ":80"}}
+	}
+
+	t.Run("introducing acme requires restart", func(t *testing.T) {
+		reason, need := ACMERestartRequired(plain(), acme("example.com"))
+		if !need {
+			t.Fatal("introducing ACME must require a restart")
+		}
+		if reason == "" {
+			t.Fatal("a non-empty reason is expected")
+		}
+	})
+
+	t.Run("adding a domain requires restart", func(t *testing.T) {
+		if _, need := ACMERestartRequired(acme("a.example.com"), acme("a.example.com", "b.example.com")); !need {
+			t.Fatal("growing the ACME domain set must require a restart")
+		}
+	})
+
+	t.Run("removing a domain requires restart", func(t *testing.T) {
+		if _, need := ACMERestartRequired(acme("a.example.com", "b.example.com"), acme("a.example.com")); !need {
+			t.Fatal("shrinking the ACME domain set must require a restart")
+		}
+	})
+
+	t.Run("changing the issuer email requires restart", func(t *testing.T) {
+		next := acme("example.com")
+		next[0].TLS.ACME.Email = "new@example.com"
+		if _, need := ACMERestartRequired(acme("example.com"), next); !need {
+			t.Fatal("changing the ACME issuer email must require a restart")
+		}
+	})
+
+	t.Run("unchanged set does not require restart", func(t *testing.T) {
+		if _, need := ACMERestartRequired(acme("b.example.com", "a.example.com"), acme("a.example.com", "b.example.com")); need {
+			t.Fatal("an unchanged ACME set (order-insensitive) must not require a restart")
+		}
+	})
+
+	t.Run("removing acme does not require restart", func(t *testing.T) {
+		if _, need := ACMERestartRequired(acme("example.com"), plain()); need {
+			t.Fatal("removing ACME hot-applies via provider swap; no restart required")
+		}
+	})
+}
+
 func TestSNICertSelection(t *testing.T) {
 	dir := t.TempDir()
 	certA, keyA := writeSelfSigned(t, dir, "a", "a.example.com")

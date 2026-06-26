@@ -12,6 +12,8 @@ import {
   subscribeEvents,
   cspNonce,
   ConfigRejectedError,
+  ConfigConflictError,
+  ConfigRestartRequiredError,
   ApiError,
   ValidationResultSchema,
   ApplyResultSchema,
@@ -126,6 +128,72 @@ describe("applyConfig", () => {
   it("throws ApiError on an unstructured failure", async () => {
     mockFetch(() => new Response("nope", { status: 500 }));
     await expect(applyConfig("x")).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("appends base_version as a query param when supplied", async () => {
+    const fn = mockFetch(
+      () => new Response(JSON.stringify({ ok: true, status: [], version: "abc123" }), { status: 200 }),
+    );
+    const res = await applyConfig("listen = \":8443\"", "feedface");
+    expect(res.version).toBe("abc123");
+    expect(fn.mock.calls[0]?.[0]).toBe("/api/config/apply?base_version=feedface");
+  });
+
+  it("omits the query param when no base_version is supplied", async () => {
+    const fn = mockFetch(
+      () => new Response(JSON.stringify({ ok: true, status: [] }), { status: 200 }),
+    );
+    await applyConfig("listen = \":8443\"");
+    expect(fn.mock.calls[0]?.[0]).toBe("/api/config/apply");
+  });
+
+  it("throws ConfigConflictError with the current version on HTTP 409", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            conflict: true,
+            message: "stale",
+            current_version: "9999",
+          }),
+          { status: 409 },
+        ),
+    );
+    await expect(applyConfig("x", "stalebase")).rejects.toBeInstanceOf(ConfigConflictError);
+    try {
+      await applyConfig("x", "stalebase");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigConflictError);
+      if (err instanceof ConfigConflictError) {
+        expect(err.message).toBe("stale");
+        expect(err.currentVersion).toBe("9999");
+      }
+    }
+  });
+
+  it("throws ConfigRestartRequiredError (not a conflict) on HTTP 409 with restart_required", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            restart_required: true,
+            message: "This change requires a server restart to take effect: ACME domains changed.",
+          }),
+          { status: 409 },
+        ),
+    );
+    await expect(applyConfig("x")).rejects.toBeInstanceOf(ConfigRestartRequiredError);
+    try {
+      await applyConfig("x");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigRestartRequiredError);
+      expect(err).not.toBeInstanceOf(ConfigConflictError);
+      if (err instanceof ConfigRestartRequiredError) {
+        expect(err.message).toContain("restart");
+      }
+    }
   });
 });
 

@@ -522,6 +522,13 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp["settings"] = extractSettings(cfg)
+		// base_version is the optimistic-concurrency fingerprint of the live
+		// config (canonical marshaled form, identical to the structured-patch
+		// preview's base_version). The raw editor sends it back on apply so a
+		// stale edit cannot silently clobber a concurrent change.
+		if marshaled, merr := config.Marshal(cfg); merr == nil {
+			resp["base_version"] = configVersion(marshaled)
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

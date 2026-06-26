@@ -223,6 +223,6 @@ describe("WizardPanel", () => {
     fireEvent.click(open);
     const draft = takePendingDraft();
     expect(draft?.kind).toBe("toml");
-    expect((draft as { kind: "toml"; toml: string })?.toml).toContain('listen = ":80"');
+    expect((draft as { kind: "toml"; toml: string }).toml).toContain('listen = ":80"');
   });
 });

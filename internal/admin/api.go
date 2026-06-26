@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -904,6 +905,47 @@ func (s *Server) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, diffConfigs(before, after))
 }
 
+// ErrRestartRequired marks a configuration apply that is valid but cannot be
+// hot-applied because it changes a setting fixed at process start (currently the
+// ACME issued-domain set and issuer). The composition root's write path returns
+// it — wrapped with a human-readable reason — instead of writing the file; the
+// apply handlers map it to a 409 carrying restart_required:true so the UI can
+// tell the operator a restart is needed rather than reporting a save.
+var ErrRestartRequired = errors.New("restart required")
+
+// restartRequiredResponse is the body returned when an apply is valid but cannot
+// take effect without a restart. The write was NOT performed, so the live config
+// is unchanged; the operator must restart for the change to apply.
+type restartRequiredResponse struct {
+	OK              bool   `json:"ok"`
+	RestartRequired bool   `json:"restart_required"`
+	Message         string `json:"message"`
+}
+
+// writeRestartRequired emits the shared restart-required response and audits the
+// refusal. action is the audit verb of the calling write path (e.g.
+// "config.apply" or "config.patch").
+func (s *Server) writeRestartRequired(w http.ResponseWriter, r *http.Request, action string, err error) {
+	s.recordAudit(action, "config", "failure", "rejected: restart required", adminClientIP(r))
+	s.emit("config", "apply_failed", "warn", "Configuration apply needs a restart to take effect; no change was applied.")
+	writeJSON(w, http.StatusConflict, restartRequiredResponse{
+		OK:              false,
+		RestartRequired: true,
+		Message:         restartRequiredMessage(err),
+	})
+}
+
+// restartRequiredMessage renders the operator-facing message for a restart
+// required error, stripping the sentinel prefix so only the reason shows.
+func restartRequiredMessage(err error) string {
+	msg := strings.TrimSpace(strings.TrimPrefix(err.Error(), ErrRestartRequired.Error()+":"))
+	if msg == "" {
+		msg = "This change requires a server restart to take effect."
+		return msg
+	}
+	return "This change requires a server restart to take effect: " + msg + "."
+}
+
 // handleConfigApply is the authoritative v2 write path: validate → snapshot →
 // write (which triggers reload) → return post-apply runtime delta.
 //
@@ -935,10 +977,37 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
+	// Optimistic concurrency: when the client sends the base_version it read the
+	// config at, reject the write with 409 if the live config changed since, so a
+	// stale raw edit cannot silently clobber a concurrent change. An empty
+	// base_version skips the check (an explicit force-apply). The version basis is
+	// the canonical marshaled form, identical to the structured-patch path, so a
+	// base_version from either editor is interchangeable.
+	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" && s.deps.LoadConfig != nil {
+		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
+			if marshaled, merr := config.Marshal(cur); merr == nil {
+				if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
+					s.recordAudit("config.apply", "config", "failure", "rejected: base version stale (concurrent change)", adminClientIP(r))
+					writeJSON(w, http.StatusConflict, conflictResponse{
+						OK:             false,
+						Conflict:       true,
+						Message:        "The configuration changed since this edit was prepared; reload and try again.",
+						CurrentVersion: currentVersion,
+					})
+					return
+				}
+			}
+		}
+	}
+
 	// Snapshot the current config before applying so the apply is reversible.
 	prev := s.currentRaw()
 
 	if err := s.deps.WriteConfigRaw(body); err != nil {
+		if errors.Is(err, ErrRestartRequired) {
+			s.writeRestartRequired(w, r, "config.apply", err)
+			return
+		}
 		s.recordAudit("config.apply", "config", "failure", "rejected: invalid configuration", adminClientIP(r))
 		s.emit("config", "apply_failed", "error", "Configuration apply was rejected (invalid).")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
@@ -960,9 +1029,16 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	// asynchronous, so "pending_reload" tells the UI this is the configuration
 	// taking effect rather than a confirmation that the swap has completed.
 	var status []FeatureStatus
+	var version string
 	if s.deps.LoadConfig != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
 			status = s.runtimeStatus(cfg)
+			// version is the fresh optimistic-concurrency fingerprint after this
+			// apply, so the raw editor can keep editing without a spurious 409 on
+			// its next save.
+			if marshaled, merr := config.Marshal(cfg); merr == nil {
+				version = configVersion(marshaled)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -970,6 +1046,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		"pending_reload": true,
 		"message":        "Configuration validated and saved. The live runtime is reloading to apply it.",
 		"status":         status,
+		"version":        version,
 	})
 }
 

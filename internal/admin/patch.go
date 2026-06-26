@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,6 +55,22 @@ type patchRequest struct {
 	// duration (e.g. "10m", "30s"); only non-empty fields are applied, so the
 	// edit is sparse. An empty string leaves the existing value untouched.
 	Limits *serverLimits `json:"limits,omitempty"`
+
+	// location_waf_set payload: the per-location [waf] override knobs the guided
+	// editor controls. location_waf_clear ignores it.
+	WAF *locationWAF `json:"waf,omitempty"`
+}
+
+// locationWAF carries the per-location WAF override fields the guided editor
+// exposes — exactly the ones the security projection discloses (enabled, mode,
+// CRS). Advanced SecLang fields (block_status, paranoia, directives_files,
+// inline_rules, request/response body inspection) are intentionally NOT here:
+// location_waf_set preserves whatever an existing override already set for them,
+// so the structured editor never silently clobbers rules it does not display.
+type locationWAF struct {
+	Enabled    bool   `json:"enabled"`
+	Mode       string `json:"mode,omitempty"`        // "block" (default) or "detect"
+	CRSEnabled bool   `json:"crs_enabled,omitempty"` // load the embedded OWASP CRS
 }
 
 // serverLimits carries the per-server limit/timeout fields the editor can set.
@@ -110,6 +127,47 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			loc.RateLimit.Enabled = false
 		}
 		return fmt.Sprintf("route %s%s rate limit %s", req.Listen, req.Path, onOff(*req.Enabled)), nil
+
+	case "location_waf_set":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if req.WAF == nil {
+			return "", fmt.Errorf("location_waf_set: waf payload is required")
+		}
+		mode := strings.TrimSpace(req.WAF.Mode)
+		if mode == "" {
+			mode = "block"
+		}
+		if mode != "block" && mode != "detect" {
+			return "", fmt.Errorf("location_waf_set: mode must be %q or %q", "block", "detect")
+		}
+		// Mutate in place when an override already exists so advanced SecLang
+		// fields the editor does not surface (block_status, paranoia, rule files,
+		// inline rules, body inspection) are preserved rather than wiped; create
+		// a fresh override otherwise. The override REPLACES the global policy for
+		// this location wholesale (it is not merged), which is exactly the
+		// semantics the security panel discloses.
+		if loc.WAF == nil {
+			loc.WAF = &config.WAFConfig{}
+		}
+		loc.WAF.Enabled = req.WAF.Enabled
+		loc.WAF.Mode = mode
+		loc.WAF.CRSEnabled = req.WAF.CRSEnabled
+		return fmt.Sprintf("route %s%s WAF override set (%s%s)", req.Listen, req.Path,
+			onOff(req.WAF.Enabled), wafModeNote(req.WAF.Enabled, mode, req.WAF.CRSEnabled)), nil
+
+	case "location_waf_clear":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if loc.WAF == nil {
+			return "", fmt.Errorf("route %s%s has no WAF override to clear", req.Listen, req.Path)
+		}
+		loc.WAF = nil
+		return fmt.Sprintf("route %s%s WAF override cleared (inherits the global [waf])", req.Listen, req.Path), nil
 
 	case "upstream_add_backend":
 		up, err := findUpstream(c, req.Upstream)
@@ -241,6 +299,19 @@ func onOff(b bool) string {
 		return "enabled"
 	}
 	return "disabled"
+}
+
+// wafModeNote renders the mode/CRS suffix for a location_waf_set audit summary,
+// e.g. " — block, CRS". It is empty when the override is disabled, since mode
+// and CRS do not apply to a switched-off firewall.
+func wafModeNote(enabled bool, mode string, crs bool) string {
+	if !enabled {
+		return ""
+	}
+	if crs {
+		return fmt.Sprintf(" — %s, CRS", mode)
+	}
+	return fmt.Sprintf(" — %s", mode)
 }
 
 // findLocation returns a pointer to the single location uniquely identified by
@@ -509,6 +580,10 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	// the all-or-nothing guarantee.
 	prev := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(candidate); err != nil {
+		if errors.Is(err, ErrRestartRequired) {
+			s.writeRestartRequired(w, r, "config.patch", err)
+			return
+		}
 		s.recordAudit("config.patch", "config", "failure", "rejected: invalid configuration", adminClientIP(r))
 		s.emit("config", "apply_failed", "error", "Structured patch apply was rejected (invalid).")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{

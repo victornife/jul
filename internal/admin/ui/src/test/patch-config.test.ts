@@ -55,6 +55,59 @@ describe("patchConfig", () => {
     expect(JSON.parse(seenBody)).toMatchObject({ op: "route_set_target", target: "http://new" });
   });
 
+  it("serializes a per-location WAF set with the nested waf payload", async () => {
+    let seenBody = "";
+    mockFetch((url, init) => {
+      expect(url).toBe("/api/config/patch");
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        summary: "route :8080/admin WAF override set (enabled — detect, CRS)",
+        candidate: 'listen = ":8080"\n',
+        diff: { summary: "1 change" },
+      });
+    });
+    const res = await patchConfig({
+      op: "location_waf_set",
+      listen: ":8080",
+      server_names: [],
+      match_type: "prefix",
+      path: "/admin",
+      waf: { enabled: true, mode: "detect", crs_enabled: true },
+    });
+    expect(res.summary).toContain("WAF override set");
+    // The nested waf payload is what the backend reads (req.WAF), so it must be
+    // sent verbatim — not flattened onto the top-level toggle `enabled` field.
+    expect(JSON.parse(seenBody)).toMatchObject({
+      op: "location_waf_set",
+      path: "/admin",
+      waf: { enabled: true, mode: "detect", crs_enabled: true },
+    });
+  });
+
+  it("serializes a per-location WAF clear without a payload", async () => {
+    let seenBody = "";
+    mockFetch((url, init) => {
+      expect(url).toBe("/api/config/patch");
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        summary: "route :8080/admin WAF override cleared (inherits the global [waf])",
+        candidate: 'listen = ":8080"\n',
+        diff: { summary: "1 change" },
+      });
+    });
+    const res = await patchConfig({
+      op: "location_waf_clear",
+      listen: ":8080",
+      server_names: [],
+      match_type: "prefix",
+      path: "/admin",
+    });
+    expect(res.summary).toContain("override cleared");
+    expect(JSON.parse(seenBody)).toMatchObject({ op: "location_waf_clear", path: "/admin" });
+  });
+
   it("surfaces validation_errors when the candidate would not build", async () => {
     mockFetch(() =>
       json({

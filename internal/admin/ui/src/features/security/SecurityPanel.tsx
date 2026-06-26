@@ -1,13 +1,24 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSecurity, type SecurityProjection } from "@/api/client.ts";
+import { fetchSecurity, type SecurityProjection, type LocationWAF } from "@/api/client.ts";
 import { WAFEditor } from "@/features/security/WAFEditor.tsx";
+import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
 
 // wafIsMixed reports whether protected locations run a mix of block and detect
 // modes, in which case a single mode badge would mislead.
 function wafIsMixed(d: SecurityProjection): boolean {
   return d.waf_block_locs > 0 && d.waf_detect_locs > 0;
+}
+
+// locationWafLabel renders a per-location override compactly: which route it
+// targets and the effective mode/CRS, so the operator sees that the route runs
+// its own policy rather than the global one.
+function locationWafLabel(w: LocationWAF): string {
+  const where = `${w.listen}${w.path ? ` ${w.path}` : ""}`;
+  const bits = [w.enabled ? (w.mode ?? "block") : "disabled"];
+  if (w.crs_enabled) bits.push("CRS");
+  return `${where} — ${bits.join(", ")}`;
 }
 
 // wafCoverageSummary describes how many locations the WAF protects and, when
@@ -51,6 +62,7 @@ function OnOff({ on }: { readonly on: boolean }) {
 
 export function SecurityPanel() {
   const [editingWAF, setEditingWAF] = useState(false);
+  const [editingLocationWAF, setEditingLocationWAF] = useState<LocationWAF | null>(null);
   const [externalizing, setExternalizing] = useState(false);
   const { data, isLoading, isError } = useQuery({
     queryKey: ["security"],
@@ -59,6 +71,8 @@ export function SecurityPanel() {
 
   if (isLoading) return <div className="text-jul-muted">Loading security…</div>;
   if (isError || !data) return <div className="text-jul-danger">Failed to load security info.</div>;
+
+  const locationWafs = data.location_wafs ?? [];
 
   return (
     <div className="space-y-6">
@@ -111,10 +125,42 @@ export function SecurityPanel() {
               }}
               className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
             >
-              {data.waf_enabled ? "Edit" : "Configure"}
+              {locationWafs.length > 0
+                ? "Edit global"
+                : data.waf_enabled
+                  ? "Edit"
+                  : "Configure"}
             </button>
           </span>
         </Row>
+        {locationWafs.length > 0 && (
+          <Row label="WAF per-location">
+            <span className="flex w-full flex-col gap-1">
+              <span className="text-jul-muted text-xs">
+                {locationWafs.length} location{locationWafs.length > 1 ? "s" : ""} override the
+                global policy. Editing above changes only the global{" "}
+                <span className="font-mono">[waf]</span>; edit each override below.
+              </span>
+              {locationWafs.map((w, i) => (
+                <span
+                  key={`locwaf-${String(i)}`}
+                  className="flex items-center gap-2 font-mono text-xs text-jul-text"
+                >
+                  <span className="min-w-0 flex-1 truncate">{locationWafLabel(w)}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingLocationWAF(w);
+                    }}
+                    className="shrink-0 rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
+                  >
+                    Edit
+                  </button>
+                </span>
+              ))}
+            </span>
+          </Row>
+        )}
         <Row label="Secret references">
           <span className="flex w-full items-center gap-2">
             {data.secret_refs > 0 ? (
@@ -150,6 +196,15 @@ export function SecurityPanel() {
           current={data}
           onClose={() => {
             setEditingWAF(false);
+          }}
+        />
+      )}
+
+      {editingLocationWAF && (
+        <LocationWAFEditor
+          target={editingLocationWAF}
+          onClose={() => {
+            setEditingLocationWAF(null);
           }}
         />
       )}

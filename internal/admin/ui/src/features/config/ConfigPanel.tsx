@@ -8,6 +8,7 @@ import {
   validateConfig,
   ConfigRejectedError,
   ConfigConflictError,
+  ConfigRestartRequiredError,
   type FeatureStatus,
   type ConfigDiff,
 } from "@/api/client.ts";
@@ -71,12 +72,17 @@ export function ConfigPanel() {
   // atomic patch endpoint rather than raw apply.
   const [patchDraft, setPatchDraft] = useState<PendingDraft & { kind: "patch" } | null>(null);
   const [conflictVersion, setConflictVersion] = useState<string | undefined>();
+  // baseVersion is the optimistic-concurrency token for the raw editor: the
+  // version the loaded config was read at. It is sent on raw apply so a stale
+  // edit is rejected with 409 instead of clobbering a concurrent change.
+  const [baseVersion, setBaseVersion] = useState<string | undefined>();
 
   // Seed the editor once the raw config arrives. A pending handoff, if present,
   // becomes the draft so the operator lands on a ready-to-review diff.
   useEffect(() => {
     if (data && draft === null && patchDraft === null) {
       const raw = data.raw ?? "";
+      setBaseVersion(data.base_version);
       const handoff = takePendingDraft();
       if (handoff) {
         if (handoff.kind === "toml") {
@@ -130,21 +136,29 @@ export function ConfigPanel() {
   );
 
   const applyRaw = useMutation({
-    mutationFn: () => applyConfig(current),
+    mutationFn: () => applyConfig(current, baseVersion),
     onSuccess: (res) => {
       setBaseline(current);
-      setApplied(res.status ?? []);
+      setApplied(res.status);
       setConfirming(false);
+      // Advance the token to the freshly-applied version so a follow-up edit
+      // does not trip a spurious conflict.
+      setBaseVersion(res.version ?? undefined);
+      setConflictVersion(undefined);
       void qc.invalidateQueries();
     },
-    onError: () => {
-      // Leave error for the UI
+    onError: (err) => {
+      if (err instanceof ConfigConflictError) {
+        setConflictVersion(err.currentVersion);
+      }
     },
   });
 
   const applyPatch = useMutation({
-    mutationFn: () =>
-      applyPatchBatch(patchDraft!.ops, patchDraft!.baseVersion ?? conflictVersion),
+    mutationFn: () => {
+      if (!patchDraft) throw new Error("no patch draft to apply");
+      return applyPatchBatch(patchDraft.ops, patchDraft.baseVersion ?? conflictVersion);
+    },
     onSuccess: (res) => {
       setPatchDraft(null);
       setApplied(res.status ?? []);
@@ -250,10 +264,18 @@ export function ConfigPanel() {
               <p className="font-medium text-jul-danger">
                 {applyError instanceof ConfigRejectedError
                   ? applyError.message
-                  : applyError instanceof ConfigConflictError
-                    ? "Conflict — another change was applied while you were editing."
-                    : "Apply failed."}
+                  : applyError instanceof ConfigRestartRequiredError
+                    ? applyError.message
+                    : applyError instanceof ConfigConflictError
+                      ? "Conflict — another change was applied while you were editing."
+                      : "Apply failed."}
               </p>
+              {applyError instanceof ConfigRestartRequiredError && (
+                <p className="mt-1 text-xs text-jul-muted">
+                  Nothing was saved. Update the configuration file and restart the
+                  server for this change to take effect.
+                </p>
+              )}
               {applyError instanceof ConfigRejectedError &&
                 applyError.issues.map((iss, i) => (
                   <p key={`ae-${String(i)}`} className="mt-1 text-xs text-jul-muted">
@@ -266,18 +288,21 @@ export function ConfigPanel() {
                   <button
                     type="button"
                     onClick={() => {
+                      // Discard the stale draft and re-seed from the latest
+                      // persisted config so the editor text and the base_version
+                      // token both reflect the concurrent change.
                       setPatchDraft(null);
                       setApplied(null);
                       setConflictVersion(undefined);
+                      applyRaw.reset();
                       applyPatch.reset();
-                      void qc.invalidateQueries();
-                      // Reload the latest raw config to start fresh.
-                      const handoff = takePendingDraft();
-                      if (handoff && handoff.kind === "toml") {
-                        setDraft(handoff.toml);
-                      } else {
-                        setDraft(data.raw ?? "");
-                      }
+                      void qc
+                        .fetchQuery({ queryKey: ["raw-config"], queryFn: fetchRawConfig })
+                        .then((fresh) => {
+                          setBaseline(fresh.raw ?? "");
+                          setDraft(fresh.raw ?? "");
+                          setBaseVersion(fresh.base_version);
+                        });
                     }}
                     className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
                   >

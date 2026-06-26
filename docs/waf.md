@@ -206,6 +206,29 @@ listen = "0.0.0.0:443"
 A location override replaces the global policy for that location wholesale (it is
 not merged field-by-field), so repeat the rule sources you want it to keep.
 
+### In the console
+
+The Security panel discloses per-location overrides explicitly: it lists each
+location that defines its own `[servers.locations.waf]` (with its mode and CRS
+state). The WAF edit button is labelled **Edit global** because the guided
+*global* editor seeds from and writes only the global `[waf]`.
+
+Each listed override has its own **Edit** action that opens a guided per-location
+editor. It controls the three knobs the panel discloses — enabled, mode
+(block/detect) and the embedded CRS — and applies the change through structured
+patch operations (`location_waf_set` / `location_waf_clear`) rather than splicing
+nested TOML, so the edit lands on exactly one location and is reviewed as a diff
+before it is applied. Advanced fields an override may carry (`block_status`,
+`paranoia`, `directives_files`, `inline_rules`, body inspection) are **preserved**
+— the editor never clears rules it does not display. **Clear override** removes
+the per-location block so the location inherits the global policy again.
+
+A route that still inherits the global policy can gain an override from the
+**route detail** drawer (Routes → a route): its quick edits offer **Add WAF
+override** (seeded detect-first), and a route that already overrides offers **Edit
+WAF override**. Use the raw TOML editor for the advanced fields above. See
+[console.md](console.md#web-application-firewall-waf).
+
 ## Rule ordering
 
 The SecLang program is assembled deterministically:

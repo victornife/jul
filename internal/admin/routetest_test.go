@@ -180,6 +180,57 @@ func TestRouteProjectionFlagsUpstreamAndWarnings(t *testing.T) {
 	}
 }
 
+// TestRouteProjectionLocationWAFState proves the route projection exposes a
+// location's own [waf] override (so the route editor can offer to edit/remove
+// it) and leaves the field absent for a location that inherits the global
+// policy (so it can offer to add one).
+func TestRouteProjectionLocationWAFState(t *testing.T) {
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: ":8080",
+			Locations: []config.LocationConfig{
+				{
+					Match: config.MatchConfig{Path: "/admin", Type: "prefix"},
+					Deny:  true,
+					WAF:   &config.WAFConfig{Enabled: true, Mode: "detect", CRSEnabled: true},
+				},
+				{Match: config.MatchConfig{Path: "/public", Type: "prefix"}, Deny: true},
+			},
+		}},
+	}
+	routes := projectRoutes(cfg)
+	locs := routes[0].Locations
+
+	if locs[0].WAF == nil {
+		t.Fatal("location with an override should expose WAF state")
+	}
+	if !locs[0].WAF.Enabled || locs[0].WAF.Mode != "detect" || !locs[0].WAF.CRSEnabled {
+		t.Errorf("override state mismatch: %+v", locs[0].WAF)
+	}
+	if locs[1].WAF != nil {
+		t.Errorf("inheriting location must not expose WAF state: %+v", locs[1].WAF)
+	}
+}
+
+// TestRouteProjectionLocationWAFModeDefaults proves a stored override with an
+// empty mode reports the effective default ("block") rather than "".
+func TestRouteProjectionLocationWAFModeDefaults(t *testing.T) {
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: ":8080",
+			Locations: []config.LocationConfig{{
+				Match: config.MatchConfig{Path: "/a", Type: "prefix"},
+				Deny:  true,
+				WAF:   &config.WAFConfig{Enabled: true},
+			}},
+		}},
+	}
+	loc := projectRoutes(cfg)[0].Locations[0]
+	if loc.WAF == nil || loc.WAF.Mode != "block" {
+		t.Fatalf("empty mode should project as block, got %+v", loc.WAF)
+	}
+}
+
 func TestAppProjectionDetailFields(t *testing.T) {
 	cfg := &config.Config{
 		Servers: []config.ServerConfig{{

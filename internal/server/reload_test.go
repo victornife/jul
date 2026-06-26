@@ -232,3 +232,65 @@ func TestReloadAddsAndRemovesListener(t *testing.T) {
 		t.Fatal("addr1 should still serve")
 	}
 }
+
+// TestPreflightListeners pins the apply-time listener probe: an apply that adds
+// an unbindable address fails fast, while unchanged addresses (still held by the
+// running server) and removals are never probed — closing the gap where
+// doReload binds new listeners best-effort and only logs a bind failure.
+func TestPreflightListeners(t *testing.T) {
+	servers := func(addrs ...string) []config.ServerConfig {
+		out := make([]config.ServerConfig, 0, len(addrs))
+		for _, a := range addrs {
+			out = append(out, config.ServerConfig{Listen: a})
+		}
+		return out
+	}
+
+	t.Run("adding a bindable address passes", func(t *testing.T) {
+		a, b := freePort(t), freePort(t)
+		if err := PreflightListeners(servers(a), servers(a, b)); err != nil {
+			t.Fatalf("a free new address should pass: %v", err)
+		}
+	})
+
+	t.Run("unchanged held address is not probed", func(t *testing.T) {
+		// Bind and HOLD an address, then keep it in both old and next. Because it
+		// is not new, it must be skipped — probing it would false-fail with
+		// "address already in use".
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ln.Close()
+		held := ln.Addr().String()
+		if err := PreflightListeners(servers(held), servers(held)); err != nil {
+			t.Fatalf("an unchanged held address must not be probed: %v", err)
+		}
+	})
+
+	t.Run("new address already in use fails", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ln.Close()
+		busy := ln.Addr().String()
+		// busy is NEW relative to old, so it is probed and the bind fails.
+		if err := PreflightListeners(servers(freePort(t)), servers(busy)); err == nil {
+			t.Fatal("adding an in-use address should fail preflight")
+		}
+	})
+
+	t.Run("invalid address fails", func(t *testing.T) {
+		if err := PreflightListeners(nil, servers("127.0.0.1:999999")); err == nil {
+			t.Fatal("an invalid port should fail preflight")
+		}
+	})
+
+	t.Run("removing an address passes", func(t *testing.T) {
+		a, b := freePort(t), freePort(t)
+		if err := PreflightListeners(servers(a, b), servers(a)); err != nil {
+			t.Fatalf("removing an address introduces nothing to probe: %v", err)
+		}
+	})
+}

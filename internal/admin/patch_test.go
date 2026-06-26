@@ -156,6 +156,126 @@ func TestApplyPatchRouteAmbiguousRejected(t *testing.T) {
 	}
 }
 
+// TestApplyPatchLocationWAFSetAndClear proves a per-location WAF override can be
+// created, updated, and removed through the structured patch ops, so the guided
+// editor never has to splice nested [[servers.locations.waf]] TOML by hand.
+func TestApplyPatchLocationWAFSetAndClear(t *testing.T) {
+	c := patchTestConfig()
+	loc := &c.Servers[0].Locations[0]
+	if loc.WAF != nil {
+		t.Fatal("fixture should start without a per-location WAF override")
+	}
+
+	// Create: a fresh override with block mode + CRS.
+	summary, err := applyPatch(c, patchRequest{
+		Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		WAF: &locationWAF{Enabled: true, Mode: "block", CRSEnabled: true},
+	})
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if loc.WAF == nil || !loc.WAF.Enabled || loc.WAF.Mode != "block" || !loc.WAF.CRSEnabled {
+		t.Fatalf("override not created as expected: %+v", loc.WAF)
+	}
+	if summary == "" {
+		t.Error("expected a non-empty summary")
+	}
+
+	// Update: switch to detect, drop CRS — same override is mutated in place.
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		WAF: &locationWAF{Enabled: true, Mode: "detect", CRSEnabled: false},
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if loc.WAF == nil || loc.WAF.Mode != "detect" || loc.WAF.CRSEnabled {
+		t.Fatalf("override not updated: %+v", loc.WAF)
+	}
+
+	// Clear: the override is removed so the location inherits the global policy.
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_waf_clear", Listen: ":8080", MatchType: "prefix", Path: "/api",
+	}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if loc.WAF != nil {
+		t.Errorf("override not cleared: %+v", loc.WAF)
+	}
+}
+
+// TestApplyPatchLocationWAFSetDefaultsMode proves an empty mode defaults to
+// "block" so a minimal payload produces an enforcing override.
+func TestApplyPatchLocationWAFSetDefaultsMode(t *testing.T) {
+	c := patchTestConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		WAF: &locationWAF{Enabled: true},
+	}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if got := c.Servers[0].Locations[0].WAF; got == nil || got.Mode != "block" {
+		t.Fatalf("empty mode should default to block, got %+v", got)
+	}
+}
+
+// TestApplyPatchLocationWAFSetPreservesAdvanced proves that editing the three
+// surfaced knobs (enabled/mode/CRS) leaves advanced SecLang fields the editor
+// does not display — inline rules, rule files, block status, paranoia — intact,
+// so a structured edit never silently wipes hand-written rules.
+func TestApplyPatchLocationWAFSetPreservesAdvanced(t *testing.T) {
+	c := patchTestConfig()
+	c.Servers[0].Locations[0].WAF = &config.WAFConfig{
+		Enabled:         true,
+		Mode:            "block",
+		BlockStatus:     429,
+		Paranoia:        2,
+		DirectivesFiles: []string{"/etc/jul/waf/custom.conf"},
+		InlineRules:     `SecRule REQUEST_URI "@contains /x" "id:200,phase:1,deny"`,
+	}
+
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		WAF: &locationWAF{Enabled: true, Mode: "detect", CRSEnabled: true},
+	}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got := c.Servers[0].Locations[0].WAF
+	if got.Mode != "detect" || !got.CRSEnabled {
+		t.Errorf("surfaced knobs not applied: %+v", got)
+	}
+	if got.BlockStatus != 429 || got.Paranoia != 2 ||
+		len(got.DirectivesFiles) != 1 || got.DirectivesFiles[0] != "/etc/jul/waf/custom.conf" ||
+		got.InlineRules == "" {
+		t.Errorf("advanced fields were clobbered: %+v", got)
+	}
+}
+
+// TestApplyPatchLocationWAFErrors proves the WAF ops reject malformed payloads
+// and missing targets without mutating the config.
+func TestApplyPatchLocationWAFErrors(t *testing.T) {
+	cases := []patchRequest{
+		// nil payload
+		{Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api"},
+		// invalid mode
+		{Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api", WAF: &locationWAF{Enabled: true, Mode: "warn"}},
+		// no such route
+		{Op: "location_waf_set", Listen: ":9999", MatchType: "prefix", Path: "/api", WAF: &locationWAF{Enabled: true}},
+		// clear with no existing override
+		{Op: "location_waf_clear", Listen: ":8080", MatchType: "prefix", Path: "/api"},
+		// clear on a missing route
+		{Op: "location_waf_clear", Listen: ":9999", MatchType: "prefix", Path: "/api"},
+	}
+	for _, req := range cases {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, req); err == nil {
+			t.Errorf("expected error for op %q payload %+v", req.Op, req.WAF)
+		}
+		if c.Servers[0].Locations[0].WAF != nil {
+			t.Errorf("a rejected op must not create an override: %+v", c.Servers[0].Locations[0].WAF)
+		}
+	}
+}
+
 func TestApplyPatchUpstreamAddRemoveBackend(t *testing.T) {
 	c := patchTestConfig()
 	if _, err := applyPatch(c, patchRequest{Op: "upstream_add_backend", Upstream: "pool", Address: "10.0.0.2:80", Weight: 3}); err != nil {

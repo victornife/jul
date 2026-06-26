@@ -152,6 +152,54 @@ it explains the operational consequences of changes to:
 - **Server timeouts and body limits**, and the global **cache**,
   **compression**, and **rate-limit** blocks.
 
+### Concurrent edits (optimistic concurrency)
+
+Both write paths carry a `base_version` — a short fingerprint of the
+configuration the edit was prepared against — so a second operator (or a second
+browser tab) cannot silently overwrite a change applied in between:
+
+- The **raw TOML editor** (`POST /api/config/apply?base_version=<v>`) and the
+  **structured quick edits** (`POST /api/config/patch/apply`) both reject a
+  stale write with **HTTP 409 Conflict** when the live config changed since the
+  edit was prepared. `GET /api/config` and the patch preview
+  (`POST /api/config/patch`) both return the current `base_version`. The
+  fingerprint is computed over the canonical, comment-insensitive form, so a
+  `base_version` is interchangeable between the raw and structured paths.
+- On a 409 the console shows a conflict banner with **Reload latest config**,
+  which discards the stale draft and re-seeds the editor (both the text and the
+  `base_version`) from the current configuration.
+- A successful apply returns the new `version`, so a follow-up edit in the same
+  session does not trip a spurious conflict.
+- Sending an empty/absent `base_version` skips the check (an explicit
+  force-apply); the console always sends it.
+
+### Restart-required changes
+
+A few settings are fixed when the process starts and cannot take effect on a hot
+apply. The clearest case is **automatic HTTPS (ACME)**: the issued-domain set and
+issuer are frozen when the autocert manager is built at startup, so enabling
+ACME, adding or removing domains, or changing the issuer cannot be hot-applied.
+
+When an apply is otherwise valid but changes such a setting, the write path
+**refuses it without persisting anything** and returns **HTTP 409** with
+`restart_required: true`. The console shows a *restart required* notice — distinct
+from the optimistic-concurrency conflict above — explaining that nothing was
+saved and that the operator must edit the configuration file and restart the
+server for the change to take effect. Removing ACME is not restart-required (the
+listener swaps to static certificates on the next reload). See
+[tls-acme.md](tls-acme.md#restart-required-acme-changes).
+
+### Listener changes
+
+Adding or removing a `listen` address **is** hot-applied: the reload binds new
+listeners and drains removed ones without a restart. To keep that honest, the
+apply first **probes every newly introduced address** — a quick bind-and-close —
+so an apply that adds an unbindable port (already in use by another process,
+invalid, or privileged without permission) is rejected before it is persisted,
+rather than being recorded as applied while the new listener silently never
+serves. Addresses the running server already holds are not probed (that would
+always fail), and removals introduce nothing to probe.
+
 ### Guided editors — scope (v2)
 
 The Routes and Apps panels provide **guided creation** that generates a
@@ -174,11 +222,42 @@ path to the pool, so a newly created app actually serves traffic instead of
 existing only as a backend. Both blocks go through the same Validate → Diff →
 Apply pipeline.
 
-The TLS, Security (auth/mTLS), and ACME panels are **read-only inventories** in
-v2; guided enablement/editing for TLS, ACME, mutual-TLS, and auth rules is a
-pending P1 item. Until then, change those settings through the validated raw
-TOML editor, which the structured diff annotates with the consequences listed
-above.
+The TLS and ACME panels, and the **auth/mTLS** portions of the Security panel,
+are **read-only inventories** in v2; guided enablement/editing for TLS, ACME,
+mutual-TLS, and auth rules is a pending P1 item. (The Security panel's **WAF**
+policy is the exception — it has a guided editor for the global `[waf]` block, as
+described below.) Until guided editors ship for the rest, change those settings
+through the validated raw TOML editor, which the structured diff annotates with
+the consequences listed above.
+
+### Web application firewall (WAF)
+
+The Security panel reports the WAF posture truthfully rather than implying a
+single uniform policy:
+
+- The **coverage summary** shows how many locations the firewall protects and,
+  when they differ, the block/detect/CRS split — so a partial or mixed rollout is
+  never flattened into one badge.
+- The guided **WAF editor** seeds from, and writes, only the global
+  `[waf]` policy. When one or more locations define their own
+  `[[servers.locations.waf]]` override (which **replaces** the global policy for
+  that location wholesale), the panel lists each override (route, mode, CRS) and
+  the edit button is labelled **Edit global** to make clear it does not touch
+  those per-location policies.
+- Each listed per-location override has its own **Edit** action that opens a
+  guided per-location editor. It controls the disclosed knobs — enabled, mode
+  (block/detect) and the embedded CRS — and applies the change through structured
+  patch operations (`location_waf_set` / `location_waf_clear`) reviewed as a diff,
+  so it never hand-edits nested TOML. Advanced rule fields the override may carry
+  (block status, paranoia, rule files, inline rules, body inspection) are
+  **preserved**; **Clear override** removes the block so the location inherits the
+  global policy again. Those advanced fields are still edited in the raw TOML
+  editor.
+- A route that still inherits the global policy can gain an override from the
+  **route detail** drawer: its quick edits offer **Add WAF override** (seeded
+  detect-first), while a route that already overrides offers **Edit WAF
+  override**. Both use the same structured patch ops and diff review, so an
+  override can be added, tuned, or removed without leaving the route surface.
 
 ### Audit log
 

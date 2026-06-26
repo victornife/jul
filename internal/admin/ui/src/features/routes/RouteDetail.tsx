@@ -6,8 +6,10 @@ import {
   ConfigRejectedError,
   type ConfigPatch,
   type LocationProjection,
+  type LocationWAF,
   type RouteProjection,
 } from "@/api/client.ts";
+import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
 function Row({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
@@ -104,6 +106,7 @@ function QuickEdits({
   const [target, setTarget] = useState(loc.target ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [wafEditing, setWafEditing] = useState(false);
 
   async function runPatch(patch: ConfigPatch): Promise<void> {
     setError(null);
@@ -126,6 +129,19 @@ function QuickEdits({
   }
 
   const canSetTarget = loc.action === "proxy";
+
+  // wafTarget builds the LocationWAF the guided per-location editor expects from
+  // the route coordinates plus the location's current override (or safe
+  // detect-first defaults when the route still inherits the global policy).
+  const wafTarget: LocationWAF = {
+    listen: route.listen,
+    server_names: route.server_names ?? [],
+    match_type: loc.type,
+    path: loc.match,
+    enabled: loc.waf?.enabled ?? true,
+    mode: loc.waf?.mode ?? "detect",
+    crs_enabled: loc.waf?.crs_enabled ?? false,
+  };
 
   return (
     <div className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-3">
@@ -205,9 +221,29 @@ function QuickEdits({
         >
           {loc.rate_limit ? "Disable rate limit" : "Enable rate limit"} →
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setWafEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.waf ? "Edit WAF override" : "Add WAF override"} →
+        </button>
       </div>
 
       {error && <p className="text-xs text-jul-danger">{error}</p>}
+
+      {wafEditing && (
+        <LocationWAFEditor
+          target={wafTarget}
+          existing={Boolean(loc.waf)}
+          onClose={() => {
+            setWafEditing(false);
+          }}
+        />
+      )}
     </div>
   );
 }

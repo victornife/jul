@@ -252,3 +252,83 @@ func TestFirewallDoesNotRewriteDownstream403(t *testing.T) {
 		t.Error("clean request should reach the action")
 	}
 }
+
+// indexOrAbsent reports the byte offset of sub in s, or -1 when absent.
+func indexOrAbsent(s, sub string) int { return strings.Index(s, sub) }
+
+// TestBuildDirectivesOrder is a golden test pinning the deterministic assembly
+// order of the SecLang program: SecDefaultAction → CRS → directives_files →
+// inline_rules → enforcement-mode line last. Order matters because later
+// directives override earlier engine state, so a regression that reordered
+// these would silently change blocking behaviour.
+func TestBuildDirectivesOrder(t *testing.T) {
+	t.Run("crs disabled: default-action first, mode last", func(t *testing.T) {
+		cfg := config.WAFConfig{
+			Mode:            "detect",
+			BlockStatus:     451,
+			DirectivesFiles: []string{"/etc/jul/extra.conf"},
+			InlineRules:     `SecRule REQUEST_URI "@contains /x" "id:100,phase:1,deny"`,
+		}
+		out, err := buildDirectives(cfg)
+		if err != nil {
+			t.Fatalf("buildDirectives: %v", err)
+		}
+
+		defAction := indexOrAbsent(out, "SecDefaultAction \"phase:1,deny,status:451,log\"")
+		dirFile := indexOrAbsent(out, "Include /etc/jul/extra.conf")
+		inline := indexOrAbsent(out, `SecRule REQUEST_URI "@contains /x"`)
+		mode := indexOrAbsent(out, "SecRuleEngine DetectionOnly")
+
+		for name, idx := range map[string]int{
+			"SecDefaultAction": defAction, "directives_file": dirFile,
+			"inline_rules": inline, "mode": mode,
+		} {
+			if idx < 0 {
+				t.Fatalf("expected %s in output, got:\n%s", name, out)
+			}
+		}
+		if !(defAction < dirFile && dirFile < inline && inline < mode) {
+			t.Errorf("order violated (defAction=%d dirFile=%d inline=%d mode=%d):\n%s",
+				defAction, dirFile, inline, mode, out)
+		}
+		// CRS off ⇒ our SecDefaultAction is emitted; CRS includes are not.
+		if strings.Contains(out, "@owasp_crs") {
+			t.Error("CRS includes must be absent when crs_enabled is false")
+		}
+	})
+
+	t.Run("crs enabled: no self default-action, CRS before user rules", func(t *testing.T) {
+		cfg := config.WAFConfig{
+			Mode:            "block",
+			CRSEnabled:      true,
+			DirectivesFiles: []string{"/etc/jul/extra.conf"},
+			InlineRules:     `SecRule REQUEST_URI "@contains /x" "id:100,phase:1,deny"`,
+		}
+		out, err := buildDirectives(cfg)
+		if err != nil {
+			t.Fatalf("buildDirectives: %v", err)
+		}
+
+		crs := indexOrAbsent(out, "Include @owasp_crs/*.conf")
+		dirFile := indexOrAbsent(out, "Include /etc/jul/extra.conf")
+		inline := indexOrAbsent(out, `SecRule REQUEST_URI "@contains /x"`)
+		mode := indexOrAbsent(out, "SecRuleEngine On")
+
+		for name, idx := range map[string]int{
+			"CRS include": crs, "directives_file": dirFile,
+			"inline_rules": inline, "mode": mode,
+		} {
+			if idx < 0 {
+				t.Fatalf("expected %s in output, got:\n%s", name, out)
+			}
+		}
+		if !(crs < dirFile && dirFile < inline && inline < mode) {
+			t.Errorf("order violated (crs=%d dirFile=%d inline=%d mode=%d):\n%s",
+				crs, dirFile, inline, mode, out)
+		}
+		// CRS on ⇒ we must NOT emit our own SecDefaultAction (Coraza rejects dups).
+		if strings.Contains(out, "SecDefaultAction") {
+			t.Error("must not emit SecDefaultAction when CRS is enabled")
+		}
+	})
+}

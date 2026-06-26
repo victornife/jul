@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -93,6 +94,94 @@ func (p *fileCertProvider) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Cert
 		}
 	}
 	return p.fallbck, nil
+}
+
+// PreflightTLS validates that every file-based TLS certificate the configuration
+// would load can actually be parsed, without binding any listener. It mirrors
+// certProviderFor's per-address selection: an address that enables ACME obtains
+// its certificate at handshake time, so its server blocks are skipped here;
+// every other TLS-enabled server block must reference a loadable cert/key pair.
+//
+// This lets an apply fail fast with a clear error instead of surfacing a broken
+// certificate only at the asynchronous reload — where the old runtime keeps
+// serving while audit/history have already recorded the apply as successful.
+func PreflightTLS(servers []config.ServerConfig) error {
+	for i := range servers {
+		srv := &servers[i]
+		if srv.TLS == nil || !srv.TLS.Enabled {
+			continue
+		}
+		// ACME-served addresses obtain certificates at handshake time, so there
+		// is no file pair to validate here (matching certProviderFor).
+		if acmeEnabledForAddr(servers, srv.Listen) {
+			continue
+		}
+		if _, err := tls.LoadX509KeyPair(srv.TLS.Cert, srv.TLS.Key); err != nil {
+			return fmt.Errorf("server %s: tls certificate: %w", srv.Listen, err)
+		}
+	}
+	return nil
+}
+
+// acmeFingerprint summarises the ACME settings that are fixed when the autocert
+// manager is built at startup: the union of issued domains plus the issuer
+// parameters (email, CA and challenge). Two configs with equal fingerprints can
+// swap their ACME state on reload without a restart; a non-empty fingerprint
+// means the candidate relies on ACME. Domains are de-duplicated and sorted so
+// the comparison is order-insensitive.
+func acmeFingerprint(servers []config.ServerConfig) string {
+	var domains []string
+	seen := make(map[string]bool)
+	var email, ca, challenge string
+	for i := range servers {
+		srv := &servers[i]
+		if srv.TLS == nil || !srv.TLS.Enabled ||
+			srv.TLS.ACME == nil || !srv.TLS.ACME.Enabled {
+			continue
+		}
+		a := srv.TLS.ACME
+		for _, d := range a.Domains {
+			if !seen[d] {
+				seen[d] = true
+				domains = append(domains, d)
+			}
+		}
+		if email == "" {
+			email = a.Email
+		}
+		if ca == "" {
+			ca = a.CA
+		}
+		if challenge == "" {
+			challenge = a.Challenge
+		}
+	}
+	if len(domains) == 0 {
+		return ""
+	}
+	sort.Strings(domains)
+	return strings.Join(domains, ",") + "|" + email + "|" + ca + "|" + challenge
+}
+
+// ACMERestartRequired reports whether moving from old to next changes the ACME
+// configuration in a way that cannot take effect without a restart. The autocert
+// manager's issued-domain set and issuer are frozen when it is built at startup,
+// so introducing ACME or changing its domains/issuer requires a restart and the
+// returned reason is non-empty.
+//
+// Removing ACME does not require a restart: the per-address provider selection
+// (certProviderFor) swaps to file certificates on the next reload, and
+// PreflightTLS validates that those file certificates load. An unchanged ACME
+// configuration likewise needs no restart.
+func ACMERestartRequired(old, next []config.ServerConfig) (string, bool) {
+	nextFP := acmeFingerprint(next)
+	if nextFP == "" {
+		return "", false // candidate uses no ACME (removal hot-applies)
+	}
+	if nextFP == acmeFingerprint(old) {
+		return "", false // ACME configuration unchanged
+	}
+	return "automatic HTTPS (ACME) domains or issuer changed; the issued-domain set is fixed when the server starts", true
 }
 
 // minTLSVersion maps a config string to a crypto/tls version constant,

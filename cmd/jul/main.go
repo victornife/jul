@@ -748,6 +748,13 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		if err := validateRuntimeConfig(c); err != nil {
 			return err
 		}
+		// Validate file-based TLS certificates before the heavier full dry-run so
+		// a broken cert/key pair fails the apply here rather than only at the
+		// asynchronous reload (preflightBuild dry-runs handlers but never loads
+		// certificates or binds listeners).
+		if err := server.PreflightTLS(c.Servers); err != nil {
+			return err
+		}
 		return preflightBuild(c)
 	}
 	if ts, ok := src.(*config.TOMLSource); ok {
@@ -760,6 +767,30 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 			if err := applyPreflight(cfg); err != nil {
 				return err
+			}
+			// Compare the candidate against the running (on-disk) config to gate
+			// changes that the asynchronous reload would otherwise apply
+			// best-effort and only log on failure.
+			if prevData, rerr := os.ReadFile(path); rerr == nil {
+				if prevCfg, perr := config.Parse(prevData); perr == nil {
+					// Probe every NEWLY introduced listen address so an apply that
+					// adds an unbindable port (already in use, invalid, privileged)
+					// fails here rather than being recorded as applied while the
+					// new listener silently never serves.
+					if err := server.PreflightListeners(prevCfg.Servers, cfg.Servers); err != nil {
+						return err
+					}
+					// Refuse to hot-apply a change that is valid but cannot take
+					// effect without a restart: the ACME issued-domain set and
+					// issuer are frozen when the autocert manager is built at
+					// startup. The on-disk config still reflects startup for ACME,
+					// since such changes are never written, so reject without
+					// writing — the operator restarts instead of believing it
+					// applied.
+					if reason, need := server.ACMERestartRequired(prevCfg.Servers, cfg.Servers); need {
+						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+					}
+				}
 			}
 			if err := os.WriteFile(path, data, 0o644); err != nil {
 				return err

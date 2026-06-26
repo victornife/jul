@@ -91,7 +91,7 @@ server_names = ["example.com", "www.example.com"]
 | ACME TLS-ALPN-01 | ✅ (`acme`) | answered on the TLS listener (`acme-tls/1`) |
 | ACME DNS-01 | ❌ | not implemented (reserved for an `acme_dns` build) |
 | ACME staging / production / custom CA | ✅ (`acme`) | via `ca` |
-| ACME domain set **hot reload** | ❌ | fixed at startup; restart to change domains |
+| ACME domain set **hot reload** | ❌ | fixed at startup; restart to change domains. The console refuses such an apply with a *restart required* notice rather than recording a no-op (see below) |
 | OCSP stapling (ACME certs) | ✅ (`acme`) | default on; degrades gracefully on fetch failure |
 | OCSP stapling (static certs) | ❌ | ACME-issued certificates only |
 | Custom cipher suites / ordering | ❌ | Go stdlib defaults (safe for TLS 1.2/1.3) |
@@ -123,6 +123,28 @@ Names are lower-cased; an empty SNI goes straight to the fallback.
 | Static `cert`/`key` | **Reloaded** — the provider is rebuilt and swapped atomically; the listener keeps serving with no downtime and no rebind. |
 | ACME domain set | **Not reloaded** — the issued-domain set is fixed when the manager starts. ACME *renewal* still happens in the background while running. Restart to add/remove domains. |
 | `client_auth` (mTLS) | **Not reloaded** — bound at listener start (see [mtls.md](mtls.md)). |
+
+When a configuration is applied (through the console or any validated write
+path), every file-based `cert`/`key` pair it references is parsed **before** the
+file is persisted. A broken or mismatched pair fails the apply up front with a
+clear error, rather than surfacing only at the asynchronous reload where the
+previous certificates would keep serving. ACME-served addresses are skipped by
+this check because their certificates are obtained at handshake time.
+
+#### Restart-required ACME changes
+
+Because the autocert manager's issued-domain set and issuer (email/CA) are fixed
+when it is built at startup, a hot apply cannot enable ACME, add or remove
+domains, or change the issuer. The console (and every validated write path)
+detects such a change by comparing the candidate against the running
+configuration and **refuses it without writing**, returning a *restart required*
+result (HTTP 409 with `restart_required: true`) instead of silently recording a
+change that the live runtime would ignore. Update the configuration file
+directly and restart the server to apply it.
+
+Removing ACME entirely is *not* restart-required: the per-address provider
+selection swaps to the static `cert`/`key` certificates on the next reload (which
+the apply-time validation above confirms will load).
 
 ## Metrics
 

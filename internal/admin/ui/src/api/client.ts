@@ -140,6 +140,16 @@ export const TLSProjectionSchema = z.object({
 });
 export type TLSProjection = z.infer<typeof TLSProjectionSchema>;
 
+// LocationWAFStateSchema is a location's own [waf] override state, present only
+// when the location defines one. It carries just the three knobs the guided
+// per-location editor controls; the route supplies the location coordinates.
+export const LocationWAFStateSchema = z.object({
+  enabled: z.boolean(),
+  mode: z.string().optional(),
+  crs_enabled: z.boolean().default(false),
+});
+export type LocationWAFState = z.infer<typeof LocationWAFStateSchema>;
+
 export const LocationProjectionSchema = z.object({
   index: z.number().default(0),
   match: z.string(),
@@ -152,6 +162,7 @@ export const LocationProjectionSchema = z.object({
   rate_limit: z.boolean().default(false),
   secure: z.boolean(),
   upstream: z.string().optional(),
+  waf: LocationWAFStateSchema.optional(),
   warnings: z.array(z.string()).optional(),
 });
 export type LocationProjection = z.infer<typeof LocationProjectionSchema>;
@@ -200,6 +211,20 @@ export const CertProjectionSchema = z.object({
 });
 export type CertProjection = z.infer<typeof CertProjectionSchema>;
 
+// LocationWAFSchema is one per-location [waf] override surfaced by the security
+// projection. The identity fields mirror the structured-patch location selector
+// so a guided editor can target the exact block.
+export const LocationWAFSchema = z.object({
+  listen: z.string(),
+  server_names: z.array(z.string()).optional(),
+  match_type: z.string().optional(),
+  path: z.string().optional(),
+  enabled: z.boolean(),
+  mode: z.string().optional(),
+  crs_enabled: z.boolean().optional().default(false),
+});
+export type LocationWAF = z.infer<typeof LocationWAFSchema>;
+
 export const SecurityProjectionSchema = z.object({
   auth_enabled: z.boolean(),
   client_auth: z.string().optional(),
@@ -224,6 +249,10 @@ export const SecurityProjectionSchema = z.object({
   waf_response_body_check: z.boolean().optional().default(false),
   waf_directives_files: z.array(z.string()).optional(),
   waf_inline_rules: z.string().optional(),
+  // Per-location [waf] overrides, each replacing the global policy for that
+  // route. Surfacing them lets the panel disclose per-location WAF rather than
+  // implying the single global policy governs every route.
+  location_wafs: z.array(LocationWAFSchema).optional(),
   secret_refs: z.number(),
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
@@ -380,6 +409,10 @@ export const RawConfigSchema = z.object({
   product: z.string().optional(),
   version: z.string().optional(),
   path: z.string().optional(),
+  // base_version is the optimistic-concurrency fingerprint of the config at read
+  // time. The raw editor sends it back on apply so a stale edit is rejected with
+  // 409 rather than silently clobbering a concurrent change.
+  base_version: z.string().optional(),
 });
 export type RawConfig = z.infer<typeof RawConfigSchema>;
 
@@ -443,10 +476,22 @@ export type RouteTarget = {
   path: string;
 };
 
+// LocationWAFPatch is the per-location [waf] override the guided editor sets —
+// only the three knobs the security projection discloses. Advanced SecLang
+// fields an existing override may carry (block status, paranoia, rule files,
+// inline rules, body inspection) are preserved by the backend, never sent here.
+export type LocationWAFPatch = {
+  enabled: boolean;
+  mode?: "block" | "detect";
+  crs_enabled?: boolean;
+};
+
 export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
   | ({ op: "route_toggle_rate_limit"; enabled: boolean } & RouteTarget)
+  | ({ op: "location_waf_set"; waf: LocationWAFPatch } & RouteTarget)
+  | ({ op: "location_waf_clear" } & RouteTarget)
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch };
@@ -551,6 +596,10 @@ export const ApplyResultSchema = z.object({
   // the status below is the configuration taking effect, not a confirmation
   // that the running runtime has already switched. Optional for back-compat.
   pending_reload: z.boolean().optional(),
+  // version is the fresh config fingerprint after this apply, used to advance
+  // the raw editor's optimistic-concurrency token so a follow-up edit does not
+  // trip a spurious conflict.
+  version: z.string().optional(),
   message: z.string().optional(),
   status: z.array(FeatureStatusSchema),
 });
@@ -559,15 +608,20 @@ export type ApplyResult = z.infer<typeof ApplyResultSchema>;
 /**
  * Applies a candidate config through the authoritative write path and resolves
  * with the post-apply runtime status delta. Rejects with ConfigRejectedError
- * when the backend refuses the draft, or ApiError on transport failure.
+ * when the backend refuses the draft, ConfigConflictError when baseVersion is
+ * supplied and the live config has since changed (optimistic concurrency), or
+ * ApiError on transport failure.
  */
-export async function applyConfig(candidate: string): Promise<ApplyResult> {
+export async function applyConfig(candidate: string, baseVersion?: string): Promise<ApplyResult> {
   const headers = new Headers();
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/toml");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const resp = await fetch("/api/config/apply", { method: "POST", headers, body: candidate });
+  const url = baseVersion
+    ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
+    : "/api/config/apply";
+  const resp = await fetch(url, { method: "POST", headers, body: candidate });
   let data: unknown = null;
   try {
     data = (await resp.json()) as unknown;
@@ -576,6 +630,20 @@ export async function applyConfig(candidate: string): Promise<ApplyResult> {
   }
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
+    if (resp.status === 409) {
+      const conflict = ConflictBodySchema.safeParse(data);
+      if (conflict.success && conflict.data.restart_required) {
+        throw new ConfigRestartRequiredError(
+          conflict.data.message ?? "This change requires a server restart to take effect.",
+        );
+      }
+      throw new ConfigConflictError(
+        conflict.success && conflict.data.message
+          ? conflict.data.message
+          : "The configuration changed since this edit was prepared; reload and try again.",
+        conflict.success ? conflict.data.current_version : undefined,
+      );
+    }
     const rejected = ValidationResultSchema.safeParse(data);
     if (rejected.success) {
       throw new ConfigRejectedError(
@@ -601,8 +669,22 @@ export class ConfigConflictError extends Error {
   }
 }
 
+// ConfigRestartRequiredError is thrown when an apply is valid but cannot be
+// hot-applied because it changes a setting fixed at process start (currently the
+// ACME issued-domain set and issuer). The server did NOT write the change, so
+// the live config is unchanged; the operator must restart for it to take effect.
+// It is distinguished from ConfigConflictError by the restart_required body flag
+// on the shared 409 response.
+export class ConfigRestartRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigRestartRequiredError";
+  }
+}
+
 const ConflictBodySchema = z.object({
   conflict: z.boolean().optional(),
+  restart_required: z.boolean().optional(),
   message: z.string().optional(),
   current_version: z.string().optional(),
 });
@@ -656,6 +738,11 @@ export async function applyPatchBatch(
     if (resp.status === 401) notifyUnauthorized();
     if (resp.status === 409) {
       const conflict = ConflictBodySchema.safeParse(data);
+      if (conflict.success && conflict.data.restart_required) {
+        throw new ConfigRestartRequiredError(
+          conflict.data.message ?? "This change requires a server restart to take effect.",
+        );
+      }
       throw new ConfigConflictError(
         conflict.success && conflict.data.message
           ? conflict.data.message

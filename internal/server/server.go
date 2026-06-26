@@ -437,6 +437,35 @@ func setOf(items []string) map[string]struct{} {
 	return m
 }
 
+// PreflightListeners validates that every listen address introduced by next
+// (present in next but not in old) can actually be bound, so an apply that adds
+// an unbindable address — a port already in use by another process, an invalid
+// host, or a privileged port without permission — fails fast before the config
+// is persisted. Without this, doReload binds new listeners best-effort and only
+// logs a bind failure, so the apply would already be recorded as successful
+// while the new listener silently never serves.
+//
+// Only NEW addresses are probed. The running server still holds every address it
+// already serves, so probing an unchanged address would always fail with
+// "address already in use" (a false positive). Each probe binds and immediately
+// closes the listener; a narrow TOCTOU window remains before the reload re-binds
+// the same address, which is acceptable for a fail-fast check that strictly
+// improves on the silent-failure status quo.
+func PreflightListeners(old, next []config.ServerConfig) error {
+	oldAddrs := setOf(uniqueListenAddrs(old))
+	for _, addr := range uniqueListenAddrs(next) {
+		if _, existed := oldAddrs[addr]; existed {
+			continue
+		}
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("listen address %s: %w", addr, err)
+		}
+		_ = ln.Close()
+	}
+	return nil
+}
+
 func (s *Server) readHeaderTimeout(addr string) time.Duration {
 	if srv := s.serverFor(addr); srv != nil && srv.ReadHeaderTimeout.Std() > 0 {
 		return srv.ReadHeaderTimeout.Std()
