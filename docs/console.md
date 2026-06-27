@@ -207,13 +207,18 @@ complete `[[servers]]`/`[[upstreams]]` TOML fragment and routes it through the
 validated **Validate → Diff → Apply → Rollback** pipeline — the editors never
 write directly, so an invalid draft never replaces the running config.
 
-> **Append-as-draft semantics.** Editing an existing route or app opens it as a
-> new draft block appended to the raw config, which the operator reviews in the
-> editor before applying. In-place *replace/rename* of an existing block is
-> intentionally **not** performed automatically: rewriting TOML in the browser
-> would risk dropping comments and formatting, and the validated apply path plus
-> the structured diff already make append-then-prune a safe, auditable workflow.
-> Automatic in-place replace/rename is tracked as a follow-up.
+> **Append-as-draft vs. structured in-place edit.** "Edit as new route/app"
+> opens an existing block as a new draft appended to the raw config, which the
+> operator reviews in the editor before applying — a deliberately conservative
+> path that never rewrites existing TOML in the browser (so comments and
+> formatting are preserved). For the most common changes, the route detail
+> drawer also offers **structured in-place edits** (previewed as a diff, applied
+> through the validated pipeline): changing a route's **match** (path + type),
+> switching its **action** (proxy / static / redirect / return / deny), and
+> **renaming** a server block's host names (`server_names`). Because a route is
+> identified by its match — and a virtual host by its first host name — a
+> rename is reflected truthfully in the diff: the old route/block is listed
+> removed and the renamed one added when the identity key changes.
 
 The Apps "New app" editor can optionally **mount the app on a route** in the
 same step (default on for a new app): alongside the `[[upstreams]]` pool it
@@ -230,8 +235,11 @@ includes guided **auth** (CIDR allow/deny, HTTP Basic, JWT, or forward-auth).
 
 Beyond creation, several settings are edited **in place** through structured
 patch operations that are previewed as a diff before they apply: a route's proxy
-target, per-location cache and rate-limit toggles, a per-location access-control
-(auth) rule, a per-location WAF override, upstream backend add/remove,
+target, its **match** (path + type) and its **action** (proxy / static /
+redirect / return / deny — richer actions such as gRPC, transcoding, FastCGI and
+handler plugins stay raw-only), per-location cache and rate-limit toggles, a
+per-location access-control (auth) rule, a per-location WAF override, a server
+block's **host names** (`server_names`), upstream backend add/remove,
 the upstream load-balancing strategy, active health checks, and dynamic
 service discovery (DNS, DNS SRV, Consul, or Kubernetes — provider ACL tokens
 are preserved server-side and never leave the box),
@@ -320,9 +328,9 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 
 | Capability | Surface | Panel |
 | --- | --- | --- |
-| Server blocks / virtual hosts | Guided-create · Structured-edit (limits/timeouts) | Routes, TLS |
-| HTTP routes / locations | Guided-create · Structured-edit (proxy target, cache, rate-limit, WAF) | Routes |
-| gRPC proxy / transcoding, FastCGI, redirect, deny, return | Read-only (raw to change) | Routes |
+| Server blocks / virtual hosts | Guided-create · Structured-edit (limits/timeouts, host-name rename) | Routes, TLS |
+| HTTP routes / locations | Guided-create · Structured-edit (match path/type, action, proxy target, cache, rate-limit, WAF) | Routes |
+| gRPC proxy / transcoding, FastCGI, redirect, deny, return | Structured-edit (switch action: redirect/return/deny) · Read-only for gRPC/transcode/FastCGI/plugin | Routes |
 | Response cache | Structured-edit (global + per-location toggle) | Traffic Controls, Routes |
 | Compression | Structured-edit (global) | Traffic Controls |
 | Rate limiting | Structured-edit (global + per-location toggle) | Traffic Controls, Routes |

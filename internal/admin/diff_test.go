@@ -342,3 +342,38 @@ func TestDiffServerTimeouts(t *testing.T) {
 		t.Errorf("expected timeout-cleared warning, got %+v", d.Warnings)
 	}
 }
+
+// TestDiffServerHostNames proves a route_rename that keeps the first host name
+// (so the block still indexes to the same key) is reported as a clean host-name
+// change with a routing warning, rather than being silently dropped.
+func TestDiffServerHostNames(t *testing.T) {
+	before := &config.Config{Servers: []config.ServerConfig{{
+		Listen:      ":443",
+		ServerNames: []string{"a.example", "old.example"},
+	}}}
+	after := &config.Config{Servers: []config.ServerConfig{{
+		Listen:      ":443",
+		ServerNames: []string{"a.example", "new.example"},
+	}}}
+	d := diffConfigs(before, after)
+	if !diffHas(d, "Change host names") {
+		t.Fatalf("expected a host-name change entry, got %+v", d)
+	}
+	if !warnHas(d, "Host/SNI") {
+		t.Fatalf("expected a routing warning, got %+v", d.Warnings)
+	}
+
+	// Reordering the trailing names (with the first name unchanged, so the block
+	// still indexes to the same key) is not reported as a change.
+	base := &config.Config{Servers: []config.ServerConfig{{
+		Listen:      ":443",
+		ServerNames: []string{"a.example", "old.example", "z.example"},
+	}}}
+	reordered := &config.Config{Servers: []config.ServerConfig{{
+		Listen:      ":443",
+		ServerNames: []string{"a.example", "z.example", "old.example"},
+	}}}
+	if d := diffConfigs(base, reordered); diffHas(d, "Change host names") {
+		t.Errorf("did not expect a change for reordered names, got %+v", d)
+	}
+}

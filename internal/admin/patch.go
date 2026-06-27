@@ -72,6 +72,40 @@ type patchRequest struct {
 	// upstream_set_discovery payload: the pool's dynamic discovery block. Type
 	// "static"/"" removes it (the static Servers list is used instead).
 	Discovery *upstreamDiscovery `json:"discovery,omitempty"`
+
+	// route_rename payload: the server block's new host names (server_names).
+	// An empty list renames the block to the catch-all (any host).
+	NewServerNames []string `json:"new_server_names,omitempty"`
+
+	// location_set_match payload: the route's new match (type + path). Changing
+	// the match changes the route's identity, so the diff lists the old route
+	// removed and the renamed route added.
+	Match *locationMatch `json:"match_set,omitempty"`
+
+	// location_set_action payload: the route's new action (proxy/static/
+	// redirect/return/deny). The op clears every other action field first.
+	Action *locationActionPayload `json:"action,omitempty"`
+}
+
+// locationMatch is the new match (type + path) for location_set_match. It
+// replaces the location's Match in place — effectively renaming the route's
+// matching pattern. Type is one of exact/prefix/regex (empty defaults to
+// prefix); the validated re-parse rejects an invalid regex.
+type locationMatch struct {
+	Type string `json:"type,omitempty"`
+	Path string `json:"path"`
+}
+
+// locationActionPayload is the new action for location_set_action. Kind selects
+// which action the location performs; the op clears every other action field so
+// exactly one remains, then sets the chosen one. It covers the tag-free actions
+// the console edits structurally (proxy / static / redirect / return / deny);
+// richer actions (gRPC, transcode, FastCGI/uWSGI, handler plugin) stay raw and
+// the editor leaves them read-only.
+type locationActionPayload struct {
+	Kind   string `json:"kind"`             // proxy | static | redirect | return | deny
+	Target string `json:"target,omitempty"` // proxy_pass / root / redirect URL
+	Status int    `json:"status,omitempty"` // return status, or optional redirect code
 }
 
 // locationWAF carries the per-location WAF override fields the guided editor
@@ -297,6 +331,50 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		loc.Auth = nil
 		return fmt.Sprintf("route %s%s auth cleared", req.Listen, req.Path), nil
 
+	case "location_set_match":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if req.Match == nil {
+			return "", fmt.Errorf("location_set_match: match payload is required")
+		}
+		newType := normMatchType(req.Match.Type)
+		if newType != "exact" && newType != "prefix" && newType != "regex" {
+			return "", fmt.Errorf("location_set_match: type must be %q, %q, or %q", "exact", "prefix", "regex")
+		}
+		newPath := strings.TrimSpace(req.Match.Path)
+		if newPath == "" {
+			return "", fmt.Errorf("location_set_match: path is required")
+		}
+		if newType == normMatchType(req.MatchType) && newPath == strings.TrimSpace(req.Path) {
+			return "", fmt.Errorf("location_set_match: the match is unchanged")
+		}
+		// A route is identified by its match, so refuse a change that would
+		// collide with another route on the same server (the validated re-parse
+		// also rejects duplicate locations, but this gives a clearer message
+		// before the diff is generated).
+		if locationMatchTaken(c, req.Listen, req.ServerNames, newType, newPath, loc) {
+			return "", fmt.Errorf("location_set_match: a route with match %s %q already exists on %s", newType, newPath, req.Listen)
+		}
+		loc.Match.Type = newType
+		loc.Match.Path = newPath
+		return fmt.Sprintf("route %s%s match changed to %s %s", req.Listen, req.Path, newType, newPath), nil
+
+	case "location_set_action":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if req.Action == nil {
+			return "", fmt.Errorf("location_set_action: action payload is required")
+		}
+		kind, err := setLocationAction(loc, *req.Action)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("route %s%s action changed to %s", req.Listen, req.Path, kind), nil
+
 	case "upstream_add_backend":
 		up, err := findUpstream(c, req.Upstream)
 		if err != nil {
@@ -430,6 +508,24 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		srv.H2C = *req.Enabled
 		return fmt.Sprintf("server %s h2c %s", req.Listen, onOff(*req.Enabled)), nil
 
+	case "route_rename":
+		srv, err := findServerByNames(c, req.Listen, req.ServerNames)
+		if err != nil {
+			return "", err
+		}
+		newNames := trimNonEmpty(req.NewServerNames)
+		if stringSetsEqual(srv.ServerNames, newNames) {
+			return "", fmt.Errorf("route_rename: the host names are unchanged")
+		}
+		// Two server blocks on the same listen with the same host-names set are
+		// indistinguishable, so refuse a rename that would create a duplicate.
+		if serverNamesTaken(c, req.Listen, newNames, srv) {
+			return "", fmt.Errorf("route_rename: another server block on %s already serves %s", req.Listen, namesLabel(newNames))
+		}
+		old := srv.ServerNames
+		srv.ServerNames = newNames
+		return fmt.Sprintf("server %s host names changed (%s → %s)", req.Listen, namesLabel(old), namesLabel(newNames)), nil
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}
@@ -507,6 +603,59 @@ func findServer(c *config.Config, listen string) (*config.ServerConfig, error) {
 		}
 	}
 	return nil, fmt.Errorf("no server found for listen %q", listen)
+}
+
+// findServerByNames returns the single server block bound to listen whose
+// server_names set equals serverNames, so route_rename targets exactly one
+// virtual host even when several blocks share a listen. An ambiguous or missing
+// target is rejected rather than guessed (the console sends the current names
+// from the route projection).
+func findServerByNames(c *config.Config, listen string, serverNames []string) (*config.ServerConfig, error) {
+	if strings.TrimSpace(listen) == "" {
+		return nil, fmt.Errorf("server target requires a listen address")
+	}
+	var found *config.ServerConfig
+	matches := 0
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		if srv.Listen == listen && stringSetsEqual(srv.ServerNames, serverNames) {
+			found = srv
+			matches++
+		}
+	}
+	switch {
+	case matches == 0:
+		return nil, fmt.Errorf("no server found for listen %q names %v", listen, serverNames)
+	case matches > 1:
+		return nil, fmt.Errorf("server target is ambiguous: %d blocks match listen %q names %v", matches, listen, serverNames)
+	default:
+		return found, nil
+	}
+}
+
+// serverNamesTaken reports whether a server block other than self on the same
+// listen already serves the given host-names set, so a rename never produces
+// two indistinguishable virtual hosts.
+func serverNamesTaken(c *config.Config, listen string, names []string, self *config.ServerConfig) bool {
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		if srv == self {
+			continue
+		}
+		if srv.Listen == listen && stringSetsEqual(srv.ServerNames, names) {
+			return true
+		}
+	}
+	return false
+}
+
+// namesLabel renders a server_names set for an audit summary, or "(any host)"
+// for the catch-all block that has no names.
+func namesLabel(names []string) string {
+	if len(names) == 0 {
+		return "(any host)"
+	}
+	return strings.Join(names, ", ")
 }
 
 // buildLocationAuth converts the guided auth payload into a *config.AuthConfig
@@ -754,6 +903,99 @@ func stringSetsEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// normMatchType normalizes a location match type, treating an empty string as
+// "prefix" (the default), so two routes that differ only by an implicit vs.
+// explicit prefix are compared as equal.
+func normMatchType(t string) string {
+	if strings.TrimSpace(t) == "" {
+		return "prefix"
+	}
+	return t
+}
+
+// locationMatchTaken reports whether a location other than self under the server
+// identified by listen + serverNames already has the match (matchType, path),
+// so location_set_match never renames a route onto an existing one.
+func locationMatchTaken(c *config.Config, listen string, serverNames []string, matchType, path string, self *config.LocationConfig) bool {
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		if srv.Listen != listen || !stringSetsEqual(srv.ServerNames, serverNames) {
+			continue
+		}
+		for j := range srv.Locations {
+			loc := &srv.Locations[j]
+			if loc == self {
+				continue
+			}
+			if normMatchType(loc.Match.Type) == matchType && loc.Match.Path == path {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// setLocationAction replaces a location's action wholesale: it clears every
+// action discriminator (and the action-specific helper fields) so no
+// conflicting leftover remains, then sets the chosen one. It covers the
+// tag-free actions the console edits structurally — proxy / static / redirect /
+// return / deny. Richer actions (gRPC, transcode, FastCGI/uWSGI, handler
+// plugin) are left to raw editing, so the editor offers this op only when the
+// current action is already one of these. The validated re-parse still has the
+// final say (e.g. proxy_pass must reference a known upstream). It returns the
+// action label for the audit summary.
+func setLocationAction(loc *config.LocationConfig, a locationActionPayload) (string, error) {
+	kind := strings.ToLower(strings.TrimSpace(a.Kind))
+	target := strings.TrimSpace(a.Target)
+
+	// Clear all action discriminators and their action-specific helper fields so
+	// the result is a single clean action with no orphaned config.
+	loc.Root, loc.Index, loc.TryFiles = "", nil, nil
+	loc.DirectoryListing, loc.AllowHidden, loc.CacheControl = false, false, ""
+	loc.ProxyPass, loc.GRPC = "", false
+	loc.ProxyConnectTimeout, loc.ProxyReadTimeout, loc.ProxySendTimeout = 0, 0, 0
+	loc.FastCGIPass, loc.FastCGIParams, loc.UWSGIPass = "", nil, ""
+	loc.Redirect, loc.Return, loc.Deny = "", 0, false
+	loc.GRPCTranscode, loc.Plugin = nil, ""
+
+	switch kind {
+	case "proxy":
+		if target == "" {
+			return "", fmt.Errorf("location_set_action: the proxy action requires a target")
+		}
+		loc.ProxyPass = target
+	case "static":
+		if target == "" {
+			return "", fmt.Errorf("location_set_action: the static action requires a root path")
+		}
+		loc.Root = target
+		// Caching applies to proxy/fastcgi responses, not a static root; the
+		// validated re-parse rejects cache + root, so clear any inherited toggle.
+		loc.Cache = false
+	case "redirect":
+		if target == "" {
+			return "", fmt.Errorf("location_set_action: the redirect action requires a target URL")
+		}
+		loc.Redirect = target
+		if a.Status != 0 {
+			if a.Status < 300 || a.Status > 399 {
+				return "", fmt.Errorf("location_set_action: a redirect status must be in the 3xx range")
+			}
+			loc.Return = a.Status
+		}
+	case "return":
+		if a.Status == 0 {
+			return "", fmt.Errorf("location_set_action: the return action requires a status code")
+		}
+		loc.Return = a.Status
+	case "deny":
+		loc.Deny = true
+	default:
+		return "", fmt.Errorf("location_set_action: unknown action %q (want proxy, static, redirect, return, or deny)", a.Kind)
+	}
+	return kind, nil
 }
 
 // findUpstream returns a pointer to the upstream pool with the given name.

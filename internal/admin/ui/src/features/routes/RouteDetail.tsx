@@ -11,6 +11,12 @@ import {
 } from "@/api/client.ts";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { AuthEditor } from "@/features/routes/AuthEditor.tsx";
+import {
+  RouteActionEditor,
+  RouteMatchEditor,
+  RouteRenameEditor,
+} from "@/features/routes/RouteEditors.tsx";
+import { isEditableAction } from "@/lib/routeEdit.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
 function Row({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
@@ -111,6 +117,8 @@ function QuickEdits({
   const [busy, setBusy] = useState(false);
   const [wafEditing, setWafEditing] = useState(false);
   const [authEditing, setAuthEditing] = useState(false);
+  const [matchEditing, setMatchEditing] = useState(false);
+  const [actionEditing, setActionEditing] = useState(false);
 
   async function runPatch(patch: ConfigPatch): Promise<void> {
     setError(null);
@@ -207,6 +215,28 @@ function QuickEdits({
           type="button"
           disabled={busy}
           onClick={() => {
+            setMatchEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          Change match →
+        </button>
+        {isEditableAction(loc.action) && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setActionEditing(true);
+            }}
+            className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+          >
+            Change action →
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
             void runPatch({
               op: "route_toggle_cache",
               listen: route.listen,
@@ -286,6 +316,26 @@ function QuickEdits({
           }}
         />
       )}
+
+      {matchEditing && (
+        <RouteMatchEditor
+          route={route}
+          loc={loc}
+          onClose={() => {
+            setMatchEditing(false);
+          }}
+        />
+      )}
+
+      {actionEditing && (
+        <RouteActionEditor
+          route={route}
+          loc={loc}
+          onClose={() => {
+            setActionEditing(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -299,6 +349,7 @@ function ServerToggles({ route }: { readonly route: RouteProjection }) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [renameEditing, setRenameEditing] = useState(false);
   const tlsOn = Boolean(route.tls?.enabled);
 
   async function runPatch(patch: ConfigPatch): Promise<void> {
@@ -358,7 +409,27 @@ function ServerToggles({ route }: { readonly route: RouteProjection }) {
           ? "TLS listener: HTTP/3 (QUIC) is available; h2c does not apply (HTTP/2 is negotiated via ALPN)."
           : "Plaintext listener: h2c enables cleartext HTTP/2 for native gRPC; HTTP/3 needs TLS."}
       </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setRenameEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          Rename host names →
+        </button>
+      </div>
       {error && <p className="text-xs text-jul-danger">{error}</p>}
+      {renameEditing && (
+        <RouteRenameEditor
+          route={route}
+          onClose={() => {
+            setRenameEditing(false);
+          }}
+        />
+      )}
     </div>
   );
 }

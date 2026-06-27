@@ -759,6 +759,61 @@ func TestConfigPatchPreviewValidCandidateHasNoErrors(t *testing.T) {
 	}
 }
 
+// TestConfigPatchActionSwitchProducesValidCandidate proves switching a cached
+// proxy route to a static action through the patch preview re-parses cleanly:
+// the op clears the cache toggle (cache + root is rejected by validation), so
+// the candidate carries no validation_errors and is never persisted.
+func TestConfigPatchActionSwitchProducesValidCandidate(t *testing.T) {
+	var writes int
+	deps := Deps{
+		LoadConfig: func() (*config.Config, error) {
+			return &config.Config{
+				Cache: config.CacheConfig{Enabled: true},
+				Servers: []config.ServerConfig{{
+					Listen: ":8080",
+					Locations: []config.LocationConfig{{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/api"},
+						ProxyPass: "http://127.0.0.1:9000",
+						Cache:     true,
+					}},
+				}},
+			}, nil
+		},
+		WriteConfigRaw: func([]byte) error { writes++; return nil },
+	}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+
+	body, err := json.Marshal(patchRequest{
+		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Action: &locationActionPayload{Kind: "static", Target: "/var/www"},
+	})
+	if err != nil {
+		t.Fatalf("marshal patch: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		OK               bool              `json:"ok"`
+		Candidate        string            `json:"candidate"`
+		ValidationErrors []validationError `json:"validation_errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK || len(out.ValidationErrors) != 0 {
+		t.Errorf("ok=%v errors=%+v, want ok with no validation errors", out.OK, out.ValidationErrors)
+	}
+	if !strings.Contains(out.Candidate, "/var/www") || strings.Contains(out.Candidate, "127.0.0.1:9000") {
+		t.Errorf("candidate did not switch to a clean static action:\n%s", out.Candidate)
+	}
+	if writes != 0 {
+		t.Errorf("WriteConfigRaw called %d times during preview; want 0", writes)
+	}
+}
+
 // ── /api/config/patch/apply (server-side atomic batch + conflict) ─────────────
 
 // v2ProxyWriteServer is a file-backed harness seeded with a proxy config (one

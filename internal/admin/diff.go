@@ -86,6 +86,7 @@ func diffServers(before, after *config.Config, d *ConfigDiff) {
 			d.mod(DiffEntry{Kind: "server", Name: name, Before: b.Listen, After: srv.Listen, Detail: "Change " + name + " listen address"}, "server "+name+" listen")
 			d.warn("Changing the listen address on %s may break clients bound to the old address.", name)
 		}
+		diffServerNames(name, b, srv, d)
 		diffServerTimeouts(name, b, srv, d)
 		diffServerBodyLimit(name, b, srv, d)
 		diffServerTLS(name, b.TLS, srv.TLS, d)
@@ -98,6 +99,46 @@ func diffServers(before, after *config.Config, d *ConfigDiff) {
 			d.warn("Removing server block %s will stop serving traffic on %s.", name, srv.Listen)
 		}
 	}
+}
+
+// diffServerNames reports a change to a server block's host names (server_names)
+// for matched server blocks — a route_rename that keeps the first host name (so
+// the block still indexes to the same key). A rename that changes the first host
+// name re-keys the block, surfacing instead as a server remove + add above.
+func diffServerNames(name string, b, a serverWrapper, d *ConfigDiff) {
+	if serverNamesEqual(b.ServerNames, a.ServerNames) {
+		return
+	}
+	d.mod(DiffEntry{Kind: "server", Name: name, Before: hostNamesLabel(b.ServerNames), After: hostNamesLabel(a.ServerNames), Detail: "Change host names for " + name}, "server "+name+" host names")
+	d.warn("Changing the host names on %s alters which requests (Host/SNI) this virtual host serves.", name)
+}
+
+// serverNamesEqual reports order-independent set equality of two server_names
+// lists (so reordering host names is not flagged as a change).
+func serverNamesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, s := range a {
+		counts[s]++
+	}
+	for _, s := range b {
+		counts[s]--
+		if counts[s] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// hostNamesLabel renders a server_names list for a diff entry, or "(any host)"
+// for the catch-all block with no names.
+func hostNamesLabel(names []string) string {
+	if len(names) == 0 {
+		return "(any host)"
+	}
+	return strings.Join(names, ", ")
 }
 
 func diffServerTimeouts(name string, b, a serverWrapper, d *ConfigDiff) {

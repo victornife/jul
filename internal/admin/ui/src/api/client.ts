@@ -582,6 +582,26 @@ export type LocationAuthPatch = {
   forward_url?: string;
 };
 
+// LocationMatchPatch is the new match (type + path) for location_set_match. It
+// renames the route's matching pattern in place. An empty/omitted type defaults
+// to "prefix"; changing the match changes the route's identity, so the diff
+// lists the old route removed and the renamed route added.
+export type LocationMatchPatch = {
+  type?: "exact" | "prefix" | "regex";
+  path: string;
+};
+
+// LocationActionPatch is the new action for location_set_action. The backend
+// clears every other action field first, so exactly one action remains. Only
+// the tag-free actions the console edits structurally are offered; richer
+// actions (gRPC, transcode, FastCGI/uWSGI, handler plugin) stay read-only.
+export type LocationActionPatch =
+  | { kind: "proxy"; target: string }
+  | { kind: "static"; target: string }
+  | { kind: "redirect"; target: string; status?: number }
+  | { kind: "return"; status: number }
+  | { kind: "deny" };
+
 export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
@@ -590,6 +610,9 @@ export type ConfigPatch =
   | ({ op: "location_waf_clear" } & RouteTarget)
   | ({ op: "location_set_auth"; auth: LocationAuthPatch } & RouteTarget)
   | ({ op: "location_clear_auth" } & RouteTarget)
+  | ({ op: "location_set_match"; match_set: LocationMatchPatch } & RouteTarget)
+  | ({ op: "location_set_action"; action: LocationActionPatch } & RouteTarget)
+  | { op: "route_rename"; listen: string; server_names: string[]; new_server_names: string[] }
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
   | { op: "upstream_set_strategy"; upstream: string; strategy: string }

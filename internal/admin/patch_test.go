@@ -669,3 +669,169 @@ func TestApplyPatchErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestApplyPatchLocationSetMatch proves a route's match (type + path) can be
+// changed in place, that the change is rejected when it would collide with a
+// sibling route or leaves the match untouched, and that an invalid type/path is
+// refused before the diff is generated.
+func TestApplyPatchLocationSetMatch(t *testing.T) {
+	c := patchTestConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_match", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Match: &locationMatch{Type: "exact", Path: "/v2"},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if m := c.Servers[0].Locations[0].Match; m.Type != "exact" || m.Path != "/v2" {
+		t.Errorf("match = %+v, want {exact /v2}", m)
+	}
+
+	// Renaming onto an existing sibling route is rejected.
+	c2 := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{
+			{Match: config.MatchConfig{Type: "prefix", Path: "/api"}, ProxyPass: "http://a"},
+			{Match: config.MatchConfig{Type: "prefix", Path: "/web"}, ProxyPass: "http://b"},
+		},
+	}}}
+	if _, err := applyPatch(c2, patchRequest{
+		Op: "location_set_match", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Match: &locationMatch{Type: "prefix", Path: "/web"},
+	}); err == nil {
+		t.Error("expected a collision error renaming onto an existing route")
+	}
+
+	// An unchanged match, an invalid type, and an empty path are all rejected.
+	for _, m := range []*locationMatch{
+		{Type: "prefix", Path: "/api"}, // unchanged
+		{Type: "glob", Path: "/x"},     // invalid type
+		{Type: "prefix", Path: "  "},   // empty path
+	} {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, patchRequest{
+			Op: "location_set_match", Listen: ":8080", MatchType: "prefix", Path: "/api", Match: m,
+		}); err == nil {
+			t.Errorf("expected error for match %+v", m)
+		}
+	}
+}
+
+// TestApplyPatchLocationSetAction proves an action switch clears every other
+// action field (so no conflicting leftover remains) and applies the chosen one,
+// including the static-clears-cache and redirect/return status rules.
+func TestApplyPatchLocationSetAction(t *testing.T) {
+	// proxy → static clears proxy_pass, sets root, and clears cache (cache + root
+	// is rejected by validation).
+	c := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{{
+			Match: config.MatchConfig{Type: "prefix", Path: "/api"}, ProxyPass: "http://old", Cache: true,
+		}},
+	}}}
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Action: &locationActionPayload{Kind: "static", Target: "/var/www"},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	loc := &c.Servers[0].Locations[0]
+	if loc.ProxyPass != "" || loc.Root != "/var/www" || loc.Cache {
+		t.Errorf("static switch left proxy=%q root=%q cache=%v", loc.ProxyPass, loc.Root, loc.Cache)
+	}
+
+	// redirect with a 3xx status sets both redirect and return.
+	c = patchTestConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Action: &locationActionPayload{Kind: "redirect", Target: "https://new", Status: 301},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	loc = &c.Servers[0].Locations[0]
+	if loc.ProxyPass != "" || loc.Redirect != "https://new" || loc.Return != 301 {
+		t.Errorf("redirect switch = proxy=%q redirect=%q return=%d", loc.ProxyPass, loc.Redirect, loc.Return)
+	}
+
+	// deny clears the proxy and sets deny.
+	c = patchTestConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Action: &locationActionPayload{Kind: "deny"},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if loc := &c.Servers[0].Locations[0]; loc.ProxyPass != "" || !loc.Deny {
+		t.Errorf("deny switch = proxy=%q deny=%v", loc.ProxyPass, loc.Deny)
+	}
+
+	// Invalid payloads are rejected: unknown kind, proxy without a target, return
+	// without a status, and a redirect status outside the 3xx range.
+	for _, a := range []*locationActionPayload{
+		{Kind: "wat"},
+		{Kind: "proxy"},
+		{Kind: "return"},
+		{Kind: "redirect", Target: "https://x", Status: 200},
+	} {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, patchRequest{
+			Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api", Action: a,
+		}); err == nil {
+			t.Errorf("expected error for action %+v", a)
+		}
+	}
+}
+
+// TestApplyPatchRouteRename proves a server block's host names can be renamed in
+// place, that an exact-target match is required, and that an unchanged or
+// colliding rename is rejected.
+func TestApplyPatchRouteRename(t *testing.T) {
+	newCfg := func() *config.Config {
+		return &config.Config{Servers: []config.ServerConfig{
+			{Listen: ":443", ServerNames: []string{"a.example"}, Locations: []config.LocationConfig{
+				{Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "http://a"},
+			}},
+			{Listen: ":443", ServerNames: []string{"b.example"}, Locations: []config.LocationConfig{
+				{Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "http://b"},
+			}},
+		}}
+	}
+
+	c := newCfg()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_rename", Listen: ":443", ServerNames: []string{"a.example"},
+		NewServerNames: []string{"c.example", "d.example"},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if !stringSetsEqual(c.Servers[0].ServerNames, []string{"c.example", "d.example"}) {
+		t.Errorf("server_names = %v, want [c.example d.example]", c.Servers[0].ServerNames)
+	}
+	if !stringSetsEqual(c.Servers[1].ServerNames, []string{"b.example"}) {
+		t.Error("the other server block was modified")
+	}
+
+	// Renaming onto another block's host names on the same listen is rejected.
+	c = newCfg()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_rename", Listen: ":443", ServerNames: []string{"a.example"},
+		NewServerNames: []string{"b.example"},
+	}); err == nil {
+		t.Error("expected a collision error renaming onto another block's names")
+	}
+
+	// An unchanged rename and a missing target are rejected.
+	c = newCfg()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_rename", Listen: ":443", ServerNames: []string{"a.example"},
+		NewServerNames: []string{"a.example"},
+	}); err == nil {
+		t.Error("expected an unchanged-rename error")
+	}
+	c = newCfg()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_rename", Listen: ":443", ServerNames: []string{"missing.example"},
+		NewServerNames: []string{"x.example"},
+	}); err == nil {
+		t.Error("expected a not-found error for an unknown target")
+	}
+}
