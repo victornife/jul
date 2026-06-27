@@ -373,7 +373,7 @@ func validateRateLimit(c RateLimitConfig, where string, perLocation bool) []erro
 	if c.Burst < c.Rate {
 		errs = append(errs, fmt.Errorf("%s burst (%d) must be >= rate (%d)", where, c.Burst, c.Rate))
 	}
-	if !validRateKey(c.Key) {
+	if !ValidRateKey(c.Key) {
 		errs = append(errs, fmt.Errorf("%s invalid key %q (want ip | header:<Name> | jwt:<claim>)", where, c.Key))
 	}
 	if perLocation && c.MaxConns != 0 {
@@ -415,8 +415,8 @@ func validateWAF(c WAFConfig, where string) []error {
 	return errs
 }
 
-// validRateKey reports whether a rate-limit key spec is well-formed.
-func validRateKey(k string) bool {
+// ValidRateKey reports whether a rate-limit key spec is well-formed.
+func ValidRateKey(k string) bool {
 	switch {
 	case k == "ip":
 		return true

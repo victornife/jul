@@ -55,6 +55,15 @@ func TestApplyPatchRouteToggleRateLimit(t *testing.T) {
 	if c.Servers[0].Locations[0].RateLimit == nil || !c.Servers[0].Locations[0].RateLimit.Enabled {
 		t.Error("rate limit not enabled")
 	}
+	if c.Servers[0].Locations[0].RateLimit.Rate != 100 {
+		t.Errorf("rate = %d, want 100", c.Servers[0].Locations[0].RateLimit.Rate)
+	}
+	if c.Servers[0].Locations[0].RateLimit.Burst != 100 {
+		t.Errorf("burst = %d, want 100", c.Servers[0].Locations[0].RateLimit.Burst)
+	}
+	if c.Servers[0].Locations[0].RateLimit.Key != "ip" {
+		t.Errorf("key = %q, want ip", c.Servers[0].Locations[0].RateLimit.Key)
+	}
 }
 
 // TestApplyPatchRouteTargetingDisambiguation proves the route target resolves to
@@ -833,5 +842,69 @@ func TestApplyPatchRouteRename(t *testing.T) {
 		NewServerNames: []string{"x.example"},
 	}); err == nil {
 		t.Error("expected a not-found error for an unknown target")
+	}
+}
+
+// TestApplyPatchRouteSetRateLimit proves the detailed rate-limit editor sets
+// rate, burst and key explicitly, validates them, and round-trips disable.
+func TestApplyPatchRouteSetRateLimit(t *testing.T) {
+	c := patchTestConfig()
+	loc := &c.Servers[0].Locations[0]
+
+	// Enable with explicit values.
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		RateLimit: &rateLimitPatch{Enabled: true, Rate: 50, Burst: 80, Key: "ip"},
+	}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if loc.RateLimit == nil || !loc.RateLimit.Enabled {
+		t.Fatal("rate limit not enabled")
+	}
+	if loc.RateLimit.Rate != 50 {
+		t.Errorf("rate = %d, want 50", loc.RateLimit.Rate)
+	}
+	if loc.RateLimit.Burst != 80 {
+		t.Errorf("burst = %d, want 80", loc.RateLimit.Burst)
+	}
+	if loc.RateLimit.Key != "ip" {
+		t.Errorf("key = %q, want ip", loc.RateLimit.Key)
+	}
+
+	// Disable.
+	if _, err := applyPatch(c, patchRequest{
+		Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		RateLimit: &rateLimitPatch{Enabled: false},
+	}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if loc.RateLimit == nil || loc.RateLimit.Enabled {
+		t.Error("rate limit not disabled")
+	}
+}
+
+// TestApplyPatchRouteSetRateLimitErrors proves route_set_rate_limit rejects
+// invalid payloads while leaving existing state untouched.
+func TestApplyPatchRouteSetRateLimitErrors(t *testing.T) {
+	cases := []patchRequest{
+		// nil payload
+		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api"},
+		// zero rate
+		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: true, Rate: 0}},
+		// negative rate
+		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: true, Rate: -1}},
+		// invalid key
+		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: true, Rate: 10, Key: "bogus"}},
+		// no such route
+		{Op: "route_set_rate_limit", Listen: ":9999", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: true, Rate: 10}},
+	}
+	for _, req := range cases {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, req); err == nil {
+			t.Errorf("expected error for op %q payload %+v", req.Op, req.RateLimit)
+		}
+		if c.Servers[0].Locations[0].RateLimit != nil {
+			t.Errorf("a rejected op must not create a rate_limit: %+v", c.Servers[0].Locations[0].RateLimit)
+		}
 	}
 }

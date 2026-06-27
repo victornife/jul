@@ -13,6 +13,7 @@ import (
 
 // RouteProjection is a structured route for the Console v2 Routes panel.
 type RouteProjection struct {
+	Name        string               `json:"name,omitempty"`
 	Listen      string               `json:"listen"`
 	ServerNames []string             `json:"server_names,omitempty"`
 	TLS         *TLSProjection       `json:"tls,omitempty"`
@@ -32,7 +33,11 @@ type LocationProjection struct {
 	Cache       bool   `json:"cache"`
 	Compression bool   `json:"compression"`
 	RateLimit   bool   `json:"rate_limit"`
-	Secure      bool   `json:"secure"` // TLS required
+	// RateLimitDetail carries the per-location rate-limit configuration (rate,
+	// burst, key) when the location has a rate_limit block, so the guided editor
+	// can seed the detailed rate-limit form and round-trip values faithfully.
+	RateLimitDetail *RateLimitProjection `json:"rate_limit_detail,omitempty"`
+	Secure          bool                 `json:"secure"` // TLS required
 	// RequireClientCert reports the location's require_client_cert flag, so the
 	// route editor can offer the per-route mutual-TLS toggle (Phase 4j). It takes
 	// effect on hot reload (enforced per request), unlike the server-level
@@ -315,6 +320,7 @@ func projectRoutes(c *config.Config) []RouteProjection {
 	for i := range c.Servers {
 		srv := &c.Servers[i]
 		rp := RouteProjection{
+			Name:        srv.Name,
 			Listen:      srv.Listen,
 			ServerNames: srv.ServerNames,
 			H2C:         srv.H2C,
@@ -343,6 +349,14 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				Compression:       c.Compression.Enabled,
 				Secure:            srv.TLS != nil && srv.TLS.Enabled,
 				RequireClientCert: loc.RequireClientCert,
+			}
+			if loc.RateLimit != nil {
+				lp.RateLimitDetail = &RateLimitProjection{
+					Enabled: loc.RateLimit.Enabled,
+					Rate:    loc.RateLimit.Rate,
+					Burst:   loc.RateLimit.Burst,
+					Key:     loc.RateLimit.Key,
+				}
 			}
 			switch {
 			case loc.GRPCTranscode != nil:

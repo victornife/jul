@@ -156,6 +156,7 @@ type GlobalConfig struct {
 
 // ServerConfig is a virtual host bound to one listen address.
 type ServerConfig struct {
+	Name        string           `toml:"name"`
 	Listen      string           `toml:"listen"`
 	ServerNames []string         `toml:"server_names"`
 	Locations   []LocationConfig `toml:"locations"`

@@ -185,6 +185,12 @@ export const LocationProjectionSchema = z.object({
   cache: z.boolean(),
   compression: z.boolean().default(false),
   rate_limit: z.boolean().default(false),
+  rate_limit_detail: z.object({
+    enabled: z.boolean(),
+    rate: z.number().optional(),
+    burst: z.number().optional(),
+    key: z.string().optional(),
+  }).optional(),
   secure: z.boolean(),
   require_client_cert: z.boolean().default(false),
   upstream: z.string().optional(),
@@ -194,6 +200,7 @@ export const LocationProjectionSchema = z.object({
 export type LocationProjection = z.infer<typeof LocationProjectionSchema>;
 
 export const RouteProjectionSchema = z.object({
+  name: z.string().optional(),
   listen: z.string(),
   server_names: z.array(z.string()).optional(),
   tls: TLSProjectionSchema.optional(),
@@ -330,6 +337,7 @@ export const RateLimitProjectionSchema = z.object({
   burst: z.number().optional(),
   key: z.string().optional(),
 });
+export type RateLimitPatch = z.infer<typeof RateLimitProjectionSchema>;
 
 export const CacheProjectionSchema = z.object({
   enabled: z.boolean(),
@@ -761,6 +769,7 @@ export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
   | ({ op: "route_toggle_rate_limit"; enabled: boolean } & RouteTarget)
+  | ({ op: "route_set_rate_limit"; rate_limit: RateLimitPatch } & RouteTarget)
   | ({ op: "location_waf_set"; waf: LocationWAFPatch } & RouteTarget)
   | ({ op: "location_waf_clear" } & RouteTarget)
   | ({ op: "location_set_auth"; auth: LocationAuthPatch } & RouteTarget)

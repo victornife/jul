@@ -93,9 +93,24 @@ function RouteCard({
   return (
     <div className="rounded-lg border border-jul-border bg-jul-surface">
       <div className="flex flex-wrap items-center gap-2 border-b border-jul-border px-4 py-3">
-        <span className="font-mono text-sm font-semibold text-jul-text">{route.listen}</span>
+        {route.name ? (
+          <>
+            <span className="font-mono text-sm font-semibold text-jul-text">
+              {route.name}
+            </span>
+            <span className="text-xs text-jul-muted">
+              {route.listen}
+            </span>
+          </>
+        ) : (
+          <span className="font-mono text-sm font-semibold text-jul-text">
+            {route.listen}
+          </span>
+        )}
         {route.server_names && route.server_names.length > 0 && (
-          <span className="text-xs text-jul-muted">{route.server_names.join(", ")}</span>
+          <span className="text-xs text-jul-muted">
+            {route.server_names.join(", ")}
+          </span>
         )}
         <span className="ml-auto flex gap-1">
           {tags.map((t) => (

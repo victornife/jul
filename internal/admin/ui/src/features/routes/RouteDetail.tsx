@@ -16,6 +16,7 @@ import {
   RouteMatchEditor,
   RouteRenameEditor,
 } from "@/features/routes/RouteEditors.tsx";
+import { LocationRateLimitEditor } from "@/features/routes/LocationRateLimitEditor.tsx";
 import { isEditableAction } from "@/lib/routeEdit.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
@@ -119,6 +120,7 @@ function QuickEdits({
   const [authEditing, setAuthEditing] = useState(false);
   const [matchEditing, setMatchEditing] = useState(false);
   const [actionEditing, setActionEditing] = useState(false);
+  const [rateLimitEditing, setRateLimitEditing] = useState(false);
 
   async function runPatch(patch: ConfigPatch): Promise<void> {
     setError(null);
@@ -265,7 +267,17 @@ function QuickEdits({
           }}
           className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
         >
-          {loc.rate_limit ? "Disable rate limit" : "Enable rate limit"} →
+          {loc.rate_limit ? "Disable rate limit" : "Enable rate limit (default)"} →
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setRateLimitEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.rate_limit ? "Edit rate limit" : "Set rate limit"} →
         </button>
         <button
           type="button"
@@ -355,6 +367,16 @@ function QuickEdits({
           loc={loc}
           onClose={() => {
             setActionEditing(false);
+          }}
+        />
+      )}
+
+      {rateLimitEditing && (
+        <LocationRateLimitEditor
+          route={route}
+          loc={loc}
+          onClose={() => {
+            setRateLimitEditing(false);
           }}
         />
       )}

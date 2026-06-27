@@ -46,11 +46,12 @@ type patchRequest struct {
 	Upstream string `json:"upstream,omitempty"`
 
 	// Operation payloads (only the field relevant to Op is read).
-	Target   string `json:"target,omitempty"`   // route_set_target: new proxy_pass
-	Enabled  *bool  `json:"enabled,omitempty"`  // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c
-	Address  string `json:"address,omitempty"`  // upstream_add_backend / upstream_remove_backend
-	Weight   int    `json:"weight,omitempty"`   // upstream_add_backend (defaults to 1)
-	Strategy string `json:"strategy,omitempty"` // upstream_set_strategy
+	Target    string          `json:"target,omitempty"`     // route_set_target: new proxy_pass
+	Enabled   *bool           `json:"enabled,omitempty"`    // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c / location_toggle_require_client_cert
+	RateLimit *rateLimitPatch `json:"rate_limit,omitempty"` // route_set_rate_limit
+	Address   string          `json:"address,omitempty"`    // upstream_add_backend / upstream_remove_backend
+	Weight    int             `json:"weight,omitempty"`     // upstream_add_backend (defaults to 1)
+	Strategy  string          `json:"strategy,omitempty"`   // upstream_set_strategy
 
 	// server_set_limits payload. Each field is an optional string-typed size or
 	// duration (e.g. "10m", "30s"); only non-empty fields are applied, so the
@@ -147,6 +148,16 @@ type locationWAF struct {
 	ResponseBodyCheck bool     `json:"response_body_check,omitempty"`
 	DirectivesFiles   []string `json:"directives_files,omitempty"`
 	InlineRules       string   `json:"inline_rules,omitempty"`
+}
+
+// rateLimitPatch carries the per-location rate-limit fields the guided editor
+// controls. The patch replaces the location's rate_limit wholesale (it does not
+// merge), which matches how the WAF override works.
+type rateLimitPatch struct {
+	Enabled bool   `json:"enabled"`
+	Rate    int    `json:"rate,omitempty"`
+	Burst   int    `json:"burst,omitempty"`
+	Key     string `json:"key,omitempty"`
 }
 
 // locationAuth carries the per-location access-control fields the guided auth
@@ -269,10 +280,62 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 				loc.RateLimit = &config.RateLimitConfig{}
 			}
 			loc.RateLimit.Enabled = true
+			if loc.RateLimit.Rate <= 0 {
+				loc.RateLimit.Rate = 100
+			}
+			if loc.RateLimit.Burst <= 0 {
+				loc.RateLimit.Burst = loc.RateLimit.Rate
+			}
+			if loc.RateLimit.Key == "" {
+				loc.RateLimit.Key = "ip"
+			}
 		} else if loc.RateLimit != nil {
 			loc.RateLimit.Enabled = false
 		}
 		return fmt.Sprintf("route %s%s rate limit %s", req.Listen, req.Path, onOff(*req.Enabled)), nil
+
+	case "route_set_rate_limit":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if req.RateLimit == nil {
+			return "", fmt.Errorf("route_set_rate_limit: rate_limit payload is required")
+		}
+		if req.RateLimit.Enabled {
+			// Validate before mutating so a rejected op leaves no partial state.
+			rate := req.RateLimit.Rate
+			if rate <= 0 {
+				return "", fmt.Errorf("route_set_rate_limit: rate must be > 0")
+			}
+			burst := req.RateLimit.Burst
+			if burst <= 0 {
+				burst = rate
+			}
+			key := strings.TrimSpace(req.RateLimit.Key)
+			if key == "" {
+				key = "ip"
+			}
+			if !config.ValidRateKey(key) {
+				return "", fmt.Errorf("route_set_rate_limit: invalid key %q", key)
+			}
+			if loc.RateLimit == nil {
+				loc.RateLimit = &config.RateLimitConfig{}
+			}
+			loc.RateLimit.Enabled = true
+			loc.RateLimit.Rate = rate
+			loc.RateLimit.Burst = burst
+			loc.RateLimit.Key = key
+		} else {
+			if loc.RateLimit != nil {
+				loc.RateLimit.Enabled = false
+			}
+		}
+		if loc.RateLimit != nil && loc.RateLimit.Enabled {
+			return fmt.Sprintf("route %s%s rate limit set (%d req/s, burst %d, key %s)",
+				req.Listen, req.Path, loc.RateLimit.Rate, loc.RateLimit.Burst, loc.RateLimit.Key), nil
+		}
+		return fmt.Sprintf("route %s%s rate limit disabled", req.Listen, req.Path), nil
 
 	case "location_waf_set":
 		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
