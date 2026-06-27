@@ -101,6 +101,15 @@ type Deps struct {
 	// Console v2 Certificate Renewal History panel (Milestone 5.6). Nil omits
 	// the panel.
 	CertRenewalHistory func() []observability.CertRenewalHistory
+
+	// RecentLogs returns up to limit recent access-log entries (newest first)
+	// from the bounded ring buffer for the Console v2 Operations Log tab
+	// (Phase 4g). Nil omits the tab.
+	RecentLogs func(limit int) []observability.LogEntry
+	// SubscribeLogs registers a live follower for the Operations Log stream. It
+	// returns a receive channel of new entries and an unsubscribe function the
+	// caller must invoke when the stream closes. Nil disables log streaming.
+	SubscribeLogs func() (<-chan observability.LogEntry, func())
 }
 
 // Server is the admin HTTP listener.
@@ -206,6 +215,8 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/observability/timeline", s.auth(http.HandlerFunc(s.handleTimeline)))
 	mux.Handle("/api/observability/upstream-history", s.auth(http.HandlerFunc(s.handleUpstreamHistory)))
 	mux.Handle("/api/observability/cert-history", s.auth(http.HandlerFunc(s.handleCertHistory)))
+	mux.Handle("/api/observability/logs", s.auth(http.HandlerFunc(s.handleLogs)))
+	mux.Handle("/api/observability/logs/stream", s.auth(http.HandlerFunc(s.handleLogsStream)))
 	mux.Handle("/api/admin/health", s.auth(http.HandlerFunc(s.handleConsoleHealth)))
 	mux.Handle("/api/admin/client-errors", s.auth(http.HandlerFunc(s.handleClientError)))
 

@@ -155,7 +155,7 @@ items point to the Phase 4 backlog.
 | Top failing routes | ✅ Done (`/api/observability/failing-routes`) |
 | Request samples | ✅ Done (`/api/observability/requests`) |
 | Collapsed navigation | ✅ Done (persisted icon-rail) |
-| Live log tail | ☐ Remaining (Phase 4g) |
+| Live log tail | ✅ Done (Phase 4g — `GET /api/observability/logs[/stream]` + Operations → Logs tab) |
 | Self-explanatory UX copy | ◑ Ongoing per [ADR 0004](../adr/0004-console-ui-invariants.md) |
 
 ## Console cockpit — remaining work (Phase 4 backlog)
@@ -173,7 +173,7 @@ items point to the Phase 4 backlog.
 | 4d | Tracing editor | P1 | ✅ Shipped — guided `[observability.tracing]` editor (exporter / endpoint / sample ratio / service name / transport) in Traffic Controls, staged as a reviewed TOML draft |
 | 4e | WAF per-location advanced fields | P2 | ✅ Shipped — `location_waf_set` now carries the full override (block status / paranoia / request-body limit / response-body inspection / rule files / inline rules); the per-location `LocationWAFEditor` seeds every field from the projection and replaces the override faithfully (round-trips) instead of preserving unshown fields, refusing saves the server would reject |
 | 4f | In-place edit / rename | P2 | ✅ Shipped — three structured ops edit a route's identity in place, each previewed as a diff: `location_set_match` (change a route's match type + path), `location_set_action` (switch the action among proxy / static / redirect / return / deny, clearing every other action field — richer actions stay raw), and `route_rename` (rename a server block's `server_names`). The route detail drawer adds **Change match**, **Change action**, and **Rename host names**; collision and unchanged-edit guards reject ambiguous renames, and identity changes are reflected truthfully in the diff (old route/block removed + renamed one added when the key changes) |
-| 4g | Live log tail | P3 | Ring-buffer access-log sink + `/api/observability/logs[/stream]` + Operations Log tab |
+| 4g | Live log tail | P3 | ✅ Shipped — a bounded, privacy-preserving access-log ring-buffer sink (`observability.LogTail`, added to the access-log sink set alongside stdout/file/syslog) feeds `GET /api/observability/logs` (newest-first snapshot) and `GET /api/observability/logs/stream` (SSE: a replayed backlog then live entries, reusing the `/api/events` frame shape and per-client connection cap). The new **Operations → Logs** tab tails the stream with live/paused status, a free-text filter, pause (drops incoming while frozen) and clear. Entries redact identifier/email/token path segments, drop query strings, and reduce User-Agents to a coarse family; the client IP is kept because the tail is the operator's own loopback-gated access log |
 | 4h | Plugins guided editor | P3 | `plugin_set` / `plugin_remove` + attach / detach ops + Plugins panel (`wasmplugins`) |
 | 4i | L4 stream guided editor | P3 | `stream_add` / `stream_set` / `stream_remove` + Stream panel |
 

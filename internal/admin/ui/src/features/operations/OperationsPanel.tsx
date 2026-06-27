@@ -15,6 +15,7 @@ import {
 } from "@/api/client.ts";
 import { TimelinePanel } from "@/features/observability/TimelinePanel.tsx";
 import { ObservabilityPanel } from "@/features/observability/ObservabilityPanel.tsx";
+import { LogTailPanel } from "@/features/observability/LogTailPanel.tsx";
 
 // ── small presentational helpers ─────────────────────────────────────────────
 
@@ -394,7 +395,7 @@ function DiagnosticsTab() {
 
 // ── Operations workspace (C-4: Events + Timeline folded in as tabs) ──────────
 
-export type OperationsTab = "diagnostics" | "events" | "timeline";
+export type OperationsTab = "diagnostics" | "events" | "logs" | "timeline";
 
 const TABS: ReadonlyArray<{ id: OperationsTab; label: string; to: string; hint: string }> = [
   {
@@ -404,6 +405,7 @@ const TABS: ReadonlyArray<{ id: OperationsTab; label: string; to: string; hint: 
     hint: "samples, failing routes, health",
   },
   { id: "events", label: "Events", to: "/operations/events", hint: "live SSE stream" },
+  { id: "logs", label: "Logs", to: "/operations/logs", hint: "live access-log tail" },
   {
     id: "timeline",
     label: "Timeline",
@@ -451,6 +453,7 @@ export function OperationsPanel({ tab = "diagnostics" }: { readonly tab?: Operat
 
       {tab === "diagnostics" && <DiagnosticsTab />}
       {tab === "events" && <ObservabilityPanel />}
+      {tab === "logs" && <LogTailPanel />}
       {tab === "timeline" && <TimelinePanel />}
     </div>
   );

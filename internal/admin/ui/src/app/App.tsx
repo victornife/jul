@@ -26,6 +26,7 @@ export function App() {
         <Route path="/search" element={<SearchPanel />} />
         <Route path="/operations" element={<OperationsPanel tab="diagnostics" />} />
         <Route path="/operations/events" element={<OperationsPanel tab="events" />} />
+        <Route path="/operations/logs" element={<OperationsPanel tab="logs" />} />
         <Route path="/operations/timeline" element={<OperationsPanel tab="timeline" />} />
         {/* C-4: Events and Timeline are now tabs of Operations; keep the old
             paths working by redirecting into the consolidated workspace. */}

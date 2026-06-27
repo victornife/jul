@@ -1097,6 +1097,35 @@ export function fetchTimeline(): Promise<TimelineEvent[]> {
   return api<unknown>("/observability/timeline").then((d) => z.array(TimelineEventSchema).parse(d));
 }
 
+// ── Operations log tail (Phase 4g) ───────────────────────────────────────────
+
+export const LogEntrySchema = z.object({
+  time: z.string(),
+  method: z.string(),
+  host: z.string(),
+  path: z.string(),
+  status: z.number(),
+  bytes: z.number(),
+  duration_ms: z.number(),
+  remote: z.string().optional(),
+  request_id: z.string().optional(),
+  trace_id: z.string().optional(),
+  user_agent: z.string().optional(),
+  proto: z.string().optional(),
+});
+export type LogEntry = z.infer<typeof LogEntrySchema>;
+
+/**
+ * Fetches up to limit recent access-log entries (newest first) from the bounded
+ * Operations Log ring buffer. The buffer is privacy-preserving: paths are
+ * redacted, query strings dropped, and User-Agents reduced to a coarse family.
+ */
+export function fetchLogs(limit = 200): Promise<LogEntry[]> {
+  return api<unknown>(`/observability/logs?limit=${String(limit)}`).then((d) =>
+    z.array(LogEntrySchema).parse(d),
+  );
+}
+
 // ── Console health & frontend error reporting (Milestone 5.7) ────────────────
 
 export const ClientErrorSchema = z.object({
@@ -1235,13 +1264,47 @@ export function subscribeEvents(
   onError?: (err: unknown) => void,
 ): () => void {
   const controller = new AbortController();
-  void streamEvents(controller.signal, onEvent, onError);
+  void streamEvents("/api/events", controller.signal, onEvent, onError);
+  return () => {
+    controller.abort();
+  };
+}
+
+/**
+ * Opens the GET /api/observability/logs/stream tail and returns a cleanup
+ * function. The stream replays a bounded backlog on connect, then delivers each
+ * new access-log entry. The "connected" control frame fires onOpen and "ping"
+ * frames are ignored; only LogEntry payloads reach onEntry. Like subscribeEvents
+ * it uses fetch + ReadableStream so the bearer token travels in the
+ * Authorization header, and it reconnects with capped exponential backoff until
+ * cleaned up.
+ */
+export function subscribeLogs(
+  onEntry: (entry: LogEntry) => void,
+  handlers?: { onOpen?: () => void; onError?: (err: unknown) => void },
+): () => void {
+  const controller = new AbortController();
+  void streamEvents(
+    "/api/observability/logs/stream",
+    controller.signal,
+    (ev) => {
+      if (ev.type === "connected") {
+        handlers?.onOpen?.();
+        return;
+      }
+      if (ev.type !== "log" || ev.data === undefined) return;
+      const parsed = LogEntrySchema.safeParse(ev.data);
+      if (parsed.success) onEntry(parsed.data);
+    },
+    handlers?.onError,
+  );
   return () => {
     controller.abort();
   };
 }
 
 async function streamEvents(
+  url: string,
   signal: AbortSignal,
   onEvent: (ev: SseEvent) => void,
   onError?: (err: unknown) => void,
@@ -1253,14 +1316,14 @@ async function streamEvents(
       headers.set("Accept", "text/event-stream");
       const token = authToken.get();
       if (token) headers.set("Authorization", `Bearer ${token}`);
-      const resp = await fetch("/api/events", { headers, signal });
+      const resp = await fetch(url, { headers, signal });
       if (resp.status === 401) {
         notifyUnauthorized();
-        onError?.(new ApiError("/events", 401, "Unauthorized"));
+        onError?.(new ApiError(url, 401, "Unauthorized"));
         return; // auth won't recover on retry
       }
       if (!resp.ok || !resp.body) {
-        throw new ApiError("/events", resp.status, `${String(resp.status)} ${resp.statusText}`);
+        throw new ApiError(url, resp.status, `${String(resp.status)} ${resp.statusText}`);
       }
       delay = 1000; // a healthy connection resets the backoff
       await pumpSse(resp.body, onEvent);

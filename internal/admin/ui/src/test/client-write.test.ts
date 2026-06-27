@@ -10,6 +10,8 @@ import {
   applyConfig,
   generateConfig,
   subscribeEvents,
+  subscribeLogs,
+  fetchLogs,
   cspNonce,
   ConfigRejectedError,
   ConfigConflictError,
@@ -255,6 +257,63 @@ describe("subscribeEvents (fetch SSE)", () => {
     stop();
     expect(fn).toHaveBeenCalledTimes(1);
     expect(errors[0]).toBeInstanceOf(ApiError);
+  });
+});
+
+describe("subscribeLogs (fetch SSE log tail)", () => {
+  it("fires onOpen on connect and delivers parsed LogEntry payloads", async () => {
+    authToken.set("sek");
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"connected","time":"t1"}\n\n'));
+        controller.enqueue(
+          encoder.encode(
+            'data: {"type":"log","time":"t2","data":{"time":"t2","method":"GET","host":"h","path":"/a","status":200,"bytes":3,"duration_ms":1.5}}\n\n',
+          ),
+        );
+        controller.enqueue(encoder.encode('data: {"type":"ping","time":"t3"}\n\n'));
+        controller.close();
+      },
+    });
+    const fn = mockFetch(() => new Response(stream, { status: 200 }));
+
+    let opened = false;
+    const entries: Array<{ path: string }> = [];
+    const stop = subscribeLogs(
+      (e) => entries.push(e),
+      {
+        onOpen: () => {
+          opened = true;
+        },
+      },
+    );
+    await vi.waitFor(() => {
+      expect(entries.length).toBe(1);
+    });
+    stop();
+
+    expect(fn.mock.calls[0]?.[0]).toBe("/api/observability/logs/stream");
+    expect(authHeader(lastInit(fn))).toBe("Bearer sek");
+    expect(opened).toBe(true);
+    expect(entries[0]?.path).toBe("/a");
+  });
+});
+
+describe("fetchLogs", () => {
+  it("requests the bounded snapshot with a limit and parses entries", async () => {
+    const fn = mockFetch(
+      () =>
+        new Response(
+          JSON.stringify([
+            { time: "t", method: "GET", host: "h", path: "/x", status: 200, bytes: 0, duration_ms: 2 },
+          ]),
+          { status: 200 },
+        ),
+    );
+    const rows = await fetchLogs(50);
+    expect(rows[0]?.path).toBe("/x");
+    expect(fn.mock.calls[0]?.[0]).toBe("/api/observability/logs?limit=50");
   });
 });
 

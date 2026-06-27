@@ -346,7 +346,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | Server limits / timeouts | Structured-edit | Routes |
 | Plugins (WASM) | Read-only | Status |
 | Tracing / OpenTelemetry | Structured-edit (global guided editor: exporter / endpoint / sample ratio / service name / transport) | Traffic Controls, Status |
-| Access / error logs | Read-only (live tail not yet in-console) | Status |
+| Access / error logs | Live tail (read-only) — bounded, privacy-preserving access-log stream | Operations |
 | L4 stream proxy | Read-only (status only) | Overview |
 | Admin listener | No surface | — |
 | Config history / rollback | Full (view + rollback) | History |
@@ -369,7 +369,7 @@ consumes the endpoints below.
 | Security | `GET /api/security` |
 | Traffic Controls | `GET /api/traffic-controls` |
 | Search & Discovery | `GET /api/search` |
-| Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history}`, `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |
+| Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history,logs}`, `GET /api/observability/logs/stream` (SSE), `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |
 | Audit | `GET /api/audit`, `GET /api/audit/export` |
 | Config editor / History | `GET /api/config` (+ `/raw`, `/validate`, `/diff`, `POST /apply`, `/patch`, `/patch/apply`, `/history`, `/history/{id}`, `/rollback`) |
 | Setup Wizard | `GET /api/wizard`, `POST /api/wizard/generate` |
@@ -393,8 +393,10 @@ consumes the endpoints below.
 ## Known limitations
 
 - No RBAC/SSO or multi-node management (single-token, single-node).
-- No live in-console log tail yet; access and error logs are written to the
-  configured sinks (server log, file, or syslog) and tailed there.
+- The in-console **Operations → Logs** tail is a bounded, privacy-preserving view
+  of recent access-log lines (paths redacted, query strings dropped, User-Agents
+  reduced to a coarse family); the configured sinks (server log, file, or syslog)
+  remain the durable, complete record.
 - ACME certificate expiry appears in the cert panel once the certificate has
   been issued and its live metadata is available; the
   `jul_tls_cert_expiry_seconds` metric is the always-on source.

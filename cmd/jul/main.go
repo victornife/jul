@@ -153,6 +153,13 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 	}()
 
+	// The Console Operations Log tail (Phase 4g) is an extra access-log sink: a
+	// bounded, privacy-preserving in-memory ring buffer that also fans new
+	// entries out to live SSE followers. It is added to every traffic listener's
+	// access-log chain below and exposed to the admin server via deps.
+	logTail := observability.NewLogTail(0)
+	accessSinks = append(accessSinks, logTail)
+
 	// Build the ACME manager once from the startup configuration. It covers the
 	// union of acme-enabled domains, caches certificates on disk, auto-renews,
 	// and answers HTTP-01 challenges. nil means no block enables ACME; an error
@@ -715,6 +722,10 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps.FailingRoutes = metrics.FailingRoutes
 	deps.UpstreamHealthHistory = metrics.UpstreamHealthHistory
 	deps.CertRenewalHistory = metrics.CertRenewalHistory
+	// Operations Log tab (Phase 4g): recent access-log entries and a live
+	// follower stream, both served from the bounded ring-buffer sink above.
+	deps.RecentLogs = logTail.Snapshot
+	deps.SubscribeLogs = logTail.Subscribe
 	// Live operational panels for the console: upstream health from the pool
 	// registry, and configured-certificate metadata from the current config.
 	deps.Upstreams = func() []admin.UpstreamStatus { return adaptUpstreams(poolReg.Snapshot()) }
