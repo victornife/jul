@@ -171,6 +171,29 @@ func TestDiffMTLSToggle(t *testing.T) {
 	}
 }
 
+func TestDiffMTLSVerifySAN(t *testing.T) {
+	mk := func(sans ...string) *config.Config {
+		return &config.Config{Servers: []config.ServerConfig{{
+			Listen: ":443",
+			TLS: &config.TLSConfig{
+				Enabled:    true,
+				ClientAuth: &config.ClientAuthConfig{Mode: "require", CAFile: "/etc/ca.pem", VerifySAN: sans},
+			},
+		}}}
+	}
+	d := diffConfigs(mk("svc-a.internal"), mk("svc-a.internal", "svc-b.internal"))
+	if !diffHas(d, "Change mutual TLS SAN allow-list") {
+		t.Errorf("expected verify_san change to be diffed, got %+v", d)
+	}
+	if !warnHas(d, "SAN allow-list") {
+		t.Errorf("expected verify_san change warning, got %+v", d.Warnings)
+	}
+	// No change must not emit a diff entry.
+	if d2 := diffConfigs(mk("svc-a.internal"), mk("svc-a.internal")); diffHas(d2, "SAN allow-list") {
+		t.Errorf("unexpected verify_san diff for identical lists, got %+v", d2)
+	}
+}
+
 func TestDiffUpstreamBackendsAndRetries(t *testing.T) {
 	before := &config.Config{Upstreams: []config.UpstreamConfig{{
 		Name:     "app",

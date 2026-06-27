@@ -252,4 +252,10 @@ func diffMTLS(name string, b, a *config.ClientAuthConfig, d *ConfigDiff) {
 	if b.CRLFile != a.CRLFile {
 		d.mod(DiffEntry{Kind: "mtls", Name: name, Detail: "Change mutual TLS revocation list (CRL) for " + name}, "server "+name+" mTLS crl")
 	}
+	if bf, af := strings.Join(b.VerifySAN, ","), strings.Join(a.VerifySAN, ","); bf != af {
+		d.mod(DiffEntry{Kind: "mtls", Name: name, Before: orNone(bf), After: orNone(af), Detail: "Change mutual TLS SAN allow-list for " + name}, "server "+name+" mTLS san")
+		if af != "" {
+			d.warn("Changing the mTLS SAN allow-list on %s may reject client certificates that were previously accepted.", name)
+		}
+	}
 }

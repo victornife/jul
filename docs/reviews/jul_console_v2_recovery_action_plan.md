@@ -19,7 +19,7 @@ Resolution status:
 | **Wizard beyond serve/proxy (P0)** | ✅ Done | Added an **app** mode (`mode:"app"`) that builds a load-balanced upstream pool + proxy route with framework presets (Express/Apollo/FastAPI/Django/Flask/Go/gRPC/generic) and optional health checks. Backend `wizardAppConfig` + `wizard_app_test.go`; UI exposes it in `WizardPanel`. |
 | **Search endpoint (P0)** | ✅ Done | Implemented `GET /api/search?q=&type=` with server-side ranking and route↔app relationships (`search.go`, `search_test.go`); `SearchPanel` now consumes it. |
 | **Route/App edit = append-as-draft (P0)** | ✅ Documented | Scope made explicit in `docs/console.md`: guided **creation** generates a validated draft block; in-place replace/rename is intentionally not auto-performed (browser TOML rewriting risks comment/format loss) and is tracked as a follow-up. |
-| **TLS/ACME/auth/mTLS editors (P1)** | ✅ Mostly done | Guided **TLS** creation shipped (`TLSEditor`: static or ACME staging/production + optional mutual TLS); route creation includes guided **auth** (CIDR/Basic/JWT/forward-auth), and editing **auth on an existing location** now ships as a structured patch (`AuthEditor` + `location_set_auth`/`location_clear_auth`, Phase 4a ✅); **WAF** has guided global + per-location editors. Remaining: editing **mTLS** on an *existing* server (raw-only). See the [capability matrix](../console.md#capability-matrix). |
+| **TLS/ACME/auth/mTLS editors (P1)** | ✅ Mostly done | Guided **TLS** creation shipped (`TLSEditor`: static or ACME staging/production + optional mutual TLS); route creation includes guided **auth** (CIDR/Basic/JWT/forward-auth), and editing **auth on an existing location** now ships as a structured patch (`AuthEditor` + `location_set_auth`/`location_clear_auth`, Phase 4a ✅); **WAF** has guided global + per-location editors. Remaining: editing **mTLS** on an *existing* server (raw-only today — now scoped as **Phase 4j**). See the [capability matrix](../console.md#capability-matrix). |
 | **Nav collapsed mode** | ✅ Done | Sidebar layout gains a persisted collapsed icon-rail mode with a toggle in the View menu and inline collapse button (`Layout.tsx`). |
 | **Overview sparklines (p95, in-flight)** | ✅ Done | `useMetricsHistory` now tracks p95 latency and in-flight alongside request rate, error rate, avg latency, and cache-hit ratio; `OverviewPanel` renders the full trend set. |
 
@@ -163,7 +163,12 @@ items point to the Phase 4 backlog.
 > Tracking home for the post-cutover guided-editor backlog (2026-06-27). Each
 > item ships code + Go/vitest tests + docs together and flips its row in the
 > [capability matrix](../console.md#capability-matrix). Sequence:
-> 4a → 4c → 4d → 4b → 4e → 4f → 4g → 4h → 4i.
+> 4a → 4c → 4d → 4b → 4e → 4f → 4g → 4h → 4i → 4j.
+>
+> 4j (guided **edit-existing mTLS**) was added 2026-06-28 to close the last
+> raw-only gap on the TLS/Security surface. Independently of 4j, the config
+> diff now surfaces `verify_san` changes (`diffMTLS`), so a raw-TOML edit of
+> the SAN allow-list is no longer a silent change in the review pipeline.
 
 | ID | Item | Priority | Scope |
 | --- | --- | --- | --- |
@@ -176,6 +181,7 @@ items point to the Phase 4 backlog.
 | 4g | Live log tail | P3 | ✅ Shipped — a bounded, privacy-preserving access-log ring-buffer sink (`observability.LogTail`, added to the access-log sink set alongside stdout/file/syslog) feeds `GET /api/observability/logs` (newest-first snapshot) and `GET /api/observability/logs/stream` (SSE: a replayed backlog then live entries, reusing the `/api/events` frame shape and per-client connection cap). The new **Operations → Logs** tab tails the stream with live/paused status, a free-text filter, pause (drops incoming while frozen) and clear. Entries redact identifier/email/token path segments, drop query strings, and reduce User-Agents to a coarse family; the client IP is kept because the tail is the operator's own loopback-gated access log |
 | 4h | Plugins guided editor | P3 | ✅ Shipped — four structured ops manage WASM plugins as a reviewed diff: `plugin_set` (upsert a global `[plugins.NAME]` — module path, type, host capabilities `kv`/`fetch`, memory/timeout limits, config table; inline modules keep their bytes server-side and are never sent to the browser), `plugin_remove` (guarded — refuses while the plugin is still attached to any route or used as a handler), and `location_attach_plugin` / `location_detach_plugin` (append/remove a middleware plugin on a route's chain, addressed by route coordinates). The new **Plugins** panel (`GET /api/plugins`) lists every declaration with its attachments, offers a create/edit drawer and a route-picker attach drawer, and guards removal; handler and server-level plugins stay raw-only. The panel and editor warn when the binary lacks the `wasmplugins` tag (declarations validate but the apply preflight rejects them, mirroring the WAF/gRPC precedent) |
 | 4i | L4 stream guided editor | P3 | `stream_add` / `stream_set` / `stream_remove` + Stream panel |
+| 4j | mTLS edit-existing (guided) | P3 | Close the last raw-only gap on an *existing* server's mutual TLS. **Patch ops:** `server_set_client_auth` (sparse edit of `mode` / `ca_file` / `crl_file` / `verify_san`, including disable→`none`) and `location_toggle_require_client_cert`. **Projection:** extend `TLSProjection` beyond the `client_auth` mode string to carry `ca_file` / `crl_file` / `verify_san` so the editor can seed every field. **Diff:** `diffMTLS` already covers enable/disable, mode, `ca_file`, `crl_file`, and now `verify_san` — wire the new op through it. **UI:** a TLS-panel "Edit mTLS" drawer (mode select, CA bundle, CRL, SAN allow-list) seeded from the projection, plus an in-place per-location `require_client_cert` toggle. **Guards:** `request`/`require` need a `ca_file`; `require_client_cert` needs `client_auth` active. **UX:** surface a **restart-required** banner — server-level `client_auth` is bind-time (listener rebind), *not* hot-reload; only per-location `require_client_cert` hot-reloads. This is the only editor so far that mutates a bind-time field, so the banner pattern is net-new |
 
 ---
 
