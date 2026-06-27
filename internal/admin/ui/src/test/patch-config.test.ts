@@ -108,6 +108,59 @@ describe("patchConfig", () => {
     expect(JSON.parse(seenBody)).toMatchObject({ op: "location_waf_clear", path: "/admin" });
   });
 
+  it("serializes a per-location auth set with the nested auth payload", async () => {
+    let seenBody = "";
+    mockFetch((url, init) => {
+      expect(url).toBe("/api/config/patch");
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        summary: "route :8080/api auth set (JWT)",
+        candidate: 'listen = ":8080"\n',
+        diff: { summary: "1 change" },
+      });
+    });
+    const res = await patchConfig({
+      op: "location_set_auth",
+      listen: ":8080",
+      server_names: [],
+      match_type: "prefix",
+      path: "/api",
+      auth: { method: "jwt", jwt_jwks_url: "https://issuer.example/jwks.json", jwt_issuer: "iss" },
+    });
+    expect(res.summary).toContain("auth set");
+    // The nested auth payload is what the backend reads (req.Auth), so it must be
+    // sent verbatim under `auth`, not flattened onto the top level.
+    expect(JSON.parse(seenBody)).toMatchObject({
+      op: "location_set_auth",
+      path: "/api",
+      auth: { method: "jwt", jwt_jwks_url: "https://issuer.example/jwks.json", jwt_issuer: "iss" },
+    });
+  });
+
+  it("serializes a per-location auth clear without a payload", async () => {
+    let seenBody = "";
+    mockFetch((url, init) => {
+      expect(url).toBe("/api/config/patch");
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        summary: "route :8080/api auth cleared",
+        candidate: 'listen = ":8080"\n',
+        diff: { summary: "1 change" },
+      });
+    });
+    const res = await patchConfig({
+      op: "location_clear_auth",
+      listen: ":8080",
+      server_names: [],
+      match_type: "prefix",
+      path: "/api",
+    });
+    expect(res.summary).toContain("auth cleared");
+    expect(JSON.parse(seenBody)).toMatchObject({ op: "location_clear_auth", path: "/api" });
+  });
+
   it("surfaces validation_errors when the candidate would not build", async () => {
     mockFetch(() =>
       json({

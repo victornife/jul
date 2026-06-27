@@ -150,6 +150,23 @@ export const LocationWAFStateSchema = z.object({
 });
 export type LocationWAFState = z.infer<typeof LocationWAFStateSchema>;
 
+// LocationAuthStateSchema is a location's access-control rule, present only when
+// the location defines one. It seeds the guided auth editor and carries no
+// secret values — the htpasswd path, JWKS URL, issuer/audience, and CIDR lists
+// are identifiers, not credentials.
+export const LocationAuthStateSchema = z.object({
+  method: z.string(),
+  allow: z.array(z.string()).optional(),
+  deny: z.array(z.string()).optional(),
+  basic_file: z.string().optional(),
+  basic_realm: z.string().optional(),
+  jwt_jwks_url: z.string().optional(),
+  jwt_issuer: z.string().optional(),
+  jwt_audience: z.string().optional(),
+  forward_url: z.string().optional(),
+});
+export type LocationAuthState = z.infer<typeof LocationAuthStateSchema>;
+
 export const LocationProjectionSchema = z.object({
   index: z.number().default(0),
   match: z.string(),
@@ -157,6 +174,7 @@ export const LocationProjectionSchema = z.object({
   action: z.string(),
   target: z.string().optional(),
   auth: z.boolean(),
+  auth_detail: LocationAuthStateSchema.optional(),
   cache: z.boolean(),
   compression: z.boolean().default(false),
   rate_limit: z.boolean().default(false),
@@ -486,12 +504,31 @@ export type LocationWAFPatch = {
   crs_enabled?: boolean;
 };
 
+// LocationAuthPatch is the per-location access-control rule the guided auth
+// editor sets. Exactly one method is chosen; the backend builds a fresh
+// AuthConfig from the method's fields and replaces the location's auth
+// wholesale. No secret values are sent — only identifiers the projection already
+// discloses.
+export type LocationAuthPatch = {
+  method: "cidr" | "basic" | "jwt" | "forward";
+  allow?: string[];
+  deny?: string[];
+  basic_file?: string;
+  basic_realm?: string;
+  jwt_jwks_url?: string;
+  jwt_issuer?: string;
+  jwt_audience?: string;
+  forward_url?: string;
+};
+
 export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
   | ({ op: "route_toggle_rate_limit"; enabled: boolean } & RouteTarget)
   | ({ op: "location_waf_set"; waf: LocationWAFPatch } & RouteTarget)
   | ({ op: "location_waf_clear" } & RouteTarget)
+  | ({ op: "location_set_auth"; auth: LocationAuthPatch } & RouteTarget)
+  | ({ op: "location_clear_auth" } & RouteTarget)
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch };

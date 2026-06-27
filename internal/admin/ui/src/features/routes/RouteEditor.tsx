@@ -6,6 +6,7 @@ import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import {
   appendFragment,
   authWarnings,
+  AUTH_METHODS,
   emptyAuthDraft,
   generateRouteToml,
   type AuthDraft,
@@ -76,37 +77,14 @@ const ACTIONS: { value: RouteAction; label: string }[] = [
   { value: "return", label: "Return status" },
 ];
 
-const AUTH_METHODS: { value: AuthMethod; label: string; hint: string }[] = [
-  { value: "none", label: "No authentication", hint: "Anyone who matches the route is allowed." },
-  {
-    value: "cidr",
-    label: "IP allow / deny (CIDR)",
-    hint: "Permit or reject clients by IP range. Deny wins over allow.",
-  },
-  {
-    value: "basic",
-    label: "HTTP Basic (htpasswd)",
-    hint: "Username/password checked against a bcrypt htpasswd file.",
-  },
-  {
-    value: "jwt",
-    label: "JWT bearer (JWKS)",
-    hint: "Validate bearer tokens against an issuer's JWKS endpoint.",
-  },
-  {
-    value: "forward",
-    label: "Forward-auth (external)",
-    hint: "Delegate the decision to an external HTTP endpoint.",
-  },
-];
-
 /**
  * AuthFields renders the method-specific inputs for the selected auth method.
  * Picking a concrete method (instead of a bare on/off toggle) is what lets the
  * editor emit auth TOML that actually enforces something — the old toggle
- * emitted "auth = {}", which the server treats as allow-all.
+ * emitted "auth = {}", which the server treats as allow-all. Exported so the
+ * per-location AuthEditor reuses the exact same inputs.
  */
-function AuthFields({
+export function AuthFields({
   auth,
   onChange,
 }: {

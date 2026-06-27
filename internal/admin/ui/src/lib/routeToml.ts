@@ -44,6 +44,34 @@ export function emptyAuthDraft(): AuthDraft {
   };
 }
 
+// AUTH_METHODS lists the selectable access-control mechanisms, shared by the
+// route-creation form and the per-location AuthEditor (which drops "none" in
+// favour of its explicit Clear action). Kept in this component-free module so it
+// can be reused without tripping the react-refresh only-export-components rule.
+export const AUTH_METHODS: { value: AuthMethod; label: string; hint: string }[] = [
+  { value: "none", label: "No authentication", hint: "Anyone who matches the route is allowed." },
+  {
+    value: "cidr",
+    label: "IP allow / deny (CIDR)",
+    hint: "Permit or reject clients by IP range. Deny wins over allow.",
+  },
+  {
+    value: "basic",
+    label: "HTTP Basic (htpasswd)",
+    hint: "Username/password checked against a bcrypt htpasswd file.",
+  },
+  {
+    value: "jwt",
+    label: "JWT bearer (JWKS)",
+    hint: "Validate bearer tokens against an issuer's JWKS endpoint.",
+  },
+  {
+    value: "forward",
+    label: "Forward-auth (external)",
+    hint: "Delegate the decision to an external HTTP endpoint.",
+  },
+];
+
 export interface RouteDraft {
   listen: string;
   serverNames: string;

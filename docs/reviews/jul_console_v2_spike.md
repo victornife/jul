@@ -6,6 +6,13 @@
 > the [Console v2 execution spec](../specs/console-v2.md). See the
 > [reviews & decision log](README.md) for the full adopted / reframed / deferred /
 > rejected mapping. The original text is preserved below unchanged.
+>
+> **Status update — 2026-06-27.** The substrate cutover and the read/edit panels
+> have shipped (the console is **GA — soak pending**). The five design rules and
+> the information architecture in this spike remain the authoritative product
+> standard against which new panels are judged; live delivery tracking now lives
+> in the [recovery action plan](jul_console_v2_recovery_action_plan.md#console-cockpit--remaining-work-phase-4-backlog)
+> and the [roadmap](../roadmap/README.md).
 
 ---
 

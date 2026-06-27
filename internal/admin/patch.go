@@ -59,6 +59,10 @@ type patchRequest struct {
 	// location_waf_set payload: the per-location [waf] override knobs the guided
 	// editor controls. location_waf_clear ignores it.
 	WAF *locationWAF `json:"waf,omitempty"`
+
+	// location_set_auth payload: the per-location access-control rule the guided
+	// auth editor controls. location_clear_auth ignores it.
+	Auth *locationAuth `json:"auth,omitempty"`
 }
 
 // locationWAF carries the per-location WAF override fields the guided editor
@@ -71,6 +75,25 @@ type locationWAF struct {
 	Enabled    bool   `json:"enabled"`
 	Mode       string `json:"mode,omitempty"`        // "block" (default) or "detect"
 	CRSEnabled bool   `json:"crs_enabled,omitempty"` // load the embedded OWASP CRS
+}
+
+// locationAuth carries the per-location access-control fields the guided auth
+// editor controls. Like the route-creation form, exactly one Method is chosen:
+// "cidr" (IP allow/deny), "basic" (htpasswd), "jwt" (JWKS), or "forward"
+// (forward-auth). location_set_auth builds a fresh *config.AuthConfig from the
+// method's fields and replaces the location's auth wholesale; the editor warns
+// before discarding a combination it cannot represent (e.g. IP rules plus a
+// credential method on the same location).
+type locationAuth struct {
+	Method      string   `json:"method"` // cidr | basic | jwt | forward
+	Allow       []string `json:"allow,omitempty"`
+	Deny        []string `json:"deny,omitempty"`
+	BasicFile   string   `json:"basic_file,omitempty"`
+	BasicRealm  string   `json:"basic_realm,omitempty"`
+	JWTJWKSURL  string   `json:"jwt_jwks_url,omitempty"`
+	JWTIssuer   string   `json:"jwt_issuer,omitempty"`
+	JWTAudience string   `json:"jwt_audience,omitempty"`
+	ForwardURL  string   `json:"forward_url,omitempty"`
 }
 
 // serverLimits carries the per-server limit/timeout fields the editor can set.
@@ -168,6 +191,32 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		}
 		loc.WAF = nil
 		return fmt.Sprintf("route %s%s WAF override cleared (inherits the global [waf])", req.Listen, req.Path), nil
+
+	case "location_set_auth":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if req.Auth == nil {
+			return "", fmt.Errorf("location_set_auth: auth payload is required")
+		}
+		ac, summary, err := buildLocationAuth(*req.Auth)
+		if err != nil {
+			return "", err
+		}
+		loc.Auth = ac
+		return fmt.Sprintf("route %s%s auth set (%s)", req.Listen, req.Path, summary), nil
+
+	case "location_clear_auth":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if loc.Auth == nil {
+			return "", fmt.Errorf("route %s%s has no auth rule to clear", req.Listen, req.Path)
+		}
+		loc.Auth = nil
+		return fmt.Sprintf("route %s%s auth cleared", req.Listen, req.Path), nil
 
 	case "upstream_add_backend":
 		up, err := findUpstream(c, req.Upstream)
@@ -292,6 +341,59 @@ func findServer(c *config.Config, listen string) (*config.ServerConfig, error) {
 		}
 	}
 	return nil, fmt.Errorf("no server found for listen %q", listen)
+}
+
+// buildLocationAuth converts the guided auth payload into a *config.AuthConfig
+// for exactly one method, mirroring the route-creation form. It returns a short
+// human label for the audit summary, and rejects a method whose required fields
+// are missing rather than persisting an inert auth block.
+func buildLocationAuth(a locationAuth) (*config.AuthConfig, string, error) {
+	switch strings.TrimSpace(a.Method) {
+	case "cidr":
+		allow := trimNonEmpty(a.Allow)
+		deny := trimNonEmpty(a.Deny)
+		if len(allow) == 0 && len(deny) == 0 {
+			return nil, "", fmt.Errorf("location_set_auth: the cidr method needs at least one allow or deny entry")
+		}
+		return &config.AuthConfig{Allow: allow, Deny: deny}, "IP allow/deny", nil
+	case "basic":
+		if strings.TrimSpace(a.BasicFile) == "" {
+			return nil, "", fmt.Errorf("location_set_auth: the basic method needs an htpasswd file")
+		}
+		return &config.AuthConfig{Basic: &config.BasicAuthConfig{
+			File:  strings.TrimSpace(a.BasicFile),
+			Realm: strings.TrimSpace(a.BasicRealm),
+		}}, "HTTP Basic", nil
+	case "jwt":
+		if strings.TrimSpace(a.JWTJWKSURL) == "" {
+			return nil, "", fmt.Errorf("location_set_auth: the jwt method needs a jwks_url")
+		}
+		return &config.AuthConfig{JWT: &config.JWTAuthConfig{
+			JWKSURL:  strings.TrimSpace(a.JWTJWKSURL),
+			Issuer:   strings.TrimSpace(a.JWTIssuer),
+			Audience: strings.TrimSpace(a.JWTAudience),
+		}}, "JWT", nil
+	case "forward":
+		if strings.TrimSpace(a.ForwardURL) == "" {
+			return nil, "", fmt.Errorf("location_set_auth: the forward method needs a url")
+		}
+		return &config.AuthConfig{ForwardAuth: &config.ForwardAuthConfig{
+			URL: strings.TrimSpace(a.ForwardURL),
+		}}, "forward-auth", nil
+	default:
+		return nil, "", fmt.Errorf("location_set_auth: unknown method %q (want cidr, basic, jwt, or forward)", a.Method)
+	}
+}
+
+// trimNonEmpty returns the non-blank, space-trimmed entries of in.
+func trimNonEmpty(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if t := strings.TrimSpace(s); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func onOff(b bool) string {

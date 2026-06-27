@@ -10,6 +10,7 @@ import {
   type RouteProjection,
 } from "@/api/client.ts";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
+import { AuthEditor } from "@/features/routes/AuthEditor.tsx";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
 function Row({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
@@ -81,12 +82,14 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
   if (loc.action === "deny") lines.push("  deny = true");
   if (loc.cache) lines.push("  cache = true");
   if (loc.rate_limit) lines.push("  rate_limit = { enabled = true }");
-  // The route projection reports only that an auth policy is present, not its
-  // method or parameters (which can carry secrets). Show a placeholder comment
-  // rather than a literal "auth = {}", which would read as a valid—but inert,
-  // allow-all—block and misrepresent the effective policy.
+  // The route projection reports an auth rule's method and non-secret
+  // identifiers (never credentials), so show the method rather than a literal
+  // "auth = {}", which would read as a valid—but inert, allow-all—block and
+  // misrepresent the effective policy.
   if (loc.auth)
-    lines.push("  # auth = { … }  (a policy is configured; see the raw config for details)");
+    lines.push(
+      `  # auth = { method = "${loc.auth_detail?.method ?? "…"}", … }  (edit it in place below)`,
+    );
   return lines.join("\n");
 }
 
@@ -107,6 +110,7 @@ function QuickEdits({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [wafEditing, setWafEditing] = useState(false);
+  const [authEditing, setAuthEditing] = useState(false);
 
   async function runPatch(patch: ConfigPatch): Promise<void> {
     setError(null);
@@ -231,6 +235,16 @@ function QuickEdits({
         >
           {loc.waf ? "Edit WAF override" : "Add WAF override"} →
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setAuthEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.auth ? "Edit auth" : "Add auth"} →
+        </button>
       </div>
 
       {error && <p className="text-xs text-jul-danger">{error}</p>}
@@ -241,6 +255,22 @@ function QuickEdits({
           existing={Boolean(loc.waf)}
           onClose={() => {
             setWafEditing(false);
+          }}
+        />
+      )}
+
+      {authEditing && (
+        <AuthEditor
+          target={{
+            listen: route.listen,
+            server_names: route.server_names ?? [],
+            match_type: loc.type,
+            path: loc.match,
+          }}
+          seed={loc.auth_detail}
+          existing={loc.auth}
+          onClose={() => {
+            setAuthEditing(false);
           }}
         />
       )}

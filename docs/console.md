@@ -222,13 +222,24 @@ path to the pool, so a newly created app actually serves traffic instead of
 existing only as a backend. Both blocks go through the same Validate → Diff →
 Apply pipeline.
 
-The TLS and ACME panels, and the **auth/mTLS** portions of the Security panel,
-are **read-only inventories** in v2; guided enablement/editing for TLS, ACME,
-mutual-TLS, and auth rules is a pending P1 item. (The Security panel's **WAF**
-policy is the exception — it has a guided editor for the global `[waf]` block, as
-described below.) Until guided editors ship for the rest, change those settings
-through the validated raw TOML editor, which the structured diff annotates with
-the consequences listed above.
+The TLS panel provides **guided creation** of a new TLS-enabled server via
+**New TLS server** — a static certificate or automatic HTTPS (ACME) in staging
+or production, with optional mutual TLS — generated as a `[[servers]]` block and
+routed through the same Validate → Diff → Apply pipeline. Route creation
+includes guided **auth** (CIDR allow/deny, HTTP Basic, JWT, or forward-auth).
+
+Beyond creation, several settings are edited **in place** through structured
+patch operations that are previewed as a diff before they apply: a route's proxy
+target, per-location cache and rate-limit toggles, a per-location access-control
+(auth) rule, a per-location WAF override, upstream backend add/remove, and
+per-server limits/timeouts.
+
+Editing the remaining settings of an **existing** block — mutual
+TLS, health checks, service discovery, load-balancing strategy, HTTP/3, h2c,
+plugins, tracing, and L4 stream listeners — currently goes through the validated
+raw TOML editor, whose structured diff annotates the consequences. The
+[capability matrix](#capability-matrix) below is the authoritative, per-feature
+breakdown of what is guided-editable versus raw-only today.
 
 ### Web application firewall (WAF)
 
@@ -291,6 +302,62 @@ per-event `fsync`: events are written as they happen but not flushed to stable
 storage on every record, an explicit trade-off. Actor identity is currently the
 shared-token `"operator"`; per-user attribution arrives with RBAC/SSO.
 
+## Capability matrix
+
+What each server capability supports from the console today. **Surface** is one
+of: *Guided-create* (a form generates a new block), *Structured-edit* (an
+in-place edit applied as a reviewed patch), *Read-only* (shown but changed via
+raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
+
+| Capability | Surface | Panel |
+| --- | --- | --- |
+| Server blocks / virtual hosts | Guided-create · Structured-edit (limits/timeouts) | Routes, TLS |
+| HTTP routes / locations | Guided-create · Structured-edit (proxy target, cache, rate-limit, WAF) | Routes |
+| gRPC proxy / transcoding, FastCGI, redirect, deny, return | Read-only (raw to change) | Routes |
+| Response cache | Structured-edit (global + per-location toggle) | Traffic Controls, Routes |
+| Compression | Structured-edit (global) | Traffic Controls |
+| Rate limiting | Structured-edit (global + per-location toggle) | Traffic Controls, Routes |
+| Access control (auth) | Guided-create · Structured-edit (per-location: CIDR / Basic / JWT / forward-auth) | Routes, Security |
+| TLS / HTTPS | Guided-create (New TLS server) · Raw-only to edit existing | TLS |
+| Mutual TLS | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS, Security |
+| Automatic HTTPS (ACME) | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS |
+| HTTP/3, h2c | Read-only | Routes |
+| Upstream pools | Guided-create · Structured-edit (backends); strategy / health-check / discovery Raw-only | Apps |
+| Load-balancing strategy, health checks, service discovery | Read-only | Apps |
+| Web application firewall (WAF) | Structured-edit (global + per-location); advanced per-location fields Raw-only | Security |
+| Secret references | Read-only (externalize helper) | Security |
+| Server limits / timeouts | Structured-edit | Routes |
+| Plugins (WASM) | Read-only | Status |
+| Tracing / OpenTelemetry | Read-only | Overview, Status |
+| Access / error logs | Read-only (live tail not yet in-console) | Status |
+| L4 stream proxy | Read-only (status only) | Overview |
+| Admin listener | No surface | — |
+| Config history / rollback | Full (view + rollback) | History |
+| Audit log | Full (filter + export) | Audit |
+
+The guided surface grows continuously per [ADR 0004](adr/0004-console-ui-invariants.md);
+rows move from *Read-only* / *Raw-only* to *Structured-edit* as editors ship.
+
+## API endpoint to panel map
+
+The console SPA is driven entirely by same-origin `/api` endpoints. Each panel
+consumes the endpoints below.
+
+| Panel / surface | Endpoints |
+| --- | --- |
+| Overview | `GET /api/runtime/overview`, `GET /api/stats` |
+| Routes | `GET /api/routes`, `POST /api/routes/test` |
+| Apps & Upstreams | `GET /api/apps` |
+| TLS & Certificates | `GET /api/tls`, `GET /api/certs` |
+| Security | `GET /api/security` |
+| Traffic Controls | `GET /api/traffic-controls` |
+| Search & Discovery | `GET /api/search` |
+| Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history}`, `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |
+| Audit | `GET /api/audit`, `GET /api/audit/export` |
+| Config editor / History | `GET /api/config` (+ `/raw`, `/validate`, `/diff`, `POST /apply`, `/patch`, `/patch/apply`, `/history`, `/history/{id}`, `/rollback`) |
+| Setup Wizard | `GET /api/wizard`, `POST /api/wizard/generate` |
+| Operational actions | `POST /cache/purge`, `POST /reload` |
+
 ## Security model
 
 - **Authentication:** all data and mutating APIs require the bearer token when
@@ -306,12 +373,13 @@ shared-token `"operator"`; per-user attribution arrives with RBAC/SSO.
   unless it parses and validates. An invalid edit is rejected with a message and
   the running configuration keeps serving unchanged.
 
-## Limitations (v1)
+## Known limitations
 
 - No RBAC/SSO or multi-node management (single-token, single-node).
-- No live log streaming yet; access and error logs are written to the
+- No live in-console log tail yet; access and error logs are written to the
   configured sinks (server log, file, or syslog) and tailed there.
-- ACME certificate expiry is surfaced via metrics rather than parsed in the
-  cert panel.
+- ACME certificate expiry appears in the cert panel once the certificate has
+  been issued and its live metadata is available; the
+  `jul_tls_cert_expiry_seconds` metric is the always-on source.
 - The Status overview reflects the parsed configuration (what is enabled), not
   per-request live counters.

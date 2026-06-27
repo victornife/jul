@@ -276,6 +276,116 @@ func TestApplyPatchLocationWAFErrors(t *testing.T) {
 	}
 }
 
+// TestApplyPatchLocationSetAuth proves each auth method builds the right
+// config.AuthConfig and that clear removes the rule, so the guided auth editor
+// never has to splice nested [servers.locations.auth] TOML by hand.
+func TestApplyPatchLocationSetAuth(t *testing.T) {
+	loc := func(c *config.Config) *config.LocationConfig { return &c.Servers[0].Locations[0] }
+
+	t.Run("cidr", func(t *testing.T) {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, patchRequest{
+			Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api",
+			Auth: &locationAuth{Method: "cidr", Allow: []string{"10.0.0.0/8", " "}, Deny: []string{"10.1.2.3/32"}},
+		}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		a := loc(c).Auth
+		if a == nil || len(a.Allow) != 1 || a.Allow[0] != "10.0.0.0/8" || len(a.Deny) != 1 {
+			t.Fatalf("cidr auth not built (blanks should be dropped): %+v", a)
+		}
+	})
+
+	t.Run("basic", func(t *testing.T) {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, patchRequest{
+			Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api",
+			Auth: &locationAuth{Method: "basic", BasicFile: "/etc/jul/htpasswd", BasicRealm: "Staff"},
+		}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		a := loc(c).Auth
+		if a == nil || a.Basic == nil || a.Basic.File != "/etc/jul/htpasswd" || a.Basic.Realm != "Staff" {
+			t.Fatalf("basic auth not built: %+v", a)
+		}
+	})
+
+	t.Run("jwt", func(t *testing.T) {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, patchRequest{
+			Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api",
+			Auth: &locationAuth{Method: "jwt", JWTJWKSURL: "https://idp/jwks", JWTIssuer: "iss", JWTAudience: "aud"},
+		}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		a := loc(c).Auth
+		if a == nil || a.JWT == nil || a.JWT.JWKSURL != "https://idp/jwks" || a.JWT.Issuer != "iss" || a.JWT.Audience != "aud" {
+			t.Fatalf("jwt auth not built: %+v", a)
+		}
+	})
+
+	t.Run("forward", func(t *testing.T) {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, patchRequest{
+			Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api",
+			Auth: &locationAuth{Method: "forward", ForwardURL: "https://authz/verify"},
+		}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		a := loc(c).Auth
+		if a == nil || a.ForwardAuth == nil || a.ForwardAuth.URL != "https://authz/verify" {
+			t.Fatalf("forward auth not built: %+v", a)
+		}
+	})
+
+	t.Run("set replaces wholesale then clear removes", func(t *testing.T) {
+		c := patchTestConfig()
+		c.Servers[0].Locations[0].Auth = &config.AuthConfig{Allow: []string{"1.2.3.0/24"}}
+		// Setting jwt replaces the prior cidr rule entirely.
+		if _, err := applyPatch(c, patchRequest{
+			Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api",
+			Auth: &locationAuth{Method: "jwt", JWTJWKSURL: "https://idp/jwks"},
+		}); err != nil {
+			t.Fatalf("set: %v", err)
+		}
+		if a := loc(c).Auth; a.JWT == nil || len(a.Allow) != 0 {
+			t.Fatalf("set did not replace wholesale: %+v", a)
+		}
+		if _, err := applyPatch(c, patchRequest{
+			Op: "location_clear_auth", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		}); err != nil {
+			t.Fatalf("clear: %v", err)
+		}
+		if loc(c).Auth != nil {
+			t.Errorf("auth not cleared: %+v", loc(c).Auth)
+		}
+	})
+}
+
+// TestApplyPatchLocationAuthErrors proves malformed payloads and missing targets
+// are rejected without mutating the config.
+func TestApplyPatchLocationAuthErrors(t *testing.T) {
+	cases := []patchRequest{
+		{Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api"},                                                              // nil payload
+		{Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api", Auth: &locationAuth{Method: "cidr"}},                         // empty cidr
+		{Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api", Auth: &locationAuth{Method: "basic"}},                        // missing file
+		{Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api", Auth: &locationAuth{Method: "jwt"}},                          // missing jwks
+		{Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api", Auth: &locationAuth{Method: "forward"}},                      // missing url
+		{Op: "location_set_auth", Listen: ":8080", MatchType: "prefix", Path: "/api", Auth: &locationAuth{Method: "saml"}},                         // unknown method
+		{Op: "location_set_auth", Listen: ":9999", MatchType: "prefix", Path: "/api", Auth: &locationAuth{Method: "jwt", JWTJWKSURL: "https://x"}}, // no route
+		{Op: "location_clear_auth", Listen: ":8080", MatchType: "prefix", Path: "/api"},                                                            // nothing to clear
+	}
+	for _, req := range cases {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, req); err == nil {
+			t.Errorf("expected error for %q %+v", req.Op, req.Auth)
+		}
+		if c.Servers[0].Locations[0].Auth != nil {
+			t.Errorf("a rejected op must not set auth: %+v", c.Servers[0].Locations[0].Auth)
+		}
+	}
+}
+
 func TestApplyPatchUpstreamAddRemoveBackend(t *testing.T) {
 	c := patchTestConfig()
 	if _, err := applyPatch(c, patchRequest{Op: "upstream_add_backend", Upstream: "pool", Address: "10.0.0.2:80", Weight: 3}); err != nil {

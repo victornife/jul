@@ -138,6 +138,14 @@ The SPA is served at `/`.
 The `FeatureStatus{Group,Name,Active,Detail}` 21-row backbone (asserted by
 `TestStatusAPI`) is preserved and surfaces through `/api/runtime/overview`.
 
+> **Shipped surface.** Additional v2 endpoints landed beyond this table
+> (`/api/routes/test`, `/api/observability/*`, `/api/admin/{health,client-errors}`,
+> `/api/audit`, `/api/audit/export`, `/api/search`, `/api/config/patch`,
+> `/api/config/patch/apply`). The authoritative current list of endpoints and the
+> panel that consumes each is the
+> [API endpoint to panel map](../console.md#api-endpoint-to-panel-map) in
+> `console.md`.
+
 ## TypeScript conventions
 
 - `strict: true` (all strict flags) + `noUncheckedIndexedAccess`,
@@ -213,7 +221,12 @@ and a **size gate** (~250 KB gz initial route).
 | **3 — Read panels** | Shell (router, Query, Zod, tokens, SVG charts); Overview, Routes, Apps, TLS, Security, Traffic Controls, Observability; Config read + diff + history + rollback | Vitest component tests; manual parity vs v1 at the dev route |
 | **4 — Editors & write flows** | CodeMirror (lazy) raw TOML + guided forms; validate-on-edit; diff preview; apply + confirm + post-apply delta; wizard expansion; TLS/security editors | Vitest editor + generated-TOML; optional Playwright apply→reload→confirm |
 | **5 — Cutover & GA** | Flip default to v2; remove `console.html` + dev route; retire v1; land deferred doc edits; a11y/responsive/size pass | full-tags build/test/race + size + drift green; single-binary/no-Node check; maturity ①–⑨ |
-
+> **Status (2026-06-23, v1.9):** all six phases are complete. The Phase 5 cutover
+> shipped — the v2 SPA is the default admin UI and the hand-written v1 is retired
+> ([ga-push.md](../ga-push.md)) — and the console is **GA — soak pending**
+> ([status.md](status.md)). Per-feature panels now evolve continuously
+> ([ADR 0004](../adr/0004-console-ui-invariants.md)); see the
+> [capability matrix](../console.md#capability-matrix).
 ## Excluded for now (with reasons)
 
 Each remains a candidate later, but must first clear the size budget and the

@@ -41,9 +41,30 @@ type LocationProjection struct {
 	// route editor truthfully offer to add, edit, or remove a per-location WAF
 	// override and show its current mode/CRS.
 	WAF *LocationWAFState `json:"waf,omitempty"`
+	// AuthDetail is the location's access-control rule, present only when the
+	// location defines one. It lets the guided auth editor seed truthfully; it
+	// carries no secrets (htpasswd path, JWKS URL, issuer/audience, and CIDR
+	// lists are not credentials).
+	AuthDetail *LocationAuthState `json:"auth_detail,omitempty"`
 	// Warnings flags likely-misconfigurations the operator should see before
 	// editing (e.g. cache toggled on but the global cache is disabled).
 	Warnings []string `json:"warnings,omitempty"`
+}
+
+// LocationAuthState summarises a location's access-control rule for the guided
+// auth editor. Method is the dominant credential method ("basic"/"jwt"/
+// "forward") or "cidr" when only IP rules are set; the remaining fields seed the
+// form. No secret values are included.
+type LocationAuthState struct {
+	Method      string   `json:"method"`
+	Allow       []string `json:"allow,omitempty"`
+	Deny        []string `json:"deny,omitempty"`
+	BasicFile   string   `json:"basic_file,omitempty"`
+	BasicRealm  string   `json:"basic_realm,omitempty"`
+	JWTJWKSURL  string   `json:"jwt_jwks_url,omitempty"`
+	JWTIssuer   string   `json:"jwt_issuer,omitempty"`
+	JWTAudience string   `json:"jwt_audience,omitempty"`
+	ForwardURL  string   `json:"forward_url,omitempty"`
 }
 
 // LocationWAFState summarises a location's own [waf] override for the route
@@ -282,6 +303,9 @@ func projectRoutes(c *config.Config) []RouteProjection {
 					Mode:       wafModeOrDefault(loc.WAF.Mode),
 					CRSEnabled: loc.WAF.CRSEnabled,
 				}
+			}
+			if loc.Auth != nil {
+				lp.AuthDetail = locationAuthState(loc.Auth)
 			}
 			lp.Warnings = locationWarnings(c, srv, loc, &lp)
 			rp.Locations = append(rp.Locations, lp)
@@ -546,6 +570,30 @@ func wafModeOrDefault(mode string) string {
 		return "block"
 	}
 	return mode
+}
+
+// locationAuthState derives the guided-auth seed from a location's AuthConfig.
+// Method reflects the dominant credential ("basic"/"jwt"/"forward"); a rule with
+// only IP allow/deny lists is reported as "cidr". It carries no secret values.
+func locationAuthState(a *config.AuthConfig) *LocationAuthState {
+	s := &LocationAuthState{Allow: a.Allow, Deny: a.Deny}
+	switch {
+	case a.Basic != nil:
+		s.Method = "basic"
+		s.BasicFile = a.Basic.File
+		s.BasicRealm = a.Basic.Realm
+	case a.JWT != nil:
+		s.Method = "jwt"
+		s.JWTJWKSURL = a.JWT.JWKSURL
+		s.JWTIssuer = a.JWT.Issuer
+		s.JWTAudience = a.JWT.Audience
+	case a.ForwardAuth != nil:
+		s.Method = "forward"
+		s.ForwardURL = a.ForwardAuth.URL
+	default:
+		s.Method = "cidr"
+	}
+	return s
 }
 
 // wafDist summarizes how the effective WAF policy is applied across all

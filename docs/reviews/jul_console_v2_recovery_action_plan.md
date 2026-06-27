@@ -19,7 +19,7 @@ Resolution status:
 | **Wizard beyond serve/proxy (P0)** | ✅ Done | Added an **app** mode (`mode:"app"`) that builds a load-balanced upstream pool + proxy route with framework presets (Express/Apollo/FastAPI/Django/Flask/Go/gRPC/generic) and optional health checks. Backend `wizardAppConfig` + `wizard_app_test.go`; UI exposes it in `WizardPanel`. |
 | **Search endpoint (P0)** | ✅ Done | Implemented `GET /api/search?q=&type=` with server-side ranking and route↔app relationships (`search.go`, `search_test.go`); `SearchPanel` now consumes it. |
 | **Route/App edit = append-as-draft (P0)** | ✅ Documented | Scope made explicit in `docs/console.md`: guided **creation** generates a validated draft block; in-place replace/rename is intentionally not auto-performed (browser TOML rewriting risks comment/format loss) and is tracked as a follow-up. |
-| **TLS/ACME/auth/mTLS editors (P1)** | ⏳ Pending | Marked explicitly as pending P1 in `docs/console.md`; panels remain read-only inventories. The structured diff now annotates the consequences of changing these via the raw editor. |
+| **TLS/ACME/auth/mTLS editors (P1)** | ✅ Mostly done | Guided **TLS** creation shipped (`TLSEditor`: static or ACME staging/production + optional mutual TLS); route creation includes guided **auth** (CIDR/Basic/JWT/forward-auth), and editing **auth on an existing location** now ships as a structured patch (`AuthEditor` + `location_set_auth`/`location_clear_auth`, Phase 4a ✅); **WAF** has guided global + per-location editors. Remaining: editing **mTLS** on an *existing* server (raw-only). See the [capability matrix](../console.md#capability-matrix). |
 | **Nav collapsed mode** | ✅ Done | Sidebar layout gains a persisted collapsed icon-rail mode with a toggle in the View menu and inline collapse button (`Layout.tsx`). |
 | **Overview sparklines (p95, in-flight)** | ✅ Done | `useMetricsHistory` now tracks p95 latency and in-flight alongside request rate, error rate, avg latency, and cache-hit ratio; `OverviewPanel` renders the full trend set. |
 
@@ -133,29 +133,49 @@ If a screen does not answer those questions, it is not done.
 | CodeMirror lazy editor | Implemented |
 | Wizard | Implemented, minimal serve/proxy only |
 
-### 3.2 Missing or Incomplete
+### 3.2 Missing or Incomplete — refreshed 2026-06-27
 
-| Area | Gap |
+The original gap list below has largely been closed since the cutover. Remaining
+items point to the Phase 4 backlog.
+
+| Area | Status |
 | --- | --- |
-| Overview | Does not show full live traffic cards |
-| Real-time request information | Not surfaced properly |
-| Request types | Not exposed |
-| Request origins | Not exposed |
-| Routes | Read-only; no guided edit |
-| Apps/upstreams | Mostly read-only |
-| TLS | Read-only cert inventory |
-| Security | Shallow posture only |
-| Traffic Controls | Read-only compression/rate/cache |
-| Observability | SSE event list only |
-| Wizard | Too limited |
-| Diff | Not deep enough |
-| Human validation errors | Heuristic and incomplete |
-| Dark/light mode | Missing |
-| Top/left navigation preference | Missing |
-| Self-explanatory UX copy | Incomplete |
-| Route-level metrics | Missing |
-| Top failing routes | Missing |
-| Logs/request samples | Missing |
+| Overview live traffic cards | ✅ Done (traffic sources + p95/in-flight sparklines) |
+| Real-time request information | ✅ Done (`/api/observability/requests`) |
+| Request types / origins | ✅ Done (traffic-sources rollup) |
+| Routes guided edit | ✅ Done (`RouteEditor` + structured patches) |
+| Apps / upstreams | ◑ Partial — backends editable; strategy / health-check / discovery pending (Phase 4b) |
+| TLS | ✅ Done (guided creation: static / ACME / mTLS); edit-existing raw-only |
+| Security | ✅ WAF editors (global + per-location); auth edit-existing shipped (Phase 4a: `AuthEditor`) |
+| Traffic Controls | ✅ Done (compression / cache / rate-limit editors) |
+| Observability | ✅ Done (requests, failing routes, timeline, upstream / cert history) |
+| Wizard | ✅ Done (serve / proxy / app + framework presets) |
+| Diff depth | ✅ Done (deep structural diff with warnings) |
+| Human validation errors | ✅ Done (human-error layer) |
+| Top failing routes | ✅ Done (`/api/observability/failing-routes`) |
+| Request samples | ✅ Done (`/api/observability/requests`) |
+| Collapsed navigation | ✅ Done (persisted icon-rail) |
+| Live log tail | ☐ Remaining (Phase 4g) |
+| Self-explanatory UX copy | ◑ Ongoing per [ADR 0004](../adr/0004-console-ui-invariants.md) |
+
+## Console cockpit — remaining work (Phase 4 backlog)
+
+> Tracking home for the post-cutover guided-editor backlog (2026-06-27). Each
+> item ships code + Go/vitest tests + docs together and flips its row in the
+> [capability matrix](../console.md#capability-matrix). Sequence:
+> 4a → 4c → 4d → 4b → 4e → 4f → 4g → 4h → 4i.
+
+| ID | Item | Priority | Scope |
+| --- | --- | --- | --- |
+| 4a | Auth editor for existing locations | P1 | ✅ Shipped — `location_set_auth` / `location_clear_auth` patch ops + `AuthEditor` drawer (CIDR / Basic / JWT / forward-auth) |
+| 4b | Apps editing | P1–P2 | `upstream_set_strategy`, `upstream_set_health_check`, `upstream_set_discovery` (dns / dns_srv / static + consul / k8s) |
+| 4c | HTTP/3 & h2c toggles | P1 | `server_toggle_http3`, `server_toggle_h2c` |
+| 4d | Tracing editor | P1 | Guided `[observability.tracing]` editor (exporter / endpoint / sample ratio / service name) |
+| 4e | WAF per-location advanced fields | P2 | block_status / paranoia / body limits / rule files / inline rules on overrides |
+| 4f | In-place edit / rename | P2 | `route_rename`, `location_set_match`, `location_set_action` |
+| 4g | Live log tail | P3 | Ring-buffer access-log sink + `/api/observability/logs[/stream]` + Operations Log tab |
+| 4h | Plugins guided editor | P3 | `plugin_set` / `plugin_remove` + attach / detach ops + Plugins panel (`wasmplugins`) |
+| 4i | L4 stream guided editor | P3 | `stream_add` / `stream_set` / `stream_remove` + Stream panel |
 
 ---
 
