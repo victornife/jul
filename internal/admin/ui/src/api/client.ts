@@ -531,7 +531,9 @@ export type ConfigPatch =
   | ({ op: "location_clear_auth" } & RouteTarget)
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
-  | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch };
+  | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch }
+  | { op: "server_toggle_http3"; listen: string; enabled: boolean }
+  | { op: "server_toggle_h2c"; listen: string; enabled: boolean };
 
 // ValidationIssue mirrors the backend validationError shape (code/path/summary/
 // detail/severity). Shared by the patch preview and the validate/apply flows.

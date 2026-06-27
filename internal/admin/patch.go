@@ -47,7 +47,7 @@ type patchRequest struct {
 
 	// Operation payloads (only the field relevant to Op is read).
 	Target  string `json:"target,omitempty"`  // route_set_target: new proxy_pass
-	Enabled *bool  `json:"enabled,omitempty"` // route_toggle_cache / route_toggle_rate_limit
+	Enabled *bool  `json:"enabled,omitempty"` // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c
 	Address string `json:"address,omitempty"` // upstream_add_backend / upstream_remove_backend
 	Weight  int    `json:"weight,omitempty"`  // upstream_add_backend (defaults to 1)
 
@@ -263,6 +263,49 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 
 	case "server_set_limits":
 		return applyServerLimits(c, req)
+
+	case "server_toggle_http3":
+		srv, err := findServer(c, req.Listen)
+		if err != nil {
+			return "", err
+		}
+		if req.Enabled == nil {
+			return "", fmt.Errorf("server_toggle_http3: enabled is required")
+		}
+		if *req.Enabled {
+			// HTTP/3 shares the block's TLS certificates, so it can only run on a
+			// TLS-enabled listener. The validated apply path also rejects this (and
+			// an enabled block in a build without the "http3" tag); the near-side
+			// check just gives a clearer message before the diff is generated.
+			if srv.TLS == nil || !srv.TLS.Enabled {
+				return "", fmt.Errorf("server_toggle_http3: HTTP/3 requires TLS on server %s — enable TLS first", req.Listen)
+			}
+			if srv.HTTP3 == nil {
+				srv.HTTP3 = &config.HTTP3Config{}
+			}
+			srv.HTTP3.Enabled = true
+		} else {
+			// Disabling removes the block entirely so the serialized config stays
+			// clean (rather than leaving an inert [http3] enabled = false).
+			srv.HTTP3 = nil
+		}
+		return fmt.Sprintf("server %s HTTP/3 %s", req.Listen, onOff(*req.Enabled)), nil
+
+	case "server_toggle_h2c":
+		srv, err := findServer(c, req.Listen)
+		if err != nil {
+			return "", err
+		}
+		if req.Enabled == nil {
+			return "", fmt.Errorf("server_toggle_h2c: enabled is required")
+		}
+		// h2c is cleartext HTTP/2: it only applies to a plaintext listener, since a
+		// TLS listener already negotiates HTTP/2 via ALPN.
+		if *req.Enabled && srv.TLS != nil && srv.TLS.Enabled {
+			return "", fmt.Errorf("server_toggle_h2c: h2c applies only to a plaintext listener; server %s already negotiates HTTP/2 over TLS", req.Listen)
+		}
+		srv.H2C = *req.Enabled
+		return fmt.Sprintf("server %s h2c %s", req.Listen, onOff(*req.Enabled)), nil
 
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)

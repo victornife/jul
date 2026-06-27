@@ -443,6 +443,90 @@ func TestApplyPatchServerSetLimitsErrors(t *testing.T) {
 	}
 }
 
+// tlsPatchConfig is patchTestConfig with TLS enabled on the :8080 server, used
+// by the HTTP/3 and h2c toggle tests (HTTP/3 requires TLS; h2c forbids it).
+func tlsPatchConfig() *config.Config {
+	c := patchTestConfig()
+	c.Servers[0].TLS = &config.TLSConfig{Enabled: true, Cert: "/etc/cert.pem", Key: "/etc/key.pem"}
+	return c
+}
+
+func TestApplyPatchServerToggleHTTP3(t *testing.T) {
+	t.Run("enable on a TLS server", func(t *testing.T) {
+		c := tlsPatchConfig()
+		if _, err := applyPatch(c, patchRequest{Op: "server_toggle_http3", Listen: ":8080", Enabled: boolPtr(true)}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if c.Servers[0].HTTP3 == nil || !c.Servers[0].HTTP3.Enabled {
+			t.Error("HTTP/3 not enabled")
+		}
+	})
+	t.Run("disable removes the block", func(t *testing.T) {
+		c := tlsPatchConfig()
+		c.Servers[0].HTTP3 = &config.HTTP3Config{Enabled: true}
+		if _, err := applyPatch(c, patchRequest{Op: "server_toggle_http3", Listen: ":8080", Enabled: boolPtr(false)}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if c.Servers[0].HTTP3 != nil {
+			t.Error("HTTP/3 block not removed on disable")
+		}
+	})
+	t.Run("errors", func(t *testing.T) {
+		cases := []struct {
+			name string
+			cfg  *config.Config
+			req  patchRequest
+		}{
+			{"enable without TLS", patchTestConfig(), patchRequest{Op: "server_toggle_http3", Listen: ":8080", Enabled: boolPtr(true)}},
+			{"nil enabled", tlsPatchConfig(), patchRequest{Op: "server_toggle_http3", Listen: ":8080"}},
+			{"no server", tlsPatchConfig(), patchRequest{Op: "server_toggle_http3", Listen: ":9999", Enabled: boolPtr(true)}},
+		}
+		for _, tc := range cases {
+			if _, err := applyPatch(tc.cfg, tc.req); err == nil {
+				t.Errorf("%s: expected error", tc.name)
+			}
+		}
+	})
+}
+
+func TestApplyPatchServerToggleH2C(t *testing.T) {
+	t.Run("enable on a plaintext server", func(t *testing.T) {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, patchRequest{Op: "server_toggle_h2c", Listen: ":8080", Enabled: boolPtr(true)}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if !c.Servers[0].H2C {
+			t.Error("h2c not enabled")
+		}
+	})
+	t.Run("disable", func(t *testing.T) {
+		c := patchTestConfig()
+		c.Servers[0].H2C = true
+		if _, err := applyPatch(c, patchRequest{Op: "server_toggle_h2c", Listen: ":8080", Enabled: boolPtr(false)}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if c.Servers[0].H2C {
+			t.Error("h2c not disabled")
+		}
+	})
+	t.Run("errors", func(t *testing.T) {
+		cases := []struct {
+			name string
+			cfg  *config.Config
+			req  patchRequest
+		}{
+			{"enable on a TLS server", tlsPatchConfig(), patchRequest{Op: "server_toggle_h2c", Listen: ":8080", Enabled: boolPtr(true)}},
+			{"nil enabled", patchTestConfig(), patchRequest{Op: "server_toggle_h2c", Listen: ":8080"}},
+			{"no server", patchTestConfig(), patchRequest{Op: "server_toggle_h2c", Listen: ":9999", Enabled: boolPtr(true)}},
+		}
+		for _, tc := range cases {
+			if _, err := applyPatch(tc.cfg, tc.req); err == nil {
+				t.Errorf("%s: expected error", tc.name)
+			}
+		}
+	})
+}
+
 func TestApplyPatchErrors(t *testing.T) {
 	cases := []patchRequest{
 		{Op: "route_set_target", Listen: ":9999", Path: "/x", Target: "http://x"}, // no route

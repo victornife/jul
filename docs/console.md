@@ -231,11 +231,12 @@ includes guided **auth** (CIDR allow/deny, HTTP Basic, JWT, or forward-auth).
 Beyond creation, several settings are edited **in place** through structured
 patch operations that are previewed as a diff before they apply: a route's proxy
 target, per-location cache and rate-limit toggles, a per-location access-control
-(auth) rule, a per-location WAF override, upstream backend add/remove, and
-per-server limits/timeouts.
+(auth) rule, a per-location WAF override, upstream backend add/remove,
+per-server limits/timeouts, and the per-server HTTP/3 and h2c protocol toggles
+(HTTP/3 requires TLS on the listener; h2c applies to plaintext listeners only).
 
 Editing the remaining settings of an **existing** block — mutual
-TLS, health checks, service discovery, load-balancing strategy, HTTP/3, h2c,
+TLS, health checks, service discovery, load-balancing strategy,
 plugins, tracing, and L4 stream listeners — currently goes through the validated
 raw TOML editor, whose structured diff annotates the consequences. The
 [capability matrix](#capability-matrix) below is the authoritative, per-feature
@@ -321,7 +322,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | TLS / HTTPS | Guided-create (New TLS server) · Raw-only to edit existing | TLS |
 | Mutual TLS | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS, Security |
 | Automatic HTTPS (ACME) | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS |
-| HTTP/3, h2c | Read-only | Routes |
+| HTTP/3, h2c | Structured-edit (per-server toggle; HTTP/3 requires TLS, h2c plaintext only) | Routes |
 | Upstream pools | Guided-create · Structured-edit (backends); strategy / health-check / discovery Raw-only | Apps |
 | Load-balancing strategy, health checks, service discovery | Read-only | Apps |
 | Web application firewall (WAF) | Structured-edit (global + per-location); advanced per-location fields Raw-only | Security |

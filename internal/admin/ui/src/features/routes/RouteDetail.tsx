@@ -278,6 +278,79 @@ function QuickEdits({
   );
 }
 
+// ServerToggles flips the two server-scope protocol switches — HTTP/3 (QUIC) and
+// cleartext HTTP/2 (h2c) — through the structured patch ops, reviewed as a diff
+// like every other edit. They are mutually exclusive by transport: HTTP/3 needs
+// TLS on the listener while h2c only applies to a plaintext one, so each button
+// is disabled when the listener's TLS posture rules it out.
+function ServerToggles({ route }: { readonly route: RouteProjection }) {
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const tlsOn = Boolean(route.tls?.enabled);
+
+  async function runPatch(patch: ConfigPatch): Promise<void> {
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await patchConfig(patch);
+      setPendingDraft({
+        kind: "patch",
+        ops: [patch],
+        baseVersion: res.base_version,
+        previewDiff: res.diff,
+        candidate: res.candidate,
+      });
+      void navigate("/config");
+    } catch (err) {
+      setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+        Server protocols
+      </span>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy || !tlsOn}
+          title={tlsOn ? undefined : "HTTP/3 requires TLS on this listener."}
+          onClick={() => {
+            void runPatch({ op: "server_toggle_http3", listen: route.listen, enabled: !route.http3 });
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {route.http3 ? "Disable HTTP/3" : "Enable HTTP/3"} →
+        </button>
+        <button
+          type="button"
+          disabled={busy || tlsOn}
+          title={
+            tlsOn
+              ? "TLS listeners negotiate HTTP/2 via ALPN; h2c is for plaintext listeners only."
+              : undefined
+          }
+          onClick={() => {
+            void runPatch({ op: "server_toggle_h2c", listen: route.listen, enabled: !route.h2c });
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {route.h2c ? "Disable h2c" : "Enable h2c"} →
+        </button>
+      </div>
+      <p className="text-xs text-jul-muted">
+        {tlsOn
+          ? "TLS listener: HTTP/3 (QUIC) is available; h2c does not apply (HTTP/2 is negotiated via ALPN)."
+          : "Plaintext listener: h2c enables cleartext HTTP/2 for native gRPC; HTTP/3 needs TLS."}
+      </p>
+      {error && <p className="text-xs text-jul-danger">{error}</p>}
+    </div>
+  );
+}
+
 export interface RouteDetailProps {
   readonly route: RouteProjection;
   readonly loc: LocationProjection;
@@ -352,9 +425,13 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           <Flag on={loc.compression} label="compression" />
           <Flag on={loc.rate_limit} label="rate limit" />
           <Flag on={loc.secure} label="TLS" />
+          <Flag on={route.http3} label="HTTP/3" />
+          <Flag on={route.h2c} label="h2c" />
         </div>
 
         <QuickEdits route={route} loc={loc} />
+
+        <ServerToggles route={route} />
 
         <div className="space-y-1">
           <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">

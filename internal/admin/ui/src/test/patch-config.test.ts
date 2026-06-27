@@ -161,6 +161,40 @@ describe("patchConfig", () => {
     expect(JSON.parse(seenBody)).toMatchObject({ op: "location_clear_auth", path: "/api" });
   });
 
+  it("serializes a server HTTP/3 toggle by listen", async () => {
+    let seenBody = "";
+    mockFetch((url, init) => {
+      expect(url).toBe("/api/config/patch");
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        summary: "server :443 HTTP/3 on",
+        candidate: 'listen = ":443"\n',
+        diff: { summary: "1 change" },
+      });
+    });
+    const res = await patchConfig({ op: "server_toggle_http3", listen: ":443", enabled: true });
+    expect(res.summary).toContain("HTTP/3");
+    expect(JSON.parse(seenBody)).toMatchObject({ op: "server_toggle_http3", listen: ":443", enabled: true });
+  });
+
+  it("serializes a server h2c toggle by listen", async () => {
+    let seenBody = "";
+    mockFetch((url, init) => {
+      expect(url).toBe("/api/config/patch");
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        summary: "server :8080 h2c off",
+        candidate: 'listen = ":8080"\n',
+        diff: { summary: "1 change" },
+      });
+    });
+    const res = await patchConfig({ op: "server_toggle_h2c", listen: ":8080", enabled: false });
+    expect(res.summary).toContain("h2c");
+    expect(JSON.parse(seenBody)).toMatchObject({ op: "server_toggle_h2c", listen: ":8080", enabled: false });
+  });
+
   it("surfaces validation_errors when the candidate would not build", async () => {
     mockFetch(() =>
       json({

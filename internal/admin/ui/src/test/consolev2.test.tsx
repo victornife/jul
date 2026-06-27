@@ -723,3 +723,94 @@ describe("RouteDetail per-location WAF", () => {
     expect(screen.getByRole("button", { name: "Clear override" })).toBeInTheDocument();
   });
 });
+
+// ── RouteDetail server-scope protocol toggles ──────────────────────────────────
+
+describe("RouteDetail server toggles", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function loc(): LocationProjection {
+    return {
+      index: 0,
+      match: "/",
+      type: "prefix",
+      action: "proxy",
+      auth: false,
+      cache: false,
+      compression: false,
+      rate_limit: false,
+      secure: false,
+    };
+  }
+
+  function stubPatch(onPatch: (body: string) => void) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        onPatch(typeof init?.body === "string" ? init.body : "");
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              ok: true,
+              summary: "ok",
+              candidate: 'listen = ":8080"\n',
+              diff: { summary: "1 change" },
+            }),
+        });
+      }),
+    );
+  }
+
+  it("enables h2c on a plaintext listener and disables the HTTP/3 toggle", async () => {
+    let body = "";
+    stubPatch((b) => {
+      body = b;
+    });
+    const route: RouteProjection = {
+      listen: ":8080",
+      server_names: [],
+      http3: false,
+      h2c: false,
+      locations: [],
+    };
+    render(<RouteDetail route={route} loc={loc()} onClose={vi.fn()} onEdit={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
+
+    // Plaintext listener ⇒ h2c is offered, HTTP/3 is gated behind TLS.
+    expect(screen.getByRole("button", { name: /Enable HTTP\/3/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Enable h2c/ }));
+    await waitFor(() => {
+      expect(body).not.toBe("");
+    });
+    expect(JSON.parse(body)).toMatchObject({ op: "server_toggle_h2c", listen: ":8080", enabled: true });
+  });
+
+  it("enables HTTP/3 on a TLS listener and disables the h2c toggle", async () => {
+    let body = "";
+    stubPatch((b) => {
+      body = b;
+    });
+    const route: RouteProjection = {
+      listen: ":443",
+      server_names: [],
+      tls: { enabled: true, acme: false },
+      http3: false,
+      h2c: false,
+      locations: [],
+    };
+    render(<RouteDetail route={route} loc={loc()} onClose={vi.fn()} onEdit={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
+
+    // TLS listener ⇒ HTTP/3 is offered, h2c does not apply.
+    expect(screen.getByRole("button", { name: /Enable h2c/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Enable HTTP\/3/ }));
+    await waitFor(() => {
+      expect(body).not.toBe("");
+    });
+    expect(JSON.parse(body)).toMatchObject({ op: "server_toggle_http3", listen: ":443", enabled: true });
+  });
+});
+
