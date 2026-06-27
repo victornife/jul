@@ -690,6 +690,12 @@ describe("RouteDetail per-location WAF", () => {
     expect(await screen.findByText("Add per-location WAF")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Clear override" })).not.toBeInTheDocument();
 
+    // The detect-first default seeds an enabled override with no rules, which is
+    // invalid (it would inspect nothing), so the save stays blocked until rules
+    // are supplied — enabling the CRS unblocks it.
+    expect(screen.getByRole("button", { name: /Review in editor/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Core Rule Set/ }));
+
     fireEvent.click(screen.getByRole("button", { name: /Review in editor/ }));
     await waitFor(() => {
       expect(body).not.toBe("");
@@ -699,7 +705,7 @@ describe("RouteDetail per-location WAF", () => {
       listen: ":8080",
       path: "/admin",
       match_type: "prefix",
-      waf: { enabled: true, mode: "detect", crs_enabled: false },
+      waf: { enabled: true, mode: "detect", crs_enabled: true },
     });
   });
 

@@ -405,8 +405,17 @@ func TestSecurityProjectionWAFDistributionAndGlobal(t *testing.T) {
 			Locations: []config.LocationConfig{
 				// Inherits the global detect+CRS policy.
 				{Match: config.MatchConfig{Path: "/a"}},
-				// Overrides to block, no CRS.
-				{Match: config.MatchConfig{Path: "/b"}, WAF: &config.WAFConfig{Enabled: true, Mode: "block"}},
+				// Overrides to block, no CRS, with advanced SecLang fields set so
+				// the projection must carry the full override for the editor seed.
+				{Match: config.MatchConfig{Path: "/b"}, WAF: &config.WAFConfig{
+					Enabled:           true,
+					Mode:              "block",
+					BlockStatus:       429,
+					RequestBodyLimit:  config.Size(64 << 10),
+					ResponseBodyCheck: true,
+					DirectivesFiles:   []string{"/etc/jul/waf/b.conf"},
+					InlineRules:       `SecRule REQUEST_URI "@contains /x" "id:200,deny"`,
+				}},
 				// Opts out entirely.
 				{Match: config.MatchConfig{Path: "/c"}, WAF: &config.WAFConfig{Enabled: false}},
 			},
@@ -453,6 +462,12 @@ func TestSecurityProjectionWAFDistributionAndGlobal(t *testing.T) {
 	}
 	if bOverride == nil || !bOverride.Enabled || bOverride.Mode != "block" || bOverride.CRSEnabled {
 		t.Errorf("/b override = %+v, want enabled block without CRS", bOverride)
+	}
+	// The advanced SecLang fields project verbatim so the guided editor seeds and
+	// round-trips them instead of clobbering rules it never showed.
+	if bOverride != nil && (bOverride.BlockStatus != 429 || bOverride.RequestBodyLimit != "64k" ||
+		!bOverride.ResponseBodyCheck || len(bOverride.DirectivesFiles) != 1 || bOverride.InlineRules == "") {
+		t.Errorf("/b advanced fields = %+v, want block_status 429, 64k limit, response check, 1 rule file, inline rules", bOverride)
 	}
 	if cOverride == nil || cOverride.Enabled {
 		t.Errorf("/c override = %+v, want a disabled override", cOverride)

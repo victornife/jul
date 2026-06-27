@@ -141,12 +141,19 @@ export const TLSProjectionSchema = z.object({
 export type TLSProjection = z.infer<typeof TLSProjectionSchema>;
 
 // LocationWAFStateSchema is a location's own [waf] override state, present only
-// when the location defines one. It carries just the three knobs the guided
-// per-location editor controls; the route supplies the location coordinates.
+// when the location defines one. As of Phase 4e it carries the full override —
+// the basic knobs plus the advanced SecLang fields — so the guided per-location
+// editor seeds and round-trips every field; the route supplies the coordinates.
 export const LocationWAFStateSchema = z.object({
   enabled: z.boolean(),
   mode: z.string().optional(),
   crs_enabled: z.boolean().default(false),
+  block_status: z.number().optional(),
+  paranoia: z.number().optional(),
+  request_body_limit: z.string().optional(),
+  response_body_check: z.boolean().optional(),
+  directives_files: z.array(z.string()).optional(),
+  inline_rules: z.string().optional(),
 });
 export type LocationWAFState = z.infer<typeof LocationWAFStateSchema>;
 
@@ -260,7 +267,8 @@ export type CertProjection = z.infer<typeof CertProjectionSchema>;
 
 // LocationWAFSchema is one per-location [waf] override surfaced by the security
 // projection. The identity fields mirror the structured-patch location selector
-// so a guided editor can target the exact block.
+// so a guided editor can target the exact block; the policy fields carry the
+// full override (Phase 4e) so the editor seeds and round-trips every field.
 export const LocationWAFSchema = z.object({
   listen: z.string(),
   server_names: z.array(z.string()).optional(),
@@ -269,6 +277,12 @@ export const LocationWAFSchema = z.object({
   enabled: z.boolean(),
   mode: z.string().optional(),
   crs_enabled: z.boolean().optional().default(false),
+  block_status: z.number().optional(),
+  paranoia: z.number().optional(),
+  request_body_limit: z.string().optional(),
+  response_body_check: z.boolean().optional(),
+  directives_files: z.array(z.string()).optional(),
+  inline_rules: z.string().optional(),
 });
 export type LocationWAF = z.infer<typeof LocationWAFSchema>;
 
@@ -533,14 +547,22 @@ export type RouteTarget = {
   path: string;
 };
 
-// LocationWAFPatch is the per-location [waf] override the guided editor sets —
-// only the three knobs the security projection discloses. Advanced SecLang
-// fields an existing override may carry (block status, paranoia, rule files,
-// inline rules, body inspection) are preserved by the backend, never sent here.
+// LocationWAFPatch is the per-location [waf] override the guided editor sets. As
+// of Phase 4e it carries the full override — the basic knobs plus the advanced
+// SecLang fields (block status, paranoia, request-body limit, response-body
+// inspection, rule files, inline rules). The editor seeds every field from the
+// projection first, so location_waf_set replaces the override faithfully rather
+// than clobbering unshown rules.
 export type LocationWAFPatch = {
   enabled: boolean;
   mode?: "block" | "detect";
   crs_enabled?: boolean;
+  block_status?: number;
+  paranoia?: number;
+  request_body_limit?: string;
+  response_body_check?: boolean;
+  directives_files?: string[];
+  inline_rules?: string;
 };
 
 // LocationAuthPatch is the per-location access-control rule the guided auth

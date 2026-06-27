@@ -75,15 +75,22 @@ type patchRequest struct {
 }
 
 // locationWAF carries the per-location WAF override fields the guided editor
-// exposes — exactly the ones the security projection discloses (enabled, mode,
-// CRS). Advanced SecLang fields (block_status, paranoia, directives_files,
-// inline_rules, request/response body inspection) are intentionally NOT here:
-// location_waf_set preserves whatever an existing override already set for them,
-// so the structured editor never silently clobbers rules it does not display.
+// exposes. As of Phase 4e the editor surfaces the full override — the three
+// basic knobs (enabled, mode, CRS) plus the advanced SecLang fields (block
+// status, paranoia, request-body limit, response-body inspection, rule files,
+// and inline rules). location_waf_set therefore REPLACES the override from this
+// payload wholesale; the editor seeds every field from the security projection
+// first, so a round-trip is faithful rather than clobbering unshown rules.
 type locationWAF struct {
-	Enabled    bool   `json:"enabled"`
-	Mode       string `json:"mode,omitempty"`        // "block" (default) or "detect"
-	CRSEnabled bool   `json:"crs_enabled,omitempty"` // load the embedded OWASP CRS
+	Enabled           bool     `json:"enabled"`
+	Mode              string   `json:"mode,omitempty"`        // "block" (default) or "detect"
+	CRSEnabled        bool     `json:"crs_enabled,omitempty"` // load the embedded OWASP CRS
+	BlockStatus       int      `json:"block_status,omitempty"`
+	Paranoia          int      `json:"paranoia,omitempty"`
+	RequestBodyLimit  string   `json:"request_body_limit,omitempty"` // size string, e.g. "128k"
+	ResponseBodyCheck bool     `json:"response_body_check,omitempty"`
+	DirectivesFiles   []string `json:"directives_files,omitempty"`
+	InlineRules       string   `json:"inline_rules,omitempty"`
 }
 
 // locationAuth carries the per-location access-control fields the guided auth
@@ -226,18 +233,30 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		if mode != "block" && mode != "detect" {
 			return "", fmt.Errorf("location_waf_set: mode must be %q or %q", "block", "detect")
 		}
-		// Mutate in place when an override already exists so advanced SecLang
-		// fields the editor does not surface (block_status, paranoia, rule files,
-		// inline rules, body inspection) are preserved rather than wiped; create
-		// a fresh override otherwise. The override REPLACES the global policy for
-		// this location wholesale (it is not merged), which is exactly the
-		// semantics the security panel discloses.
-		if loc.WAF == nil {
-			loc.WAF = &config.WAFConfig{}
+		// The override REPLACES the global policy for this location wholesale (it
+		// is not merged), which is exactly the semantics the security panel
+		// discloses. As of Phase 4e the guided editor surfaces every override
+		// field and seeds them from the projection, so building a fresh
+		// config.WAFConfig from the full payload round-trips faithfully rather
+		// than clobbering unshown rules. Defaults (block_status 403, body limit
+		// 128 KiB, CRS paranoia) are applied by the parser on re-parse.
+		var bodyLimit config.Size
+		if raw := strings.TrimSpace(req.WAF.RequestBodyLimit); raw != "" {
+			if err := bodyLimit.UnmarshalText([]byte(raw)); err != nil {
+				return "", fmt.Errorf("location_waf_set: request_body_limit: %w", err)
+			}
 		}
-		loc.WAF.Enabled = req.WAF.Enabled
-		loc.WAF.Mode = mode
-		loc.WAF.CRSEnabled = req.WAF.CRSEnabled
+		loc.WAF = &config.WAFConfig{
+			Enabled:           req.WAF.Enabled,
+			Mode:              mode,
+			BlockStatus:       req.WAF.BlockStatus,
+			DirectivesFiles:   trimNonEmpty(req.WAF.DirectivesFiles),
+			InlineRules:       strings.TrimSpace(req.WAF.InlineRules),
+			CRSEnabled:        req.WAF.CRSEnabled,
+			Paranoia:          req.WAF.Paranoia,
+			RequestBodyLimit:  bodyLimit,
+			ResponseBodyCheck: req.WAF.ResponseBodyCheck,
+		}
 		return fmt.Sprintf("route %s%s WAF override set (%s%s)", req.Listen, req.Path,
 			onOff(req.WAF.Enabled), wafModeNote(req.WAF.Enabled, mode, req.WAF.CRSEnabled)), nil
 

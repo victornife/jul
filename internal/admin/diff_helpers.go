@@ -231,6 +231,13 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 		if strings.TrimSpace(bEffWAF.InlineRules) != strings.TrimSpace(aEffWAF.InlineRules) {
 			d.mod(DiffEntry{Kind: "waf", Name: name, Detail: "Change WAF inline rules on route " + key}, "route "+name+" waf inline_rules")
 		}
+		if bEffWAF.ResponseBodyCheck != aEffWAF.ResponseBodyCheck {
+			action := "Enable"
+			if !aEffWAF.ResponseBodyCheck {
+				action = "Disable"
+			}
+			d.mod(DiffEntry{Kind: "waf", Name: name, Detail: fmt.Sprintf("%s WAF response-body inspection on route %s", action, key)}, "route "+name+" waf response_body_check")
+		}
 	}
 
 	// Auth toggle.

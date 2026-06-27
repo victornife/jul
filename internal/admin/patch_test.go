@@ -181,7 +181,8 @@ func TestApplyPatchLocationWAFSetAndClear(t *testing.T) {
 		t.Error("expected a non-empty summary")
 	}
 
-	// Update: switch to detect, drop CRS — same override is mutated in place.
+	// Update: switch to detect, drop CRS — the override is replaced wholesale
+	// from the editor's full field set.
 	if _, err := applyPatch(c, patchRequest{
 		Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api",
 		WAF: &locationWAF{Enabled: true, Mode: "detect", CRSEnabled: false},
@@ -218,35 +219,50 @@ func TestApplyPatchLocationWAFSetDefaultsMode(t *testing.T) {
 	}
 }
 
-// TestApplyPatchLocationWAFSetPreservesAdvanced proves that editing the three
-// surfaced knobs (enabled/mode/CRS) leaves advanced SecLang fields the editor
-// does not display — inline rules, rule files, block status, paranoia — intact,
-// so a structured edit never silently wipes hand-written rules.
-func TestApplyPatchLocationWAFSetPreservesAdvanced(t *testing.T) {
+// TestApplyPatchLocationWAFSetAdvanced proves the override carries the full
+// SecLang field set — block status, paranoia, request-body limit, response-body
+// inspection, rule files, inline rules — not just the basic knobs. As of Phase
+// 4e the editor surfaces and seeds every field, so location_waf_set REPLACES the
+// override wholesale and a save round-trips faithfully.
+func TestApplyPatchLocationWAFSetAdvanced(t *testing.T) {
 	c := patchTestConfig()
-	c.Servers[0].Locations[0].WAF = &config.WAFConfig{
-		Enabled:         true,
-		Mode:            "block",
-		BlockStatus:     429,
-		Paranoia:        2,
-		DirectivesFiles: []string{"/etc/jul/waf/custom.conf"},
-		InlineRules:     `SecRule REQUEST_URI "@contains /x" "id:200,phase:1,deny"`,
-	}
 
 	if _, err := applyPatch(c, patchRequest{
 		Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api",
-		WAF: &locationWAF{Enabled: true, Mode: "detect", CRSEnabled: true},
+		WAF: &locationWAF{
+			Enabled:           true,
+			Mode:              "block",
+			CRSEnabled:        true,
+			BlockStatus:       429,
+			Paranoia:          3,
+			RequestBodyLimit:  "256k",
+			ResponseBodyCheck: true,
+			DirectivesFiles:   []string{"/etc/jul/waf/custom.conf", " "},
+			InlineRules:       `SecRule REQUEST_URI "@contains /x" "id:200,phase:1,deny"`,
+		},
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
+
 	got := c.Servers[0].Locations[0].WAF
-	if got.Mode != "detect" || !got.CRSEnabled {
-		t.Errorf("surfaced knobs not applied: %+v", got)
+	if got == nil {
+		t.Fatal("override not created")
 	}
-	if got.BlockStatus != 429 || got.Paranoia != 2 ||
-		len(got.DirectivesFiles) != 1 || got.DirectivesFiles[0] != "/etc/jul/waf/custom.conf" ||
+
+	var wantLimit config.Size
+	if err := wantLimit.UnmarshalText([]byte("256k")); err != nil {
+		t.Fatalf("parse want limit: %v", err)
+	}
+
+	if !got.Enabled || got.Mode != "block" || !got.CRSEnabled ||
+		got.BlockStatus != 429 || got.Paranoia != 3 ||
+		got.RequestBodyLimit != wantLimit || !got.ResponseBodyCheck ||
 		got.InlineRules == "" {
-		t.Errorf("advanced fields were clobbered: %+v", got)
+		t.Fatalf("advanced fields not applied: %+v", got)
+	}
+	// Blank rule-file entries are dropped so the override stays clean.
+	if len(got.DirectivesFiles) != 1 || got.DirectivesFiles[0] != "/etc/jul/waf/custom.conf" {
+		t.Errorf("blank rule files not trimmed: %+v", got.DirectivesFiles)
 	}
 }
 
@@ -258,6 +274,8 @@ func TestApplyPatchLocationWAFErrors(t *testing.T) {
 		{Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api"},
 		// invalid mode
 		{Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api", WAF: &locationWAF{Enabled: true, Mode: "warn"}},
+		// unparseable request-body limit
+		{Op: "location_waf_set", Listen: ":8080", MatchType: "prefix", Path: "/api", WAF: &locationWAF{Enabled: true, RequestBodyLimit: "not-a-size"}},
 		// no such route
 		{Op: "location_waf_set", Listen: ":9999", MatchType: "prefix", Path: "/api", WAF: &locationWAF{Enabled: true}},
 		// clear with no existing override

@@ -86,6 +86,44 @@ func TestDiffRouteAuthCacheRateLimit(t *testing.T) {
 	}
 }
 
+// TestDiffLocationWAFAdvanced proves a per-location override's advanced SecLang
+// fields — block status, request-body limit, response-body inspection — are
+// reported in the diff, so the guided editor's full-field edits surface in the
+// Validate → Diff → Apply review instead of landing silently.
+func TestDiffLocationWAFAdvanced(t *testing.T) {
+	loc := func(status int, limit config.Size, respCheck bool) config.LocationConfig {
+		return config.LocationConfig{
+			Match: config.MatchConfig{Type: "prefix", Path: "/api"},
+			WAF: &config.WAFConfig{
+				Enabled:           true,
+				Mode:              "block",
+				BlockStatus:       status,
+				RequestBodyLimit:  limit,
+				ResponseBodyCheck: respCheck,
+				InlineRules:       `SecRule ARGS "@rx evil" "id:1,deny"`,
+			},
+		}
+	}
+	before := &config.Config{Servers: []config.ServerConfig{{
+		Listen:    ":8080",
+		Locations: []config.LocationConfig{loc(403, config.Size(128<<10), false)},
+	}}}
+	after := &config.Config{Servers: []config.ServerConfig{{
+		Listen:    ":8080",
+		Locations: []config.LocationConfig{loc(429, config.Size(64<<10), true)},
+	}}}
+	d := diffConfigs(before, after)
+	if !diffHas(d, "Change WAF block status on route prefix /api") {
+		t.Errorf("expected block-status change, got %+v", d)
+	}
+	if !diffHas(d, "Change WAF request body limit on route prefix /api") {
+		t.Errorf("expected request-body-limit change, got %+v", d)
+	}
+	if !diffHas(d, "Enable WAF response-body inspection on route prefix /api") {
+		t.Errorf("expected response-body inspection toggle, got %+v", d)
+	}
+}
+
 func TestDiffTLSMinVersionAndACME(t *testing.T) {
 	before := &config.Config{Servers: []config.ServerConfig{{
 		Listen: ":443",

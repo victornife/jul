@@ -262,14 +262,17 @@ single uniform policy:
   the edit button is labelled **Edit global** to make clear it does not touch
   those per-location policies.
 - Each listed per-location override has its own **Edit** action that opens a
-  guided per-location editor. It controls the disclosed knobs — enabled, mode
-  (block/detect) and the embedded CRS — and applies the change through structured
-  patch operations (`location_waf_set` / `location_waf_clear`) reviewed as a diff,
-  so it never hand-edits nested TOML. Advanced rule fields the override may carry
-  (block status, paranoia, rule files, inline rules, body inspection) are
-  **preserved**; **Clear override** removes the block so the location inherits the
-  global policy again. Those advanced fields are still edited in the raw TOML
-  editor.
+  guided per-location editor. It controls the **full override** — the basic
+  knobs (enabled, mode block/detect, the embedded CRS) plus the advanced SecLang
+  fields (block status, paranoia level, request-body limit, response-body
+  inspection, rule files and inline rules) — and applies the change through
+  structured patch operations (`location_waf_set` / `location_waf_clear`)
+  reviewed as a diff, so it never hand-edits nested TOML. Because the editor
+  seeds **every** field from the running config, a save **replaces** the override
+  faithfully (round-trips) rather than clobbering rules it never showed; it also
+  refuses a save the server would reject (an enabled override with no rules, an
+  out-of-range block status or paranoia level). **Clear override** removes the
+  block so the location inherits the global policy again.
 - A route that still inherits the global policy can gain an override from the
   **route detail** drawer: its quick edits offer **Add WAF override** (seeded
   detect-first), while a route that already overrides offers **Edit WAF
@@ -330,7 +333,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | HTTP/3, h2c | Structured-edit (per-server toggle; HTTP/3 requires TLS, h2c plaintext only) | Routes |
 | Upstream pools | Guided-create · Structured-edit (backends, strategy, health checks, discovery) | Apps |
 | Load-balancing strategy, health checks, service discovery | Structured-edit | Apps |
-| Web application firewall (WAF) | Structured-edit (global + per-location); advanced per-location fields Raw-only | Security |
+| Web application firewall (WAF) | Structured-edit (global + per-location, incl. advanced fields: block status / paranoia / body limits / rule files / inline rules / response-body inspection) | Security |
 | Secret references | Read-only (externalize helper) | Security |
 | Server limits / timeouts | Structured-edit | Routes |
 | Plugins (WASM) | Read-only | Status |

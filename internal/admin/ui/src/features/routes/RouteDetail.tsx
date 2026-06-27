@@ -136,7 +136,9 @@ function QuickEdits({
 
   // wafTarget builds the LocationWAF the guided per-location editor expects from
   // the route coordinates plus the location's current override (or safe
-  // detect-first defaults when the route still inherits the global policy).
+  // detect-first defaults when the route still inherits the global policy). It
+  // passes the advanced SecLang fields through verbatim so the editor seeds and
+  // round-trips them instead of clobbering rules it never showed (Phase 4e).
   const wafTarget: LocationWAF = {
     listen: route.listen,
     server_names: route.server_names ?? [],
@@ -145,6 +147,16 @@ function QuickEdits({
     enabled: loc.waf?.enabled ?? true,
     mode: loc.waf?.mode ?? "detect",
     crs_enabled: loc.waf?.crs_enabled ?? false,
+    response_body_check: loc.waf?.response_body_check ?? false,
+    ...(loc.waf?.block_status !== undefined ? { block_status: loc.waf.block_status } : {}),
+    ...(loc.waf?.paranoia !== undefined ? { paranoia: loc.waf.paranoia } : {}),
+    ...(loc.waf?.request_body_limit !== undefined
+      ? { request_body_limit: loc.waf.request_body_limit }
+      : {}),
+    ...(loc.waf?.directives_files !== undefined
+      ? { directives_files: loc.waf.directives_files }
+      : {}),
+    ...(loc.waf?.inline_rules !== undefined ? { inline_rules: loc.waf.inline_rules } : {}),
   };
 
   return (

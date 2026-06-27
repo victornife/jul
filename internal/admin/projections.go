@@ -68,13 +68,21 @@ type LocationAuthState struct {
 }
 
 // LocationWAFState summarises a location's own [waf] override for the route
-// editor: the three knobs the guided per-location editor controls. It mirrors
-// the policy fields of LocationWAFProjection without repeating the location
-// coordinates (the route already provides them).
+// editor. It carries the full override the guided per-location editor controls
+// (Phase 4e) — the basic knobs plus the advanced SecLang fields — so the editor
+// can seed every field and round-trip it without clobbering unshown rules. It
+// mirrors the policy fields of LocationWAFProjection without repeating the
+// location coordinates (the route already provides them).
 type LocationWAFState struct {
-	Enabled    bool   `json:"enabled"`
-	Mode       string `json:"mode,omitempty"`
-	CRSEnabled bool   `json:"crs_enabled"`
+	Enabled           bool     `json:"enabled"`
+	Mode              string   `json:"mode,omitempty"`
+	CRSEnabled        bool     `json:"crs_enabled"`
+	BlockStatus       int      `json:"block_status,omitempty"`
+	Paranoia          int      `json:"paranoia,omitempty"`
+	RequestBodyLimit  string   `json:"request_body_limit,omitempty"`
+	ResponseBodyCheck bool     `json:"response_body_check"`
+	DirectivesFiles   []string `json:"directives_files,omitempty"`
+	InlineRules       string   `json:"inline_rules,omitempty"`
 }
 
 // AppProjection is a structured upstream/app for the Console v2 Apps panel.
@@ -221,6 +229,14 @@ type LocationWAFProjection struct {
 	Enabled     bool     `json:"enabled"`
 	Mode        string   `json:"mode,omitempty"`
 	CRSEnabled  bool     `json:"crs_enabled"`
+	// Advanced override detail (Phase 4e) so the guided editor seeds and
+	// round-trips every field rather than clobbering unshown SecLang rules.
+	BlockStatus       int      `json:"block_status,omitempty"`
+	Paranoia          int      `json:"paranoia,omitempty"`
+	RequestBodyLimit  string   `json:"request_body_limit,omitempty"`
+	ResponseBodyCheck bool     `json:"response_body_check"`
+	DirectivesFiles   []string `json:"directives_files,omitempty"`
+	InlineRules       string   `json:"inline_rules,omitempty"`
 }
 
 // TrafficControlsProjection is the traffic/observability settings panel.
@@ -352,9 +368,15 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			lp.Upstream = upstreamRef(lp.Target, lp.Action)
 			if loc.WAF != nil {
 				lp.WAF = &LocationWAFState{
-					Enabled:    loc.WAF.Enabled,
-					Mode:       wafModeOrDefault(loc.WAF.Mode),
-					CRSEnabled: loc.WAF.CRSEnabled,
+					Enabled:           loc.WAF.Enabled,
+					Mode:              wafModeOrDefault(loc.WAF.Mode),
+					CRSEnabled:        loc.WAF.CRSEnabled,
+					BlockStatus:       loc.WAF.BlockStatus,
+					Paranoia:          loc.WAF.Paranoia,
+					RequestBodyLimit:  wafBodyLimitStr(loc.WAF.RequestBodyLimit),
+					ResponseBodyCheck: loc.WAF.ResponseBodyCheck,
+					DirectivesFiles:   loc.WAF.DirectivesFiles,
+					InlineRules:       loc.WAF.InlineRules,
 				}
 			}
 			if loc.Auth != nil {
@@ -599,13 +621,19 @@ func projectSecurity(c *config.Config) SecurityProjection {
 			// global policy for this location, so disclose it explicitly.
 			if loc.WAF != nil {
 				sp.LocationWAFs = append(sp.LocationWAFs, LocationWAFProjection{
-					Listen:      srv.Listen,
-					ServerNames: srv.ServerNames,
-					MatchType:   loc.Match.Type,
-					Path:        loc.Match.Path,
-					Enabled:     loc.WAF.Enabled,
-					Mode:        wafModeOrDefault(loc.WAF.Mode),
-					CRSEnabled:  loc.WAF.CRSEnabled,
+					Listen:            srv.Listen,
+					ServerNames:       srv.ServerNames,
+					MatchType:         loc.Match.Type,
+					Path:              loc.Match.Path,
+					Enabled:           loc.WAF.Enabled,
+					Mode:              wafModeOrDefault(loc.WAF.Mode),
+					CRSEnabled:        loc.WAF.CRSEnabled,
+					BlockStatus:       loc.WAF.BlockStatus,
+					Paranoia:          loc.WAF.Paranoia,
+					RequestBodyLimit:  wafBodyLimitStr(loc.WAF.RequestBodyLimit),
+					ResponseBodyCheck: loc.WAF.ResponseBodyCheck,
+					DirectivesFiles:   loc.WAF.DirectivesFiles,
+					InlineRules:       loc.WAF.InlineRules,
 				})
 			}
 		}
@@ -637,6 +665,19 @@ func projectSecurity(c *config.Config) SecurityProjection {
 	}
 	sp.SecretRefs = config.CountSecretRefs(c)
 	return sp
+}
+
+// wafBodyLimitStr renders a WAF request-body limit as a size string (e.g.
+// "128k"), or "" when zero so the guided editor shows the default rather than a
+// literal 0. It mirrors the global [waf] projection's encoding.
+func wafBodyLimitStr(s config.Size) string {
+	if s.Bytes() == 0 {
+		return ""
+	}
+	if b, err := s.MarshalText(); err == nil {
+		return string(b)
+	}
+	return ""
 }
 
 // effectiveWAFPolicy returns the WAF policy that applies to a location: its own

@@ -171,7 +171,7 @@ items point to the Phase 4 backlog.
 | 4b | Apps editing | P1–P2 | ✅ Shipped — `upstream_set_strategy` / `upstream_set_health_check` / `upstream_set_discovery` patch ops + guided HealthCheck and Discovery drawers (dns / dns_srv / static + consul / k8s); provider ACL tokens are preserved server-side and never sent to the browser |
 | 4c | HTTP/3 & h2c toggles | P1 | ✅ Shipped — `server_toggle_http3` / `server_toggle_h2c` patch ops + per-server toggles in the route drawer (HTTP/3 requires TLS; h2c plaintext only) |
 | 4d | Tracing editor | P1 | ✅ Shipped — guided `[observability.tracing]` editor (exporter / endpoint / sample ratio / service name / transport) in Traffic Controls, staged as a reviewed TOML draft |
-| 4e | WAF per-location advanced fields | P2 | block_status / paranoia / body limits / rule files / inline rules on overrides |
+| 4e | WAF per-location advanced fields | P2 | ✅ Shipped — `location_waf_set` now carries the full override (block status / paranoia / request-body limit / response-body inspection / rule files / inline rules); the per-location `LocationWAFEditor` seeds every field from the projection and replaces the override faithfully (round-trips) instead of preserving unshown fields, refusing saves the server would reject |
 | 4f | In-place edit / rename | P2 | `route_rename`, `location_set_match`, `location_set_action` |
 | 4g | Live log tail | P3 | Ring-buffer access-log sink + `/api/observability/logs[/stream]` + Operations Log tab |
 | 4h | Plugins guided editor | P3 | `plugin_set` / `plugin_remove` + attach / detach ops + Plugins panel (`wasmplugins`) |
