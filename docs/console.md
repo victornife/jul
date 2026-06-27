@@ -255,8 +255,17 @@ path — the console never uploads WASM. In a build without the `wasmplugins`
 tag the editor still works, but the apply preflight rejects a config that
 declares plugins, and the panel warns up front.
 
+The **Streams** panel adds guided **creation and in-place editing** of L4
+(TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,
+default backend (`proxy_pass`), SNI routing table (TCP — enables SNI inspection
+without terminating TLS), TLS passthrough, the PROXY protocol direction, and the
+connect/idle timeouts. UDP listeners reject the TCP-only fields (SNI routes, TLS
+passthrough, PROXY protocol), matching the validator. In a build without the
+`stream` tag the editor still works, but a lean binary refuses to start with
+`[[stream]]` declared, so the panel warns up front.
+
 Editing the remaining settings of an **existing** block — mutual
-TLS and L4 stream listeners — currently goes through the validated
+TLS — currently goes through the validated
 raw TOML editor, whose structured diff annotates the consequences. The
 [capability matrix](#capability-matrix) below is the authoritative, per-feature
 breakdown of what is guided-editable versus raw-only today.
@@ -351,9 +360,9 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | Secret references | Read-only (externalize helper) | Security |
 | Server limits / timeouts | Structured-edit | Routes |
 | Plugins (WASM) | Structured-edit (global defs: path/type/capabilities/limits/config; attach/detach middleware plugins per route; handler & server-level plugins stay raw-only) | Plugins |
+| L4 stream proxy | Guided-create · Structured-edit (listen, protocol, default backend, SNI routes, TLS passthrough, PROXY protocol, timeouts) | Streams |
 | Tracing / OpenTelemetry | Structured-edit (global guided editor: exporter / endpoint / sample ratio / service name / transport) | Traffic Controls, Status |
 | Access / error logs | Live tail (read-only) — bounded, privacy-preserving access-log stream | Operations |
-| L4 stream proxy | Read-only (status only) | Overview |
 | Admin listener | No surface | — |
 | Config history / rollback | Full (view + rollback) | History |
 | Audit log | Full (filter + export) | Audit |
@@ -375,6 +384,7 @@ consumes the endpoints below.
 | Security | `GET /api/security` |
 | Traffic Controls | `GET /api/traffic-controls` |
 | Plugins | `GET /api/plugins` |
+| Streams | `GET /api/streams` |
 | Search & Discovery | `GET /api/search` |
 | Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history,logs}`, `GET /api/observability/logs/stream` (SSE), `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |
 | Audit | `GET /api/audit`, `GET /api/audit/export` |

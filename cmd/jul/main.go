@@ -730,6 +730,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// so the guided editor warns when declarations would fail the apply
 	// preflight on a lean (non-wasmplugins) build.
 	deps.PluginsCompiled = plugins.Compiled
+	deps.StreamCompiled = stream.Compiled
 	// Live operational panels for the console: upstream health from the pool
 	// registry, and configured-certificate metadata from the current config.
 	deps.Upstreams = func() []admin.UpstreamStatus { return adaptUpstreams(poolReg.Snapshot()) }

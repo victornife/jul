@@ -116,6 +116,12 @@ type Deps struct {
 	// 4h) surfaces it so the guided editor can warn that declarations validate
 	// but the apply preflight rejects them on a lean build.
 	PluginsCompiled bool
+
+	// StreamCompiled reports whether this binary includes the L4 stream proxy
+	// (the stream build tag). The Console v2 Streams panel (Phase 4i) surfaces it
+	// so the guided editor can warn that declarations validate but a lean binary
+	// refuses to start with them.
+	StreamCompiled bool
 }
 
 // Server is the admin HTTP listener.
@@ -210,6 +216,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/security", s.auth(http.HandlerFunc(s.handleSecurity)))
 	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
 	mux.Handle("/api/plugins", s.auth(http.HandlerFunc(s.handlePlugins)))
+	mux.Handle("/api/streams", s.auth(http.HandlerFunc(s.handleStreams)))
 	mux.Handle("/api/search", s.auth(http.HandlerFunc(s.handleSearch)))
 	mux.Handle("/api/events", s.auth(http.HandlerFunc(s.handleEvents)))
 

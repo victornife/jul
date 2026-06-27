@@ -843,3 +843,63 @@ func locationEffectiveWAF(loc *config.LocationConfig, global config.WAFConfig) *
 	}
 	return nil
 }
+
+// diffStreams compares the declared [[stream]] L4 listeners, reporting added and
+// removed listeners plus per-listener field changes. Streams are a slice keyed
+// by their protocol + listen identity (the same key the validator dedups on), so
+// a change to that identity surfaces as a remove + add rather than a modify.
+func diffStreams(before, after *config.Config, d *ConfigDiff) {
+	bs, as := streamIndex(before.Streams), streamIndex(after.Streams)
+	for _, key := range sortedKeys(as) {
+		a := as[key]
+		b, ok := bs[key]
+		if !ok {
+			d.add(DiffEntry{Kind: "stream", Name: key, After: streamSummary(a), Detail: "Add L4 stream listener " + key}, "stream "+key)
+			d.warn("Stream %s opens an L4 (TCP/UDP) listener; it only serves in binaries built with the stream tag, and a lean binary refuses to start with it.", key)
+			continue
+		}
+		diffStreamFields(key, b, a, d)
+	}
+	for _, key := range sortedKeys(bs) {
+		if _, ok := as[key]; !ok {
+			b := bs[key]
+			d.del(DiffEntry{Kind: "stream", Name: key, Before: streamSummary(b), Detail: "Remove L4 stream listener " + key}, "stream "+key)
+			d.warn("Removing stream %s stops L4 proxying on that listener.", key)
+		}
+	}
+}
+
+// streamIndex keys a stream slice by its normalized "proto/listen" identity for
+// diffing. A duplicate key (which the validated config rejects) keeps the last
+// occurrence, mirroring how the runtime would treat the live set.
+func streamIndex(streams []config.StreamServer) map[string]config.StreamServer {
+	out := make(map[string]config.StreamServer, len(streams))
+	for _, st := range streams {
+		out[streamProtoOrDefault(st.Protocol)+"/"+strings.TrimSpace(st.Listen)] = st
+	}
+	return out
+}
+
+// diffStreamFields reports per-listener changes between two [[stream]] blocks
+// with the same proto/listen identity: the default target, SNI routes, TLS
+// passthrough, the PROXY protocol, and the connect/idle timeouts.
+func diffStreamFields(key string, b, a config.StreamServer, d *ConfigDiff) {
+	if strings.TrimSpace(b.ProxyPass) != strings.TrimSpace(a.ProxyPass) {
+		d.mod(DiffEntry{Kind: "stream", Name: key, Before: orNone(b.ProxyPass), After: orNone(a.ProxyPass), Detail: "Change default backend for stream " + key}, "stream "+key+" proxy_pass")
+	}
+	if !stringMapEqual(trimSNIRoutes(b.SNIRoutes), trimSNIRoutes(a.SNIRoutes)) {
+		d.mod(DiffEntry{Kind: "stream", Name: key, Before: fmt.Sprintf("%d route%s", len(b.SNIRoutes), plural(len(b.SNIRoutes))), After: fmt.Sprintf("%d route%s", len(a.SNIRoutes), plural(len(a.SNIRoutes))), Detail: "Change SNI routes for stream " + key}, "stream "+key+" sni_routes")
+	}
+	if b.TLSPassthrough != a.TLSPassthrough {
+		d.mod(DiffEntry{Kind: "stream", Name: key, Detail: "Change TLS passthrough flag for stream " + key}, "stream "+key+" tls_passthrough")
+	}
+	if bp, ap := strings.ToLower(strings.TrimSpace(b.ProxyProtocol)), strings.ToLower(strings.TrimSpace(a.ProxyProtocol)); bp != ap {
+		d.mod(DiffEntry{Kind: "stream", Name: key, Before: orNone(bp), After: orNone(ap), Detail: "Change PROXY protocol for stream " + key}, "stream "+key+" proxy_protocol")
+	}
+	if b.ConnectTimeout != a.ConnectTimeout {
+		d.mod(DiffEntry{Kind: "stream", Name: key, Before: durStr(b.ConnectTimeout), After: durStr(a.ConnectTimeout), Detail: "Change connect timeout for stream " + key}, "stream "+key+" connect_timeout")
+	}
+	if b.IdleTimeout != a.IdleTimeout {
+		d.mod(DiffEntry{Kind: "stream", Name: key, Before: durStr(b.IdleTimeout), After: durStr(a.IdleTimeout), Detail: "Change idle timeout for stream " + key}, "stream "+key+" idle_timeout")
+	}
+}

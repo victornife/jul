@@ -94,6 +94,14 @@ type patchRequest struct {
 
 	// plugin_set payload: the plugin declaration to add or replace.
 	PluginDef *pluginDef `json:"plugin,omitempty"`
+
+	// Stream target (stream_set / stream_remove). A [[stream]] block is
+	// addressed by its listen (reusing Listen above) and protocol; the protocol
+	// defaults to tcp. stream_add has no target.
+	StreamProtocol string `json:"stream_protocol,omitempty"`
+
+	// stream_add / stream_set payload: the L4 listener to add or replace.
+	Stream *streamDef `json:"stream,omitempty"`
 }
 
 // locationMatch is the new match (type + path) for location_set_match. It
@@ -617,6 +625,49 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		}
 		loc.Plugins = append(loc.Plugins[:idx], loc.Plugins[idx+1:]...)
 		return fmt.Sprintf("plugin %s detached from route %s%s", name, req.Listen, loc.Match.Path), nil
+
+	case "stream_add":
+		if req.Stream == nil {
+			return "", fmt.Errorf("stream_add: stream is required")
+		}
+		st, summary, err := buildStream(*req.Stream)
+		if err != nil {
+			return "", fmt.Errorf("stream_add: %w", err)
+		}
+		if streamTaken(c, st.Listen, st.Protocol, -1) {
+			return "", fmt.Errorf("stream_add: a %s stream listening on %s already exists", streamProtoOrDefault(st.Protocol), st.Listen)
+		}
+		c.Streams = append(c.Streams, st)
+		return fmt.Sprintf("stream %s added", summary), nil
+
+	case "stream_set":
+		if req.Stream == nil {
+			return "", fmt.Errorf("stream_set: stream is required")
+		}
+		idx, err := findStreamIndex(c, req.Listen, req.StreamProtocol)
+		if err != nil {
+			return "", fmt.Errorf("stream_set: %w", err)
+		}
+		st, summary, err := buildStream(*req.Stream)
+		if err != nil {
+			return "", fmt.Errorf("stream_set: %w", err)
+		}
+		// Editing may change the listen/protocol (the stream's identity); refuse
+		// a change that would collide with a different existing stream.
+		if streamTaken(c, st.Listen, st.Protocol, idx) {
+			return "", fmt.Errorf("stream_set: a %s stream listening on %s already exists", streamProtoOrDefault(st.Protocol), st.Listen)
+		}
+		c.Streams[idx] = st
+		return fmt.Sprintf("stream %s updated", summary), nil
+
+	case "stream_remove":
+		idx, err := findStreamIndex(c, req.Listen, req.StreamProtocol)
+		if err != nil {
+			return "", fmt.Errorf("stream_remove: %w", err)
+		}
+		st := c.Streams[idx]
+		c.Streams = append(c.Streams[:idx], c.Streams[idx+1:]...)
+		return fmt.Sprintf("stream %s removed", streamSummary(st)), nil
 
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)

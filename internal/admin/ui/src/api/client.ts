@@ -396,6 +396,30 @@ export const PluginsProjectionSchema = z.object({
 });
 export type PluginsProjection = z.infer<typeof PluginsProjectionSchema>;
 
+// StreamProjectionSchema is one declared [[stream]] L4 (TCP/UDP) listener for
+// the Streams panel and its guided editor. The protocol is normalized to its
+// effective value (tcp default) so the editor seeds a faithful round-trip.
+export const StreamProjectionSchema = z.object({
+  listen: z.string(),
+  protocol: z.string(), // "tcp" | "udp"
+  proxy_pass: z.string().optional(),
+  sni_routes: z.record(z.string(), z.string()).optional(),
+  tls_passthrough: z.boolean(),
+  proxy_protocol: z.string().optional(), // "" | "in" | "out" | "both"
+  connect_timeout: z.string().optional(),
+  idle_timeout: z.string().optional(),
+});
+export type StreamProjection = z.infer<typeof StreamProjectionSchema>;
+
+export const StreamsProjectionSchema = z.object({
+  // compiled reports whether this binary includes the L4 stream proxy (the
+  // stream build tag). When false, declarations still validate but a lean
+  // binary refuses to start with them, so the panel warns up front.
+  compiled: z.boolean(),
+  streams: z.array(StreamProjectionSchema),
+});
+export type StreamsProjection = z.infer<typeof StreamsProjectionSchema>;
+
 // ── Query functions ──────────────────────────────────────────────────────────
 
 export function fetchOverview(): Promise<Overview> {
@@ -461,6 +485,10 @@ export function fetchTrafficControls(): Promise<TrafficControls> {
 
 export function fetchPlugins(): Promise<PluginsProjection> {
   return api<unknown>("/plugins").then((d) => PluginsProjectionSchema.parse(d));
+}
+
+export function fetchStreams(): Promise<StreamsProjection> {
+  return api<unknown>("/streams").then((d) => StreamsProjectionSchema.parse(d));
 }
 
 /** Fetches the runtime stats snapshot directly (used by traffic-control editors). */
@@ -666,6 +694,21 @@ export type PluginDefPatch = {
   allowed_hosts?: string[];
 };
 
+// StreamDefPatch is the stream_add / stream_set payload — the guided editor's
+// view of a single [[stream]] L4 listener. Durations are strings (e.g. "10s");
+// the validated apply re-parse enforces the rest (the target resolves to a
+// known upstream or host:port, no duplicate listener, the TCP-only constraints).
+export type StreamDefPatch = {
+  listen: string;
+  protocol?: "tcp" | "udp";
+  proxy_pass?: string;
+  sni_routes?: Record<string, string>;
+  tls_passthrough?: boolean;
+  proxy_protocol?: "in" | "out" | "both";
+  connect_timeout?: string;
+  idle_timeout?: string;
+};
+
 export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
@@ -680,6 +723,9 @@ export type ConfigPatch =
   | ({ op: "location_detach_plugin"; plugin_name: string } & RouteTarget)
   | { op: "plugin_set"; plugin_name: string; plugin: PluginDefPatch }
   | { op: "plugin_remove"; plugin_name: string }
+  | { op: "stream_add"; stream: StreamDefPatch }
+  | { op: "stream_set"; listen: string; stream_protocol?: string; stream: StreamDefPatch }
+  | { op: "stream_remove"; listen: string; stream_protocol?: string }
   | { op: "route_rename"; listen: string; server_names: string[]; new_server_names: string[] }
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
