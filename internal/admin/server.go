@@ -217,6 +217,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
 	mux.Handle("/api/plugins", s.auth(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("/api/streams", s.auth(http.HandlerFunc(s.handleStreams)))
+	mux.Handle("/api/mtls", s.auth(http.HandlerFunc(s.handleMTLS)))
 	mux.Handle("/api/search", s.auth(http.HandlerFunc(s.handleSearch)))
 	mux.Handle("/api/events", s.auth(http.HandlerFunc(s.handleEvents)))
 

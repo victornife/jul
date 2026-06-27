@@ -186,6 +186,7 @@ export const LocationProjectionSchema = z.object({
   compression: z.boolean().default(false),
   rate_limit: z.boolean().default(false),
   secure: z.boolean(),
+  require_client_cert: z.boolean().default(false),
   upstream: z.string().optional(),
   waf: LocationWAFStateSchema.optional(),
   warnings: z.array(z.string()).optional(),
@@ -420,6 +421,36 @@ export const StreamsProjectionSchema = z.object({
 });
 export type StreamsProjection = z.infer<typeof StreamsProjectionSchema>;
 
+// MTLSLocationProjectionSchema is one location's per-route client-certificate
+// requirement, addressed by its match type + path. Unlike the server-level
+// client_auth, require_client_cert hot-reloads (it is enforced per request).
+export const MTLSLocationProjectionSchema = z.object({
+  match: z.string(),
+  type: z.string(),
+  require_client_cert: z.boolean().default(false),
+});
+export type MTLSLocationProjection = z.infer<typeof MTLSLocationProjectionSchema>;
+
+// MTLSServerProjectionSchema is one TLS-enabled server's mutual-TLS posture.
+// mode is normalized to "none" when client_auth is absent or inactive, so the
+// editor seeds a faithful round-trip and can enable it on a server that lacks
+// it. ca_file/crl_file are paths (not secrets); verify_san is the SAN allow-list.
+export const MTLSServerProjectionSchema = z.object({
+  listen: z.string(),
+  server_names: z.array(z.string()).optional(),
+  mode: z.string(),
+  ca_file: z.string().optional(),
+  crl_file: z.string().optional(),
+  verify_san: z.array(z.string()).optional(),
+  locations: z.array(MTLSLocationProjectionSchema),
+});
+export type MTLSServerProjection = z.infer<typeof MTLSServerProjectionSchema>;
+
+export const MTLSProjectionSchema = z.object({
+  servers: z.array(MTLSServerProjectionSchema),
+});
+export type MTLSProjection = z.infer<typeof MTLSProjectionSchema>;
+
 // ── Query functions ──────────────────────────────────────────────────────────
 
 export function fetchOverview(): Promise<Overview> {
@@ -489,6 +520,10 @@ export function fetchPlugins(): Promise<PluginsProjection> {
 
 export function fetchStreams(): Promise<StreamsProjection> {
   return api<unknown>("/streams").then((d) => StreamsProjectionSchema.parse(d));
+}
+
+export function fetchMTLS(): Promise<MTLSProjection> {
+  return api<unknown>("/mtls").then((d) => MTLSProjectionSchema.parse(d));
 }
 
 /** Fetches the runtime stats snapshot directly (used by traffic-control editors). */
@@ -709,6 +744,19 @@ export type StreamDefPatch = {
   idle_timeout?: string;
 };
 
+// ClientAuthPatch is the server_set_client_auth payload — the guided mTLS
+// editor's view of a server block's mutual-TLS (client-certificate) settings. A
+// "none" mode disables it. ca_file/crl_file are paths (not secrets); the
+// validated apply re-parse enforces that they are readable PEM/DER files and
+// that request/require modes carry a ca_file. Server-level changes take effect
+// when the listener binds (on restart), so the editor surfaces that caveat.
+export type ClientAuthPatch = {
+  mode: "none" | "request" | "require";
+  ca_file?: string;
+  crl_file?: string;
+  verify_san?: string[];
+};
+
 export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
@@ -734,7 +782,9 @@ export type ConfigPatch =
   | { op: "upstream_set_discovery"; upstream: string; discovery: DiscoveryPatch }
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch }
   | { op: "server_toggle_http3"; listen: string; enabled: boolean }
-  | { op: "server_toggle_h2c"; listen: string; enabled: boolean };
+  | { op: "server_toggle_h2c"; listen: string; enabled: boolean }
+  | { op: "server_set_client_auth"; listen: string; server_names: string[]; client_auth: ClientAuthPatch }
+  | ({ op: "location_toggle_require_client_cert"; enabled: boolean } & RouteTarget);
 
 // HealthCheckPatch is the upstream active health-check block the guided Apps
 // editor sets. Durations are strings (e.g. "5s"); empty/zero fields fall back to

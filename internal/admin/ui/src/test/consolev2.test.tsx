@@ -651,6 +651,7 @@ describe("RouteDetail per-location WAF", () => {
       compression: false,
       rate_limit: false,
       secure: false,
+      require_client_cert: false,
       waf: over,
     };
   }
@@ -746,6 +747,7 @@ describe("RouteDetail server toggles", () => {
       compression: false,
       rate_limit: false,
       secure: false,
+      require_client_cert: false,
     };
   }
 

@@ -33,6 +33,11 @@ type LocationProjection struct {
 	Compression bool   `json:"compression"`
 	RateLimit   bool   `json:"rate_limit"`
 	Secure      bool   `json:"secure"` // TLS required
+	// RequireClientCert reports the location's require_client_cert flag, so the
+	// route editor can offer the per-route mutual-TLS toggle (Phase 4j). It takes
+	// effect on hot reload (enforced per request), unlike the server-level
+	// client_auth that binds with the listener.
+	RequireClientCert bool `json:"require_client_cert"`
 	// Upstream is the referenced upstream pool name when Action proxies to a
 	// named upstream (proxy_pass http://<name>); empty for direct host:port.
 	Upstream string `json:"upstream,omitempty"`
@@ -329,14 +334,15 @@ func projectRoutes(c *config.Config) []RouteProjection {
 		for j := range srv.Locations {
 			loc := &srv.Locations[j]
 			lp := LocationProjection{
-				Index:       j,
-				Match:       loc.Match.Path,
-				Type:        loc.Match.Type,
-				Auth:        loc.Auth != nil,
-				Cache:       loc.Cache,
-				RateLimit:   loc.RateLimit != nil && loc.RateLimit.Enabled,
-				Compression: c.Compression.Enabled,
-				Secure:      srv.TLS != nil && srv.TLS.Enabled,
+				Index:             j,
+				Match:             loc.Match.Path,
+				Type:              loc.Match.Type,
+				Auth:              loc.Auth != nil,
+				Cache:             loc.Cache,
+				RateLimit:         loc.RateLimit != nil && loc.RateLimit.Enabled,
+				Compression:       c.Compression.Enabled,
+				Secure:            srv.TLS != nil && srv.TLS.Enabled,
+				RequireClientCert: loc.RequireClientCert,
 			}
 			switch {
 			case loc.GRPCTranscode != nil:

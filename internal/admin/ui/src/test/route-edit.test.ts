@@ -38,6 +38,7 @@ function loc(over: Partial<LocationProjection> = {}): LocationProjection {
     compression: false,
     rate_limit: false,
     secure: false,
+    require_client_cert: false,
     ...over,
   };
 }

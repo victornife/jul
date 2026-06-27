@@ -102,6 +102,11 @@ type patchRequest struct {
 
 	// stream_add / stream_set payload: the L4 listener to add or replace.
 	Stream *streamDef `json:"stream,omitempty"`
+
+	// server_set_client_auth payload: the server block's mutual-TLS (client
+	// certificate) settings. A "none"/empty mode disables it. The server is
+	// addressed by Listen + ServerNames above.
+	ClientAuth *clientAuthDef `json:"client_auth,omitempty"`
 }
 
 // locationMatch is the new match (type + path) for location_set_match. It
@@ -668,6 +673,56 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		st := c.Streams[idx]
 		c.Streams = append(c.Streams[:idx], c.Streams[idx+1:]...)
 		return fmt.Sprintf("stream %s removed", streamSummary(st)), nil
+
+	case "server_set_client_auth":
+		if req.ClientAuth == nil {
+			return "", fmt.Errorf("server_set_client_auth: client_auth is required")
+		}
+		srv, err := findServerByNames(c, req.Listen, req.ServerNames)
+		if err != nil {
+			return "", err
+		}
+		// Mutual TLS only applies on a TLS listener (the validator rejects
+		// client_auth without tls.enabled); surface it before the diff.
+		if srv.TLS == nil || !srv.TLS.Enabled {
+			return "", fmt.Errorf("server_set_client_auth: mutual TLS requires TLS on server %s — enable TLS first", req.Listen)
+		}
+		ca, summary, err := buildClientAuth(*req.ClientAuth)
+		if err != nil {
+			return "", fmt.Errorf("server_set_client_auth: %w", err)
+		}
+		// Disabling mutual TLS would invalidate any per-location
+		// require_client_cert under this server (the validator rejects it
+		// without an active client_auth); refuse with a clear message first.
+		if !ca.Active() {
+			if paths := serverRequireClientCertPaths(srv); len(paths) > 0 {
+				return "", fmt.Errorf("server_set_client_auth: cannot disable mutual TLS while these routes still require a client certificate: %s; clear them first", strings.Join(paths, ", "))
+			}
+		}
+		srv.TLS.ClientAuth = ca
+		return fmt.Sprintf("server %s mutual TLS %s", req.Listen, summary), nil
+
+	case "location_toggle_require_client_cert":
+		if req.Enabled == nil {
+			return "", fmt.Errorf("location_toggle_require_client_cert: enabled is required")
+		}
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if *req.Enabled {
+			// Requiring a client certificate is meaningful only when the server
+			// requests one; the validator enforces the same dependency.
+			srv, err := findServerByNames(c, req.Listen, req.ServerNames)
+			if err != nil {
+				return "", err
+			}
+			if srv.TLS == nil || !srv.TLS.ClientAuth.Active() {
+				return "", fmt.Errorf("location_toggle_require_client_cert: server %s must have mutual TLS enabled (mode request or require) first", req.Listen)
+			}
+		}
+		loc.RequireClientCert = *req.Enabled
+		return fmt.Sprintf("route %s%s require client certificate %s", req.Listen, loc.Match.Path, onOff(*req.Enabled)), nil
 
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)

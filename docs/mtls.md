@@ -231,6 +231,13 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
 - **Rotation.** To rotate the client CA without downtime, issue the new CA
   alongside the old one in `ca_file` (it is a bundle), restart, then drop the old
   CA once all clients have migrated.
+- **Console editing.** The Console's **TLS & Certificates → Mutual TLS** section
+  edits `client_auth` in place (mode, CA bundle, CRL, SAN allow-list), and a
+  per-route **require client certificate** toggle (also on the Routes detail)
+  sets `require_client_cert`. Both go through Validate → Diff → Apply. The editor
+  and the diff repeat the bind-time caveat above: saving the server-level block
+  reloads routing but applies the new client-auth on the next restart, while the
+  per-location toggle takes effect on reload.
 
 ## Limits
 

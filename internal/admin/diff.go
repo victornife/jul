@@ -236,27 +236,43 @@ func diffMTLS(name string, b, a *config.ClientAuthConfig, d *ConfigDiff) {
 		if action == "Disable" {
 			d.warn("Disabling mutual TLS on %s removes client-certificate authentication.", name)
 		}
+		d.warn(mtlsBindTimeWarn, name)
 		return
 	}
 	if !aOn {
 		return
 	}
+	changed := false
 	if !strings.EqualFold(b.Mode, a.Mode) {
+		changed = true
 		d.mod(DiffEntry{Kind: "mtls", Name: name, Before: orNone(b.Mode), After: orNone(a.Mode), Detail: "Change mutual TLS mode for " + name}, "server "+name+" mTLS mode")
 		if strings.EqualFold(a.Mode, "request") && strings.EqualFold(b.Mode, "require") {
 			d.warn("Relaxing mTLS on %s from require to request admits connections without a client certificate.", name)
 		}
 	}
 	if b.CAFile != a.CAFile {
+		changed = true
 		d.mod(DiffEntry{Kind: "mtls", Name: name, Detail: "Change mutual TLS CA bundle for " + name}, "server "+name+" mTLS ca")
 	}
 	if b.CRLFile != a.CRLFile {
+		changed = true
 		d.mod(DiffEntry{Kind: "mtls", Name: name, Detail: "Change mutual TLS revocation list (CRL) for " + name}, "server "+name+" mTLS crl")
 	}
 	if bf, af := strings.Join(b.VerifySAN, ","), strings.Join(a.VerifySAN, ","); bf != af {
+		changed = true
 		d.mod(DiffEntry{Kind: "mtls", Name: name, Before: orNone(bf), After: orNone(af), Detail: "Change mutual TLS SAN allow-list for " + name}, "server "+name+" mTLS san")
 		if af != "" {
 			d.warn("Changing the mTLS SAN allow-list on %s may reject client certificates that were previously accepted.", name)
 		}
 	}
+	if changed {
+		d.warn(mtlsBindTimeWarn, name)
+	}
 }
+
+// mtlsBindTimeWarn explains that server-level mutual-TLS settings are read when
+// the listener binds: a structured edit reloads HTTP routing immediately, but
+// the new client-certificate verifier takes effect only after a restart (or a
+// listen-address change that forces a re-bind). Per-location
+// require_client_cert, by contrast, hot-reloads per request.
+const mtlsBindTimeWarn = "Server-level mutual TLS on %s is read when the listener binds: saving reloads HTTP routing immediately, but the new client-certificate settings take effect only after you restart Jul (or change the listen address)."

@@ -264,11 +264,22 @@ passthrough, PROXY protocol), matching the validator. In a build without the
 `stream` tag the editor still works, but a lean binary refuses to start with
 `[[stream]]` declared, so the panel warns up front.
 
-Editing the remaining settings of an **existing** block — mutual
-TLS — currently goes through the validated
-raw TOML editor, whose structured diff annotates the consequences. The
-[capability matrix](#capability-matrix) below is the authoritative, per-feature
-breakdown of what is guided-editable versus raw-only today.
+The TLS panel's **Mutual TLS** section adds guided **in-place editing** of
+client-certificate authentication on a TLS listener. The server-level editor
+sets the verification mode (`none` / `request` / `require`), the CA bundle and
+optional CRL presented certificates are checked against, and an optional SAN
+allow-list (`[tls.client_auth]`); a per-route **require client certificate**
+toggle (also offered from the Routes detail) sets a location's
+`require_client_cert`. Both edits route through Validate → Diff → Apply. Note the
+two take effect on different schedules: server-level `client_auth` is read when
+the listener **binds**, so saving reloads HTTP routing immediately but the new
+client-certificate verifier applies only after a restart (or a listen-address
+change) — the editor and the diff both surface this caveat; per-location
+`require_client_cert` is enforced per request and takes effect on hot reload.
+
+With mutual TLS now guided, the [capability matrix](#capability-matrix) below is
+the authoritative, per-feature breakdown of what is guided-editable versus
+raw-only today.
 
 ### Web application firewall (WAF)
 
@@ -351,7 +362,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | Rate limiting | Structured-edit (global + per-location toggle) | Traffic Controls, Routes |
 | Access control (auth) | Guided-create · Structured-edit (per-location: CIDR / Basic / JWT / forward-auth) | Routes, Security |
 | TLS / HTTPS | Guided-create (New TLS server) · Raw-only to edit existing | TLS |
-| Mutual TLS | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS, Security |
+| Mutual TLS | Guided-create (within the TLS editor) · Structured-edit (mode / CA bundle / CRL / SAN allow-list — bind-time; per-location require-client-cert — immediate) | TLS, Security, Routes |
 | Automatic HTTPS (ACME) | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS |
 | HTTP/3, h2c | Structured-edit (per-server toggle; HTTP/3 requires TLS, h2c plaintext only) | Routes |
 | Upstream pools | Guided-create · Structured-edit (backends, strategy, health checks, discovery) | Apps |
@@ -380,7 +391,7 @@ consumes the endpoints below.
 | Overview | `GET /api/runtime/overview`, `GET /api/stats` |
 | Routes | `GET /api/routes`, `POST /api/routes/test` |
 | Apps & Upstreams | `GET /api/apps` |
-| TLS & Certificates | `GET /api/tls`, `GET /api/certs` |
+| TLS & Certificates | `GET /api/tls`, `GET /api/certs`, `GET /api/mtls` |
 | Security | `GET /api/security` |
 | Traffic Controls | `GET /api/traffic-controls` |
 | Plugins | `GET /api/plugins` |

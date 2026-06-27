@@ -269,6 +269,28 @@ function QuickEdits({
         </button>
         <button
           type="button"
+          disabled={busy || (!loc.require_client_cert && !route.tls?.client_auth)}
+          title={
+            !route.tls?.client_auth
+              ? "Enable mutual TLS on this server first (TLS & Certificates → Mutual TLS)."
+              : "Takes effect immediately on reload."
+          }
+          onClick={() => {
+            void runPatch({
+              op: "location_toggle_require_client_cert",
+              listen: route.listen,
+              server_names: route.server_names ?? [],
+              match_type: loc.type,
+              path: loc.match,
+              enabled: !loc.require_client_cert,
+            });
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.require_client_cert ? "Don’t require client cert" : "Require client cert"} →
+        </button>
+        <button
+          type="button"
           disabled={busy}
           onClick={() => {
             setWafEditing(true);
@@ -508,6 +530,7 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           <Flag on={loc.compression} label="compression" />
           <Flag on={loc.rate_limit} label="rate limit" />
           <Flag on={loc.secure} label="TLS" />
+          <Flag on={loc.require_client_cert} label="client cert" />
           <Flag on={route.http3} label="HTTP/3" />
           <Flag on={route.h2c} label="h2c" />
         </div>
