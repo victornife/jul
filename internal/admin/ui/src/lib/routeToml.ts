@@ -207,7 +207,7 @@ export function generateRouteToml(d: RouteDraft): string {
       break;
   }
   if (d.cache) lines.push(`  cache = true`);
-  if (d.rateLimit) lines.push(`  rate_limit = { enabled = true }`);
+  if (d.rateLimit) lines.push(`  rate_limit = { enabled = true, rate = 100, burst = 100, key = "ip" }`);
   for (const line of authLines(d.auth)) lines.push(line);
   return lines.join("\n");
 }

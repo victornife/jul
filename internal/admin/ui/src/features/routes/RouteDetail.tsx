@@ -88,7 +88,14 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
   }
   if (loc.action === "deny") lines.push("  deny = true");
   if (loc.cache) lines.push("  cache = true");
-  if (loc.rate_limit) lines.push("  rate_limit = { enabled = true }");
+  if (loc.rate_limit) {
+    const rl = loc.rate_limit_detail;
+    if (rl) {
+      lines.push(`  rate_limit = { enabled = true, rate = ${rl.rate}, burst = ${rl.burst}, key = "${rl.key}" }`);
+    } else {
+      lines.push("  rate_limit = { enabled = true }");
+    }
+  }
   // The route projection reports an auth rule's method and non-secret
   // identifiers (never credentials), so show the method rather than a literal
   // "auth = {}", which would read as a valid—but inert, allow-all—block and
