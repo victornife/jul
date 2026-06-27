@@ -167,6 +167,44 @@ func TestDiffUpstreamBackendsAndRetries(t *testing.T) {
 	}
 }
 
+func TestDiffUpstreamHealthAndDiscovery(t *testing.T) {
+	before := &config.Config{Upstreams: []config.UpstreamConfig{{
+		Name:        "app",
+		Servers:     []config.UpstreamServer{{Address: "127.0.0.1:3000", Weight: 1}},
+		HealthCheck: &config.HealthCheckConfig{Enabled: true, Type: "http", Path: "/healthz", Interval: config.Duration(5e9), Timeout: config.Duration(2e9)},
+		Discovery:   &config.DiscoveryConfig{Type: "dns", Target: "svc:8080", Refresh: config.Duration(30e9)},
+	}}}
+	after := &config.Config{Upstreams: []config.UpstreamConfig{{
+		Name:        "app",
+		Servers:     []config.UpstreamServer{{Address: "127.0.0.1:3000", Weight: 1}},
+		HealthCheck: &config.HealthCheckConfig{Enabled: true, Type: "http", Path: "/ready", Interval: config.Duration(10e9), Timeout: config.Duration(2e9)},
+		Discovery:   &config.DiscoveryConfig{Type: "dns", Target: "svc:9090", Refresh: config.Duration(15e9)},
+	}}}
+	d := diffConfigs(before, after)
+	if !diffHas(d, "Change health-check path") {
+		t.Errorf("expected health-check path change, got %+v", d)
+	}
+	if !diffHas(d, "Change health-check interval") {
+		t.Errorf("expected health-check interval change, got %+v", d)
+	}
+	if !diffHas(d, "Change discovery target") {
+		t.Errorf("expected discovery target change, got %+v", d)
+	}
+	if !diffHas(d, "Change discovery refresh interval") {
+		t.Errorf("expected discovery refresh change, got %+v", d)
+	}
+
+	// Enable/disable health checks and switch the discovery provider type.
+	on := &config.Config{Upstreams: []config.UpstreamConfig{{Name: "app", Servers: before.Upstreams[0].Servers, HealthCheck: &config.HealthCheckConfig{Enabled: true, Type: "tcp", Interval: config.Duration(5e9), Timeout: config.Duration(2e9)}}}}
+	off := &config.Config{Upstreams: []config.UpstreamConfig{{Name: "app", Servers: before.Upstreams[0].Servers}}}
+	if d := diffConfigs(off, on); !diffHas(d, "Enable active health checks") {
+		t.Errorf("expected health-check enable, got %+v", d)
+	}
+	if d := diffConfigs(on, off); !diffHas(d, "Disable active health checks") {
+		t.Errorf("expected health-check disable, got %+v", d)
+	}
+}
+
 func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 	before := &config.Config{
 		Cache:       config.CacheConfig{Enabled: true, DefaultTTL: config.Duration(0)},

@@ -46,10 +46,11 @@ type patchRequest struct {
 	Upstream string `json:"upstream,omitempty"`
 
 	// Operation payloads (only the field relevant to Op is read).
-	Target  string `json:"target,omitempty"`  // route_set_target: new proxy_pass
-	Enabled *bool  `json:"enabled,omitempty"` // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c
-	Address string `json:"address,omitempty"` // upstream_add_backend / upstream_remove_backend
-	Weight  int    `json:"weight,omitempty"`  // upstream_add_backend (defaults to 1)
+	Target   string `json:"target,omitempty"`   // route_set_target: new proxy_pass
+	Enabled  *bool  `json:"enabled,omitempty"`  // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c
+	Address  string `json:"address,omitempty"`  // upstream_add_backend / upstream_remove_backend
+	Weight   int    `json:"weight,omitempty"`   // upstream_add_backend (defaults to 1)
+	Strategy string `json:"strategy,omitempty"` // upstream_set_strategy
 
 	// server_set_limits payload. Each field is an optional string-typed size or
 	// duration (e.g. "10m", "30s"); only non-empty fields are applied, so the
@@ -63,6 +64,14 @@ type patchRequest struct {
 	// location_set_auth payload: the per-location access-control rule the guided
 	// auth editor controls. location_clear_auth ignores it.
 	Auth *locationAuth `json:"auth,omitempty"`
+
+	// upstream_set_health_check payload: the pool's active health-check block.
+	// nil/disabled removes the block (passive health only).
+	HealthCheck *upstreamHealthCheck `json:"health_check,omitempty"`
+
+	// upstream_set_discovery payload: the pool's dynamic discovery block. Type
+	// "static"/"" removes it (the static Servers list is used instead).
+	Discovery *upstreamDiscovery `json:"discovery,omitempty"`
 }
 
 // locationWAF carries the per-location WAF override fields the guided editor
@@ -104,6 +113,57 @@ type serverLimits struct {
 	WriteTimeout      string `json:"write_timeout,omitempty"`
 	IdleTimeout       string `json:"idle_timeout,omitempty"`
 	MaxHeaderBytes    string `json:"max_header_bytes,omitempty"`
+}
+
+// upstreamHealthCheck carries the active health-check fields the guided Apps
+// editor controls. It maps 1:1 to config.HealthCheckConfig; durations are
+// strings (e.g. "5s") parsed on apply. Empty/zero fields are left for the
+// re-parse defaulting (interval 5s, timeout 2s, thresholds 2/3, expect [200]),
+// and the validated SaveConfig path rejects an inconsistent combination (e.g.
+// timeout >= interval, or http with no path).
+type upstreamHealthCheck struct {
+	Enabled            bool   `json:"enabled"`
+	Type               string `json:"type,omitempty"` // "http" (default) or "tcp"
+	Path               string `json:"path,omitempty"`
+	Interval           string `json:"interval,omitempty"`
+	Timeout            string `json:"timeout,omitempty"`
+	HealthyThreshold   int    `json:"healthy_threshold,omitempty"`
+	UnhealthyThreshold int    `json:"unhealthy_threshold,omitempty"`
+	ExpectStatus       []int  `json:"expect_status,omitempty"`
+	ExpectBody         string `json:"expect_body,omitempty"`
+}
+
+// upstreamDiscovery carries the dynamic-discovery fields the guided Apps editor
+// controls. Secret tokens are intentionally NOT carried on the wire: when the
+// edit keeps the same provider type, upstream_set_discovery preserves the
+// existing Consul/Kubernetes token rather than clobbering it.
+type upstreamDiscovery struct {
+	Type       string                 `json:"type"` // static | dns | dns_srv | consul | kubernetes
+	Target     string                 `json:"target,omitempty"`
+	Refresh    string                 `json:"refresh,omitempty"`
+	Consul     *consulDiscoveryFields `json:"consul,omitempty"`
+	Kubernetes *k8sDiscoveryFields    `json:"kubernetes,omitempty"`
+}
+
+// consulDiscoveryFields are the non-secret Consul discovery knobs (the ACL
+// token is preserved server-side, never sent to or from the console).
+type consulDiscoveryFields struct {
+	Address     string `json:"address,omitempty"`
+	Service     string `json:"service,omitempty"`
+	Tag         string `json:"tag,omitempty"`
+	Datacenter  string `json:"datacenter,omitempty"`
+	PassingOnly *bool  `json:"passing_only,omitempty"`
+}
+
+// k8sDiscoveryFields are the non-secret Kubernetes discovery knobs (the bearer
+// token is preserved server-side, never sent to or from the console).
+type k8sDiscoveryFields struct {
+	Namespace             string `json:"namespace,omitempty"`
+	Service               string `json:"service,omitempty"`
+	Port                  string `json:"port,omitempty"`
+	APIServer             string `json:"api_server,omitempty"`
+	CAFile                string `json:"ca_file,omitempty"`
+	InsecureSkipTLSVerify bool   `json:"insecure_skip_tls_verify,omitempty"`
 }
 
 // applyPatch mutates c in place according to req, returning a human-readable
@@ -260,6 +320,50 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		}
 		up.Servers = append(up.Servers[:idx], up.Servers[idx+1:]...)
 		return fmt.Sprintf("upstream %s removed backend %s", req.Upstream, addr), nil
+
+	case "upstream_set_strategy":
+		up, err := findUpstream(c, req.Upstream)
+		if err != nil {
+			return "", err
+		}
+		strat := strings.TrimSpace(req.Strategy)
+		switch strat {
+		case "", "round_robin", "weighted_round_robin", "least_conn":
+		default:
+			return "", fmt.Errorf("upstream_set_strategy: invalid strategy %q (want round_robin|weighted_round_robin|least_conn)", strat)
+		}
+		up.Strategy = strat
+		return fmt.Sprintf("upstream %s strategy set to %s", req.Upstream, orDefault(strat, "round_robin")), nil
+
+	case "upstream_set_health_check":
+		up, err := findUpstream(c, req.Upstream)
+		if err != nil {
+			return "", err
+		}
+		if req.HealthCheck == nil {
+			return "", fmt.Errorf("upstream_set_health_check: health_check payload is required")
+		}
+		hc, summary, err := buildHealthCheck(*req.HealthCheck)
+		if err != nil {
+			return "", err
+		}
+		up.HealthCheck = hc
+		return fmt.Sprintf("upstream %s active health checks %s", req.Upstream, summary), nil
+
+	case "upstream_set_discovery":
+		up, err := findUpstream(c, req.Upstream)
+		if err != nil {
+			return "", err
+		}
+		if req.Discovery == nil {
+			return "", fmt.Errorf("upstream_set_discovery: discovery payload is required")
+		}
+		disc, summary, err := buildDiscovery(*req.Discovery, up.Discovery)
+		if err != nil {
+			return "", err
+		}
+		up.Discovery = disc
+		return fmt.Sprintf("upstream %s discovery %s", req.Upstream, summary), nil
 
 	case "server_set_limits":
 		return applyServerLimits(c, req)
@@ -444,6 +548,124 @@ func onOff(b bool) string {
 		return "enabled"
 	}
 	return "disabled"
+}
+
+// orDefault returns s, or def when s is empty — used to echo the effective value
+// (after re-parse defaulting) in an audit summary.
+func orDefault(s, def string) string {
+	if strings.TrimSpace(s) == "" {
+		return def
+	}
+	return s
+}
+
+// buildHealthCheck turns the editor payload into a *config.HealthCheckConfig.
+// A disabled payload returns nil so the serialized pool drops the [health_check]
+// block entirely (passive health only). Durations are parsed here; everything
+// else (defaulting, timeout < interval, http-needs-path) is enforced by the
+// validated SaveConfig re-parse, so the structured edit never bypasses it.
+func buildHealthCheck(in upstreamHealthCheck) (*config.HealthCheckConfig, string, error) {
+	if !in.Enabled {
+		return nil, "disabled", nil
+	}
+	typ := strings.TrimSpace(in.Type)
+	if typ == "" {
+		typ = "http"
+	}
+	if typ != "http" && typ != "tcp" {
+		return nil, "", fmt.Errorf("upstream_set_health_check: type must be %q or %q", "http", "tcp")
+	}
+	hc := &config.HealthCheckConfig{
+		Enabled:            true,
+		Type:               typ,
+		Path:               strings.TrimSpace(in.Path),
+		HealthyThreshold:   in.HealthyThreshold,
+		UnhealthyThreshold: in.UnhealthyThreshold,
+		ExpectBody:         strings.TrimSpace(in.ExpectBody),
+	}
+	if typ == "http" && hc.Path == "" {
+		return nil, "", fmt.Errorf("upstream_set_health_check: path is required for http probes")
+	}
+	if err := parseDurInto(in.Interval, &hc.Interval, "interval"); err != nil {
+		return nil, "", fmt.Errorf("upstream_set_health_check: %w", err)
+	}
+	if err := parseDurInto(in.Timeout, &hc.Timeout, "timeout"); err != nil {
+		return nil, "", fmt.Errorf("upstream_set_health_check: %w", err)
+	}
+	if len(in.ExpectStatus) > 0 {
+		hc.ExpectStatus = append([]int(nil), in.ExpectStatus...)
+	}
+	note := typ
+	if typ == "http" && hc.Path != "" {
+		note = typ + " " + hc.Path
+	}
+	return hc, "enabled (" + note + ")", nil
+}
+
+// buildDiscovery turns the editor payload into a *config.DiscoveryConfig. A
+// static/empty type returns nil so the pool falls back to its static Servers
+// list. Secret tokens are never carried on the wire: when the provider type is
+// unchanged, the existing Consul/Kubernetes token is preserved from prev rather
+// than wiped. Per-provider required fields and refresh range are enforced by the
+// validated SaveConfig re-parse.
+func buildDiscovery(in upstreamDiscovery, prev *config.DiscoveryConfig) (*config.DiscoveryConfig, string, error) {
+	typ := strings.ToLower(strings.TrimSpace(in.Type))
+	switch typ {
+	case "", "static":
+		return nil, "disabled (static backends)", nil
+	case "dns", "dns_srv", "consul", "kubernetes":
+	default:
+		return nil, "", fmt.Errorf("upstream_set_discovery: invalid type %q (want static|dns|dns_srv|consul|kubernetes)", in.Type)
+	}
+	d := &config.DiscoveryConfig{Type: typ, Target: strings.TrimSpace(in.Target)}
+	if err := parseDurInto(in.Refresh, &d.Refresh, "refresh"); err != nil {
+		return nil, "", fmt.Errorf("upstream_set_discovery: %w", err)
+	}
+	sameType := prev != nil && strings.EqualFold(strings.TrimSpace(prev.Type), typ)
+	if typ == "consul" {
+		cd := &config.ConsulDiscovery{}
+		if in.Consul != nil {
+			cd.Address = strings.TrimSpace(in.Consul.Address)
+			cd.Service = strings.TrimSpace(in.Consul.Service)
+			cd.Tag = strings.TrimSpace(in.Consul.Tag)
+			cd.Datacenter = strings.TrimSpace(in.Consul.Datacenter)
+			cd.PassingOnly = in.Consul.PassingOnly
+		}
+		if sameType && prev.Consul != nil {
+			cd.Token = prev.Consul.Token // preserve the secret ACL token
+		}
+		d.Consul = cd
+	}
+	if typ == "kubernetes" {
+		kd := &config.KubernetesDiscovery{}
+		if in.Kubernetes != nil {
+			kd.Namespace = strings.TrimSpace(in.Kubernetes.Namespace)
+			kd.Service = strings.TrimSpace(in.Kubernetes.Service)
+			kd.Port = strings.TrimSpace(in.Kubernetes.Port)
+			kd.APIServer = strings.TrimSpace(in.Kubernetes.APIServer)
+			kd.CAFile = strings.TrimSpace(in.Kubernetes.CAFile)
+			kd.InsecureSkipTLSVerify = in.Kubernetes.InsecureSkipTLSVerify
+		}
+		if sameType && prev.Kubernetes != nil {
+			kd.Token = prev.Kubernetes.Token // preserve the secret bearer token
+		}
+		d.Kubernetes = kd
+	}
+	return d, "set to " + typ, nil
+}
+
+// parseDurInto parses an optional duration string (e.g. "5s") into dst. An empty
+// string leaves dst at its zero value so the re-parse defaulting applies.
+func parseDurInto(val string, dst *config.Duration, name string) error {
+	if strings.TrimSpace(val) == "" {
+		return nil
+	}
+	var d config.Duration
+	if err := d.UnmarshalText([]byte(val)); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	*dst = d
+	return nil
 }
 
 // wafModeNote renders the mode/CRS suffix for a location_waf_set audit summary,

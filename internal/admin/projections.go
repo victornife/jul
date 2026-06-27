@@ -93,6 +93,45 @@ type AppProjection struct {
 	DiscoveryTarget  string   `json:"discovery_target,omitempty"`
 	RoutesUsing      []string `json:"routes_using,omitempty"`
 	Warnings         []string `json:"warnings,omitempty"`
+
+	// Guided-editor seed fields (Phase 4b). These expose the full, non-secret
+	// health-check and discovery detail so the structured Apps editor round-trips
+	// the current values without clobbering knobs it does not display. Secret
+	// tokens are never projected — DiscoveryConsul/Kubernetes carry only a
+	// has_token flag so the editor can show "token set" and preserve it.
+	HealthCheckTimeout      string               `json:"health_check_timeout,omitempty"`
+	HealthCheckHealthyThr   int                  `json:"health_check_healthy_threshold,omitempty"`
+	HealthCheckUnhealthyThr int                  `json:"health_check_unhealthy_threshold,omitempty"`
+	HealthCheckExpectStatus []int                `json:"health_check_expect_status,omitempty"`
+	HealthCheckExpectBody   string               `json:"health_check_expect_body,omitempty"`
+	DiscoveryRefresh        string               `json:"discovery_refresh,omitempty"`
+	DiscoveryConsul         *ConsulDiscoveryView `json:"discovery_consul,omitempty"`
+	DiscoveryKubernetes     *K8sDiscoveryView    `json:"discovery_kubernetes,omitempty"`
+}
+
+// ConsulDiscoveryView is the non-secret Consul discovery state the Apps editor
+// seeds from. HasToken reports whether an ACL token is configured (the token
+// itself is never projected).
+type ConsulDiscoveryView struct {
+	Address     string `json:"address,omitempty"`
+	Service     string `json:"service,omitempty"`
+	Tag         string `json:"tag,omitempty"`
+	Datacenter  string `json:"datacenter,omitempty"`
+	PassingOnly *bool  `json:"passing_only,omitempty"`
+	HasToken    bool   `json:"has_token,omitempty"`
+}
+
+// K8sDiscoveryView is the non-secret Kubernetes discovery state the Apps editor
+// seeds from. HasToken reports whether a bearer token is configured (the token
+// itself is never projected).
+type K8sDiscoveryView struct {
+	Namespace             string `json:"namespace,omitempty"`
+	Service               string `json:"service,omitempty"`
+	Port                  string `json:"port,omitempty"`
+	APIServer             string `json:"api_server,omitempty"`
+	CAFile                string `json:"ca_file,omitempty"`
+	InsecureSkipTLSVerify bool   `json:"insecure_skip_tls_verify,omitempty"`
+	HasToken              bool   `json:"has_token,omitempty"`
 }
 
 // BackendProjection is one backend server in an upstream pool.
@@ -401,11 +440,46 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 				if up.HealthCheck.Interval > 0 {
 					ap.HealthCheckIntvl = string(mustMarshal(up.HealthCheck.Interval.MarshalText()))
 				}
+				if up.HealthCheck.Timeout > 0 {
+					ap.HealthCheckTimeout = string(mustMarshal(up.HealthCheck.Timeout.MarshalText()))
+				}
+				ap.HealthCheckHealthyThr = up.HealthCheck.HealthyThreshold
+				ap.HealthCheckUnhealthyThr = up.HealthCheck.UnhealthyThreshold
+				if len(up.HealthCheck.ExpectStatus) > 0 {
+					ap.HealthCheckExpectStatus = append([]int(nil), up.HealthCheck.ExpectStatus...)
+				}
+				ap.HealthCheckExpectBody = up.HealthCheck.ExpectBody
 			}
 		}
 		if up.Discovery != nil {
 			ap.Discovery = up.Discovery.Type
 			ap.DiscoveryTarget = up.Discovery.Target
+			if up.Discovery.Refresh > 0 {
+				ap.DiscoveryRefresh = string(mustMarshal(up.Discovery.Refresh.MarshalText()))
+			}
+			if up.Discovery.Consul != nil {
+				cd := up.Discovery.Consul
+				ap.DiscoveryConsul = &ConsulDiscoveryView{
+					Address:     cd.Address,
+					Service:     cd.Service,
+					Tag:         cd.Tag,
+					Datacenter:  cd.Datacenter,
+					PassingOnly: cd.PassingOnly,
+					HasToken:    strings.TrimSpace(cd.Token) != "",
+				}
+			}
+			if up.Discovery.Kubernetes != nil {
+				kd := up.Discovery.Kubernetes
+				ap.DiscoveryKubernetes = &K8sDiscoveryView{
+					Namespace:             kd.Namespace,
+					Service:               kd.Service,
+					Port:                  kd.Port,
+					APIServer:             kd.APIServer,
+					CAFile:                kd.CAFile,
+					InsecureSkipTLSVerify: kd.InsecureSkipTLSVerify,
+					HasToken:              strings.TrimSpace(kd.Token) != "",
+				}
+			}
 		}
 		livePool, _ := live[up.Name]
 		liveMap := make(map[string]BackendStatus, len(livePool.Backends))

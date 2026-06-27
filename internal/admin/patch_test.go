@@ -402,6 +402,116 @@ func TestApplyPatchUpstreamAddRemoveBackend(t *testing.T) {
 	}
 }
 
+func TestApplyPatchUpstreamSetStrategy(t *testing.T) {
+	c := patchTestConfig()
+	if _, err := applyPatch(c, patchRequest{Op: "upstream_set_strategy", Upstream: "pool", Strategy: "least_conn"}); err != nil {
+		t.Fatalf("set strategy: %v", err)
+	}
+	if c.Upstreams[0].Strategy != "least_conn" {
+		t.Errorf("strategy = %q, want least_conn", c.Upstreams[0].Strategy)
+	}
+	if _, err := applyPatch(c, patchRequest{Op: "upstream_set_strategy", Upstream: "pool", Strategy: "bogus"}); err == nil {
+		t.Error("expected error for invalid strategy")
+	}
+}
+
+func TestApplyPatchUpstreamSetHealthCheck(t *testing.T) {
+	c := patchTestConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op:       "upstream_set_health_check",
+		Upstream: "pool",
+		HealthCheck: &upstreamHealthCheck{
+			Enabled: true, Type: "http", Path: "/healthz", Interval: "5s", Timeout: "2s",
+			HealthyThreshold: 2, UnhealthyThreshold: 3, ExpectStatus: []int{200, 204},
+		},
+	}); err != nil {
+		t.Fatalf("set health check: %v", err)
+	}
+	hc := c.Upstreams[0].HealthCheck
+	if hc == nil || !hc.Enabled || hc.Path != "/healthz" || hc.Timeout.Std().String() != "2s" {
+		t.Fatalf("health check not applied: %+v", hc)
+	}
+	if len(hc.ExpectStatus) != 2 || hc.ExpectStatus[1] != 204 {
+		t.Errorf("expect_status = %v, want [200 204]", hc.ExpectStatus)
+	}
+	// http probe with no path is rejected near-side.
+	if _, err := applyPatch(c, patchRequest{Op: "upstream_set_health_check", Upstream: "pool", HealthCheck: &upstreamHealthCheck{Enabled: true, Type: "http"}}); err == nil {
+		t.Error("expected error for http probe with no path")
+	}
+	// Disabling removes the block entirely.
+	if _, err := applyPatch(c, patchRequest{Op: "upstream_set_health_check", Upstream: "pool", HealthCheck: &upstreamHealthCheck{Enabled: false}}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if c.Upstreams[0].HealthCheck != nil {
+		t.Errorf("disabled health check should drop the block, got %+v", c.Upstreams[0].HealthCheck)
+	}
+}
+
+func TestApplyPatchUpstreamSetDiscovery(t *testing.T) {
+	c := patchTestConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op:        "upstream_set_discovery",
+		Upstream:  "pool",
+		Discovery: &upstreamDiscovery{Type: "dns", Target: "svc.internal:8080", Refresh: "15s"},
+	}); err != nil {
+		t.Fatalf("set dns discovery: %v", err)
+	}
+	d := c.Upstreams[0].Discovery
+	if d == nil || d.Type != "dns" || d.Target != "svc.internal:8080" || d.Refresh.Std().String() != "15s" {
+		t.Fatalf("dns discovery not applied: %+v", d)
+	}
+	// Static type drops the block.
+	if _, err := applyPatch(c, patchRequest{Op: "upstream_set_discovery", Upstream: "pool", Discovery: &upstreamDiscovery{Type: "static"}}); err != nil {
+		t.Fatalf("static: %v", err)
+	}
+	if c.Upstreams[0].Discovery != nil {
+		t.Errorf("static discovery should drop the block, got %+v", c.Upstreams[0].Discovery)
+	}
+}
+
+// TestApplyPatchUpstreamDiscoveryPreservesToken proves a re-edit of a Consul
+// pool keeps the existing ACL token (which is never sent by the console) rather
+// than wiping it.
+func TestApplyPatchUpstreamDiscoveryPreservesToken(t *testing.T) {
+	c := patchTestConfig()
+	passing := true
+	c.Upstreams[0].Discovery = &config.DiscoveryConfig{
+		Type:   "consul",
+		Consul: &config.ConsulDiscovery{Service: "web", Token: "secret-acl", PassingOnly: &passing},
+	}
+	if _, err := applyPatch(c, patchRequest{
+		Op:       "upstream_set_discovery",
+		Upstream: "pool",
+		Discovery: &upstreamDiscovery{
+			Type:   "consul",
+			Consul: &consulDiscoveryFields{Service: "web", Tag: "v2"},
+		},
+	}); err != nil {
+		t.Fatalf("re-edit consul: %v", err)
+	}
+	cd := c.Upstreams[0].Discovery.Consul
+	if cd == nil || cd.Token != "secret-acl" {
+		t.Fatalf("token not preserved: %+v", cd)
+	}
+	if cd.Tag != "v2" {
+		t.Errorf("tag = %q, want v2", cd.Tag)
+	}
+	// Switching provider type does NOT carry the old token over.
+	if _, err := applyPatch(c, patchRequest{
+		Op:       "upstream_set_discovery",
+		Upstream: "pool",
+		Discovery: &upstreamDiscovery{
+			Type:       "kubernetes",
+			Kubernetes: &k8sDiscoveryFields{Namespace: "default", Service: "web"},
+		},
+	}); err != nil {
+		t.Fatalf("switch to k8s: %v", err)
+	}
+	if kd := c.Upstreams[0].Discovery.Kubernetes; kd == nil || kd.Token != "" {
+		t.Errorf("token should not carry across provider types: %+v", kd)
+	}
+}
+
 func TestApplyPatchServerSetLimits(t *testing.T) {
 	c := patchTestConfig()
 	summary, err := applyPatch(c, patchRequest{

@@ -378,6 +378,8 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "upstream", Name: name, Detail: fmt.Sprintf("%s active health checks on %s", action, name)}, "upstream "+name+" health check")
+	} else if bHC && aHC {
+		diffHealthCheckFields(name, b.HealthCheck, a.HealthCheck, d)
 	}
 
 	// Service discovery.
@@ -385,6 +387,82 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 	aDisc := discoveryType(a.Discovery)
 	if bDisc != aDisc {
 		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(bDisc), After: orNone(aDisc), Detail: "Change service discovery of " + name}, "upstream "+name+" discovery")
+	} else if aDisc != "" {
+		diffDiscoveryFields(name, b.Discovery, a.Discovery, d)
+	}
+}
+
+// diffHealthCheckFields reports per-field changes to an upstream's active
+// health check when it is enabled on both sides (probe type, path, timing,
+// thresholds, expected status set, expected body).
+func diffHealthCheckFields(name string, b, a *config.HealthCheckConfig, d *ConfigDiff) {
+	if !strings.EqualFold(b.Type, a.Type) {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Type), After: orNone(a.Type), Detail: "Change health-check probe type of " + name}, "upstream "+name+" health check type")
+	}
+	if b.Path != a.Path {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Path), After: orNone(a.Path), Detail: "Change health-check path of " + name}, "upstream "+name+" health check path")
+	}
+	if b.Interval != a.Interval {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: durStr(b.Interval), After: durStr(a.Interval), Detail: "Change health-check interval of " + name}, "upstream "+name+" health check interval")
+	}
+	if b.Timeout != a.Timeout {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: durStr(b.Timeout), After: durStr(a.Timeout), Detail: "Change health-check timeout of " + name}, "upstream "+name+" health check timeout")
+	}
+	if b.HealthyThreshold != a.HealthyThreshold {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: fmt.Sprintf("%d", b.HealthyThreshold), After: fmt.Sprintf("%d", a.HealthyThreshold), Detail: "Change healthy_threshold of " + name}, "upstream "+name+" healthy_threshold")
+	}
+	if b.UnhealthyThreshold != a.UnhealthyThreshold {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: fmt.Sprintf("%d", b.UnhealthyThreshold), After: fmt.Sprintf("%d", a.UnhealthyThreshold), Detail: "Change unhealthy_threshold of " + name}, "upstream "+name+" unhealthy_threshold")
+	}
+	if !intsEqual(b.ExpectStatus, a.ExpectStatus) {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(intsStr(b.ExpectStatus)), After: orNone(intsStr(a.ExpectStatus)), Detail: "Change expected status codes of " + name}, "upstream "+name+" expect_status")
+	}
+	if b.ExpectBody != a.ExpectBody {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.ExpectBody), After: orNone(a.ExpectBody), Detail: "Change expected body of " + name}, "upstream "+name+" expect_body")
+	}
+}
+
+// diffDiscoveryFields reports per-field changes to an upstream's dynamic
+// discovery when the provider type is unchanged (target, refresh, and the
+// active provider's non-secret knobs). Token changes are not surfaced because
+// tokens are preserved server-side and never diffed.
+func diffDiscoveryFields(name string, b, a *config.DiscoveryConfig, d *ConfigDiff) {
+	if b == nil || a == nil {
+		return
+	}
+	if b.Target != a.Target {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Target), After: orNone(a.Target), Detail: "Change discovery target of " + name}, "upstream "+name+" discovery target")
+	}
+	if b.Refresh != a.Refresh {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: durStr(b.Refresh), After: durStr(a.Refresh), Detail: "Change discovery refresh interval of " + name}, "upstream "+name+" discovery refresh")
+	}
+	if b.Consul != nil && a.Consul != nil {
+		if b.Consul.Service != a.Consul.Service {
+			d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Consul.Service), After: orNone(a.Consul.Service), Detail: "Change Consul service of " + name}, "upstream "+name+" consul service")
+		}
+		if b.Consul.Address != a.Consul.Address {
+			d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Consul.Address), After: orNone(a.Consul.Address), Detail: "Change Consul address of " + name}, "upstream "+name+" consul address")
+		}
+		if b.Consul.Tag != a.Consul.Tag {
+			d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Consul.Tag), After: orNone(a.Consul.Tag), Detail: "Change Consul tag of " + name}, "upstream "+name+" consul tag")
+		}
+		if b.Consul.Datacenter != a.Consul.Datacenter {
+			d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Consul.Datacenter), After: orNone(a.Consul.Datacenter), Detail: "Change Consul datacenter of " + name}, "upstream "+name+" consul datacenter")
+		}
+	}
+	if b.Kubernetes != nil && a.Kubernetes != nil {
+		if b.Kubernetes.Namespace != a.Kubernetes.Namespace {
+			d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Kubernetes.Namespace), After: orNone(a.Kubernetes.Namespace), Detail: "Change Kubernetes namespace of " + name}, "upstream "+name+" k8s namespace")
+		}
+		if b.Kubernetes.Service != a.Kubernetes.Service {
+			d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Kubernetes.Service), After: orNone(a.Kubernetes.Service), Detail: "Change Kubernetes service of " + name}, "upstream "+name+" k8s service")
+		}
+		if b.Kubernetes.Port != a.Kubernetes.Port {
+			d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Kubernetes.Port), After: orNone(a.Kubernetes.Port), Detail: "Change Kubernetes port of " + name}, "upstream "+name+" k8s port")
+		}
+		if b.Kubernetes.APIServer != a.Kubernetes.APIServer {
+			d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Kubernetes.APIServer), After: orNone(a.Kubernetes.APIServer), Detail: "Change Kubernetes API server of " + name}, "upstream "+name+" k8s api_server")
+		}
 	}
 }
 
@@ -409,6 +487,31 @@ func discoveryType(d *config.DiscoveryConfig) string {
 		return ""
 	}
 	return t
+}
+
+// intsEqual reports whether two int slices have the same elements in order.
+func intsEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// intsStr renders an int slice as a comma-separated list (e.g. "200,204").
+func intsStr(xs []int) string {
+	if len(xs) == 0 {
+		return ""
+	}
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = fmt.Sprintf("%d", x)
+	}
+	return strings.Join(parts, ",")
 }
 
 // diffGlobalCache compares the [cache] block.

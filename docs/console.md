@@ -232,6 +232,9 @@ Beyond creation, several settings are edited **in place** through structured
 patch operations that are previewed as a diff before they apply: a route's proxy
 target, per-location cache and rate-limit toggles, a per-location access-control
 (auth) rule, a per-location WAF override, upstream backend add/remove,
+the upstream load-balancing strategy, active health checks, and dynamic
+service discovery (DNS, DNS SRV, Consul, or Kubernetes — provider ACL tokens
+are preserved server-side and never leave the box),
 per-server limits/timeouts, the per-server HTTP/3 and h2c protocol toggles
 (HTTP/3 requires TLS on the listener; h2c applies to plaintext listeners only),
 and the global distributed-tracing exporter (a guided `[observability.tracing]`
@@ -239,8 +242,7 @@ editor covering exporter, collector endpoint, sample ratio, service name, and
 transport security).
 
 Editing the remaining settings of an **existing** block — mutual
-TLS, health checks, service discovery, load-balancing strategy,
-plugins, and L4 stream listeners — currently goes through the validated
+TLS, plugins, and L4 stream listeners — currently goes through the validated
 raw TOML editor, whose structured diff annotates the consequences. The
 [capability matrix](#capability-matrix) below is the authoritative, per-feature
 breakdown of what is guided-editable versus raw-only today.
@@ -326,8 +328,8 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | Mutual TLS | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS, Security |
 | Automatic HTTPS (ACME) | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS |
 | HTTP/3, h2c | Structured-edit (per-server toggle; HTTP/3 requires TLS, h2c plaintext only) | Routes |
-| Upstream pools | Guided-create · Structured-edit (backends); strategy / health-check / discovery Raw-only | Apps |
-| Load-balancing strategy, health checks, service discovery | Read-only | Apps |
+| Upstream pools | Guided-create · Structured-edit (backends, strategy, health checks, discovery) | Apps |
+| Load-balancing strategy, health checks, service discovery | Structured-edit | Apps |
 | Web application firewall (WAF) | Structured-edit (global + per-location); advanced per-location fields Raw-only | Security |
 | Secret references | Read-only (externalize helper) | Security |
 | Server limits / timeouts | Structured-edit | Routes |

@@ -217,6 +217,35 @@ export const AppProjectionSchema = z.object({
   discovery_target: z.string().optional(),
   routes_using: z.array(z.string()).optional(),
   warnings: z.array(z.string()).optional(),
+  // Guided-editor seed fields (Phase 4b). Non-secret health-check and discovery
+  // detail; tokens are never projected (only has_token is exposed).
+  health_check_timeout: z.string().optional(),
+  health_check_healthy_threshold: z.number().optional(),
+  health_check_unhealthy_threshold: z.number().optional(),
+  health_check_expect_status: z.array(z.number()).optional(),
+  health_check_expect_body: z.string().optional(),
+  discovery_refresh: z.string().optional(),
+  discovery_consul: z
+    .object({
+      address: z.string().optional(),
+      service: z.string().optional(),
+      tag: z.string().optional(),
+      datacenter: z.string().optional(),
+      passing_only: z.boolean().optional(),
+      has_token: z.boolean().optional(),
+    })
+    .optional(),
+  discovery_kubernetes: z
+    .object({
+      namespace: z.string().optional(),
+      service: z.string().optional(),
+      port: z.string().optional(),
+      api_server: z.string().optional(),
+      ca_file: z.string().optional(),
+      insecure_skip_tls_verify: z.boolean().optional(),
+      has_token: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type AppProjection = z.infer<typeof AppProjectionSchema>;
 
@@ -541,9 +570,53 @@ export type ConfigPatch =
   | ({ op: "location_clear_auth" } & RouteTarget)
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
+  | { op: "upstream_set_strategy"; upstream: string; strategy: string }
+  | { op: "upstream_set_health_check"; upstream: string; health_check: HealthCheckPatch }
+  | { op: "upstream_set_discovery"; upstream: string; discovery: DiscoveryPatch }
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch }
   | { op: "server_toggle_http3"; listen: string; enabled: boolean }
   | { op: "server_toggle_h2c"; listen: string; enabled: boolean };
+
+// HealthCheckPatch is the upstream active health-check block the guided Apps
+// editor sets. Durations are strings (e.g. "5s"); empty/zero fields fall back to
+// the backend defaults (interval 5s, timeout 2s, thresholds 2/3, expect [200]).
+// A disabled payload removes the block (passive health only).
+export type HealthCheckPatch = {
+  enabled: boolean;
+  type?: "http" | "tcp";
+  path?: string;
+  interval?: string;
+  timeout?: string;
+  healthy_threshold?: number;
+  unhealthy_threshold?: number;
+  expect_status?: number[];
+  expect_body?: string;
+};
+
+// DiscoveryPatch is the upstream dynamic-discovery block the guided Apps editor
+// sets. Type "static" removes discovery (the static backend list is used).
+// Secret tokens are never sent; when the provider type is unchanged the backend
+// preserves the existing Consul/Kubernetes token.
+export type DiscoveryPatch = {
+  type: "static" | "dns" | "dns_srv" | "consul" | "kubernetes";
+  target?: string;
+  refresh?: string;
+  consul?: {
+    address?: string;
+    service?: string;
+    tag?: string;
+    datacenter?: string;
+    passing_only?: boolean;
+  };
+  kubernetes?: {
+    namespace?: string;
+    service?: string;
+    port?: string;
+    api_server?: string;
+    ca_file?: string;
+    insecure_skip_tls_verify?: boolean;
+  };
+};
 
 // ValidationIssue mirrors the backend validationError shape (code/path/summary/
 // detail/severity). Shared by the patch preview and the validate/apply flows.

@@ -9,6 +9,13 @@ import {
   type ConfigPatch,
 } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import { DiscoveryEditor, HealthCheckEditor } from "@/features/apps/AppSettingsEditor.tsx";
+
+const STRATEGIES: ReadonlyArray<{ readonly value: string; readonly label: string }> = [
+  { value: "round_robin", label: "Round robin" },
+  { value: "weighted_round_robin", label: "Weighted round robin" },
+  { value: "least_conn", label: "Least connections" },
+];
 
 function Row({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
   return (
@@ -74,6 +81,8 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
   const healthy = app.backends.filter((b) => b.healthy !== false).length;
   const [newAddr, setNewAddr] = useState("");
   const [newWeight, setNewWeight] = useState(1);
+  const [strategy, setStrategy] = useState(app.strategy || "round_robin");
+  const [editing, setEditing] = useState<null | "health" | "discovery">(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -153,6 +162,65 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
                 : "static"
             }
           />
+        </div>
+
+        <div className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-4">
+          <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+            Pool settings (in place)
+          </span>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex-1 space-y-1">
+              <span className="text-xs text-jul-muted">Load-balancing strategy</span>
+              <select
+                value={strategy}
+                onChange={(e) => {
+                  setStrategy(e.target.value);
+                }}
+                className="w-full rounded-md border border-jul-border bg-jul-bg px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+              >
+                {STRATEGIES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={busy || strategy === (app.strategy || "round_robin")}
+              onClick={() => {
+                void runPatch({
+                  op: "upstream_set_strategy",
+                  upstream: app.name,
+                  strategy,
+                });
+              }}
+              className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              Apply →
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEditing("health");
+              }}
+              className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text hover:bg-jul-bg"
+            >
+              Edit health checks →
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditing("discovery");
+              }}
+              className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text hover:bg-jul-bg"
+            >
+              Edit discovery →
+            </button>
+          </div>
+          <span className="text-xs text-jul-muted">each opens a diff to review &amp; apply</span>
         </div>
 
         <div className="space-y-1">
@@ -261,6 +329,23 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
           )}
         </div>
       </div>
+
+      {editing === "health" && (
+        <HealthCheckEditor
+          app={app}
+          onClose={() => {
+            setEditing(null);
+          }}
+        />
+      )}
+      {editing === "discovery" && (
+        <DiscoveryEditor
+          app={app}
+          onClose={() => {
+            setEditing(null);
+          }}
+        />
+      )}
     </Drawer>
   );
 }

@@ -268,12 +268,23 @@ func TestRoutesNoLoadConfigReturnsNotLoaded(t *testing.T) {
 // ── /api/apps ────────────────────────────────────────────────────────────────
 
 func TestAppsProjection(t *testing.T) {
+	passing := true
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamConfig{{
 			Name:     "api",
 			Strategy: "round_robin",
 			Servers: []config.UpstreamServer{
 				{Address: "10.0.0.1:80", Weight: 1},
+			},
+			HealthCheck: &config.HealthCheckConfig{
+				Enabled: true, Type: "http", Path: "/healthz",
+				Interval: config.Duration(5e9), Timeout: config.Duration(2e9),
+				HealthyThreshold: 2, UnhealthyThreshold: 3, ExpectStatus: []int{200},
+			},
+			Discovery: &config.DiscoveryConfig{
+				Type:    "consul",
+				Refresh: config.Duration(30e9),
+				Consul:  &config.ConsulDiscovery{Service: "web", Token: "secret-acl", PassingOnly: &passing},
 			},
 		}},
 	}
@@ -297,6 +308,16 @@ func TestAppsProjection(t *testing.T) {
 	}
 	if len(out[0].Backends) != 1 || !out[0].Backends[0].Healthy {
 		t.Error("backend should be marked healthy from live data")
+	}
+	if out[0].HealthCheckPath != "/healthz" || out[0].HealthCheckTimeout != "2s" || out[0].HealthCheckHealthyThr != 2 {
+		t.Errorf("health-check detail not projected: %+v", out[0])
+	}
+	if out[0].DiscoveryConsul == nil || out[0].DiscoveryConsul.Service != "web" || !out[0].DiscoveryConsul.HasToken {
+		t.Errorf("consul discovery not projected with has_token: %+v", out[0].DiscoveryConsul)
+	}
+	// The ACL token itself must never appear in the projection payload.
+	if bytes.Contains(rr.Body.Bytes(), []byte("secret-acl")) {
+		t.Error("consul ACL token leaked into /api/apps projection")
 	}
 }
 
