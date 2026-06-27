@@ -62,6 +62,7 @@ func diffConfigs(before, after *config.Config) ConfigDiff {
 	diffGlobalCompression(before, after, &d)
 	diffGlobalRateLimit(before, after, &d)
 	diffGlobalWAF(before, after, &d)
+	diffGlobalTracing(before, after, &d)
 	diffSecretRefs(before, after, &d)
 	if len(d.Affected) == 0 {
 		d.Summary = "No structural changes detected between the current configuration and the draft."

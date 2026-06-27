@@ -193,6 +193,52 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 	}
 }
 
+func TestDiffGlobalTracing(t *testing.T) {
+	tracing := func(tc config.TracingConfig) *config.Config {
+		return &config.Config{Observability: config.ObservabilityConfig{Tracing: tc}}
+	}
+
+	// Enable from disabled: reports the toggle and warns about the otel build tag.
+	d := diffConfigs(tracing(config.TracingConfig{}), tracing(config.TracingConfig{
+		Enabled: true, Exporter: "otlp-grpc", Endpoint: "localhost:4317", SampleRatio: 1,
+	}))
+	if !diffHas(d, "Enable distributed tracing") {
+		t.Errorf("expected tracing enable, got %+v", d)
+	}
+	if !warnHas(d, "otel") {
+		t.Errorf("expected otel build-tag warning, got %+v", d.Warnings)
+	}
+
+	// Field changes on an already-enabled block, including a switch to insecure.
+	before := tracing(config.TracingConfig{
+		Enabled: true, Exporter: "otlp-grpc", Endpoint: "localhost:4317", SampleRatio: 1, ServiceName: "jul",
+	})
+	after := tracing(config.TracingConfig{
+		Enabled: true, Exporter: "otlp-http", Endpoint: "http://collector:4318", SampleRatio: 0.1, ServiceName: "edge", Insecure: true,
+	})
+	d = diffConfigs(before, after)
+	for _, want := range []string{
+		"Change tracing exporter",
+		"Change tracing collector endpoint",
+		"Change tracing sample ratio",
+		"Change tracing service name",
+		"Change tracing transport security",
+	} {
+		if !diffHas(d, want) {
+			t.Errorf("expected %q, got %+v", want, d)
+		}
+	}
+	if !warnHas(d, "plaintext") {
+		t.Errorf("expected insecure-transport warning, got %+v", d.Warnings)
+	}
+
+	// Disable from enabled.
+	d = diffConfigs(before, tracing(config.TracingConfig{}))
+	if !diffHas(d, "Disable distributed tracing") {
+		t.Errorf("expected tracing disable, got %+v", d)
+	}
+}
+
 func TestDiffServerTimeouts(t *testing.T) {
 	before := &config.Config{Servers: []config.ServerConfig{{
 		Listen:      ":8080",

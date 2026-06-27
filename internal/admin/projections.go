@@ -189,6 +189,7 @@ type TrafficControlsProjection struct {
 	Compression *CompressionProjection `json:"compression,omitempty"`
 	RateLimit   *RateLimitProjection   `json:"rate_limit,omitempty"`
 	Cache       *CacheProjection       `json:"cache,omitempty"`
+	Tracing     *TracingProjection     `json:"tracing,omitempty"`
 }
 
 // CompressionProjection is compression configuration.
@@ -211,6 +212,19 @@ type CacheProjection struct {
 	DefaultTTL string `json:"default_ttl,omitempty"`
 	MemoryMax  string `json:"memory_max,omitempty"`
 	DiskPath   string `json:"disk_path,omitempty"`
+}
+
+// TracingProjection is the OpenTelemetry distributed-tracing configuration that
+// seeds the guided tracing editor. It carries no secrets: the endpoint is a
+// collector address, not a credential. Values reflect the effective config
+// after defaults (exporter, service name, and full sampling) are applied.
+type TracingProjection struct {
+	Enabled     bool    `json:"enabled"`
+	Exporter    string  `json:"exporter,omitempty"`
+	Endpoint    string  `json:"endpoint,omitempty"`
+	SampleRatio float64 `json:"sample_ratio,omitempty"`
+	ServiceName string  `json:"service_name,omitempty"`
+	Insecure    bool    `json:"insecure,omitempty"`
 }
 
 // RuntimeOverview is the top-level dashboard summary.
@@ -659,6 +673,17 @@ func projectTrafficControls(c *config.Config) TrafficControlsProjection {
 		tcp.Cache.DefaultTTL = string(mustMarshal(c.Cache.DefaultTTL.MarshalText()))
 		tcp.Cache.MemoryMax = string(mustMarshal(c.Cache.MemoryMaxSize.MarshalText()))
 		tcp.Cache.DiskPath = c.Cache.DiskPath
+	}
+	if c.Observability.Tracing.Enabled {
+		t := c.Observability.Tracing
+		tcp.Tracing = &TracingProjection{
+			Enabled:     true,
+			Exporter:    t.Exporter,
+			Endpoint:    t.Endpoint,
+			SampleRatio: t.SampleRatio,
+			ServiceName: t.ServiceName,
+			Insecure:    t.Insecure,
+		}
 	}
 	return tcp
 }

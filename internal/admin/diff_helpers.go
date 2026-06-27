@@ -550,6 +550,46 @@ func diffSecretRefs(before, after *config.Config, d *ConfigDiff) {
 	}
 }
 
+// diffGlobalTracing compares the [observability.tracing] block. Tracing changes
+// govern what telemetry leaves the process and where it is sent, so each is
+// surfaced explicitly; enabling exports spans and is only active in binaries
+// built with the otel tag.
+func diffGlobalTracing(before, after *config.Config, d *ConfigDiff) {
+	b, a := before.Observability.Tracing, after.Observability.Tracing
+	if b.Enabled != a.Enabled {
+		action := "Enable"
+		if !a.Enabled {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "tracing", Name: "global", Detail: action + " distributed tracing"}, "tracing")
+		if a.Enabled {
+			d.warn("Enabling tracing exports spans to the collector; it is only active in binaries built with the otel tag.")
+		}
+		return
+	}
+	if !a.Enabled {
+		return
+	}
+	if b.Exporter != a.Exporter {
+		d.mod(DiffEntry{Kind: "tracing", Name: "global", Before: orNone(b.Exporter), After: orNone(a.Exporter), Detail: "Change tracing exporter"}, "tracing exporter")
+	}
+	if b.Endpoint != a.Endpoint {
+		d.mod(DiffEntry{Kind: "tracing", Name: "global", Before: orNone(b.Endpoint), After: orNone(a.Endpoint), Detail: "Change tracing collector endpoint"}, "tracing endpoint")
+	}
+	if b.SampleRatio != a.SampleRatio {
+		d.mod(DiffEntry{Kind: "tracing", Name: "global", Before: fmt.Sprintf("%g", b.SampleRatio), After: fmt.Sprintf("%g", a.SampleRatio), Detail: "Change tracing sample ratio"}, "tracing sample_ratio")
+	}
+	if b.ServiceName != a.ServiceName {
+		d.mod(DiffEntry{Kind: "tracing", Name: "global", Before: orNone(b.ServiceName), After: orNone(a.ServiceName), Detail: "Change tracing service name"}, "tracing service_name")
+	}
+	if b.Insecure != a.Insecure {
+		d.mod(DiffEntry{Kind: "tracing", Name: "global", Detail: "Change tracing transport security"}, "tracing insecure")
+		if a.Insecure {
+			d.warn("Tracing now sends spans over plaintext (insecure); only use this for a local collector on a trusted network.")
+		}
+	}
+}
+
 // locationEffectiveWAF returns the WAF policy that applies to a location,
 // taking inheritance from the global policy into account.  If the location
 // does not define a WAF block at all, the global policy is returned (when

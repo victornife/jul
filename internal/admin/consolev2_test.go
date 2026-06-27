@@ -444,6 +444,16 @@ func TestTrafficControlsProjection(t *testing.T) {
 	cfg := &config.Config{
 		Compression: config.CompressionConfig{Enabled: true, Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100, Key: "ip"},
+		Observability: config.ObservabilityConfig{
+			Tracing: config.TracingConfig{
+				Enabled:     true,
+				Exporter:    "otlp-http",
+				Endpoint:    "http://collector:4318",
+				SampleRatio: 0.25,
+				ServiceName: "edge",
+				Insecure:    true,
+			},
+		},
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		LoadConfig: func() (*config.Config, error) { return cfg, nil },
@@ -462,6 +472,13 @@ func TestTrafficControlsProjection(t *testing.T) {
 	}
 	if out.RateLimit == nil || out.RateLimit.Rate != 100 {
 		t.Error("rate limit should be 100")
+	}
+	if out.Tracing == nil {
+		t.Fatal("tracing should be projected when enabled")
+	}
+	if out.Tracing.Exporter != "otlp-http" || out.Tracing.Endpoint != "http://collector:4318" ||
+		out.Tracing.SampleRatio != 0.25 || out.Tracing.ServiceName != "edge" || !out.Tracing.Insecure {
+		t.Errorf("tracing projection = %+v", out.Tracing)
 	}
 }
 

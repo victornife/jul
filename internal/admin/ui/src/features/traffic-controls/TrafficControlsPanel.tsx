@@ -5,6 +5,7 @@ import {
   TrafficControlEditor,
   type TrafficEditorKind,
 } from "@/features/traffic-controls/TrafficControlEditor.tsx";
+import { TracingEditor } from "@/features/traffic-controls/TracingEditor.tsx";
 
 function SectionCard({
   title,
@@ -60,6 +61,7 @@ export function TrafficControlsPanel() {
   });
 
   const [editing, setEditing] = useState<TrafficEditorKind | null>(null);
+  const [tracingEditing, setTracingEditing] = useState(false);
 
   if (isLoading) return <div className="text-jul-muted">Loading traffic controls…</div>;
   if (isError || !data)
@@ -72,9 +74,9 @@ export function TrafficControlsPanel() {
         <h1 className="text-xl font-semibold">Traffic Controls</h1>
         <p className="max-w-3xl text-sm text-jul-muted">
           Traffic controls shape how Jul handles requests and responses: compression,
-          caching, and rate limits. Changes here are generated as configuration and
-          applied safely through validate → diff → apply, so nothing takes effect until
-          you confirm.
+          caching, rate limits, and distributed tracing. Changes here are generated as
+          configuration and applied safely through validate → diff → apply, so nothing
+          takes effect until you confirm.
         </p>
       </div>
 
@@ -164,6 +166,33 @@ export function TrafficControlsPanel() {
             under the server block you choose in the editor.
           </p>
         </SectionCard>
+
+        {/* Distributed tracing (Phase 4d) */}
+        <SectionCard
+          title="Distributed Tracing"
+          active={data.tracing?.enabled ?? false}
+          onEdit={() => {
+            setTracingEditing(true);
+          }}
+        >
+          {data.tracing?.enabled ? (
+            <div className="space-y-1">
+              <KV k="exporter" v={data.tracing.exporter || "otlp-grpc"} />
+              <KV k="endpoint" v={data.tracing.endpoint} />
+              <KV
+                k="sample ratio"
+                v={data.tracing.sample_ratio !== undefined ? String(data.tracing.sample_ratio) : undefined}
+              />
+              <KV k="service" v={data.tracing.service_name} />
+              {data.tracing.insecure && <KV k="transport" v="insecure (plaintext)" />}
+            </div>
+          ) : (
+            <p className="text-xs text-jul-muted">
+              Tracing is off. Enable it to export request spans to an OpenTelemetry collector
+              (OTLP). Requires a binary built with the otel tag.
+            </p>
+          )}
+        </SectionCard>
       </div>
 
       {editing && (
@@ -172,6 +201,15 @@ export function TrafficControlsPanel() {
           current={data}
           onClose={() => {
             setEditing(null);
+          }}
+        />
+      )}
+
+      {tracingEditing && (
+        <TracingEditor
+          current={data}
+          onClose={() => {
+            setTracingEditing(false);
           }}
         />
       )}

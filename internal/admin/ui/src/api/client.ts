@@ -294,10 +294,20 @@ export const CacheProjectionSchema = z.object({
   disk_path: z.string().optional(),
 });
 
+export const TracingProjectionSchema = z.object({
+  enabled: z.boolean(),
+  exporter: z.string().optional(),
+  endpoint: z.string().optional(),
+  sample_ratio: z.number().optional(),
+  service_name: z.string().optional(),
+  insecure: z.boolean().optional(),
+});
+
 export const TrafficControlsSchema = z.object({
   compression: CompressionProjectionSchema.optional(),
   rate_limit: RateLimitProjectionSchema.optional(),
   cache: CacheProjectionSchema.optional(),
+  tracing: TracingProjectionSchema.optional(),
 });
 export type TrafficControls = z.infer<typeof TrafficControlsSchema>;
 
