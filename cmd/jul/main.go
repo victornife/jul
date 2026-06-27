@@ -726,6 +726,10 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// follower stream, both served from the bounded ring-buffer sink above.
 	deps.RecentLogs = logTail.Snapshot
 	deps.SubscribeLogs = logTail.Subscribe
+	// Plugins panel (Phase 4h): report whether this binary can run WASM plugins
+	// so the guided editor warns when declarations would fail the apply
+	// preflight on a lean (non-wasmplugins) build.
+	deps.PluginsCompiled = plugins.Compiled
 	// Live operational panels for the console: upstream health from the pool
 	// registry, and configured-certificate metadata from the current config.
 	deps.Upstreams = func() []admin.UpstreamStatus { return adaptUpstreams(poolReg.Snapshot()) }

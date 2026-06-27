@@ -6,6 +6,7 @@ import { AppsPanel } from "@/features/apps/AppsPanel.tsx";
 import { TLSPanel } from "@/features/tls/TLSPanel.tsx";
 import { SecurityPanel } from "@/features/security/SecurityPanel.tsx";
 import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControlsPanel.tsx";
+import { PluginsPanel } from "@/features/plugins/PluginsPanel.tsx";
 import { SearchPanel } from "@/features/search/SearchPanel.tsx";
 import { OperationsPanel } from "@/features/operations/OperationsPanel.tsx";
 import { AuditPanel } from "@/features/security/AuditPanel.tsx";
@@ -23,6 +24,7 @@ export function App() {
         <Route path="/tls" element={<TLSPanel />} />
         <Route path="/security" element={<SecurityPanel />} />
         <Route path="/traffic" element={<TrafficControlsPanel />} />
+        <Route path="/plugins" element={<PluginsPanel />} />
         <Route path="/search" element={<SearchPanel />} />
         <Route path="/operations" element={<OperationsPanel tab="diagnostics" />} />
         <Route path="/operations/events" element={<OperationsPanel tab="events" />} />

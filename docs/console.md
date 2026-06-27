@@ -245,12 +245,18 @@ service discovery (DNS, DNS SRV, Consul, or Kubernetes — provider ACL tokens
 are preserved server-side and never leave the box),
 per-server limits/timeouts, the per-server HTTP/3 and h2c protocol toggles
 (HTTP/3 requires TLS on the listener; h2c applies to plaintext listeners only),
-and the global distributed-tracing exporter (a guided `[observability.tracing]`
+the global distributed-tracing exporter (a guided `[observability.tracing]`
 editor covering exporter, collector endpoint, sample ratio, service name, and
-transport security).
+transport security), and **WASM plugins** (the **Plugins** panel: declare a
+global `[plugins.NAME]` — module path, type, host capabilities and limits,
+config — and attach or detach middleware plugins per route; handler and
+server-level plugins stay raw-only). Plugin module bytes are referenced by file
+path — the console never uploads WASM. In a build without the `wasmplugins`
+tag the editor still works, but the apply preflight rejects a config that
+declares plugins, and the panel warns up front.
 
 Editing the remaining settings of an **existing** block — mutual
-TLS, plugins, and L4 stream listeners — currently goes through the validated
+TLS and L4 stream listeners — currently goes through the validated
 raw TOML editor, whose structured diff annotates the consequences. The
 [capability matrix](#capability-matrix) below is the authoritative, per-feature
 breakdown of what is guided-editable versus raw-only today.
@@ -344,7 +350,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | Web application firewall (WAF) | Structured-edit (global + per-location, incl. advanced fields: block status / paranoia / body limits / rule files / inline rules / response-body inspection) | Security |
 | Secret references | Read-only (externalize helper) | Security |
 | Server limits / timeouts | Structured-edit | Routes |
-| Plugins (WASM) | Read-only | Status |
+| Plugins (WASM) | Structured-edit (global defs: path/type/capabilities/limits/config; attach/detach middleware plugins per route; handler & server-level plugins stay raw-only) | Plugins |
 | Tracing / OpenTelemetry | Structured-edit (global guided editor: exporter / endpoint / sample ratio / service name / transport) | Traffic Controls, Status |
 | Access / error logs | Live tail (read-only) — bounded, privacy-preserving access-log stream | Operations |
 | L4 stream proxy | Read-only (status only) | Overview |
@@ -368,6 +374,7 @@ consumes the endpoints below.
 | TLS & Certificates | `GET /api/tls`, `GET /api/certs` |
 | Security | `GET /api/security` |
 | Traffic Controls | `GET /api/traffic-controls` |
+| Plugins | `GET /api/plugins` |
 | Search & Discovery | `GET /api/search` |
 | Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history,logs}`, `GET /api/observability/logs/stream` (SSE), `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |
 | Audit | `GET /api/audit`, `GET /api/audit/export` |

@@ -289,6 +289,17 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 		d.mod(DiffEntry{Kind: "timeouts", Name: name, Before: sizeStr(b.ClientMaxBodySize), After: sizeStr(a.ClientMaxBodySize), Detail: "Change body size limit on route " + key}, "route "+name+" body limit")
 	}
 
+	// Per-route plugin middleware chain (loc.Plugins) — attach/detach.
+	if attached, detached := stringSetDiff(b.Plugins, a.Plugins); len(attached) > 0 || len(detached) > 0 {
+		for _, p := range attached {
+			d.mod(DiffEntry{Kind: "plugin", Name: name, After: p, Detail: fmt.Sprintf("Attach plugin %s to route %s", p, key)}, "route "+name+" plugin "+p)
+			d.warn("Attaching plugin %s to route %s on %s runs guest WASM in the request path; it only loads in binaries built with the wasmplugins tag.", p, key, server)
+		}
+		for _, p := range detached {
+			d.mod(DiffEntry{Kind: "plugin", Name: name, Before: p, Detail: fmt.Sprintf("Detach plugin %s from route %s", p, key)}, "route "+name+" plugin "+p)
+		}
+	}
+
 	// Proxy timeouts.
 	diffProxyTimeouts(server, key, b, a, d)
 }
@@ -698,6 +709,122 @@ func diffGlobalTracing(before, after *config.Config, d *ConfigDiff) {
 			d.warn("Tracing now sends spans over plaintext (insecure); only use this for a local collector on a trusted network.")
 		}
 	}
+}
+
+// diffGlobalPlugins compares the declared WASM plugin set ([plugins.NAME]),
+// reporting added/removed declarations and per-plugin changes to the module
+// source, type, granted host capabilities, and limits. Attachment (which routes
+// run a plugin) is diffed per-location in diffLocationFields.
+func diffGlobalPlugins(before, after *config.Config, d *ConfigDiff) {
+	for _, name := range sortedKeys(after.Plugins) {
+		a := after.Plugins[name]
+		b, ok := before.Plugins[name]
+		if !ok {
+			d.add(DiffEntry{Kind: "plugin", Name: name, After: pluginSummary(a), Detail: "Add plugin " + name}, "plugin "+name)
+			d.warn("Plugin %s runs guest WASM; it only loads in binaries built with the wasmplugins tag, and the apply preflight rejects it otherwise.", name)
+			continue
+		}
+		diffPluginFields(name, b, a, d)
+	}
+	for _, name := range sortedKeys(before.Plugins) {
+		if _, ok := after.Plugins[name]; !ok {
+			b := before.Plugins[name]
+			d.del(DiffEntry{Kind: "plugin", Name: name, Before: pluginSummary(b), Detail: "Remove plugin " + name}, "plugin "+name)
+		}
+	}
+}
+
+// diffPluginFields reports per-plugin declaration changes between matched
+// [plugins.NAME] blocks, warning when a host capability (kv/fetch) is newly
+// granted.
+func diffPluginFields(name string, b, a config.PluginConfig, d *ConfigDiff) {
+	if pluginSource(b) != pluginSource(a) {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: pluginSource(b), After: pluginSource(a), Detail: "Change plugin module source for " + name}, "plugin "+name+" source")
+	}
+	if pluginTypeOrDefault(b) != pluginTypeOrDefault(a) {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: pluginTypeOrDefault(b), After: pluginTypeOrDefault(a), Detail: "Change plugin type for " + name}, "plugin "+name+" type")
+	}
+	if b.KV != a.KV {
+		action := "Grant"
+		if !a.KV {
+			action = "Revoke"
+		}
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Detail: fmt.Sprintf("%s KV store access for plugin %s", action, name)}, "plugin "+name+" kv")
+		if a.KV {
+			d.warn("Plugin %s now has KV store access; it can read and write shared key-value state.", name)
+		}
+	}
+	if b.Fetch != a.Fetch {
+		action := "Grant"
+		if !a.Fetch {
+			action = "Revoke"
+		}
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Detail: fmt.Sprintf("%s outbound fetch for plugin %s", action, name)}, "plugin "+name+" fetch")
+		if a.Fetch {
+			d.warn("Plugin %s can now make outbound HTTP requests; it is restricted to the allowed_hosts allowlist.", name)
+		}
+	}
+	if bf, af := strings.Join(b.AllowedHosts, ","), strings.Join(a.AllowedHosts, ","); bf != af {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: orNone(bf), After: orNone(af), Detail: "Change plugin fetch allowlist for " + name}, "plugin "+name+" allowed_hosts")
+	}
+	if !stringMapEqual(b.Config, a.Config) {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Detail: "Change plugin config for " + name}, "plugin "+name+" config")
+	}
+	if b.MemoryLimit != a.MemoryLimit {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: sizeStr(b.MemoryLimit), After: sizeStr(a.MemoryLimit), Detail: "Change plugin memory limit for " + name}, "plugin "+name+" memory_limit")
+	}
+	if b.Timeout != a.Timeout {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: durStr(b.Timeout), After: durStr(a.Timeout), Detail: "Change plugin timeout for " + name}, "plugin "+name+" timeout")
+	}
+}
+
+// pluginSource renders a plugin's module source for a diff: "inline" for an
+// embedded module, or "path <file>" for a file-backed one.
+func pluginSource(p config.PluginConfig) string {
+	if strings.TrimSpace(p.Inline) != "" {
+		return "inline"
+	}
+	return "path " + p.Path
+}
+
+// stringSetDiff returns the elements added to and removed from a string slice
+// (set semantics, ignoring order and duplicates), used to diff a location's
+// plugin middleware chain.
+func stringSetDiff(before, after []string) (added, removed []string) {
+	bset := make(map[string]bool, len(before))
+	for _, s := range before {
+		bset[s] = true
+	}
+	aset := make(map[string]bool, len(after))
+	for _, s := range after {
+		aset[s] = true
+	}
+	for _, s := range after {
+		if !bset[s] {
+			added = append(added, s)
+			bset[s] = true // dedupe
+		}
+	}
+	for _, s := range before {
+		if !aset[s] {
+			removed = append(removed, s)
+			aset[s] = true // dedupe
+		}
+	}
+	return added, removed
+}
+
+// stringMapEqual reports whether two string maps have identical keys and values.
+func stringMapEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
 }
 
 // locationEffectiveWAF returns the WAF policy that applies to a location,

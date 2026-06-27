@@ -85,6 +85,15 @@ type patchRequest struct {
 	// location_set_action payload: the route's new action (proxy/static/
 	// redirect/return/deny). The op clears every other action field first.
 	Action *locationActionPayload `json:"action,omitempty"`
+
+	// Plugin target. PluginName is the [plugins.NAME] key for plugin_set /
+	// plugin_remove, and the plugin to attach/detach for
+	// location_attach_plugin / location_detach_plugin (the location is
+	// addressed by the route coordinates above).
+	PluginName string `json:"plugin_name,omitempty"`
+
+	// plugin_set payload: the plugin declaration to add or replace.
+	PluginDef *pluginDef `json:"plugin,omitempty"`
 }
 
 // locationMatch is the new match (type + path) for location_set_match. It
@@ -525,6 +534,89 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		old := srv.ServerNames
 		srv.ServerNames = newNames
 		return fmt.Sprintf("server %s host names changed (%s → %s)", req.Listen, namesLabel(old), namesLabel(newNames)), nil
+
+	case "plugin_set":
+		name := strings.TrimSpace(req.PluginName)
+		if name == "" {
+			return "", fmt.Errorf("plugin_set: plugin_name is required")
+		}
+		if req.PluginDef == nil {
+			return "", fmt.Errorf("plugin_set: plugin is required")
+		}
+		existing, existed := c.Plugins[name]
+		pc, summary, err := buildPlugin(*req.PluginDef, existing)
+		if err != nil {
+			return "", err
+		}
+		if c.Plugins == nil {
+			c.Plugins = make(map[string]config.PluginConfig)
+		}
+		c.Plugins[name] = pc
+		verb := "added"
+		if existed {
+			verb = "updated"
+		}
+		return fmt.Sprintf("plugin %s %s (%s)", name, verb, summary), nil
+
+	case "plugin_remove":
+		name := strings.TrimSpace(req.PluginName)
+		if name == "" {
+			return "", fmt.Errorf("plugin_remove: plugin_name is required")
+		}
+		if _, ok := c.Plugins[name]; !ok {
+			return "", fmt.Errorf("plugin_remove: no plugin named %q", name)
+		}
+		if refs := pluginReferences(c, name); len(refs) > 0 {
+			return "", fmt.Errorf("plugin_remove: plugin %q is still attached to %s; detach it first", name, strings.Join(refs, ", "))
+		}
+		delete(c.Plugins, name)
+		return fmt.Sprintf("plugin %s removed", name), nil
+
+	case "location_attach_plugin":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		name := strings.TrimSpace(req.PluginName)
+		if name == "" {
+			return "", fmt.Errorf("location_attach_plugin: plugin_name is required")
+		}
+		pc, ok := c.Plugins[name]
+		if !ok {
+			return "", fmt.Errorf("location_attach_plugin: no plugin named %q", name)
+		}
+		if pluginTypeOrDefault(pc) != "middleware" {
+			return "", fmt.Errorf("location_attach_plugin: plugin %q is a handler plugin, not middleware; attach it as the route action instead", name)
+		}
+		for _, p := range loc.Plugins {
+			if p == name {
+				return "", fmt.Errorf("location_attach_plugin: plugin %q is already attached to route %s%s", name, req.Listen, loc.Match.Path)
+			}
+		}
+		loc.Plugins = append(loc.Plugins, name)
+		return fmt.Sprintf("plugin %s attached to route %s%s", name, req.Listen, loc.Match.Path), nil
+
+	case "location_detach_plugin":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		name := strings.TrimSpace(req.PluginName)
+		if name == "" {
+			return "", fmt.Errorf("location_detach_plugin: plugin_name is required")
+		}
+		idx := -1
+		for i, p := range loc.Plugins {
+			if p == name {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return "", fmt.Errorf("location_detach_plugin: plugin %q is not attached to route %s%s", name, req.Listen, loc.Match.Path)
+		}
+		loc.Plugins = append(loc.Plugins[:idx], loc.Plugins[idx+1:]...)
+		return fmt.Sprintf("plugin %s detached from route %s%s", name, req.Listen, loc.Match.Path), nil
 
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)

@@ -40,6 +40,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
       { to: "/apps", label: "Apps", glyph: "▦" },
       { to: "/traffic", label: "Traffic", glyph: "📈" },
       { to: "/security", label: "Security", glyph: "🛡" },
+      { to: "/plugins", label: "Plugins", glyph: "🧩" },
       { to: "/tls", label: "TLS", glyph: "🔒" },
     ],
   },

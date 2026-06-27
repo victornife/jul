@@ -110,6 +110,12 @@ type Deps struct {
 	// returns a receive channel of new entries and an unsubscribe function the
 	// caller must invoke when the stream closes. Nil disables log streaming.
 	SubscribeLogs func() (<-chan observability.LogEntry, func())
+
+	// PluginsCompiled reports whether this binary includes the WASM plugin
+	// runtime (the wasmplugins build tag). The Console v2 Plugins panel (Phase
+	// 4h) surfaces it so the guided editor can warn that declarations validate
+	// but the apply preflight rejects them on a lean build.
+	PluginsCompiled bool
 }
 
 // Server is the admin HTTP listener.
@@ -203,6 +209,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/tls", s.auth(http.HandlerFunc(s.handleTLS)))
 	mux.Handle("/api/security", s.auth(http.HandlerFunc(s.handleSecurity)))
 	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
+	mux.Handle("/api/plugins", s.auth(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("/api/search", s.auth(http.HandlerFunc(s.handleSearch)))
 	mux.Handle("/api/events", s.auth(http.HandlerFunc(s.handleEvents)))
 

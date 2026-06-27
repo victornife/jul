@@ -354,6 +354,48 @@ export const TrafficControlsSchema = z.object({
 });
 export type TrafficControls = z.infer<typeof TrafficControlsSchema>;
 
+// PluginAttachmentSchema is one place a plugin is referenced — a location
+// middleware chain, a location handler action, or a server-level chain. The
+// identity fields mirror the structured-patch location selector so the guided
+// attach/detach editor can target the exact location.
+export const PluginAttachmentSchema = z.object({
+  scope: z.string(), // "location" | "server"
+  role: z.string(), // "middleware" | "handler"
+  listen: z.string(),
+  server_names: z.array(z.string()).optional(),
+  match_type: z.string().optional(),
+  path: z.string().optional(),
+});
+export type PluginAttachment = z.infer<typeof PluginAttachmentSchema>;
+
+// PluginProjectionSchema is one declared [plugins.NAME] for the Plugins panel.
+// The inline module bytes are never projected — only the source kind ("path" or
+// "inline"). attachments lists where the plugin is used, so the panel can show
+// usage and guard removal.
+export const PluginProjectionSchema = z.object({
+  name: z.string(),
+  source: z.string(), // "path" | "inline"
+  path: z.string().optional(),
+  type: z.string(), // "middleware" | "handler"
+  config: z.record(z.string(), z.string()).optional(),
+  memory_limit: z.string().optional(),
+  timeout: z.string().optional(),
+  kv: z.boolean(),
+  fetch: z.boolean(),
+  allowed_hosts: z.array(z.string()).optional(),
+  attachments: z.array(PluginAttachmentSchema).optional(),
+});
+export type PluginProjection = z.infer<typeof PluginProjectionSchema>;
+
+export const PluginsProjectionSchema = z.object({
+  // compiled reports whether this binary includes the WASM plugin runtime (the
+  // wasmplugins build tag). When false, declarations still validate but the
+  // apply preflight rejects them, so the panel warns up front.
+  compiled: z.boolean(),
+  plugins: z.array(PluginProjectionSchema),
+});
+export type PluginsProjection = z.infer<typeof PluginsProjectionSchema>;
+
 // ── Query functions ──────────────────────────────────────────────────────────
 
 export function fetchOverview(): Promise<Overview> {
@@ -415,6 +457,10 @@ export function fetchSecurity(): Promise<SecurityProjection> {
 
 export function fetchTrafficControls(): Promise<TrafficControls> {
   return api<unknown>("/traffic-controls").then((d) => TrafficControlsSchema.parse(d));
+}
+
+export function fetchPlugins(): Promise<PluginsProjection> {
+  return api<unknown>("/plugins").then((d) => PluginsProjectionSchema.parse(d));
 }
 
 /** Fetches the runtime stats snapshot directly (used by traffic-control editors). */
@@ -602,6 +648,24 @@ export type LocationActionPatch =
   | { kind: "return"; status: number }
   | { kind: "deny" };
 
+// PluginDefPatch is the plugin_set payload — the guided editor's view of a
+// single [plugins.NAME] declaration. The module is identified by source ("path"
+// sets a new file; "inline" keeps an existing inline plugin's bytes, which the
+// console never transmits), never by raw WASM bytes. Durations/sizes are strings
+// (e.g. "16m", "100ms"); the validated apply re-parse enforces the rest (the
+// path exists, fetch needs allowed_hosts).
+export type PluginDefPatch = {
+  source: "path" | "inline";
+  path?: string;
+  type?: "middleware" | "handler";
+  config?: Record<string, string>;
+  memory_limit?: string;
+  timeout?: string;
+  kv?: boolean;
+  fetch?: boolean;
+  allowed_hosts?: string[];
+};
+
 export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
@@ -612,6 +676,10 @@ export type ConfigPatch =
   | ({ op: "location_clear_auth" } & RouteTarget)
   | ({ op: "location_set_match"; match_set: LocationMatchPatch } & RouteTarget)
   | ({ op: "location_set_action"; action: LocationActionPatch } & RouteTarget)
+  | ({ op: "location_attach_plugin"; plugin_name: string } & RouteTarget)
+  | ({ op: "location_detach_plugin"; plugin_name: string } & RouteTarget)
+  | { op: "plugin_set"; plugin_name: string; plugin: PluginDefPatch }
+  | { op: "plugin_remove"; plugin_name: string }
   | { op: "route_rename"; listen: string; server_names: string[]; new_server_names: string[] }
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
