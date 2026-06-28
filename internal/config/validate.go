@@ -848,6 +848,24 @@ func validatePlugins(plugins map[string]PluginConfig) []error {
 		if p.Fetch && len(p.AllowedHosts) == 0 {
 			errs = append(errs, fmt.Errorf("%s: fetch is enabled but allowed_hosts is empty (an allowlist is required)", where))
 		}
+		if p.MaxRequestBody.Bytes() < 0 {
+			errs = append(errs, fmt.Errorf("%s: max_request_body must not be negative", where))
+		}
+		if p.MaxResponseBody.Bytes() < 0 {
+			errs = append(errs, fmt.Errorf("%s: max_response_body must not be negative", where))
+		}
+		if p.MaxFetchResponse.Bytes() < 0 {
+			errs = append(errs, fmt.Errorf("%s: max_fetch_response must not be negative", where))
+		}
+		if p.FetchTimeout.Std() < 0 {
+			errs = append(errs, fmt.Errorf("%s: fetch_timeout must not be negative", where))
+		}
+		if p.KVMaxEntries < 0 {
+			errs = append(errs, fmt.Errorf("%s: kv_max_entries must not be negative", where))
+		}
+		if p.KVMaxBytes.Bytes() < 0 {
+			errs = append(errs, fmt.Errorf("%s: kv_max_bytes must not be negative", where))
+		}
 	}
 	return errs
 }

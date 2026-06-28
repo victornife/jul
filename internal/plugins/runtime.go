@@ -127,6 +127,20 @@ type plugin struct {
 	configJSON   []byte
 	kv           KVStore
 
+	maxReqBody   int
+	maxRespBody  int
+	fetchTimeout time.Duration
+	maxFetchResp int
+	kvMaxEntries int
+	kvMaxBytes   int
+
+	// KV accounting bounds the per-plugin namespace independent of the shared
+	// store: kvKeys tracks each key's stored size so kv_set can reject an entry
+	// or a total that would exceed the plugin's quota.
+	kvMu    sync.Mutex
+	kvKeys  map[string]int
+	kvBytes int
+
 	log      *slog.Logger
 	onInvoke func(string, string, time.Duration)
 	onPanic  func(string)
@@ -159,9 +173,22 @@ func (m *Manager) compilePlugin(name string, pc config.PluginConfig) (*plugin, e
 		allowedHosts: pc.AllowedHosts,
 		configJSON:   cfgJSON,
 		kv:           m.kv,
+		maxReqBody:   sizeOr(pc.MaxRequestBody, maxRequestBodyBuffer),
+		maxRespBody:  sizeOr(pc.MaxResponseBody, maxResponseBodyBuffer),
+		fetchTimeout: pc.FetchTimeout.Std(),
+		maxFetchResp: sizeOr(pc.MaxFetchResponse, 1<<20),
+		kvMaxEntries: pc.KVMaxEntries,
+		kvMaxBytes:   sizeOr(pc.KVMaxBytes, 1<<20),
+		kvKeys:       make(map[string]int),
 		log:          m.log,
 		onInvoke:     m.onInvoke,
 		onPanic:      m.onPanic,
+	}
+	if p.fetchTimeout <= 0 {
+		p.fetchTimeout = 5 * time.Second
+	}
+	if p.kvMaxEntries <= 0 {
+		p.kvMaxEntries = 1024
 	}
 	if p.timeout <= 0 {
 		p.timeout = 100 * time.Millisecond
@@ -214,6 +241,14 @@ func (m *Manager) compilePlugin(name string, pc config.PluginConfig) (*plugin, e
 	return p, nil
 }
 
+// sizeOr returns the byte count of s, or def when s is non-positive.
+func sizeOr(s config.Size, def int) int {
+	if n := s.Bytes(); n > 0 {
+		return int(n)
+	}
+	return def
+}
+
 // loadModule reads the plugin's wasm bytes from its path or inline base64.
 func loadModule(pc config.PluginConfig) ([]byte, error) {
 	switch {
@@ -246,6 +281,26 @@ func (p *plugin) acquire() (api.Module, error) {
 
 func (p *plugin) release(mod api.Module) { p.pool.Put(mod) }
 
+// kvSet stores a value under an already-namespaced key, enforcing the plugin's
+// per-namespace quota: it rejects (returns false) a value that would push the
+// total byte size or the distinct-key count over the configured caps.
+func (p *plugin) kvSet(key string, val []byte) bool {
+	p.kvMu.Lock()
+	defer p.kvMu.Unlock()
+	prev, exists := p.kvKeys[key]
+	newTotal := p.kvBytes - prev + len(val)
+	if newTotal > p.kvMaxBytes {
+		return false
+	}
+	if !exists && len(p.kvKeys) >= p.kvMaxEntries {
+		return false
+	}
+	p.kv.Set(key, val)
+	p.kvKeys[key] = len(val)
+	p.kvBytes = newTotal
+	return true
+}
+
 // invoke runs the guest's handle_request for one HTTP request. It returns the
 // guest's action (Continue/Stop), the invocation holding any response the guest
 // produced, and an error if the guest trapped, panicked, or timed out (which the
@@ -258,7 +313,7 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 		return 0, nil, err
 	}
 
-	inv = &invocation{r: r, w: w, log: p.log}
+	inv = &invocation{r: r, w: w, log: p.log, maxReqBody: p.maxReqBody, maxRespBody: p.maxRespBody}
 	ctx, cancel := context.WithTimeout(withInvocation(parent, inv), p.timeout)
 	defer cancel()
 
@@ -281,6 +336,15 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 		p.onPanic(p.name)
 		p.onInvoke(p.name, "error", dur)
 		return 0, inv, callErr
+	}
+
+	// A host function may have rejected the request (oversize body, response
+	// overflow); treat that as a contained failure so the caller returns 500
+	// instead of serving a truncated request/response.
+	if inv.err != nil {
+		_ = mod.Close(context.Background())
+		p.onInvoke(p.name, "error", dur)
+		return 0, inv, inv.err
 	}
 
 	p.release(mod)

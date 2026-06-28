@@ -5,6 +5,7 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,12 +17,19 @@ import (
 
 // maxRequestBodyBuffer caps how much of a request body the host buffers so a
 // guest can read it (and the next handler can re-read it). Bodies larger than
-// this are truncated for the guest's view; the next handler still receives the
-// full, unmodified body.
+// this default ceiling fail the guest call; per-plugin max_request_body overrides.
 const maxRequestBodyBuffer = 1 << 20 // 1 MiB
 
 // maxResponseBodyBuffer caps the response body a guest may accumulate.
 const maxResponseBodyBuffer = 8 << 20 // 8 MiB
+
+// errBodyTooLarge and errRespTooLarge fail an invocation when the guest's view
+// of the request body would be truncated, or its response would overflow, rather
+// than silently serving partial data.
+var (
+	errBodyTooLarge = errors.New("plugin: request body exceeds max_request_body")
+	errRespTooLarge = errors.New("plugin: response body exceeds max_response_body")
+)
 
 // invocation is the per-request state the host functions read from the call
 // context. One is created per HTTP request and never shared across goroutines.
@@ -39,6 +47,14 @@ type invocation struct {
 	// never leaves a half-written response.
 	status   int
 	respBody []byte
+
+	// maxReqBody / maxRespBody bound how much request body is buffered and how
+	// much response body is accumulated. err records the first host-side failure
+	// (oversize body, response overflow) so invoke turns it into a 500 instead of
+	// serving truncated data.
+	maxReqBody  int
+	maxRespBody int
+	err         error
 }
 
 type invCtxKey struct{}
@@ -59,6 +75,12 @@ func (inv *invocation) flush() {
 	status := inv.status
 	if status == 0 {
 		status = http.StatusOK
+	}
+	// A guest may only set a real HTTP status; an out-of-range value is rejected
+	// rather than passed to WriteHeader (which would panic).
+	if status < 100 || status > 599 {
+		inv.log.Warn("plugin: invalid response status replaced with 500", "status", status)
+		status = http.StatusInternalServerError
 	}
 	inv.w.WriteHeader(status)
 	if len(inv.respBody) > 0 {
@@ -195,8 +217,13 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		if !inv.bodyBuffered {
 			inv.bodyBuffered = true
 			if inv.r.Body != nil {
-				lr := io.LimitReader(inv.r.Body, maxRequestBodyBuffer)
-				data, _ := io.ReadAll(lr)
+				// Read one byte past the cap to detect overflow; an oversize body
+				// fails the call rather than handing the guest a truncated view.
+				data, _ := io.ReadAll(io.LimitReader(inv.r.Body, int64(inv.maxReqBody)+1))
+				if len(data) > inv.maxReqBody {
+					inv.err = errBodyTooLarge
+					return 0
+				}
 				inv.body = data
 				// Restore the body so the next handler can read it in full.
 				inv.r.Body = io.NopCloser(bytes.NewReader(data))
@@ -211,7 +238,8 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		if inv == nil {
 			return
 		}
-		if len(inv.respBody)+int(n) > maxResponseBodyBuffer {
+		if len(inv.respBody)+int(n) > inv.maxRespBody {
+			inv.err = errRespTooLarge
 			return
 		}
 		data, ok := readMem(m, ptr, n)
@@ -254,8 +282,33 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		if !ok {
 			return -1
 		}
-		p.kv.Set(key, val)
+		if !p.kvSet(key, val) {
+			return -3 // quota exceeded
+		}
 		return 0
+	})
+
+	exp("fetch", func(ctx context.Context, m api.Module, methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, buf, limit uint32) int32 {
+		if !p.capFetch {
+			return -2
+		}
+		inv := invocationFrom(ctx)
+		if inv == nil {
+			return -4
+		}
+		method := readStr(m, methodPtr, methodLen)
+		rawURL := readStr(m, urlPtr, urlLen)
+		body, _ := readMem(m, bodyPtr, bodyLen)
+		status, respBody, err := p.doFetch(ctx, method, rawURL, body)
+		if err != nil {
+			inv.log.Warn("plugin: fetch denied", "name", p.name, "url", rawURL, "err", err)
+			if errors.Is(err, errFetchBlocked) {
+				return -3
+			}
+			return -4
+		}
+		writeInto(m, buf, limit, respBody)
+		return int32(status)
 	})
 
 	_, err := b.Instantiate(ctx)

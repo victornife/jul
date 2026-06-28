@@ -251,6 +251,24 @@ func (c *Config) applyDefaults() {
 		if p.Timeout == 0 {
 			p.Timeout = Duration(100 * time.Millisecond)
 		}
+		if p.MaxRequestBody == 0 {
+			p.MaxRequestBody = Size(1 << 20) // 1 MiB
+		}
+		if p.MaxResponseBody == 0 {
+			p.MaxResponseBody = Size(8 << 20) // 8 MiB
+		}
+		if p.FetchTimeout == 0 {
+			p.FetchTimeout = Duration(5 * time.Second)
+		}
+		if p.MaxFetchResponse == 0 {
+			p.MaxFetchResponse = Size(1 << 20) // 1 MiB
+		}
+		if p.KVMaxEntries == 0 {
+			p.KVMaxEntries = 1024
+		}
+		if p.KVMaxBytes == 0 {
+			p.KVMaxBytes = Size(1 << 20) // 1 MiB
+		}
 		c.Plugins[name] = p
 	}
 }

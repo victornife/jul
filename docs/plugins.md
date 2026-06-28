@@ -82,7 +82,10 @@ plugins = ["header-inject"]             # middleware for every location here
 | `memory_limit` | Guest linear-memory ceiling (default 16 MiB) |
 | `timeout` | Deadline for a single invocation (default 100ms) |
 | `kv` | Grant the key/value store host functions (namespaced per plugin) |
-| `fetch` / `allowed_hosts` | Grant guarded outbound HTTP (validated; reserved — see below) |
+| `kv_max_entries` / `kv_max_bytes` | Per-plugin KV quota (defaults 1024 keys / 1 MiB); a `kv_set` past either is rejected |
+| `fetch` / `allowed_hosts` | Grant guarded outbound HTTP to the allow-listed hosts (SSRF-guarded) |
+| `fetch_timeout` / `max_fetch_response` | Per-call deadline and response-size cap for `fetch` (defaults 5s / 1 MiB) |
+| `max_request_body` / `max_response_body` | Body buffering caps (defaults 1 MiB / 8 MiB); overflow fails the call, never truncates |
 
 Validation rules:
 
@@ -194,12 +197,13 @@ other languages can target it.
   | `get_request_header` | `(namePtr, nameLen, buf, limit u32) -> i32` | `-1` if absent |
   | `set_request_header` | `(namePtr, nameLen, valPtr, valLen u32)` | |
   | `set_response_header` | `(namePtr, nameLen, valPtr, valLen u32)` | |
-  | `read_request_body` | `(buf, limit u32) -> u32` | Caller-allocates; body is buffered lazily |
-  | `write_response_body` | `(ptr, n u32)` | Appends to the response body |
-  | `set_response_status` | `(code u32)` | |
+  | `read_request_body` | `(buf, limit u32) -> u32` | Caller-allocates; body buffered lazily up to `max_request_body`; oversize fails the call |
+  | `write_response_body` | `(ptr, n u32)` | Appends to the response body; overflow past `max_response_body` fails the call |
+  | `set_response_status` | `(code u32)` | A code outside `100–599` is replaced with `500` |
   | `get_config` | `(buf, limit u32) -> u32` | Caller-allocates; JSON object |
   | `kv_get` | `(keyPtr, keyLen, buf, limit u32) -> i32` | `-1` absent, `-2` capability denied |
-  | `kv_set` | `(keyPtr, keyLen, valPtr, valLen u32) -> i32` | `0` ok, `-2` capability denied |
+  | `kv_set` | `(keyPtr, keyLen, valPtr, valLen u32) -> i32` | `0` ok, `-2` capability denied, `-3` quota exceeded |
+  | `fetch` | `(methodPtr,methodLen,urlPtr,urlLen,bodyPtr,bodyLen,buf,limit u32) -> i32` | status on success, `-2` denied, `-3` blocked, `-4` error |
 
 **Caller-allocates convention.** Getters never allocate guest memory. The guest
 passes a buffer pointer and its size; the host copies up to that many bytes and
@@ -220,7 +224,10 @@ the guest grows it and calls again. The SDK helpers (`readInto`, `KVGet`,
   - **`kv`** — a per-plugin namespaced key/value store shared across that
     plugin's instances. Without the capability `kv_get`/`kv_set` return "denied".
   - **`fetch`** — a guarded outbound HTTP capability restricted to
-    `allowed_hosts` (validated in config; host function reserved, see below).
+    `allowed_hosts`. The host validates each URL against the allow-list, refuses
+    addresses that resolve to loopback/private/link-local/CGNAT/multicast ranges
+    (SSRF guard), re-checks the allow-list on every redirect, and caps the
+    response at `max_fetch_response` within `fetch_timeout`.
 
 ## Observability
 
@@ -237,9 +244,6 @@ Guest `log` output is emitted on the server log with the plugin name attached.
 
 The `jul-abi/v1` ABI is request-phase only in v1:
 
-- **`fetch` host function is reserved.** The `fetch`/`allowed_hosts` config is
-  validated but the outbound-HTTP host function is not implemented yet; it is
-  reserved for a future ABI revision.
 - **No separate response phase.** There is no `handle_response` export in v1.
   Response headers and status set during `handle_request` apply because they are
   written before the next handler runs.

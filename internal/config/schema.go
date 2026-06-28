@@ -109,6 +109,20 @@ type PluginConfig struct {
 	// AllowedHosts is the allowlist of hosts the guest may fetch from when Fetch
 	// is granted.
 	AllowedHosts []string `toml:"allowed_hosts"`
+	// MaxRequestBody caps the request body the host buffers for a guest. Zero
+	// applies a 1 MiB default; a larger body fails the call rather than truncating.
+	MaxRequestBody Size `toml:"max_request_body"`
+	// MaxResponseBody caps the response body a guest may accumulate. Zero applies
+	// an 8 MiB default; an overflow fails the call rather than dropping bytes.
+	MaxResponseBody Size `toml:"max_response_body"`
+	// FetchTimeout bounds a single outbound fetch. Zero applies a 5s default.
+	FetchTimeout Duration `toml:"fetch_timeout"`
+	// MaxFetchResponse caps a fetch response body. Zero applies a 1 MiB default.
+	MaxFetchResponse Size `toml:"max_fetch_response"`
+	// KVMaxEntries caps distinct keys per plugin. Zero applies a 1024 default.
+	KVMaxEntries int `toml:"kv_max_entries"`
+	// KVMaxBytes caps total stored bytes per plugin. Zero applies a 1 MiB default.
+	KVMaxBytes Size `toml:"kv_max_bytes"`
 }
 
 // WAFConfig configures the Coraza-based web application firewall, either
