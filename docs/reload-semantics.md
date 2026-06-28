@@ -106,6 +106,19 @@ server is already serving are gated. The operator restarts the process to apply
 the gated changes, rather than believing they took effect. See
 [console.md](console.md) for how the console surfaces this.
 
+### L4 stream listeners are not affected
+
+The bind-time freeze above applies to the **HTTP `[[servers]]`** listeners only.
+The L4 **`[[stream]]`** proxy stores every tunable (`proxy_pass`, `sni_routes`,
+`proxy_protocol`, `connect_timeout`, `idle_timeout`) in a forwarding *route*
+that the reload swaps atomically on each surviving listener, so those changes
+take effect on the next connection without a restart. The only bind-time
+properties are the `protocol` (TCP/UDP) and the `listen` address — and changing
+either keys a *different* listener, so the reload binds the new socket and drains
+the old one (the new address is bind-probed at apply time). Stream settings are
+therefore never silently not-applied, and no `restart_required` gate is needed
+for them. See [stream-proxy.md](stream-proxy.md#hot-reload).
+
 ## Optimistic concurrency
 
 The admin apply path is guarded by an optimistic-concurrency token

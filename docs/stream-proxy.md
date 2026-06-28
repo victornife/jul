@@ -205,6 +205,15 @@ The HTTP listeners are untouched throughout. Existing connections on a listener
 whose route changed continue on their original backend; new connections use the
 new route.
 
+Every per-listener setting — `proxy_pass`, `sni_routes`, `proxy_protocol`,
+`connect_timeout`, and `idle_timeout` — lives in that swapped route, so editing
+one takes effect on the next connection **without a restart**. Unlike the HTTP
+listeners, no `[[stream]]` setting is frozen at bind time. The only bind-time
+properties are `protocol` (TCP vs UDP) and `listen`; changing either identifies a
+*different* listener, so the reload binds the new socket and drains the old one
+rather than mutating the running one. See
+[Configuration reload semantics](reload-semantics.md#l4-stream-listeners-are-not-affected).
+
 ### Apply-time truthfulness
 
 When a reload is triggered by the **admin console / `/api/config/apply`**, the
