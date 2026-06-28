@@ -1,6 +1,6 @@
 # Engineering specs
 
-> Version 1.0 · Updated 2026-06-21
+> Version 1.1 · Updated 2026-06-28
 
 Detailed, per-feature engineering execution plans behind the [5-year roadmap](../roadmap/).
 These are the design source-of-truth: for each feature (`Y#-##`) they capture objective/scope,
@@ -22,6 +22,7 @@ For the high-level "why" and the delivery status of each feature, see:
 | 3 | Scale, fleet & ecosystem (clustering, multi-node config, RBAC/SSO, plugin registry) | [year-3.md](year-3.md) |
 | 4 | AI-native + edge platform (semantic cache, tokenizer-aware routing, image optimization) | [year-4.md](year-4.md) |
 | 5 | Global scale, mesh & cloud (geo-routing, service mesh, advanced edge security) | [year-5.md](year-5.md) |
+| — | Hardening & platform (pre-1.0 robustness: reload transaction, Console RBAC, metric cardinality, pre-commit gate, container hardening, config-parity patch-ops, SSRF allow-list) | [hardening-platform.md](hardening-platform.md) |
 
 ## Keeping these in sync
 
@@ -33,4 +34,5 @@ add an ADR. See the maintenance note in [../roadmap/](../roadmap/).
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-28 | 1.1 | Indexed the new cross-cutting [Hardening & platform spec](hardening-platform.md) (HP-01..HP-07 + micro-fixes register) — the design source-of-truth behind the roadmap's pre-1.0 robustness backlog. | The per-year index rows and sync guidance. | [hardening-platform.md](hardening-platform.md), [roadmap](../roadmap/) |
 | 2026-06-21 | 1.0 | Added a version stamp; corrected the Year-2 index blurb from "gRPC GA" to "gRPC streaming" (shipped at Beta, not GA). | The index, per-spec descriptions, and sync guidance. | [review 2026-06-21](../reviews/); [ADR 0003](../adr/0003-maturity-and-ga.md) |

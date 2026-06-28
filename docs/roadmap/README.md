@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.12 · Updated 2026-06-24
+> Version 1.13 · Updated 2026-06-28
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -102,6 +102,24 @@ Done.
 | --- | --- | --- | --- | --- |
 | Y2-08 | GraphQL composition prototype (`graphql` tag) | Schema-first, **explicit resolvers**, Query/Mutation over gRPC/REST unary, depth/complexity limits + resolver tracing from day one. **Not** "GraphQL without resolvers" ([ADR 0002](../adr/0002-protocol-adaptation.md)). | Users need BFF/composition over existing REST/gRPC | L |
 
+### Hardening & platform — pre-1.0 robustness 🚧
+
+Cross-cutting robustness work parked out of the pre-1.0 hardening pass (the Console
+v2 robustness phases) so it is tracked, not lost. These are **not** demand-gated
+vision items; they are near-term durability/parity work. The design source-of-truth
+is the [Hardening & platform spec](../specs/hardening-platform.md) (HP-01..HP-07 +
+the HP-m\* micro-fixes register). Nothing here has shipped.
+
+| ID | Item | Description | Impact / what it unlocks | Effort |
+| --- | --- | --- | --- | --- |
+| HP-01 | Unified reload transaction + `reload_timeout` | Single, time-bounded HTTP+stream reload (`[global].reload_timeout`, default 10s) with a truthful per-subsystem apply result `{http_ok,stream_ok,timed_out,…}` (apply is already write-time truthful via symmetric bind-probe preflight). | A reload can never stall while the UI says *applied* | M |
+| HP-02 | Console RBAC + multi-user | Named principals, roles (viewer/operator/admin), scoped revocable tokens; authz at the API boundary; per-principal audit attribution. Precursor to [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core). | Multiple operators under least-privilege with attributable audit | L |
+| HP-03 | Metric-cardinality & relabel strategy | Bounded label sets by construction + a relabel cookbook + series budget (the `host` label is already opt-in). | Predictable Prometheus cardinality at scale | M |
+| HP-04 | Pre-commit hooks / local gate parity | A repo-managed hook running the CI gate's fast path locally (fmt/vet/changed-pkg test + console lint/typecheck), full test + drift/size on push. | Red builds caught before they reach `main` | M |
+| HP-05 | Container & process-supervision hardening | Base-image digest pinning (Dependabot-maintained) + a `jul healthcheck` self target so a shell-less distroless image can declare a `HEALTHCHECK` (systemd resource/crash-loop limits already landed). | Self-healing containers + reproducible images | M |
+| HP-06 | Structured-config parity patch-ops | Create-ops for servers/routes/upstream pools + structured global-table ops (`[global]`/`[cache]`/`[compression]`/global `[rate_limit]`/`[admin]`/access-log), so the console need not drop to raw TOML (the raw editor stays the universal fallback). | Full structured editing parity with the raw editor | L |
+| HP-07 | SSRF allow-list hardening | Optional, default-off egress allow-list (host/CIDR) for config-driven JWKS/forward-auth/ACME/discovery fetches. Defense-in-depth — config is trusted per [SECURITY.md](../SECURITY.md), so this bounds operator-error blast radius, not a request-driven hole. | Limits outbound reach even with a mistaken/compromised config | M |
+
 ---
 
 ## Vision horizon — demand-gated ⬜
@@ -193,6 +211,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-06-28 | 1.13 | Added the **Hardening & platform** pre-1.0 robustness backlog (HP-01..HP-07) under *Planned*, with a dedicated [engineering spec](../specs/hardening-platform.md): unified reload transaction + `[global].reload_timeout`, Console RBAC/multi-user, metric-cardinality strategy, pre-commit gate parity, container/supervision hardening (image digest pinning + a `jul healthcheck` target), structured-config parity patch-ops, and an optional SSRF allow-list. This records the strategic items and work deferred out of the pre-1.0 hardening pass so they are tracked, not lost. | All Delivered/Planned feature rows, IDs, and maturity states; the 5-year vision horizon is unchanged and nothing moved to Delivered. | [specs/hardening-platform.md](../specs/hardening-platform.md) |
 | 2026-06-24 | 1.12 | Shipped **Y2-06 WAF** (Coraza + OWASP CRS, `waf` tag) and **SEC-1 secrets references** (core), both **Beta**. WAF adds block/detect engines per-location, embedded CRS (paranoia 0–4), inline SecLang rules, request/response body inspection, the `jul_waf_events_total` metric, and a Console **Status**/**Security** surface. SEC-1 adds `${env:}`/`${file:}`/`${secret:}` references resolved across all string config, automatic log redaction of resolved values, a `jul lint` rule for literal secrets, and a Console secret-reference count. Year-2 checklist **6/9 → 8/9**; committed remaining is now just Y2-09 Console. | All other feature rows, IDs, and maturity states; Y2-08 GraphQL stays deferred and AI-MVP stays a time-boxed bet. | [waf.md](../waf.md), [secrets.md](../secrets.md), [year-2.md](../specs/year-2.md), [status.md](../status.md) |
 | 2026-06-23 | 1.11 | Recorded the **Console v2 substrate migration** under Y2-09: a one-time cutover from the hand-written v1 to a prebuilt, embedded **React/TS/Vite/Tailwind** SPA (Node-free build, no external assets, ~250 KB gz budget), closing Console GA gaps ① + ⑦ and targeting **GA — soak pending**. | All other feature rows, IDs, and maturity states; the Y2-09 continuous-panels framing stands (the cutover is a bounded exception). | [ADR 0006](../adr/0006-console-v2-stack.md); [console-v2 spec](../specs/console-v2.md) |
 | 2026-06-22 | 1.10 | Linked the new beginner-friendly [concepts appendix](../vision/appendix.md) (HTTP, proxies, TLS, caching, observability from first principles) from the intro. | All feature rows, IDs, maturity states, and the 5-year plan. | [appendix.md](../vision/appendix.md) |
