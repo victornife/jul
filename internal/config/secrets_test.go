@@ -57,8 +57,8 @@ func TestExpandSecretsEnvAndFile(t *testing.T) {
 
 func TestExpandSecretsErrors(t *testing.T) {
 	cases := map[string]*Config{
-		"missing env": {Admin: AdminConfig{Token: "${env:JUL_DOES_NOT_EXIST_XYZ}"}},
-		"missing file": {Admin: AdminConfig{Token: "${file:/no/such/secret/file}"}},
+		"missing env":    {Admin: AdminConfig{Token: "${env:JUL_DOES_NOT_EXIST_XYZ}"}},
+		"missing file":   {Admin: AdminConfig{Token: "${file:/no/such/secret/file}"}},
 		"unknown scheme": {Admin: AdminConfig{Token: "${vault:secret/data}"}},
 		"empty env":      {Admin: AdminConfig{Token: "${env:}"}},
 	}
