@@ -170,6 +170,12 @@ describe("PluginsPanel", () => {
     expect(screen.getByText("handler")).toBeInTheDocument();
   });
 
+  it("marks the panel Beta per the maturity model", async () => {
+    render(<PluginsPanel />, { wrapper: Wrapper });
+    await screen.findByText("inject");
+    expect(screen.getByText("beta")).toBeInTheDocument();
+  });
+
   it("shows the attachment and a detach control for a middleware plugin", async () => {
     render(<PluginsPanel />, { wrapper: Wrapper });
     expect(await screen.findByText(/:8080 \/api/)).toBeInTheDocument();

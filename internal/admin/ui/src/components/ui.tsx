@@ -97,6 +97,30 @@ export function Badge({
   );
 }
 
+// ── MaturityBadge ───────────────────────────────────────────────────────────-
+// Honest feature-maturity labeling per ADR 0003: a feature that is implemented
+// but not yet at the GA bar is marked Beta so operators set correct
+// expectations. Tooltip explains the level; the link to the maturity model is in
+// the Console guide.
+type Maturity = "beta" | "best-effort" | "experimental";
+
+const MATURITY_HINT: Record<Maturity, string> = {
+  beta: "Beta — usable, with known limitations; config/API may change before GA.",
+  "best-effort": "Best-effort — no stability or completeness guarantees.",
+  experimental: "Experimental — may change or be removed.",
+};
+
+export function MaturityBadge({ level = "beta" }: { readonly level?: Maturity }) {
+  return (
+    <span
+      title={MATURITY_HINT[level]}
+      className="inline-block rounded-full bg-jul-warning/15 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-jul-warning"
+    >
+      {level}
+    </span>
+  );
+}
+
 // ── Card ───────────────────────────────────────────────────────────────────--
 
 export function Card({

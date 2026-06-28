@@ -342,6 +342,12 @@ passthrough, PROXY protocol), matching the validator. In a build without the
 `stream` tag the editor still works, but a lean binary refuses to start with
 `[[stream]]` declared, so the panel warns up front.
 
+The **Streams** and **Plugins** panels carry a **Beta** badge: per the
+[maturity model](adr/0003-maturity-and-ga.md) they are usable with known
+limitations and may change before GA, while core HTTP and gRPC are *GA — soak
+pending*. The [status matrix](status.md) is the source of truth for each
+feature's level.
+
 The TLS panel's **Mutual TLS** section adds guided **in-place editing** of
 client-certificate authentication on a TLS listener. The server-level editor
 sets the verification mode (`none` / `request` / `require`), the CA bundle and

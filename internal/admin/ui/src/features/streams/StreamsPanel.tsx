@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
-import { Loading } from "@/components/ui.tsx";
+import { Loading, MaturityBadge } from "@/components/ui.tsx";
 import {
   fetchStreams,
   type StreamProjection,
@@ -359,7 +359,10 @@ export function StreamsPanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">L4 streams</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold">L4 streams</h1>
+          <MaturityBadge level="beta" />
+        </div>
         <button
           type="button"
           onClick={() => {
