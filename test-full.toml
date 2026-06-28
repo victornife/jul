@@ -357,9 +357,10 @@ listen = "127.0.0.1:38443"
 
 # === Observability ========================================================
 [observability.tracing]
-enabled = false
+enabled = true
 endpoint = "http://127.0.0.1:4317"
 service_name = "jul-test"
+exporter = "otlp-grpc"
 
 [observability.access_log]
 sinks = ["stdout", "file"]
@@ -383,3 +384,5 @@ block_status = 403
 directives_files = ["testdata/waf/local-rules.conf"]
 inline_rules = ""
 response_body_check = false
+
+
