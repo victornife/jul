@@ -163,7 +163,16 @@ interface Selection {
 // Filters narrow the route list (Milestone 4.7): by action/type and by the
 // edge features applied to a location. They run entirely client-side over the
 // projection the API already serves and persist across sessions.
-type ActionFilter = "all" | "proxy" | "static" | "redirect" | "deny" | "return";
+type ActionFilter =
+  | "all"
+  | "proxy"
+  | "grpc"
+  | "grpc_transcode"
+  | "fastcgi"
+  | "static"
+  | "redirect"
+  | "deny"
+  | "return";
 type FeatureFilter = "all" | "auth" | "cache" | "compression" | "rate_limit" | "warnings";
 
 function locationMatches(
@@ -264,6 +273,9 @@ export function RoutesPanel() {
             >
               <option value="all">All actions</option>
               <option value="proxy">Proxy</option>
+              <option value="grpc">gRPC</option>
+              <option value="grpc_transcode">gRPC transcode</option>
+              <option value="fastcgi">FastCGI</option>
               <option value="static">Static</option>
               <option value="redirect">Redirect</option>
               <option value="deny">Deny</option>

@@ -332,6 +332,17 @@ describe("RoutesPanel", () => {
     render(<RoutesPanel />, { wrapper: Wrapper });
     expect(await screen.findByText("auth")).toBeInTheDocument();
   });
+
+  it("filters by protocol-adapter actions (grpc_transcode)", async () => {
+    render(<RoutesPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText("grpc_transcode")).toBeInTheDocument();
+    expect(screen.getByText("proxy")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: /Action/ }), {
+      target: { value: "grpc_transcode" },
+    });
+    expect(screen.getByText("grpc_transcode")).toBeInTheDocument();
+    expect(screen.queryByText("proxy")).not.toBeInTheDocument();
+  });
 });
 
 // ── AppsPanel health aggregation ──────────────────────────────────────────────

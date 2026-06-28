@@ -351,6 +351,12 @@ With mutual TLS now guided, the [capability matrix](#capability-matrix) below is
 the authoritative, per-feature breakdown of what is guided-editable versus
 raw-only today.
 
+The Routes panel filters the location list client-side by **action** — including
+the protocol-adapter kinds (proxy, gRPC, gRPC transcode, FastCGI, static,
+redirect, deny, return) — and by **feature** (auth, cache, compression, rate
+limit, warnings), so large configs stay navigable. Filters persist across
+sessions and never call the server.
+
 ### Web application firewall (WAF)
 
 The Security panel reports the WAF posture truthfully rather than implying a
