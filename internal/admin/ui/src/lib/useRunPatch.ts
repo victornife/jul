@@ -4,10 +4,10 @@ import { patchConfig, ConfigRejectedError, type ConfigPatch } from "@/api/client
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
 // useRunPatch previews a structured patch and hands the resulting diff to the
-// Config editor for Validate → Diff → Apply — it never writes directly (mirrors
-// the Plugins/Streams/Apps editors). Shared by the mutual-TLS editor and the TLS
-// panel's per-location require_client_cert toggle so both route through the same
-// flow.
+// Config editor for Validate → Diff → Apply — it never writes directly. It is the
+// single shared handoff hook used by every structured editor (Plugins, Streams,
+// Apps, mutual-TLS, and the TLS panel's per-location require_client_cert toggle)
+// so they all route through the same flow.
 export function useRunPatch(): {
   readonly error: string | null;
   readonly busy: boolean;

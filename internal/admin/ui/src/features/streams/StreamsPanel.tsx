@@ -1,17 +1,13 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading } from "@/components/ui.tsx";
 import {
-  patchConfig,
   fetchStreams,
-  ConfigRejectedError,
-  type ConfigPatch,
   type StreamProjection,
 } from "@/api/client.ts";
-import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import { useRunPatch } from "@/lib/useRunPatch.ts";
 import {
   emptyStreamDraft,
   seedStreamDraft,
@@ -20,42 +16,6 @@ import {
   streamSummary,
   type StreamDraft,
 } from "@/lib/streams.ts";
-
-// useRunPatch previews a structured patch and hands the resulting diff to the
-// Config editor for Validate → Diff → Apply — it never writes directly (mirrors
-// the Plugins/Apps/Security editors).
-function useRunPatch(): {
-  readonly error: string | null;
-  readonly busy: boolean;
-  readonly run: (patch: ConfigPatch) => void;
-} {
-  const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  function run(patch: ConfigPatch): void {
-    setError(null);
-    setBusy(true);
-    void (async () => {
-      try {
-        const res = await patchConfig(patch);
-        setPendingDraft({
-          kind: "patch",
-          ops: [patch],
-          baseVersion: res.base_version,
-          previewDiff: res.diff,
-          candidate: res.candidate,
-        });
-        void navigate("/config");
-      } catch (err) {
-        setError(
-          err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.",
-        );
-        setBusy(false);
-      }
-    })();
-  }
-  return { error, busy, run };
-}
 
 function TextField({
   label,
