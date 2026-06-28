@@ -60,6 +60,18 @@ func (s *Server) addBytes(proto, dir string, n int64) {
 	}
 }
 
+func (s *Server) udpEvicted(reason string) {
+	if s.hooks.OnUDPSessionEvicted != nil {
+		s.hooks.OnUDPSessionEvicted(reason)
+	}
+}
+
+func (s *Server) udpRejected() {
+	if s.hooks.OnUDPSessionRejected != nil {
+		s.hooks.OnUDPSessionRejected()
+	}
+}
+
 // route is the immutable forwarding decision for a listener: the default and
 // SNI-keyed backend pools plus the per-connection options. A reload publishes a
 // new route via the listener's atomic pointer; existing connections keep the
@@ -72,6 +84,7 @@ type route struct {
 	proxyOut       bool
 	connectTimeout time.Duration
 	idleTimeout    time.Duration
+	maxUDPSessions int
 
 	// pools owns every pool referenced above so a replaced route can be torn
 	// down. Pool.Close is idempotent.
@@ -92,6 +105,7 @@ type listener struct {
 
 	udpMu       sync.Mutex
 	udpSessions map[string]*udpSession
+	udpPending  map[string]*udpPending
 }
 
 // Reload applies the desired stream configuration transactionally: all routes
@@ -257,12 +271,16 @@ func (s *Server) buildRoute(st config.StreamServer, upstreams map[string]config.
 		proto:          normProto(st.Protocol),
 		connectTimeout: st.ConnectTimeout.Std(),
 		idleTimeout:    st.IdleTimeout.Std(),
+		maxUDPSessions: st.MaxUDPSessions,
 	}
 	if r.connectTimeout <= 0 {
 		r.connectTimeout = 10 * time.Second
 	}
 	if r.idleTimeout <= 0 {
 		r.idleTimeout = 5 * time.Minute
+	}
+	if r.maxUDPSessions <= 0 {
+		r.maxUDPSessions = 10000
 	}
 	switch strings.ToLower(strings.TrimSpace(st.ProxyProtocol)) {
 	case "in":
@@ -305,6 +323,7 @@ func (s *Server) bindListener(key string, r *route) (*listener, error) {
 		proto:       proto,
 		addr:        addr,
 		udpSessions: map[string]*udpSession{},
+		udpPending:  map[string]*udpPending{},
 	}
 	l.route.Store(r)
 	if proto == "udp" {

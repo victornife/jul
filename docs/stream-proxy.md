@@ -57,6 +57,7 @@ Each `[[stream]]` block is one listener.
 | `proxy_protocol` | string | `""` | PROXY-protocol mode (TCP only): `""`, `in`, `out`, `both` |
 | `connect_timeout` | duration | `10s` | Backend dial timeout |
 | `idle_timeout` | duration | `5m` | Close a relayed connection / UDP session after this idle period |
+| `max_udp_sessions` | int | `10000` | Cap on concurrent UDP sessions per listener (UDP only); see [UDP proxying](#udp-proxying) |
 
 Provide at least one of `proxy_pass` or `sni_routes`. A `"*"` key in `sni_routes`
 is a catch-all that takes precedence over `proxy_pass`. UDP listeners are plain
@@ -162,10 +163,36 @@ listen = "0.0.0.0:53"
 protocol = "udp"
 proxy_pass = "dns_pool"
 idle_timeout = "30s"
+max_udp_sessions = 20000
 ```
 
 UDP is a plain relay: SNI routing, TLS passthrough, and the PROXY protocol do not
 apply and are rejected on a UDP block.
+
+### Session model, limits, and the public internet
+
+UDP has no connections, so a session is just state Jul.IA holds per source
+address: a backend socket, the chosen pool backend, and a last-seen timestamp.
+Because source addresses are trivially **spoofed**, an unbounded session table is
+a denial-of-service vector — a flood of distinct source addresses would exhaust
+memory and backend sockets. Two bounds keep it safe to expose UDP to the public
+internet:
+
+- **`idle_timeout`** reaps a session once both directions go quiet, returning its
+  backend socket to the pool. Keep it as short as the protocol tolerates (a few
+  seconds for DNS, longer for long-lived flows).
+- **`max_udp_sessions`** is a hard per-listener cap (default `10000`). When the
+  cap is reached and a **new** client arrives, Jul.IA reclaims the
+  least-recently-seen session **only if it is already idle past `idle_timeout`**;
+  otherwise the new datagram is **dropped**. Established, active flows are never
+  evicted to admit a newcomer, so a source-address flood is rejected rather than
+  displacing legitimate sessions. Size the cap to your expected concurrency plus
+  headroom; lower it on exposed listeners to bound resource use.
+
+Session creation never blocks the listener's other sessions: the backend dial
+runs without holding the session lock, and concurrent datagrams for the same new
+client dial exactly one backend (the rest share the result), so a slow backend
+stalls only that client, not the whole listener.
 
 ## Load balancing and health
 
@@ -232,6 +259,12 @@ and surfaces only in the Overview stream-status panel. See
 | ------ | ---- | ------ | ------- |
 | `jul_stream_active_conns` | gauge | `proto` | Currently open TCP connections / UDP sessions |
 | `jul_stream_bytes_total` | counter | `proto`, `direction` | Bytes relayed (`direction` is `up` to the backend or `down` to the client) |
+| `jul_stream_udp_sessions_evicted_total` | counter | `reason` | UDP sessions removed to enforce limits: `idle` (reaped after `idle_timeout`) or `lru` (reclaimed at the `max_udp_sessions` cap) |
+| `jul_stream_udp_sessions_rejected_total` | counter | — | New UDP clients dropped because a listener's `max_udp_sessions` cap was reached and no session was reclaimable |
+
+A rising `jul_stream_udp_sessions_rejected_total` means a UDP listener is at its
+session cap with all sessions active — raise `max_udp_sessions`, shorten
+`idle_timeout`, or investigate a possible source-address flood.
 
 ## Limits in v1
 

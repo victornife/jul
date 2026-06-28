@@ -51,6 +51,8 @@ type Metrics struct {
 	http3Conns       prometheus.Gauge
 	streamConns      *prometheus.GaugeVec
 	streamBytes      *prometheus.CounterVec
+	streamUDPEvicted *prometheus.CounterVec
+	streamUDPReject  prometheus.Counter
 	certExpiry       *prometheus.GaugeVec
 	certRenewals     prometheus.Counter
 	mtlsHandshakes   *prometheus.CounterVec
@@ -203,6 +205,14 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_stream_bytes_total",
 			Help: "Bytes relayed by the L4 stream proxy, labeled by protocol (tcp/udp) and direction (up to backend / down to client).",
 		}, []string{"proto", "direction"}),
+		streamUDPEvicted: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_stream_udp_sessions_evicted_total",
+			Help: "UDP sessions removed by the L4 stream proxy to enforce limits, labeled by reason: 'idle' (reaped after idle_timeout) or 'lru' (reclaimed to admit a new client at the session cap).",
+		}, []string{"reason"}),
+		streamUDPReject: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "jul_stream_udp_sessions_rejected_total",
+			Help: "New UDP clients dropped because a listener's max_udp_sessions cap was reached and no session was reclaimable.",
+		}),
 		certExpiry: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_tls_cert_expiry_seconds",
 			Help: "Leaf certificate expiry as a Unix timestamp, labeled by domain.",
@@ -247,6 +257,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.http3Conns,
 		m.streamConns,
 		m.streamBytes,
+		m.streamUDPEvicted,
+		m.streamUDPReject,
 		m.certExpiry,
 		m.certRenewals,
 		m.mtlsHandshakes,
@@ -523,6 +535,19 @@ func (m *Metrics) ObserveStreamBytes(proto, direction string, n int64) {
 		return
 	}
 	m.streamBytes.WithLabelValues(proto, direction).Add(float64(n))
+}
+
+// StreamUDPEvicted counts a UDP session removed to enforce limits, by reason
+// ("idle" reaped after idle_timeout or "lru" reclaimed at the session cap). It
+// is supplied to the stream proxy so that package stays decoupled from metrics.
+func (m *Metrics) StreamUDPEvicted(reason string) {
+	m.streamUDPEvicted.WithLabelValues(reason).Inc()
+}
+
+// StreamUDPRejected counts a new UDP client dropped because a listener's
+// max_udp_sessions cap was reached and no session was reclaimable.
+func (m *Metrics) StreamUDPRejected() {
+	m.streamUDPReject.Inc()
 }
 
 // hostLabel strips the port so metric cardinality stays bounded by hostname.

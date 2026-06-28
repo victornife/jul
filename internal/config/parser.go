@@ -126,6 +126,9 @@ func (c *Config) applyDefaults() {
 		if st.IdleTimeout == 0 {
 			st.IdleTimeout = Duration(5 * time.Minute)
 		}
+		if st.MaxUDPSessions == 0 {
+			st.MaxUDPSessions = 10000
+		}
 	}
 
 	if c.Admin.Enabled && c.Admin.Listen == "" {

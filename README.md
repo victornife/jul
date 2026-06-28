@@ -1147,6 +1147,7 @@ proxy_protocol = "out"              # prepend a PROXY v2 header to the backend
 | `proxy_protocol` | string | HAProxy PROXY-protocol handling (TCP only): `""` (off), `"in"` (parse a header from the client), `"out"` (emit a v2 header to the backend), or `"both"` |
 | `connect_timeout` | duration | Backend dial timeout (default `10s`) |
 | `idle_timeout` | duration | Close a relayed connection / UDP session after this idle period (default `5m`) |
+| `max_udp_sessions` | int | Cap on concurrent UDP sessions per listener (UDP only, default `10000`); at the cap a new client reclaims an idle session or is dropped, bounding resource use under a source-address flood |
 
 Provide at least one of `proxy_pass` or `sni_routes`. UDP listeners are plain
 relays: `sni_routes`, `tls_passthrough`, and `proxy_protocol` are TCP-only and

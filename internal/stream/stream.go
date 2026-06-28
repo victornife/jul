@@ -29,6 +29,14 @@ type Hooks struct {
 	// OnBytes is invoked with the number of bytes relayed, labeled by protocol
 	// ("tcp"/"udp") and direction ("up" to backend, "down" to client).
 	OnBytes func(proto, direction string, n int64)
+	// OnUDPSessionEvicted is invoked when a UDP session is removed to enforce
+	// limits, labeled by reason: "idle" (reaped after idle_timeout) or "lru"
+	// (the least-recently-seen idle session reclaimed to admit a new client at
+	// the session cap).
+	OnUDPSessionEvicted func(reason string)
+	// OnUDPSessionRejected is invoked when a new UDP client is dropped because a
+	// listener's max_udp_sessions cap is reached and no session is reclaimable.
+	OnUDPSessionRejected func()
 }
 
 // Options configures a stream Server.

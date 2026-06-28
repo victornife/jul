@@ -73,6 +73,13 @@ type StreamServer struct {
 	// IdleTimeout closes a relayed connection/UDP session after this period with
 	// no traffic in either direction. Zero applies a 5m default.
 	IdleTimeout Duration `toml:"idle_timeout"`
+	// MaxUDPSessions caps the number of concurrent UDP sessions (one per client
+	// source address) a UDP listener tracks, bounding memory and backend sockets
+	// on the public internet where source addresses are cheap to spoof. When the
+	// cap is reached, an idle session is reclaimed to admit a new client; if none
+	// is reclaimable the new client's datagram is dropped. Zero applies a 10000
+	// default. Ignored for tcp listeners.
+	MaxUDPSessions int `toml:"max_udp_sessions"`
 }
 
 // PluginConfig declares a single WASM plugin. Exactly one of Path or Inline

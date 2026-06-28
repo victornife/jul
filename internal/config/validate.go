@@ -240,6 +240,9 @@ func validateStreams(streams []StreamServer, upstreamNames map[string]int) []err
 		if st.IdleTimeout < 0 {
 			errs = append(errs, fmt.Errorf("%s: 'idle_timeout' must not be negative", where))
 		}
+		if st.MaxUDPSessions < 0 {
+			errs = append(errs, fmt.Errorf("%s: 'max_udp_sessions' must not be negative", where))
+		}
 	}
 	return errs
 }

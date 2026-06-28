@@ -245,8 +245,10 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	streamSrv := stream.NewServer(stream.Options{
 		Logger: log,
 		Hooks: stream.Hooks{
-			OnConnDelta: metrics.StreamConnDelta,
-			OnBytes:     metrics.ObserveStreamBytes,
+			OnConnDelta:          metrics.StreamConnDelta,
+			OnBytes:              metrics.ObserveStreamBytes,
+			OnUDPSessionEvicted:  metrics.StreamUDPEvicted,
+			OnUDPSessionRejected: metrics.StreamUDPRejected,
 		},
 	})
 	defer func() { _ = streamSrv.Close() }()
