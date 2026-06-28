@@ -1,0 +1,41 @@
+# Labels-as-code sync. `.github/labels.yml` is the single source of truth for the
+# repository's issue/PR labels. On push to main this applies them; on a pull
+# request it runs in dry-run so label changes are reviewable before merge.
+#
+# skip-delete is false: a label removed from labels.yml is DELETED on the next
+# main-branch run. Set skip-delete: true below to make the sync additive-only
+# (never delete). `good first issue` / `help wanted` are protected via `exclude`.
+name: labels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/workflows/labels.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/workflows/labels.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  labeler:
+    name: sync labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Sync labels
+        uses: crazy-max/ghaction-github-labeler@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          yaml-file: .github/labels.yml
+          dry-run: ${{ github.event_name == 'pull_request' }}
+          skip-delete: false
+          exclude: |
+            help*
+            *issue
