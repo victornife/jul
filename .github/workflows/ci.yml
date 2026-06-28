@@ -220,7 +220,7 @@ jobs:
           version: v2.12.2
 
   console-frontend:
-    name: console frontend (${{ matrix.profile }))
+    name: console frontend (${{ matrix.profile }})
     runs-on: ubuntu-latest
     env:
       CONSOLE_UI: internal/admin/ui
