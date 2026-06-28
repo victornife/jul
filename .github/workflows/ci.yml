@@ -312,13 +312,20 @@ jobs:
         if: matrix.profile == 'source'
         run: |
           set -euo pipefail
-          if [ -n "$(git status --porcelain ${{ env.CONSOLE_DIST }}/)" ]; then
-            echo "ERROR: ${{ env.CONSOLE_DIST }} is out of date."
+          # Verify the committed embedded assets match a fresh build. Sourcemaps
+          # (*.map) are excluded: they are debug-only (never executed), are not
+          # size-gated, and are not byte-reproducible across build OS/toolchain
+          # (e.g. Windows vs the Linux runner), so gating on them is flaky. The
+          # served JS/CSS/HTML are deterministic and ARE verified.
+          drift="$(git status --porcelain -- "${CONSOLE_DIST}/" | grep -v '\.map$' || true)"
+          if [ -n "$drift" ]; then
+            echo "ERROR: ${CONSOLE_DIST} is out of date."
             echo "Run 'make console-build' locally and commit the generated assets."
-            git diff --stat ${{ env.CONSOLE_DIST }}/
+            echo "$drift"
+            git diff --stat -- "${CONSOLE_DIST}/" ':(exclude)*.map'
             exit 1
           fi
-          echo "Drift guard: embedded assets are current."
+          echo "Drift guard: embedded assets are current (sourcemaps excluded)."
 
       - name: upload build log
         if: always()
