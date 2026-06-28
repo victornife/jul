@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"io"
@@ -43,7 +44,7 @@ func TestHTTP3EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startHTTP3: %v", err)
 	}
-	defer func() { _ = h3.Close() }()
+	defer func() { _ = h3.Close(context.Background()) }()
 
 	addr := h3.(*h3Conn).ln.Addr().String()
 

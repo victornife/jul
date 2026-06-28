@@ -64,7 +64,7 @@ operator what to do:
 | **403** — authenticated but not permitted | "Access denied" | Use a token with admin access |
 | **404** — endpoint/feature absent | "Not available" | The capability may be disabled in this build or configuration; enable it or rebuild with its tag |
 | **409** — stale read | "Out of date" (with the server's reason) | Retry — the panel refetches the latest state |
-| **429** — rate-limited | "Too many requests" | Wait a moment, then retry |
+| **429** — rate-limited | "Too many requests" | Wait the suggested time, then retry. When the response carries a `Retry-After` header the message names the exact wait ("Wait N seconds, then retry") |
 | **5xx** — server error | "Server error" (with the server's detail) | Retry; check the server logs |
 | **network** — offline, DNS, reset | "Can't reach the server" | Check the server is running and your connection is stable |
 

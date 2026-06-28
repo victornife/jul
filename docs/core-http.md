@@ -179,7 +179,7 @@ failures a backend is parked for `fail_timeout` (default 10s). There is **no**
 | --- | --- | --- |
 | Request ID | always | `X-Request-ID` (incoming preserved or generated) |
 | Recover | always | converts a panic to 500; re-panics `http.ErrAbortHandler` |
-| Body limit | always | `client_max_body_size` via `MaxBytesReader` → 413 |
+| Body limit | always | `client_max_body_size`: an oversized declared `Content-Length` is rejected with 413 before the body is read; an unknown length trips via `MaxBytesReader` → 413 |
 | Timeout | when configured | `http.TimeoutHandler` → 503 |
 | Access log | when a sink is set | structured `slog` access records |
 | Rate limit | when enabled | 32-shard token bucket |

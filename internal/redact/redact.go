@@ -18,25 +18,43 @@ import (
 // Mask is the replacement written in place of a registered secret.
 const Mask = "***"
 
-// minLen is the shortest value the registry will mask. Masking one- or
-// two-character values would corrupt unrelated log text, so short secrets are
-// left unregistered (a token that short is not meaningfully secret anyway).
-const minLen = 4
+// DefaultMinLen is the default shortest value the registry will mask. Masking
+// one- or two-character values would corrupt unrelated log text, so short
+// secrets are left unregistered (a token that short is not meaningfully secret
+// anyway). SetMinLen can lower or raise this floor from the configuration.
+const DefaultMinLen = 4
 
 var (
 	mu      sync.RWMutex
+	minLen  = DefaultMinLen
 	secrets = map[string]struct{}{}
 )
 
+// SetMinLen sets the shortest value Add will mask. It is applied from the
+// configuration during secret resolution (and on every reload), so an operator
+// whose secrets are shorter than the default can opt into masking them at the
+// cost of possibly masking incidental short substrings of log text. A value
+// below 1 restores DefaultMinLen. Safe for concurrent use; intended to be
+// called before secrets are registered.
+func SetMinLen(n int) {
+	if n < 1 {
+		n = DefaultMinLen
+	}
+	mu.Lock()
+	minLen = n
+	mu.Unlock()
+}
+
 // Add registers a secret value to be masked from redacted output. Empty or very
-// short values are ignored. It is safe for concurrent use and idempotent.
+// short values (shorter than the current floor; see SetMinLen) are ignored. It
+// is safe for concurrent use and idempotent.
 func Add(value string) {
+	mu.Lock()
+	defer mu.Unlock()
 	if len(value) < minLen {
 		return
 	}
-	mu.Lock()
 	secrets[value] = struct{}{}
-	mu.Unlock()
 }
 
 // Count returns the number of distinct registered secret values.

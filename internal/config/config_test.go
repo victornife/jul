@@ -104,6 +104,17 @@ func TestValidateRejectsReserved(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsNegativeRedactFloor(t *testing.T) {
+	cfg := &Config{
+		Global:  GlobalConfig{RedactMinSecretLength: -1},
+		Servers: []ServerConfig{{Listen: "127.0.0.1:80"}},
+	}
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "redact_min_secret_length") {
+		t.Fatalf("expected redact_min_secret_length validation error, got %v", err)
+	}
+}
+
 func TestValidateStreams(t *testing.T) {
 	base := func() *Config {
 		return &Config{

@@ -138,8 +138,16 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			body, berr := req.GetBody()
 			if berr != nil {
 				t.pool.Release(b)
-				span.RecordError(berr)
-				return nil, berr
+				// The body could not be rewound for this retry. The meaningful
+				// error is the upstream failure that triggered the retry, not the
+				// rewind error, so surface lastErr when present (it always is on a
+				// retry, since i > 0 means a prior attempt failed).
+				err := berr
+				if lastErr != nil {
+					err = lastErr
+				}
+				span.RecordError(err)
+				return nil, err
 			}
 			out = req.Clone(req.Context())
 			out.Body = body

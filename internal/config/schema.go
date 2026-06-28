@@ -152,6 +152,11 @@ type GlobalConfig struct {
 	LogFormat string `toml:"log_format"`
 	// ShutdownTimeout is how long to wait for in-flight requests to drain.
 	ShutdownTimeout Duration `toml:"shutdown_timeout"`
+	// RedactMinSecretLength is the shortest resolved secret value that is masked
+	// from logs. Zero uses the default (4). Lower it (down to 1) when secrets are
+	// shorter than the default, accepting that short values may also mask
+	// incidental log text.
+	RedactMinSecretLength int `toml:"redact_min_secret_length"`
 }
 
 // ServerConfig is a virtual host bound to one listen address.

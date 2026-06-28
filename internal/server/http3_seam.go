@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -14,8 +15,11 @@ import (
 // build (http3_stub.go) never produces a value, so this stays a small interface
 // the untagged server lifecycle can hold and Close without importing quic-go.
 type h3Listener interface {
-	// Close stops serving HTTP/3 and releases the UDP socket.
-	Close() error
+	// Close stops serving HTTP/3 and releases the UDP socket, draining in-flight
+	// requests until ctx is done. The server lifecycle derives ctx from the
+	// configured shutdown_timeout so HTTP/3 drains on the same budget as the
+	// TCP listeners.
+	Close(ctx context.Context) error
 }
 
 // CheckHTTP3 reports whether the configuration can be served by this binary with

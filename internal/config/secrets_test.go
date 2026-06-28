@@ -71,6 +71,34 @@ func TestExpandSecretsErrors(t *testing.T) {
 	}
 }
 
+func TestExpandSecretsAppliesRedactFloor(t *testing.T) {
+	// The redact registry is a process-global; restore the default floor and use
+	// distinctive short values that cannot collide with other tests' Apply input.
+	defer redact.SetMinLen(redact.DefaultMinLen)
+	t.Setenv("JUL_TEST_SHORT", "Xq7") // 3 chars, below the default floor of 4
+
+	// Default floor (4): a 3-char resolved secret is not registered for masking.
+	c := &Config{Admin: AdminConfig{Token: "${env:JUL_TEST_SHORT}"}}
+	if err := ExpandSecrets(c); err != nil {
+		t.Fatalf("ExpandSecrets: %v", err)
+	}
+	if masked := redact.Apply("v=Xq7 w"); strings.Contains(masked, redact.Mask) {
+		t.Errorf("short secret masked at the default floor: %q", masked)
+	}
+
+	// Lowering redact_min_secret_length registers and masks the short secret.
+	c2 := &Config{
+		Global: GlobalConfig{RedactMinSecretLength: 3},
+		Admin:  AdminConfig{Token: "${env:JUL_TEST_SHORT}"},
+	}
+	if err := ExpandSecrets(c2); err != nil {
+		t.Fatalf("ExpandSecrets: %v", err)
+	}
+	if masked := redact.Apply("v=Xq7 w"); !strings.Contains(masked, redact.Mask) {
+		t.Errorf("short secret not masked after lowering the floor: %q", masked)
+	}
+}
+
 func TestExpandSecretsNoRefIsNoop(t *testing.T) {
 	c := &Config{Admin: AdminConfig{Token: "literal-token"}}
 	if err := ExpandSecrets(c); err != nil {

@@ -372,7 +372,8 @@ console = true
 | `log_level` | string | `debug`, `info` (default), `warn`, or `error` |
 | `log_format` | string | `text` (human-readable) or `json` |
 | `access_log` / `error_log` | string | Log destinations |
-| `shutdown_timeout` | duration | Grace period to drain in-flight requests on shutdown |
+| `shutdown_timeout` | duration | Grace period to drain in-flight requests on shutdown (also bounds the HTTP/3 drain) |
+| `redact_min_secret_length` | int | Shortest resolved secret value masked from logs; `0` uses the default (4). Lower it (down to 1) for short secrets, accepting possible masking of incidental log text |
 
 Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`, `512m`, etc.
 

@@ -37,10 +37,30 @@ export class ApiError extends Error {
     public readonly path: string,
     public readonly status: number,
     message: string,
+    /** Parsed Retry-After (whole seconds), when the response carried one. */
+    public readonly retryAfter?: number,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+/**
+ * parseRetryAfter reads a Retry-After header into whole seconds. The value is
+ * either a non-negative integer (delta-seconds, what Jul emits) or an HTTP-date;
+ * both forms are handled. Returns undefined when absent or unparseable.
+ */
+function parseRetryAfter(resp: Response): number | undefined {
+  const raw = resp.headers.get("Retry-After");
+  if (!raw) return undefined;
+  const secs = Number(raw);
+  if (Number.isFinite(secs) && secs >= 0) return Math.round(secs);
+  const when = Date.parse(raw);
+  if (!Number.isNaN(when)) {
+    const delta = Math.round((when - Date.now()) / 1000);
+    return delta > 0 ? delta : 0;
+  }
+  return undefined;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -58,7 +78,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // ignore parse failure
     }
-    throw new ApiError(path, resp.status, msg);
+    throw new ApiError(path, resp.status, msg, parseRetryAfter(resp));
   }
   return resp.json() as Promise<T>;
 }
@@ -91,6 +111,8 @@ export interface ApiErrorDescription {
   readonly status?: number;
   /** Whether retrying the same request might plausibly succeed. */
   readonly retryable: boolean;
+  /** Suggested wait before retrying, in whole seconds (from Retry-After). */
+  readonly retryAfter?: number;
 }
 
 /**
@@ -139,12 +161,18 @@ export function describeApiError(error: unknown, resource: string): ApiErrorDesc
       };
     }
     if (status === 429) {
+      const wait = error.retryAfter;
+      const waitMsg =
+        wait !== undefined && wait > 0
+          ? `Wait ${String(wait)} second${wait === 1 ? "" : "s"}, then retry.`
+          : "Wait a moment, then retry.";
       return {
         kind: "rateLimited",
         status,
         retryable: true,
         title: "Too many requests",
-        message: `The console is being rate-limited. Wait a moment, then retry.`,
+        message: `The console is being rate-limited. ${waitMsg}`,
+        ...(wait !== undefined ? { retryAfter: wait } : {}),
       };
     }
     if (status >= 500) {

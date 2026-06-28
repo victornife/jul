@@ -34,6 +34,10 @@ var secretRefAnyRE = regexp.MustCompile(`\$\{([A-Za-z_]+):([^}]*)\}`)
 // unresolved references, so secrets are never written back to disk or surfaced
 // through the console.
 func ExpandSecrets(c *Config) error {
+	// Apply the operator-configured redaction floor before any resolved secret is
+	// registered, so a lowered floor masks short secrets and a reload that
+	// removes the override restores the default.
+	redact.SetMinLen(c.Global.RedactMinSecretLength)
 	var errs []error
 	walkConfigStrings(c, func(s string) string {
 		out, err := resolveSecretRefs(s)

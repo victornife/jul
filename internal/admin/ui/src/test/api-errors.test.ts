@@ -55,6 +55,18 @@ describe("describeApiError", () => {
     expect(d.message).toContain("rate-limited");
   });
 
+  it("surfaces the Retry-After wait on a 429", () => {
+    const d = describeApiError(new ApiError("/api/overview", 429, "slow down", 12), "the overview");
+    expect(d.kind).toBe("rateLimited");
+    expect(d.retryAfter).toBe(12);
+    expect(d.message).toContain("Wait 12 seconds");
+  });
+
+  it("uses the singular form for a one-second Retry-After", () => {
+    const d = describeApiError(new ApiError("/api/overview", 429, "slow down", 1), "the overview");
+    expect(d.message).toContain("Wait 1 second,");
+  });
+
   it("maps 5xx to a retryable server error and includes the detail", () => {
     const d = describeApiError(new ApiError("/api/tls", 503, "backend down"), "TLS info");
     expect(d.kind).toBe("server");

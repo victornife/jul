@@ -372,7 +372,7 @@ func (s *Server) removeListener(addr string) {
 		_ = entry.httpd.Close()
 	}
 	if entry.h3 != nil {
-		_ = entry.h3.Close()
+		_ = entry.h3.Close(ctx)
 	}
 }
 
@@ -399,7 +399,7 @@ func (s *Server) shutdownAll(ctx context.Context) {
 			_ = e.httpd.Close()
 		}
 		if e.h3 != nil {
-			_ = e.h3.Close()
+			_ = e.h3.Close(ctx)
 		}
 	}
 }

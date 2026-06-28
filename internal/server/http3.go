@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -20,10 +19,6 @@ import (
 // only in builds with the http3 tag, which link the quic-go dependency.
 const http3Compiled = true
 
-// h3GracePeriod bounds how long Close waits for in-flight HTTP/3 requests to
-// finish (a GOAWAY-style drain) before the UDP socket is forcibly released.
-const h3GracePeriod = 5 * time.Second
-
 // h3Conn is a running HTTP/3 listener: the QUIC listener, the quic-go HTTP/3
 // server that handles accepted connections, and the UDP socket they share.
 type h3Conn struct {
@@ -32,11 +27,10 @@ type h3Conn struct {
 	udp    *net.UDPConn
 }
 
-// Close gracefully drains in-flight HTTP/3 requests (bounded by h3GracePeriod),
-// stops accepting new QUIC connections, and releases the UDP socket.
-func (c *h3Conn) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), h3GracePeriod)
-	defer cancel()
+// Close gracefully drains in-flight HTTP/3 requests (bounded by ctx, which the
+// server lifecycle derives from the configured shutdown_timeout), stops
+// accepting new QUIC connections, and releases the UDP socket.
+func (c *h3Conn) Close(ctx context.Context) error {
 	_ = c.server.Shutdown(ctx) // GOAWAY + drain; marks the server closed
 	err := c.ln.Close()        // unblock acceptLoop
 	_ = c.udp.Close()          // release the socket

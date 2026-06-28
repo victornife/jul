@@ -31,6 +31,10 @@ func Validate(c *Config) error {
 		errs = append(errs, errors.New("at least one [[servers]] block is required"))
 	}
 
+	if c.Global.RedactMinSecretLength < 0 {
+		errs = append(errs, fmt.Errorf("global: redact_min_secret_length must be >= 0, got %d", c.Global.RedactMinSecretLength))
+	}
+
 	// Index upstream names for proxy_pass reference checks and detect dups.
 	upstreamNames := map[string]int{}
 	for i, up := range c.Upstreams {

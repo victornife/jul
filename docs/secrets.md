@@ -87,9 +87,12 @@ line — an error string, a debug field — is masked wherever it appears.
 Notes on the redactor:
 
 - The registry **only grows**: secrets stay registered across reloads.
-- Values shorter than **4 characters** are deliberately **not** masked, to avoid
-  corrupting unrelated log text with a too-common substring (a secret that short
-  is not meaningfully secret).
+- Values shorter than the **redaction floor** (default **4 characters**) are
+  deliberately **not** masked, to avoid corrupting unrelated log text with a
+  too-common substring (a secret that short is not meaningfully secret). Lower
+  the floor with `[global] redact_min_secret_length` (down to `1`) when your
+  secrets are shorter than the default, accepting that short values may also mask
+  incidental log text; `0` keeps the default.
 - Redaction is best-effort defense-in-depth for logs; it is not a substitute for
   keeping secrets out of the config file in the first place (use references).
 
@@ -184,7 +187,8 @@ jul serve -config jul.toml
   alias) are supported. A managed secret-manager backend (HashiCorp Vault, cloud
   KMS) and SPIFFE/SVID identity are future work — `${secret:}` reserves the
   spelling.
-- **Redaction is substring-based and skips very short values** (< 4 chars), so it
+- **Redaction is substring-based and skips very short values** (below the floor,
+  default < 4 chars; tunable via `redact_min_secret_length`), so it
   is defense-in-depth, not a guarantee; keep secrets in references rather than
   relying on masking.
 - **Lint covers the highest-risk fields** (`admin.token`, Consul/Kubernetes

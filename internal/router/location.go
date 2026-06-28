@@ -95,6 +95,9 @@ func redirectHandler(loc config.LocationConfig) http.Handler {
 // redirectToHTTPS issues a redirect to the HTTPS equivalent of the request URL,
 // preserving host (port stripped) and request URI.
 func redirectToHTTPS(w http.ResponseWriter, r *http.Request, code int) {
+	// Config validation already restricts redirect_https to 301 or 308 (see
+	// config.Validate), so this coercion is belt-and-suspenders for an
+	// unvalidated zero value rather than a silent override of an operator choice.
 	if code != http.StatusMovedPermanently && code != http.StatusPermanentRedirect {
 		code = http.StatusMovedPermanently
 	}

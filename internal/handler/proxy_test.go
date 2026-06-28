@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/upstream"
 )
 
 func newProxy(t *testing.T, loc config.LocationConfig, ups map[string]config.UpstreamConfig) http.Handler {
@@ -177,6 +179,36 @@ func TestProxyFailover(t *testing.T) {
 		if rec.Code != http.StatusOK || rec.Body.String() != "live" {
 			t.Fatalf("request %d: failover = %d %q", i, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestProxyRetryRewindSurfacesUpstreamError(t *testing.T) {
+	// Two dead backends so the first attempt fails (setting lastErr) and the
+	// retry then attempts to rewind the request body. GetBody is rigged to fail,
+	// exercising the path that must surface the upstream failure rather than the
+	// body-rewind error.
+	up := config.UpstreamConfig{
+		Name:     "dead",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "127.0.0.1:1", Weight: 1}, {Address: "127.0.0.1:1", Weight: 1}},
+		MaxFails: 5,
+	}
+	pool, err := upstream.NewPool(up, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	tr := &balancingTransport{pool: pool, base: newProxyTransport(config.LocationConfig{})}
+
+	rewindErr := errors.New("rewind boom")
+	req := httptest.NewRequest(http.MethodGet, "http://edge/", strings.NewReader("body"))
+	req.GetBody = func() (io.ReadCloser, error) { return nil, rewindErr }
+
+	_, err = tr.RoundTrip(req)
+	if err == nil {
+		t.Fatal("expected an error from a request to two dead backends")
+	}
+	if errors.Is(err, rewindErr) {
+		t.Fatalf("surfaced the body-rewind error instead of the upstream failure: %v", err)
 	}
 }
 

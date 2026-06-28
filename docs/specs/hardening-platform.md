@@ -339,18 +339,19 @@ messages naming the blocked destination.
 ## Deferred micro-fixes register
 
 Small, low-priority items confirmed during the pre-1.0 review. Each is a contained
-change; parked here so they are tracked, not lost. Most are documented trade-offs
-today, not bugs.
+change; parked here so they are tracked, not lost. **All entries below shipped in
+v1.1 (2026-06-28); the table is retained as a record.** HP-m3 and HP-m6 were found
+already covered when the register was actioned (see notes).
 
-| ID | Item | Where | Note |
+| ID | Item | Where | Resolution |
 | --- | --- | --- | --- |
-| HP-m1 | `redact` leaves <4-char resolved secrets unmasked | `internal/redact` | Documented trade-off (avoids masking short non-secret tokens); make the floor configurable. |
-| HP-m2 | No upfront `Content-Length` 413 for body limits | body-limit middleware | Minor optimization: reject oversized requests before reading the body. |
-| HP-m3 | Invalid HTTPS-redirect status silently coerced to 301 | `router.go` `redirectToHTTPS` | Validate the configured redirect code at parse time instead of coercing. |
-| HP-m4 | Proxy retry returns `GetBody` error instead of `lastErr` | `internal/handler/proxy.go` | Minor error masking on the retry path; surface the real upstream error. |
-| HP-m5 | `h3GracePeriod` hardcoded `5s` | `http3.go` | Should track `shutdown_timeout` rather than a constant. |
-| HP-m6 | Audit CSV export endpoint not wired in the UI | Console Audit panel | Backend export exists; add the download control. |
-| HP-m7 | Rate-limit headers not surfaced in the Console | Console | Expose `Retry-After`/limit headers in the relevant panel. |
+| HP-m1 | `redact` leaves <4-char resolved secrets unmasked | `internal/redact` | ✅ Floor is configurable via `[global] redact_min_secret_length` (default 4), applied during secret resolution. |
+| HP-m2 | No upfront `Content-Length` 413 for body limits | body-limit middleware | ✅ A declared Content-Length over the limit is rejected with 413 before the body is read; unknown length still trips via `MaxBytesReader`. |
+| HP-m3 | Invalid HTTPS-redirect status silently coerced to 301 | `router.go` `redirectToHTTPS` | ✅ Already validated at parse time (`config.Validate` rejects any `redirect_https` other than 301/308); the runtime coercion is now documented as belt-and-suspenders. |
+| HP-m4 | Proxy retry returns `GetBody` error instead of `lastErr` | `internal/handler/proxy.go` | ✅ The retry-rewind path now surfaces the real upstream failure (`lastErr`) instead of the body-rewind error. |
+| HP-m5 | `h3GracePeriod` hardcoded `5s` | `http3.go` | ✅ HTTP/3 Close drains on the shutdown context, so it tracks `shutdown_timeout` like the TCP listeners. |
+| HP-m6 | Audit CSV export endpoint not wired in the UI | Console Audit panel | ✅ Already wired: the Audit panel has Export JSON/CSV controls backed by `downloadAuditExport` (auth-aware blob download). |
+| HP-m7 | Rate-limit headers not surfaced in the Console | Console | ✅ The API client parses `Retry-After` on 429 and the error taxonomy surfaces the wait time ("Wait N seconds, then retry"). |
 
 ---
 
@@ -368,4 +369,5 @@ today, not bugs.
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.1 | 2026-06-28 | Shipped the HP-m* micro-fixes register: HP-m1 configurable redaction floor (`[global] redact_min_secret_length`), HP-m2 upfront Content-Length 413, HP-m4 proxy retry surfaces the upstream error, HP-m5 HTTP/3 drain tracks `shutdown_timeout`, HP-m7 Console surfaces `Retry-After` on 429. HP-m3 (redirect-code validation) and HP-m6 (audit CSV export control) were already covered and are documented as such. Strategic items HP-01..HP-07 remain design-ahead. |
 | 1.0 | 2026-06-28 | Initial backlog spec. Captures the strategic items and deferred work parked out of the pre-1.0 hardening pass (Console v2 robustness Phases 1–4): HP-01 unified reload transaction + `reload_timeout`, HP-02 Console RBAC, HP-03 metric-cardinality strategy, HP-04 pre-commit gate parity, HP-05 container/supervision hardening (digest pinning + health target), HP-06 structured-config parity patch-ops, HP-07 SSRF allow-list hardening, plus the HP-m* micro-fixes register. Design-ahead only — nothing here has shipped. |
