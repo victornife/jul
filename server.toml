@@ -246,7 +246,7 @@ listen = "127.0.0.1:9090"
 #   # challenge = "http-01"          # "http-01" (default) or "tls-alpn-01"
 #   cache_dir = "./jul-data/certs"   # where issued certs are cached on disk
 #   # ocsp_stapling = true           # staple OCSP responses (default true)
-#   # dns_provider = "cloudflare"    # only used by builds with DNS-01 support
+#   # dns_provider = "cloudflare"    # reserved for a future DNS-01 release (rejected if set)
 #
 #   [[servers.locations]]
 #   match = { type = "prefix", path = "/" }

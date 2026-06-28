@@ -30,7 +30,7 @@
 set -euo pipefail
 
 # Keep in sync with .github/workflows/ci.yml `env.FULL_TAGS`.
-DEFAULT_TAGS="brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes"
+DEFAULT_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes"
 
 TAGS="${BENCH_TAGS:-$DEFAULT_TAGS}"
 BENCHTIME="${BENCHTIME:-2s}"

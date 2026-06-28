@@ -43,7 +43,7 @@ set -euo pipefail
 # Keep in sync with .github/workflows/ci.yml `env.FULL_TAGS` (minus waf, which the
 # soak does not exercise). The `soak` tag activates the soak tests; `stream` is
 # required for the udp-churn scenario.
-DEFAULT_TAGS="brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes"
+DEFAULT_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes"
 
 TAGS="soak ${SOAK_TAGS:-$DEFAULT_TAGS}"
 DURATION="${SOAK_DURATION:-30s}"

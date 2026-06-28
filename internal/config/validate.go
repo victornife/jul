@@ -149,6 +149,8 @@ func Validate(c *Config) error {
 		}
 	}
 
+	errs = append(errs, validateACMEConsistency(c.Servers)...)
+
 	if c.Admin.Enabled {
 		if strings.TrimSpace(c.Admin.Listen) == "" {
 			errs = append(errs, errors.New("[admin] enabled but 'listen' is empty"))
@@ -634,12 +636,55 @@ func validateACME(a *ACMEConfig, serverNames []string, where string) []error {
 	switch a.Challenge {
 	case "http-01", "tls-alpn-01":
 	case "dns-01":
-		errs = append(errs, fmt.Errorf("%s: challenge \"dns-01\" requires a build with DNS provider support (the \"acme_dns\" tag), which is not available in this build; use http-01 or tls-alpn-01", where))
+		errs = append(errs, fmt.Errorf("%s: challenge \"dns-01\" is reserved for a future release and not implemented; use http-01 or tls-alpn-01", where))
 	default:
 		errs = append(errs, fmt.Errorf("%s: invalid challenge %q (want http-01 | tls-alpn-01)", where, a.Challenge))
 	}
+	if strings.TrimSpace(a.DNSProvider) != "" {
+		errs = append(errs, fmt.Errorf("%s: dns_provider is reserved for a future DNS-01 release and not implemented; remove it", where))
+	}
 	if len(a.Domains) == 0 && len(serverNames) == 0 {
 		errs = append(errs, fmt.Errorf("%s: no domains to certify (set tls.acme.domains or the server's server_names)", where))
+	}
+	return errs
+}
+
+// validateACMEConsistency rejects divergent issuer settings across ACME-enabled
+// server blocks. A single autocert manager is built once at startup and shared
+// by every ACME block, so its email, CA, challenge, cache directory and OCSP
+// stapling are taken from the first enabled block; conflicting values in later
+// blocks would be silently ignored. Requiring them to match makes the runtime
+// behaviour predictable and surfaces typos at config time.
+func validateACMEConsistency(servers []ServerConfig) []error {
+	var errs []error
+	var ref *ACMEConfig
+	var refWhere string
+	for i := range servers {
+		srv := &servers[i]
+		if srv.TLS == nil || !srv.TLS.Enabled || srv.TLS.ACME == nil || !srv.TLS.ACME.Enabled {
+			continue
+		}
+		a := srv.TLS.ACME
+		where := fmt.Sprintf("servers[%d].tls.acme", i)
+		if ref == nil {
+			ref, refWhere = a, where
+			continue
+		}
+		if a.Email != ref.Email {
+			errs = append(errs, fmt.Errorf("%s: email %q differs from %s email %q; all ACME server blocks share one issuer and must agree", where, a.Email, refWhere, ref.Email))
+		}
+		if a.CA != ref.CA {
+			errs = append(errs, fmt.Errorf("%s: ca %q differs from %s ca %q; all ACME server blocks share one issuer and must agree", where, a.CA, refWhere, ref.CA))
+		}
+		if a.Challenge != ref.Challenge {
+			errs = append(errs, fmt.Errorf("%s: challenge %q differs from %s challenge %q; all ACME server blocks share one challenge type and must agree", where, a.Challenge, refWhere, ref.Challenge))
+		}
+		if a.CacheDir != ref.CacheDir {
+			errs = append(errs, fmt.Errorf("%s: cache_dir %q differs from %s cache_dir %q; all ACME server blocks share one certificate cache and must agree", where, a.CacheDir, refWhere, ref.CacheDir))
+		}
+		if a.OCSPStaplingEnabled() != ref.OCSPStaplingEnabled() {
+			errs = append(errs, fmt.Errorf("%s: ocsp_stapling differs from %s; all ACME server blocks share one staple setting and must agree", where, refWhere))
+		}
 	}
 	return errs
 }

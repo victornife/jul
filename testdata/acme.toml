@@ -16,7 +16,7 @@ server_names = ["localhost"]
   challenge = "http-01"             # or "tls-alpn-01"
   cache_dir = "./jul-data/certs"
   ocsp_stapling = true              # staple OCSP responses (default true)
-  # dns_provider = "cloudflare"     # only used by builds with DNS-01 support
+  # dns_provider = "cloudflare"     # reserved for a future DNS-01 release (rejected if set)
 
   [[servers.locations]]
   match = { type = "exact", path = "/health" }

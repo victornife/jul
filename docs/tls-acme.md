@@ -70,8 +70,8 @@ server_names = ["example.com", "www.example.com"]
 | `email` | string | — | **Required.** ACME account contact. |
 | `ca` | string | `"letsencrypt-staging"` | `"letsencrypt"`, `"letsencrypt-staging"`, or a full `https://` directory URL. |
 | `domains` | []string | server_names | Names to request. Falls back to the block's `server_names`. |
-| `challenge` | string | `"http-01"` | `"http-01"` or `"tls-alpn-01"`. `"dns-01"` is **not** supported in this build. |
-| `dns_provider` | string | — | Reserved for a future `acme_dns` build; ignored otherwise. |
+| `challenge` | string | `"http-01"` | `"http-01"` or `"tls-alpn-01"`. `"dns-01"` is **reserved for a future release** and rejected today. |
+| `dns_provider` | string | — | Reserved for a future DNS-01 release; setting it is rejected. |
 | `cache_dir` | string | `"./jul-data/certs"` | Directory cache for issued certs and the account key. |
 | `ocsp_stapling` | bool | `true` | Staple OCSP responses for ACME-issued certificates. |
 
@@ -89,7 +89,7 @@ server_names = ["example.com", "www.example.com"]
 | Static cert **hot reload** | ✅ | atomic provider swap on config reload, no rebind |
 | ACME HTTP-01 | ✅ (`acme`) | default; needs a plain HTTP listener |
 | ACME TLS-ALPN-01 | ✅ (`acme`) | answered on the TLS listener (`acme-tls/1`) |
-| ACME DNS-01 | ❌ | not implemented (reserved for an `acme_dns` build) |
+| ACME DNS-01 | ❌ | not implemented; reserved for a future release (rejected in validation) |
 | ACME staging / production / custom CA | ✅ (`acme`) | via `ca` |
 | ACME domain set **hot reload** | ❌ | fixed at startup; restart to change domains. The console refuses such an apply with a *restart required* notice rather than recording a no-op (see below) |
 | OCSP stapling (ACME certs) | ✅ (`acme`) | default on; degrades gracefully on fetch failure |
@@ -194,11 +194,17 @@ go test -run '^$' -bench 'SNICertSelection|TLSHandshakeServerAuth' -benchmem ./i
 - **OCSP stapling fails open.** If an OCSP responder is unreachable the
   certificate is served **unstapled** rather than failing the handshake; clients
   fall back to their own revocation behaviour.
+- **One ACME issuer per process.** A single autocert manager is built at startup
+  and shared by every ACME-enabled server block, so the issuer settings come from
+  the first block. Validation rejects an apply where blocks disagree on `email`,
+  `ca`, `challenge`, `cache_dir`, or `ocsp_stapling`; keep them identical across
+  ACME blocks.
 
 ## Limits
 
-- **No DNS-01 challenge.** Wildcard issuance via DNS is not available in this
-  build (reserved for a future `acme_dns` tag). Use per-name HTTP-01/TLS-ALPN-01.
+- **No DNS-01 challenge.** Wildcard issuance via DNS is not implemented; the
+  `dns-01` challenge and `dns_provider` are reserved for a future release and
+  rejected by validation. Use per-name HTTP-01/TLS-ALPN-01.
 - **ACME domain set is fixed at startup.** Adding or removing ACME domains needs
   a restart; static-file certificates and ACME *renewals* are unaffected.
 - **OCSP stapling is ACME-only.** Static file certificates are served without a

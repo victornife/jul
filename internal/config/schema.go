@@ -555,11 +555,10 @@ func (c *ClientAuthConfig) Active() bool {
 }
 
 // ACMEConfig configures automatic certificate management via the ACME protocol.
-// The "http-01" and "tls-alpn-01" challenges are supported; "dns-01" requires a
-// build with DNS provider support (the "acme_dns" tag) and is rejected by other
-// builds with a clear error. The feature itself is compiled only into builds
-// with the "acme" build tag; other builds reject an enabled block with a clear
-// "not compiled in this build" error.
+// Only the "http-01" and "tls-alpn-01" challenges are supported; "dns-01" is
+// reserved for a future release and is rejected by validation today. The feature
+// itself is compiled only into builds with the "acme" build tag; other builds
+// reject an enabled block with a clear "not compiled in this build" error.
 type ACMEConfig struct {
 	Enabled bool `toml:"enabled"`
 	// Email is the ACME account contact address (required when enabled).
@@ -572,11 +571,11 @@ type ACMEConfig struct {
 	// Defaults to the server block's server_names.
 	Domains []string `toml:"domains"`
 	// Challenge selects the ACME challenge type: "http-01" (default) or
-	// "tls-alpn-01". "dns-01" needs a build with DNS provider support.
+	// "tls-alpn-01". "dns-01" is reserved for a future release.
 	Challenge string `toml:"challenge"`
 	// DNSProvider names the DNS-01 provider plugin (e.g. "cloudflare"). It is a
-	// forward-looking seam: required by the "dns-01" challenge, which is only
-	// available in builds compiled with DNS provider support. Ignored otherwise.
+	// reserved seam for a future DNS-01 release and is not implemented; setting it
+	// is rejected by validation.
 	DNSProvider string `toml:"dns_provider"`
 	// CacheDir is where issued certificates and account keys are stored.
 	// Defaults to "./jul-data/certs".

@@ -73,7 +73,7 @@ rm -rf ./jul-data/certs   # drop staging certs before the production switch
   under `[servers.tls.acme]` to turn it off.
 - A binary built *without* `-tags acme` refuses to start with this config and
   prints a clear message, so the feature is never silently disabled.
-- Wildcard certificates need the `dns-01` challenge, which requires a build with
-  DNS provider support and is not available here.
+- Wildcard certificates need the `dns-01` challenge, which is reserved for a
+  future release and rejected today.
 - Certificate health is exported via the `jul_tls_cert_expiry_seconds` gauge and
   `jul_acme_renewals_total` counter on the admin metrics endpoint.

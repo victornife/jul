@@ -16,7 +16,7 @@ permissions:
 
 env:
   # Full opt-in build-tag set; keep in sync with .golangci.yml `run.build-tags`.
-  FULL_TAGS: "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
 
 jobs:
   build:
@@ -29,7 +29,7 @@ jobs:
           - profile: lean
             tags: ""
           - profile: full
-            tags: "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+            tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -51,7 +51,7 @@ jobs:
           - profile: lean
             tags: ""
           - profile: full
-            tags: "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+            tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6

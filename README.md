@@ -936,8 +936,8 @@ redirect_https = 308               # HTTP-01 challenges are answered here first
 | `email` | string | **Required.** ACME account contact address |
 | `ca` | string | `letsencrypt-staging` (default), `letsencrypt`, or a custom `https://` directory URL |
 | `domains` | []string | Certificate host names; defaults to the block's `server_names` |
-| `challenge` | string | `http-01` (default) or `tls-alpn-01`. `dns-01` needs a build with DNS provider support |
-| `dns_provider` | string | DNS-01 provider name (e.g. `cloudflare`). Forward-looking; only used by builds with DNS support |
+| `challenge` | string | `http-01` (default) or `tls-alpn-01`. `dns-01` is reserved for a future release |
+| `dns_provider` | string | Reserved for a future DNS-01 release; setting it is rejected |
 | `cache_dir` | string | Directory where issued certificates are cached and reused across restarts (default `./jul-data/certs`) |
 | `ocsp_stapling` | bool | Staple OCSP responses onto served certificates (default `true`) |
 
@@ -955,12 +955,15 @@ Notes and current limits:
   rather than breaking the handshake. Set `ocsp_stapling = false` to disable.
 - A single listener address may not mix ACME and static `cert`/`key` server
   blocks; validation rejects that so the certificate source is unambiguous.
+- All ACME server blocks share one issuer (one autocert manager per process):
+  `email`, `ca`, `challenge`, `cache_dir`, and `ocsp_stapling` must match across
+  blocks or validation rejects the apply.
 - The ACME domain set is fixed at startup — enabling ACME or adding domains
   needs a restart (a hot reload that newly enables ACME is rejected safely and
   the running config keeps serving).
-- The `dns-01` challenge (the only way to issue wildcard certificates) requires
-  a build with DNS provider support and is rejected by this build with a clear
-  error; `dns_provider` is accepted as a forward-looking configuration seam.
+- The `dns-01` challenge (the only way to issue wildcard certificates) is
+  reserved for a future release and rejected today with a clear error;
+  `dns_provider` is likewise reserved and rejected if set.
 - Certificate expiry and renewals are exported as the
   `jul_tls_cert_expiry_seconds` gauge and `jul_acme_renewals_total` counter.
 

@@ -45,7 +45,7 @@ Releases are a matrix of **operating system × architecture × profile**.
 | Profile | Build tags | Use when |
 | --- | --- | --- |
 | `lean` | _(none)_ | You want the smallest binary and only need the default HTTP feature set. |
-| `full` | `brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes waf` | You want every opt-in feature (the recommended default). |
+| `full` | `brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf` | You want every opt-in feature (the recommended default). |
 
 The build-tag list is kept in sync with `env.FULL_TAGS` in
 [release.yml](../.github/workflows/release.yml) and

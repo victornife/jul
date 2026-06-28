@@ -7,7 +7,6 @@ run:
     - brotli
     - zstd
     - acme
-    - acme_dns
     - console
     - otel
     - grpc
