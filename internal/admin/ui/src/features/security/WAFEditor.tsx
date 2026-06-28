@@ -263,7 +263,8 @@ export function WAFEditor({ current, onClose }: WAFEditorProps) {
                 className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 font-mono text-xs text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
               />
               <span className="text-xs text-jul-muted">
-                SecLang files loaded before the CRS and inline rules.
+                SecLang files loaded after the CRS and before inline rules — the place for rule
+                exclusions and tuning.
               </span>
             </label>
 

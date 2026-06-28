@@ -165,7 +165,8 @@ export function TrafficControlsPanel() {
           <p className="text-xs text-jul-muted">
             Per-server request body limit and read/write/idle timeouts. Configure these to
             protect the server from oversized or slow requests; the generated keys are placed
-            under the server block you choose in the editor.
+            under the server block you choose in the editor. The read/write/idle timeouts are
+            listener-level and require a restart to change on an existing listener.
           </p>
         </SectionCard>
 

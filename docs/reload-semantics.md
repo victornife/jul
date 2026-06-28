@@ -87,9 +87,24 @@ silently accepted:
 
 - **ACME issued-domain set / issuer** — frozen when the autocert manager is
   built at startup.
+- **Listener bind-time settings** — for an address the server already holds,
+  the socket is bound once at startup and reused across reloads. Changing the
+  global max-connections limit, the listener read/read-header/write/idle
+  timeouts, the max header bytes, or toggling HTTP/3 or h2c on an existing
+  listener cannot rebind it live. (These are taken from the *first* server
+  block on each `listen` address; later blocks sharing the address inherit it.)
+- **TLS handshake parameters on an existing listener** — the minimum TLS
+  version and the mutual-TLS client-auth policy (mode, trusted CAs, allowed
+  SANs, CRLs) are baked into the listener's TLS config at bind time.
+- **Tracing** — the OpenTelemetry tracer is wired once at startup, so enabling
+  or disabling tracing or changing its endpoint or sample ratio takes effect on
+  restart.
 
-The operator restarts the process to apply these, rather than believing they
-took effect. See [console.md](console.md) for how the console surfaces this.
+Adding a brand-new `listen` address (or a new server block on one) is *not*
+restart-required — the reload binds it fresh. Only changes to an address the
+server is already serving are gated. The operator restarts the process to apply
+the gated changes, rather than believing they took effect. See
+[console.md](console.md) for how the console surfaces this.
 
 ## Optimistic concurrency
 

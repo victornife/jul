@@ -157,7 +157,7 @@ const TITLES: Record<TrafficEditorKind, { title: string; subtitle: string }> = {
   limits: {
     title: "Limits & timeouts",
     subtitle:
-      "Request limits and timeouts protect the server from slow or oversized requests. These apply per server block, so the generated keys are placed under the [[servers]] block you choose in the editor.",
+      "Request limits and timeouts protect the server from slow or oversized requests. These apply per server block, so the generated keys are placed under the [[servers]] block you choose in the editor. The read/write/idle timeouts are listener-level (from the first server block on the address) and require a restart to change on an existing listener.",
   },
 };
 
@@ -667,6 +667,14 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 block via a structured edit — you review the diff before it is saved.
               </span>
             </label>
+
+            <p className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-warning">
+              The read, write, and idle timeouts are <strong>listener-level</strong>: they are
+              taken from the first server block on the listen address and fixed when the socket is
+              bound. Changing them on an address the server already serves cannot be hot-applied —
+              the apply reports <strong>restart required</strong>. The max request body size
+              hot-applies normally.
+            </p>
 
             <TextField
               label="Max request body size"

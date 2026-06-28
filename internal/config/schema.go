@@ -117,8 +117,9 @@ type WAFConfig struct {
 	// BlockStatus is the HTTP status returned when a request is blocked in
 	// "block" mode. Zero applies 403. A rule may override it via its own status.
 	BlockStatus int `toml:"block_status"`
-	// DirectivesFiles lists SecLang rule files to load, in order, before the
-	// CRS (when crs_enabled) and InlineRules.
+	// DirectivesFiles lists SecLang rule files to load, in order, after the
+	// CRS (when crs_enabled) and before InlineRules. They are post-CRS tuning
+	// files, so a rule exclusion can reference a CRS rule that already loaded.
 	DirectivesFiles []string `toml:"directives_files"`
 	// InlineRules is a SecLang snippet appended last (after files and the CRS).
 	// It is handy for small allow-list or tuning rules without a separate file.

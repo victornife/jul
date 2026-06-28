@@ -821,6 +821,25 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					if reason, need := server.ACMERestartRequired(prevCfg.Servers, cfg.Servers); need {
 						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 					}
+					// Likewise refuse a change to a bind-time-frozen listener
+					// setting (timeouts, header limits, h2c, HTTP/3, TLS minimum
+					// version, mutual TLS, or the connection cap) on an address
+					// that already serves: doReload swaps handlers and refreshes
+					// certificates but never rebinds a kept listener, so such an
+					// edit would persist yet never take effect until a restart.
+					// Reject it here so "applied" stays honest.
+					if reason, need := server.ListenerRebindRequired(prevCfg, cfg); need {
+						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+					}
+					// Tracing is wired once at startup (the OTLP exporter
+					// pipeline and the global tracing seam), so doReload keeps the
+					// running tracer. Reject a changed [observability.tracing]
+					// block here so it is not persisted while the live tracer
+					// stays on the old settings — the operator restarts to apply
+					// it, exactly like ACME.
+					if reason, need := server.TracingRestartRequired(prevCfg, cfg); need {
+						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+					}
 				}
 			}
 			if err := os.WriteFile(path, data, 0o644); err != nil {

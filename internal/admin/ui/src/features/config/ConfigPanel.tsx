@@ -163,7 +163,16 @@ export function ConfigPanel() {
       return applyPatchBatch(patchDraft.ops, patchDraft.baseVersion ?? conflictVersion);
     },
     onSuccess: (res) => {
+      // Reconcile the raw-editor state with the freshly-applied patch: the
+      // candidate is now the persisted config and res.version is its
+      // fingerprint. Without this, exiting patch mode leaves the editor looking
+      // dirty (draft still the candidate, baseline still the old config) and a
+      // follow-up raw apply trips a spurious 409 on the stale baseVersion.
+      const candidate = patchDraft?.candidate ?? current;
       setPatchDraft(null);
+      setBaseline(candidate);
+      setDraft(candidate);
+      setBaseVersion(res.version ?? undefined);
       setApplied(res.status ?? []);
       setConfirming(false);
       setConflictVersion(undefined);

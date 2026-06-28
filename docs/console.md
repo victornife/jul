@@ -221,6 +221,17 @@ A few settings are fixed when the process starts and cannot take effect on a hot
 apply. The clearest case is **automatic HTTPS (ACME)**: the issued-domain set and
 issuer are frozen when the autocert manager is built at startup, so enabling
 ACME, adding or removing domains, or changing the issuer cannot be hot-applied.
+The same applies to other startup-bound settings:
+
+- **Listener bind-time settings** on an address the server already holds — the
+  global max-connections limit, the listener read/read-header/write/idle
+  timeouts, the max header bytes, and toggling HTTP/3 or h2c. These come from
+  the first server block on each `listen` address and are fixed when the socket
+  is bound; adding a *new* listen address is still hot-applied.
+- **TLS handshake parameters** on an existing listener — the minimum TLS
+  version and the mutual-TLS client-auth policy (mode, CAs, allowed SANs, CRLs).
+- **Tracing** — the OpenTelemetry tracer is wired once at startup, so changing
+  the endpoint or sample ratio, or enabling/disabling it, requires a restart.
 
 When an apply is otherwise valid but changes such a setting, the write path
 **refuses it without persisting anything** and returns **HTTP 409** with
@@ -229,7 +240,8 @@ from the optimistic-concurrency conflict above — explaining that nothing was
 saved and that the operator must edit the configuration file and restart the
 server for the change to take effect. Removing ACME is not restart-required (the
 listener swaps to static certificates on the next reload). See
-[tls-acme.md](tls-acme.md#restart-required-acme-changes).
+[tls-acme.md](tls-acme.md#restart-required-acme-changes) and
+[reload-semantics.md](reload-semantics.md).
 
 ### Listener changes
 

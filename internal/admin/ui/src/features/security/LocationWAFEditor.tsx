@@ -238,7 +238,7 @@ export function LocationWAFEditor({ target, existing = true, onClose }: Location
 
             <TextArea
               label="Rule files"
-              hint="SecLang rule files to load, one path per line, before the CRS and inline rules."
+              hint="SecLang rule files to load, one path per line, after the CRS and before inline rules."
               value={draft.directivesFiles}
               placeholder={"/etc/jul/waf/custom.conf"}
               rows={3}

@@ -148,6 +148,12 @@ export function TracingEditor({ current, onClose }: TracingEditorProps) {
           binary without it rejects an enabled block at startup.
         </p>
 
+        <p className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-warning">
+          The OpenTelemetry tracer is wired once at startup, so tracing changes cannot be
+          hot-applied. Applying one reports <strong>restart required</strong>: the process must be
+          restarted with the new configuration for it to take effect.
+        </p>
+
         <Toggle
           label="Enable distributed tracing"
           checked={draft.enabled}

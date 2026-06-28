@@ -33,7 +33,7 @@ import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
 import { WizardPanel } from "@/features/wizard/WizardPanel.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
-import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
+import { takePendingDraft, setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -280,6 +280,91 @@ describe("ConfigPanel apply flow", () => {
 
     // An invalid draft must keep Apply disabled.
     expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
+  });
+
+  it("reconciles the raw editor after an atomic patch apply", async () => {
+    takePendingDraft(); // clear any leftover handoff state
+    let patchApplies = 0;
+    let rawApplyBaseVersion: string | null = null;
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(
+          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }),
+        );
+      }
+      if (url === "/api/config/patch/apply") {
+        patchApplies += 1;
+        return Promise.resolve(
+          json({
+            ok: true,
+            version: "v2",
+            summary: ["1 change"],
+            diff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+            status: [{ group: "Traffic", name: "TLS", active: true }],
+          }),
+        );
+      }
+      if (url.startsWith("/api/config/apply")) {
+        rawApplyBaseVersion = new URL(url, "http://x").searchParams.get("base_version");
+        return Promise.resolve(json({ ok: true, status: [], version: "v3" }));
+      }
+      if (url === "/api/config/validate") {
+        return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
+      }
+      if (url === "/api/config/diff") {
+        return Promise.resolve(json({ summary: "1 change" }));
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    setPendingDraft({
+      kind: "patch",
+      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+      baseVersion: "v1",
+      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+      candidate: 'listen = ":9000"\n',
+    });
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    // The panel lands in patch mode showing the read-only candidate.
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    expect(editor.value).toContain('listen = ":9000"');
+    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(patchBtn).toBeEnabled();
+    });
+
+    // Apply the patch through the confirm gate.
+    fireEvent.click(patchBtn);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await waitFor(() => {
+      expect(patchApplies).toBe(1);
+    });
+
+    // Patch mode is exited and the editor is clean: baseline now equals the
+    // applied candidate, so a fresh "Apply changes" button is disabled.
+    const rawBtn = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(rawBtn).toBeDisabled();
+    });
+
+    // A follow-up raw edit applies with the *new* base_version (v2) returned by
+    // the patch apply — not the stale v1 — so there is no spurious 409.
+    fireEvent.change(editor, { target: { value: 'listen = ":9001"\n' } });
+    await waitFor(() => {
+      expect(rawBtn).toBeEnabled();
+    });
+    fireEvent.click(rawBtn);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await waitFor(() => {
+      expect(rawApplyBaseVersion).toBe("v2");
+    });
   });
 });
 
