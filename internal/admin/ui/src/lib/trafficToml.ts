@@ -27,10 +27,10 @@ function escapeRe(s: string): string {
  * as part of the block so nested keys are replaced atomically.
  */
 export function upsertTopLevelTable(raw: string, table: string, fragment: string): string {
-  const lines = raw.split("\n");
+  const lines = raw.split(/\r?\n/);
   const headerRe = new RegExp(`^\\[+\\s*${escapeRe(table)}(\\.|\\s*\\]\\])`);
   const belongs = (line: string): boolean => {
-    const t = line.trimStart();
+    const t = line.trim();
     return t === `[${table}]` || headerRe.test(t);
   };
 
@@ -55,10 +55,10 @@ export function upsertTopLevelTable(raw: string, table: string, fragment: string
     }
   }
 
-  const before = lines.slice(0, start).join("\n").trimEnd();
+  const before = lines.slice(0, start).join("\n").trim();
   const after = lines.slice(end).join("\n").trim();
   const parts = [before, fragment, after].filter((p) => p.length > 0);
-  return parts.join("\n\n").trimEnd() + "\n";
+  return parts.join("\n\n").trim() + "\n";
 }
 
 // ── Compression (Milestone 3.1) ──────────────────────────────────────────────

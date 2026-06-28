@@ -38,7 +38,7 @@ function LocationRow({
   return (
     <tr
       onClick={onOpen}
-      className="cursor-pointer border-b border-jul-border last:border-b-0 hover:bg-jul-surface/60"
+      className="cursor-pointer border-b border-jul-border last:border-b-0 hover:bg-jul-border/30 transition-colors"
     >
       <td className="px-4 py-2">
         <span className="mr-1 text-xs text-jul-muted">{loc.type}</span>

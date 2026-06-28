@@ -20,7 +20,7 @@ function HealthDot({ healthy }: { readonly healthy: boolean | undefined }) {
 
 function BackendRow({ b }: { readonly b: BackendProjection }) {
   return (
-    <tr className="border-b border-jul-border last:border-b-0 hover:bg-jul-surface/60">
+    <tr className="border-b border-jul-border last:border-b-0 hover:bg-jul-border/30 transition-colors">
       <td className="px-4 py-2">
         <div className="flex items-center gap-2">
           <HealthDot healthy={b.healthy} />
@@ -44,7 +44,7 @@ function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen
   const totalCount = app.backends.length;
 
   return (
-    <div className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface" onClick={onOpen}>
+    <div className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface transition-colors hover:bg-jul-border/10" onClick={onOpen}>
       <div className="flex flex-wrap items-center gap-3 border-b border-jul-border px-4 py-3">
         <span className="font-semibold text-jul-text">{app.name}</span>
         <span className="rounded-full bg-jul-border px-2 py-0.5 text-xs text-jul-muted">
