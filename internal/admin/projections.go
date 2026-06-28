@@ -186,6 +186,11 @@ type SecurityProjection struct {
 	// WAFEnabled reports whether any location is protected by the web
 	// application firewall (the global [waf] or a per-location override).
 	WAFEnabled bool `json:"waf_enabled"`
+	// WAFCompiled reports whether this binary includes the WAF engine (the waf
+	// build tag). When false the apply preflight rejects an enabled WAF, so the
+	// Security panel warns up front rather than letting the operator configure a
+	// policy this build cannot enforce.
+	WAFCompiled bool `json:"waf_compiled"`
 	// WAFMode is the enforcement mode ("block" or "detect") of the first
 	// protected location seen, kept for backward compatibility; the per-mode
 	// distribution below is the authoritative summary.
@@ -619,8 +624,8 @@ func projectTLS(c *config.Config, live []CertStatus) []CertProjection {
 	return certs
 }
 
-func projectSecurity(c *config.Config) SecurityProjection {
-	sp := SecurityProjection{}
+func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
+	sp := SecurityProjection{WAFCompiled: wafCompiled}
 	for i := range c.Servers {
 		srv := &c.Servers[i]
 		if srv.TLS != nil && srv.TLS.ClientAuth != nil && srv.TLS.ClientAuth.Mode != "" && srv.TLS.ClientAuth.Mode != "none" {

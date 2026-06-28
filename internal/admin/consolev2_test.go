@@ -384,6 +384,37 @@ func TestSecurityProjection(t *testing.T) {
 	}
 }
 
+// TestSecurityProjectionWAFCompiled proves the projection reports whether this
+// binary includes the WAF engine, so the Security panel can warn up front when
+// an enabled WAF would be rejected by the apply preflight on a non-waf build.
+func TestSecurityProjectionWAFCompiled(t *testing.T) {
+	cfg := &config.Config{WAF: config.WAFConfig{Enabled: true, Mode: "block"}}
+	load := func() (*config.Config, error) { return cfg, nil }
+	for _, tc := range []struct {
+		name     string
+		compiled bool
+	}{
+		{"compiled", true},
+		{"lean", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t, config.AdminConfig{}, Deps{LoadConfig: load, WAFCompiled: tc.compiled})
+			rr := httptest.NewRecorder()
+			s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/security", nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			var out SecurityProjection
+			if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if out.WAFCompiled != tc.compiled {
+				t.Errorf("waf_compiled = %v, want %v", out.WAFCompiled, tc.compiled)
+			}
+		})
+	}
+}
+
 // TestSecurityProjectionWAFDistributionAndGlobal proves the projection reports
 // the real per-location enforcement mix and exposes the global [waf] policy
 // verbatim, so the Security panel is truthful and the guided editor can seed

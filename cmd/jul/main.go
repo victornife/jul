@@ -731,6 +731,10 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// preflight on a lean (non-wasmplugins) build.
 	deps.PluginsCompiled = plugins.Compiled
 	deps.StreamCompiled = stream.Compiled
+	// Security panel: report whether this binary can enforce WAF rules so the
+	// guided editor warns that an enabled WAF validates here but the apply
+	// preflight rejects it on a lean (non-waf) build.
+	deps.WAFCompiled = waf.Compiled
 	// Live operational panels for the console: upstream health from the pool
 	// registry, and configured-certificate metadata from the current config.
 	deps.Upstreams = func() []admin.UpstreamStatus { return adaptUpstreams(poolReg.Snapshot()) }

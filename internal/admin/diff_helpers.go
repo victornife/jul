@@ -622,7 +622,9 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: action + " global WAF"}, "waf global")
-		if !a.Enabled {
+		if a.Enabled {
+			d.warn("Enabling the WAF inspects requests against the configured rules; it only enforces in binaries built with the waf tag, and the apply preflight rejects an enabled WAF otherwise.")
+		} else {
 			d.warn("Disabling the global WAF removes rule inspection from routes that do not have a per-location override.")
 		}
 		return

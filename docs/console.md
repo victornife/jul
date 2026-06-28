@@ -352,6 +352,11 @@ single uniform policy:
   override**. Both use the same structured patch ops and diff review, so an
   override can be added, tuned, or removed without leaving the route surface.
 
+In a build without the `waf` tag the editors still work, but the apply preflight
+rejects a config that enables the WAF (globally or per location), so the Security
+panel warns up front and an apply diff flags the enable — matching the Plugins
+and Streams panels.
+
 ### Audit log
 
 Security- and config-relevant actions (apply, rollback, reload, auth failures)
@@ -420,6 +425,22 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 The guided surface grows continuously per [ADR 0004](adr/0004-console-ui-invariants.md);
 rows move from *Read-only* / *Raw-only* to *Structured-edit* as editors ship.
 
+### Build-tag degradation
+
+Several capabilities are compiled in only with their build tag (the `Full`
+edition includes them all; the lean `Core/OSS` build omits them). When a tag is
+absent the console **degrades transparently** rather than failing opaquely: the
+editor stays usable, but the limitation is disclosed up front and the apply
+preflight rejects a config that would enable the missing feature, so a draft is
+never silently dropped.
+
+| Feature (tag) | Panel | When the tag is absent |
+| --- | --- | --- |
+| WASM plugins (`wasmplugins`) | Plugins | Banner in the panel; apply diff warns; preflight rejects a config that declares plugins |
+| L4 stream proxy (`stream`) | Streams | Banner in the panel; apply diff warns; a lean binary refuses to start with `[[stream]]` |
+| Web application firewall (`waf`) | Security | Banner in the panel; apply diff warns; preflight rejects an enabled WAF |
+| Distributed tracing (`otel`) | Traffic Controls | Apply diff warns that spans only export from an `otel` build (config is accepted; tracing is a no-op otherwise) |
+
 ## API endpoint to panel map
 
 The console SPA is driven entirely by same-origin `/api` endpoints. Each panel
@@ -441,6 +462,19 @@ consumes the endpoints below.
 | Config editor / History | `GET /api/config` (+ `/raw`, `/validate`, `/diff`, `POST /apply`, `/patch`, `/patch/apply`, `/history`, `/history/{id}`, `/rollback`) |
 | Setup Wizard | `GET /api/wizard`, `POST /api/wizard/generate` |
 | Operational actions | `POST /cache/purge`, `POST /reload` |
+
+## Accessibility & keyboard operation
+
+The Console is operable by keyboard and screen reader, not just by mouse — part
+of the *Friendliest* pillar ([ADR 0004](adr/0004-console-ui-invariants.md)).
+Every control is a real focusable element reachable with `Tab` / `Shift+Tab`,
+and modal surfaces (the route/app **Drawer**, the **Confirm** dialog, the shared
+**Modal**, the **command palette**, and the re-authentication **token prompt**)
+behave as proper modal dialogs: focus moves into the dialog on open, `Tab` /
+`Shift+Tab` wrap **within** it so focus cannot leak to the page behind, and focus
+returns to the triggering control on close (WCAG 2.4.3). The full accessibility
+commitments, keyboard-shortcut map, and verification live in
+[accessibility.md](accessibility.md).
 
 ## Security model
 

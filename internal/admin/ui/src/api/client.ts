@@ -422,6 +422,11 @@ export const SecurityProjectionSchema = z.object({
   body_limit: z.string().optional(),
   require_cert_count: z.number(),
   waf_enabled: z.boolean(),
+  // waf_compiled reports whether this binary includes the WAF engine (the waf
+  // build tag). When false the apply preflight rejects an enabled WAF, so the
+  // panel warns up front. Defaults to true so an omitted field never shows a
+  // spurious "not compiled" banner.
+  waf_compiled: z.boolean().optional().default(true),
   waf_mode: z.string().optional(),
   waf_locations: z.number(),
   // Per-mode distribution of protected locations, so the panel shows the real

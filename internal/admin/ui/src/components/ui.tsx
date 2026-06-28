@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { useFocusTrap } from "@/lib/useFocusTrap.ts";
 
 // Shared component system for Console v2 (Milestone 4.5). These primitives wrap
 // the semantic jul-* design tokens so every screen looks consistent in both
@@ -371,6 +372,8 @@ export function Modal({
   readonly onClose: () => void;
   readonly footer?: ReactNode;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
       <button
@@ -380,10 +383,12 @@ export function Modal({
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative z-50 w-full max-w-lg space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5 shadow-xl"
+        className="relative z-50 w-full max-w-lg space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5 shadow-xl outline-none"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-jul-text">{title}</h2>

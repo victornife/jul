@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useFocusTrap } from "@/lib/useFocusTrap.ts";
 
 export interface DrawerProps {
   readonly title: string;
@@ -10,11 +11,15 @@ export interface DrawerProps {
 
 /**
  * Right-hand slide-over panel used for route and app detail/edit surfaces.
- * Escape closes it and focus stays within the document; the backdrop click
- * also dismisses it. It is intentionally simple (no focus trap library) to keep
- * the bundle lean.
+ * Escape closes it and the backdrop click also dismisses it. While open, focus
+ * is trapped within the panel (via useFocusTrap, no external library to keep the
+ * bundle lean) so keyboard users cannot tab into the obscured page behind it,
+ * and focus returns to the trigger on close.
  */
 export function Drawer({ title, subtitle, onClose, children, footer }: DrawerProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (e.key === "Escape") onClose();
@@ -33,7 +38,11 @@ export function Drawer({ title, subtitle, onClose, children, footer }: DrawerPro
         onClick={onClose}
         className="absolute inset-0 bg-black/50"
       />
-      <div className="relative flex h-full w-full max-w-xl flex-col border-l border-jul-border bg-jul-bg shadow-2xl">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className="relative flex h-full w-full max-w-xl flex-col border-l border-jul-border bg-jul-bg shadow-2xl outline-none"
+      >
         <div className="flex items-start justify-between gap-4 border-b border-jul-border px-6 py-4">
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold text-jul-text">{title}</h2>

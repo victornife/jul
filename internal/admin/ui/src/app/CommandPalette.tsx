@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useFocusTrap } from "@/lib/useFocusTrap.ts";
 
 export interface CommandItem {
   readonly to: string;
@@ -25,6 +26,8 @@ export function CommandPalette({ commands }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   // Global open shortcut: Ctrl+K (Windows/Linux) or Cmd+K (macOS). Escape closes.
   useEffect(() => {
@@ -97,10 +100,12 @@ export function CommandPalette({ commands }: CommandPaletteProps) {
         }}
       />
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-lg border border-jul-border bg-jul-surface shadow-2xl"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-lg border border-jul-border bg-jul-surface shadow-2xl outline-none"
       >
         <input
           ref={inputRef}

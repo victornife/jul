@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { authToken, UNAUTHORIZED_EVENT } from "@/api/client.ts";
+import { useFocusTrap } from "@/lib/useFocusTrap.ts";
 
 /**
  * AuthGate surfaces a first-class token prompt when the admin API rejects the
@@ -16,6 +17,8 @@ export function AuthGate() {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   useEffect(() => {
     function onUnauthorized(): void {
@@ -45,10 +48,12 @@ export function AuthGate() {
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[18vh]">
       <div className="absolute inset-0 bg-black/50" />
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Admin token required"
-        className="relative z-10 w-full max-w-md space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5 shadow-2xl"
+        className="relative z-10 w-full max-w-md space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5 shadow-2xl outline-none"
       >
         <div className="space-y-1">
           <h2 className="text-lg font-semibold text-jul-text">Admin token required</h2>

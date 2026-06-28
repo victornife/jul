@@ -1,7 +1,12 @@
 # Binaries (anchored to repo root so the cmd/jul/ source dir is NOT ignored)
 /jul
 /jul.exe
+/jul_test.exe
 /dist/
+
+# Go test binaries (`go test -c` / ad-hoc test builds)
+*.test
+*.test.exe
 
 # Rust example build output
 examples/rust-proxy/target/

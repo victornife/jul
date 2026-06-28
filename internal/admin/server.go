@@ -122,6 +122,12 @@ type Deps struct {
 	// so the guided editor can warn that declarations validate but a lean binary
 	// refuses to start with them.
 	StreamCompiled bool
+
+	// WAFCompiled reports whether this binary includes the web application
+	// firewall (the waf build tag). The Console Security panel surfaces it so the
+	// guided WAF editor can warn that a policy validates here but the apply
+	// preflight rejects an enabled WAF on a non-waf build.
+	WAFCompiled bool
 }
 
 // Server is the admin HTTP listener.

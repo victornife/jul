@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.6 · Updated 2026-06-28
+> Version 1.8 · Updated 2026-06-28
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -104,6 +104,8 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-06-28 | 1.8 | **Console accessibility — dialog focus management:** the route/app drawer, confirm dialog, shared modal, command palette, and re-auth token prompt now trap focus while open (`Tab` / `Shift+Tab` wrap within the dialog) and restore focus to the triggering control on close (WCAG 2.4.3), via a shared `useFocusTrap` hook with no added dependencies. Added the canonical [accessibility](accessibility.md) reference. | [accessibility.md](accessibility.md), [console.md](console.md), [adr/0004-console-ui-invariants.md](adr/0004-console-ui-invariants.md) |
+| 2026-06-28 | 1.7 | **Console build-tag degradation:** the Security panel now warns up front when the binary lacks the `waf` tag (mirroring the Plugins and Streams panels), and enabling the WAF in an apply diff flags that it only enforces in a `waf`-tagged build — so a feature compiled out is disclosed, never a silent no-op. | [console.md](console.md), [adr/0004-console-ui-invariants.md](adr/0004-console-ui-invariants.md) |
 | 2026-06-28 | 1.6 | **Console failure-state taxonomy:** panels classify a failed data load (401 / 403 / 404 / 409 / 429 / 5xx / network) into distinct, actionable messages instead of a single generic "Failed to load X", with a **Retry** action on retryable failures. | [console.md](console.md) |
 | 2026-06-28 | 1.5 | **Admin self-lockout guard:** an apply that would change admin reachability (disable admin, move its listen address, rotate its token, or disable the web console) is held with `409 admin_change` and requires `?confirm_admin=true`; the console surfaces a confirm-and-retry dialog. | [console.md](console.md), [SECURITY.md](../SECURITY.md) |
 | 2026-06-28 | 1.4 | **Reload truthfulness:** the admin apply path now bind-probes newly added `[[stream]]` listen addresses before writing the config, symmetric with the HTTP listener probe, so an unbindable stream port is rejected at apply time instead of failing in the asynchronous reload. Added the canonical [reload semantics](reload-semantics.md) reference. | [stream-proxy.md](stream-proxy.md), [reload-semantics.md](reload-semantics.md) |

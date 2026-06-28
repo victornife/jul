@@ -79,6 +79,13 @@ export function SecurityPanel() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Security</h1>
+      {!data.waf_compiled && (
+        <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-text">
+          This build does not include the web application firewall (the <code>waf</code> tag). You
+          can edit WAF policy here, but applying a config that enables the WAF will be rejected by
+          the apply preflight until you run a WAF-enabled binary.
+        </div>
+      )}
       <div className="rounded-lg border border-jul-border bg-jul-surface">
         <Row label="Authentication">
           <OnOff on={data.auth_enabled} />

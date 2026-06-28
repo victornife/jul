@@ -780,7 +780,7 @@ func (s *Server) handleTLS(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
-		writeJSON(w, http.StatusOK, projectSecurity(c))
+		writeJSON(w, http.StatusOK, projectSecurity(c, s.deps.WAFCompiled))
 	})(w, r)
 }
 

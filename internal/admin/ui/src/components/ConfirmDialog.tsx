@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useFocusTrap } from "@/lib/useFocusTrap.ts";
 
 export interface ConfirmDialogProps {
   readonly title: string;
@@ -13,7 +14,8 @@ export interface ConfirmDialogProps {
 /**
  * Accessible confirmation modal for irreversible operations (config apply,
  * rollback). Confirmation is always explicit — never a single unguarded click.
- * Focus moves to the dialog on open and Escape cancels.
+ * Focus moves to the primary action on open, is trapped within the dialog while
+ * it is open, and returns to the trigger on close; Escape cancels.
  */
 export function ConfirmDialog({
   title,
@@ -24,7 +26,9 @@ export function ConfirmDialog({
   onCancel,
   children,
 }: ConfirmDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement | null>(null);
+  useFocusTrap(dialogRef);
 
   useEffect(() => {
     confirmRef.current?.focus();
@@ -47,7 +51,7 @@ export function ConfirmDialog({
       aria-modal="true"
       aria-label={title}
     >
-      <div className="flex w-full max-w-lg flex-col gap-4 rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl">
+      <div className="flex w-full max-w-lg flex-col gap-4 rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl outline-none" ref={dialogRef} tabIndex={-1}>
         <h2 className="text-lg font-semibold text-jul-text">{title}</h2>
         <div className="text-sm text-jul-muted">{children}</div>
         <div className="flex justify-end gap-3 pt-2">

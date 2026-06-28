@@ -292,6 +292,28 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 	}
 }
 
+// TestDiffGlobalWAFBuildTag verifies that enabling the global WAF reports the
+// toggle and warns it only enforces in a waf-tagged build, mirroring the
+// plugins/streams/tracing build-tag disclosures.
+func TestDiffGlobalWAFBuildTag(t *testing.T) {
+	mk := func(enabled bool) *config.Config {
+		return &config.Config{WAF: config.WAFConfig{Enabled: enabled, Mode: "block"}}
+	}
+	// Enable from disabled: the toggle plus the build-tag warning.
+	d := diffConfigs(mk(false), mk(true))
+	if !diffHas(d, "Enable global WAF") {
+		t.Errorf("expected WAF enable entry, got %+v", d)
+	}
+	if !warnHas(d, "waf tag") {
+		t.Errorf("expected waf build-tag warning, got %+v", d.Warnings)
+	}
+	// Disable: the build-tag warning must not appear (only protection-loss).
+	d = diffConfigs(mk(true), mk(false))
+	if warnHas(d, "waf tag") {
+		t.Errorf("did not expect build-tag warning on disable, got %+v", d.Warnings)
+	}
+}
+
 func TestDiffGlobalTracing(t *testing.T) {
 	tracing := func(tc config.TracingConfig) *config.Config {
 		return &config.Config{Observability: config.ObservabilityConfig{Tracing: tc}}

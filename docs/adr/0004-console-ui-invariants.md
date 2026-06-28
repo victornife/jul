@@ -42,6 +42,19 @@ that constrains *how* every other feature ships.
    always-coherent surface of each feature's own panel. "Console v2 / v3" are the
    *result* of per-feature panels staying consistent — not separate monolithic UI
    projects.
+6. **Build-tag-gated capabilities degrade transparently.** When a capability's
+   build tag is absent, its Console surface stays usable for editing but
+   **discloses** the limitation up front (a panel banner) and at apply time (a
+   diff warning), and the apply preflight rejects a config that would enable it —
+   never a silent no-op or an opaque failure. (Plugins, Streams, WAF, and
+   tracing follow this rule today; see
+   [console.md → Build-tag degradation](../console.md#build-tag-degradation).)
+7. **Operable by keyboard, not just by mouse.** Every Console control is a real
+   focusable element reachable and actionable from the keyboard, and modal
+   surfaces (drawers, confirm dialogs, the command palette, the re-auth prompt)
+   trap focus while open and restore it on close (WCAG 2.4.3). "Anyone can operate
+   Jul.IA" includes operators who navigate by keyboard or screen reader; see
+   [accessibility.md](../accessibility.md).
 
 ## Rationale
 
