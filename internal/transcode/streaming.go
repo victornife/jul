@@ -62,8 +62,9 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, method string) {
 	req := dynamicpb.NewMessage(rt.method.Input())
 	if err := t.buildRequest(req, rt, vars, r); err != nil {
-		t.writeError(w, http.StatusBadRequest, err.Error())
-		t.report(method, http.StatusBadRequest)
+		code := requestErrorStatus(err)
+		t.writeError(w, code, err.Error())
+		t.report(method, code)
 		return
 	}
 	if err := cs.SendMsg(req); err != nil {
@@ -411,6 +412,14 @@ func (fd *frameDecoder) next() (json.RawMessage, error) {
 			fd.opened = true
 		}
 		if !fd.dec.More() {
+			// Consume the closing ']' and reject any trailing tokens so a body
+			// like [..]{..} cannot smuggle silently ignored extra data.
+			if _, err := fd.dec.Token(); err != nil { // ']'
+				return nil, err
+			}
+			if fd.dec.More() {
+				return nil, fmt.Errorf("unexpected trailing data after JSON array")
+			}
 			return nil, io.EOF
 		}
 	}

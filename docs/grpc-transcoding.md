@@ -116,6 +116,10 @@ converted. The full proto3 JSON surface — nested messages, well-known types,
 | Client-streaming | JSON array **or** NDJSON frames | single JSON object | ✅ |
 | Bidirectional | JSON array **or** NDJSON frames | framed: NDJSON or SSE | ✅ |
 
+A JSON-array request body must be the **only** top-level value: trailing tokens
+after the closing `]` are rejected with `400`. A unary request body larger than
+`max_message_size` is rejected with `413` rather than silently truncated.
+
 With `streaming = false`, a request to a streaming method returns
 `501 Not Implemented`. A terminal gRPC error that arrives **after** the first
 response frame is delivered as an in-band error frame (`{"error":…}` for NDJSON,
@@ -128,7 +132,7 @@ response frame is delivered as an in-band error frame (`{"error":…}` for NDJSO
 | Backend transport | h2c (default) or TLS (`tls = true`, verified against system roots) |
 | Inbound metadata | `Authorization` and any `Grpc-Metadata-<key>` header → gRPC metadata |
 | Deadline | The HTTP request context (and its deadline) is propagated to the call |
-| Error mapping | gRPC status code → HTTP status (`InvalidArgument`→400, `NotFound`→404, `PermissionDenied`→403, `Unauthenticated`→401, `ResourceExhausted`→429, `Unavailable`→503, `DeadlineExceeded`→504, …) |
+| Error mapping | gRPC status code → HTTP status (`InvalidArgument`→400, `NotFound`→404, `PermissionDenied`→403, `Unauthenticated`→401, `ResourceExhausted`→429, `Unavailable`→503, `DeadlineExceeded`→504, …); oversize body → 413; malformed/trailing JSON → 400 |
 | Error body | RFC 7807 `application/problem+json` (`status`, `title`, `detail`) |
 | Response encoding | `protojson` with unpopulated fields emitted; field-name casing per `preserve_proto_field_names` |
 
@@ -163,10 +167,13 @@ is a correctness bug; each is a bounded scope decision.
 GA criterion 7. The transcoding path is a parser and a fan-out point, so it is
 treated as a trust boundary:
 
-- **Bounded inputs.** The request body is read through a `LimitReader`, and every
-  encoded message (request frame or reply) is capped by `max_message_size`
-  (4 MiB default), bounding memory per call. The body-limit middleware can impose
-  a smaller ceiling upstream.
+- **Bounded inputs.** Each encoded message (request frame or reply) is capped by
+  `max_message_size` (4 MiB default), bounding memory per call. A unary body that
+  exceeds the cap returns `413` instead of being truncated into a malformed
+  message; the body-limit middleware can impose a smaller ceiling upstream. A
+  JSON-array request body is strictly framed — trailing tokens after the closing
+  `]` are rejected (`400`) so a single request cannot smuggle silently dropped
+  data past the parser.
 - **Fuzzed parser.** The `google.api.http` path-template parser is fuzzed
   (`FuzzParseTemplate`) to guarantee it never panics on malformed templates from
   a descriptor set.

@@ -251,6 +251,14 @@ func TestStreamClientStreamArray(t *testing.T) {
 	}
 }
 
+func TestStreamClientArrayTrailingRejected(t *testing.T) {
+	tr := newStreamTranscoder(t, true, "ndjson")
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/up", `[{"value":"a"}]{"value":"b"}`, nil)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", res.StatusCode, body)
+	}
+}
+
 func TestStreamClientStreamNDJSONBody(t *testing.T) {
 	tr := newStreamTranscoder(t, true, "ndjson")
 	res, body := doRequest(t, tr, http.MethodPost, "/v1/up", "{\"value\":\"one\"}\n{\"value\":\"two\"}\n", nil)

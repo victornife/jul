@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -179,8 +180,9 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	req := dynamicpb.NewMessage(rt.method.Input())
 	if err := t.buildRequest(req, rt, vars, r); err != nil {
-		t.writeError(w, http.StatusBadRequest, err.Error())
-		t.report(method, http.StatusBadRequest)
+		code := requestErrorStatus(err)
+		t.writeError(w, code, err.Error())
+		t.report(method, code)
 		return
 	}
 
@@ -230,7 +232,7 @@ func (t *Transcoder) buildRequest(msg *dynamicpb.Message, rt *route, vars map[st
 	case "":
 		// No body mapping.
 	case "*":
-		body, err := readBody(r)
+		body, err := readBody(r, t.maxMsg)
 		if err != nil {
 			return err
 		}
@@ -240,7 +242,7 @@ func (t *Transcoder) buildRequest(msg *dynamicpb.Message, rt *route, vars map[st
 			}
 		}
 	default:
-		body, err := readBody(r)
+		body, err := readBody(r, t.maxMsg)
 		if err != nil {
 			return err
 		}
@@ -279,15 +281,33 @@ func (t *Transcoder) buildRequest(msg *dynamicpb.Message, rt *route, vars map[st
 	return nil
 }
 
-func readBody(r *http.Request) ([]byte, error) {
+func readBody(r *http.Request, limit int) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
+	// Read one byte past the limit so an oversize body is rejected (413) rather
+	// than silently truncated into a malformed, partially decoded message.
+	body, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
 	if err != nil {
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
+	if len(body) > limit {
+		return nil, errBodyTooLarge
+	}
 	return body, nil
+}
+
+// errBodyTooLarge marks a request body that exceeds the transcoder's per-message
+// limit so callers can map it to 413 Request Entity Too Large.
+var errBodyTooLarge = errors.New("request body exceeds max_message_size")
+
+// requestErrorStatus maps a request-construction error to an HTTP status: an
+// oversize body is 413, anything else is a 400 decode/validation error.
+func requestErrorStatus(err error) int {
+	if errors.Is(err, errBodyTooLarge) {
+		return http.StatusRequestEntityTooLarge
+	}
+	return http.StatusBadRequest
 }
 
 // mutableMessageField returns the singular message field named name as a

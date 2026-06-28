@@ -284,6 +284,16 @@ func TestTranscodeGRPCErrorMapped(t *testing.T) {
 	}
 }
 
+func TestTranscodeBodyTooLarge(t *testing.T) {
+	tr := newEchoTranscoder(t, false)
+	tr.maxMsg = 16
+	big := `{"message":"` + strings.Repeat("x", 64) + `"}`
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", big, nil)
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body = %s", res.StatusCode, body)
+	}
+}
+
 func TestTranscodeForwardsAuthorization(t *testing.T) {
 	tr := newEchoTranscoder(t, false)
 	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"whoami"}`,
