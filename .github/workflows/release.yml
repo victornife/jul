@@ -19,7 +19,7 @@ jobs:
     name: release gate (build + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -35,7 +35,7 @@ jobs:
     name: soak gate (ADR 0005)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -60,7 +60,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -83,17 +83,17 @@ jobs:
       # Keyless build provenance: cryptographically links this binary to the
       # workflow run/commit that produced it (SLSA-style attestation via Sigstore).
       - name: attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: jul
       # Sign the SBOM the same way so its integrity can be verified offline.
       - name: attest SBOM
-        uses: actions/attest-sbom@v2
+        uses: actions/attest-sbom@v4
         with:
           subject-path: jul
           sbom-path: jul.spdx.json
       - name: upload release binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jul-${{ github.ref_name }}
           path: |
