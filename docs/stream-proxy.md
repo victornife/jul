@@ -194,6 +194,35 @@ runs without holding the session lock, and concurrent datagrams for the same new
 client dial exactly one backend (the rest share the result), so a slow backend
 stalls only that client, not the whole listener.
 
+### Soak testing
+
+The cap is a *hard* bound, but a bound is only safe if every reaped or evicted
+session also tears down cleanly — otherwise backend sockets and per-session
+goroutines would leak even while the session table stays capped. The `udp-churn`
+soak scenario proves this under sustained source-address churn: a flood of
+short-lived clients, each from a fresh ephemeral source port (a new session
+keyed by source address), runs for a configurable duration against a listener
+with a small `max_udp_sessions` cap and a short `idle_timeout`. It asserts:
+
+- live sessions **never exceed** the cap (the high-water mark is sampled
+  throughout the run);
+- the create / idle-reap / cap-evict paths are actually exercised (sessions are
+  reaped and rejections occur);
+- after churn stops, sessions **drain back to zero** and the goroutine count and
+  heap return to their pre-churn baseline (no leak).
+
+Run it with the soak harness ([ADR 0005](adr/0005-soak-post-ga-gate.md)):
+
+```bash
+SOAK_SCENARIO=udp-churn scripts/soak.sh                 # 30s smoke
+SOAK_SCENARIO=udp-churn SOAK_DURATION=5m SOAK_WORKERS=32 scripts/soak.sh
+```
+
+The smoke run is part of the CI `soak` job and the multi-minute release gate.
+Note that admission is O(n) in the cap at full capacity (it scans for the
+least-recently-seen session), so prefer a cap sized to real concurrency rather
+than an arbitrarily huge one on listeners exposed to floods.
+
 ## Load balancing and health
 
 When the backend is a named upstream, the pool's load-balancing strategy and

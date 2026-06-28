@@ -1704,6 +1704,24 @@ go build -o jul ./cmd/jul
 go test ./...
 ```
 
+**Stability gates.** Two opt-in soak scenarios (behind the `soak` build tag) drive
+sustained load through real proxy data paths and assert the process stays bounded
+— no request errors, a steady goroutine count, and bounded heap growth (a leak
+gate, per [ADR 0005](docs/adr/0005-soak-post-ga-gate.md)). Run both with
+[`scripts/soak.sh`](scripts/soak.sh) (or `make soak`); pick one with
+`SOAK_SCENARIO`:
+
+```bash
+make soak                                   # both scenarios, 30s each
+SOAK_SCENARIO=udp-churn make soak           # only the UDP source-address churn soak
+SOAK_DURATION=5m SOAK_WORKERS=32 make soak  # release-style run
+```
+
+| Scenario | Asserts |
+| -------- | ------- |
+| `proxy` | Sustained concurrent HTTP through a reverse-proxy handler: zero request errors, steady goroutines/heap |
+| `udp-churn` | Sustained UDP source-address churn through a stream listener: live sessions stay capped at `max_udp_sessions`, every reaped/evicted session tears down fully (see [stream-proxy.md](docs/stream-proxy.md#soak-testing)) |
+
 **Optional build tags** enable heavier features that are left out of the default
 binary. Combine them as needed:
 
