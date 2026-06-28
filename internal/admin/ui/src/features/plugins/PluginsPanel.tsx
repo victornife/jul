@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
+import { Loading } from "@/components/ui.tsx";
 import {
   patchConfig,
   fetchPlugins,
@@ -540,7 +541,7 @@ export function PluginsPanel() {
   const [creating, setCreating] = useState(false);
   const [attaching, setAttaching] = useState<PluginProjection | null>(null);
 
-  if (isLoading) return <div className="text-jul-muted">Loading plugins…</div>;
+  if (isLoading) return <Loading label="Loading plugins…" />;
   if (isError || !data)
     return <PanelError error={error} resource="plugins" onRetry={() => void refetch()} />;
 

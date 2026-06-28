@@ -6,7 +6,7 @@ import {
   type CertProjection,
   type MTLSServerProjection,
 } from "@/api/client.ts";
-import { PageHeader, Button } from "@/components/ui.tsx";
+import { PageHeader, Button, Loading } from "@/components/ui.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { TLSEditor } from "@/features/tls/TLSEditor.tsx";
 import { MTLSEditor } from "@/features/tls/MTLSEditor.tsx";
@@ -169,7 +169,7 @@ function MTLSSection() {
   });
   const [editing, setEditing] = useState<MTLSServerProjection | null>(null);
 
-  if (isLoading) return <div className="text-jul-muted">Loading mutual TLS…</div>;
+  if (isLoading) return <Loading label="Loading mutual TLS…" />;
   if (isError || !data)
     return <PanelError error={error} resource="mutual TLS" onRetry={() => void refetch()} />;
 
@@ -221,7 +221,7 @@ export function TLSPanel() {
     queryFn: fetchTLS,
   });
 
-  if (isLoading) return <div className="text-jul-muted">Loading TLS certificates…</div>;
+  if (isLoading) return <Loading label="Loading TLS certificates…" />;
   if (isError || !data)
     return <PanelError error={error} resource="TLS info" onRetry={() => void refetch()} />;
   const expiringSoon = data.filter((c) => c.days_left !== undefined && c.days_left <= 30);

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchOverview, type FeatureStatus, type TrafficSources } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
 import { PanelError } from "@/components/PanelError.tsx";
+import { Loading } from "@/components/ui.tsx";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
 
 // Group status rows by their `group` field.
@@ -185,7 +186,7 @@ export function OverviewPanel() {
   const history = useMetricsHistory(data?.stats);
 
   if (isLoading) {
-    return <div className="text-jul-muted">Loading overview…</div>;
+    return <Loading label="Loading overview…" />;
   }
   if (isError || !data) {
     return <PanelError error={error} resource="the overview" onRetry={() => void refetch()} />;

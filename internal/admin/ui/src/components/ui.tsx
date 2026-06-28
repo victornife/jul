@@ -172,6 +172,35 @@ export function EmptyState({
   );
 }
 
+// ── Spinner / Loading (Phase 2 — consistent async feedback) ──────────────────
+
+// Spinner is a dependency-free animated indicator shown wherever an async action
+// is in flight (button presses, inline fetches). It inherits the current text
+// colour via `border-current`, so it tints itself to whatever it sits inside.
+// It is decorative (aria-hidden); pair it with visible or screen-reader text —
+// as Loading does below — when the state needs to be announced.
+export function Spinner({ className = "" }: { readonly className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current border-r-transparent ${className}`}
+    />
+  );
+}
+
+// Loading is the standard full-panel "still fetching" state: a spinner beside a
+// short label, so every screen reports progress the same way instead of each
+// panel inventing its own bare "Loading X…" text. role="status" announces the
+// label to assistive technology.
+export function Loading({ label = "Loading…" }: { readonly label?: string }) {
+  return (
+    <div role="status" className="flex items-center gap-2 text-sm text-jul-muted">
+      <Spinner />
+      <span>{label}</span>
+    </div>
+  );
+}
+
 // ── Form fields ──────────────────────────────────────────────────────────────
 
 export function TextField({

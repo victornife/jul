@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchApps, type AppProjection, type BackendProjection } from "@/api/client.ts";
 import { AppDetail } from "@/features/apps/AppDetail.tsx";
 import { AppEditor } from "@/features/apps/AppEditor.tsx";
-import { PageHeader, Button, EmptyState } from "@/components/ui.tsx";
+import { PageHeader, Button, EmptyState, Loading } from "@/components/ui.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
 
@@ -135,7 +135,7 @@ export function AppsPanel() {
     [data, healthFilter, usageFilter],
   );
 
-  if (isLoading) return <div className="text-jul-muted">Loading apps…</div>;
+  if (isLoading) return <Loading label="Loading apps…" />;
   if (isError || !data)
     return <PanelError error={error} resource="apps" onRetry={() => void refetch()} />;
 

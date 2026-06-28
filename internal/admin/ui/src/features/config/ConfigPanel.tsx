@@ -18,6 +18,7 @@ import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
+import { Loading, Spinner } from "@/components/ui.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 
 const CodeEditor = lazy(() =>
@@ -182,7 +183,7 @@ export function ConfigPanel() {
   // with confirm_admin=true. Derived from the error so no extra state is needed.
   const adminChangeError = applyError instanceof ConfigAdminChangeError ? applyError : null;
 
-  if (isLoading) return <div className="text-jul-muted">Loading configuration…</div>;
+  if (isLoading) return <Loading label="Loading configuration…" />;
   if (isError || !data)
     return <PanelError error={error} resource="the configuration" onRetry={() => void refetch()} />;
 
@@ -240,9 +241,14 @@ export function ConfigPanel() {
               setConfirming(true);
             }}
             disabled={!dirty || !valid || applyActive.isPending}
-            className="rounded-md bg-jul-accent px-3 py-1 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            className="inline-flex items-center gap-2 rounded-md bg-jul-accent px-3 py-1 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
-            {isPatchMode ? "Apply patch" : "Apply changes"}
+            {applyActive.isPending && <Spinner />}
+            {applyActive.isPending
+              ? "Applying…"
+              : isPatchMode
+                ? "Apply patch"
+                : "Apply changes"}
           </button>
         </div>
       </div>

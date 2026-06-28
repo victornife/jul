@@ -463,6 +463,33 @@ consumes the endpoints below.
 | Setup Wizard | `GET /api/wizard`, `POST /api/wizard/generate` |
 | Operational actions | `POST /cache/purge`, `POST /reload` |
 
+## Consistency, feedback & discoverability
+
+Every panel reports the same three transient states the same way, so the Console
+feels like one product rather than a set of independently built screens (part of
+the *Friendliest* pillar, [ADR 0004](adr/0004-console-ui-invariants.md)):
+
+- **Loading.** While a panel's data is still being fetched it shows the shared
+  `Loading` indicator — a spinner next to a short label (e.g. *"Loading
+  routes…"*) — announced to assistive technology with `role="status"`. No panel
+  invents its own bare "Loading…" text.
+- **Empty.** When a collection has no items yet (no apps, no routes, **no config
+  snapshots**), the panel shows a shared `EmptyState` card explaining what the
+  collection is and how to populate it, rather than a blank area or a stray line
+  of muted text.
+- **In flight.** Long-running actions report progress on the control that
+  triggered them. Applying a configuration change swaps the **Apply** button to
+  a spinner and *"Applying…"* while the request is outstanding, and the
+  **Apply** / **Reset** buttons stay disabled so the change cannot be
+  double-submitted.
+
+**Discoverability.** The command palette (jump-to-any-page search) is reachable
+from anywhere with `Ctrl/Cmd+K`, and a labelled **Jump to…** button in the
+header makes that shortcut visible instead of hidden. The **Timeline** annotates
+each event dot with a tooltip and an accessible label describing its severity
+and category (e.g. *"Warning severity — tls event"*), so the colour coding is
+self-explanatory.
+
 ## Accessibility & keyboard operation
 
 The Console is operable by keyboard and screen reader, not just by mouse — part

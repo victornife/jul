@@ -182,6 +182,60 @@ describe("ConfigPanel apply flow", () => {
     });
     expect(await screen.findByText("Configuration validated and saved.")).toBeInTheDocument();
   });
+
+  it("shows an apply-progress spinner while the apply request is in flight", async () => {
+    let resolveApply: (r: Response) => void = () => {
+      /* set below */
+    };
+    const applyInFlight = new Promise<Response>((res) => {
+      resolveApply = res;
+    });
+    let applied = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml" }));
+      }
+      if (url === "/api/config/validate") {
+        return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
+      }
+      if (url === "/api/config/diff") {
+        return Promise.resolve(
+          json({ summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] }),
+        );
+      }
+      if (url === "/api/config/apply") {
+        applied += 1;
+        return applyInFlight;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+    const applyBtn = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyBtn).toBeEnabled();
+    });
+    fireEvent.click(applyBtn);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+
+    // While the request is pending the button reports progress.
+    expect(await screen.findByRole("button", { name: "Applying…" })).toBeInTheDocument();
+
+    // Resolve and let the panel settle so no state updates leak past the test.
+    resolveApply(json({ ok: true, status: [] }));
+    await waitFor(() => {
+      expect(applied).toBe(1);
+    });
+    await screen.findByText("Configuration validated and saved.");
+  });
 });
 
 describe("HistoryPanel rollback flow", () => {
@@ -203,6 +257,25 @@ describe("HistoryPanel rollback flow", () => {
     await waitFor(() => {
       expect(counters.rollback).toBe(1);
     });
+  });
+});
+
+describe("HistoryPanel empty state", () => {
+  it("shows a friendly empty state when there are no snapshots", async () => {
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history") {
+        return Promise.resolve(json([]));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+
+    expect(await screen.findByText("No snapshots yet")).toBeInTheDocument();
   });
 });
 

@@ -7,6 +7,7 @@ import {
 } from "@/features/traffic-controls/TrafficControlEditor.tsx";
 import { TracingEditor } from "@/features/traffic-controls/TracingEditor.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
+import { Loading } from "@/components/ui.tsx";
 
 function SectionCard({
   title,
@@ -64,7 +65,7 @@ export function TrafficControlsPanel() {
   const [editing, setEditing] = useState<TrafficEditorKind | null>(null);
   const [tracingEditing, setTracingEditing] = useState(false);
 
-  if (isLoading) return <div className="text-jul-muted">Loading traffic controls…</div>;
+  if (isLoading) return <Loading label="Loading traffic controls…" />;
   if (isError || !data)
     return <PanelError error={error} resource="traffic controls" onRetry={() => void refetch()} />;
 

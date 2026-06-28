@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
+import { Loading } from "@/components/ui.tsx";
 import {
   patchConfig,
   fetchStreams,
@@ -387,7 +388,7 @@ export function StreamsPanel() {
   const [editing, setEditing] = useState<StreamProjection | null>(null);
   const [creating, setCreating] = useState(false);
 
-  if (isLoading) return <div className="text-jul-muted">Loading streams…</div>;
+  if (isLoading) return <Loading label="Loading streams…" />;
   if (isError || !data)
     return <PanelError error={error} resource="streams" onRetry={() => void refetch()} />;
 

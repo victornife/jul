@@ -5,6 +5,7 @@ import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
+import { Loading } from "@/components/ui.tsx";
 
 // wafIsMixed reports whether protected locations run a mix of block and detect
 // modes, in which case a single mode badge would mislead.
@@ -70,7 +71,7 @@ export function SecurityPanel() {
     queryFn: fetchSecurity,
   });
 
-  if (isLoading) return <div className="text-jul-muted">Loading security…</div>;
+  if (isLoading) return <Loading label="Loading security…" />;
   if (isError || !data)
     return <PanelError error={error} resource="security info" onRetry={() => void refetch()} />;
 

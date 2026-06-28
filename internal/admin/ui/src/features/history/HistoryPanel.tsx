@@ -10,6 +10,7 @@ import {
 } from "@/api/client.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
+import { EmptyState, Loading } from "@/components/ui.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 
 function formatBytes(n: number): string {
@@ -175,7 +176,7 @@ export function HistoryPanel() {
     },
   });
 
-  if (isLoading) return <div className="text-jul-muted">Loading history…</div>;
+  if (isLoading) return <Loading label="Loading history…" />;
   if (isError || !data)
     return <PanelError error={error} resource="the history" onRetry={() => void refetch()} />;
 
@@ -193,7 +194,10 @@ export function HistoryPanel() {
       )}
 
       {data.length === 0 ? (
-        <p className="text-jul-muted text-sm">No snapshots yet. Apply a config change to create one.</p>
+        <EmptyState
+          title="No snapshots yet"
+          description="Apply a config change to create the first snapshot. Snapshots let you review and roll back to any previous configuration."
+        />
       ) : (
         <div className="rounded-lg border border-jul-border bg-jul-surface overflow-hidden">
           <table className="w-full text-left text-sm">

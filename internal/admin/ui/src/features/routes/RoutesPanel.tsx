@@ -4,7 +4,7 @@ import { fetchRoutes, type RouteProjection, type LocationProjection } from "@/ap
 import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
 import { RouteEditor } from "@/features/routes/RouteEditor.tsx";
 import { RouteTester } from "@/features/routes/RouteTester.tsx";
-import { PageHeader, Button, EmptyState } from "@/components/ui.tsx";
+import { PageHeader, Button, EmptyState, Loading } from "@/components/ui.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
 import { emptyAuthDraft, type RouteDraft } from "@/lib/routeToml.ts";
@@ -220,7 +220,7 @@ export function RoutesPanel() {
       .filter((r) => !filtersActive || r.locations.length > 0);
   }, [data, actionFilter, featureFilter, filtersActive]);
 
-  if (isLoading) return <div className="text-jul-muted">Loading routes…</div>;
+  if (isLoading) return <Loading label="Loading routes…" />;
   if (isError || !data)
     return <PanelError error={error} resource="routes" onRetry={() => void refetch()} />;
 

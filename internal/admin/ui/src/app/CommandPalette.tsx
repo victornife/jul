@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFocusTrap } from "@/lib/useFocusTrap.ts";
+import { COMMAND_PALETTE_EVENT } from "@/app/commandPaletteBus.ts";
 
 export interface CommandItem {
   readonly to: string;
@@ -30,6 +31,7 @@ export function CommandPalette({ commands }: CommandPaletteProps) {
   useFocusTrap(dialogRef, open);
 
   // Global open shortcut: Ctrl+K (Windows/Linux) or Cmd+K (macOS). Escape closes.
+  // A custom event (COMMAND_PALETTE_EVENT) opens it from header affordances too.
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
@@ -39,9 +41,14 @@ export function CommandPalette({ commands }: CommandPaletteProps) {
         setOpen(false);
       }
     }
+    function onOpenEvent(): void {
+      setOpen(true);
+    }
     window.addEventListener("keydown", onKey);
+    window.addEventListener(COMMAND_PALETTE_EVENT, onOpenEvent);
     return () => {
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener(COMMAND_PALETTE_EVENT, onOpenEvent);
     };
   }, []);
 

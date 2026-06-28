@@ -15,6 +15,12 @@ const CATEGORY_LABEL: Record<string, string> = {
   upstream: "Upstream",
 };
 
+const SEVERITY_LABEL: Record<string, string> = {
+  info: "Informational",
+  warning: "Warning",
+  error: "Error",
+};
+
 function dotTone(severity: string): string {
   if (severity === "error") return "bg-jul-danger";
   if (severity === "warning") return "bg-jul-warning";
@@ -22,16 +28,20 @@ function dotTone(severity: string): string {
 }
 
 function TimelineRow({ ev }: { readonly ev: TimelineEvent }) {
+  const severityLabel = SEVERITY_LABEL[ev.severity] ?? ev.severity;
+  const categoryLabel = CATEGORY_LABEL[ev.category] ?? ev.category;
   return (
     <li className="flex gap-3 px-4 py-3 text-sm">
       <span
+        role="img"
+        aria-label={`${severityLabel} ${categoryLabel.toLowerCase()} event`}
+        title={`${severityLabel} severity — ${categoryLabel.toLowerCase()} event`}
         className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotTone(ev.severity)}`}
-        aria-hidden="true"
       />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className={`text-xs font-semibold uppercase ${SEVERITY_TONE[ev.severity] ?? "text-jul-text"}`}>
-            {CATEGORY_LABEL[ev.category] ?? ev.category}
+            {categoryLabel}
           </span>
           <span className="font-mono text-xs text-jul-muted">{ev.type}</span>
           <span className="ml-auto text-xs text-jul-muted">{new Date(ev.time).toLocaleString()}</span>

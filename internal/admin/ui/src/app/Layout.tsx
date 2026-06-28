@@ -4,6 +4,7 @@ import { useTheme, type ThemePreference } from "@/lib/theme.ts";
 import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.ts";
 import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
+import { openCommandPalette } from "@/app/commandPaletteBus.ts";
 
 interface NavItem {
   readonly to: string;
@@ -79,6 +80,36 @@ const THEME_LABEL: Record<ThemePreference, string> = {
 };
 
 const THEME_ORDER: ThemePreference[] = ["system", "light", "dark"];
+
+// Platform-aware label for the command-palette shortcut so macOS users see ⌘K
+// and everyone else sees Ctrl K. Computed once at module load.
+const PALETTE_SHORTCUT =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
+    ? "⌘K"
+    : "Ctrl K";
+
+// CommandPaletteButton makes the otherwise hidden Ctrl/Cmd+K palette
+// discoverable: a labelled header affordance that opens it on click and shows
+// the keyboard shortcut so operators learn it (P1-7 — search reachable from
+// anywhere).
+function CommandPaletteButton() {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        openCommandPalette();
+      }}
+      title="Jump to any page (command palette)"
+      className="flex items-center gap-2 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent"
+    >
+      <span aria-hidden>🔍</span>
+      <span className="hidden sm:inline">Jump to…</span>
+      <kbd className="rounded border border-jul-border bg-jul-bg px-1 font-mono text-[10px] text-jul-muted">
+        {PALETTE_SHORTCUT}
+      </kbd>
+    </button>
+  );
+}
 
 type NavLayout = "top" | "side";
 
@@ -304,6 +335,7 @@ export function Layout() {
   const controls = (
     <div className="flex items-center gap-2">
       <ConsoleHealthBadge />
+      <CommandPaletteButton />
       <PreferenceMenu
         layout={layout}
         onLayout={setLayout}

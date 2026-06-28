@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
+import { openCommandPalette } from "@/app/commandPaletteBus.ts";
 
 const navigateMock = vi.fn();
 vi.mock("react-router-dom", async () => {
@@ -38,6 +39,15 @@ describe("CommandPalette", () => {
     renderPalette();
     expect(screen.queryByRole("dialog")).toBeNull();
     openPalette();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("opens when openCommandPalette() dispatches the global event", () => {
+    renderPalette();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => {
+      openCommandPalette();
+    });
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
