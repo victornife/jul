@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -88,14 +89,14 @@ func TestLogsStreamUnavailableWithoutHook(t *testing.T) {
 
 func TestLogsStreamEmitsBacklogThenLive(t *testing.T) {
 	live := make(chan observability.LogEntry, 4)
-	var cancelled bool
+	var cancelled atomic.Bool
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		RecentLogs: func(limit int) []observability.LogEntry {
 			// Snapshot is newest-first; the handler replays it oldest-first.
 			return []observability.LogEntry{{Method: "GET", Path: "/a", Status: 200, Time: time.Now()}}
 		},
 		SubscribeLogs: func() (<-chan observability.LogEntry, func()) {
-			return live, func() { cancelled = true }
+			return live, func() { cancelled.Store(true) }
 		},
 	})
 	srv := httptest.NewServer(s.routes())
@@ -161,10 +162,10 @@ func TestLogsStreamEmitsBacklogThenLive(t *testing.T) {
 	cancel()
 	// Give the handler a moment to observe the cancellation and unsubscribe.
 	deadline := time.Now().Add(2 * time.Second)
-	for !cancelled && time.Now().Before(deadline) {
+	for !cancelled.Load() && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !cancelled {
+	if !cancelled.Load() {
 		t.Error("stream did not unsubscribe on disconnect")
 	}
 }

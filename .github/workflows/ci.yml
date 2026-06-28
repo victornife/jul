@@ -240,17 +240,20 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # pnpm must be installed before setup-node so `cache: pnpm` can resolve
+      # the store path. Dependencies are installed in a dedicated step after
+      # setup-node so the install runs under the pinned Node and reuses the
+      # restored pnpm cache.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
       - uses: actions/setup-node@v6
         with:
           node-version-file: ${{ env.CONSOLE_UI }}/package.json
           cache: pnpm
           cache-dependency-path: ${{ env.CONSOLE_UI }}/pnpm-lock.yaml
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.8.0
-          run_install: |
-            - cwd: ${{ env.CONSOLE_UI }}
-              args: [--frozen-lockfile]
+      - name: install dependencies
+        run: pnpm --dir ${{ env.CONSOLE_UI }} install --frozen-lockfile
 
       - name: typecheck
         run: pnpm --dir ${{ env.CONSOLE_UI }} run typecheck
