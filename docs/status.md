@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.9 · Updated 2026-06-28
+> Version 1.11 · Updated 2026-06-28
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -104,6 +104,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-06-28 | 1.11 | **Operational & supply-chain readiness:** the systemd unit gained a `LimitNOFILE`/`TasksMax` ceiling, a `StartLimitBurst` crash-loop guard, and commented `MemoryMax`/`CPUQuota` examples. CI now enforces a statement-**coverage floor** (full opt-in tag set). Tagged releases publish a signed **SBOM** (SPDX) and **build provenance** for the binary via keyless Sigstore attestation, and **Dependabot** keeps Actions, Go modules, and the Docker base image current. | [README.md](../README.md), [SECURITY.md](../SECURITY.md) |
 | 2026-06-28 | 1.10 | **Edge robustness & operability:** `proxy_read_timeout`/`proxy_send_timeout` now bound a slow-trickle upstream response/request as per-read/per-write **inactivity** deadlines (NGINX semantics), not just the response headers, so a stalled backend can no longer pin a worker indefinitely. The Prometheus `host` label on `jul_http_requests_total` is now **opt-in** (`[observability.metrics] host_label`), keeping request-metric cardinality bounded by default. Config validation errors now carry a structured **path** (e.g. `servers[0].locations[1]`), which the Console renders as a chip so failures stay locatable in large configs. | [core-http.md](core-http.md), [console.md](console.md), [README.md](../README.md) |
 | 2026-06-28 | 1.9 | **Console UX consistency & discoverability:** every panel now reports loading, empty, and in-flight states the same way — a shared `Loading` (`role="status"`) spinner+label, a shared `EmptyState` card (now including config **History**), and an apply-progress spinner that switches the **Apply** button to *"Applying…"* while a change is outstanding. The command palette is made discoverable with a labelled header **Jump to…** button alongside `Ctrl/Cmd+K`, and **Timeline** event dots carry severity/category tooltips and accessible labels. | [console.md](console.md) |
 | 2026-06-28 | 1.8 | **Console accessibility — dialog focus management:** the route/app drawer, confirm dialog, shared modal, command palette, and re-auth token prompt now trap focus while open (`Tab` / `Shift+Tab` wrap within the dialog) and restore focus to the triggering control on close (WCAG 2.4.3), via a shared `useFocusTrap` hook with no added dependencies. Added the canonical [accessibility](accessibility.md) reference. | [accessibility.md](accessibility.md), [console.md](console.md), [adr/0004-console-ui-invariants.md](adr/0004-console-ui-invariants.md) |

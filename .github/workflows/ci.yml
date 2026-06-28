@@ -74,6 +74,42 @@ jobs:
       - name: go test -race
         run: go test -race -tags "${{ env.FULL_TAGS }}" ./...
 
+  coverage:
+    name: coverage gate
+    runs-on: ubuntu-latest
+    env:
+      # Statement-coverage floor for the full opt-in tag set. The current merged
+      # total sits comfortably above this; the gate guards against large
+      # regressions, not against every fractional dip. Raise it as coverage grows.
+      COVERAGE_FLOOR: "65"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test -coverprofile
+        run: go test -tags "${{ env.FULL_TAGS }}" -coverprofile=cover.out ./...
+      - name: enforce coverage floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          total=$(go tool cover -func=cover.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+          echo "Total statement coverage: ${total}% (floor: ${COVERAGE_FLOOR}%)"
+          # Use awk for the float comparison; bash can't compare decimals natively.
+          if awk -v t="$total" -v f="$COVERAGE_FLOOR" 'BEGIN { exit (t >= f) ? 0 : 1 }'; then
+            echo "PASS: coverage meets the floor."
+          else
+            echo "ERROR: coverage ${total}% is below the ${COVERAGE_FLOOR}% floor."
+            exit 1
+          fi
+      - name: upload coverage profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-profile
+          path: cover.out
+
   benchmarks:
     name: benchmarks (smoke)
     runs-on: ubuntu-latest

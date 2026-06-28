@@ -1,0 +1,28 @@
+# Dependabot keeps the supply chain current so the CI/release hardening
+# (govulncheck, SBOM, provenance) stays meaningful over time. It tracks three
+# ecosystems: pinned GitHub Actions, the Go module graph, and the Docker base
+# image (the sustainable alternative to hand-pinning image digests).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

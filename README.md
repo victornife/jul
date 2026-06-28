@@ -1619,7 +1619,10 @@ sudo systemctl reload jul
 
 The unit runs as a dynamically-allocated unprivileged user with
 `CAP_NET_BIND_SERVICE` (so it can bind ports 80/443) and a strict hardening
-profile. Adjust `ReadWritePaths` to match your `disk_path` cache location.
+profile. Adjust `ReadWritePaths` to match your `disk_path` cache location. The
+unit also raises `LimitNOFILE` for high socket fan-out, caps `TasksMax`, and
+trips a `StartLimitBurst` crash-loop guard; optional `MemoryMax`/`CPUQuota`
+caps are included commented-out for you to tune to the host.
 
 ### As a Windows service
 

@@ -3,6 +3,10 @@ Description=Jul NGINX-inspired HTTP edge server
 Documentation=https://example.invalid/jul
 After=network-online.target
 Wants=network-online.target
+# Crash-loop safeguard: if the unit restarts more than StartLimitBurst times
+# within StartLimitIntervalSec, systemd gives up instead of looping forever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -36,6 +40,14 @@ RestrictSUIDSGID=yes
 # Writable paths the server needs (disk cache, logs). Adjust as configured.
 StateDirectory=jul
 ReadWritePaths=/var/cache/jul
+
+# Resource limits. An edge server multiplexes many sockets, so raise the
+# file-descriptor ceiling well above the default and cap thread/PID growth.
+LimitNOFILE=65536
+TasksMax=4096
+# Optional memory/CPU caps - uncomment and tune to your host's capacity.
+# MemoryMax=512M
+# CPUQuota=200%
 
 [Install]
 WantedBy=multi-user.target
