@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,8 +33,10 @@ var cacheableStatus = map[int]bool{
 }
 
 // New builds a Cache from config. It returns (nil, nil) when caching is
-// disabled so callers can treat a nil *Cache as "no caching".
-func New(cfg config.CacheConfig) (*Cache, error) {
+// disabled so callers can treat a nil *Cache as "no caching". The logger (may be
+// nil) receives operational warnings from the disk tier, such as foreign files
+// found in the cache directory or a failed disk write.
+func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -43,7 +46,7 @@ func New(cfg config.CacheConfig) (*Cache, error) {
 		maxEntry:   cfg.MemoryMaxSize.Bytes(),
 	}
 	if cfg.DiskPath != "" {
-		d, err := newDiskStore(cfg.DiskPath, cfg.DiskMaxSize.Bytes())
+		d, err := newDiskStore(cfg.DiskPath, cfg.DiskMaxSize.Bytes(), logger)
 		if err != nil {
 			return nil, err
 		}

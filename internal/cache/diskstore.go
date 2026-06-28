@@ -6,10 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"jul/internal/atomicfile"
 )
 
 // diskStore is the overflow tier: a size-bounded, content-addressed file cache.
@@ -23,6 +26,7 @@ type diskStore struct {
 	curBytes int64
 	ll       *list.List // front = most recently used; values are *diskItem
 	items    map[string]*list.Element
+	log      *slog.Logger
 }
 
 type diskItem struct {
@@ -30,25 +34,53 @@ type diskItem struct {
 	size int64
 }
 
-func newDiskStore(dir string, maxBytes int64) (*diskStore, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func newDiskStore(dir string, maxBytes int64, logger *slog.Logger) (*diskStore, error) {
+	// 0o700: cached response bodies may carry sensitive content, so the cache
+	// directory is owned by and readable only to the server's user.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	if maxBytes <= 0 {
 		maxBytes = 512 << 20
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	d := &diskStore{
 		dir:      dir,
 		maxBytes: maxBytes,
 		ll:       list.New(),
 		items:    make(map[string]*list.Element),
+		log:      logger,
 	}
 	d.rehydrate()
 	return d, nil
 }
 
+// isCacheFile reports whether name matches the cache's own file-naming scheme:
+// the lowercase hex SHA-256 of a key (64 hex chars). Restricting rehydrate and
+// eviction to such names means a directory that also holds unrelated files (an
+// operator pointing disk_path at a shared or pre-populated directory) never has
+// those foreign files indexed, served, or — critically — deleted by LRU
+// eviction. The atomicfile temp files (".<name>.tmp-*") also fail this check and
+// are ignored.
+func isCacheFile(name string) bool {
+	if len(name) != 2*sha256.Size {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
 // rehydrate seeds the LRU index from existing files (ordered oldest-first by
-// mtime) so disk usage is bounded across process restarts.
+// mtime) so disk usage is bounded across process restarts. Only files that match
+// the cache's own naming scheme are indexed; foreign files are left untouched so
+// the cache never serves or evicts data it did not write.
 func (d *diskStore) rehydrate() {
 	entries, err := os.ReadDir(d.dir)
 	if err != nil {
@@ -60,8 +92,13 @@ func (d *diskStore) rehydrate() {
 		mod  int64
 	}
 	var files []fi
+	var foreign int
 	for _, e := range entries {
 		if e.IsDir() {
+			continue
+		}
+		if !isCacheFile(e.Name()) {
+			foreign++
 			continue
 		}
 		info, err := e.Info()
@@ -69,6 +106,11 @@ func (d *diskStore) rehydrate() {
 			continue
 		}
 		files = append(files, fi{hash: e.Name(), size: info.Size(), mod: info.ModTime().UnixNano()})
+	}
+	if foreign > 0 {
+		d.log.Warn("cache: ignoring foreign files in disk cache directory",
+			"dir", d.dir, "count", foreign,
+			"hint", "point cache disk_path at a directory dedicated to the cache")
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mod < files[j].mod })
 	for _, f := range files {
@@ -117,7 +159,11 @@ func (d *diskStore) set(key string, e *Entry) {
 		return
 	}
 	hash := hashKey(key)
-	if err := os.WriteFile(d.path(hash), buf.Bytes(), 0o644); err != nil {
+	// Atomic, crash-safe, owner-only (0o600): a temp file in the same directory
+	// is fsync'd and renamed over the target, so a reader or a restart never sees
+	// a half-written entry and the file is never world-readable.
+	if err := atomicfile.Write(d.path(hash), buf.Bytes(), 0o600); err != nil {
+		d.log.Warn("cache: disk write failed", "dir", d.dir, "error", err)
 		return
 	}
 	size := int64(buf.Len())

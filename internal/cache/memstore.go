@@ -49,7 +49,6 @@ func (m *memStore) get(key string) (*Entry, bool) {
 func (m *memStore) set(key string, e *Entry) {
 	size := e.Size()
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if el, ok := m.items[key]; ok {
 		it := el.Value.(*memItem)
@@ -62,22 +61,33 @@ func (m *memStore) set(key string, e *Entry) {
 		m.items[key] = el
 		m.curBytes += size
 	}
-	m.evictLocked()
+	victims := m.evictLocked()
+	m.mu.Unlock()
+
+	// Forward evicted entries to the disk overflow tier outside the lock: the
+	// hook performs disk I/O (encode + atomic write), which must not block other
+	// cache operations nor invert the mem/disk lock order.
+	if m.onEvict != nil {
+		for _, it := range victims {
+			m.onEvict(it.key, it.entry)
+		}
+	}
 }
 
-// evictLocked drops LRU entries until within the byte cap, forwarding each to
-// onEvict (disk overflow).
-func (m *memStore) evictLocked() {
+// evictLocked drops LRU entries until within the byte cap and returns them (in
+// eviction order) so the caller can forward them to onEvict after releasing the
+// lock. It must be called with m.mu held.
+func (m *memStore) evictLocked() []*memItem {
+	var victims []*memItem
 	for m.curBytes > m.maxBytes && m.ll.Len() > 0 {
 		el := m.ll.Back()
 		it := el.Value.(*memItem)
 		m.ll.Remove(el)
 		delete(m.items, it.key)
 		m.curBytes -= it.size
-		if m.onEvict != nil {
-			m.onEvict(it.key, it.entry)
-		}
+		victims = append(victims, it)
 	}
+	return victims
 }
 
 func (m *memStore) del(key string) {

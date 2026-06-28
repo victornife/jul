@@ -1,9 +1,17 @@
 package cache
 
 import (
+	"bytes"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,10 +19,16 @@ import (
 	"jul/internal/config"
 )
 
+// testLogger returns a logger that discards output, for tests that exercise the
+// disk tier's warning paths without polluting test output.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 func newTestCache(t *testing.T, cfg config.CacheConfig) *Cache {
 	t.Helper()
 	cfg.Enabled = true
-	c, err := New(cfg)
+	c, err := New(cfg, testLogger())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -42,7 +56,7 @@ func TestMemStoreEvictionOverflow(t *testing.T) {
 
 func TestDiskStorePersistence(t *testing.T) {
 	dir := t.TempDir()
-	d, err := newDiskStore(dir, 1<<20)
+	d, err := newDiskStore(dir, 1<<20, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +64,7 @@ func TestDiskStorePersistence(t *testing.T) {
 	d.set("k", e)
 
 	// New store over the same dir must rehydrate and serve the entry.
-	d2, err := newDiskStore(dir, 1<<20)
+	d2, err := newDiskStore(dir, 1<<20, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,5 +245,111 @@ func TestParseCacheControl(t *testing.T) {
 	want := map[string]string{"public": "", "max-age": "60", "stale-while-revalidate": "30"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseCacheControl = %v, want %v", got, want)
+	}
+}
+
+// TestDiskStoreFileMode proves cache files are written owner-only (0o600) so a
+// cached response body is never world-readable.
+func TestDiskStoreFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not meaningful on Windows")
+	}
+	dir := t.TempDir()
+	d, err := newDiskStore(dir, 1<<20, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.set("k", &Entry{Status: 200, Body: []byte("hi"), ExpiresAt: time.Now().Add(time.Hour)})
+
+	fi, err := os.Stat(d.path(hashKey("k")))
+	if err != nil {
+		t.Fatalf("stat cache file: %v", err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("cache file mode = %o, want 600", perm)
+	}
+}
+
+// TestDiskStoreAtomicNoTempLeftovers proves the atomic temp+rename write leaves
+// no stray temp files behind: after a series of writes the directory holds only
+// well-formed cache files.
+func TestDiskStoreAtomicNoTempLeftovers(t *testing.T) {
+	dir := t.TempDir()
+	d, err := newDiskStore(dir, 1<<20, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 8; i++ {
+		d.set(strconv.Itoa(i), &Entry{Status: 200, Body: []byte("x"), ExpiresAt: time.Now().Add(time.Hour)})
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !isCacheFile(e.Name()) {
+			t.Fatalf("non-cache file left in cache dir after writes: %q", e.Name())
+		}
+	}
+}
+
+// TestDiskStoreIgnoresForeignFiles proves a directory holding unrelated files is
+// safe to use as disk_path: foreign files are never indexed, served, or deleted
+// by LRU eviction, and their presence is logged once.
+func TestDiskStoreIgnoresForeignFiles(t *testing.T) {
+	dir := t.TempDir()
+	foreign := filepath.Join(dir, "operator-notes.txt")
+	if err := os.WriteFile(foreign, []byte("do not delete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// A tiny budget makes eviction eager, so the only thing protecting the
+	// foreign file is its exclusion from the index.
+	d, err := newDiskStore(dir, 64, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.items) != 0 {
+		t.Fatalf("foreign file was indexed: %d items", len(d.items))
+	}
+	if !strings.Contains(logBuf.String(), "foreign") {
+		t.Errorf("expected a warning about foreign files, got: %q", logBuf.String())
+	}
+
+	// Drive writes that force eviction; the foreign file must be untouched.
+	for i := 0; i < 16; i++ {
+		d.set(strconv.Itoa(i), &Entry{Status: 200, Body: make([]byte, 128), ExpiresAt: time.Now().Add(time.Hour)})
+	}
+	got, err := os.ReadFile(foreign)
+	if err != nil {
+		t.Fatalf("foreign file was removed by the cache: %v", err)
+	}
+	if string(got) != "do not delete" {
+		t.Fatalf("foreign file was modified: %q", got)
+	}
+}
+
+// TestMemStoreEvictHookRunsOutsideLock proves the disk-overflow onEvict hook runs
+// without the memory-tier lock held: the hook re-enters the same store, which
+// would deadlock if set still held m.mu while evicting.
+func TestMemStoreEvictHookRunsOutsideLock(t *testing.T) {
+	var m *memStore
+	m = newMemStore(600, func(key string, _ *Entry) {
+		_, _ = m.get(key) // re-entrant read; deadlocks if onEvict holds m.mu
+	})
+
+	done := make(chan struct{})
+	go func() {
+		m.set("a", &Entry{Body: make([]byte, 300)})
+		m.set("b", &Entry{Body: make([]byte, 300)}) // overflows -> evicts "a" -> onEvict
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("eviction hook deadlocked: onEvict ran while holding the mem lock")
 	}
 }

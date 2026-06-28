@@ -110,7 +110,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	// The response cache persists across reloads, so it is created once and
 	// captured by the handler factory below.
-	responseCache, err := cache.New(cfg.Cache)
+	responseCache, err := cache.New(cfg.Cache, log)
 	if err != nil {
 		log.Error("failed to initialize cache", "error", err)
 		return 1

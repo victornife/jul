@@ -656,7 +656,9 @@ A two-tier response cache shared across reloads.
 | `default_ttl` | duration | Used when upstream gives no explicit freshness |
 | `stale_while_revalidate` | duration | Serve stale entries while refreshing asynchronously |
 
-Per-location caching also requires `cache = true` on the location.
+Per-location caching also requires `cache = true` on the location. See
+[docs/cache.md](docs/cache.md) for the two-tier model, on-disk format, file
+permissions (`0o600`), atomic writes, and overflow/eviction semantics.
 
 ### `[compression]`
 
