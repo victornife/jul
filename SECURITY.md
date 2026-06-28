@@ -75,7 +75,10 @@ JWKS fetching, and ACME are SSRF-safe by design rather than by filtering.
   `auth` modifier (CIDR / Basic / JWT / forward-auth). At most one credential
   method per location; see [docs/auth.md](docs/auth.md).
 - **Lock down the admin console.** Always set `[admin].token` (constant-time
-  compare; strict CSP, `X-Frame-Options: DENY`, same-origin `/api`). See the
+  compare; strict CSP, `X-Frame-Options: DENY`, same-origin `/api`). Edits that
+  change admin reachability (disabling admin, moving its listen address, rotating
+  its token, or disabling the web console) are held for explicit confirmation so
+  a single apply cannot silently lock you out. See the
   [console security model](docs/console.md#security-model) and the invariants in
   [ADR 0004](docs/adr/0004-console-ui-invariants.md).
 - **Run least-privilege.** Use the provided systemd unit

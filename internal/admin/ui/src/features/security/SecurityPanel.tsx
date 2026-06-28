@@ -4,6 +4,7 @@ import { fetchSecurity, type SecurityProjection, type LocationWAF } from "@/api/
 import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 
 // wafIsMixed reports whether protected locations run a mix of block and detect
 // modes, in which case a single mode badge would mislead.
@@ -64,13 +65,14 @@ export function SecurityPanel() {
   const [editingWAF, setEditingWAF] = useState(false);
   const [editingLocationWAF, setEditingLocationWAF] = useState<LocationWAF | null>(null);
   const [externalizing, setExternalizing] = useState(false);
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["security"],
     queryFn: fetchSecurity,
   });
 
   if (isLoading) return <div className="text-jul-muted">Loading security…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load security info.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="security info" onRetry={() => void refetch()} />;
 
   const locationWafs = data.location_wafs ?? [];
 

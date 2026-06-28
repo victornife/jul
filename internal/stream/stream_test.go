@@ -231,6 +231,81 @@ func TestPreflightBuildRejectsDuplicate(t *testing.T) {
 	}
 }
 
+// TestPreflightListenersDetectsBusyPort proves the apply-time bind-probe rejects
+// a NEWLY added stream listener whose address is already in use, so the apply is
+// refused before the config is written rather than failing in the asynchronous
+// reload after "applied" was already reported.
+func TestPreflightListenersDetectsBusyPort(t *testing.T) {
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("occupy: %v", err)
+	}
+	defer busy.Close()
+	busyAddr := busy.Addr().String()
+
+	s := newTestServer(t, Hooks{})
+	err = s.PreflightListeners(nil, []config.StreamServer{
+		{Listen: busyAddr, Protocol: "tcp", ProxyPass: "127.0.0.1:1"},
+	})
+	if err == nil {
+		t.Fatal("preflight accepted an in-use stream listen address, want error")
+	}
+}
+
+// TestPreflightListenersSkipsExisting proves an address already present in the
+// running set is not re-probed: a listener Jul.IA itself holds must not make its
+// own apply fail.
+func TestPreflightListenersSkipsExisting(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	defer held.Close()
+	addr := held.Addr().String()
+
+	s := newTestServer(t, Hooks{})
+	old := []config.StreamServer{{Listen: addr, Protocol: "tcp", ProxyPass: "127.0.0.1:1"}}
+	next := []config.StreamServer{{Listen: addr, Protocol: "tcp", ProxyPass: "127.0.0.1:2"}}
+	if err := s.PreflightListeners(old, next); err != nil {
+		t.Fatalf("preflight re-probed an existing listener: %v", err)
+	}
+}
+
+// TestPreflightListenersReleasesSocket proves a successful probe of a free
+// address does not hold the socket, so the subsequent real bind can succeed.
+func TestPreflightListenersReleasesSocket(t *testing.T) {
+	addr := freeTCPAddr(t)
+	s := newTestServer(t, Hooks{})
+	if err := s.PreflightListeners(nil, []config.StreamServer{
+		{Listen: addr, Protocol: "tcp", ProxyPass: "127.0.0.1:1"},
+	}); err != nil {
+		t.Fatalf("preflight free addr: %v", err)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("address held after preflight (socket not released): %v", err)
+	}
+	_ = ln.Close()
+}
+
+// TestPreflightListenersUDP proves the probe covers UDP listeners, not just TCP.
+func TestPreflightListenersUDP(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("occupy udp: %v", err)
+	}
+	defer pc.Close()
+	busyAddr := pc.LocalAddr().String()
+
+	s := newTestServer(t, Hooks{})
+	err = s.PreflightListeners(nil, []config.StreamServer{
+		{Listen: busyAddr, Protocol: "udp", ProxyPass: "127.0.0.1:1"},
+	})
+	if err == nil {
+		t.Fatal("preflight accepted an in-use UDP stream listen address, want error")
+	}
+}
+
 func TestTCPProxyEcho(t *testing.T) {
 	backend, stop := tcpEcho(t)
 	defer stop()

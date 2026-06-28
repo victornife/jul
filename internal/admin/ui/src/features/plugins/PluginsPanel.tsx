@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 import {
   patchConfig,
   fetchPlugins,
@@ -531,13 +532,17 @@ function PluginCard({
 
 export function PluginsPanel() {
   const { run: runDetach } = useRunPatch();
-  const { data, isLoading, isError } = useQuery({ queryKey: ["plugins"], queryFn: fetchPlugins });
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["plugins"],
+    queryFn: fetchPlugins,
+  });
   const [editing, setEditing] = useState<PluginProjection | null>(null);
   const [creating, setCreating] = useState(false);
   const [attaching, setAttaching] = useState<PluginProjection | null>(null);
 
   if (isLoading) return <div className="text-jul-muted">Loading plugins…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load plugins.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="plugins" onRetry={() => void refetch()} />;
 
   function detach(plugin: PluginProjection, a: PluginAttachment): void {
     runDetach({

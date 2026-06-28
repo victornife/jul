@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchAudit,
   downloadAuditExport,
+  describeApiError,
   type AuditEvent,
   type AuditFilter,
 } from "@/api/client.ts";
@@ -33,7 +34,7 @@ export function AuditPanel() {
     result: result || undefined,
     limit: 500,
   };
-  const { data, isError, refetch } = useQuery({
+  const { data, isError, error, refetch } = useQuery({
     queryKey: ["audit", op, result],
     queryFn: () => fetchAudit(filter),
   });
@@ -122,7 +123,7 @@ export function AuditPanel() {
       <div className="overflow-hidden rounded-lg border border-jul-border bg-jul-surface">
         {events.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-jul-muted">
-            {isError ? "Failed to load the audit log." : "No audit events match."}
+            {isError ? describeApiError(error, "the audit log").message : "No audit events match."}
           </p>
         ) : (
           <div className="max-h-[calc(100vh-260px)] overflow-auto">

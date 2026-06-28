@@ -50,6 +50,29 @@ the root instead; the JSON APIs below that do not require the tag (for example
 
 ## Panels
 
+### Loading and failure states
+
+Every panel that loads data renders one of three states: a brief *loading* line
+while the first request is in flight, the panel content on success, or a **typed
+failure state** when the request fails. Rather than a single generic "Failed to
+load X" for every cause, the console classifies the failure and tells the
+operator what to do:
+
+| Cause | What you see | Why / what to do |
+| --- | --- | --- |
+| **401** — token missing or no longer valid | "Session expired" (the console-wide token prompt also opens) | Re-enter the admin token |
+| **403** — authenticated but not permitted | "Access denied" | Use a token with admin access |
+| **404** — endpoint/feature absent | "Not available" | The capability may be disabled in this build or configuration; enable it or rebuild with its tag |
+| **409** — stale read | "Out of date" (with the server's reason) | Retry — the panel refetches the latest state |
+| **429** — rate-limited | "Too many requests" | Wait a moment, then retry |
+| **5xx** — server error | "Server error" (with the server's detail) | Retry; check the server logs |
+| **network** — offline, DNS, reset | "Can't reach the server" | Check the server is running and your connection is stable |
+
+Retryable failures (409, 429, 5xx, network) show a **Retry** button that
+refetches in place; re-authentication, permission, and availability errors do
+not, because retrying the identical request cannot succeed. A 401 from any panel
+also raises the console-wide token prompt described above.
+
 ### Dashboard
 
 Polls `GET /api/stats` every two seconds and shows requests/sec, in-flight
@@ -198,7 +221,23 @@ so an apply that adds an unbindable port (already in use by another process,
 invalid, or privileged without permission) is rejected before it is persisted,
 rather than being recorded as applied while the new listener silently never
 serves. Addresses the running server already holds are not probed (that would
-always fail), and removals introduce nothing to probe.
+always fail), and removals introduce nothing to probe. Newly added `[[stream]]`
+(L4 TCP/UDP) listeners are probed the same way, so the apply is equally truthful
+for stream deployments. See [reload semantics](reload-semantics.md) for the full
+*applied vs serving* model.
+
+### Admin self-lockout guard
+
+The raw editor can edit the `[admin]` block itself, which means a single apply
+could change how you reach the console — and unlike any other change, you cannot
+roll it back from a console you can no longer reach. To prevent that, an apply
+that would **disable the admin interface, move its listen address, rotate its
+token, or disable the web console** is held with **HTTP 409** and
+`admin_change: true` the first time, listing exactly what would change. Nothing
+is written. The console shows a confirmation dialog enumerating the changes; on
+confirm it re-applies with `?confirm_admin=true` and the write proceeds. An apply
+that leaves the `[admin]` block unchanged is never gated, and changes that only
+*widen* access (enabling admin or the console) are not gated either.
 
 ### Guided editors — scope (v2)
 

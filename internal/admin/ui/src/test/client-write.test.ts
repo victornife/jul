@@ -16,6 +16,7 @@ import {
   ConfigRejectedError,
   ConfigConflictError,
   ConfigRestartRequiredError,
+  ConfigAdminChangeError,
   ApiError,
   ValidationResultSchema,
   ApplyResultSchema,
@@ -196,6 +197,40 @@ describe("applyConfig", () => {
         expect(err.message).toContain("restart");
       }
     }
+  });
+
+  it("throws ConfigAdminChangeError (not a conflict) on HTTP 409 with admin_change", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            admin_change: true,
+            message: "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+            changes: ["the admin token would change (your current session would need to re-authenticate)"],
+          }),
+          { status: 409 },
+        ),
+    );
+    await expect(applyConfig("x")).rejects.toBeInstanceOf(ConfigAdminChangeError);
+    try {
+      await applyConfig("x");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigAdminChangeError);
+      expect(err).not.toBeInstanceOf(ConfigConflictError);
+      if (err instanceof ConfigAdminChangeError) {
+        expect(err.changes).toHaveLength(1);
+        expect(err.changes[0]).toContain("token");
+      }
+    }
+  });
+
+  it("appends confirm_admin=true when confirmAdmin is set", async () => {
+    const fn = mockFetch(
+      () => new Response(JSON.stringify({ ok: true, status: [], version: "v2" }), { status: 200 }),
+    );
+    await applyConfig("listen = \":8443\"", "feedface", true);
+    expect(fn.mock.calls[0]?.[0]).toBe("/api/config/apply?base_version=feedface&confirm_admin=true");
   });
 });
 

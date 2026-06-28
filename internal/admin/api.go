@@ -950,13 +950,15 @@ func restartRequiredMessage(err error) string {
 // write (which triggers reload) → return post-apply runtime delta.
 //
 // Truthfulness contract: WriteConfigRaw runs the composition root's full apply
-// preflight (deep validation plus a dry-run of every runtime builder that can
-// fail — WAF, auth, compression, and the WASM plugin set) BEFORE persisting the
-// file. A configuration that passes therefore cannot fail the subsequent build,
-// so the only remaining gap between "saved" and "serving" is the asynchronous
-// reload itself. The response and audit/timeline copy say "saved; reloading"
-// rather than the past-tense "reloaded" so the operator is not told the live
-// runtime switched at a moment when the swap may still be in flight.
+// preflight (deep validation; a dry-run build of every runtime builder that can
+// fail — WAF, auth, compression, the WASM plugin set, and the L4 stream route
+// set; plus a bind-probe of every newly added HTTP and stream listen address)
+// BEFORE persisting the file. A configuration that passes therefore cannot fail
+// the subsequent build or fail to bind, so the only remaining gap between
+// "saved" and "serving" is the asynchronous reload itself. The response and
+// audit/timeline copy say "saved; reloading" rather than the past-tense
+// "reloaded" so the operator is not told the live runtime switched at a moment
+// when the swap may still be in flight. See docs/reload-semantics.md.
 // POST /api/config/apply
 func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -993,6 +995,33 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 						Conflict:       true,
 						Message:        "The configuration changed since this edit was prepared; reload and try again.",
 						CurrentVersion: currentVersion,
+					})
+					return
+				}
+			}
+		}
+	}
+
+	// Self-lockout guard: refuse an apply that would change how the operator
+	// reaches the admin console (disabling admin, moving its listen address,
+	// rotating its token, or disabling the web console) unless the client
+	// explicitly confirms with ?confirm_admin=true. This stops an operator from
+	// silently locking themselves out with a single raw edit — the one change
+	// that no rollback can undo from the console, because the console would be
+	// gone. The guard is best-effort: it only runs when both the running config
+	// and the proposed config parse; a parse failure falls through to the normal
+	// validation path below, which reports the error.
+	if r.URL.Query().Get("confirm_admin") != "true" && s.deps.LoadConfig != nil {
+		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
+			if next, perr := config.Parse(body); perr == nil && next != nil {
+				if changes := adminLockoutChanges(cur.Admin, next.Admin); len(changes) > 0 {
+					s.recordAudit("config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation", adminClientIP(r))
+					s.emit("config", "apply_failed", "warn", "Configuration apply would change admin access and was held for confirmation.")
+					writeJSON(w, http.StatusConflict, adminGuardResponse{
+						OK:          false,
+						AdminChange: true,
+						Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+						Changes:     changes,
 					})
 					return
 				}
@@ -1048,6 +1077,47 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		"status":         status,
 		"version":        version,
 	})
+}
+
+// adminGuardResponse is the 409 body when an apply would change a setting that
+// governs admin reachability (disabling the admin interface, its listen address,
+// its token, or the web console) without explicit confirmation. The write was
+// NOT performed; the operator re-sends with ?confirm_admin=true to proceed. This
+// guards against silently locking oneself out of the console with a single edit.
+type adminGuardResponse struct {
+	OK          bool     `json:"ok"`
+	AdminChange bool     `json:"admin_change"`
+	Message     string   `json:"message"`
+	Changes     []string `json:"changes"`
+}
+
+// adminLockoutChanges reports the admin-reachability changes between the running
+// config (prev) and a proposed one (next) that could lock an operator out of the
+// console: disabling the admin interface, moving its listen address, rotating
+// its token, or disabling the web console. It returns one human-readable
+// description per such change, or nil when none apply. Changes that only widen
+// access (enabling admin or the console) are intentionally not flagged, and the
+// guard is a no-op when admin is not currently serving.
+func adminLockoutChanges(prev, next config.AdminConfig) []string {
+	if !prev.Enabled {
+		// Admin is not currently serving (this handler is only reachable when it
+		// is, but guard defensively): there is no live session to lock out.
+		return nil
+	}
+	if !next.Enabled {
+		return []string{"the admin interface would be disabled"}
+	}
+	var changes []string
+	if prev.Listen != next.Listen {
+		changes = append(changes, fmt.Sprintf("the admin listen address would change from %q to %q", prev.Listen, next.Listen))
+	}
+	if prev.Token != next.Token {
+		changes = append(changes, "the admin token would change (your current session would need to re-authenticate)")
+	}
+	if prev.ConsoleEnabled() && !next.ConsoleEnabled() {
+		changes = append(changes, "the web console would be disabled (only the basic config page would remain)")
+	}
+	return changes
 }
 
 // handleConfigHistoryList serves the v2 snapshot index at GET /api/config/history.

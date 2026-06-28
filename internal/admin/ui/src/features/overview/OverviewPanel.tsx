@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchOverview, type FeatureStatus, type TrafficSources } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
+import { PanelError } from "@/components/PanelError.tsx";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
 
 // Group status rows by their `group` field.
@@ -175,7 +176,7 @@ function StatusGroup({ name, rows }: { readonly name: string; readonly rows: Fea
 }
 
 export function OverviewPanel() {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["overview"],
     queryFn: fetchOverview,
     refetchInterval: 2000, // Poll every 2 seconds per Milestone 1.1
@@ -187,7 +188,7 @@ export function OverviewPanel() {
     return <div className="text-jul-muted">Loading overview…</div>;
   }
   if (isError || !data) {
-    return <div className="text-jul-danger">Failed to load overview.</div>;
+    return <PanelError error={error} resource="the overview" onRetry={() => void refetch()} />;
   }
 
   const groups = groupBy(data.status, (r) => r.group);

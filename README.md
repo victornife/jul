@@ -1408,6 +1408,13 @@ reload is rejected and the previous configuration keeps serving** — there is n
 window of downtime. The response cache and metrics counters persist across
 reloads.
 
+When a reload is triggered through the admin API, the config is additionally
+preflighted — including a bind-probe of every newly added HTTP **and**
+`[[stream]]` listen address — before it is written, so an apply that cannot bind
+is rejected up front rather than reported as applied. See
+[docs/reload-semantics.md](docs/reload-semantics.md) for the full *applied vs
+serving* model.
+
 ---
 
 ## Admin interface & observability

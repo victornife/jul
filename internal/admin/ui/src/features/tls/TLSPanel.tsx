@@ -7,6 +7,7 @@ import {
   type MTLSServerProjection,
 } from "@/api/client.ts";
 import { PageHeader, Button } from "@/components/ui.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 import { TLSEditor } from "@/features/tls/TLSEditor.tsx";
 import { MTLSEditor } from "@/features/tls/MTLSEditor.tsx";
 import { mtlsServerSummary } from "@/lib/mtls.ts";
@@ -162,11 +163,15 @@ function MTLSCard({
 }
 
 function MTLSSection() {
-  const { data, isLoading, isError } = useQuery({ queryKey: ["mtls"], queryFn: fetchMTLS });
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["mtls"],
+    queryFn: fetchMTLS,
+  });
   const [editing, setEditing] = useState<MTLSServerProjection | null>(null);
 
   if (isLoading) return <div className="text-jul-muted">Loading mutual TLS…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load mutual TLS.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="mutual TLS" onRetry={() => void refetch()} />;
 
   return (
     <section className="space-y-4">
@@ -211,13 +216,14 @@ function MTLSSection() {
 
 export function TLSPanel() {
   const [creating, setCreating] = useState(false);
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["tls"],
     queryFn: fetchTLS,
   });
 
   if (isLoading) return <div className="text-jul-muted">Loading TLS certificates…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load TLS info.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="TLS info" onRetry={() => void refetch()} />;
   const expiringSoon = data.filter((c) => c.days_left !== undefined && c.days_left <= 30);
 
   return (

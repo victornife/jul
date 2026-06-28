@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.3 · Updated 2026-06-25
+> Version 1.6 · Updated 2026-06-28
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -104,6 +104,9 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-06-28 | 1.6 | **Console failure-state taxonomy:** panels classify a failed data load (401 / 403 / 404 / 409 / 429 / 5xx / network) into distinct, actionable messages instead of a single generic "Failed to load X", with a **Retry** action on retryable failures. | [console.md](console.md) |
+| 2026-06-28 | 1.5 | **Admin self-lockout guard:** an apply that would change admin reachability (disable admin, move its listen address, rotate its token, or disable the web console) is held with `409 admin_change` and requires `?confirm_admin=true`; the console surfaces a confirm-and-retry dialog. | [console.md](console.md), [SECURITY.md](../SECURITY.md) |
+| 2026-06-28 | 1.4 | **Reload truthfulness:** the admin apply path now bind-probes newly added `[[stream]]` listen addresses before writing the config, symmetric with the HTTP listener probe, so an unbindable stream port is rejected at apply time instead of failing in the asynchronous reload. Added the canonical [reload semantics](reload-semantics.md) reference. | [stream-proxy.md](stream-proxy.md), [reload-semantics.md](reload-semantics.md) |
 | 2026-06-25 | 1.3 | Reconciled the **Console** entry: Y2-09 Console v2 (continuous panels) is part of the shipped, *GA — soak pending* Console (operations cockpit) row, so it is removed from *Not yet shipped* (committed remaining is now none). | [console.md](console.md) |
 | 2026-06-24 | 1.2 | Added **Y2-06 WAF** (`waf`) and **SEC-1 secrets references** (core) to the **Beta** table with their remaining GA gaps, and removed them from *Not yet shipped* (committed remaining is now just Y2-09 Console v2). | [waf.md](waf.md), [secrets.md](secrets.md), [year-2.md](specs/year-2.md) |
 | 2026-06-22 | 1.0 | Created the canonical feature-status + GA-criteria matrix, consolidating the per-feature *GA status* tables, the [GA push](ga-push.md) waves, and the [roadmap](roadmap/README.md) maturity column into one source of truth. | per-feature docs, [ga-push.md](ga-push.md), [roadmap](roadmap/README.md) |

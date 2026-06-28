@@ -38,5 +38,10 @@ func (s *Server) PreflightBuild(streams []config.StreamServer, _ map[string]conf
 	return nil
 }
 
+// PreflightListeners is a no-op for the stub: a non-empty stream set is already
+// rejected by PreflightBuild before any bind-probe would run, so there is
+// nothing to probe in a lean build.
+func (s *Server) PreflightListeners(_, _ []config.StreamServer) error { return nil }
+
 // Close is a no-op for the stub.
 func (s *Server) Close() error { return nil }

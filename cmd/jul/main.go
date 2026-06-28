@@ -796,6 +796,15 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					if err := server.PreflightListeners(prevCfg.Servers, cfg.Servers); err != nil {
 						return err
 					}
+					// Symmetrically probe newly introduced stream (L4) listen
+					// addresses. PreflightBuild (run in applyPreflight above) proves
+					// the [[stream]] config builds but deliberately does not bind, so
+					// without this an unbindable new stream port would be recorded as
+					// applied while the asynchronous reload's bind fails and surfaces
+					// only in the Overview StreamStatus.
+					if err := streamSrv.PreflightListeners(prevCfg.Streams, cfg.Streams); err != nil {
+						return err
+					}
 					// Refuse to hot-apply a change that is valid but cannot take
 					// effect without a restart: the ACME issued-domain set and
 					// issuer are frozen when the autocert manager is built at

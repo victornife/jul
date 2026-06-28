@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { searchConfig, type SearchResult } from "@/api/client.ts";
+import { searchConfig, describeApiError, type SearchResult } from "@/api/client.ts";
 import { PageHeader, TextField, EmptyState, Badge } from "@/components/ui.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
@@ -73,7 +73,7 @@ export function SearchPanel() {
       {search.isLoading ? (
         <div className="text-jul-muted">Loading…</div>
       ) : search.isError ? (
-        <div className="text-jul-danger">Search failed. Check that the admin token is valid.</div>
+        <div className="text-jul-danger">{describeApiError(search.error, "search results").message}</div>
       ) : results.length === 0 ? (
         <EmptyState
           title={query.trim() === "" ? "Start typing to search" : "No matches"}

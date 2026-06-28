@@ -205,6 +205,18 @@ The HTTP listeners are untouched throughout. Existing connections on a listener
 whose route changed continue on their original backend; new connections use the
 new route.
 
+### Apply-time truthfulness
+
+When a reload is triggered by the **admin console / `/api/config/apply`**, the
+write path additionally **bind-probes every newly introduced stream listen
+address before the configuration is written to disk** — symmetric with the HTTP
+listener probe. The stream config is also dry-run-built earlier in the same
+preflight. Together this means an apply that adds an unbindable `[[stream]]` port
+(already in use, privileged, or invalid) is **rejected up front** with an error,
+rather than being recorded as applied while the asynchronous reload's bind fails
+and surfaces only in the Overview stream-status panel. See
+[Configuration reload semantics](reload-semantics.md).
+
 ## Metrics
 
 | Metric | Type | Labels | Meaning |

@@ -194,6 +194,51 @@ func (s *Server) PreflightBuild(streams []config.StreamServer, upstreams map[str
 	return nil
 }
 
+// PreflightListeners probes that every NEWLY introduced stream listen address
+// in next — one whose proto|addr key is not already present in old — can be
+// bound, then immediately releases it. It mirrors the HTTP
+// server.PreflightListeners gate: PreflightBuild proves a [[stream]] block's
+// routes build but deliberately does not bind, so without this an apply that
+// adds an unbindable port (already in use, privileged, or invalid) would be
+// recorded as applied while the asynchronous Reload's bind fails and surfaces
+// only in the Overview StreamStatus. Probing here lets the apply be rejected
+// before the config is written. It does not touch the running listener set;
+// the subsequent Reload performs the authoritative bind under the lock and
+// rolls back on failure. A probe-then-bind race is possible but matches the
+// established HTTP gate's semantics.
+func (s *Server) PreflightListeners(old, next []config.StreamServer) error {
+	oldKeys := make(map[string]struct{}, len(old))
+	for i := range old {
+		oldKeys[normProto(old[i].Protocol)+"|"+old[i].Listen] = struct{}{}
+	}
+	probed := make(map[string]struct{}, len(next))
+	for i := range next {
+		proto := normProto(next[i].Protocol)
+		key := proto + "|" + next[i].Listen
+		if _, existed := oldKeys[key]; existed {
+			continue
+		}
+		if _, dup := probed[key]; dup {
+			continue
+		}
+		probed[key] = struct{}{}
+		if proto == "udp" {
+			pc, err := net.ListenPacket("udp", next[i].Listen)
+			if err != nil {
+				return fmt.Errorf("stream listen address %s (udp): %w", next[i].Listen, err)
+			}
+			_ = pc.Close()
+			continue
+		}
+		ln, err := net.Listen("tcp", next[i].Listen)
+		if err != nil {
+			return fmt.Errorf("stream listen address %s (tcp): %w", next[i].Listen, err)
+		}
+		_ = ln.Close()
+	}
+	return nil
+}
+
 // Close stops every listener and releases all sockets.
 func (s *Server) Close() error {
 	s.mu.Lock()

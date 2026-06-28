@@ -1142,6 +1142,161 @@ func TestConfigApplyMethodNotAllowed(t *testing.T) {
 	}
 }
 
+// adminWriteServer seeds a persisted config whose [admin] block is enabled with
+// a token and a loopback listen address, and returns a write-capable console
+// server plus the on-disk config path. It is the harness for the self-lockout
+// guard tests.
+func adminWriteServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), "server.toml")
+	seed := config.ServeDir("./public", ":8080")
+	seed.Admin = config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "original-token"}
+	raw, err := config.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, raw, 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	deps := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		WriteConfigRaw: func(data []byte) error {
+			c, err := config.Parse(data)
+			if err != nil {
+				return err
+			}
+			if err := config.Validate(c); err != nil {
+				return err
+			}
+			return os.WriteFile(cfgPath, data, 0o644)
+		},
+		LoadConfig: func() (*config.Config, error) {
+			raw, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return nil, err
+			}
+			return config.Parse(raw)
+		},
+	}
+	cfg := config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}
+	return newTestServer(t, cfg, deps), cfgPath
+}
+
+// adminTOML marshals a full config whose [admin] block carries the given token
+// and listen address, for posting to /api/config/apply.
+func adminTOML(t *testing.T, token, listen string) []byte {
+	t.Helper()
+	c := config.ServeDir("./public", ":8080")
+	c.Admin = config.AdminConfig{Enabled: true, Listen: listen, Token: token}
+	raw, err := config.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal admin config: %v", err)
+	}
+	return raw
+}
+
+// TestConfigApplyAdminChangeRequiresConfirm proves a raw apply that rotates the
+// admin token is held with 409 admin_change:true and persists nothing, so an
+// operator cannot silently lock themselves out of the console.
+func TestConfigApplyAdminChangeRequiresConfirm(t *testing.T) {
+	s, cfgPath := adminWriteServer(t)
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+	body := adminTOML(t, "rotated-token", "127.0.0.1:9090")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+	var out adminGuardResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.OK || !out.AdminChange || len(out.Changes) == 0 {
+		t.Errorf("body = %+v, want ok=false admin_change=true with changes", out)
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("config was modified despite an unconfirmed admin change")
+	}
+}
+
+// TestConfigApplyAdminChangeWithConfirm proves the same change applies once the
+// client opts in with ?confirm_admin=true.
+func TestConfigApplyAdminChangeWithConfirm(t *testing.T) {
+	s, cfgPath := adminWriteServer(t)
+	body := adminTOML(t, "rotated-token", "127.0.0.1:9090")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply?confirm_admin=true", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Contains(after, []byte("rotated-token")) {
+		t.Error("a confirmed admin change should have persisted")
+	}
+}
+
+// TestConfigApplyNonAdminChangeSkipsGuard proves an edit that leaves the [admin]
+// block identical applies without confirmation, so the guard does not impose a
+// confirmation on ordinary edits.
+func TestConfigApplyNonAdminChangeSkipsGuard(t *testing.T) {
+	s, cfgPath := adminWriteServer(t)
+	c := config.ServeDir("./changed-root", ":8080")
+	c.Admin = config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "original-token"}
+	body, err := config.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Contains(after, []byte("changed-root")) {
+		t.Error("a non-admin change should apply without confirmation")
+	}
+}
+
+// TestAdminLockoutChanges exercises each branch of the reachability diff.
+func TestAdminLockoutChanges(t *testing.T) {
+	base := config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "t"}
+	consoleOff := false
+	cases := []struct {
+		name string
+		prev config.AdminConfig
+		next config.AdminConfig
+		want bool
+	}{
+		{"no change", base, base, false},
+		{"disable admin", base, config.AdminConfig{Enabled: false}, true},
+		{"listen change", base, config.AdminConfig{Enabled: true, Listen: "0.0.0.0:9090", Token: "t"}, true},
+		{"token change", base, config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "u"}, true},
+		{"console disabled", base, config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "t", Console: &consoleOff}, true},
+		{"admin not serving", config.AdminConfig{Enabled: false}, base, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := adminLockoutChanges(tc.prev, tc.next)
+			if (len(got) > 0) != tc.want {
+				t.Errorf("changes = %v, want hasChange=%v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestConfigGetReturnsBaseVersion proves GET /api/config exposes the
 // optimistic-concurrency fingerprint the raw editor sends back on apply.
 func TestConfigGetReturnsBaseVersion(t *testing.T) {

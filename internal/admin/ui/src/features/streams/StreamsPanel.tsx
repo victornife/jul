@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 import {
   patchConfig,
   fetchStreams,
@@ -379,12 +380,16 @@ function StreamCard({
 
 export function StreamsPanel() {
   const { run: runRemove } = useRunPatch();
-  const { data, isLoading, isError } = useQuery({ queryKey: ["streams"], queryFn: fetchStreams });
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["streams"],
+    queryFn: fetchStreams,
+  });
   const [editing, setEditing] = useState<StreamProjection | null>(null);
   const [creating, setCreating] = useState(false);
 
   if (isLoading) return <div className="text-jul-muted">Loading streams…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load streams.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="streams" onRetry={() => void refetch()} />;
 
   function remove(stream: StreamProjection): void {
     runRemove({ op: "stream_remove", listen: stream.listen, stream_protocol: stream.protocol });

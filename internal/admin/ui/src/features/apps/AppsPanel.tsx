@@ -4,6 +4,7 @@ import { fetchApps, type AppProjection, type BackendProjection } from "@/api/cli
 import { AppDetail } from "@/features/apps/AppDetail.tsx";
 import { AppEditor } from "@/features/apps/AppEditor.tsx";
 import { PageHeader, Button, EmptyState } from "@/components/ui.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
 
 function HealthDot({ healthy }: { readonly healthy: boolean | undefined }) {
@@ -110,7 +111,7 @@ function appMatches(app: AppProjection, health: HealthFilter, usage: UsageFilter
 }
 
 export function AppsPanel() {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["apps"],
     queryFn: fetchApps,
     refetchInterval: 5_000,
@@ -135,7 +136,8 @@ export function AppsPanel() {
   );
 
   if (isLoading) return <div className="text-jul-muted">Loading apps…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load apps.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="apps" onRetry={() => void refetch()} />;
 
   return (
     <div className="space-y-6">

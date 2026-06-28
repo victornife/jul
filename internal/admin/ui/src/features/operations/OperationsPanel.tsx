@@ -7,6 +7,7 @@ import {
   fetchCertHistory,
   fetchConsoleHealth,
   fetchOverview,
+  describeApiError,
   type RequestSample,
   type RouteFailure,
   type BackendHealthHistory,
@@ -350,7 +351,11 @@ function DiagnosticsTab() {
             <ConsoleHealthCards health={health.data} />
           </div>
         ) : (
-          <Empty label={health.isError ? "Failed to load console health." : "Loading…"} />
+          <Empty
+            label={
+              health.isError ? describeApiError(health.error, "console health").message : "Loading…"
+            }
+          />
         )}
       </Section>
 
@@ -358,7 +363,13 @@ function DiagnosticsTab() {
         {samples.data ? (
           <RequestSamplesTable samples={samples.data} />
         ) : (
-          <Empty label={samples.isError ? "Failed to load samples." : "Loading…"} />
+          <Empty
+            label={
+              samples.isError
+                ? describeApiError(samples.error, "request samples").message
+                : "Loading…"
+            }
+          />
         )}
       </Section>
 
@@ -366,7 +377,13 @@ function DiagnosticsTab() {
         {failing.data ? (
           <FailingRoutesTable routes={failing.data} />
         ) : (
-          <Empty label={failing.isError ? "Failed to load failing routes." : "Loading…"} />
+          <Empty
+            label={
+              failing.isError
+                ? describeApiError(failing.error, "failing routes").message
+                : "Loading…"
+            }
+          />
         )}
       </Section>
 
@@ -374,7 +391,13 @@ function DiagnosticsTab() {
         {upstream.data ? (
           <UpstreamHistoryList backends={upstream.data} />
         ) : (
-          <Empty label={upstream.isError ? "Failed to load upstream history." : "Loading…"} />
+          <Empty
+            label={
+              upstream.isError
+                ? describeApiError(upstream.error, "upstream history").message
+                : "Loading…"
+            }
+          />
         )}
       </Section>
 
@@ -382,7 +405,13 @@ function DiagnosticsTab() {
         {certs.data ? (
           <CertHistoryList domains={certs.data} />
         ) : (
-          <Empty label={certs.isError ? "Failed to load certificate history." : "Loading…"} />
+          <Empty
+            label={
+              certs.isError
+                ? describeApiError(certs.error, "certificate history").message
+                : "Loading…"
+            }
+          />
         )}
       </Section>
 

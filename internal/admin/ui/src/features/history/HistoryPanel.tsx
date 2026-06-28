@@ -5,9 +5,11 @@ import {
   fetchHistorySnapshot,
   diffConfig,
   rollback,
+  describeApiError,
   type HistoryEntry,
 } from "@/api/client.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 
 function formatBytes(n: number): string {
@@ -24,7 +26,7 @@ function formatTime(iso: string): string {
 }
 
 function SnapshotViewer({ id, onClose }: { readonly id: string; readonly onClose: () => void }) {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["history-snap", id],
     queryFn: () => fetchHistorySnapshot(id),
   });
@@ -42,7 +44,11 @@ function SnapshotViewer({ id, onClose }: { readonly id: string; readonly onClose
           </button>
         </div>
         {isLoading && <div className="text-jul-muted text-sm">Loading…</div>}
-        {isError && <div className="text-jul-danger text-sm">Failed to load snapshot.</div>}
+        {isError && (
+          <div className="text-jul-danger text-sm">
+            {describeApiError(error, "the snapshot").message}
+          </div>
+        )}
         {data && (
           <pre className="max-h-96 overflow-auto rounded-md border border-jul-border bg-jul-surface p-4 text-xs text-jul-text">
             {data.raw}
@@ -152,7 +158,7 @@ export function HistoryPanel() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [rollingId, setRollingId] = useState<string | null>(null);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["history"],
     queryFn: fetchHistory,
   });
@@ -170,7 +176,8 @@ export function HistoryPanel() {
   });
 
   if (isLoading) return <div className="text-jul-muted">Loading history…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load history.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="the history" onRetry={() => void refetch()} />;
 
   return (
     <div className="space-y-6">

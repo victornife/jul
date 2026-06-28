@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchTimeline, type TimelineEvent } from "@/api/client.ts";
+import { fetchTimeline, describeApiError, type TimelineEvent } from "@/api/client.ts";
 
 const SEVERITY_TONE: Record<string, string> = {
   info: "text-jul-accent",
@@ -46,7 +46,7 @@ function TimelineRow({ ev }: { readonly ev: TimelineEvent }) {
 }
 
 export function TimelinePanel() {
-  const { data, isError } = useQuery({
+  const { data, isError, error } = useQuery({
     queryKey: ["timeline"],
     queryFn: fetchTimeline,
   });
@@ -86,7 +86,7 @@ export function TimelinePanel() {
       <div className="overflow-hidden rounded-lg border border-jul-border bg-jul-surface">
         {filtered.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-jul-muted">
-            {isError ? "Failed to load the timeline." : "No events yet."}
+            {isError ? describeApiError(error, "the timeline").message : "No events yet."}
           </p>
         ) : (
           <ul className="divide-y divide-jul-border">

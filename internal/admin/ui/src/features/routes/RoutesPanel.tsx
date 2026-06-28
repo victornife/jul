@@ -5,6 +5,7 @@ import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
 import { RouteEditor } from "@/features/routes/RouteEditor.tsx";
 import { RouteTester } from "@/features/routes/RouteTester.tsx";
 import { PageHeader, Button, EmptyState } from "@/components/ui.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
 import { emptyAuthDraft, type RouteDraft } from "@/lib/routeToml.ts";
 
@@ -188,7 +189,7 @@ function locationMatches(
 }
 
 export function RoutesPanel() {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["routes"],
     queryFn: fetchRoutes,
   });
@@ -220,7 +221,8 @@ export function RoutesPanel() {
   }, [data, actionFilter, featureFilter, filtersActive]);
 
   if (isLoading) return <div className="text-jul-muted">Loading routes…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load routes.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="routes" onRetry={() => void refetch()} />;
 
   return (
     <div className="space-y-6">

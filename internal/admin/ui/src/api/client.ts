@@ -63,6 +63,128 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
+// ── Error taxonomy ───────────────────────────────────────────────────────────
+
+/**
+ * Classification of a failed data-load so panels can explain *why* a screen is
+ * blank instead of rendering an identical "Failed to load X" for every cause.
+ * A 401 (re-auth) and a 503 (feature unavailable) demand very different operator
+ * actions; collapsing them into one message hides that.
+ */
+export type ApiErrorKind =
+  | "unauthorized" // 401 — token missing or no longer valid
+  | "forbidden" // 403 — authenticated but not permitted
+  | "notFound" // 404 — endpoint/feature absent in this build or config
+  | "conflict" // 409 — server state changed under an optimistic edit
+  | "rateLimited" // 429 — too many requests
+  | "server" // 5xx — the server itself failed
+  | "network" // fetch rejected: offline, DNS, reset (no HTTP status)
+  | "unknown"; // anything else
+
+export interface ApiErrorDescription {
+  readonly kind: ApiErrorKind;
+  /** Short, human-facing headline (e.g. "Session expired"). */
+  readonly title: string;
+  /** One-sentence explanation plus the corrective action. */
+  readonly message: string;
+  /** HTTP status when the failure carried one; undefined for network errors. */
+  readonly status?: number;
+  /** Whether retrying the same request might plausibly succeed. */
+  readonly retryable: boolean;
+}
+
+/**
+ * describeApiError maps a thrown error (an {@link ApiError}, a `fetch` network
+ * `TypeError`, or anything else) onto a stable taxonomy with operator-facing
+ * copy. `resource` is a lowercase noun phrase that slots into the message as the
+ * object being loaded, e.g. "routes", "the configuration", "security info".
+ */
+export function describeApiError(error: unknown, resource: string): ApiErrorDescription {
+  if (error instanceof ApiError) {
+    const status = error.status;
+    if (status === 401) {
+      return {
+        kind: "unauthorized",
+        status,
+        retryable: false,
+        title: "Session expired",
+        message: `Your admin token is missing or no longer valid. Re-enter it to view ${resource}.`,
+      };
+    }
+    if (status === 403) {
+      return {
+        kind: "forbidden",
+        status,
+        retryable: false,
+        title: "Access denied",
+        message: `This admin token is not permitted to view ${resource}.`,
+      };
+    }
+    if (status === 404) {
+      return {
+        kind: "notFound",
+        status,
+        retryable: false,
+        title: "Not available",
+        message: `Could not find ${resource}. The feature may be disabled in this build or configuration.`,
+      };
+    }
+    if (status === 409) {
+      return {
+        kind: "conflict",
+        status,
+        retryable: true,
+        title: "Out of date",
+        message: error.message || `${resource} changed on the server. Reload to see the latest state.`,
+      };
+    }
+    if (status === 429) {
+      return {
+        kind: "rateLimited",
+        status,
+        retryable: true,
+        title: "Too many requests",
+        message: `The console is being rate-limited. Wait a moment, then retry.`,
+      };
+    }
+    if (status >= 500) {
+      return {
+        kind: "server",
+        status,
+        retryable: true,
+        title: "Server error",
+        message: error.message
+          ? `The server failed while loading ${resource}: ${error.message}`
+          : `The server failed while loading ${resource}.`,
+      };
+    }
+    return {
+      kind: "unknown",
+      status,
+      retryable: true,
+      title: "Request failed",
+      message: error.message || `Could not load ${resource}.`,
+    };
+  }
+  // fetch() rejects with a TypeError when the request never reached the server
+  // (offline, DNS failure, connection reset, blocked by CORS). There is no HTTP
+  // status to inspect, so this is the one case we infer from the error type.
+  if (error instanceof TypeError) {
+    return {
+      kind: "network",
+      retryable: true,
+      title: "Can't reach the server",
+      message: `The console couldn't reach Jul. Check that the server is running and your connection is stable, then retry.`,
+    };
+  }
+  return {
+    kind: "unknown",
+    retryable: true,
+    title: "Something went wrong",
+    message: error instanceof Error && error.message ? error.message : `Could not load ${resource}.`,
+  };
+}
+
 // ── Schemas & types ──────────────────────────────────────────────────────────
 
 export const FeatureStatusSchema = z.object({
@@ -952,15 +1074,21 @@ export type ApplyResult = z.infer<typeof ApplyResultSchema>;
  * supplied and the live config has since changed (optimistic concurrency), or
  * ApiError on transport failure.
  */
-export async function applyConfig(candidate: string, baseVersion?: string): Promise<ApplyResult> {
+export async function applyConfig(
+  candidate: string,
+  baseVersion?: string,
+  confirmAdmin = false,
+): Promise<ApplyResult> {
   const headers = new Headers();
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/toml");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const url = baseVersion
-    ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
-    : "/api/config/apply";
+  const params = new URLSearchParams();
+  if (baseVersion) params.set("base_version", baseVersion);
+  if (confirmAdmin) params.set("confirm_admin", "true");
+  const query = params.toString();
+  const url = query ? `/api/config/apply?${query}` : "/api/config/apply";
   const resp = await fetch(url, { method: "POST", headers, body: candidate });
   let data: unknown = null;
   try {
@@ -975,6 +1103,13 @@ export async function applyConfig(candidate: string, baseVersion?: string): Prom
       if (conflict.success && conflict.data.restart_required) {
         throw new ConfigRestartRequiredError(
           conflict.data.message ?? "This change requires a server restart to take effect.",
+        );
+      }
+      if (conflict.success && conflict.data.admin_change) {
+        throw new ConfigAdminChangeError(
+          conflict.data.message ??
+            "This change affects how you reach the admin console; confirm to proceed.",
+          conflict.data.changes ?? [],
         );
       }
       throw new ConfigConflictError(
@@ -1022,9 +1157,26 @@ export class ConfigRestartRequiredError extends Error {
   }
 }
 
+// ConfigAdminChangeError is thrown when an apply would change how the operator
+// reaches the admin console (disabling admin, moving its listen address,
+// rotating its token, or disabling the web console). The server did NOT write
+// the change; the caller confirms the risk and retries with confirmAdmin=true.
+// `changes` lists the human-readable reachability changes to show the operator.
+export class ConfigAdminChangeError extends Error {
+  constructor(
+    message: string,
+    public readonly changes: string[],
+  ) {
+    super(message);
+    this.name = "ConfigAdminChangeError";
+  }
+}
+
 const ConflictBodySchema = z.object({
   conflict: z.boolean().optional(),
   restart_required: z.boolean().optional(),
+  admin_change: z.boolean().optional(),
+  changes: z.array(z.string()).optional(),
   message: z.string().optional(),
   current_version: z.string().optional(),
 });

@@ -9,6 +9,7 @@ import {
   ConfigRejectedError,
   ConfigConflictError,
   ConfigRestartRequiredError,
+  ConfigAdminChangeError,
   type FeatureStatus,
   type ConfigDiff,
 } from "@/api/client.ts";
@@ -16,6 +17,7 @@ import type { PendingDraft } from "@/lib/configDraftHandoff.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 
 const CodeEditor = lazy(() =>
@@ -56,7 +58,7 @@ function AppliedSummary({ status }: { readonly status: FeatureStatus[] }) {
 
 export function ConfigPanel() {
   const qc = useQueryClient();
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["raw-config"],
     queryFn: fetchRawConfig,
   });
@@ -136,7 +138,7 @@ export function ConfigPanel() {
   );
 
   const applyRaw = useMutation({
-    mutationFn: () => applyConfig(current, baseVersion),
+    mutationFn: (confirmAdmin: boolean) => applyConfig(current, baseVersion, confirmAdmin),
     onSuccess: (res) => {
       setBaseline(current);
       setApplied(res.status);
@@ -175,9 +177,14 @@ export function ConfigPanel() {
 
   const applyActive = isPatchMode ? applyPatch : applyRaw;
   const applyError = applyActive.error;
+  // A raw apply that would change how the operator reaches the admin console is
+  // rejected with a 409 the first time; the same confirm modal then re-applies
+  // with confirm_admin=true. Derived from the error so no extra state is needed.
+  const adminChangeError = applyError instanceof ConfigAdminChangeError ? applyError : null;
 
   if (isLoading) return <div className="text-jul-muted">Loading configuration…</div>;
-  if (isError || !data) return <div className="text-jul-danger">Failed to load configuration.</div>;
+  if (isError || !data)
+    return <PanelError error={error} resource="the configuration" onRetry={() => void refetch()} />;
 
   if (data.raw === undefined && draft === null) {
     return (
@@ -259,7 +266,7 @@ export function ConfigPanel() {
         <div className="min-h-0 space-y-4 overflow-auto">
           {applied && <AppliedSummary status={applied} />}
 
-          {applyError && (
+          {applyError && !adminChangeError && (
             <div className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm">
               <p className="font-medium text-jul-danger">
                 {applyError instanceof ConfigRejectedError
@@ -358,17 +365,43 @@ export function ConfigPanel() {
 
       {confirming && (
         <ConfirmDialog
-          title={isPatchMode ? "Apply atomic patch?" : "Apply configuration?"}
-          confirmLabel="Apply now"
+          title={
+            adminChangeError
+              ? "Confirm admin access change?"
+              : isPatchMode
+                ? "Apply atomic patch?"
+                : "Apply configuration?"
+          }
+          confirmLabel={adminChangeError ? "Apply and change admin access" : "Apply now"}
           busy={applyActive.isPending}
           onConfirm={() => {
-            applyActive.mutate();
+            if (adminChangeError) {
+              applyRaw.mutate(true);
+            } else if (isPatchMode) {
+              applyPatch.mutate();
+            } else {
+              applyRaw.mutate(false);
+            }
           }}
           onCancel={() => {
             setConfirming(false);
+            applyRaw.reset();
           }}
         >
-          {isPatchMode ? (
+          {adminChangeError ? (
+            <>
+              <p>
+                This edit changes how you reach the admin console. Review the effect before
+                continuing — you may need to re-authenticate or use a new address, and an incorrect
+                change can lock you out of the console. Nothing has been saved yet.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-jul-text">
+                {adminChangeError.changes.map((c, i) => (
+                  <li key={`adm-${String(i)}`}>{c}</li>
+                ))}
+              </ul>
+            </>
+          ) : isPatchMode ? (
             <>
               <p>
                 This applies the structured edit atomically server-side. The config is validated

@@ -6,6 +6,7 @@ import {
   type TrafficEditorKind,
 } from "@/features/traffic-controls/TrafficControlEditor.tsx";
 import { TracingEditor } from "@/features/traffic-controls/TracingEditor.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
 
 function SectionCard({
   title,
@@ -55,7 +56,7 @@ function KV({ k, v }: { readonly k: string; readonly v: string | number | undefi
 }
 
 export function TrafficControlsPanel() {
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["traffic-controls"],
     queryFn: fetchTrafficControls,
   });
@@ -65,7 +66,7 @@ export function TrafficControlsPanel() {
 
   if (isLoading) return <div className="text-jul-muted">Loading traffic controls…</div>;
   if (isError || !data)
-    return <div className="text-jul-danger">Failed to load traffic controls.</div>;
+    return <PanelError error={error} resource="traffic controls" onRetry={() => void refetch()} />;
 
   return (
     <div className="space-y-6">
