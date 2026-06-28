@@ -303,7 +303,7 @@ type timeoutConn struct {
 
 func (c *timeoutConn) Read(b []byte) (int, error) {
 	if c.readTimeout > 0 {
-		if err := c.Conn.SetReadDeadline(time.Now().Add(c.readTimeout)); err != nil {
+		if err := c.SetReadDeadline(time.Now().Add(c.readTimeout)); err != nil {
 			return 0, err
 		}
 	}
@@ -312,7 +312,7 @@ func (c *timeoutConn) Read(b []byte) (int, error) {
 
 func (c *timeoutConn) Write(b []byte) (int, error) {
 	if c.writeTimeout > 0 {
-		if err := c.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
+		if err := c.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
 			return 0, err
 		}
 	}

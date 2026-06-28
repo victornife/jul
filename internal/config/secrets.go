@@ -143,7 +143,7 @@ func walkConfigStrings(c *Config, fn func(string) string) {
 
 func walkValue(v reflect.Value, fn func(string) string) {
 	switch v.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if !v.IsNil() {
 			walkValue(v.Elem(), fn)
 		}

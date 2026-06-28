@@ -287,7 +287,7 @@ func TestBuildDirectivesOrder(t *testing.T) {
 				t.Fatalf("expected %s in output, got:\n%s", name, out)
 			}
 		}
-		if !(defAction < dirFile && dirFile < inline && inline < mode) {
+		if defAction >= dirFile || dirFile >= inline || inline >= mode {
 			t.Errorf("order violated (defAction=%d dirFile=%d inline=%d mode=%d):\n%s",
 				defAction, dirFile, inline, mode, out)
 		}
@@ -322,7 +322,7 @@ func TestBuildDirectivesOrder(t *testing.T) {
 				t.Fatalf("expected %s in output, got:\n%s", name, out)
 			}
 		}
-		if !(crs < dirFile && dirFile < inline && inline < mode) {
+		if crs >= dirFile || dirFile >= inline || inline >= mode {
 			t.Errorf("order violated (crs=%d dirFile=%d inline=%d mode=%d):\n%s",
 				crs, dirFile, inline, mode, out)
 		}

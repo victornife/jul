@@ -528,7 +528,7 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 				}
 			}
 		}
-		livePool, _ := live[up.Name]
+		livePool := live[up.Name]
 		liveMap := make(map[string]BackendStatus, len(livePool.Backends))
 		for _, b := range livePool.Backends {
 			liveMap[b.Address] = b

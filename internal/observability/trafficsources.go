@@ -3,7 +3,6 @@ package observability
 import (
 	"net"
 	"net/url"
-	"sort"
 	"strings"
 	"sync"
 )
@@ -200,20 +199,4 @@ func capLen(s string) string {
 		return s[:trafficKeyMaxLen]
 	}
 	return s
-}
-
-// topKeys returns the keys of m sorted by descending count then name, used by
-// tests and any caller that wants a deterministic ordering.
-func topKeys(m map[string]float64) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if m[keys[i]] != m[keys[j]] {
-			return m[keys[i]] > m[keys[j]]
-		}
-		return keys[i] < keys[j]
-	})
-	return keys
 }

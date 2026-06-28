@@ -1606,7 +1606,8 @@ func TestWizardGenerateIsNonMutating(t *testing.T) {
 		}
 		return rr.Body.String()
 	}
-	if do() != do() {
+	first, second := do(), do()
+	if first != second {
 		t.Error("wizard/generate should be idempotent (non-mutating)")
 	}
 }
