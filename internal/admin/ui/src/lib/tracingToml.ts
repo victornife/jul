@@ -21,7 +21,7 @@ export interface TracingDraft {
 
 export function emptyTracingDraft(): TracingDraft {
   return {
-    enabled: true,
+    enabled: false,
     exporter: "otlp-grpc",
     endpoint: "",
     sampleRatio: 1,
