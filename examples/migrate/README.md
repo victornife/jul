@@ -3,6 +3,12 @@
 This example shows `jul import nginx` translating a real-world NGINX
 configuration into Jul.IA TOML.
 
+> **Maturity: beta (best-effort).** The importer covers common reverse-proxy and
+> static-file setups, never fails silently (every unmapped directive is
+> reported), and always re-validates its own output — but it is not a complete
+> NGINX emulator. Review the report and the `# TODO`/notes in the output before
+> serving the result.
+
 - [`nginx.conf`](nginx.conf) — the source NGINX configuration.
 - [`jul.toml`](jul.toml) — the configuration produced by the importer.
 
@@ -66,3 +72,18 @@ Review the `# TODO` comments and port anything the importer could not map
 (custom headers, `client_max_body_size`, `map`/`if` blocks, `include`d files,
 and so on). Then run `jul fmt -w examples/migrate/jul.toml` if you want to drop
 the default zero-valued fields and tidy the file.
+
+## Best-effort caveats
+
+These mappings are approximate and surface as `notes:` in the report — confirm
+them after importing:
+
+- **`proxy_pass` trailing slash.** A trailing slash on `proxy_pass http://host/`
+  makes NGINX rewrite the matched location prefix; Jul.IA drops the slash and
+  does not rewrite, so adjust the location or upstream path if you relied on it.
+- **Server-level `return`.** A `return` outside a location becomes a catch-all
+  `/` location. NGINX evaluates the server-level return before locations; Jul.IA
+  gives matching locations precedence, so verify the intended order.
+- **Multiple `listen` directives.** A server block binds a single address — only
+  the first usable `listen` is kept and any others are dropped (split them into
+  separate server blocks if you need both).

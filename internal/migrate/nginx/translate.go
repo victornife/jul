@@ -90,6 +90,8 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 				t.report.skip(c, "unsupported listen address (e.g. a unix socket)")
 			} else if s.Listen == "" {
 				s.Listen = listen
+			} else if listen != s.Listen {
+				t.report.note("server line %d: extra listen %q dropped; one Jul.IA server block binds a single address (kept %q)", c.GetLine(), listen, s.Listen)
 			}
 			if ssl {
 				hasTLS = true
@@ -142,6 +144,9 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 
 	// A server-level `return` applies to every request: synthesize a catch-all.
 	if len(serverReturn) > 0 {
+		if len(s.Locations) > 0 {
+			t.report.note("server return at line %d: synthesized a catch-all '/' but nginx evaluates a server-level return before locations; Jul.IA gives matching locations precedence, so verify the intended order", serverReturnLine)
+		}
 		loc := config.LocationConfig{Match: config.MatchConfig{Type: "prefix", Path: "/"}}
 		applyReturn(&loc, serverReturn, &t.report, serverReturnLine)
 		s.Locations = append(s.Locations, loc)
@@ -203,7 +208,7 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 		switch c.GetName() {
 		case "proxy_pass":
 			if len(cp) > 0 {
-				loc.ProxyPass = translateProxyPass(cp[0])
+				loc.ProxyPass = translateProxyPass(cp[0], &t.report, c.GetLine())
 			}
 		case "fastcgi_pass":
 			if len(cp) > 0 {
@@ -348,7 +353,7 @@ func matchConfig(mod, path string, rep *Report, line int) (config.MatchConfig, b
 // translateProxyPass normalizes an nginx proxy_pass value into a Jul.IA
 // proxy_pass URL. A bare host gets an http:// scheme; an upstream name is kept
 // verbatim so it resolves to the imported [[upstreams]] pool.
-func translateProxyPass(v string) string {
+func translateProxyPass(v string, rep *Report, line int) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return v
@@ -356,7 +361,11 @@ func translateProxyPass(v string) string {
 	if !strings.Contains(v, "://") {
 		v = "http://" + v
 	}
-	return strings.TrimRight(v, "/")
+	trimmed := strings.TrimRight(v, "/")
+	if trimmed != v {
+		rep.note("proxy_pass %q at line %d: trailing slash dropped; nginx rewrites the matched location prefix on a trailing-slash target, which Jul.IA does not — adjust the location/upstream path if needed", v, line)
+	}
+	return trimmed
 }
 
 // applyReturn maps an nginx `return` directive onto a location.

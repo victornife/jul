@@ -402,3 +402,61 @@ func hasSkip(rep *Report, substr string) bool {
 	}
 	return false
 }
+
+func hasNote(rep *Report, substr string) bool {
+	for _, n := range rep.Notes {
+		if strings.Contains(n, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTranslateProxyPassTrailingSlashWarns(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / { proxy_pass http://backend/; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if got := s.Locations[0].ProxyPass; got != "http://backend" {
+		t.Errorf("proxy_pass: got %q want http://backend", got)
+	}
+	if !hasNote(rep, "trailing slash dropped") {
+		t.Errorf("expected trailing-slash note, notes=%v", rep.Notes)
+	}
+}
+
+func TestTranslateExtraListenDropped(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    listen 8080;
+    location / { return 200; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if s.Listen != ":80" {
+		t.Errorf("listen: got %q want :80", s.Listen)
+	}
+	if !hasNote(rep, "extra listen") {
+		t.Errorf("expected extra-listen note, notes=%v", rep.Notes)
+	}
+}
+
+func TestTranslateServerReturnPrecedenceWarns(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    return 403;
+    location /api { proxy_pass http://backend; }
+  }
+}`)
+	if !hasNote(rep, "before locations") {
+		t.Errorf("expected server-return precedence note, notes=%v", rep.Notes)
+	}
+}
