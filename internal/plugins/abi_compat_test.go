@@ -51,7 +51,7 @@ func TestABIV1Golden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden (run with UPDATE_ABI_GOLDEN=1 to seed): %v", err)
 	}
-	if got != string(want) {
+	if got != strings.ReplaceAll(string(want), "\r\n", "\n") {
 		t.Fatalf("jul-abi/v1 host surface changed.\n--- got\n%s--- want\n%s\nAdditive changes require UPDATE_ABI_GOLDEN=1; renames/retypes require a new ABI id.", got, want)
 	}
 }

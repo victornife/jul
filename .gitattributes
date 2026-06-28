@@ -1,3 +1,7 @@
 # Shell scripts must keep LF endings so they run on the Linux CI runners
 # regardless of a contributor's core.autocrlf setting.
 *.sh text eol=lf
+
+# Golden fixtures are byte-compared by tests; keep LF so the snapshot matches on
+# every platform.
+*.golden text eol=lf
