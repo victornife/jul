@@ -31,7 +31,7 @@ jobs:
           - profile: full
             tags: "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -53,7 +53,7 @@ jobs:
           - profile: full
             tags: "brotli zstd acme acme_dns console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -65,7 +65,7 @@ jobs:
     name: test -race
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -83,7 +83,7 @@ jobs:
       # regressions, not against every fractional dip. Raise it as coverage grows.
       COVERAGE_FLOOR: "65"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -105,7 +105,7 @@ jobs:
           fi
       - name: upload coverage profile
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-profile
           path: cover.out
@@ -114,7 +114,7 @@ jobs:
     name: benchmarks (smoke)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -132,7 +132,7 @@ jobs:
         run: scripts/bench.sh | tee bench-results.txt
       - name: upload benchmark results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: bench-results.txt
@@ -141,7 +141,7 @@ jobs:
     name: fuzz (smoke)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -158,7 +158,7 @@ jobs:
       # input is reproducible and can be committed as a permanent regression seed.
       - name: upload fuzz crashers
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashers
           path: '**/testdata/fuzz/**'
@@ -168,7 +168,7 @@ jobs:
     name: soak (smoke)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -188,7 +188,7 @@ jobs:
     name: gofmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -209,13 +209,13 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
 
@@ -235,17 +235,17 @@ jobs:
           - profile: released
             install: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version-file: ${{ env.CONSOLE_UI }}/package.json
           cache: pnpm
           cache-dependency-path: ${{ env.CONSOLE_UI }}/pnpm-lock.yaml
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.8.0
           run_install: |
@@ -295,7 +295,7 @@ jobs:
 
       - name: upload build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: console-build-log-${{ matrix.profile }}
           path: build.log
@@ -304,7 +304,7 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
