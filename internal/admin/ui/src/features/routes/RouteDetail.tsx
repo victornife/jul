@@ -91,7 +91,14 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
   if (loc.rate_limit) {
     const rl = loc.rate_limit_detail;
     if (rl) {
-      lines.push(`  rate_limit = { enabled = true, rate = ${rl.rate}, burst = ${rl.burst}, key = "${rl.key}" }`);
+      // Emit only the fields the projection actually carries. The detail's
+      // rate/burst/key are optional, so interpolating them unconditionally
+      // would render literal "undefined" into otherwise-valid TOML.
+      const parts = ["enabled = true"];
+      if (rl.rate !== undefined) parts.push(`rate = ${String(rl.rate)}`);
+      if (rl.burst !== undefined) parts.push(`burst = ${String(rl.burst)}`);
+      if (rl.key !== undefined) parts.push(`key = "${rl.key}"`);
+      lines.push(`  rate_limit = { ${parts.join(", ")} }`);
     } else {
       lines.push("  rate_limit = { enabled = true }");
     }

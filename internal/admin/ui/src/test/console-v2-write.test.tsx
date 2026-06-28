@@ -236,6 +236,51 @@ describe("ConfigPanel apply flow", () => {
     });
     await screen.findByText("Configuration validated and saved.");
   });
+
+  it("renders structured validation issues with their config path", async () => {
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml" }));
+      }
+      if (url === "/api/config/validate") {
+        return Promise.resolve(
+          json({
+            ok: false,
+            message: "The draft configuration is invalid.",
+            errors: [
+              {
+                code: "unknown_upstream",
+                path: "servers[0].locations[1]",
+                summary: "Upstream reference points to a pool that does not exist.",
+                detail: "Create the upstream in the config or choose an existing one.",
+                severity: "error",
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+
+    // The config path is surfaced as a chip in front of the human summary.
+    expect(await screen.findByText("servers[0].locations[1]")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Upstream reference points to a pool that does not exist\./),
+    ).toBeInTheDocument();
+
+    // An invalid draft must keep Apply disabled.
+    expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
+  });
 });
 
 describe("HistoryPanel rollback flow", () => {

@@ -822,3 +822,70 @@ describe("RouteDetail server toggles", () => {
   });
 });
 
+// ── RouteDetail generated TOML: rate_limit projection ──────────────────────────
+
+describe("RouteDetail rate_limit generated TOML", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const route: RouteProjection = {
+    listen: ":8080",
+    server_names: [],
+    http3: false,
+    h2c: false,
+    locations: [],
+  };
+
+  function rlLoc(detail: LocationProjection["rate_limit_detail"]): LocationProjection {
+    return {
+      index: 0,
+      match: "/api",
+      type: "prefix",
+      action: "proxy",
+      target: "http://app",
+      auth: false,
+      cache: false,
+      compression: false,
+      rate_limit: true,
+      rate_limit_detail: detail,
+      secure: false,
+      require_client_cert: false,
+    };
+  }
+
+  it("emits only the fields the detail carries and never literal undefined", () => {
+    render(
+      <RouteDetail route={route} loc={rlLoc({ enabled: true, rate: 10 })} onClose={vi.fn()} onEdit={vi.fn()} />,
+      { wrapper: Wrapper },
+    );
+    const toml = screen.getByText(/\[\[servers\]\]/);
+    expect(toml).toHaveTextContent("rate_limit = { enabled = true, rate = 10 }");
+    expect(toml).not.toHaveTextContent("undefined");
+    expect(toml).not.toHaveTextContent("burst");
+    expect(toml).not.toHaveTextContent("key");
+  });
+
+  it("emits every field when all are present", () => {
+    render(
+      <RouteDetail
+        route={route}
+        loc={rlLoc({ enabled: true, rate: 100, burst: 200, key: "ip" })}
+        onClose={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+      { wrapper: Wrapper },
+    );
+    const toml = screen.getByText(/\[\[servers\]\]/);
+    expect(toml).toHaveTextContent('rate_limit = { enabled = true, rate = 100, burst = 200, key = "ip" }');
+  });
+
+  it("falls back to enabled-only when no detail is present", () => {
+    render(
+      <RouteDetail route={route} loc={rlLoc(undefined)} onClose={vi.fn()} onEdit={vi.fn()} />,
+      { wrapper: Wrapper },
+    );
+    const toml = screen.getByText(/\[\[servers\]\]/);
+    expect(toml).toHaveTextContent("rate_limit = { enabled = true }");
+    expect(toml).not.toHaveTextContent("undefined");
+  });
+});
+

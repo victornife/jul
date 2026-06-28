@@ -308,3 +308,57 @@ func TestMetricsUpstreamAndCertHistoryWiring(t *testing.T) {
 		t.Errorf("cert last error = %q", certs[0].LastError)
 	}
 }
+
+// ── host label opt-in (slow-cardinality guard) ──────────────────────────────
+
+func TestMetricsHostLabelOptIn(t *testing.T) {
+	// Default (opt-out): the client-controlled Host must not leak into the
+	// "host" label, so distinct Host headers cannot explode cardinality.
+	m := NewMetrics()
+	serve(m, "evil.example.com:1234")
+	if got := requestsHostLabel(t, m); got != "" {
+		t.Fatalf("default host label = %q, want empty (opt-out)", got)
+	}
+
+	// Opt-in: WithHostLabel(true) records the Host with the port stripped.
+	on := NewMetrics(WithHostLabel(true))
+	serve(on, "app.example.com:8443")
+	if got := requestsHostLabel(t, on); got != "app.example.com" {
+		t.Fatalf("opt-in host label = %q, want app.example.com", got)
+	}
+}
+
+// serve drives one GET through m.Middleware with the given request Host.
+func serve(m *Metrics, host string) {
+	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Host = host
+	h.ServeHTTP(httptest.NewRecorder(), req)
+}
+
+// requestsHostLabel returns the "host" label value of the single
+// jul_http_requests_total series recorded on m.
+func requestsHostLabel(t *testing.T, m *Metrics) string {
+	t.Helper()
+	fams, err := m.registry.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	for _, fam := range fams {
+		if fam.GetName() != "jul_http_requests_total" {
+			continue
+		}
+		for _, mt := range fam.GetMetric() {
+			for _, lp := range mt.GetLabel() {
+				if lp.GetName() == "host" {
+					return lp.GetValue()
+				}
+			}
+			return "" // series present, host label absent
+		}
+	}
+	t.Fatalf("jul_http_requests_total series not found")
+	return ""
+}

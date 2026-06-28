@@ -292,6 +292,7 @@ export function ConfigPanel() {
               {applyError instanceof ConfigRejectedError &&
                 applyError.issues.map((iss, i) => (
                   <p key={`ae-${String(i)}`} className="mt-1 text-xs text-jul-muted">
+                    {iss.path ? `${iss.path}: ` : ""}
                     {iss.summary}
                     {iss.detail ? ` — ${iss.detail}` : ""}
                   </p>
@@ -333,7 +334,14 @@ export function ConfigPanel() {
               </h3>
               {issues.map((iss, i) => (
                 <div key={`iss-${String(i)}`} className="text-xs">
-                  <p className="text-jul-text">{iss.summary}</p>
+                  <p className="text-jul-text">
+                    {iss.path && (
+                      <code className="mr-1.5 rounded bg-jul-danger/10 px-1 py-0.5 font-mono text-[0.7rem] text-jul-danger">
+                        {iss.path}
+                      </code>
+                    )}
+                    {iss.summary}
+                  </p>
                   {iss.detail && <p className="text-jul-muted">{iss.detail}</p>}
                 </div>
               ))}

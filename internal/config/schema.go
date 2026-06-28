@@ -762,11 +762,24 @@ type AdminConfig struct {
 // still governs whether the console UI is compiled in.
 func (a AdminConfig) ConsoleEnabled() bool { return a.Console == nil || *a.Console }
 
-// ObservabilityConfig groups distributed-tracing and access-log sink settings
-// under the [observability] table.
+// ObservabilityConfig groups distributed-tracing, metrics, and access-log sink
+// settings under the [observability] table.
 type ObservabilityConfig struct {
 	Tracing   TracingConfig   `toml:"tracing"`
+	Metrics   MetricsConfig   `toml:"metrics"`
 	AccessLog AccessLogConfig `toml:"access_log"`
+}
+
+// MetricsConfig tunes the Prometheus metrics exposed at the admin /metrics
+// endpoint, under the [observability.metrics] table.
+type MetricsConfig struct {
+	// HostLabel adds the request Host as the "host" label on
+	// jul_http_requests_total and jul_http_request_duration_seconds. It is off
+	// by default: the Host header is client-controlled, so enabling it on an
+	// edge exposed to arbitrary Host values can drive unbounded metric
+	// cardinality. Enable it only when the set of hosts is bounded (or pair it
+	// with a scrape-time relabel/drop rule).
+	HostLabel bool `toml:"host_label"`
 }
 
 // TracingConfig configures OpenTelemetry distributed tracing. Tracing is

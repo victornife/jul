@@ -44,6 +44,7 @@ interface — all in a single static, dependency-free binary.
   - [`[servers.locations.auth]`](#serverslocationsauth)
   - [`[admin]`](#admin)
   - [`[observability.tracing]`](#observabilitytracing)
+  - [`[observability.metrics]`](#observabilitymetrics)
   - [`[observability.access_log]`](#observabilityaccess_log)
   - [TLS](#tls)
   - [Automatic HTTPS (ACME)](#automatic-https-acme)
@@ -423,9 +424,9 @@ match = { type = "prefix", path = "/api/" }   # prefix, exact, or regex
 | Key | Type | Description |
 | --- | ---- | ----------- |
 | `proxy_pass` | string | `http://upstream-name` or a concrete `http://host:port` |
-| `proxy_connect_timeout` | duration | Connection establishment timeout |
-| `proxy_read_timeout` | duration | Response header (time-to-first-byte) timeout |
-| `proxy_send_timeout` | duration | Send timeout |
+| `proxy_connect_timeout` | duration | Connection establishment timeout (default 10s) |
+| `proxy_read_timeout` | duration | Per-read inactivity bound on the upstream response — the maximum gap between successive reads, covering both the headers (time-to-first-byte) and a slow-trickle body. `0` (default) leaves it unbounded. A steadily streaming response is never interrupted while data keeps flowing |
+| `proxy_send_timeout` | duration | Per-write inactivity bound on sending the request to the upstream — the maximum gap between successive writes. `0` (default) leaves it unbounded |
 | `grpc` | bool | Proxy `proxy_pass` as **native gRPC** over end-to-end HTTP/2 (trailers preserved, no buffering); `http://` dials the backend over cleartext HTTP/2 (h2c), `https://` over HTTP/2 with TLS — requires the `grpc` build tag |
 | `headers` | table | Upstream request headers; values support `$host`, `$remote_addr`, `$scheme`, `$proxy_add_x_forwarded_for` |
 
@@ -775,6 +776,24 @@ added to the access log as `trace_id`. The exporter uses TLS with the host's
 root CAs by default. Tracing is configured once at boot; a reload keeps the
 running tracer (the server logs a warning if the block changed) — restart to
 apply tracing changes.
+
+### `[observability.metrics]`
+
+Tunes the Prometheus metrics exposed at the admin `/metrics` endpoint. Needs no
+build tag.
+
+| Key | Type | Description |
+| --- | ---- | ----------- |
+| `host_label` | bool | Add the request `Host` as the `host` label on `jul_http_requests_total` and `jul_http_request_duration_seconds` (default `false`) |
+
+The `host` label is **off by default**: the Host header is client-controlled, so
+recording it unconditionally lets a flood of distinct Host values explode metric
+cardinality and exhaust scrape memory. While disabled the label is emitted with
+an empty value, so every request folds into one stable series. Enable
+`host_label` only when the set of hosts is bounded; on an edge that receives
+arbitrary Host headers, pair it with a scrape-time `keep` relabel rule for known
+hosts. The setting is read once at boot; a reload keeps the running value —
+restart to apply a change.
 
 ### `[observability.access_log]`
 

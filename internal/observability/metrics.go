@@ -21,6 +21,14 @@ import (
 type Metrics struct {
 	registry *prometheus.Registry
 
+	// hostLabelEnabled controls whether the request Host is recorded as the
+	// "host" label on jul_http_requests_total / jul_http_request_duration_seconds.
+	// It is opt-in (default off) because Host is client-controlled and an
+	// unbounded label would let a flood of distinct Host headers explode metric
+	// cardinality. When disabled the label is emitted with an empty value so the
+	// metric shape is stable for dashboards.
+	hostLabelEnabled bool
+
 	requests         *prometheus.CounterVec
 	duration         *prometheus.HistogramVec
 	inflight         prometheus.Gauge
@@ -84,8 +92,19 @@ type Metrics struct {
 	statsLastClasses map[string]float64
 }
 
+// MetricsOption customises a Metrics at construction time.
+type MetricsOption func(*Metrics)
+
+// WithHostLabel enables (or disables) the per-request "host" label on the HTTP
+// request counter and latency histogram. It is off by default: the Host header
+// is client-controlled, so an attacker sending many distinct values could
+// otherwise drive unbounded metric cardinality.
+func WithHostLabel(on bool) MetricsOption {
+	return func(m *Metrics) { m.hostLabelEnabled = on }
+}
+
 // NewMetrics creates and registers the collectors on a private registry.
-func NewMetrics() *Metrics {
+func NewMetrics(opts ...MetricsOption) *Metrics {
 	reg := prometheus.NewRegistry()
 	m := &Metrics{
 		registry: reg,
@@ -235,6 +254,9 @@ func NewMetrics() *Metrics {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
+	for _, opt := range opts {
+		opt(m)
+	}
 	return m
 }
 
@@ -255,6 +277,11 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rw, r)
 
 		host := hostLabel(r.Host)
+		if !m.hostLabelEnabled {
+			// Opt-out (default): collapse the client-controlled Host to a single
+			// empty series so per-host cardinality cannot grow unbounded.
+			host = ""
+		}
 		m.requests.WithLabelValues(r.Method, host, strconv.Itoa(rw.Status())).Inc()
 		m.duration.WithLabelValues(r.Method, host).Observe(time.Since(start).Seconds())
 		if state := rw.Header().Get("X-Cache"); state != "" {

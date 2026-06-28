@@ -237,8 +237,29 @@ func newProxyTransport(loc config.LocationConfig) *http.Transport {
 	}
 	dialer := &net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second}
 
+	readTimeout := loc.ProxyReadTimeout.Std()
+	sendTimeout := loc.ProxySendTimeout.Std()
+
+	// When either inactivity bound is configured, wrap each upstream connection
+	// so a slow-trickle peer cannot stall the exchange indefinitely. The
+	// deadlines are re-armed on every Read/Write, so they cap the gap *between*
+	// successive I/O operations (NGINX proxy_read_timeout / proxy_send_timeout
+	// semantics) rather than the total transfer — a steadily streaming response
+	// (SSE, chunked downloads) is never interrupted while data keeps flowing.
+	dial := dialer.DialContext
+	if readTimeout > 0 || sendTimeout > 0 {
+		base := dial
+		dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := base(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			return &timeoutConn{Conn: c, readTimeout: readTimeout, writeTimeout: sendTimeout}, nil
+		}
+	}
+
 	t := &http.Transport{
-		DialContext:           dialer.DialContext,
+		DialContext:           dial,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   32,
@@ -246,11 +267,48 @@ func newProxyTransport(loc config.LocationConfig) *http.Transport {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
-	if rt := loc.ProxyReadTimeout.Std(); rt > 0 {
+	if readTimeout > 0 {
 		// Time allowed to receive the response headers (time-to-first-byte).
-		t.ResponseHeaderTimeout = rt
+		// The per-read deadline above additionally bounds the body.
+		t.ResponseHeaderTimeout = readTimeout
 	}
 	return t
+}
+
+// timeoutConn enforces NGINX-style inactivity deadlines on a proxied upstream
+// connection. Before each Read it (re)arms a read deadline of readTimeout
+// (proxy_read_timeout: the maximum gap between successive reads of the response,
+// covering both the headers and a slow-trickle body). Before each Write it arms
+// a write deadline of writeTimeout (proxy_send_timeout: the maximum gap between
+// successive writes of the request to the upstream). A non-positive timeout
+// leaves that direction unbounded, so the wrapper is only installed when at
+// least one bound is configured.
+//
+// Because the deadlines are refreshed per call, an actively streaming exchange
+// (chunked download, SSE, a long-lived upgrade) is never torn down while data
+// keeps moving inside the window; only true inactivity beyond the bound fails.
+type timeoutConn struct {
+	net.Conn
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+}
+
+func (c *timeoutConn) Read(b []byte) (int, error) {
+	if c.readTimeout > 0 {
+		if err := c.Conn.SetReadDeadline(time.Now().Add(c.readTimeout)); err != nil {
+			return 0, err
+		}
+	}
+	return c.Conn.Read(b)
+}
+
+func (c *timeoutConn) Write(b []byte) (int, error) {
+	if c.writeTimeout > 0 {
+		if err := c.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
+			return 0, err
+		}
+	}
+	return c.Conn.Write(b)
 }
 
 // applyProxyHeaders applies the Host override and custom headers with variable

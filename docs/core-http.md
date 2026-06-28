@@ -123,7 +123,7 @@ transport that picks a backend from the named (or anonymous) upstream pool.
 | Target | `proxy_pass` references a named upstream or a single hardcoded backend (static config only) |
 | Forwarded headers | `X-Forwarded-For` regenerated; `$proxy_add_x_forwarded_for`, `$remote_addr`, `$host`, `$scheme`, `$ssl_client_*` expandable in custom `headers` |
 | Failover | one retry per backend, **idempotent methods only** (GET/HEAD/OPTIONS/TRACE/PUT/DELETE) and only when the body is re-readable |
-| Timeouts | `proxy_connect_timeout` (default 10s), `proxy_read_timeout`, 90s idle |
+| Timeouts | `proxy_connect_timeout` (default 10s); `proxy_read_timeout` / `proxy_send_timeout` are per-read / per-write **inactivity** bounds (NGINX semantics) — they cap the gap between successive reads of the response (headers and slow-trickle body) or writes of the request, not the total transfer, so a steady stream is never cut off; both default to unbounded. 90s idle keep-alive |
 | Connection reuse | `MaxIdleConns` 100, `MaxIdleConnsPerHost` 32, HTTP/2 attempted |
 | WebSocket / SSE | `Connection: Upgrade` (HTTP `101`) spliced bidirectionally; `text/event-stream` and chunked responses streamed (flushed per write, never buffered) |
 | Error mapping | 503 no backend, 504 timeout, 502 connection error |
@@ -194,6 +194,35 @@ failures a backend is parked for `fail_timeout` (default 10s). There is **no**
 | `jul_http_requests_in_flight` | — |
 | `jul_upstream_healthy` | `pool`, `backend` |
 | `jul_upstream_backends` | `pool` |
+
+### The `host` label is opt-in
+
+`host` is recorded on `jul_http_requests_total` and
+`jul_http_request_duration_seconds` only when explicitly enabled. The Host header
+is client-controlled, so populating it unconditionally lets a flood of distinct
+Host values explode metric cardinality (one series per host, per method, per
+code) and exhaust scrape memory. By default the label is therefore emitted with
+an **empty value**, collapsing every request into one stable series.
+
+Enable it only when the set of hosts is bounded (e.g. a handful of configured
+`server_names`):
+
+```toml
+[observability.metrics]
+host_label = true
+```
+
+The setting is read once at startup (like `[observability.tracing]`); a reload
+does not change it. If you enable `host_label` on an edge that receives
+arbitrary Host headers, pair it with a scrape-time relabel rule that keeps only
+known hosts and drops the rest, for example:
+
+```yaml
+metric_relabel_configs:
+  - source_labels: [host]
+    regex: (app\.example\.com|api\.example\.com)
+    action: keep
+```
 
 ## Benchmarks
 

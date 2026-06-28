@@ -116,7 +116,9 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	}
 
 	// Metrics persist across reloads so counters are not reset on config edits.
-	metrics := observability.NewMetrics()
+	// The host label is read once at startup (like tracing): changing
+	// [observability.metrics] takes effect only after a restart.
+	metrics := observability.NewMetrics(observability.WithHostLabel(cfg.Observability.Metrics.HostLabel))
 
 	// Tracing is initialized once at startup (like ACME): the OTLP pipeline and
 	// global TracerProvider are fixed for the process, so changing
