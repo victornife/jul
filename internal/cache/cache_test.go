@@ -353,3 +353,102 @@ func TestMemStoreEvictHookRunsOutsideLock(t *testing.T) {
 		t.Fatal("eviction hook deadlocked: onEvict ran while holding the mem lock")
 	}
 }
+
+// TestHandlerVaryVariantsCoexist proves that two requests for the same URL whose
+// Vary-selected header differs are cached as distinct entries that both survive,
+// rather than overwriting each other.
+func TestHandlerVaryVariantsCoexist(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	var calls int
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Vary", "Accept")
+		_, _ = w.Write([]byte("body-for-" + r.Header.Get("Accept")))
+	}))
+
+	do := func(accept string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "http://x/data", nil)
+		req.Header.Set("Accept", accept)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Prime two variants.
+	if r := do("application/json"); r.Header().Get("X-Cache") != "MISS" || r.Body.String() != "body-for-application/json" {
+		t.Fatalf("json prime: X-Cache=%q body=%q", r.Header().Get("X-Cache"), r.Body.String())
+	}
+	if r := do("application/xml"); r.Header().Get("X-Cache") != "MISS" || r.Body.String() != "body-for-application/xml" {
+		t.Fatalf("xml prime: X-Cache=%q body=%q", r.Header().Get("X-Cache"), r.Body.String())
+	}
+	// Both variants must now hit independently — neither evicted the other.
+	if r := do("application/json"); r.Header().Get("X-Cache") != "HIT" || r.Body.String() != "body-for-application/json" {
+		t.Fatalf("json hit: X-Cache=%q body=%q", r.Header().Get("X-Cache"), r.Body.String())
+	}
+	if r := do("application/xml"); r.Header().Get("X-Cache") != "HIT" || r.Body.String() != "body-for-application/xml" {
+		t.Fatalf("xml hit: X-Cache=%q body=%q", r.Header().Get("X-Cache"), r.Body.String())
+	}
+	if calls != 2 {
+		t.Fatalf("upstream called %d times, want 2 (one per variant)", calls)
+	}
+}
+
+// TestHandlerStaleRevalidateSingleflight proves a burst of concurrent stale hits
+// triggers exactly one background revalidation, not one per request.
+func TestHandlerStaleRevalidateSingleflight(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+
+	var mu sync.Mutex
+	calls := 0
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release // hold the revalidation in-flight while all stale hits fire
+		w.Header().Set("Cache-Control", "max-age=60")
+		_, _ = w.Write([]byte("fresh"))
+	}))
+
+	// Seed a stale-but-servable entry.
+	now := time.Now()
+	seed := httptest.NewRequest(http.MethodGet, "http://x/swr", nil)
+	c.set(key(seed), &Entry{
+		Status:     200,
+		Header:     http.Header{"Cache-Control": {"max-age=60"}},
+		Body:       []byte("stale"),
+		CreatedAt:  now.Add(-time.Minute),
+		ExpiresAt:  now.Add(-time.Second), // expired
+		StaleUntil: now.Add(time.Minute),  // within grace
+	})
+
+	const n = 24
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://x/swr", nil))
+			if got := rec.Body.String(); got != "stale" {
+				t.Errorf("stale serve body = %q, want stale", got)
+			}
+		}()
+	}
+	wg.Wait()
+
+	<-entered // one background revalidation reached upstream
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("upstream revalidation calls = %d, want 1 (singleflight)", got)
+	}
+	close(release)
+}

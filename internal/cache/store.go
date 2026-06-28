@@ -26,6 +26,13 @@ type Entry struct {
 	// values they were stored against, so a differing request is a miss.
 	Vary       []string
 	VaryValues map[string]string
+
+	// IsVaryStub marks a pointer entry stored under a URL's base key for a
+	// response that carries a Vary header. It holds only the Vary field names so
+	// a lookup can compute the per-variant key (base key plus the request's
+	// values for those fields) where the real response is stored. A stub is
+	// never served — it only redirects the lookup to the correct variant.
+	IsVaryStub bool
 }
 
 // Size estimates the entry's memory footprint in bytes.

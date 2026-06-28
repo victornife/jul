@@ -64,10 +64,13 @@ cache = true
 ## Cache key and Vary
 
 The cache key is derived from the request method, the lowercased host, and the
-request URI. When an upstream response carries a `Vary` header, the selected
-request-header values are folded into the stored entry so that, for example, a
-`Vary: Accept-Encoding` response keeps gzip and identity variants distinct. A
-request whose `Vary` values do not match a stored entry is treated as a miss.
+request URI. When an upstream response carries a `Vary` header, each combination
+of the varied request-header values is stored as a **distinct variant** under its
+own key, so (for example) `Vary: Accept` keeps the JSON and XML representations of
+one URL cached at the same time instead of overwriting each other. A tiny pointer
+entry under the base key records which header fields the URL varies on so a
+lookup can compute the right variant key. A request whose varied values match no
+stored variant is a miss; `Vary: *` responses are never reused.
 
 Responses report their disposition in the `X-Cache` header:
 
@@ -83,7 +86,9 @@ Freshness comes from the upstream's `Cache-Control`/`Expires`. When the upstream
 gives no explicit freshness, `default_ttl` applies. `stale_while_revalidate`
 allows a still-recent-but-expired entry to be served immediately (`X-Cache: STALE`)
 while a fresh copy is fetched in the background, trading a small staleness window
-for lower tail latency.
+for lower tail latency. A burst of concurrent stale hits triggers exactly one
+background revalidation per variant, so the cache shields the origin from a
+thundering herd.
 
 ## On-disk format
 

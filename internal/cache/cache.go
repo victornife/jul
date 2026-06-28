@@ -4,8 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"jul/internal/config"
@@ -21,6 +23,9 @@ type Cache struct {
 	defaultTTL time.Duration
 	swr        time.Duration
 	maxEntry   int64
+
+	reMu     sync.Mutex
+	inflight map[string]struct{} // keys with an in-flight background revalidation
 }
 
 // cacheableStatus lists response codes safe to cache by default.
@@ -44,6 +49,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		defaultTTL: cfg.DefaultTTL.Std(),
 		swr:        cfg.StaleWhileRevalidate.Std(),
 		maxEntry:   cfg.MemoryMaxSize.Bytes(),
+		inflight:   make(map[string]struct{}),
 	}
 	if cfg.DiskPath != "" {
 		d, err := newDiskStore(cfg.DiskPath, cfg.DiskMaxSize.Bytes(), logger)
@@ -98,6 +104,58 @@ func key(r *http.Request) string {
 	return r.Method + "\n" + strings.ToLower(r.Host) + "\n" + r.URL.RequestURI()
 }
 
+// lookup resolves a request to a stored entry, following the per-URL Vary stub
+// when present. It returns the entry, the effective storage key it lives under
+// (the base key, or a variant key for Vary responses), and whether it was found.
+func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
+	e, ok := c.get(base)
+	if !ok {
+		return nil, base, false
+	}
+	if e.IsVaryStub {
+		vk := variantKey(base, e.Vary, r)
+		e, ok = c.get(vk)
+		return e, vk, ok
+	}
+	return e, base, true
+}
+
+// store writes an entry to the cache. A response without Vary is stored directly
+// under the base key. A Vary response is stored under a per-variant key, and a
+// small stub is (re)written under the base key so future lookups can find the
+// right variant; this lets multiple variants of one URL coexist instead of
+// overwriting one another.
+func (c *Cache) store(base string, r *http.Request, e *Entry) {
+	if len(e.Vary) == 0 {
+		c.set(base, e)
+		return
+	}
+	c.set(variantKey(base, e.Vary, r), e)
+	c.set(base, &Entry{IsVaryStub: true, Vary: append([]string(nil), e.Vary...)})
+}
+
+// variantKey derives a per-variant storage key from the base key and the
+// request's values for the response's Vary header fields. Field names are
+// lowercased and sorted so the key is independent of header order or case, and
+// values are separated by control bytes that cannot appear in header values, so
+// distinct variants never collide.
+func variantKey(base string, vary []string, r *http.Request) string {
+	fields := make([]string, len(vary))
+	for i, f := range vary {
+		fields[i] = strings.ToLower(strings.TrimSpace(f))
+	}
+	sort.Strings(fields)
+	var b strings.Builder
+	b.WriteString(base)
+	for _, f := range fields {
+		b.WriteByte(0x00)
+		b.WriteString(f)
+		b.WriteByte(0x1f)
+		b.WriteString(r.Header.Get(f))
+	}
+	return b.String()
+}
+
 // Handler wraps next with cache lookup/store behavior. Only GET/HEAD responses
 // that are cacheable per HTTP semantics are stored.
 func (c *Cache) Handler(next http.Handler) http.Handler {
@@ -121,7 +179,7 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 
 		k := key(r)
 		now := time.Now()
-		if e, ok := c.get(k); ok && e.matchesVary(r) {
+		if e, effKey, ok := c.lookup(k, r); ok && e.matchesVary(r) {
 			if e.Fresh(now) {
 				span.SetString("cache.status", "HIT")
 				span.End()
@@ -132,19 +190,26 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 				span.SetString("cache.status", "STALE")
 				span.End()
 				c.serve(w, r, e, "STALE", now)
-				go c.revalidate(k, r, next, e)
+				// Background refresh, deduplicated per variant so a burst of
+				// stale hits triggers exactly one upstream revalidation.
+				if c.beginRevalidate(effKey) {
+					go func() {
+						defer c.endRevalidate(effKey)
+						c.revalidate(effKey, r, next, e)
+					}()
+				}
 				return
 			}
 		}
 		span.SetString("cache.status", "MISS")
 		span.End()
-		c.fetchAndStore(w, r, next, k, now)
+		c.fetchAndStore(w, r, next, now)
 	})
 }
 
 // fetchAndStore runs the upstream handler, streams the response to the client,
 // and stores it if cacheable.
-func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.Handler, k string, now time.Time) {
+func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time) {
 	cw := &cacheWriter{ResponseWriter: w, limit: c.maxEntry}
 	w.Header().Set("X-Cache", "MISS")
 	next.ServeHTTP(cw, r)
@@ -153,13 +218,33 @@ func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.
 		return
 	}
 	if e := c.buildEntry(r, cw.status, w.Header(), cw.buf.Bytes(), now); e != nil {
-		c.set(k, e)
+		c.store(key(r), r, e)
 	}
+}
+
+// beginRevalidate marks key as having an in-flight background revalidation,
+// returning false if one is already running so callers skip launching a
+// duplicate. This bounds a burst of concurrent stale hits to one upstream fetch.
+func (c *Cache) beginRevalidate(key string) bool {
+	c.reMu.Lock()
+	defer c.reMu.Unlock()
+	if _, ok := c.inflight[key]; ok {
+		return false
+	}
+	c.inflight[key] = struct{}{}
+	return true
+}
+
+// endRevalidate clears the in-flight marker for key.
+func (c *Cache) endRevalidate(key string) {
+	c.reMu.Lock()
+	delete(c.inflight, key)
+	c.reMu.Unlock()
 }
 
 // revalidate refreshes a stale entry in the background using a conditional
 // request when possible.
-func (c *Cache) revalidate(k string, orig *http.Request, next http.Handler, stale *Entry) {
+func (c *Cache) revalidate(effKey string, orig *http.Request, next http.Handler, stale *Entry) {
 	r := orig.Clone(context.Background())
 	r.Body = http.NoBody
 	if stale.ETag != "" {
@@ -174,13 +259,14 @@ func (c *Cache) revalidate(k string, orig *http.Request, next http.Handler, stal
 	now := time.Now()
 
 	if rec.status == http.StatusNotModified {
-		// Upstream confirms freshness: extend the stored entry's lifetime.
+		// Upstream confirms freshness: extend the stored entry's lifetime under
+		// the same (variant) key it already lives at.
 		if ttl, swr, ok := c.freshness(stale.Status, stale.Header, now); ok {
 			refreshed := *stale
 			refreshed.CreatedAt = now
 			refreshed.ExpiresAt = now.Add(ttl)
 			refreshed.StaleUntil = now.Add(ttl + swr)
-			c.set(k, &refreshed)
+			c.set(effKey, &refreshed)
 		}
 		return
 	}
@@ -188,7 +274,7 @@ func (c *Cache) revalidate(k string, orig *http.Request, next http.Handler, stal
 		return
 	}
 	if e := c.buildEntry(orig, rec.status, rec.header, rec.body.Bytes(), now); e != nil {
-		c.set(k, e)
+		c.store(key(orig), orig, e)
 	}
 }
 
@@ -219,6 +305,13 @@ func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []by
 		LastModified: h.Get("Last-Modified"),
 	}
 	if vary := parseList(h.Get("Vary")); len(vary) > 0 {
+		for _, name := range vary {
+			if name == "*" {
+				// Vary: * means the response is not reusable for any other
+				// request; do not store it.
+				return nil
+			}
+		}
 		e.Vary = vary
 		e.VaryValues = make(map[string]string, len(vary))
 		for _, name := range vary {
