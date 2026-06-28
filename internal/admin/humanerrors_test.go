@@ -65,13 +65,13 @@ func TestHumanizeErrSubsystemPrefixIsNotAPath(t *testing.T) {
 
 func TestPathPrefixLen(t *testing.T) {
 	cases := map[string]int{
-		"servers[0]: x":               10, // "servers[0]"
-		"servers[0].locations[2]: x":  23,
-		"upstreams[1].servers[0]: x":  23,
-		"at least one [[servers]]":    2, // "at" is a bare token (no colon follows)
-		"waf: x":                      3, // "waf"
-		"[[mail]] reserved":           0, // starts with '[', not an identifier
-		"servers[: malformed":         0, // malformed index
+		"servers[0]: x":              10, // "servers[0]"
+		"servers[0].locations[2]: x": 23,
+		"upstreams[1].servers[0]: x": 23,
+		"at least one [[servers]]":   2, // "at" is a bare token (no colon follows)
+		"waf: x":                     3, // "waf"
+		"[[mail]] reserved":          0, // starts with '[', not an identifier
+		"servers[: malformed":        0, // malformed index
 	}
 	for in, want := range cases {
 		if got := pathPrefixLen(in); got != want {
