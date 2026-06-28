@@ -94,7 +94,11 @@ unavailable it renders an empty state.
 
 Lists each named `[[upstreams]]` pool with its load-balancing strategy and a row
 per backend showing live health (active + passive), weight, and in-flight
-requests. Backed by `GET /api/upstreams`.
+requests. Backend health is three-state: a green dot is known-healthy, red is
+known-unhealthy, and a grey dot means health is **unknown** — no live status yet
+(for example, health checks are disabled). The pool summary reports unknown
+pools as "*N* backends · health unknown" rather than counting them as healthy.
+Backed by `GET /api/upstreams`.
 
 ### Certificates
 

@@ -8,7 +8,13 @@ import { PanelError } from "@/components/PanelError.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
 
 function HealthDot({ healthy }: { readonly healthy: boolean | undefined }) {
-  if (healthy === undefined) return null;
+  if (healthy === undefined)
+    return (
+      <span
+        title="health unknown — no active checks"
+        className="inline-block h-2 w-2 rounded-full bg-jul-muted/50"
+      />
+    );
   return (
     <span
       title={healthy ? "healthy" : "unhealthy"}
@@ -41,8 +47,10 @@ function BackendRow({ b }: { readonly b: BackendProjection }) {
 }
 
 function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen: () => void }) {
-  const activeCount = app.backends.filter((b) => b.healthy !== false).length;
   const totalCount = app.backends.length;
+  const healthyCount = app.backends.filter((b) => b.healthy === true).length;
+  const unhealthyCount = app.backends.filter((b) => b.healthy === false).length;
+  const known = healthyCount + unhealthyCount;
 
   return (
     <div className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface transition-colors hover:bg-jul-border/10" onClick={onOpen}>
@@ -67,7 +75,11 @@ function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen
           </span>
         )}
         <span className="ml-auto text-xs text-jul-muted">
-          {activeCount}/{totalCount} healthy
+          {totalCount === 0
+            ? "no backends"
+            : known === 0
+              ? `${String(totalCount)} backends · health unknown`
+              : `${String(healthyCount)}/${String(totalCount)} healthy${unhealthyCount > 0 ? ` · ${String(unhealthyCount)} down` : ""}`}
         </span>
       </div>
 
@@ -101,9 +113,12 @@ type UsageFilter = "all" | "used" | "unused";
 
 function appMatches(app: AppProjection, health: HealthFilter, usage: UsageFilter): boolean {
   const total = app.backends.length;
-  const healthy = app.backends.filter((b) => b.healthy !== false).length;
+  const healthy = app.backends.filter((b) => b.healthy === true).length;
+  const unhealthy = app.backends.filter((b) => b.healthy === false).length;
+  // "healthy" means every backend is known-healthy; "degraded" means at least
+  // one backend is known-unhealthy. Unknown-health backends match neither.
   if (health === "healthy" && (total === 0 || healthy < total)) return false;
-  if (health === "degraded" && healthy === total) return false;
+  if (health === "degraded" && unhealthy === 0) return false;
   const used = (app.routes_using ?? []).length > 0;
   if (usage === "used" && !used) return false;
   if (usage === "unused" && used) return false;

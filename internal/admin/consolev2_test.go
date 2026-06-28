@@ -306,7 +306,7 @@ func TestAppsProjection(t *testing.T) {
 	if len(out) != 1 || out[0].Name != "api" {
 		t.Fatalf("unexpected projection: %+v", out)
 	}
-	if len(out[0].Backends) != 1 || !out[0].Backends[0].Healthy {
+	if len(out[0].Backends) != 1 || out[0].Backends[0].Healthy == nil || !*out[0].Backends[0].Healthy {
 		t.Error("backend should be marked healthy from live data")
 	}
 	if out[0].HealthCheckPath != "/healthz" || out[0].HealthCheckTimeout != "2s" || out[0].HealthCheckHealthyThr != 2 {
@@ -318,6 +318,47 @@ func TestAppsProjection(t *testing.T) {
 	// The ACL token itself must never appear in the projection payload.
 	if bytes.Contains(rr.Body.Bytes(), []byte("secret-acl")) {
 		t.Error("consul ACL token leaked into /api/apps projection")
+	}
+}
+
+// TestAppsBackendHealthThreeState proves the projection distinguishes a
+// known-unhealthy backend (healthy=false) from one with no live status
+// (healthy omitted = unknown). Conflating them would mislabel a down backend
+// as healthy in the console.
+func TestAppsBackendHealthThreeState(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamConfig{{
+			Name:     "api",
+			Strategy: "round_robin",
+			Servers: []config.UpstreamServer{
+				{Address: "10.0.0.1:80", Weight: 1}, // has live status (down)
+				{Address: "10.0.0.2:80", Weight: 1}, // no live status (unknown)
+			},
+		}},
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+		Upstreams: func() []UpstreamStatus {
+			return []UpstreamStatus{{Name: "api", Backends: []BackendStatus{{Address: "10.0.0.1:80", Healthy: false}}}}
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/apps", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out []AppProjection
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out) != 1 || len(out[0].Backends) != 2 {
+		t.Fatalf("unexpected projection: %+v", out)
+	}
+	if out[0].Backends[0].Healthy == nil || *out[0].Backends[0].Healthy {
+		t.Error("first backend should be known-unhealthy (healthy=false)")
+	}
+	if out[0].Backends[1].Healthy != nil {
+		t.Error("second backend should be unknown (healthy nil/omitted)")
 	}
 }
 

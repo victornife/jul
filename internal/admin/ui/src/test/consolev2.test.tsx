@@ -381,12 +381,35 @@ describe("AppsPanel", () => {
 
   it("shows correct healthy/total count", async () => {
     render(<AppsPanel />, { wrapper: Wrapper });
-    expect(await screen.findByText("1/2 healthy")).toBeInTheDocument();
+    expect(await screen.findByText("1/2 healthy · 1 down")).toBeInTheDocument();
   });
 
   it("shows discovery badge", async () => {
     render(<AppsPanel />, { wrapper: Wrapper });
     expect(await screen.findByText("discovery:consul")).toBeInTheDocument();
+  });
+
+  it("marks pool health unknown when no live status is present", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve([
+            {
+              name: "api",
+              strategy: "round_robin",
+              backends: [
+                { address: "10.0.0.1:80", weight: 1 },
+                { address: "10.0.0.2:80", weight: 1 },
+              ],
+              health_check: false,
+            },
+          ]),
+      }),
+    );
+    render(<AppsPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText("2 backends · health unknown")).toBeInTheDocument();
   });
 });
 

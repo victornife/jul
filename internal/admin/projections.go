@@ -152,11 +152,15 @@ type K8sDiscoveryView struct {
 	HasToken              bool   `json:"has_token,omitempty"`
 }
 
-// BackendProjection is one backend server in an upstream pool.
+// BackendProjection is one backend server in an upstream pool. Healthy is a
+// pointer so the console can distinguish three states: nil means health is
+// unknown (no live status — e.g. health checks disabled or the pool not yet
+// observed), while a non-nil value reports a known healthy/unhealthy result.
+// Omitting the field for false would conflate "unhealthy" with "unknown".
 type BackendProjection struct {
 	Address  string `json:"address"`
 	Weight   int    `json:"weight"`
-	Healthy  bool   `json:"healthy,omitempty"`
+	Healthy  *bool  `json:"healthy,omitempty"`
 	Inflight int64  `json:"inflight,omitempty"`
 }
 
@@ -536,7 +540,8 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 		for _, b := range up.Servers {
 			bp := BackendProjection{Address: b.Address, Weight: b.Weight}
 			if lb, ok := liveMap[b.Address]; ok {
-				bp.Healthy = lb.Healthy
+				healthy := lb.Healthy
+				bp.Healthy = &healthy
 				bp.Inflight = lb.Inflight
 			}
 			ap.Backends = append(ap.Backends, bp)

@@ -41,10 +41,15 @@ function BackendRow({
     <tr className="border-b border-jul-border last:border-b-0">
       <td className="px-3 py-2">
         <div className="flex items-center gap-2">
-          {b.healthy !== undefined && (
+          {b.healthy !== undefined ? (
             <span
               title={b.healthy ? "healthy" : "unhealthy"}
               className={`inline-block h-2 w-2 rounded-full ${b.healthy ? "bg-jul-success" : "bg-jul-danger"}`}
+            />
+          ) : (
+            <span
+              title="health unknown — no active checks"
+              className="inline-block h-2 w-2 rounded-full bg-jul-muted/50"
             />
           )}
           <span className="font-mono text-sm text-jul-text">{b.address}</span>
@@ -78,7 +83,15 @@ export interface AppDetailProps {
  * diff in the Config editor to review and apply, rather than appending a draft. */
 export function AppDetail({ app, onClose }: AppDetailProps) {
   const navigate = useNavigate();
-  const healthy = app.backends.filter((b) => b.healthy !== false).length;
+  const total = app.backends.length;
+  const healthy = app.backends.filter((b) => b.healthy === true).length;
+  const unhealthy = app.backends.filter((b) => b.healthy === false).length;
+  const backendsValue =
+    total === 0
+      ? "none"
+      : healthy + unhealthy === 0
+        ? `${String(total)} backends · health unknown`
+        : `${String(healthy)}/${String(total)} healthy${unhealthy > 0 ? ` · ${String(unhealthy)} down` : ""}`;
   const [newAddr, setNewAddr] = useState("");
   const [newWeight, setNewWeight] = useState(1);
   const [strategy, setStrategy] = useState(app.strategy || "round_robin");
@@ -139,7 +152,7 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
           <Row label="Strategy" value={app.strategy} />
           <Row
             label="Backends"
-            value={`${String(healthy)}/${String(app.backends.length)} healthy`}
+            value={backendsValue}
           />
           <Row
             label="Health checks"
