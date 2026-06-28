@@ -271,12 +271,36 @@ jobs:
       - name: size gate
         run: |
           set -euo pipefail
-          echo "--- Console v2 bundle size gate ---"
-          # Sum gzip sizes of all non-sourcemap, non-html assets from build output.
-          total=$(grep -oP '\│ gzip:\s+\K[0-9.]+' build.log | awk '{sum+=$1} END {printf "%.0f", sum*1024}')
-          echo "Total initial-route gzip: ${total} bytes (budget: ${{ env.SIZE_BUDGET_GZ_BYTES }} bytes)"
-          if [ "$total" -gt "${{ env.SIZE_BUDGET_GZ_BYTES }}" ]; then
-            echo "ERROR: Console v2 bundle exceeds ~250 KB gz budget."
+          echo "--- Console v2 initial-route size gate ---"
+          html="${CONSOLE_DIST}/index.html"
+          # The budget governs the INITIAL ROUTE only: what the entry HTML loads
+          # eagerly — the entry module, its modulepreloaded static-import chunks,
+          # and the stylesheet. Lazily imported chunks (e.g. the CodeMirror
+          # editor) are not referenced by index.html, so summing only its
+          # referenced assets excludes them by design — ADR 0006: "heavy or
+          # rarely used surfaces load lazily and do not count against the
+          # initial-route budget." Measure gzip -9 of the actual emitted files
+          # rather than parsing the build log, so the number is deterministic.
+          mapfile -t refs < <(grep -oE '/assets/[^"]+\.(js|css)' "$html" | sort -u)
+          if [ "${#refs[@]}" -eq 0 ]; then
+            echo "ERROR: no initial-route assets referenced in $html"
+            exit 1
+          fi
+          total=0
+          for ref in "${refs[@]}"; do
+            f="${CONSOLE_DIST}${ref}"
+            if [ ! -f "$f" ]; then
+              echo "ERROR: referenced asset missing on disk: $f"
+              exit 1
+            fi
+            sz=$(gzip -9 -n -c "$f" | wc -c)
+            printf '  %8d B  %s\n' "$sz" "$ref"
+            total=$((total + sz))
+          done
+          echo "Total initial-route gzip: ${total} bytes (budget: ${SIZE_BUDGET_GZ_BYTES} bytes)"
+          if [ "$total" -gt "${SIZE_BUDGET_GZ_BYTES}" ]; then
+            echo "ERROR: Console v2 initial-route bundle exceeds the ~250 KB gz budget."
+            echo "Per ADR 0006, revisit (preact/compat, more code-splitting, or trim scope) before raising the budget."
             exit 1
           fi
           echo "PASS: within budget."
