@@ -181,7 +181,9 @@ The SDK lives at [`examples/plugins/sdk`](../examples/plugins/sdk) (package
 
 The SDK talks to the host over the `jul` WebAssembly import module. Authors using
 the SDK never call these directly, but the contract is stable and versioned so
-other languages can target it.
+other languages can target it. The compatibility guarantees (additive-only in
+v1, golden-pinned, prebuilt-guest tested) are documented in
+[abi.md](abi.md).
 
 - **Export (guest → host):** `handle_request() -> u32` returns the `Action`
   (`0` = Stop, `1` = Continue). The module is a reactor; the host runs
