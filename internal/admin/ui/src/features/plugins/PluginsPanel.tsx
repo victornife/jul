@@ -414,6 +414,7 @@ function PluginCard({
   const caps: string[] = [];
   if (plugin.kv) caps.push("kv");
   if (plugin.fetch) caps.push("fetch");
+  const fetchHosts = plugin.allowed_hosts ?? [];
   return (
     <div className="space-y-3 rounded-lg border border-jul-border bg-jul-surface p-4">
       <div className="flex items-start justify-between gap-3">
@@ -434,6 +435,14 @@ function PluginCard({
             {plugin.source === "inline" ? "embedded module" : (plugin.path ?? "(no path)")}
             {caps.length > 0 ? ` · ${caps.join("+")}` : ""}
           </p>
+          {plugin.fetch && (
+            <p className="mt-0.5 truncate text-xs text-jul-muted">
+              egress:{" "}
+              <span className="font-mono text-jul-warning">
+                {fetchHosts.length > 0 ? fetchHosts.join(", ") : "no hosts allowed"}
+              </span>
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 gap-2">
           {plugin.type === "middleware" && (

@@ -141,6 +141,15 @@ const projection = {
       kv: false,
       fetch: false,
     },
+    {
+      name: "enrich",
+      source: "path",
+      path: "enrich.wasm",
+      type: "middleware",
+      kv: false,
+      fetch: true,
+      allowed_hosts: ["api.example.com", "auth.example.com"],
+    },
   ],
 };
 
@@ -157,7 +166,7 @@ describe("PluginsPanel", () => {
     render(<PluginsPanel />, { wrapper: Wrapper });
     expect(await screen.findByText("inject")).toBeInTheDocument();
     expect(screen.getByText("block")).toBeInTheDocument();
-    expect(screen.getByText("middleware")).toBeInTheDocument();
+    expect(screen.getAllByText("middleware").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("handler")).toBeInTheDocument();
   });
 
@@ -195,5 +204,11 @@ describe("PluginsPanel", () => {
     );
     render(<PluginsPanel />, { wrapper: Wrapper });
     expect(await screen.findByText(/does not include the WASM plugin runtime/i)).toBeInTheDocument();
+  });
+
+  it("shows the fetch egress allowlist on a fetch-enabled plugin", async () => {
+    render(<PluginsPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText("enrich")).toBeInTheDocument();
+    expect(screen.getByText("api.example.com, auth.example.com")).toBeInTheDocument();
   });
 });
