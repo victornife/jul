@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -52,7 +53,7 @@ func cfgWith(addr string) *config.Config {
 }
 
 func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
-	return func(c *config.Config) (map[string]http.Handler, error) {
+	return func(c *config.Config) (map[string]http.Handler, func(), error) {
 		current := *tag.Load()
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, current)
@@ -61,7 +62,7 @@ func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
 		for _, srv := range c.Servers {
 			m[srv.Listen] = h
 		}
-		return m, nil
+		return m, nil, nil
 	}
 }
 
@@ -144,6 +145,215 @@ func TestReloadSwapsHandler(t *testing.T) {
 
 	if !eventually(t, "http://"+addr+"/", "v2") {
 		t.Fatal("handler did not swap to v2 after reload")
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+// dialable reports whether a TCP connection to addr can be established. Unlike
+// reachable it does not issue a request, so it returns true even while the only
+// handler is blocking a request mid-flight.
+func dialable(addr string) bool {
+	c, err := net.DialTimeout("tcp", addr, 150*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
+}
+
+// waitDialable blocks until addr accepts TCP connections, failing on timeout.
+func waitDialable(t *testing.T, addr string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if dialable(addr) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("server never listened on %s", addr)
+}
+
+// TestReloadDrainsBeforeRetiringClosers asserts the generational drain contract:
+// a request in flight on the old generation when a reload runs keeps that
+// generation's resources alive — the factory's retire callback for the
+// superseded generation must not run until the in-flight request finishes —
+// while new requests immediately observe the new generation. Run with -race to
+// also catch any handler-map data race during the swap.
+func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
+	addr := freePort(t)
+
+	release := make(chan struct{}) // closed to let the gen-1 request finish
+	entered := make(chan struct{}) // closed when the gen-1 request is in flight
+	retired := make(chan struct{}) // closed when gen-1's retire callback runs
+	var enterOnce, retireOnce sync.Once
+	var builds atomic.Int32
+
+	factory := func(c *config.Config) (map[string]http.Handler, func(), error) {
+		n := builds.Add(1)
+		var h http.Handler
+		switch n {
+		case 1:
+			h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				enterOnce.Do(func() { close(entered) })
+				<-release
+				_, _ = io.WriteString(w, "v1")
+			})
+		default:
+			h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, "v2")
+			})
+		}
+		m := map[string]http.Handler{}
+		for _, srv := range c.Servers {
+			m[srv.Listen] = h
+		}
+		// The retire callback a build returns closes the resources of the
+		// generation it supersedes. Only the reload (n == 2) has a predecessor to
+		// retire; record when the server actually runs it.
+		var retire func()
+		if n == 2 {
+			retire = func() { retireOnce.Do(func() { close(retired) }) }
+		}
+		return m, retire, nil
+	}
+
+	src := &stubSource{}
+	src.set(cfgWith(addr), nil)
+	srv := New(cfgWith(addr), quietLogger(), factory, src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }()
+	waitDialable(t, addr)
+
+	// Start a request that blocks inside the gen-1 handler, then wait until it
+	// is actually executing so the reload genuinely races an in-flight request.
+	reqBody := make(chan string, 1)
+	go func() {
+		body, _ := fetch("http://" + addr + "/")
+		reqBody <- body
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("gen-1 request never entered the handler")
+	}
+
+	// Trigger the reload while the gen-1 request is in flight.
+	src.set(cfgWith(addr), nil)
+	reload <- struct{}{}
+
+	// New requests must immediately observe the new generation.
+	if !eventually(t, "http://"+addr+"/", "v2") {
+		t.Fatal("new requests should use v2 after reload")
+	}
+
+	// The superseded generation must NOT be retired while its request is in
+	// flight: closing gen-1's resources now would tear them out from under the
+	// blocked request.
+	select {
+	case <-retired:
+		t.Fatal("retire ran before the in-flight gen-1 request drained")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// Let the in-flight request finish; it must still succeed on gen-1.
+	close(release)
+	select {
+	case body := <-reqBody:
+		if body != "v1" {
+			t.Fatalf("in-flight request body = %q, want v1", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("in-flight gen-1 request never completed")
+	}
+
+	// Once drained, the generation's resources are retired.
+	select {
+	case <-retired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("gen-1 was never retired after its request drained")
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+// TestReloadNoGoroutineLeak drives many reloads through the generational retire
+// path and asserts the server's goroutine count does not grow unbounded: each
+// retired generation's resources are closed and any drain goroutine it spawned
+// exits, so steady-state reloads must not accumulate goroutines.
+func TestReloadNoGoroutineLeak(t *testing.T) {
+	addr := freePort(t)
+
+	factory := func(c *config.Config) (map[string]http.Handler, func(), error) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "ok")
+		})
+		m := map[string]http.Handler{}
+		for _, srv := range c.Servers {
+			m[srv.Listen] = h
+		}
+		// Non-nil retire so every reload exercises the retire path.
+		return m, func() {}, nil
+	}
+
+	src := &stubSource{}
+	src.set(cfgWith(addr), nil)
+	srv := New(cfgWith(addr), quietLogger(), factory, src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }()
+	waitForServe(t, "http://"+addr+"/", "ok")
+
+	// A no-keep-alive client so each request's server-side connection goroutine
+	// exits promptly and does not inflate the goroutine sample.
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	get := func() {
+		resp, err := client.Get("http://" + addr + "/")
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		_, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+	}
+
+	settle := func() int {
+		runtime.GC()
+		runtime.GC()
+		return runtime.NumGoroutine()
+	}
+
+	get()
+	base := settle()
+
+	const reloads = 50
+	for i := 0; i < reloads; i++ {
+		src.set(cfgWith(addr), nil)
+		reload <- struct{}{}
+		get()
+	}
+
+	// Give retire goroutines time to exit, then sample. Retry to absorb the brief
+	// window where a just-spawned drain goroutine has not yet returned.
+	deadline := time.Now().Add(3 * time.Second)
+	end := settle()
+	for time.Now().Before(deadline) && end > base+8 {
+		time.Sleep(50 * time.Millisecond)
+		end = settle()
+	}
+	if end > base+8 {
+		t.Errorf("goroutine leak after %d reloads: %d -> %d", reloads, base, end)
 	}
 
 	cancel()

@@ -180,6 +180,14 @@ jul serve -config jul.toml
 - **Secrets stay out of the surfaces.** Disk, admin API, and Console all keep the
   unexpanded references; only the in-memory serving config holds plaintext, and
   logs mask it.
+- **On-disk config is written tightly and atomically.** A config saved by the
+  admin console (or a history snapshot, or `jul import` output) is created
+  `0o600` and written through a same-directory temp file that is renamed into
+  place, so a freshly written file is not world-readable and a crash mid-write
+  never leaves a truncated config. An existing file's mode is preserved. Prefer
+  references over literals regardless — but if a literal must live on disk, this
+  keeps it off other local users' eyes. See
+  [SECURITY.md](../SECURITY.md#hardening-defaults--recommendations).
 
 ## Limits
 

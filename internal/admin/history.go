@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"jul/internal/atomicfile"
 )
 
 // historyTimeLayout is the timestamp format used for snapshot filenames. It is
@@ -71,7 +73,7 @@ func (h *history) snapshot(raw []byte) (string, error) {
 		id = strings.TrimSuffix(name, historyExt)
 		path = filepath.Join(h.dir, name)
 	}
-	if err := os.WriteFile(path, raw, 0o640); err != nil {
+	if err := atomicfile.Write(path, raw, 0o600); err != nil {
 		return "", fmt.Errorf("write snapshot: %w", err)
 	}
 	h.prune()

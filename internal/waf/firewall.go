@@ -92,10 +92,15 @@ func rootFS(cfg config.WAFConfig) fs.FS {
 
 // buildDirectives assembles the SecLang program in a deterministic order:
 //
-//  1. SecDefaultAction (all phases) with the configured block_status so that
-//     any rule using the generic "block" action or no explicit disruptive
-//     action inherits "deny,status:<block_status>" instead of Coraza's
-//     hardcoded 403 fallback.
+//  1. SecDefaultAction (all phases) with the configured block_status — emitted
+//     ONLY when crs_enabled is false — so that any rule using the generic
+//     "block" action or no explicit disruptive action inherits
+//     "deny,status:<block_status>" instead of Coraza's hardcoded 403 fallback.
+//     When CRS is enabled this step is skipped: @crs-setup.conf.example already
+//     defines its own SecDefaultAction for phases 1–4 and Coraza rejects a
+//     duplicate, so CRS-scored anomaly blocks use the CRS setup's default
+//     status (403) rather than block_status. See docs/waf.md for the overrides
+//     (inline_rule / directives_files) that recover block_status under CRS.
 //  2. the embedded CRS when crs_enabled;
 //  3. each user directive file;
 //  4. the inline rules snippet;

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"jul/internal/admin"
+	"jul/internal/atomicfile"
 	"jul/internal/auth"
 	"jul/internal/cache"
 	"jul/internal/config"
@@ -272,10 +273,13 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	// liveHandlerClosers holds closers for handlers in the currently serving
 	// configuration that own resources needing explicit teardown on reload —
-	// presently gRPC-transcoding backend connections. A successful reload closes
-	// the previous generation's closers after the new handlers are built; a
-	// failed reload closes only the rejected generation's. CloseAll-equivalent
-	// teardown happens via this deferred close on shutdown.
+	// gRPC-transcoding backend connections, WASM plugin runtimes, and static
+	// file directory handles. A successful reload adopts the new generation's
+	// closers here and hands the previous generation's closers to the server as a
+	// retire callback, which runs only after that generation's in-flight requests
+	// drain; a failed reload closes only the rejected generation's staged
+	// closers. The deferred close on shutdown tears down the final generation
+	// still serving.
 	var liveHandlerClosers []io.Closer
 	defer func() {
 		for _, c := range liveHandlerClosers {
@@ -296,7 +300,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// the previous generation's handler closers torn down); when false the build
 	// is a throwaway preflight whose staged pools and closers are released by the
 	// deferred abort, leaving the live serving state untouched.
-	buildHandlers := func(c *config.Config, commit bool) (map[string]http.Handler, error) {
+	buildHandlers := func(c *config.Config, commit bool) (map[string]http.Handler, func(), error) {
 		buildMu.Lock()
 		defer buildMu.Unlock()
 
@@ -305,7 +309,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// for log masking. The admin/on-disk views keep the unresolved references,
 		// so secrets never reach the console or the config file (SEC-1).
 		if err := config.ExpandSecrets(c); err != nil {
-			return nil, fmt.Errorf("secrets: %w", err)
+			return nil, nil, fmt.Errorf("secrets: %w", err)
 		}
 		upstreams := indexUpstreams(c.Upstreams)
 
@@ -318,9 +322,10 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		poolReg.Begin()
 		committed := false
 		// stagedHandlerClosers collects closers for handlers built in THIS
-		// generation. On success they become the live set (and the previous live
-		// set is closed); on failure they are closed here so a rejected reload
-		// leaks no backend connections.
+		// generation. On success they become the live set and the previous live
+		// set is returned as a retire callback (closed after it drains); on
+		// failure they are closed here so a rejected reload leaks no backend
+		// connections.
 		var stagedHandlerClosers []io.Closer
 		defer func() {
 			if !committed {
@@ -337,7 +342,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// closed only after the new handlers are live.
 		pluginSet, err := pluginMgr.Build(c.Plugins)
 		if err != nil {
-			return nil, fmt.Errorf("plugins: %w", err)
+			return nil, nil, fmt.Errorf("plugins: %w", err)
 		}
 		stagedHandlerClosers = append(stagedHandlerClosers, pluginSet)
 
@@ -449,7 +454,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					OnDecision: metrics.ObserveAuthDecision,
 				})
 				if err != nil {
-					return nil, fmt.Errorf("location %s: %w", key, err)
+					return nil, nil, fmt.Errorf("location %s: %w", key, err)
 				}
 				authByScope[key] = a
 			}
@@ -484,7 +489,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					Hooks:  waf.Hooks{OnEvent: metrics.ObserveWAFEvent},
 				})
 				if err != nil {
-					return nil, fmt.Errorf("location %s: %w", wafScope(c.Servers[i], loc), err)
+					return nil, nil, fmt.Errorf("location %s: %w", wafScope(c.Servers[i], loc), err)
 				}
 				wafByScope[wafScope(c.Servers[i], loc)] = fw
 			}
@@ -562,7 +567,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 		rt, err := router.New(c, builders, nil, locModifier, log)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Compression is built once per reload and shared across listeners. It
@@ -579,7 +584,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				OnCompress: metrics.ObserveCompression,
 			})
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			compress = cm
 		}
@@ -626,25 +631,33 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 		// The build succeeded. A committing build promotes the staged pools and
 		// closes any pools the previous generation no longer needs (the deferred
-		// Abort becomes a no-op), then adopts this generation's handler closers and
-		// tears down the previous generation's (e.g. gRPC backend connections no
-		// longer served). A preflight build (commit == false) leaves committed
-		// false, so the deferred Abort releases the staged pools and closers and the
-		// live generation is untouched; the returned handlers are discarded.
+		// Abort becomes a no-op), then adopts this generation's handler closers as
+		// the live set and returns a retire callback that closes the PREVIOUS
+		// generation's closers. The server invokes that callback only after the
+		// previous generation has drained, so gRPC backend connections, WASM plugin
+		// runtimes, and static-file directory handles are never closed while an
+		// in-flight request is still served by the old handlers. A preflight build
+		// (commit == false) leaves committed false, so the deferred Abort releases
+		// the staged pools and closers and the live generation is untouched; the
+		// returned handlers and nil retire are discarded.
+		var retirePrev func()
 		if commit {
 			poolReg.Commit()
-			for _, c := range liveHandlerClosers {
-				_ = c.Close()
-			}
+			prevClosers := liveHandlerClosers
 			liveHandlerClosers = stagedHandlerClosers
 			committed = true
+			retirePrev = func() {
+				for _, c := range prevClosers {
+					_ = c.Close()
+				}
+			}
 		}
-		return handlers, nil
+		return handlers, retirePrev, nil
 	}
 
 	// factory adapts buildHandlers to the server's reload hook: a reload always
 	// commits the new generation.
-	factory := func(c *config.Config) (map[string]http.Handler, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, func(), error) {
 		return buildHandlers(c, true)
 	}
 
@@ -668,7 +681,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}()
 		// buildHandlers expands secrets on the clone in place, so the stream
 		// preflight below sees the same resolved targets the reload will use.
-		if _, err = buildHandlers(clone, false); err != nil {
+		if _, _, err = buildHandlers(clone, false); err != nil {
 			return err
 		}
 		// The L4 stream listeners reload independently of the HTTP handlers, so
@@ -840,9 +853,22 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					if reason, need := server.TracingRestartRequired(prevCfg, cfg); need {
 						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 					}
+					// Access-log sinks (stdout/file/syslog, their paths, format,
+					// and rotation) are built once at startup and persist across
+					// reloads, so a changed [observability.access_log] block would
+					// be written yet keep logging through the startup sinks until a
+					// restart. Reject it here, exactly like tracing and ACME, so
+					// "applied" stays honest.
+					if reason, need := server.AccessLogRestartRequired(prevCfg, cfg); need {
+						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+					}
 				}
 			}
-			if err := os.WriteFile(path, data, 0o644); err != nil {
+			// Write the validated config atomically with a secure default mode.
+			// A new config file is created 0o600 (it may hold inline credentials);
+			// an existing file's mode is preserved, and a crash mid-write leaves the
+			// previously serving file intact rather than a truncated one.
+			if err := atomicfile.Write(path, data, 0o600); err != nil {
 				return err
 			}
 			triggerReload()
@@ -856,7 +882,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil {
 				return err
 			}
-			if err := os.WriteFile(path, data, 0o644); err != nil {
+			if err := atomicfile.Write(path, data, 0o600); err != nil {
 				return err
 			}
 			triggerReload()

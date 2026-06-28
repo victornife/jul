@@ -84,6 +84,15 @@ JWKS fetching, and ACME are SSRF-safe by design rather than by filtering.
 - **Run least-privilege.** Use the provided systemd unit
   ([deploy/systemd](deploy/systemd/)) with a dedicated service user and a
   read-only deployment; grant write only to `cache_dir` / `history_dir`.
+- **Persisted state is written tightly and atomically.** When the admin console
+  saves the configuration, or the server records a history snapshot, or
+  `jul import` writes a translated config, the file is created `0o600` (so a
+  freshly written config that may carry inline credentials is never
+  world-readable) and written via a same-directory temp file that is fsync'd and
+  renamed into place — a crash mid-write leaves the previous complete file, never
+  a truncated one. An **existing** file's mode is preserved, so an operator who
+  deliberately changed it keeps that choice; tighten an over-permissive config
+  with `chmod 600`.
 
 ## Per-feature threat notes
 

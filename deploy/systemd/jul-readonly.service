@@ -1,0 +1,79 @@
+# Jul HTTP edge server — READ-ONLY (immutable-config) deployment.
+#
+# This variant pins the configuration: the admin console can read status and
+# render diffs, but an "Apply" is rejected because /etc/jul is mounted
+# read-only. Use it for golden-image / GitOps deployments where the config is
+# delivered by your provisioning pipeline, not edited in place. For the editable
+# deployment (admin console writes config + history), use jul.service instead.
+#
+# Prerequisite — a static service user, so the operator-managed config file can
+# be owned and read-restricted deterministically (a dynamic user's UID changes
+# between boots). Create it once:
+#
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin jul
+#   sudo install -d -m0755 /etc/jul
+#   sudo install -m0640 -o root -g jul server.toml /etc/jul/server.toml
+#
+# The config is root-owned and group-readable by jul (0640), so the service
+# reads it but no process — including the service — can rewrite it.
+
+[Unit]
+Description=Jul NGINX-inspired HTTP edge server (read-only config)
+Documentation=https://example.invalid/jul
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/jul --config /etc/jul/server.toml
+# Reload re-reads the on-disk config; with an immutable /etc/jul this only
+# re-applies what the provisioning pipeline shipped.
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+
+# Static, unprivileged service user (see the prerequisite above).
+User=jul
+Group=jul
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Hardening: minimal filesystem and kernel surface.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+# The config tree is read-only: an admin "Apply" cannot rewrite it, so the
+# deployment is provably immutable. ProtectSystem=strict already makes /etc
+# read-only; this makes the intent explicit and survives a looser ProtectSystem.
+ReadOnlyPaths=/etc/jul
+
+# Runtime still needs writable cache and log areas (and the ACME cert cache
+# lives under the cache dir). History is intentionally omitted — there is no
+# config to snapshot. Point acme.cache_dir and the disk cache at /var/cache/jul
+# and the access-log file sink at /var/log/jul.
+CacheDirectory=jul
+LogsDirectory=jul
+
+# Resource limits. An edge server multiplexes many sockets, so raise the
+# file-descriptor ceiling well above the default and cap thread/PID growth.
+LimitNOFILE=65536
+TasksMax=4096
+# Optional memory/CPU caps - uncomment and tune to your host's capacity.
+# MemoryMax=512M
+# CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target

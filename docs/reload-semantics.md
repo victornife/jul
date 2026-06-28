@@ -60,6 +60,43 @@ partial configuration serving:
   **before** any running state changes; a bind failure rolls back to the
   previously serving configuration (see [stream-proxy.md](stream-proxy.md#hot-reload)).
 
+### HTTP handler-generation retirement (resource teardown)
+
+The HTTP handler swap is **generational**, and a superseded generation's
+resources are torn down only after the requests that may still be using them
+have finished. This matters because some handlers own backend resources that
+become invalid the instant they are closed:
+
+- gRPC-transcoding **backend connections**,
+- WASM **plugin runtimes**, and
+- **static-file directory handles** (`os.Root`).
+
+The sequence on a successful reload is:
+
+1. The composition root builds the new handler map and returns it together with
+   a **retire callback** that closes the *previous* generation's resources (the
+   three kinds above). It does **not** close them inline.
+2. The server installs the new generation with a single atomic pointer store, so
+   every request that arrives after the store immediately uses the new handlers.
+3. The server then retires the previous generation: it marks it *retiring* and
+   waits for its in-flight request count to fall to zero (the generation has
+   **drained**) before invoking the retire callback. A request that is still
+   executing on the old generation therefore keeps its gRPC connection, plugin
+   runtime, and static root alive until it returns.
+4. If the old generation does not drain within the shutdown grace period
+   (`[global] shutdown_timeout`, default 30s), the server logs a warning and
+   closes the resources anyway, so a wedged request cannot leak them forever.
+
+The atomic store plus reference counting is what makes the swap race-free: a
+request increments the generation's in-flight counter **before** it checks the
+*retiring* flag, while retirement sets *retiring* **before** it reads the
+counter. Under Go's sequentially-consistent atomics, if retirement observes a
+zero count and closes resources, any racing request is guaranteed to see
+*retiring* set and retry on the live generation instead of touching a
+closed connection. A **rejected** reload never reaches step 1's swap: its
+freshly built (staged) resources are closed immediately and the live generation
+is untouched.
+
 ## Why there is no asynchronous reload timeout
 
 The apply response intentionally does **not** carry a per-layer reload result
@@ -99,6 +136,10 @@ silently accepted:
 - **Tracing** — the OpenTelemetry tracer is wired once at startup, so enabling
   or disabling tracing or changing its endpoint or sample ratio takes effect on
   restart.
+- **Access log** — the access-log sinks (`stdout` / `file` / `syslog`), their
+  file path, format, and rotation are built once at startup; the file sink owns
+  a rotating handle and the syslog sink a system-log connection, both kept across
+  reloads. Any change to `[observability.access_log]` is held for a restart.
 
 Adding a brand-new `listen` address (or a new server block on one) is *not*
 restart-required — the reload binds it fresh. Only changes to an address the

@@ -22,8 +22,14 @@ import (
 // HandlerFactory builds the request handler for each unique listen address from
 // a configuration. It is supplied by the composition root (main) so routing and
 // content-handler construction live outside this package. Returning fresh
-// handlers lets reload swap behavior atomically.
-type HandlerFactory func(cfg *config.Config) (map[string]http.Handler, error)
+// handlers lets reload swap behavior atomically. The second result is a retire
+// callback that closes the resources owned by the generation this build
+// replaces (gRPC backend connections, WASM plugin runtimes, static-file
+// directory handles); the server invokes it only after that previous generation
+// has drained, so a reload never closes resources an in-flight request is still
+// using. It is nil when there is nothing to retire (for example the first build
+// at startup).
+type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, retirePrev func(), err error)
 
 // Server runs one http.Server per unique listen address and coordinates
 // graceful shutdown and configuration reload.
@@ -68,10 +74,50 @@ type Server struct {
 	mu        sync.Mutex
 	cfg       *config.Config
 	listeners map[string]*listenerEntry // keyed by listen address
-	handlers  atomic.Pointer[map[string]http.Handler]
+	handlers  atomic.Pointer[handlerGen]
 
 	wg       sync.WaitGroup
 	serveErr chan error
+}
+
+// handlerGen is one generation of the per-listen-address handler map plus the
+// bookkeeping that lets the server close the generation's resources only after
+// the requests that may be using them have drained. A reload installs a new
+// generation atomically; the generation it replaces is retired once its
+// in-flight requests finish (or a grace period elapses), so handler-owned
+// resources (gRPC backend connections, WASM plugin runtimes, static-file
+// directory handles) are never closed while an old request is still executing.
+type handlerGen struct {
+	handlers map[string]http.Handler
+
+	inflight   atomic.Int64
+	retiring   atomic.Bool
+	drained    chan struct{}
+	drainOnce  sync.Once
+	retire     func()
+	retireOnce sync.Once
+}
+
+func newHandlerGen(handlers map[string]http.Handler) *handlerGen {
+	return &handlerGen{handlers: handlers, drained: make(chan struct{})}
+}
+
+// release marks an in-flight request against this generation done. The request
+// that drops a retiring generation's in-flight count to zero signals that the
+// generation has drained so its resources can be closed.
+func (g *handlerGen) release() {
+	if g.inflight.Add(-1) == 0 && g.retiring.Load() {
+		g.drainOnce.Do(func() { close(g.drained) })
+	}
+}
+
+// doRetire closes the generation's resources exactly once.
+func (g *handlerGen) doRetire() {
+	g.retireOnce.Do(func() {
+		if g.retire != nil {
+			g.retire()
+		}
+	})
 }
 
 // listenerEntry tracks a bound listener and its hot-reloadable TLS provider.
@@ -100,11 +146,11 @@ func New(cfg *config.Config, log *slog.Logger, factory HandlerFactory, source co
 // receive from the reload channel, then drains in-flight requests within the
 // configured shutdown timeout.
 func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
-	handlers, err := s.factory(s.cfg)
+	handlers, _, err := s.factory(s.cfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
 	}
-	s.handlers.Store(&handlers)
+	s.handlers.Store(newHandlerGen(handlers))
 
 	addrs := uniqueListenAddrs(s.cfg.Servers)
 	if len(addrs) == 0 {
@@ -244,16 +290,75 @@ func (s *Server) bind(addr string) error {
 	return nil
 }
 
+// acquireGen registers an in-flight request against the current generation and
+// returns it. If the generation it loaded is already being retired (its
+// resources may be closing), it releases the registration and retries against
+// the generation now installed, which is never the retiring one because the
+// replacement is stored before a generation is marked retiring. It returns nil
+// only when no generation is installed yet.
+//
+// Correctness of the swap relies on Go's sequentially consistent atomics: a
+// request increments inflight before reading retiring, while retireGen stores
+// retiring before reading inflight. So if retireGen observes inflight == 0 and
+// closes resources, any request whose increment it missed is guaranteed to
+// observe retiring == true here and retry on the live generation instead of
+// touching the closed resources.
+func (s *Server) acquireGen() *handlerGen {
+	for {
+		g := s.handlers.Load()
+		if g == nil {
+			return nil
+		}
+		g.inflight.Add(1)
+		if g.retiring.Load() {
+			g.release()
+			continue
+		}
+		return g
+	}
+}
+
+// retireGen closes the resources of a swapped-out generation after its in-flight
+// requests drain, or after the shutdown grace period if they do not. retire is
+// the factory-supplied closer for that generation and may be nil (the initial
+// generation owns nothing a previous one did not).
+func (s *Server) retireGen(g *handlerGen, retire func()) {
+	if g == nil || retire == nil {
+		return
+	}
+	g.retire = retire
+	g.retiring.Store(true)
+	if g.inflight.Load() == 0 {
+		g.doRetire()
+		return
+	}
+	grace := s.shutdownTimeout()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		t := time.NewTimer(grace)
+		defer t.Stop()
+		select {
+		case <-g.drained:
+		case <-t.C:
+			s.log.Warn("reload: previous handler generation did not drain within grace; closing its resources", "grace", grace)
+		}
+		g.doRetire()
+	}()
+}
+
 // dynamicHandler returns a handler that dispatches to the currently-installed
-// handler for addr, so reload can swap behavior atomically.
+// handler for addr, so reload can swap behavior atomically while keeping the
+// previous generation's resources alive until its in-flight requests drain.
 func (s *Server) dynamicHandler(addr string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		m := s.handlers.Load()
-		if m == nil {
+		g := s.acquireGen()
+		if g == nil {
 			http.Error(w, "503 Service Unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		h, ok := (*m)[addr]
+		defer g.release()
+		h, ok := g.handlers[addr]
 		if !ok || h == nil {
 			http.Error(w, "503 Service Unavailable", http.StatusServiceUnavailable)
 			return
@@ -281,14 +386,21 @@ func (s *Server) doReload() {
 			return
 		}
 	}
-	newHandlers, err := s.factory(newCfg)
+	newHandlers, retirePrev, err := s.factory(newCfg)
 	if err != nil {
 		s.log.Error("reload aborted: build handlers failed", "error", err)
 		return
 	}
 
-	// Swap request handlers atomically; in-flight requests keep the old one.
-	s.handlers.Store(&newHandlers)
+	// Swap request handlers atomically, then retire the previous generation once
+	// its in-flight requests drain. New requests immediately use the new
+	// generation; the old generation's handler-owned resources (gRPC backend
+	// connections, WASM plugin runtimes, static-file directory handles) are
+	// closed only after no request is still executing against them, so a reload
+	// never tears resources out from under an in-flight request.
+	prevGen := s.handlers.Load()
+	s.handlers.Store(newHandlerGen(newHandlers))
+	s.retireGen(prevGen, retirePrev)
 
 	oldCfg := s.cfg
 	s.cfg = newCfg
@@ -298,6 +410,13 @@ func (s *Server) doReload() {
 	// block changes so the operator knows a restart is needed to apply it.
 	if oldCfg.Observability.Tracing != newCfg.Observability.Tracing {
 		s.log.Warn("tracing settings changed; restart required to apply (running tracer kept)")
+	}
+
+	// Access-log sinks are likewise wired once at startup; warn when a reload
+	// that bypassed the admin gate (a direct file edit plus SIGHUP) changes the
+	// block, so the operator knows a restart is needed to apply it.
+	if !accessLogEqual(oldCfg.Observability.AccessLog, newCfg.Observability.AccessLog) {
+		s.log.Warn("access-log settings changed; restart required to apply (running sinks kept)")
 	}
 
 	// Refresh TLS certificates for listeners that remain TLS-enabled.

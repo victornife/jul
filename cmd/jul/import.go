@@ -5,9 +5,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
 	"strings"
 
+	"jul/internal/atomicfile"
 	"jul/internal/config"
 	"jul/internal/migrate/nginx"
 )
@@ -92,7 +92,7 @@ func cmdImport(args []string) int {
 	}
 
 	if *outPath != "" {
-		if err := os.WriteFile(*outPath, out, 0o644); err != nil {
+		if err := atomicfile.Write(*outPath, out, 0o600); err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}

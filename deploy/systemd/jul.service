@@ -37,9 +37,28 @@ MemoryDenyWriteExecute=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 
-# Writable paths the server needs (disk cache, logs). Adjust as configured.
+# Editable deployment. systemd creates and owns these directories for the
+# (dynamic) service user and keeps them across restarts. ProtectSystem=strict
+# keeps the rest of the host read-only, but these four stay writable, so the
+# admin console can apply config changes and roll back from history while
+# everything else remains immutable:
+#
+#   /etc/jul       (ConfigurationDirectory) - server.toml the admin rewrites
+#   /var/lib/jul   (StateDirectory)         - config history snapshots
+#   /var/cache/jul (CacheDirectory)         - HTTP disk cache + ACME cert cache
+#   /var/log/jul   (LogsDirectory)          - access-log "file" sink output
+#
+# Config and history can carry inline credentials, so restrict them to the
+# service user only (0700). Point acme.cache_dir and the disk cache at
+# /var/cache/jul, the access-log file sink at /var/log/jul, and history at
+# /var/lib/jul. Seed the initial config before the first start with, e.g.:
+#   install -D -m600 server.toml /etc/jul/server.toml
+ConfigurationDirectory=jul
+ConfigurationDirectoryMode=0700
 StateDirectory=jul
-ReadWritePaths=/var/cache/jul
+StateDirectoryMode=0700
+CacheDirectory=jul
+LogsDirectory=jul
 
 # Resource limits. An edge server multiplexes many sockets, so raise the
 # file-descriptor ceiling well above the default and cap thread/PID growth.

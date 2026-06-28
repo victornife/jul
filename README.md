@@ -119,19 +119,30 @@ interface — all in a single static, dependency-free binary.
 
 ## Installation
 
-Download the archive for your platform from a release (or build it yourself —
-see [Building from source](#building-from-source--cross-compiling)) and extract
-it. Each archive contains the binary, a sample `server.toml`, and the matching
-deploy asset.
+Download the archive for your platform from a [release](https://github.com/example/jul/releases)
+(or build it yourself — see [Building from source](#building-from-source--cross-compiling))
+and extract it. Each archive contains the binary, a sample `server.toml`, the
+SBOM, and `README`/`SECURITY` docs.
 
-| Platform | Archive |
+Archives are named `jul_<version>_<os>_<arch>_<profile>.(tar.gz|zip)` and ship in
+two **profiles**: `lean` (the default build, no optional features) and `full`
+(every opt-in feature — Brotli/Zstd, ACME, console, OTel, gRPC, HTTP/3, importer,
+WASM plugins, stream proxy, Consul/Kubernetes discovery, WAF). Pick `full` unless
+you specifically want the smaller lean binary.
+
+| Platform | Archive (full profile) |
 | -------- | ------- |
-| Windows (Intel/AMD 64-bit) | `jul-<version>-windows-amd64.zip` |
-| Windows (ARM64) | `jul-<version>-windows-arm64.zip` |
-| Linux (Intel/AMD 64-bit) | `jul-<version>-linux-amd64.tar.gz` |
-| Linux (ARM64) | `jul-<version>-linux-arm64.tar.gz` |
-| macOS (Apple Silicon) | `jul-<version>-darwin-arm64.tar.gz` |
-| macOS (Intel) | `jul-<version>-darwin-amd64.tar.gz` |
+| Windows (Intel/AMD 64-bit) | `jul_<version>_windows_amd64_full.zip` |
+| Windows (ARM64) | `jul_<version>_windows_arm64_full.zip` |
+| Linux (Intel/AMD 64-bit) | `jul_<version>_linux_amd64_full.tar.gz` |
+| Linux (ARM64) | `jul_<version>_linux_arm64_full.tar.gz` |
+| macOS (Apple Silicon) | `jul_<version>_darwin_arm64_full.tar.gz` |
+| macOS (Intel) | `jul_<version>_darwin_amd64_full.tar.gz` |
+
+Swap `full` for `lean` for the minimal build. Verify your download and the
+build provenance before running it — see [docs/release.md](docs/release.md) for
+the `sha256` checksums, SBOM, and `gh attestation verify` steps, plus the full
+list of variants and per-platform install notes.
 
 Not sure which architecture you need?
 
@@ -1600,15 +1611,21 @@ then start Jul.IA pointing at that example's config
 
 ## Deployment
 
+> See [docs/deployment.md](docs/deployment.md) for the full guide: the
+> **editable** vs **read-only** deployment shapes, the canonical directory
+> layout, ownership, container volumes, and what writes where (config, history,
+> disk cache, ACME cache, logs).
+
 ### As a Linux systemd service
 
-A hardened unit file is provided at
-[`deploy/systemd/jul.service`](deploy/systemd/jul.service).
+Two hardened units are provided: [`deploy/systemd/jul.service`](deploy/systemd/jul.service)
+(**editable** — the admin console can apply config changes and roll back) and
+[`deploy/systemd/jul-readonly.service`](deploy/systemd/jul-readonly.service)
+(**read-only** — the config is immutable).
 
 ```bash
 sudo cp jul /usr/local/bin/
-sudo mkdir -p /etc/jul
-sudo cp server.toml /etc/jul/server.toml
+sudo install -D -m600 server.toml /etc/jul/server.toml
 sudo cp deploy/systemd/jul.service /etc/systemd/system/
 
 sudo systemctl daemon-reload
@@ -1618,21 +1635,31 @@ sudo systemctl enable --now jul
 sudo systemctl reload jul
 ```
 
-The unit runs as a dynamically-allocated unprivileged user with
+The editable unit runs as a dynamically-allocated unprivileged user with
 `CAP_NET_BIND_SERVICE` (so it can bind ports 80/443) and a strict hardening
-profile. Adjust `ReadWritePaths` to match your `disk_path` cache location. The
-unit also raises `LimitNOFILE` for high socket fan-out, caps `TasksMax`, and
-trips a `StartLimitBurst` crash-loop guard; optional `MemoryMax`/`CPUQuota`
-caps are included commented-out for you to tune to the host.
+profile. systemd creates and owns the four writable directories
+(`/etc/jul`, `/var/lib/jul`, `/var/cache/jul`, `/var/log/jul`) via
+`ConfigurationDirectory`/`StateDirectory`/`CacheDirectory`/`LogsDirectory`, so
+point `acme.cache_dir`, the disk cache, the access-log file sink, and
+`history_dir` at them (see [deployment.md](docs/deployment.md#directory-layout)).
+The unit also raises `LimitNOFILE` for high socket fan-out, caps `TasksMax`, and
+trips a `StartLimitBurst` crash-loop guard; optional `MemoryMax`/`CPUQuota` caps
+are included commented-out for you to tune to the host.
 
 ### As a Windows service
 
 Use [`deploy/windows/install-service.ps1`](deploy/windows/install-service.ps1)
-from an elevated PowerShell prompt:
+from an elevated PowerShell prompt. It registers the service under the
+least-privilege virtual account `NT SERVICE\jul` and creates an ACL'd data
+directory:
 
 ```powershell
 # Run as Administrator
-.\install-service.ps1
+.\install-service.ps1 `
+  -BinaryPath 'C:\Program Files\jul\jul.exe' `
+  -ConfigPath 'C:\ProgramData\jul\server.toml' `
+  -DataDir    'C:\ProgramData\jul'
+Start-Service jul
 ```
 
 Jul.IA detects when it is launched by the Windows Service Control Manager and
@@ -1641,14 +1668,26 @@ runs under the service protocol automatically.
 ### With Docker
 
 A multi-stage [`Dockerfile`](Dockerfile) builds a minimal distroless image with
-a static binary running as a non-root user.
+a static binary running as a non-root user. The writable paths (`/etc/jul`,
+`/var/lib/jul`, `/var/cache/jul`, `/var/log/jul`) are declared as volumes; mount
+named volumes to persist config, history, and the ACME certificate cache:
 
 ```bash
 docker build --build-arg VERSION=0.1.0 -t jul .
+
+# Editable: named volumes (seeded from the image's baked server.toml on first use)
+docker run --rm -p 8080:8080 -p 8443:8443 \
+  -v jul-config:/etc/jul -v jul-state:/var/lib/jul \
+  -v jul-cache:/var/cache/jul -v jul-log:/var/log/jul \
+  jul
+
+# Read-only config: bind-mount your config file read-only
 docker run --rm -p 8080:8080 -p 9090:9090 \
   -v "$PWD/server.toml:/etc/jul/server.toml:ro" \
+  -v jul-cache:/var/cache/jul \
   jul
 ```
+
 
 ---
 
