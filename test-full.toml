@@ -357,7 +357,7 @@ listen = "127.0.0.1:38443"
 
 # === Observability ========================================================
 [observability.tracing]
-enabled = true
+enabled = false
 endpoint = "http://127.0.0.1:4317"
 service_name = "jul-test"
 exporter = "otlp-grpc"
