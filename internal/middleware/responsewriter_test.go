@@ -19,9 +19,8 @@ func TestWrapResponseWriterCapturesStatus(t *testing.T) {
 	wrapped := WrapResponseWriter(rec)
 	handler.ServeHTTP(wrapped, req)
 
-	sw := wrapped.(StatusWriter)
-	if sw.Status() != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", sw.Status())
+	if wrapped.Status() != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", wrapped.Status())
 	}
 }
 
