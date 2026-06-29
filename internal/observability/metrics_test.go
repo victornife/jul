@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -210,4 +211,13 @@ func TestCertRenewalHistory(t *testing.T) {
 	if len(m.CertRenewalHistory()) != 0 {
 		t.Error("expected empty cert history initially")
 	}
+}
+
+func TestConnState(t *testing.T) {
+	m := NewMetrics()
+	conn := &net.TCPConn{}
+	m.ConnState(conn, http.StateNew)
+	m.ConnState(conn, http.StateClosed)
+	// Hijacked should also decrement.
+	m.ConnState(conn, http.StateHijacked)
 }

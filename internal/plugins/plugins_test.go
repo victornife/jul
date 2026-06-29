@@ -278,3 +278,16 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
+
+func TestSetHas(t *testing.T) {
+	m := testManager(t)
+	s := buildSet(t, m, map[string]config.PluginConfig{
+		"a": pcfg("header-inject"),
+	})
+	if !s.Has("a") {
+		t.Error("expected Has(a) = true")
+	}
+	if s.Has("missing") {
+		t.Error("expected Has(missing) = false")
+	}
+}

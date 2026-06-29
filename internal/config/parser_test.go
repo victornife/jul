@@ -137,3 +137,26 @@ name = "app"
 		t.Errorf("default fail_timeout = %v", up.FailTimeout.Std())
 	}
 }
+
+func TestConfigClone(t *testing.T) {
+	cfg, _ := Parse([]byte("[global]\nlog_level = \"debug\"\n\n[[servers]]\nlisten=\":80\"\n"))
+	clone, err := cfg.Clone()
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if clone.Global.LogLevel != "debug" {
+		t.Errorf("clone log_level = %q", clone.Global.LogLevel)
+	}
+	// Mutate clone; original should be unaffected.
+	clone.Global.LogLevel = "error"
+	if cfg.Global.LogLevel != "debug" {
+		t.Error("original was mutated")
+	}
+}
+
+func TestPreflightClone(t *testing.T) {
+	cfg, _ := Parse([]byte("[global]\nlog_level = \"info\"\n\n[[servers]]\nlisten=\":80\"\n"))
+	if err := PreflightClone(cfg); err != nil {
+		t.Fatalf("PreflightClone: %v", err)
+	}
+}

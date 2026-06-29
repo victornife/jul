@@ -332,3 +332,13 @@ func TestBuildDirectivesOrder(t *testing.T) {
 		}
 	})
 }
+
+func TestFirewallClose(t *testing.T) {
+	fw, err := New(config.WAFConfig{Enabled: true, Mode: "detect"}, Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := fw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}

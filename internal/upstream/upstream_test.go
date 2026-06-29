@@ -123,3 +123,32 @@ func TestAllDownReturnsError(t *testing.T) {
 		t.Fatalf("expected ErrNoAvailableBackend, got %v", err)
 	}
 }
+
+func TestBackendFailCountAndAvailable(t *testing.T) {
+	p := pool(t, "round_robin", config.UpstreamServer{Address: "a:80", Weight: 1})
+	b := p.Backends()[0]
+	if b.FailCount() != 0 {
+		t.Errorf("initial fail count = %d", b.FailCount())
+	}
+	if !b.Available() {
+		t.Error("expected available initially")
+	}
+	p.MarkFailure(b)
+	if b.FailCount() != 1 {
+		t.Errorf("fail count = %d", b.FailCount())
+	}
+	p.MarkSuccess(b)
+	if b.FailCount() != 0 {
+		t.Errorf("fail count after success = %d", b.FailCount())
+	}
+	if !b.Available() {
+		t.Error("expected available after success")
+	}
+}
+
+func TestPoolName(t *testing.T) {
+	p := pool(t, "round_robin", config.UpstreamServer{Address: "a:80", Weight: 1})
+	if p.Name() != "test" {
+		t.Errorf("name = %q, want test", p.Name())
+	}
+}
