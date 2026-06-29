@@ -251,6 +251,17 @@ plugins = ["header-injector"]
   proxy_pass = "http://backend"
   proxy_read_timeout = "0s"
 
+
+  # FastCGI (core, always compiled)
+  [[servers.locations]]
+  match = { type = "prefix", path = "/php/" }
+  fastcgi_pass = "unix:/tmp/php-fpm.sock"
+  fastcgi_params = { SCRIPT_FILENAME = "/var/www/app$fastcgi_script_name" }
+
+  # uWSGI (core, always compiled)
+  [[servers.locations]]
+  match = { type = "prefix", path = "/python/" }
+  uwsgi_pass = "unix:/tmp/uwsgi.sock"
   [[servers.locations]]
   match = { type = "prefix", path = "/" }
   return = 204
