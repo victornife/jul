@@ -56,10 +56,10 @@ type invocation struct {
 	maxRespBody int
 	err         error
 
-	// lastFetch holds the most recent fetch response so last_fetch_len and
-	// fetch_read implement the caller-allocates grow-and-retry convention: a
-	// guest can size its buffer to the full length and re-read without a second
-	// outbound call.
+	// lastFetch holds the most recent retained/capped fetch response so
+	// last_fetch_len and fetch_read implement the caller-allocates grow-and-retry
+	// convention: a guest can size its buffer to the retained length and re-read
+	// without a second outbound call.
 	lastFetch []byte
 
 	// lastFetchTruncated reports whether the most recent fetch response exceeded

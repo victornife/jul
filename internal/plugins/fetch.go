@@ -75,7 +75,14 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 	defer resp.Body.Close()
 
 	// Read one byte past the cap so we can detect truncation unambiguously.
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, int64(p.maxFetchResp)+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(p.maxFetchResp)+1))
+	if err != nil {
+		if inv, _ := parent.Value(invCtxKey{}).(*invocation); inv != nil {
+			inv.lastFetch = nil
+			inv.lastFetchTruncated = false
+		}
+		return 0, nil, err
+	}
 	truncated := len(data) > p.maxFetchResp
 	if truncated {
 		data = data[:p.maxFetchResp]

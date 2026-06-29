@@ -207,9 +207,9 @@ v1, golden-pinned, prebuilt-guest tested) are documented in
   | `kv_get` | `(keyPtr, keyLen, buf, limit u32) -> i32` | `-1` absent, `-2` capability denied |
   | `kv_set` | `(keyPtr, keyLen, valPtr, valLen u32) -> i32` | `0` ok, `-2` capability denied, `-3` quota exceeded |
   | `fetch` | `(methodPtr,methodLen,urlPtr,urlLen,bodyPtr,bodyLen,buf,limit u32) -> i32` | status on success, `-2` denied, `-3` blocked, `-4` error |
-  | `last_fetch_len` | `() -> u32` | Full length of the last `fetch` response |
+  | `last_fetch_len` | `() -> u32` | Retained/capped length of the last `fetch` response |
   | `last_fetch_truncated` | `() -> i32` | `1` if the last `fetch` response was capped at `max_fetch_response`, else `0` |
-  | `fetch_read` | `(buf, limit u32) -> u32` | Caller-allocates; re-reads the last `fetch` body so an oversize response is fully retrieved without another call |
+  | `fetch_read` | `(buf, limit u32) -> u32` | Caller-allocates; re-reads the last retained/capped `fetch` body without another outbound call |
 
 **Caller-allocates convention.** Getters never allocate guest memory. The guest
 passes a buffer pointer and its size; the host copies up to that many bytes and
