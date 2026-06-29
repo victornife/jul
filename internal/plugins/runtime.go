@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -138,6 +139,10 @@ type plugin struct {
 	// guard; nil uses net.DefaultResolver.
 	resolver ipResolver
 
+	// client is the reusable HTTP client for guarded outbound fetches.
+	// Created once per plugin to enable connection pooling.
+	client *http.Client
+
 	// KV accounting bounds the per-plugin namespace independent of the shared
 	// store: kvKeys tracks each key's stored size so kv_set can reject an entry
 	// or a total that would exceed the plugin's quota.
@@ -196,6 +201,45 @@ func (m *Manager) compilePlugin(name string, pc config.PluginConfig) (*plugin, e
 	}
 	if p.timeout <= 0 {
 		p.timeout = 100 * time.Millisecond
+	}
+
+	dialer := &net.Dialer{Timeout: p.fetchTimeout}
+	resolver := p.resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	p.client = &http.Client{
+		Timeout: p.fetchTimeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				ips, err := resolver.LookupIPAddr(ctx, host)
+				if err != nil {
+					return nil, err
+				}
+				for _, ip := range ips {
+					if ipBlocked(ip.IP) {
+						return nil, errFetchBlocked
+					}
+				}
+				if len(ips) == 0 {
+					return nil, errFetchBlocked
+				}
+				return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+			},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("too many redirects")
+			}
+			if !hostAllowed(p.allowedHosts, req.URL.Hostname()) {
+				return errFetchBlocked
+			}
+			return nil
+		},
 	}
 
 	ctx := context.Background()

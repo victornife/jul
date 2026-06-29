@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"jul/internal/config"
+	"jul/internal/upstream"
 
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
@@ -199,7 +200,17 @@ func newStreamTranscoder(t *testing.T, streaming bool, mode string) *Transcoder 
 		Streaming:     streaming,
 		StreamMode:    mode,
 	}
-	tr, err := New(cfg, nil, Options{})
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:     "test-stream",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails: 3,
+	}, "http")
+	if err != nil {
+		t.Fatalf("create test pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+	tr, err := New(cfg, pool, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -309,7 +320,20 @@ func TestStreamMsgCounter(t *testing.T) {
 		t.Fatalf("write descriptor: %v", err)
 	}
 	tr, err := New(config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile, Streaming: true},
-		nil, Options{OnStreamMsg: func(_, direction string) {
+		func() *upstream.Pool {
+			pool, err := upstream.NewPool(config.UpstreamConfig{
+				Name:     "test-msgcounter",
+				Strategy: "round_robin",
+				Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
+				MaxFails: 3,
+			}, "http")
+			if err != nil {
+				t.Fatalf("create test pool: %v", err)
+			}
+			t.Cleanup(func() { pool.Close() })
+			return pool
+		}(),
+		Options{OnStreamMsg: func(_, direction string) {
 			switch direction {
 			case "sent":
 				sent++

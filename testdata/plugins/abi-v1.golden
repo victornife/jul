@@ -7,6 +7,7 @@ get_uri(i32,i32)->i32
 kv_get(i32,i32,i32,i32)->i32
 kv_set(i32,i32,i32,i32)->i32
 last_fetch_len()->i32
+last_fetch_truncated()->i32
 log(i32,i32,i32)->
 read_request_body(i32,i32)->i32
 set_request_header(i32,i32,i32,i32)->

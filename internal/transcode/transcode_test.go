@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"jul/internal/config"
+	"jul/internal/upstream"
 
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
@@ -201,7 +202,18 @@ func newEchoTranscoder(t testing.TB, reflect bool) *Transcoder {
 		cfg.DescriptorSet = descFile
 	}
 
-	tr, err := New(cfg, nil, Options{})
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:     "test-echo",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails: 3,
+	}, "http")
+	if err != nil {
+		t.Fatalf("create test pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	tr, err := New(cfg, pool, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}

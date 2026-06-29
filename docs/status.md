@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.25 · Updated 2026-06-29
+> Version 1.26 · Updated 2026-06-29
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -104,6 +104,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-06-29 | 1.26 | **gRPC transcoding upstream pools + plugin fetch truncation signal:** gRPC-JSON transcoding now resolves `target` to an upstream pool (`[[upstreams]]` name or literal `host:port`), picks a backend per request for load-balancing and passive health-checking, and caches gRPC connections per backend address. The plugin `fetch` host function detects when a response exceeds `max_fetch_response` and exposes `last_fetch_truncated() -> i32` so guests can distinguish a capped body from a complete one; the SDK `Fetch()` wrapper pre-sizes its read buffer via `last_fetch_len` to eliminate a grow-and-retry loop. | [invoke.go](../internal/transcode/invoke.go), [fetch.go](../internal/plugins/fetch.go), [sdk.go](../examples/plugins/sdk/sdk.go) |
 | 2026-06-29 | 1.26 | **Re-audit residuals:** the plugin `fetch` SSRF guard now dials the *validated* IP (closing a DNS-rebinding window), and `fetch` gained `last_fetch_len`/`fetch_read` plus an SDK `Fetch` wrapper so an oversize response is fully retrieved without a second call. The ABI golden pins full value types (not just arity), gRPC streaming rejects trailing tokens after `]` via decode-to-EOF, the Docker image builds with the `console` tag by default, and the deployment ACME example uses the nested `[servers.tls.acme]` shape. | [fetch.go](../internal/plugins/fetch.go), [abi-v1.golden](../testdata/plugins/abi-v1.golden), [Dockerfile](../Dockerfile) |
 | 2026-06-29 | 1.25 | **Console maturity labelling:** the Streams and Plugins panels now show a **Beta** badge so operators see, in the surface itself, that those features are usable-with-limitations and may change before GA — aligning the Console with the [maturity model](adr/0003-maturity-and-ga.md). A reusable `MaturityBadge` carries an explanatory tooltip. | [internal/admin/ui/src/components/ui.tsx](../internal/admin/ui/src/components/ui.tsx), [console.md](console.md) |
 | 2026-06-29 | 1.24 | **NGINX importer warnings (beta):** the importer now reports three previously silent lossy mappings as notes — a dropped `proxy_pass` trailing slash (NGINX rewrites the matched prefix, Jul.IA does not), a server-level `return` whose precedence differs from NGINX once locations exist, and extra `listen` directives beyond the first (a server block binds one address). Imported configs are written `0o600`. The migrate example is labelled best-effort/beta with a caveats section. | [examples/migrate/README.md](../examples/migrate/README.md), [internal/migrate/nginx/translate.go](../internal/migrate/nginx/translate.go) |

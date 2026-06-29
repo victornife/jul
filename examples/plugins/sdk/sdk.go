@@ -97,6 +97,9 @@ func hostFetch(methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, buf, bufL
 //go:wasmimport jul last_fetch_len
 func hostLastFetchLen() uint32
 
+//go:wasmimport jul last_fetch_truncated
+func hostLastFetchTruncated() int32
+
 //go:wasmimport jul fetch_read
 func hostFetchRead(buf, bufLimit uint32) uint32
 
@@ -199,9 +202,27 @@ func Fetch(method, url string, body []byte) (status int, resp []byte, err error)
 	case -4:
 		return 0, nil, ErrFetchFailed
 	}
-	resp = readInto(hostFetchRead)
+	// Use last_fetch_len to size the buffer exactly, avoiding a grow-and-retry loop.
+	n := hostLastFetchLen()
+	if n == 0 {
+		return int(rc), nil, nil
+	}
+	if n <= uint32(len(buf)) {
+		// Response already fit in the initial buffer written by hostFetch.
+		resp = buf[:n]
+		return int(rc), resp, nil
+	}
+	// Response larger than initial buffer: allocate exact size and fetch_read once.
+	buf = make([]byte, n)
+	r := hostFetchRead(bytePtr(buf), n)
+	resp = buf[:r]
 	return int(rc), resp, nil
 }
+
+// LastFetchTruncated reports whether the most recent fetch response exceeded
+// max_fetch_response and was truncated. Callers should check this after Fetch
+// when handling large or unbounded upstream responses.
+func LastFetchTruncated() bool { return hostLastFetchTruncated() != 0 }
 
 // Request is the in-flight HTTP request exposed to the guest.
 type Request struct{}

@@ -14,9 +14,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/upstream"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -48,11 +50,13 @@ type Options struct {
 
 // Transcoder maps REST/JSON requests to gRPC calls on a backend — unary and,
 // when streaming is enabled, server/client/bidi streaming. It implements
-// http.Handler and io.Closer; closing it releases the backend connection when
+// http.Handler and io.Closer; closing it releases all backend connections when
 // the configuration is replaced.
 type Transcoder struct {
 	routes        []*route
-	conn          *grpc.ClientConn
+	pool          *upstream.Pool
+	useTLS        bool
+	conns         sync.Map // address -> *grpc.ClientConn
 	preserveNames bool
 	streaming     bool
 	streamMode    string
@@ -66,36 +70,46 @@ type Transcoder struct {
 // method routing table from the configured descriptor source, dials the gRPC
 // backend (h2c or TLS), and returns a handler. The caller closes the handler to
 // release the connection when the configuration is replaced.
-func New(cfg config.GRPCTranscodeConfig, upstreams map[string]config.UpstreamConfig, opts Options) (*Transcoder, error) {
-	addr, err := resolveTarget(cfg.Target, upstreams)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := dial(addr, cfg.TLS)
-	if err != nil {
-		return nil, err
-	}
-
+func New(cfg config.GRPCTranscodeConfig, pool *upstream.Pool, opts Options) (*Transcoder, error) {
 	var routes []*route
+	var err error
+
 	if cfg.UseReflection {
 		timeout := opts.reflectTimeout
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		// Reflection needs one connection to discover methods. Use the first
+		// available backend; fail fast so misconfiguration surfaces at build time.
+		b, berr := pool.Pick()
+		if berr != nil {
+			return nil, fmt.Errorf("grpc_transcode %s: no available backend for reflection: %w", cfg.Target, berr)
+		}
+		defer pool.Release(b)
+
+		conn, derr := dial(b.Address, cfg.TLS)
+		if derr != nil {
+			return nil, fmt.Errorf("grpc_transcode %s: dial %s for reflection: %w", cfg.Target, b.Address, derr)
+		}
 		routes, err = loadRoutesViaReflection(ctx, conn)
-		cancel()
+		_ = conn.Close()
+		if err != nil {
+			return nil, fmt.Errorf("grpc_transcode %s: %w", cfg.Target, err)
+		}
 	} else {
 		routes, err = loadRoutesFromFile(cfg.DescriptorSet)
-	}
-	if err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("grpc_transcode %s: %w", cfg.Target, err)
+		if err != nil {
+			return nil, fmt.Errorf("grpc_transcode %s: %w", cfg.Target, err)
+		}
 	}
 
 	return &Transcoder{
 		routes:        routes,
-		conn:          conn,
+		pool:          pool,
+		useTLS:        cfg.TLS,
 		preserveNames: cfg.PreserveNames,
 		streaming:     cfg.Streaming,
 		streamMode:    normalizeStreamMode(cfg.StreamMode),
@@ -124,23 +138,45 @@ func maxMessageBytes(s config.Size) int {
 	return maxBodyBytes
 }
 
-// Close releases the backend connection.
+// Close releases all cached backend connections.
 func (t *Transcoder) Close() error {
-	return t.conn.Close()
+	t.conns.Range(func(_, v any) bool {
+		if c, ok := v.(*grpc.ClientConn); ok {
+			_ = c.Close()
+		}
+		return true
+	})
+	return nil
 }
 
-// resolveTarget maps a configured target to a dial address. A name matching a
-// configured upstream resolves to its first server (the MVP dials a single
-// backend; balancing across multiple gRPC backends is a later enhancement);
-// otherwise the target is used verbatim as host:port.
-func resolveTarget(target string, upstreams map[string]config.UpstreamConfig) (string, error) {
-	if up, ok := upstreams[target]; ok {
-		if len(up.Servers) == 0 {
-			return "", fmt.Errorf("grpc_transcode target upstream %q has no servers", target)
-		}
-		return up.Servers[0].Address, nil
+// connFor returns a cached gRPC connection for addr, creating and caching one
+// if absent. Connections survive across requests to the same backend.
+func (t *Transcoder) connFor(addr string) (*grpc.ClientConn, error) {
+	if v, ok := t.conns.Load(addr); ok {
+		return v.(*grpc.ClientConn), nil
 	}
-	return target, nil
+	conn, err := dial(addr, t.useTLS)
+	if err != nil {
+		return nil, err
+	}
+	actual, loaded := t.conns.LoadOrStore(addr, conn)
+	if loaded {
+		_ = conn.Close() // lost the race; use the winner's connection
+		return actual.(*grpc.ClientConn), nil
+	}
+	return conn, nil
+}
+
+// firstConn returns a connection to the first available backend. It is used by
+// benchmarks that need a native gRPC baseline without the HTTP routing
+// overhead.
+func (t *Transcoder) firstConn() (*grpc.ClientConn, error) {
+	b, err := t.pool.Pick()
+	if err != nil {
+		return nil, err
+	}
+	defer t.pool.Release(b)
+	return t.connFor(b.Address)
 }
 
 // dial creates a lazy gRPC client connection to addr over TLS or plaintext
@@ -168,13 +204,33 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	method := string(rt.method.FullName())
+
+	// Pick a backend per request so load-balancing and passive health checking
+	// apply to gRPC transcoding the same way they do for HTTP proxy.
+	backend, err := t.pool.Pick()
+	if err != nil {
+		code := http.StatusServiceUnavailable
+		t.writeError(w, code, "no available gRPC backend: "+err.Error())
+		t.report(method, code)
+		return
+	}
+	defer t.pool.Release(backend)
+
+	conn, err := t.connFor(backend.Address)
+	if err != nil {
+		code := http.StatusBadGateway
+		t.writeError(w, code, "grpc backend unreachable: "+err.Error())
+		t.report(method, code)
+		return
+	}
+
 	if rt.streaming {
 		if !t.streaming {
 			t.writeError(w, http.StatusNotImplemented, "streaming methods require streaming = true on this grpc_transcode location")
 			t.report(method, http.StatusNotImplemented)
 			return
 		}
-		t.serveStreaming(w, r, rt, vars)
+		t.serveStreaming(w, r, rt, vars, conn)
 		return
 	}
 
@@ -187,7 +243,7 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := dynamicpb.NewMessage(rt.method.Output())
-	if err := t.conn.Invoke(outgoingContext(r), grpcMethodPath(rt.method), req, resp); err != nil {
+	if err := conn.Invoke(outgoingContext(r), grpcMethodPath(rt.method), req, resp); err != nil {
 		code := httpStatusFromCode(status.Code(err))
 		t.writeError(w, code, status.Convert(err).Message())
 		t.report(method, code)

@@ -58,6 +58,11 @@ func BenchmarkNativeGRPCUnary(b *testing.B) {
 	tr := newEchoTranscoder(b, false)
 	rt := tr.routes[0] // POST /v1/echo -> echo.EchoService.Echo (unary)
 
+	conn, err := tr.firstConn()
+	if err != nil {
+		b.Fatalf("get connection: %v", err)
+	}
+
 	req := dynamicpb.NewMessage(rt.method.Input())
 	req.ProtoReflect().Set(
 		rt.method.Input().Fields().ByName("message"),
@@ -70,7 +75,7 @@ func BenchmarkNativeGRPCUnary(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		resp := dynamicpb.NewMessage(rt.method.Output())
-		if err := tr.conn.Invoke(ctx, path, req, resp); err != nil {
+		if err := conn.Invoke(ctx, path, req, resp); err != nil {
 			b.Fatalf("invoke: %v", err)
 		}
 	}

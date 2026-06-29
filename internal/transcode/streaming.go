@@ -25,7 +25,7 @@ import (
 // the method's streaming kind: server-streaming and bidirectional responses are
 // framed (NDJSON or SSE, per the location's stream_mode) and flushed per
 // message; a client-streaming response is a single JSON object.
-func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string) {
+func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, conn *grpc.ClientConn) {
 	method := string(rt.method.FullName())
 	clientStream := rt.method.IsStreamingClient()
 	serverStream := rt.method.IsStreamingServer()
@@ -38,7 +38,7 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 		ServerStreams: serverStream,
 		ClientStreams: clientStream,
 	}
-	cs, err := t.conn.NewStream(ctx, desc, grpcMethodPath(rt.method),
+	cs, err := conn.NewStream(ctx, desc, grpcMethodPath(rt.method),
 		grpc.MaxCallRecvMsgSize(t.maxMsg), grpc.MaxCallSendMsgSize(t.maxMsg))
 	if err != nil {
 		code := httpStatusFromCode(status.Code(err))

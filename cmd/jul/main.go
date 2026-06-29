@@ -399,7 +399,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				return withCache(loc, h), nil
 			},
 			router.ActionGRPCTranscode: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
-				h, err := handler.NewGRPCTranscode(srv, loc, upstreams, log, metrics.ObserveGRPCTranscode, metrics.ObserveGRPCTranscodeStreamMsg)
+				h, err := handler.NewGRPCTranscode(srv, loc, upstreams, poolReg, log, metrics.ObserveGRPCTranscode, metrics.ObserveGRPCTranscodeStreamMsg)
 				if err != nil {
 					return nil, err
 				}

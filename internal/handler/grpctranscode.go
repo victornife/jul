@@ -3,24 +3,55 @@
 package handler
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"jul/internal/config"
 	"jul/internal/transcode"
+	"jul/internal/upstream"
 )
 
 // NewGRPCTranscode builds a gRPC-JSON transcoding handler for a location. It
-// loads the method routing table from the configured descriptor source, dials
-// the gRPC backend, and returns a handler that maps REST/JSON requests to gRPC
-// calls — unary and, when streaming is enabled, server/client/bidi streaming.
-// The returned handler also implements io.Closer (via the
-// Transcoder), so the caller closes it to release the backend connection when
-// the configuration is replaced.
-func NewGRPCTranscode(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, log *slog.Logger, onResult func(method, code string), onStreamMsg func(method, direction string)) (http.Handler, error) {
-	return transcode.New(*loc.GRPCTranscode, upstreams, transcode.Options{
+// loads the method routing table from the configured descriptor source, resolves
+// the target (named upstream or direct host:port) to a pool for load-balanced
+// per-request backend selection, and returns a handler that maps REST/JSON
+// requests to gRPC calls. The caller closes the handler to release connections
+// when the configuration is replaced.
+func NewGRPCTranscode(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger, onResult func(method, code string), onStreamMsg func(method, direction string)) (http.Handler, error) {
+	cfg := loc.GRPCTranscode
+	if cfg == nil {
+		return nil, fmt.Errorf("grpc_transcode location missing config")
+	}
+
+	pool, err := resolveGRPCTranscodePool(cfg.Target, upstreams, reg)
+	if err != nil {
+		return nil, err
+	}
+
+	return transcode.New(*cfg, pool, transcode.Options{
 		Logger:      log,
 		OnResult:    onResult,
 		OnStreamMsg: onStreamMsg,
 	})
+}
+
+// resolveGRPCTranscodePool maps a grpc_transcode target to an upstream.Pool.
+// A name matching a configured upstream resolves through the registry; otherwise
+// the target is treated as a single-host pool.
+func resolveGRPCTranscodePool(target string, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, error) {
+	if up, ok := upstreams[target]; ok {
+		if reg != nil {
+			return reg.For(up, "http")
+		}
+		return upstream.NewPool(up, "http")
+	}
+	// Concrete host:port target → ad-hoc pool of one.
+	single := config.UpstreamConfig{
+		Name:     target,
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: target, Weight: 1}},
+		MaxFails: 3,
+	}
+	return upstream.NewPool(single, "http")
 }

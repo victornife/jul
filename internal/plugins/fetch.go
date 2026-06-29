@@ -31,7 +31,7 @@ type ipResolver interface {
 // fall outside the same guards.
 func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []byte) (int, []byte, error) {
 	if method == "" {
-		method = http.MethodGet
+		method = "GET"
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -44,50 +44,12 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 		return 0, nil, errFetchBlocked
 	}
 
-	dialer := &net.Dialer{Timeout: p.fetchTimeout}
-	resolver := p.resolver
-	if resolver == nil {
-		resolver = net.DefaultResolver
-	}
-	client := &http.Client{
-		Timeout: p.fetchTimeout,
-		Transport: &http.Transport{
-			// guardedDial blocks connections to non-routable/private addresses,
-			// closing the SSRF window even when DNS resolves to such an address.
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				host, port, err := net.SplitHostPort(addr)
-				if err != nil {
-					return nil, err
-				}
-				ips, err := resolver.LookupIPAddr(ctx, host)
-				if err != nil {
-					return nil, err
-				}
-				for _, ip := range ips {
-					if ipBlocked(ip.IP) {
-						return nil, errFetchBlocked
-					}
-				}
-				if len(ips) == 0 {
-					return nil, errFetchBlocked
-				}
-				// Dial the validated IP itself, not the hostname, so a rebinding
-				// record cannot resolve to a private address between this check
-				// and the connect. Host header and TLS SNI keep the hostname.
-				return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
-			},
-		},
-		// Re-validate the allow-list on every redirect hop so a permitted host
-		// cannot bounce the call to a private or non-allow-listed target.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return errors.New("too many redirects")
-			}
-			if !hostAllowed(p.allowedHosts, req.URL.Hostname()) {
-				return errFetchBlocked
-			}
-			return nil
-		},
+	// Backward compat: tests that construct bare plugin structs may not set
+	// p.client; use a temporary one in that rare case. Production always sets
+	// p.client in compilePlugin.
+	client := p.client
+	if client == nil {
+		client = newFetchClient(p)
 	}
 
 	ctx, cancel := context.WithTimeout(parent, p.fetchTimeout)
@@ -104,7 +66,20 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, int64(p.maxFetchResp)))
+
+	// Read one byte past the cap so we can detect truncation unambiguously.
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, int64(p.maxFetchResp)+1))
+	truncated := len(data) > p.maxFetchResp
+	if truncated {
+		data = data[:p.maxFetchResp]
+	}
+
+	inv, _ := parent.Value(invCtxKey{}).(*invocation)
+	if inv != nil {
+		inv.lastFetch = data
+		inv.lastFetchTruncated = truncated
+	}
+
 	return resp.StatusCode, data, nil
 }
 
@@ -148,4 +123,47 @@ func ipBlocked(ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+// newFetchClient builds a temporary http.Client for doFetch when p.client is
+// nil (backwards-compat for tests that construct bare plugin structs).
+func newFetchClient(p *plugin) *http.Client {
+	dialer := &net.Dialer{Timeout: p.fetchTimeout}
+	resolver := p.resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	return &http.Client{
+		Timeout: p.fetchTimeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				ips, err := resolver.LookupIPAddr(ctx, host)
+				if err != nil {
+					return nil, err
+				}
+				for _, ip := range ips {
+					if ipBlocked(ip.IP) {
+						return nil, errFetchBlocked
+					}
+				}
+				if len(ips) == 0 {
+					return nil, errFetchBlocked
+				}
+				return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+			},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("too many redirects")
+			}
+			if !hostAllowed(p.allowedHosts, req.URL.Hostname()) {
+				return errFetchBlocked
+			}
+			return nil
+		},
+	}
 }

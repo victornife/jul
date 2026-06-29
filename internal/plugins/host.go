@@ -61,6 +61,10 @@ type invocation struct {
 	// guest can size its buffer to the full length and re-read without a second
 	// outbound call.
 	lastFetch []byte
+
+	// lastFetchTruncated reports whether the most recent fetch response exceeded
+	// max_fetch_response and was truncated.
+	lastFetchTruncated bool
 }
 
 type invCtxKey struct{}
@@ -313,10 +317,6 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 			}
 			return -4
 		}
-		// Retain the full response so a guest that supplied too small a buffer can
-		// read last_fetch_len and re-read via fetch_read without re-issuing the
-		// request. fetch itself still returns the status and a best-effort copy.
-		inv.lastFetch = respBody
 		writeInto(m, buf, limit, respBody)
 		return int32(status)
 	})
@@ -340,6 +340,19 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 			return 0
 		}
 		return writeInto(m, buf, limit, inv.lastFetch)
+	})
+
+	// last_fetch_truncated reports whether the most recent fetch response
+	// exceeded max_fetch_response and was truncated.
+	exp("last_fetch_truncated", func(ctx context.Context, m api.Module) uint32 {
+		inv := invocationFrom(ctx)
+		if inv == nil {
+			return 0
+		}
+		if inv.lastFetchTruncated {
+			return 1
+		}
+		return 0
 	})
 
 	_, err := b.Instantiate(ctx)

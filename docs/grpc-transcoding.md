@@ -130,6 +130,8 @@ response frame is delivered as an in-band error frame (`{"error":…}` for NDJSO
 | Aspect | Behavior |
 | --- | --- |
 | Backend transport | h2c (default) or TLS (`tls = true`, verified against system roots) |
+| Backend selection | Per-request pick from the resolved upstream pool (load-balanced and health-checked) |
+| Connection reuse | gRPC connections are cached per backend address and shared across requests |
 | Inbound metadata | `Authorization` and any `Grpc-Metadata-<key>` header → gRPC metadata |
 | Deadline | The HTTP request context (and its deadline) is propagated to the call |
 | Error mapping | gRPC status code → HTTP status (`InvalidArgument`→400, `NotFound`→404, `PermissionDenied`→403, `Unauthenticated`→401, `ResourceExhausted`→429, `Unavailable`→503, `DeadlineExceeded`→504, …); oversize body → 413; malformed/trailing JSON → 400 |
@@ -141,10 +143,6 @@ response frame is delivered as an in-band error frame (`{"error":…}` for NDJSO
 Documented gaps (ADR [0003](adr/0003-maturity-and-ga.md) GA criterion 3). None
 is a correctness bug; each is a bounded scope decision.
 
-- **Single backend per location.** The transcoder dials the first server of the
-  target upstream; it does **not** load-balance across multiple gRPC backends.
-  Use [native passthrough](grpc-proxy.md) when you need pool balancing, or front
-  the backends with a gRPC-aware L4 balancer. (Passthrough *does* balance.)
 - **No `response_body` selection.** The whole reply message is rendered; mapping
   a single response field to the HTTP body (the `HttpRule.response_body` option)
   is not implemented.

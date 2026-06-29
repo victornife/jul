@@ -3,10 +3,12 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -105,5 +107,78 @@ func TestFlushRejectsInvalidStatus(t *testing.T) {
 	inv.flush()
 	if rec.Code != 500 {
 		t.Fatalf("flush status = %d, want 500 for out-of-range guest status", rec.Code)
+	}
+}
+
+func TestFetchTruncationDetected(t *testing.T) {
+	// A response larger than maxFetchResp should be capped and flagged truncated.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, 200))
+	}))
+	defer srv.Close()
+
+	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx := withInvocation(context.Background(), inv)
+
+	// Custom client that dials the test server directly, bypassing SSRF guards
+	// so this test focuses on truncation detection only.
+	testClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("tcp", srv.Listener.Addr().String())
+			},
+		},
+	}
+
+	p := &plugin{capFetch: true, allowedHosts: []string{"127.0.0.1"}, fetchTimeout: time.Second, maxFetchResp: 100, client: testClient}
+	status, data, err := p.doFetch(ctx, "GET", srv.URL, nil)
+	if err != nil {
+		t.Fatalf("doFetch err = %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if len(data) != 100 {
+		t.Fatalf("len(data) = %d, want 100 (capped)", len(data))
+	}
+	if !inv.lastFetchTruncated {
+		t.Fatal("lastFetchTruncated = false, want true")
+	}
+	if !bytes.Equal(inv.lastFetch, data) {
+		t.Fatal("lastFetch mismatch")
+	}
+}
+
+func TestFetchNotTruncated(t *testing.T) {
+	// A response smaller than maxFetchResp should not be flagged truncated.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("small"))
+	}))
+	defer srv.Close()
+
+	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx := withInvocation(context.Background(), inv)
+
+	testClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("tcp", srv.Listener.Addr().String())
+			},
+		},
+	}
+
+	p := &plugin{capFetch: true, allowedHosts: []string{"127.0.0.1"}, fetchTimeout: time.Second, maxFetchResp: 100, client: testClient}
+	status, data, err := p.doFetch(ctx, "GET", srv.URL, nil)
+	if err != nil {
+		t.Fatalf("doFetch err = %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if string(data) != "small" {
+		t.Fatalf("data = %q, want \"small\"", string(data))
+	}
+	if inv.lastFetchTruncated {
+		t.Fatal("lastFetchTruncated = true, want false")
 	}
 }
