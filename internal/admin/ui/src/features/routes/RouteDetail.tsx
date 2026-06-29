@@ -61,6 +61,10 @@ function describe(action: string): string {
       return "This route forwards requests to a FastCGI application.";
     case "uwsgi":
       return "This route forwards requests to a uWSGI application.";
+    case "plugin":
+      return "This route is served by a WASM plugin.";
+    case "unknown":
+      return "This route uses a custom or plugin-based action.";
     default:
       return "This route's action is not recognized.";
   }

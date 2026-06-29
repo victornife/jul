@@ -394,6 +394,9 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			case loc.Return != 0:
 				lp.Action = "return"
 				lp.Target = strconv.Itoa(loc.Return)
+			case loc.Plugin != "":
+				lp.Action = "plugin"
+				lp.Target = loc.Plugin
 			default:
 				lp.Action = "unknown"
 			}
