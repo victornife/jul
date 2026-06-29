@@ -401,6 +401,7 @@ export function RoutesPanel() {
       {creating && (
         <RouteEditor
           initial={creating}
+          serverHasTls={selected?.route.tls?.enabled}
           onClose={() => {
             setCreating(null);
           }}
