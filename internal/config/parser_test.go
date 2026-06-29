@@ -65,7 +65,7 @@ func TestMarshalRoundTripErrors(t *testing.T) {
 			ShutdownTimeout: Duration(45 * time.Second),
 		},
 		Servers: []ServerConfig{{
-			Listen:           "127.0.0.1:8080",
+			Listen:            "127.0.0.1:8080",
 			ClientMaxBodySize: Size(1 << 20),
 			MaxHeaderBytes:    Size(1 << 10),
 			ReadHeaderTimeout: Duration(10 * time.Second),
