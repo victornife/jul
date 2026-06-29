@@ -277,11 +277,6 @@ export function RouteEditor({ initial, onClose }: RouteEditorProps) {
           builds the configuration for you; nothing is applied until you review the diff and confirm
           in the editor.
         </p>
-        <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
-          <strong className="text-jul-text">No TLS here?</strong> HTTPS termination is a
-          <em>server-level</em> setting — configure it in the <strong>TLS &amp; Certificates</strong> panel.
-          You can still proxy to an <code>https://</code> upstream below for encrypted backend traffic.
-        </p>
 
         <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
           <p className="font-semibold text-jul-text">TLS is configured at the server level</p>
