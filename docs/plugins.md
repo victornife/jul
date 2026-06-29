@@ -176,7 +176,7 @@ The SDK lives at [`examples/plugins/sdk`](../examples/plugins/sdk) (package
 | `Request.Body() []byte` | Buffered request body (up to the host limit) |
 | `Request.Config() []byte` | The plugin's `config` table as a JSON object |
 | `KVGet(key) ([]byte, bool)` / `KVSet(key, value) bool` | Key/value store (needs `kv`) |
-| `Fetch(method, url string, body []byte) (int, []byte, error)` | Guarded outbound HTTP (needs `fetch`); reads the full response via `last_fetch_len`+`fetch_read`. When the response exceeds `max_fetch_response`, the body is truncated and `LastFetchTruncated()` returns `true`. |
+| `Fetch(method, url string, body []byte) (int, []byte, error)` | Guarded outbound HTTP (needs `fetch`); reads the response body via `last_fetch_len`+`fetch_read`. When the response exceeds `max_fetch_response`, the body is truncated and `LastFetchTruncated()` returns `true`. |
 
 ## The `jul-abi/v1` ABI
 

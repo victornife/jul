@@ -30,6 +30,13 @@ type ipResolver interface {
 // per-call timeout, and a response-size cap, and refuses redirects to hosts that
 // fall outside the same guards.
 func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []byte) (int, []byte, error) {
+	// Clear any previous fetch response so a failed call does not leave stale
+	// data visible to fetch_read / last_fetch_len.
+	if inv, _ := parent.Value(invCtxKey{}).(*invocation); inv != nil {
+		inv.lastFetch = nil
+		inv.lastFetchTruncated = false
+	}
+
 	if method == "" {
 		method = "GET"
 	}
@@ -81,6 +88,40 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 	}
 
 	return resp.StatusCode, data, nil
+}
+
+// dialer matches net.Dialer's DialContext method so dialValidatedIPs can be
+// unit-tested with a mock.
+type dialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+// dialValidatedIPs resolves host, validates every IP against the SSRF guard,
+// and then tries each validated IP in order until one connects. The original
+// Host header and SNI are preserved by the surrounding DialContext because
+// it only substitutes the dial target; the HTTP layer keeps the original name.
+func dialValidatedIPs(ctx context.Context, d dialer, resolver ipResolver, network, host, port string) (net.Conn, error) {
+	ips, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range ips {
+		if ipBlocked(ip.IP) {
+			return nil, errFetchBlocked
+		}
+	}
+	if len(ips) == 0 {
+		return nil, errFetchBlocked
+	}
+
+	// Try each validated IP in order until one connects.
+	for _, ip := range ips {
+		conn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+	}
+	return nil, errFetchBlocked
 }
 
 // hostAllowed reports whether host matches the allow-list. An entry may be an
@@ -141,19 +182,7 @@ func newFetchClient(p *plugin) *http.Client {
 				if err != nil {
 					return nil, err
 				}
-				ips, err := resolver.LookupIPAddr(ctx, host)
-				if err != nil {
-					return nil, err
-				}
-				for _, ip := range ips {
-					if ipBlocked(ip.IP) {
-						return nil, errFetchBlocked
-					}
-				}
-				if len(ips) == 0 {
-					return nil, errFetchBlocked
-				}
-				return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+				return dialValidatedIPs(ctx, dialer, resolver, network, host, port)
 			},
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

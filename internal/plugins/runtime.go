@@ -216,19 +216,7 @@ func (m *Manager) compilePlugin(name string, pc config.PluginConfig) (*plugin, e
 				if err != nil {
 					return nil, err
 				}
-				ips, err := resolver.LookupIPAddr(ctx, host)
-				if err != nil {
-					return nil, err
-				}
-				for _, ip := range ips {
-					if ipBlocked(ip.IP) {
-						return nil, errFetchBlocked
-					}
-				}
-				if len(ips) == 0 {
-					return nil, errFetchBlocked
-				}
-				return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+				return dialValidatedIPs(ctx, dialer, resolver, network, host, port)
 			},
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -408,7 +396,13 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 // close tears down the plugin's runtime, which closes every instance (pooled or
 // in flight) and the compiled module.
 func (p *plugin) close() {
-	if p == nil || p.runtime == nil {
+	if p == nil {
+		return
+	}
+	if p.client != nil {
+		p.client.CloseIdleConnections()
+	}
+	if p.runtime == nil {
 		return
 	}
 	_ = p.runtime.Close(context.Background())

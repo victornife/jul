@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 	"jul/internal/upstream"
@@ -126,6 +127,8 @@ func startEchoServer(t testing.TB, fd protoreflect.FileDescriptor, withReflectio
 		switch {
 		case message == "fail":
 			return nil, status.Error(codes.NotFound, "item not found")
+		case message == "unavailable":
+			return nil, status.Error(codes.Unavailable, "backend down")
 		case message == "whoami":
 			if md, ok := metadata.FromIncomingContext(ctx); ok {
 				if v := md.Get("authorization"); len(v) > 0 {
@@ -203,10 +206,11 @@ func newEchoTranscoder(t testing.TB, reflect bool) *Transcoder {
 	}
 
 	pool, err := upstream.NewPool(config.UpstreamConfig{
-		Name:     "test-echo",
-		Strategy: "round_robin",
-		Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
-		MaxFails: 3,
+		Name:        "test-echo",
+		Strategy:    "round_robin",
+		Servers:     []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails:    3,
+		FailTimeout: config.Duration(time.Minute),
 	}, "http")
 	if err != nil {
 		t.Fatalf("create test pool: %v", err)
@@ -326,5 +330,78 @@ func TestTranscodeViaReflection(t *testing.T) {
 	}
 	if got := replyMessage(t, body); got != "reflected" {
 		t.Errorf("reply message = %q, want %q", got, "reflected")
+	}
+}
+
+func TestTranscodePassiveHealthMarking(t *testing.T) {
+	fdp := echoFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	files, err := filesFromSet(set)
+	if err != nil {
+		t.Fatalf("build descriptors: %v", err)
+	}
+	fd, err := files.FindFileByPath("echo/echo.proto")
+	if err != nil {
+		t.Fatalf("find echo file: %v", err)
+	}
+
+	addr := startEchoServer(t, fd, false)
+
+	cfg := config.GRPCTranscodeConfig{Target: addr}
+	descFile := filepath.Join(t.TempDir(), "echo.pb")
+	raw, err := proto.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal set: %v", err)
+	}
+	if err := os.WriteFile(descFile, raw, 0o600); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+	cfg.DescriptorSet = descFile
+
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:        "test-health",
+		Strategy:    "round_robin",
+		Servers:     []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails:    2,
+		FailTimeout: config.Duration(time.Minute),
+	}, "http")
+	if err != nil {
+		t.Fatalf("create test pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	tr, err := New(cfg, pool, Options{})
+	if err != nil {
+		t.Fatalf("New transcoder: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+
+	// Application-level NotFound should NOT mark failure.
+	for i := 0; i < 3; i++ {
+		res, _ := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"fail"}`, nil)
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("NotFound request %d: status = %d, want 404", i, res.StatusCode)
+		}
+	}
+	// Backend should still be available after 3 NotFound errors.
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"hi"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("after NotFound errors: status = %d, body = %s", res.StatusCode, body)
+	}
+
+	// Backend Unavailable SHOULD mark failure and trigger cooldown after MaxFails.
+	for i := 0; i < 2; i++ {
+		res, _ := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"unavailable"}`, nil)
+		if res.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("Unavailable request %d: status = %d, want 503", i, res.StatusCode)
+		}
+	}
+	// After 2 consecutive Unavailable errors (MaxFails=2), the backend is in cooldown.
+	res, body = doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"unavailable"}`, nil)
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("post-cooldown status = %d, want 503; body = %s", res.StatusCode, body)
+	}
+	if !strings.Contains(body, "no available gRPC backend") {
+		t.Fatalf("expected cooldown pick failure, got body: %s", body)
 	}
 }

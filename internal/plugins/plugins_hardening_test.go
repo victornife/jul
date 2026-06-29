@@ -5,6 +5,7 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -180,5 +181,115 @@ func TestFetchNotTruncated(t *testing.T) {
 	}
 	if inv.lastFetchTruncated {
 		t.Fatal("lastFetchTruncated = true, want false")
+	}
+}
+
+func TestFetchClearsLastFetchOnError(t *testing.T) {
+	// A successful fetch stores a response; a subsequent failed fetch must
+	// clear it so fetch_read does not expose stale data.
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("live"))
+	}))
+	defer live.Close()
+
+	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx := withInvocation(context.Background(), inv)
+
+	// First client succeeds.
+	okClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("tcp", live.Listener.Addr().String())
+			},
+		},
+	}
+	p := &plugin{capFetch: true, allowedHosts: []string{"127.0.0.1"}, fetchTimeout: time.Second, maxFetchResp: 100, client: okClient}
+	if _, _, err := p.doFetch(ctx, "GET", live.URL, nil); err != nil {
+		t.Fatalf("first fetch err = %v", err)
+	}
+	if inv.lastFetch == nil {
+		t.Fatal("lastFetch nil after success, want data")
+	}
+
+	// Second client fails (dial refused).
+	failClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("tcp", "127.0.0.1:1") // port 1 is almost certainly refused
+			},
+		},
+	}
+	p.client = failClient
+	if _, _, err := p.doFetch(ctx, "GET", "http://127.0.0.1/", nil); err == nil {
+		t.Fatal("second fetch succeeded, want error")
+	}
+	if inv.lastFetch != nil {
+		t.Fatalf("lastFetch not cleared after failure, got %q", inv.lastFetch)
+	}
+	if inv.lastFetchTruncated {
+		t.Fatal("lastFetchTruncated true after failure, want false")
+	}
+}
+
+func TestPluginCloseClosesIdleConnections(t *testing.T) {
+	// close() must be nil-safe and tolerate missing runtime/client without panic.
+	var nilP *plugin
+	nilP.close()
+
+	pNoClient := &plugin{}
+	pNoClient.close()
+
+	pWithClient := &plugin{client: &http.Client{}}
+	pWithClient.close() // runtime is nil so it returns early; still must not panic
+}
+
+// multiIPResolver returns a fixed list of IP addresses in order.
+type multiIPResolver struct{ ips []string }
+
+func (r multiIPResolver) LookupIPAddr(_ context.Context, _ string) ([]net.IPAddr, error) {
+	var addrs []net.IPAddr
+	for _, s := range r.ips {
+		addrs = append(addrs, net.IPAddr{IP: net.ParseIP(s)})
+	}
+	return addrs, nil
+}
+
+// mockDialer fails on the first N calls, then returns a pipe connection.
+type mockDialer struct {
+	failCount int
+	attempted []string
+}
+
+func (m *mockDialer) DialContext(_ context.Context, network, address string) (net.Conn, error) {
+	m.attempted = append(m.attempted, address)
+	if m.failCount > 0 {
+		m.failCount--
+		return nil, errors.New("connection refused")
+	}
+	c, _ := net.Pipe()
+	_ = network
+	return c, nil
+}
+
+func TestFetchTriesMultipleValidatedIPs(t *testing.T) {
+	// Use public-range IPs so the SSRF guard does not block them.
+	resolver := multiIPResolver{ips: []string{"8.8.8.8", "8.8.4.4"}}
+	md := &mockDialer{failCount: 1}
+
+	conn, err := dialValidatedIPs(context.Background(), md, resolver, "tcp", "example.com", "443")
+	if err != nil {
+		t.Fatalf("dialValidatedIPs err = %v, want nil", err)
+	}
+	defer conn.Close()
+
+	// Should have attempted two IP addresses.
+	if len(md.attempted) != 2 {
+		t.Fatalf("attempted %d addrs, want 2: %v", len(md.attempted), md.attempted)
+	}
+	if md.attempted[0] != "8.8.8.8:443" {
+		t.Fatalf("first attempt = %q, want 8.8.8.8:443", md.attempted[0])
+	}
+	if md.attempted[1] != "8.8.4.4:443" {
+		t.Fatalf("second attempt = %q, want 8.8.4.4:443", md.attempted[1])
 	}
 }

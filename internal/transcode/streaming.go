@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 
+	"jul/internal/upstream"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -25,7 +27,7 @@ import (
 // the method's streaming kind: server-streaming and bidirectional responses are
 // framed (NDJSON or SSE, per the location's stream_mode) and flushed per
 // message; a client-streaming response is a single JSON object.
-func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, conn *grpc.ClientConn) {
+func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, conn *grpc.ClientConn, backend *upstream.Backend) {
 	method := string(rt.method.FullName())
 	clientStream := rt.method.IsStreamingClient()
 	serverStream := rt.method.IsStreamingServer()
@@ -44,78 +46,93 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 		code := httpStatusFromCode(status.Code(err))
 		t.writeError(w, code, status.Convert(err).Message())
 		t.report(method, code)
+		if isBackendFailure(status.Code(err)) {
+			t.pool.MarkFailure(backend)
+		}
 		return
 	}
 
+	var backendFailed bool
 	switch {
 	case serverStream && !clientStream:
-		t.serveServerStream(w, r, rt, vars, cs, method)
+		backendFailed = t.serveServerStream(w, r, rt, vars, cs, method, backend)
 	case clientStream && !serverStream:
-		t.serveClientStream(w, r, rt, vars, cs, cancel, method)
+		backendFailed = t.serveClientStream(w, r, rt, vars, cs, cancel, method, backend)
 	default:
-		t.serveBidiStream(w, r, rt, vars, cs, cancel, method)
+		backendFailed = t.serveBidiStream(w, r, rt, vars, cs, cancel, method, backend)
+	}
+	if !backendFailed {
+		t.pool.MarkSuccess(backend)
 	}
 }
 
 // serveServerStream sends a single request built from the body, path variables,
 // and query, then streams each reply message to the client as a framed event.
-func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, method string) {
+func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, method string, backend *upstream.Backend) bool {
 	req := dynamicpb.NewMessage(rt.method.Input())
 	if err := t.buildRequest(req, rt, vars, r); err != nil {
 		code := requestErrorStatus(err)
 		t.writeError(w, code, err.Error())
 		t.report(method, code)
-		return
+		return false // client-side request error
 	}
 	if err := cs.SendMsg(req); err != nil {
 		t.streamSetupError(w, err, method)
-		return
+		t.pool.MarkFailure(backend)
+		return true
 	}
 	t.streamMsg(method, "sent")
 	_ = cs.CloseSend()
 
 	resp := newStreamResponder(w, t.streamMode)
-	t.pumpReplies(resp, cs, rt, method)
+	return t.pumpReplies(resp, cs, rt, method, backend)
 }
 
 // serveClientStream reads a sequence of JSON request frames (a JSON array or
 // newline/whitespace-delimited objects), forwards each as a gRPC message, then
 // returns the single reply as one JSON object.
-func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string) {
+func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend *upstream.Backend) bool {
 	if err := t.sendRequestFrames(r, rt, vars, cs); err != nil {
 		cancel()
 		var de *decodeError
 		if errors.As(err, &de) {
 			t.writeError(w, http.StatusBadRequest, de.Error())
 			t.report(method, http.StatusBadRequest)
-			return
+			return false // client-side decode error
+		}
+		if isBackendFailure(status.Code(err)) {
+			t.pool.MarkFailure(backend)
 		}
 		t.streamSetupError(w, err, method)
-		return
+		return true
 	}
 	_ = cs.CloseSend()
 
 	out := dynamicpb.NewMessage(rt.method.Output())
 	if err := cs.RecvMsg(out); err != nil {
+		if isBackendFailure(status.Code(err)) {
+			t.pool.MarkFailure(backend)
+		}
 		t.streamSetupError(w, err, method)
-		return
+		return true
 	}
 	t.streamMsg(method, "recv")
 	body, err := t.marshalReply(out)
 	if err != nil {
 		t.writeError(w, http.StatusInternalServerError, "encode response: "+err.Error())
 		t.report(method, http.StatusInternalServerError)
-		return
+		return false // encoding error
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 	t.report(method, http.StatusOK)
+	return false
 }
 
 // serveBidiStream pumps request frames to the backend while concurrently
 // streaming reply frames back to the client over the same HTTP/2 request.
-func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string) {
+func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend *upstream.Backend) bool {
 	var (
 		mu      sync.Mutex
 		sendErr error
@@ -145,32 +162,40 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 			se := sendErr
 			mu.Unlock()
 			if se != nil {
+				var failed bool
+				if !isDecodeError(se) && isBackendFailure(status.Code(se)) {
+					t.pool.MarkFailure(backend)
+					failed = true
+				}
 				t.finishStreamError(w, resp, se, method)
 				<-done
-				return
+				return failed
 			}
 			if errors.Is(err, io.EOF) {
 				resp.end()
 				t.report(method, http.StatusOK)
 				<-done
-				return
+				return false
+			}
+			if isBackendFailure(status.Code(err)) {
+				t.pool.MarkFailure(backend)
 			}
 			t.finishStreamError(w, resp, err, method)
 			<-done
-			return
+			return true
 		}
 		body, mErr := t.marshalReply(out)
 		if mErr != nil {
 			t.finishStreamError(w, resp, mErr, method)
 			cancel()
 			<-done
-			return
+			return false // encoding error
 		}
 		if err := resp.message(body); err != nil {
 			cancel()
 			<-done
 			t.report(method, http.StatusOK)
-			return
+			return false
 		}
 		t.streamMsg(method, "recv")
 	}
@@ -179,26 +204,29 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 // pumpReplies streams every reply message from cs to the client, mapping a
 // terminal gRPC error to an HTTP error (before the first frame) or an error
 // frame (after streaming has started).
-func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt *route, method string) {
+func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt *route, method string, backend *upstream.Backend) bool {
 	for {
 		out := dynamicpb.NewMessage(rt.method.Output())
 		if err := cs.RecvMsg(out); err != nil {
 			if errors.Is(err, io.EOF) {
 				resp.end()
 				t.report(method, http.StatusOK)
-				return
+				return false
+			}
+			if isBackendFailure(status.Code(err)) {
+				t.pool.MarkFailure(backend)
 			}
 			t.finishStreamError(resp.w, resp, err, method)
-			return
+			return true
 		}
 		body, mErr := t.marshalReply(out)
 		if mErr != nil {
 			t.finishStreamError(resp.w, resp, mErr, method)
-			return
+			return false // encoding error
 		}
 		if err := resp.message(body); err != nil {
 			t.report(method, http.StatusOK)
-			return
+			return false
 		}
 		t.streamMsg(method, "recv")
 	}
@@ -286,6 +314,11 @@ type decodeError struct{ err error }
 
 func (e *decodeError) Error() string { return e.err.Error() }
 func (e *decodeError) Unwrap() error { return e.err }
+
+func isDecodeError(err error) bool {
+	var de *decodeError
+	return errors.As(err, &de)
+}
 
 // streamResponder writes framed streaming responses (NDJSON or SSE) and flushes
 // after each frame. Headers are written lazily on the first frame so a failure

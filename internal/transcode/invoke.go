@@ -221,6 +221,7 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		code := http.StatusBadGateway
 		t.writeError(w, code, "grpc backend unreachable: "+err.Error())
 		t.report(method, code)
+		t.pool.MarkFailure(backend)
 		return
 	}
 
@@ -230,7 +231,7 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			t.report(method, http.StatusNotImplemented)
 			return
 		}
-		t.serveStreaming(w, r, rt, vars, conn)
+		t.serveStreaming(w, r, rt, vars, conn, backend)
 		return
 	}
 
@@ -247,6 +248,9 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		code := httpStatusFromCode(status.Code(err))
 		t.writeError(w, code, status.Convert(err).Message())
 		t.report(method, code)
+		if isBackendFailure(status.Code(err)) {
+			t.pool.MarkFailure(backend)
+		}
 		return
 	}
 
@@ -263,6 +267,7 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(out)
 	t.report(method, http.StatusOK)
+	t.pool.MarkSuccess(backend)
 }
 
 // match returns the first route whose HTTP method and path template match the
@@ -569,4 +574,14 @@ func httpStatusFromCode(c codes.Code) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+// isBackendFailure checks if a gRPC status code indicates a backend failure
+// that should be recorded by the pool's passive health mechanism.
+func isBackendFailure(c codes.Code) bool {
+	switch c {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.Internal, codes.Unknown, codes.DataLoss:
+		return true
+	}
+	return false
 }
