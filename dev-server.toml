@@ -1,0 +1,388 @@
+# Jul sample configuration (v1)
+# NGINX-inspired concepts expressed in TOML.
+
+[global]
+worker_threads = "auto"
+log_level = "info"
+log_format = "text"
+shutdown_timeout = "30s"
+
+[[servers]]
+listen = "0.0.0.0:18080"
+server_names = ["localhost", "example.com", "www.example.com"]
+client_max_body_size = "1m"
+# Limits and timeouts (sane defaults applied when omitted).
+max_header_bytes = "1m"
+read_header_timeout = "10s"
+idle_timeout = "60s"
+# read_timeout / write_timeout default off so streaming (SSE, WebSocket, large
+# transfers) is not severed; set them only if you need hard request/response caps.
+# read_timeout = "30s"
+# write_timeout = "30s"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:3000"
+  # root = "/srv/www/example"
+  # index = ["index.html", "index.htm"]
+  # try_files = ["$uri", "$uri/", "/index.html"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://backend"
+  cache = true
+
+    [servers.locations.headers]
+    Host = "$host"
+    X-Real-IP = "$remote_addr"
+    X-Forwarded-For = "$proxy_add_x_forwarded_for"
+
+    # Per-location access control. An optional CIDR gate (deny wins over allow)
+    # runs first, then at most ONE credential method: basic, jwt, or
+    # forward_auth. Authentication runs ahead of rate limiting, so a
+    # "jwt:<claim>" rate-limit key can key on a validated token claim.
+    # [servers.locations.auth]
+    # allow = ["10.0.0.0/8"]          # only these client networks may proceed
+    # deny = ["10.9.0.0/16"]          # ... except these (deny takes precedence)
+    #
+    #   # HTTP Basic against an htpasswd file of bcrypt hashes.
+    #   [servers.locations.auth.basic]
+    #   file = "/etc/jul/htpasswd"
+    #   realm = "Restricted"          # default "Restricted"
+    #
+    #   # OR: JWT bearer tokens validated against a JWKS endpoint.
+    #   [servers.locations.auth.jwt]
+    #   jwks_url = "https://issuer.example/.well-known/jwks.json"  # https required
+    #   issuer = "https://issuer.example/"     # optional: require this "iss"
+    #   audience = "https://api.example/"      # optional: require this "aud"
+    #   # algorithms defaults to the asymmetric set (RS*/ES*/PS*); "none" and
+    #   # symmetric (HS*) algorithms are always rejected.
+    #   # algorithms = ["RS256", "ES256"]
+    #
+    #   # OR: delegate the decision to an external service. A 2xx authorizes the
+    #   # request and the listed response headers are copied onto the upstream
+    #   # request; any other status is relayed to the client.
+    #   [servers.locations.auth.forward_auth]
+    #   url = "http://127.0.0.1:4181/auth"
+    #   auth_response_headers = ["X-Auth-User", "X-Auth-Groups"]
+
+  # gRPC <-> JSON transcoding (binaries built with -tags grpc). Exposes a gRPC
+  # service as a RESTful JSON API using the google.api.http annotations compiled
+  # into your .proto. Exactly one descriptor source is required.
+  # [[servers.locations]]
+  # match = { type = "prefix", path = "/v1/" }
+  #   [servers.locations.grpc_transcode]
+  #   target = "grpc-backend"          # upstream name or a literal host:port
+  #   descriptor_set = "/etc/jul/api.pb"  # protoc --include_imports --descriptor_set_out
+  #   # use_reflection = true          # OR discover via gRPC server reflection
+  #   # tls = false                    # dial the backend over TLS (default h2c)
+  #   # preserve_proto_field_names = false  # keep snake_case field names in JSON
+  #   # streaming = false              # transcode server/client/bidi streaming methods
+  #   # stream_mode = "ndjson"         # framing for streamed responses: "ndjson" or "sse"
+  #   # max_message_size = "4m"        # per-message ceiling (default 4 MiB)
+
+  # Native gRPC passthrough (binaries built with -tags grpc). Reverse-proxies
+  # real gRPC end to end over HTTP/2 — trailers preserved, streaming frames
+  # flushed immediately — with the upstream pool's load balancing and health.
+  # Set grpc = true on a proxy_pass location; the scheme picks the backend
+  # transport (http:// => cleartext h2c, https:// => HTTP/2 over TLS).
+  # [[servers.locations]]
+  # match = { type = "prefix", path = "/" }
+  # proxy_pass = "http://grpc-backend"   # http:// => h2c, https:// => HTTP/2 TLS
+  # grpc = true
+  #
+  # On a plaintext listener, also accept cleartext HTTP/2 from gRPC clients that
+  # connect without TLS by setting h2c = true on the [[servers]] block above
+  # (unnecessary on a TLS listener, where HTTP/2 is negotiated via ALPN):
+  # h2c = true
+
+[[upstreams]]
+name = "backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:3000", "127.0.0.1:3001"]
+# Passive health: after max_fails consecutive live-traffic failures a backend is
+# taken out of rotation for fail_timeout, then probed half-open by the next pick.
+# max_fails = 3
+# fail_timeout = "10s"
+#
+# Active health checks proactively probe each backend so failures are detected
+# (and recoveries observed) without waiting for live traffic. A backend leaves
+# rotation after unhealthy_threshold failed probes and returns after
+# healthy_threshold successful ones; this combines with passive health.
+#   [upstreams.health_check]
+#   enabled = true
+#   type = "http"            # http (default) or tcp
+#   path = "/healthz"        # required for http
+#   interval = "5s"          # delay between probe rounds
+#   timeout = "2s"           # per-probe timeout (must be < interval)
+#   healthy_threshold = 2    # consecutive successes to mark healthy
+#   unhealthy_threshold = 3  # consecutive failures to eject
+#   expect_status = [200]    # acceptable HTTP statuses (http only)
+#   # expect_body = "OK"     # optional: response body must contain this (http only)
+#
+# Dynamic service discovery resolves the backend set from an external source and
+# refreshes the pool live (no reload). With discovery enabled the static
+# `servers` list above is optional (a seed/fallback until the first resolve). A
+# failed or empty resolve keeps the last-good backends. See docs/service-discovery.md.
+#   [upstreams.discovery]
+#   type = "dns"             # dns | dns_srv | consul | kubernetes (static = off)
+#   target = "api.internal.svc:8080"  # dns: host:port; dns_srv: the SRV name
+#   refresh = "30s"          # poll interval (default 30s)
+#   # Consul (requires a build with the "consul" tag):
+#   #   type = "consul"
+#   #   [upstreams.discovery.consul]
+#   #   address = "http://127.0.0.1:8500"
+#   #   service = "web"
+#   #   tag = "v1"           # optional
+#   #   passing_only = true  # default true
+#   # Kubernetes (requires a build with the "kubernetes" tag):
+#   #   type = "kubernetes"
+#   #   [upstreams.discovery.kubernetes]
+#   #   namespace = "default"
+#   #   service = "web"
+#   #   port = "http"        # port name or number (default: first port)
+
+[cache]
+enabled = false
+memory_max_size = "64m"
+# disk_path = "/var/cache/jul"
+# disk_max_size = "512m"
+default_ttl = "60s"
+stale_while_revalidate = "30s"
+
+[compression]
+# Negotiated response compression. gzip works in every build; br and zstd
+# require their build tags (build-full enables them).
+enabled = false
+# Encoders in server-preference order; any subset of gzip, br, zstd.
+encoders = ["gzip"]
+# 0 selects each encoder's own default level.
+level = 0
+# Smallest response body that is worth compressing.
+min_size = "1k"
+# MIME allow-list ("type/*" matches a whole family). When omitted while enabled,
+# a sensible default set (text, JSON, JS, XML, SVG, WASM) is applied.
+types = ["text/*", "application/json", "application/javascript", "application/xml", "application/wasm", "image/svg+xml"]
+# Serve sidecar .br/.gz files for static responses when present and acceptable.
+precompressed = false
+
+[rate_limit]
+# Token-bucket request rate limiting plus an optional per-listener connection
+# cap. Disabled by default. The global policy here applies to every location;
+# a location may override rate/burst/key under [servers.locations.rate_limit].
+enabled = false
+# Bucket identity: "ip" (client address), "header:<Name>" (e.g. header:X-Api-Key),
+# or "jwt:<claim>" (a validated JWT claim from a location's auth block, falling
+# back to client IP when absent). The client address is the real transport peer,
+# never an untrusted X-Forwarded-For value.
+key = "ip"
+# Sustained requests/second allowed per key.
+rate = 100
+# Maximum momentary burst above rate. Defaults to rate when omitted.
+burst = 200
+# Concurrent connections allowed per listener (0 = unlimited). Active only when
+# this block is enabled. Listener-global; ignored on per-location overrides and
+# applied to newly bound listeners.
+max_conns = 0
+
+[admin]
+enabled = true
+listen = "127.0.0.1:10199"
+# token = "change-me"            # require `Authorization: Bearer <token>`
+# console = true                 # web console dashboard (default: true when
+#                                # admin is enabled; needs a binary built with
+#                                # `-tags console`). Set false for the basic
+#                                # configuration page only.
+# history_dir = "./jul-data/config-history"  # snapshots for the console
+#                                # history/rollback panel (default shown).
+# history_keep = 50              # max snapshots to retain; older are pruned.
+
+# [observability.tracing]
+# OpenTelemetry distributed tracing — requires a binary built with `-tags otel`
+# (an enabled block in a binary without that tag is rejected at startup).
+# Disabled by default; uncomment and set enabled = true to export spans over
+# OTLP to a collector (Grafana Tempo, Jaeger, the OpenTelemetry Collector, ...).
+# Each request emits a server span with proxy.roundtrip / upstream.request /
+# cache.lookup child spans, and W3C tracecontext is propagated to upstreams.
+# Tracing settings are fixed at startup: changing this block needs a restart
+# (a config reload keeps the running tracer).
+# enabled = true
+# exporter = "otlp-grpc"           # "otlp-grpc" (default) or "otlp-http"
+# endpoint = "localhost:4317"      # collector address: host:port (gRPC) / URL (HTTP)
+# sample_ratio = 1.0               # head-sampling probability, 0..1 (default 1.0)
+# service_name = "jul"             # resource service.name in the trace backend
+# insecure = false                 # set true for a plaintext collector (no TLS)
+
+# [observability.access_log]
+# Where the access log is written. Always available (no build tag required).
+# The default sink "stdout" emits the structured access line in the server log,
+# honoring [global].log_format. Add "file" for a dedicated rotating file and/or
+# "syslog" for the system log (syslog is not supported on Windows). Settings are
+# fixed at startup; changing this block needs a restart.
+# sinks = ["stdout", "file"]        # any of "stdout", "file", "syslog"
+# file = "/var/log/jul/access.log" # required when "file" is listed
+# format = "text"                  # "text" (logfmt, default) or "json" (file/syslog)
+# rotate_max_mb = 100              # rotate the file at this size in MB (default 100)
+# rotate_keep = 7                  # keep this many rotated files (default 7)
+
+# Automatic HTTPS (ACME) — requires a binary built with `-tags acme`.
+# Uncomment a 443 server block like the one below to have Jul obtain and renew
+# certificates automatically. The HTTP-01 challenge is answered on a plain :80
+# server block (keep one running, it can also redirect to HTTPS); the
+# TLS-ALPN-01 challenge is answered on the :443 listener itself.
+#
+# [[servers]]
+# listen = "0.0.0.0:443"
+# server_names = ["example.com", "www.example.com"]
+#
+#   [servers.tls.acme]
+#   enabled = true
+#   email = "ops@example.com"        # required: ACME account contact
+#   # ca defaults to "letsencrypt-staging" (untrusted certs, generous limits).
+#   # Switch to "letsencrypt" only once staging works end to end, or set a
+#   # custom https:// directory URL.
+#   ca = "letsencrypt-staging"
+#   # domains defaults to server_names when omitted.
+#   # domains = ["example.com", "www.example.com"]
+#   # challenge = "http-01"          # "http-01" (default) or "tls-alpn-01"
+#   cache_dir = "./jul-data/certs"   # where issued certs are cached on disk
+#   # ocsp_stapling = true           # staple OCSP responses (default true)
+#   # dns_provider = "cloudflare"    # reserved for a future DNS-01 release (rejected if set)
+#
+#   [[servers.locations]]
+#   match = { type = "prefix", path = "/" }
+#   root = "/srv/www/example"
+#
+# [[servers]]
+# listen = "0.0.0.0:80"
+# server_names = ["example.com", "www.example.com"]
+# redirect_https = 308               # send HTTP traffic to HTTPS
+#   [[servers.locations]]
+#   match = { type = "prefix", path = "/" }
+#   root = "/srv/www/example"
+
+# Mutual TLS (client certificates) — in core, no build tag. Add a
+# [servers.tls.client_auth] block to verify the certificate a client presents
+# against a CA bundle. mode is none|request|require. Settings are read when the
+# listener binds (like min_version), so changing them needs a restart. The
+# verified identity is exposed to upstreams as $ssl_client_* header variables;
+# set require_client_cert on a location to return 403 when no cert is present.
+# See docs/mtls.md and testdata/mtls.toml.
+#
+# [[servers]]
+# listen = "0.0.0.0:443"
+# server_names = ["api.example.com"]
+#
+#   [servers.tls]
+#   enabled = true
+#   cert = "/etc/jul/server.crt"
+#   key = "/etc/jul/server.key"
+#
+#     [servers.tls.client_auth]
+#     mode = "require"                 # none | request | require
+#     ca_file = "/etc/jul/clients-ca.pem"   # CA bundle that signs client certs
+#     # verify_san = ["svc.internal.example.com"]   # optional SAN allow-list
+#     # crl_file = "/etc/jul/clients.crl"           # optional revocation list
+#
+#   [[servers.locations]]
+#   match = { type = "prefix", path = "/api" }
+#   proxy_pass = "http://127.0.0.1:9000"
+#   require_client_cert = true         # 403 unless a verified client cert is present
+#     [servers.locations.headers]
+#     X-Client-Verify = "$ssl_client_verify"
+#     X-Client-CN = "$ssl_client_cn"
+
+# HTTP/3 (QUIC) — requires a binary built with `-tags http3`.
+# Add a [servers.http3] block to a TLS-enabled server to also serve HTTP/3 on
+# the same address over UDP. It shares the server's TLS certificate (static or
+# ACME, including reloads) and is advertised to clients with an Alt-Svc response
+# header, so they upgrade to h3 on a later request. HTTP/3 requires TLS, so the
+# block is only valid on a TLS-enabled server. Open the same UDP port as the TCP
+# port in your firewall. Settings are fixed at startup; changing them (including
+# turning HTTP/3 on or off for an existing address) needs a restart.
+#
+# [[servers]]
+# listen = "0.0.0.0:443"
+# server_names = ["example.com"]
+#
+#   [servers.tls]
+#   enabled = true
+#   cert = "/etc/jul/tls/example.crt"
+#   key = "/etc/jul/tls/example.key"
+#
+#   [servers.http3]
+#   enabled = true
+#   # alt_svc_max_age = 86400        # Alt-Svc advertisement lifetime, seconds (default 86400)
+#
+#   [[servers.locations]]
+#   match = { type = "prefix", path = "/" }
+#   root = "/srv/www/example"
+
+# WebAssembly plugins — requires a binary built with `-tags wasmplugins`.
+# Each [plugins.NAME] entry declares one sandboxed WASM module run on the
+# embedded wazero runtime. Supply the module with exactly one of `path` (a .wasm
+# file) or `inline` (base64 module bytes). Capabilities default off. Reference a
+# plugin from a server/location `plugins = [...]` list to run it as middleware,
+# or a location `plugin = "NAME"` to use it as a terminal handler action.
+# See docs/plugins.md for the authoring guide and examples/plugins for samples.
+#
+# [plugins.header-inject]
+# path = "./plugins/header-inject.wasm"
+# type = "middleware"                # "middleware" (default) or "handler"
+# memory_limit = "16m"               # guest linear-memory cap (default 16 MiB)
+# timeout = "100ms"                  # per-invocation deadline (default 100ms)
+# config = { header = "X-Plugin", value = "header-inject" }  # JSON to the guest
+#
+# [plugins.kv-counter]
+# path = "./plugins/kv-counter.wasm"
+# kv = true                          # grant the key/value store host functions
+#
+# [plugins.request-block]
+# path = "./plugins/request-block.wasm"
+# type = "handler"                   # terminal location action
+#
+# [[servers]]
+# listen = "0.0.0.0:8080"
+# plugins = ["header-inject"]        # middleware for every location on this server
+#   [[servers.locations]]
+#   match = { type = "prefix", path = "/api/" }
+#   proxy_pass = "http://backend"
+#   plugins = ["kv-counter"]         # additional middleware for this location
+#   [[servers.locations]]
+#   match = { type = "exact", path = "/blocked" }
+#   plugin = "request-block"          # terminal handler — no root/proxy_pass here
+
+# ---------------------------------------------------------------------------
+# L4 stream proxy ([[stream]]) — requires a binary built with `-tags stream`.
+# Each [[stream]] block reverse-proxies raw TCP or UDP: load balancing + health
+# over an upstream pool, TLS SNI routing without terminating, and the HAProxy
+# PROXY protocol to preserve the client address. See docs/stream-proxy.md and
+# examples/l4 for the full guide.
+#
+# # Plain TCP load balancing to an upstream pool.
+# [[stream]]
+# listen = "0.0.0.0:5432"
+# proxy_pass = "postgres_pool"       # named upstream or a literal host:port
+# connect_timeout = "10s"            # backend dial timeout (default 10s)
+# idle_timeout = "5m"                # close after this idle period (default 5m)
+#
+# # TLS SNI routing — passthrough, TLS is never terminated.
+# [[stream]]
+# listen = "0.0.0.0:443"
+#   [stream.sni_routes]
+#   "api.example.com" = "api_pool"   # named upstream
+#   "db.example.com"  = "10.0.0.7:8443"  # or a literal host:port
+#   "*"               = "default_pool"   # catch-all (beats proxy_pass)
+#
+# # UDP relay (e.g. DNS).
+# [[stream]]
+# listen = "0.0.0.0:53"
+# protocol = "udp"                   # "tcp" (default) or "udp"
+# proxy_pass = "dns_pool"
+#
+# # TCP that prepends a PROXY v2 header to the backend.
+# [[stream]]
+# listen = "0.0.0.0:6379"
+# proxy_pass = "redis_pool"
+# proxy_protocol = "out"             # "" (off), "in", "out", or "both" (TCP only)
+
