@@ -109,6 +109,11 @@ jobs:
         with:
           name: coverage-profile
           path: cover.out
+      - name: upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./cover.out
+          fail_ci_if_error: false
 
   benchmarks:
     name: benchmarks (smoke)
