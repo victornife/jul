@@ -1,10 +1,10 @@
 # Jul.IA
 
 [![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](https://github.com/victornife/jul)
-[![CI](https://github.com/victornife/jul/actions/workflows/ci.yml/badge.svg)](https://github.com/victornife/jul/actions/workflows/ci.yml)
+[![CI](https://github.com/victornife/jul/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/victornife/jul/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://github.com/victornife/jul/blob/main/go.mod)
 [![License](https://img.shields.io/badge/license-PolyForm%20Non--Commercial%201.0.0-blue.svg)](https://github.com/victornife/jul#license)
-[![Codecov](https://codecov.io/gh/victornife/jul/graph/badge.svg)](https://codecov.io/gh/victornife/jul)
+[![Codecov](https://codecov.io/gh/victornife/jul/graph/badge.svg?branch=main)](https://codecov.io/gh/victornife/jul)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/victornife/jul)
 
 **Jul.IA** is an NGINX-inspired HTTP edge server written in Go and configured
