@@ -5,6 +5,7 @@ package transcode
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -437,5 +440,98 @@ func TestStreamClientStreamDecodeErrorNeutralHealth(t *testing.T) {
 	}
 	if backend.FailCount() != wantFails {
 		t.Fatalf("fail count changed from %d to %d, expected unchanged after client decode error", wantFails, backend.FailCount())
+	}
+}
+
+func TestStreamSetupErrorReportsHTTPStatus(t *testing.T) {
+	var reportedMethod, reportedCode string
+	tr := &Transcoder{
+		onResult: func(m, c string) {
+			reportedMethod, reportedCode = m, c
+		},
+	}
+	rec := httptest.NewRecorder()
+	tr.streamSetupError(rec, status.Error(codes.Unavailable, "backend down"), "pkg.Service/Method")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("code = %d", rec.Code)
+	}
+	if reportedMethod != "pkg.Service/Method" || reportedCode != "503" {
+		t.Errorf("reported %s %s", reportedMethod, reportedCode)
+	}
+}
+
+func TestFinishStreamErrorBeforeStarted(t *testing.T) {
+	var reportedCode string
+	tr := &Transcoder{onResult: func(_, c string) { reportedCode = c }}
+	rec := httptest.NewRecorder()
+	sr := newStreamResponder(rec, "ndjson")
+	err := status.Error(codes.NotFound, "missing")
+	tr.finishStreamError(rec, sr, err, "M")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("code = %d", rec.Code)
+	}
+	if reportedCode != "404" {
+		t.Errorf("reported = %q", reportedCode)
+	}
+}
+
+func TestFinishStreamErrorAfterStarted(t *testing.T) {
+	var reportedCode string
+	tr := &Transcoder{onResult: func(_, c string) { reportedCode = c }}
+	rec := httptest.NewRecorder()
+	sr := newStreamResponder(rec, "ndjson")
+	sr.ensureStarted()
+	err := status.Error(codes.Internal, "oops")
+	tr.finishStreamError(rec, sr, err, "M")
+	if rec.Code != http.StatusOK {
+		t.Errorf("code = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"Internal"`) || !strings.Contains(body, `"message":"oops"`) {
+		t.Errorf("body = %q", body)
+	}
+	if reportedCode != "200" {
+		t.Errorf("reported = %q", reportedCode)
+	}
+}
+
+func TestErrorFrameNDJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sr := newStreamResponder(rec, "ndjson")
+	sr.errorFrame(codes.InvalidArgument, "bad")
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"InvalidArgument"`) || !strings.Contains(body, `"message":"bad"`) {
+		t.Errorf("body = %q", body)
+	}
+}
+
+func TestErrorFrameSSE(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sr := newStreamResponder(rec, "sse")
+	sr.errorFrame(codes.DeadlineExceeded, "timeout")
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: error") || !strings.Contains(body, `"message":"timeout"`) {
+		t.Errorf("body = %q", body)
+	}
+}
+
+func TestDecodeErrorUnwrap(t *testing.T) {
+	inner := errors.New("inner")
+	de := &decodeError{err: inner}
+	if !errors.Is(de, inner) {
+		t.Error("Unwrap should expose inner")
+	}
+}
+
+func TestIsDecodeError(t *testing.T) {
+	if isDecodeError(errors.New("plain")) {
+		t.Error("plain should not match")
+	}
+	if !isDecodeError(&decodeError{err: errors.New("x")}) {
+		t.Error("decodeError should match")
+	}
+	wrapped := fmt.Errorf("wrap: %w", &decodeError{err: errors.New("y")})
+	if !isDecodeError(wrapped) {
+		t.Error("wrapped decodeError should match")
 	}
 }
