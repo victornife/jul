@@ -279,9 +279,27 @@ export function RouteEditor({ initial, serverHasTls, onClose }: RouteEditorProps
           in the editor.
         </p>
 
-        {!serverHasTls && (
+        {serverHasTls ? (
           <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
-            <p className="font-semibold text-jul-text">TLS is configured at the server level</p>
+            <p className="font-semibold text-jul-text">TLS is enabled on this server</p>
+            <p>
+              Routes inherit TLS from their parent server. You cannot turn TLS on or off per route
+              — the listener terminates TLS before any path matching happens.
+            </p>
+            <p>
+              Manage certificates and settings in the{" "}
+              <Link
+                to="/tls"
+                className="inline-flex items-center gap-1 font-medium text-jul-accent underline hover:no-underline"
+              >
+                TLS &amp; Certificates
+              </Link>{" "}
+              panel.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
+            <p className="font-semibold text-jul-text">TLS is not enabled on this server</p>
             <p>
               Routes inherit TLS from their parent server. You cannot turn TLS on or off per route
               — the listener terminates TLS before any path matching happens.
