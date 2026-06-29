@@ -173,7 +173,7 @@ function PreferenceMenu({
           <div
             role="menu"
             className={`absolute z-20 w-60 space-y-3 rounded-md border border-jul-border bg-jul-surface p-3 shadow-lg ${
-              inSidebar ? "left-full top-0 ml-1" : "right-0 mt-1"
+              inSidebar ? "bottom-full right-0 mb-1" : "right-0 mt-1"
             }`}
           >
             <div className="space-y-1">
@@ -378,7 +378,7 @@ export function Layout() {
     return (
       <div className="flex min-h-screen bg-jul-bg text-jul-text">
         <aside
-          className={`sticky top-0 h-screen flex shrink-0 flex-col gap-4 overflow-y-auto border-r border-jul-border bg-jul-surface py-4 ${
+          className={`flex shrink-0 flex-col gap-4 border-r border-jul-border bg-jul-surface py-4 ${
             collapsed ? "w-16 px-2" : "w-56 px-4"
           }`}
         >
