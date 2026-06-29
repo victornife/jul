@@ -376,9 +376,9 @@ export function Layout() {
 
   if (layout === "side") {
     return (
-      <div className="flex h-screen bg-jul-bg text-jul-text">
+      <div className="flex min-h-screen bg-jul-bg text-jul-text">
         <aside
-          className={`flex shrink-0 flex-col gap-4 border-r border-jul-border bg-jul-surface py-4 ${
+          className={`sticky top-0 h-screen flex shrink-0 flex-col gap-4 border-r border-jul-border bg-jul-surface py-4 ${
             collapsed ? "w-16 px-2" : "w-56 px-4"
           }`}
         >
@@ -404,9 +404,9 @@ export function Layout() {
             </button>
           </div>
           <NavLinks pathname={loc.pathname} orientation="col" collapsed={collapsed} />
-          <div className="mt-auto">{controlsSide}</div>
+          {controlsSide}
         </aside>
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 p-6">
           <Outlet />
         </main>
         {palette}

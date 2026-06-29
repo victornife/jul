@@ -38,7 +38,7 @@ export function ConsoleHealthBadge({ compact = false }: ConsoleHealthBadgeProps)
       <Link
         to="/operations"
         title={`Console ${status}${p95 !== undefined && p95 > 0 ? ` — ${p95.toFixed(0)}ms` : ""}`}
-        className={`inline-flex items-center rounded-full p-1 text-xs transition-colors ${tone(status)}`}
+        className={`flex items-center justify-center rounded-full p-1 text-xs transition-colors ${tone(status)}`}
         aria-label={`Console ${status}`}
       >
         <span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />
