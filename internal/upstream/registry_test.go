@@ -210,3 +210,19 @@ func TestRegistryStartsHealthChecks(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 }
+
+func TestRegistrySnapshot(t *testing.T) {
+	r := NewRegistry(RegistryOptions{})
+	r.Begin()
+	_, _ = r.For(upstreamCfg("z", "round_robin", "10.0.0.1:80"), "http")
+	_, _ = r.For(upstreamCfg("a", "round_robin", "10.0.0.2:80"), "http")
+	r.Commit()
+
+	snap := r.Snapshot()
+	if len(snap) != 2 {
+		t.Fatalf("len = %d", len(snap))
+	}
+	if snap[0].Name != "a" || snap[1].Name != "z" {
+		t.Errorf("order = %v, %v", snap[0].Name, snap[1].Name)
+	}
+}

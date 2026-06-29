@@ -673,3 +673,12 @@ func TestCloseStopsAllListeners(t *testing.T) {
 		t.Errorf("expected refused connection after Close")
 	}
 }
+
+func TestCheckEmpty(t *testing.T) {
+	if err := Check(nil); err != nil {
+		t.Fatalf("Check(nil): %v", err)
+	}
+	if err := Check([]config.StreamServer{}); err != nil {
+		t.Fatalf("Check(empty): %v", err)
+	}
+}

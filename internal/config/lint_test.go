@@ -171,3 +171,12 @@ func TestIsLoopbackListen(t *testing.T) {
 		}
 	}
 }
+
+func TestSeverityString(t *testing.T) {
+	if SeverityWarning.String() != "warning" {
+		t.Errorf("warning = %q", SeverityWarning.String())
+	}
+	if SeverityError.String() != "error" {
+		t.Errorf("error = %q", SeverityError.String())
+	}
+}
