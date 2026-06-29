@@ -231,6 +231,52 @@ func TestFetchClearsLastFetchOnError(t *testing.T) {
 	}
 }
 
+
+// errRoundTripper returns a fixed *http.Response; used to inject a body reader
+// that fails mid-read without involving real network I/O.
+type errRoundTripper struct{ resp *http.Response }
+
+func (e *errRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { return e.resp, nil }
+
+// errorReader always returns a read error, simulating a connection reset.
+type errorReader struct{}
+
+func (errorReader) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+
+func TestFetchBodyReadErrorReturnsTransportError(t *testing.T) {
+	// If the upstream connects but the response body read fails mid-way,
+	// doFetch must return the read error (mapped to guest code -4) and
+	// clear lastFetch so the guest cannot act on partial data.
+	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx := withInvocation(context.Background(), inv)
+
+	p := &plugin{
+		capFetch:     true,
+		allowedHosts: []string{"example.com"},
+		fetchTimeout: time.Second,
+		maxFetchResp: 1 << 10,
+		client: &http.Client{
+			Transport: &errRoundTripper{
+				resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/plain"}},
+					Body:       io.NopCloser(errorReader{}),
+				},
+			},
+		},
+	}
+
+	_, _, err := p.doFetch(ctx, "GET", "http://example.com/", nil)
+	if err == nil {
+		t.Fatal("doFetch with body read error succeeded, want error")
+	}
+	if inv.lastFetch != nil {
+		t.Fatalf("lastFetch not cleared after body read error, got %q", inv.lastFetch)
+	}
+	if inv.lastFetchTruncated {
+		t.Fatal("lastFetchTruncated true after body read error, want false")
+	}
+}
 func TestPluginCloseClosesIdleConnections(t *testing.T) {
 	// close() must be nil-safe and tolerate missing runtime/client without panic.
 	var nilP *plugin
