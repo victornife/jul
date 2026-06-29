@@ -18,6 +18,13 @@ import (
 // guest's "blocked" return code, distinct from a transport error.
 var errFetchBlocked = errors.New("fetch blocked by guard")
 
+// ipResolver resolves a host to IP addresses; net.Resolver satisfies it. The
+// seam lets tests inject addresses to exercise the SSRF guard, including a
+// rebinding record that resolves to a private address.
+type ipResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
 // doFetch performs a guarded outbound HTTP request for a plugin holding the
 // fetch capability. It enforces the allow-list, an SSRF address guard, a
 // per-call timeout, and a response-size cap, and refuses redirects to hosts that
@@ -38,6 +45,10 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 	}
 
 	dialer := &net.Dialer{Timeout: p.fetchTimeout}
+	resolver := p.resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
 	client := &http.Client{
 		Timeout: p.fetchTimeout,
 		Transport: &http.Transport{
@@ -48,7 +59,7 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 				if err != nil {
 					return nil, err
 				}
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				ips, err := resolver.LookupIPAddr(ctx, host)
 				if err != nil {
 					return nil, err
 				}
@@ -57,7 +68,13 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 						return nil, errFetchBlocked
 					}
 				}
-				return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
+				if len(ips) == 0 {
+					return nil, errFetchBlocked
+				}
+				// Dial the validated IP itself, not the hostname, so a rebinding
+				// record cannot resolve to a private address between this check
+				// and the connect. Host header and TLS SNI keep the hostname.
+				return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 			},
 		},
 		// Re-validate the allow-list on every redirect hop so a permitted host

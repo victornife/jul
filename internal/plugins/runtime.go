@@ -134,6 +134,10 @@ type plugin struct {
 	kvMaxEntries int
 	kvMaxBytes   int
 
+	// resolver lets tests substitute DNS resolution to exercise the fetch SSRF
+	// guard; nil uses net.DefaultResolver.
+	resolver ipResolver
+
 	// KV accounting bounds the per-plugin namespace independent of the shared
 	// store: kvKeys tracks each key's stored size so kv_set can reject an entry
 	// or a total that would exceed the plugin's quota.

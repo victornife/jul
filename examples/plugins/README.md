@@ -18,6 +18,7 @@ go build -tags wasmplugins -o jul ./cmd/jul
 | [`header-inject/`](header-inject) | Middleware: adds an `X-Plugin` response header, then `Continue` |
 | [`request-block/`](request-block) | Middleware: `403` + body when `X-Block: 1`, else `Continue` |
 | [`kv-counter/`](kv-counter) | Middleware: counts requests in the KV store, reports `X-Count` (needs `kv = true`) |
+| [`egress-check/`](egress-check) | Middleware: guarded outbound `Fetch` to an allow-listed host, reports `X-Egress-Status` (needs `fetch = true`) |
 | [`testguest-panic/`](testguest-panic) | Panics on invocation — used by the panic-isolation test |
 | [`testguest-loop/`](testguest-loop) | Infinite loop — used by the timeout-isolation test |
 

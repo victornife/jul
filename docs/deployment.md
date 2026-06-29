@@ -39,11 +39,8 @@ The canonical paths (used by the bundled systemd units and Docker image):
 Point the matching config fields at these paths:
 
 ```toml
-[acme]
-cache_dir = "/var/cache/jul/acme"
-
 [cache]
-# ... disk cache directory under /var/cache/jul ...
+disk_path = "/var/cache/jul/cache"
 
 [observability.access_log]
 sinks = ["file"]
@@ -51,6 +48,11 @@ file  = "/var/log/jul/access.log"
 
 [admin]
 history_dir = "/var/lib/jul/history"
+
+# ACME is configured per server, under its TLS block:
+[[servers]]
+  [servers.tls.acme]
+  cache_dir = "/var/cache/jul/acme"
 ```
 
 Config and history can carry inline credentials. Jul.IA writes both with mode
@@ -151,7 +153,7 @@ Start-Service jul
 
 It creates `C:\ProgramData\jul\{history,cache,logs}` and grants the service
 account **modify** there and **read** on the config; ordinary users get neither.
-Point `acme.cache_dir`, the disk cache, the access-log file sink, and
+Point `servers.tls.acme.cache_dir`, the disk cache, the access-log file sink, and
 `history_dir` at the matching subdirectories.
 
 ## What writes where

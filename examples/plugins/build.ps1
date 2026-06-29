@@ -9,7 +9,7 @@ try {
 
     $env:GOOS = "wasip1"
     $env:GOARCH = "wasm"
-    foreach ($p in "header-inject", "request-block", "kv-counter", "testguest-panic", "testguest-loop") {
+    foreach ($p in "header-inject", "request-block", "kv-counter", "egress-check", "testguest-panic", "testguest-loop") {
         Write-Host "building $p"
         go build -buildmode=c-shared -o (Join-Path $out "$p.wasm") "./$p"
         if ($LASTEXITCODE -ne 0) { throw "build failed: $p" }

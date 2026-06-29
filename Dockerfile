@@ -12,7 +12,13 @@ RUN go mod download
 # Build a static binary (CGO disabled) for a minimal final image.
 COPY . .
 ARG VERSION=0.0.0-docker
+# Feature build tags. Default includes "console" so the admin console (referenced
+# by the /etc/jul editable-config story below) is present. Override for lean or
+# full builds, e.g. --build-arg BUILD_TAGS="" (lean) or the full set:
+#   --build-arg BUILD_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+ARG BUILD_TAGS="console"
 RUN CGO_ENABLED=0 GOOS=linux go build \
+    -tags "${BUILD_TAGS}" \
     -ldflags "-s -w -X main.version=${VERSION}" \
     -o /out/jul ./cmd/jul
 

@@ -29,11 +29,12 @@ A guest compiled against v1 must keep running unchanged on every later v1 host.
 ## What is pinned
 
 The host-function **surface** — every function name with its parameter and
-result arity — is pinned by a golden snapshot at
+result value types (`i32`/`i64`/…), not just arity — is pinned by a golden
+snapshot at
 [testdata/plugins/abi-v1.golden](../testdata/plugins/abi-v1.golden). The
 `TestABIV1Golden` test reconstructs the live surface from the instantiated `jul`
-module and fails on any drift, so a rename, retype, or removal cannot merge
-silently. An *additive* change regenerates the golden intentionally:
+module and fails on any drift, so a rename, retype (e.g. `i32`→`i64`), or removal
+cannot merge silently. An *additive* change regenerates the golden intentionally:
 
 ```bash
 UPDATE_ABI_GOLDEN=1 go test -tags wasmplugins -run TestABIV1Golden ./internal/plugins/

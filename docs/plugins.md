@@ -176,6 +176,7 @@ The SDK lives at [`examples/plugins/sdk`](../examples/plugins/sdk) (package
 | `Request.Body() []byte` | Buffered request body (up to the host limit) |
 | `Request.Config() []byte` | The plugin's `config` table as a JSON object |
 | `KVGet(key) ([]byte, bool)` / `KVSet(key, value) bool` | Key/value store (needs `kv`) |
+| `Fetch(method, url string, body []byte) (int, []byte, error)` | Guarded outbound HTTP (needs `fetch`); reads the full response via `last_fetch_len`+`fetch_read` |
 
 ## The `jul-abi/v1` ABI
 
@@ -206,6 +207,8 @@ v1, golden-pinned, prebuilt-guest tested) are documented in
   | `kv_get` | `(keyPtr, keyLen, buf, limit u32) -> i32` | `-1` absent, `-2` capability denied |
   | `kv_set` | `(keyPtr, keyLen, valPtr, valLen u32) -> i32` | `0` ok, `-2` capability denied, `-3` quota exceeded |
   | `fetch` | `(methodPtr,methodLen,urlPtr,urlLen,bodyPtr,bodyLen,buf,limit u32) -> i32` | status on success, `-2` denied, `-3` blocked, `-4` error |
+  | `last_fetch_len` | `() -> u32` | Full length of the last `fetch` response |
+  | `fetch_read` | `(buf, limit u32) -> u32` | Caller-allocates; re-reads the last `fetch` body so an oversize response is fully retrieved without another call |
 
 **Caller-allocates convention.** Getters never allocate guest memory. The guest
 passes a buffer pointer and its size; the host copies up to that many bytes and

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
 )
 
 // goldenABIPath holds the pinned jul-abi/v1 host-function surface. The
@@ -34,10 +35,20 @@ func currentABISurface(t *testing.T) string {
 	}
 	var lines []string
 	for name, d := range mod.ExportedFunctionDefinitions() {
-		lines = append(lines, fmt.Sprintf("%s(%d)->%d", name, len(d.ParamTypes()), len(d.ResultTypes())))
+		lines = append(lines, fmt.Sprintf("%s(%s)->%s", name, joinTypes(d.ParamTypes()), joinTypes(d.ResultTypes())))
 	}
 	sort.Strings(lines)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// joinTypes renders Wasm value types so the golden pins full signatures, not
+// just arity — an i32->i64 retype with the same count is then a breaking change.
+func joinTypes(ts []api.ValueType) string {
+	parts := make([]string, len(ts))
+	for i, t := range ts {
+		parts[i] = api.ValueTypeName(t)
+	}
+	return strings.Join(parts, ",")
 }
 
 func TestABIV1Golden(t *testing.T) {

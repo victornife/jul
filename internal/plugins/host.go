@@ -55,6 +55,12 @@ type invocation struct {
 	maxReqBody  int
 	maxRespBody int
 	err         error
+
+	// lastFetch holds the most recent fetch response so last_fetch_len and
+	// fetch_read implement the caller-allocates grow-and-retry convention: a
+	// guest can size its buffer to the full length and re-read without a second
+	// outbound call.
+	lastFetch []byte
 }
 
 type invCtxKey struct{}
@@ -307,8 +313,33 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 			}
 			return -4
 		}
+		// Retain the full response so a guest that supplied too small a buffer can
+		// read last_fetch_len and re-read via fetch_read without re-issuing the
+		// request. fetch itself still returns the status and a best-effort copy.
+		inv.lastFetch = respBody
 		writeInto(m, buf, limit, respBody)
 		return int32(status)
+	})
+
+	// last_fetch_len reports the length of the most recent fetch response so a
+	// guest can size a buffer before fetch_read.
+	exp("last_fetch_len", func(ctx context.Context, m api.Module) uint32 {
+		inv := invocationFrom(ctx)
+		if inv == nil {
+			return 0
+		}
+		return uint32(len(inv.lastFetch))
+	})
+
+	// fetch_read copies the most recent fetch response into the guest buffer,
+	// returning the full length (caller-allocates) so a short buffer can grow and
+	// retry without another outbound call.
+	exp("fetch_read", func(ctx context.Context, m api.Module, buf, limit uint32) uint32 {
+		inv := invocationFrom(ctx)
+		if inv == nil {
+			return 0
+		}
+		return writeInto(m, buf, limit, inv.lastFetch)
 	})
 
 	_, err := b.Instantiate(ctx)

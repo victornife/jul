@@ -59,6 +59,29 @@ func TestFetchBlocksLoopbackEvenIfAllowed(t *testing.T) {
 	}
 }
 
+// rebindResolver resolves any host to a fixed address, simulating a DNS record
+// whose value the attacker controls (the rebinding to a private IP).
+type rebindResolver struct{ ip string }
+
+func (r rebindResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP(r.ip)}}, nil
+}
+
+func TestFetchBlocksDNSRebinding(t *testing.T) {
+	// Allow-listed host that resolves to a private address: the dialer must
+	// validate and dial the resolved IP, so the call is blocked, not connected.
+	p := &plugin{
+		capFetch:     true,
+		allowedHosts: []string{"api.example.com"},
+		fetchTimeout: time.Second,
+		maxFetchResp: 1 << 10,
+		resolver:     rebindResolver{ip: "127.0.0.1"},
+	}
+	if _, _, err := p.doFetch(context.Background(), "GET", "https://api.example.com/", nil); err == nil {
+		t.Fatal("doFetch to rebound private IP succeeded, want SSRF guard rejection")
+	}
+}
+
 func TestKVSetEnforcesBounds(t *testing.T) {
 	p := &plugin{kv: newMemKV(), kvKeys: map[string]int{}, kvMaxEntries: 2, kvMaxBytes: 100}
 	if !p.kvSet("a", []byte("x")) || !p.kvSet("b", []byte("y")) {

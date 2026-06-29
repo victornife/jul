@@ -23,7 +23,10 @@
 // request on.
 package sdk
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
 
 // Action is the decision a request handler returns.
 type Action uint32
@@ -88,8 +91,16 @@ func hostKVGet(keyPtr, keyLen, buf, bufLimit uint32) int32
 //go:wasmimport jul kv_set
 func hostKVSet(keyPtr, keyLen, valPtr, valLen uint32) int32
 
-// ---- pointer helpers ------------------------------------------------------
+//go:wasmimport jul fetch
+func hostFetch(methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, buf, bufLimit uint32) int32
 
+//go:wasmimport jul last_fetch_len
+func hostLastFetchLen() uint32
+
+//go:wasmimport jul fetch_read
+func hostFetchRead(buf, bufLimit uint32) uint32
+
+// ---- pointer helpers ------------------------------------------------------
 func bytePtr(b []byte) uint32 {
 	if len(b) == 0 {
 		return 0
@@ -161,6 +172,35 @@ func KVGet(key string) (value []byte, ok bool) {
 // plugin lacks the "kv" capability.
 func KVSet(key string, value []byte) bool {
 	return hostKVSet(strPtr(key), uint32(len(key)), bytePtr(value), uint32(len(value))) == 0
+}
+
+// Fetch errors mirror the host fetch return codes: a denied capability, a
+// guarded/blocked target, or a transport failure.
+var (
+	ErrFetchDenied  = errors.New("fetch: plugin lacks the fetch capability")
+	ErrFetchBlocked = errors.New("fetch: target blocked by guard")
+	ErrFetchFailed  = errors.New("fetch: transport error")
+)
+
+// Fetch performs a guarded outbound HTTP request (requires the "fetch"
+// capability and an allow-listed host). It returns the response status, the
+// response body, and an error. The body is read with last_fetch_len + fetch_read
+// so an oversize response is fully retrieved without a second outbound call.
+func Fetch(method, url string, body []byte) (status int, resp []byte, err error) {
+	mb, ub := []byte(method), []byte(url)
+	buf := make([]byte, 256)
+	rc := hostFetch(strPtr(method), uint32(len(mb)), strPtr(url), uint32(len(ub)),
+		bytePtr(body), uint32(len(body)), bytePtr(buf), uint32(len(buf)))
+	switch rc {
+	case -2:
+		return 0, nil, ErrFetchDenied
+	case -3:
+		return 0, nil, ErrFetchBlocked
+	case -4:
+		return 0, nil, ErrFetchFailed
+	}
+	resp = readInto(hostFetchRead)
+	return int(rc), resp, nil
 }
 
 // Request is the in-flight HTTP request exposed to the guest.

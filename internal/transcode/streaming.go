@@ -417,7 +417,10 @@ func (fd *frameDecoder) next() (json.RawMessage, error) {
 			if _, err := fd.dec.Token(); err != nil { // ']'
 				return nil, err
 			}
-			if fd.dec.More() {
+			// Decoder.More is unreliable for detecting trailing top-level junk;
+			// attempt one more decode and require EOF so [..]{..} or [..]5 fail.
+			var trailing json.RawMessage
+			if err := fd.dec.Decode(&trailing); err != io.EOF {
 				return nil, fmt.Errorf("unexpected trailing data after JSON array")
 			}
 			return nil, io.EOF
