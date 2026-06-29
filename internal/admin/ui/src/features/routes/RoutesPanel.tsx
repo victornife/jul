@@ -440,6 +440,7 @@ export function RoutesPanel() {
         <RouteEditor
           initial={creating}
           serverHasTls={selected?.route.tls?.enabled}
+          closeLabel={selected ? "Back" : "Close"}
           onReview={() => {
             if (selected) {
               sessionStorage.setItem("__jul_routeEditor_open", "1");

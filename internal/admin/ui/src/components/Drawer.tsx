@@ -5,6 +5,7 @@ export interface DrawerProps {
   readonly title: string;
   readonly subtitle?: string;
   readonly onClose: () => void;
+  readonly closeLabel?: string | undefined;
   readonly children: ReactNode;
   readonly footer?: ReactNode;
 }
@@ -16,7 +17,7 @@ export interface DrawerProps {
  * bundle lean) so keyboard users cannot tab into the obscured page behind it,
  * and focus returns to the trigger on close.
  */
-export function Drawer({ title, subtitle, onClose, children, footer }: DrawerProps) {
+export function Drawer({ title, subtitle, onClose, closeLabel, children, footer }: DrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef);
 
@@ -53,7 +54,7 @@ export function Drawer({ title, subtitle, onClose, children, footer }: DrawerPro
             onClick={onClose}
             className="rounded-md border border-jul-border px-2 py-1 text-sm text-jul-muted hover:text-jul-text"
           >
-            Close
+            {closeLabel ?? "Close"}
           </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5">{children}</div>

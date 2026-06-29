@@ -209,6 +209,7 @@ export interface RouteEditorProps {
   readonly initial?: Partial<RouteDraft>;
   readonly serverHasTls?: boolean | undefined;
   readonly onReview?: () => void;
+  readonly closeLabel?: string;
   readonly onClose: () => void;
 }
 
@@ -218,7 +219,7 @@ export interface RouteEditorProps {
  * and hands the draft to the Config editor where it flows through
  * Validate → Diff → Apply → Rollback.
  */
-export function RouteEditor({ initial, serverHasTls, onReview, onClose }: RouteEditorProps) {
+export function RouteEditor({ initial, serverHasTls, onReview, closeLabel, onClose }: RouteEditorProps) {
   const navigate = useNavigate();
   const [draft, setDraft] = useState<RouteDraft>({
     listen: initial?.listen ?? ":8080",
@@ -262,6 +263,7 @@ export function RouteEditor({ initial, serverHasTls, onReview, onClose }: RouteE
       title="New route"
       subtitle="Generate a route, then review and apply it safely in the editor."
       onClose={onClose}
+      closeLabel={closeLabel}
       footer={
         <div className="flex items-center justify-between gap-3">
           {error && <span className="text-xs text-jul-danger">{error}</span>}
