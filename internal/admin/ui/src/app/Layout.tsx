@@ -6,6 +6,16 @@ import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
 import { openCommandPalette } from "@/app/commandPaletteBus.ts";
 
+type NavLayout = "top" | "side";
+
+function isNavLayout(v: unknown): v is NavLayout {
+  return v === "top" || v === "side";
+}
+
+function isBool(v: unknown): v is boolean {
+  return typeof v === "boolean";
+}
+
 interface NavItem {
   readonly to: string;
   readonly label: string;
@@ -92,7 +102,7 @@ const PALETTE_SHORTCUT =
 // discoverable: a labelled header affordance that opens it on click and shows
 // the keyboard shortcut so operators learn it (P1-7 — search reachable from
 // anywhere).
-function CommandPaletteButton() {
+function CommandPaletteButton({ compact = false }: { readonly compact?: boolean }) {
   return (
     <button
       type="button"
@@ -100,25 +110,19 @@ function CommandPaletteButton() {
         openCommandPalette();
       }}
       title="Jump to any page (command palette)"
-      className="flex items-center gap-2 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent"
+      className={`flex items-center gap-2 rounded-md border border-jul-border text-xs text-jul-text hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent ${compact ? "w-full justify-center px-2 py-1" : "px-2.5 py-1"}`}
     >
       <span aria-hidden>🔍</span>
-      <span className="hidden sm:inline">Jump to…</span>
-      <kbd className="rounded border border-jul-border bg-jul-bg px-1 font-mono text-[10px] text-jul-muted">
-        {PALETTE_SHORTCUT}
-      </kbd>
+      {!compact && (
+        <>
+          <span className="hidden sm:inline">Jump to…</span>
+          <kbd className="rounded border border-jul-border bg-jul-bg px-1 font-mono text-[10px] text-jul-muted">
+            {PALETTE_SHORTCUT}
+          </kbd>
+        </>
+      )}
     </button>
   );
-}
-
-type NavLayout = "top" | "side";
-
-function isNavLayout(v: unknown): v is NavLayout {
-  return v === "top" || v === "side";
-}
-
-function isBool(v: unknown): v is boolean {
-  return typeof v === "boolean";
 }
 
 // PreferenceMenu (Milestone 4.5/4.6) collects the View preferences — theme,
@@ -129,11 +133,15 @@ function PreferenceMenu({
   onLayout,
   collapsed,
   onCollapsed,
+  compact = false,
+  inSidebar = false,
 }: {
   readonly layout: NavLayout;
   readonly onLayout: (v: NavLayout) => void;
   readonly collapsed: boolean;
   readonly onCollapsed: (v: boolean) => void;
+  readonly compact?: boolean;
+  readonly inSidebar?: boolean;
 }) {
   const { preference, setPreference } = useTheme();
   const [open, setOpen] = useState(false);
@@ -148,9 +156,9 @@ function PreferenceMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         title="View & preferences"
-        className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent"
+        className={`rounded-md border border-jul-border text-xs text-jul-text hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent ${compact ? "w-full px-2 py-1" : "px-2.5 py-1"}`}
       >
-        ⚙ View
+        {compact ? "⚙" : "⚙ View"}
       </button>
       {open && (
         <>
@@ -164,7 +172,9 @@ function PreferenceMenu({
           />
           <div
             role="menu"
-            className="absolute right-0 z-20 mt-1 w-60 space-y-3 rounded-md border border-jul-border bg-jul-surface p-3 shadow-lg"
+            className={`absolute z-20 w-60 space-y-3 rounded-md border border-jul-border bg-jul-surface p-3 shadow-lg ${
+              inSidebar ? "left-full top-0 ml-1" : "right-0 mt-1"
+            }`}
           >
             <div className="space-y-1">
               <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
@@ -332,7 +342,7 @@ export function Layout() {
   const [layout, setLayout] = usePersistentState<NavLayout>("nav_layout", "top", isNavLayout);
   const [collapsed, setCollapsed] = usePersistentState<boolean>("nav_collapsed", false, isBool);
 
-  const controls = (
+  const controlsTop = (
     <div className="flex items-center gap-2">
       <ConsoleHealthBadge />
       <CommandPaletteButton />
@@ -341,6 +351,21 @@ export function Layout() {
         onLayout={setLayout}
         collapsed={collapsed}
         onCollapsed={setCollapsed}
+      />
+    </div>
+  );
+
+  const controlsSide = (
+    <div className="flex flex-col items-stretch gap-y-2">
+      <ConsoleHealthBadge compact={collapsed} />
+      <CommandPaletteButton compact={collapsed} />
+      <PreferenceMenu
+        layout={layout}
+        onLayout={setLayout}
+        collapsed={collapsed}
+        onCollapsed={setCollapsed}
+        compact={collapsed}
+        inSidebar
       />
     </div>
   );
@@ -379,7 +404,7 @@ export function Layout() {
             </button>
           </div>
           <NavLinks pathname={loc.pathname} orientation="col" collapsed={collapsed} />
-          <div className="mt-auto">{controls}</div>
+          <div className="mt-auto">{controlsSide}</div>
         </aside>
         <main className="flex-1 overflow-auto p-6">
           <Outlet />
@@ -396,7 +421,7 @@ export function Layout() {
         <span className="text-xs text-jul-muted">Console v2</span>
         <div className="ml-auto flex items-center gap-4">
           <NavLinks pathname={loc.pathname} orientation="row" />
-          {controls}
+          {controlsTop}
         </div>
       </header>
       <main className="flex-1 overflow-auto p-6">

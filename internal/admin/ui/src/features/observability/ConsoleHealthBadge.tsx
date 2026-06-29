@@ -13,13 +13,17 @@ function tone(status: string): string {
   }
 }
 
+export interface ConsoleHealthBadgeProps {
+  readonly compact?: boolean;
+}
+
 /**
  * ConsoleHealthBadge is the subtle footer indicator required by Milestone 5.7.
  * It polls the Console's own health endpoint and links to the Operations view
  * for detail. It stays quiet (a small dot + word) so it never competes with the
  * primary content.
  */
-export function ConsoleHealthBadge() {
+export function ConsoleHealthBadge({ compact = false }: ConsoleHealthBadgeProps) {
   const { data, isError } = useQuery({
     queryKey: ["console-health-badge"],
     queryFn: fetchConsoleHealth,
@@ -28,6 +32,19 @@ export function ConsoleHealthBadge() {
 
   const status = isError ? "error" : (data?.status ?? "…");
   const p95 = data?.latency_p95;
+
+  if (compact) {
+    return (
+      <Link
+        to="/operations"
+        title={`Console ${status}${p95 !== undefined && p95 > 0 ? ` — ${p95.toFixed(0)}ms` : ""}`}
+        className={`inline-flex items-center rounded-full p-1 text-xs transition-colors ${tone(status)}`}
+        aria-label={`Console ${status}`}
+      >
+        <span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />
+      </Link>
+    );
+  }
 
   return (
     <Link
