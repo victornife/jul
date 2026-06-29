@@ -378,7 +378,7 @@ export function Layout() {
     return (
       <div className="flex min-h-screen bg-jul-bg text-jul-text">
         <aside
-          className={`sticky top-0 h-screen flex shrink-0 flex-col gap-4 border-r border-jul-border bg-jul-surface py-4 ${
+          className={`sticky top-0 h-screen flex shrink-0 flex-col gap-4 overflow-y-auto border-r border-jul-border bg-jul-surface py-4 ${
             collapsed ? "w-16 px-2" : "w-56 px-4"
           }`}
         >
