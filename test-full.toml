@@ -78,13 +78,13 @@ idle_timeout = "60s"
   proxy_pass = "http://grpc-backend"
   grpc = true
 
-  # gRPC transcoding (REST -> gRPC)
+  # gRPC transcoding (REST -> gRPC) - TLS server talks to plaintext gRPC backend
   [[servers.locations]]
   match = { type = "prefix", path = "/v1/" }
     [servers.locations.grpc_transcode]
     target = "grpc-backend"
     descriptor_set = "testdata/grpc/api.pb"
-    tls = false
+    tls = false          # backend is plaintext; server TLS is at listener level
     preserve_proto_field_names = false
     streaming = false
 

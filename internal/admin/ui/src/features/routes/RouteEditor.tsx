@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
 import { fetchRawConfig } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
@@ -277,6 +277,33 @@ export function RouteEditor({ initial, onClose }: RouteEditorProps) {
           builds the configuration for you; nothing is applied until you review the diff and confirm
           in the editor.
         </p>
+        <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
+          <strong className="text-jul-text">No TLS here?</strong> HTTPS termination is a
+          <em>server-level</em> setting — configure it in the <strong>TLS &amp; Certificates</strong> panel.
+          You can still proxy to an <code>https://</code> upstream below for encrypted backend traffic.
+        </p>
+
+        <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
+          <p className="font-semibold text-jul-text">TLS is configured at the server level</p>
+          <p>
+            Routes inherit TLS from their parent server. You cannot turn TLS on or off per route
+            — the listener terminates TLS before any path matching happens.
+          </p>
+          <p>
+            If you need HTTPS for this route, create or edit a TLS-enabled server in the{" "}
+            <Link
+              to="/tls"
+              className="inline-flex items-center gap-1 font-medium text-jul-accent underline hover:no-underline"
+            >
+              TLS &amp; Certificates
+            </Link>{" "}
+            panel, then move the location into that server block.
+          </p>
+          <p>
+            (You can still proxy to an <code>https://</code> upstream below for encrypted backend
+            traffic regardless of this setting.)
+          </p>
+        </div>
 
         <TextField
           label="Listener"
