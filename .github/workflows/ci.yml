@@ -114,6 +114,7 @@ jobs:
         with:
           files: ./cover.out
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   benchmarks:
     name: benchmarks (smoke)
