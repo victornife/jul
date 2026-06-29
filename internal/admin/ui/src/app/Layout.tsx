@@ -172,8 +172,8 @@ function PreferenceMenu({
           />
           <div
             role="menu"
-            className={`absolute z-20 w-60 space-y-3 rounded-md border border-jul-border bg-jul-surface p-3 shadow-lg ${
-              inSidebar ? "bottom-full right-0 mb-1" : "right-0 mt-1"
+            className={`absolute z-20 w-60 max-h-[80vh] overflow-y-auto space-y-3 rounded-md border border-jul-border bg-jul-surface p-3 shadow-lg ${
+              inSidebar ? "left-full top-0 ml-1" : "right-0 mt-1"
             }`}
           >
             <div className="space-y-1">
