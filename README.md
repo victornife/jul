@@ -1,16 +1,9 @@
 # Jul.IA
 
-[![CI](https://github.com/victornife/jul/actions/workflows/ci.yml/badge.svg)](https://github.com/victornife/jul/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/victornife/jul)](https://github.com/victornife/jul/blob/main/go.mod)
-[![License](https://img.shields.io/badge/license-PolyForm%20Non--Commercial%201.0.0-blue)](https://github.com/victornife/jul#license)
-[![Latest Release](https://img.shields.io/github/v/release/victornife/jul)](https://github.com/victornife/jul/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/victornife/jul)](https://goreportcard.com/report/github.com/victornife/jul)
-[![Top Language](https://img.shields.io/github/languages/top/victornife/jul)](https://github.com/victornife/jul)
-[![Code Size](https://img.shields.io/github/languages/code-size/victornife/jul)](https://github.com/victornife/jul)
-[![GitHub Stars](https://img.shields.io/github/stars/victornife/jul?style=social)](https://github.com/victornife/jul/stargazers)
-[![Open Issues](https://img.shields.io/github/issues-raw/victornife/jul)](https://github.com/victornife/jul/issues)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/victornife/jul)
 [![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](https://github.com/victornife/jul)
+[![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://github.com/victornife/jul/blob/main/go.mod)
+[![License](https://img.shields.io/badge/license-PolyForm%20Non--Commercial%201.0.0-blue.svg)](https://github.com/victornife/jul#license)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/victornife/jul)
 
 **Jul.IA** is an NGINX-inspired HTTP edge server written in Go and configured
 entirely through TOML. It bundles reverse-proxying with load balancing, static
