@@ -8,7 +8,7 @@ log_format = "text"
 shutdown_timeout = "30s"
 
 [[servers]]
-listen = "0.0.0.0:18080"
+listen = "0.0.0.0:38080"
 server_names = ["localhost", "example.com", "www.example.com"]
 client_max_body_size = "1m"
 # Limits and timeouts (sane defaults applied when omitted).
