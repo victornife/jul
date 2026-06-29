@@ -377,9 +377,12 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			case loc.ProxyPass != "":
 				lp.Action = "proxy"
 				lp.Target = loc.ProxyPass
-			case loc.FastCGIPass != "", loc.UWSGIPass != "":
+			case loc.FastCGIPass != "":
 				lp.Action = "fastcgi"
-				lp.Target = firstNonEmpty(loc.FastCGIPass, loc.UWSGIPass)
+				lp.Target = loc.FastCGIPass
+			case loc.UWSGIPass != "":
+				lp.Action = "uwsgi"
+				lp.Target = loc.UWSGIPass
 			case loc.Redirect != "":
 				lp.Action = "redirect"
 				lp.Target = loc.Redirect

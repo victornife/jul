@@ -134,9 +134,12 @@ func projectLocation(c *config.Config, srv *config.ServerConfig, loc *config.Loc
 	case loc.ProxyPass != "":
 		lp.Action = "proxy"
 		lp.Target = loc.ProxyPass
-	case loc.FastCGIPass != "", loc.UWSGIPass != "":
+	case loc.FastCGIPass != "":
 		lp.Action = "fastcgi"
-		lp.Target = firstNonEmpty(loc.FastCGIPass, loc.UWSGIPass)
+		lp.Target = loc.FastCGIPass
+	case loc.UWSGIPass != "":
+		lp.Action = "uwsgi"
+		lp.Target = loc.UWSGIPass
 	case loc.Redirect != "":
 		lp.Action = "redirect"
 		lp.Target = loc.Redirect
@@ -285,7 +288,9 @@ func explainMatch(srv *config.ServerConfig, lp *LocationProjection) string {
 	case "return":
 		b.WriteString("It returns HTTP status " + lp.Target + ".")
 	case "fastcgi":
-		b.WriteString("It forwards to the FastCGI/uWSGI app at " + quote(lp.Target) + ".")
+		b.WriteString("It forwards to the FastCGI app at " + quote(lp.Target) + ".")
+	case "uwsgi":
+		b.WriteString("It forwards to the uWSGI app at " + quote(lp.Target) + ".")
 	case "grpc_transcode":
 		b.WriteString("It transcodes REST/JSON to gRPC for the backend.")
 	default:

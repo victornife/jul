@@ -58,7 +58,9 @@ function describe(action: string): string {
     case "return":
       return "This route returns a fixed HTTP status code.";
     case "fastcgi":
-      return "This route forwards requests to a FastCGI/uWSGI application.";
+      return "This route forwards requests to a FastCGI application.";
+    case "uwsgi":
+      return "This route forwards requests to a uWSGI application.";
     default:
       return "This route's action is not recognized.";
   }

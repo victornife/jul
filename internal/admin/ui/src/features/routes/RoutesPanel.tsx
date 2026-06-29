@@ -14,6 +14,7 @@ const ACTION_COLORS: Record<string, string> = {
   grpc: "bg-purple-500/15 text-purple-300",
   grpc_transcode: "bg-indigo-500/15 text-indigo-300",
   fastcgi: "bg-yellow-500/15 text-yellow-300",
+  uwsgi: "bg-orange-500/15 text-orange-300",
   static: "bg-jul-success/15 text-jul-success",
   redirect: "bg-jul-warning/15 text-jul-warning",
   deny: "bg-jul-danger/15 text-jul-danger",
@@ -169,6 +170,7 @@ type ActionFilter =
   | "grpc"
   | "grpc_transcode"
   | "fastcgi"
+  | "uwsgi"
   | "static"
   | "redirect"
   | "deny"
