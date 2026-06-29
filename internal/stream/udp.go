@@ -62,74 +62,72 @@ func (l *listener) serveUDP() {
 // (singleflight) instead of racing to create duplicate sessions.
 func (l *listener) udpSessionFor(clientAddr *net.UDPAddr) *udpSession {
 	key := clientAddr.String()
-	for {
-		l.udpMu.Lock()
-		if sess, ok := l.udpSessions[key]; ok {
-			l.udpMu.Unlock()
-			return sess
-		}
-		if p, ok := l.udpPending[key]; ok {
-			// Another goroutine is dialing this exact client; wait for its
-			// result without holding the lock instead of dialing a second time.
-			l.udpMu.Unlock()
-			<-p.done
-			if p.sess != nil {
-				return p.sess
-			}
-			return nil
-		}
-		r := l.route.Load()
-		if r.defaultPool == nil {
-			l.udpMu.Unlock()
-			return nil
-		}
-		// Enforce the session cap before reserving a slot. A reclaimed idle
-		// victim is detached from the map under the lock and torn down after
-		// unlocking (no backend I/O under udpMu).
-		victim, victimKey, ok := l.admitUDPLocked(r.maxUDPSessions, r.idleTimeout, time.Now().UnixNano())
-		if !ok {
-			l.udpMu.Unlock()
-			l.server.udpRejected()
-			return nil
-		}
-		p := &udpPending{done: make(chan struct{})}
-		l.udpPending[key] = p
+	l.udpMu.Lock()
+	if sess, ok := l.udpSessions[key]; ok {
 		l.udpMu.Unlock()
-
-		if victim != nil {
-			_ = victim.backend.Close()
-			victim.pool.Release(victim.b)
-			l.server.connDelta("udp", -1)
-			l.server.udpEvicted("lru")
-			l.server.log.Debug("stream: udp session evicted at cap", "addr", l.addr, "client", victimKey)
-		}
-
-		backend, b, err := l.dialBackend(r.defaultPool, "udp", r.connectTimeout)
-
-		l.udpMu.Lock()
-		delete(l.udpPending, key)
-		if err != nil {
-			l.udpMu.Unlock()
-			close(p.done) // p.sess stays nil: signal failure to any waiters
-			l.server.log.Warn("stream: dial udp backend failed", "addr", l.addr, "error", err)
-			return nil
-		}
-		sess := &udpSession{backend: backend, pool: r.defaultPool, b: b}
-		sess.lastSeen.Store(time.Now().UnixNano())
-		l.udpSessions[key] = sess
-		l.udpMu.Unlock()
-
-		p.sess = sess
-		close(p.done)
-
-		l.server.connDelta("udp", 1)
-		l.wg.Add(1)
-		go func() {
-			defer l.wg.Done()
-			l.udpDownstream(clientAddr, sess, r.idleTimeout)
-		}()
 		return sess
 	}
+	if p, ok := l.udpPending[key]; ok {
+		// Another goroutine is dialing this exact client; wait for its
+		// result without holding the lock instead of dialing a second time.
+		l.udpMu.Unlock()
+		<-p.done
+		if p.sess != nil {
+			return p.sess
+		}
+		return nil
+	}
+	r := l.route.Load()
+	if r.defaultPool == nil {
+		l.udpMu.Unlock()
+		return nil
+	}
+	// Enforce the session cap before reserving a slot. A reclaimed idle
+	// victim is detached from the map under the lock and torn down after
+	// unlocking (no backend I/O under udpMu).
+	victim, victimKey, ok := l.admitUDPLocked(r.maxUDPSessions, r.idleTimeout, time.Now().UnixNano())
+	if !ok {
+		l.udpMu.Unlock()
+		l.server.udpRejected()
+		return nil
+	}
+	p := &udpPending{done: make(chan struct{})}
+	l.udpPending[key] = p
+	l.udpMu.Unlock()
+
+	if victim != nil {
+		_ = victim.backend.Close()
+		victim.pool.Release(victim.b)
+		l.server.connDelta("udp", -1)
+		l.server.udpEvicted("lru")
+		l.server.log.Debug("stream: udp session evicted at cap", "addr", l.addr, "client", victimKey)
+	}
+
+	backend, b, err := l.dialBackend(r.defaultPool, "udp", r.connectTimeout)
+
+	l.udpMu.Lock()
+	delete(l.udpPending, key)
+	if err != nil {
+		l.udpMu.Unlock()
+		close(p.done) // p.sess stays nil: signal failure to any waiters
+		l.server.log.Warn("stream: dial udp backend failed", "addr", l.addr, "error", err)
+		return nil
+	}
+	sess := &udpSession{backend: backend, pool: r.defaultPool, b: b}
+	sess.lastSeen.Store(time.Now().UnixNano())
+	l.udpSessions[key] = sess
+	l.udpMu.Unlock()
+
+	p.sess = sess
+	close(p.done)
+
+	l.server.connDelta("udp", 1)
+	l.wg.Add(1)
+	go func() {
+		defer l.wg.Done()
+		l.udpDownstream(clientAddr, sess, r.idleTimeout)
+	}()
+	return sess
 }
 
 // udpPending coordinates concurrent creation of the session for one client key
