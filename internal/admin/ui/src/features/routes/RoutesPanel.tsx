@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchRoutes, type RouteProjection, type LocationProjection } from "@/api/client.ts";
 import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
@@ -208,6 +209,44 @@ export function RoutesPanel() {
   const [selected, setSelected] = useState<Selection | null>(null);
   const [creating, setCreating] = useState<Partial<RouteDraft> | null>(null);
   const [testing, setTesting] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (data) {
+      const flag = sessionStorage.getItem("__jul_routeEditor_open");
+      if (flag) {
+        sessionStorage.removeItem("__jul_routeEditor_open");
+        const stored = sessionStorage.getItem("__jul_routeEditor_state");
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored) as Selection;
+            const route = data.find((r) => r.listen === parsed.route.listen);
+            if (route) {
+              const loc = route.locations[Number(parsed.loc.index)];
+              if (loc) {
+                setSelected({ route, loc });
+                setCreating({
+                  listen: route.listen,
+                  serverNames: parsed.route.server_names?.join(", ") ?? "",
+                  path: loc.match,
+                  matchType: loc.type === "exact" || loc.type === "regex" ? loc.type : "prefix",
+                  action: loc.action as RouteDraft["action"],
+                  target: loc.target ?? "",
+                  auth: loc.auth ? { ...emptyAuthDraft(), method: "cidr" } : emptyAuthDraft(),
+                  cache: loc.cache,
+                  rateLimit: loc.rate_limit,
+                });
+              }
+            }
+            sessionStorage.removeItem("__jul_routeEditor_state");
+          } catch {
+            sessionStorage.removeItem("__jul_routeEditor_state");
+          }
+        }
+      }
+    }
+  }, [data]);
+
   const [actionFilter, setActionFilter] = usePersistentState<ActionFilter>(
     "routes_action_filter",
     "all",
@@ -370,7 +409,6 @@ export function RoutesPanel() {
           }}
           onEdit={() => {
             const { route, loc } = selected;
-            setSelected(null);
             setCreating({
               listen: route.listen,
               serverNames: route.server_names?.join(", ") ?? "",
@@ -402,6 +440,13 @@ export function RoutesPanel() {
         <RouteEditor
           initial={creating}
           serverHasTls={selected?.route.tls?.enabled}
+          onReview={() => {
+            if (selected) {
+              sessionStorage.setItem("__jul_routeEditor_open", "1");
+              sessionStorage.setItem("__jul_routeEditor_state", JSON.stringify(selected));
+            }
+            void navigate("/config");
+          }}
           onClose={() => {
             setCreating(null);
           }}

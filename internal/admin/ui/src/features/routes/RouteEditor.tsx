@@ -208,6 +208,7 @@ function targetHint(action: RouteAction): { label: string; placeholder: string }
 export interface RouteEditorProps {
   readonly initial?: Partial<RouteDraft>;
   readonly serverHasTls?: boolean | undefined;
+  readonly onReview?: () => void;
   readonly onClose: () => void;
 }
 
@@ -217,7 +218,7 @@ export interface RouteEditorProps {
  * and hands the draft to the Config editor where it flows through
  * Validate → Diff → Apply → Rollback.
  */
-export function RouteEditor({ initial, serverHasTls, onClose }: RouteEditorProps) {
+export function RouteEditor({ initial, serverHasTls, onReview, onClose }: RouteEditorProps) {
   const navigate = useNavigate();
   const [draft, setDraft] = useState<RouteDraft>({
     listen: initial?.listen ?? ":8080",
@@ -246,7 +247,11 @@ export function RouteEditor({ initial, serverHasTls, onClose }: RouteEditorProps
     try {
       const raw = await fetchRawConfig();
       setPendingDraft({ kind: "toml", toml: appendFragment(raw.raw ?? "", fragment) });
-      void navigate("/config");
+      if (onReview) {
+        onReview();
+      } else {
+        void navigate("/config");
+      }
     } catch {
       setError("Could not load the current configuration to merge this route.");
     }

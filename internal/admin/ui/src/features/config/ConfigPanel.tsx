@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   applyConfig,
@@ -58,6 +59,7 @@ function AppliedSummary({ status }: { readonly status: FeatureStatus[] }) {
 }
 
 export function ConfigPanel() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["raw-config"],
@@ -229,6 +231,15 @@ export function ConfigPanel() {
           </span>
         )}
         <div className="ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              navigate(-1);
+            }}
+            className="rounded-md border border-jul-border px-3 py-1 text-sm text-jul-text hover:bg-jul-surface"
+          >
+            ← Go back
+          </button>
           <button
             type="button"
             onClick={() => {
