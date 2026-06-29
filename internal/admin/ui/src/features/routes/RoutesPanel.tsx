@@ -42,7 +42,7 @@ function LocationRow({
       onClick={onOpen}
       className="cursor-pointer border-b border-jul-border last:border-b-0 hover:bg-jul-border/30 transition-colors"
     >
-      <td className="px-4 py-2">
+      <td className="px-4 py-2 truncate">
         <span className="mr-1 text-xs text-jul-muted">{loc.type}</span>
         <span className="font-mono text-sm text-jul-text">{loc.match}</span>
         {loc.warnings && loc.warnings.length > 0 && (
@@ -57,7 +57,7 @@ function LocationRow({
       <td className="px-4 py-2">
         <ActionBadge action={loc.action} />
       </td>
-      <td className="px-4 py-2 font-mono text-xs text-jul-muted">{loc.target ?? "—"}</td>
+      <td className="px-4 py-2 font-mono text-xs text-jul-muted truncate">{loc.target ?? "—"}</td>
       <td className="px-4 py-2 text-center">
         {loc.auth && (
           <span className="inline-block rounded-full bg-jul-warning/15 px-2 py-0.5 text-xs text-jul-warning">
@@ -129,14 +129,14 @@ function RouteCard({
       {locations.length === 0 ? (
         <p className="px-4 py-3 text-xs text-jul-muted">No locations match the current filter.</p>
       ) : (
-        <table className="w-full text-left text-sm">
+        <table className="w-full table-fixed text-left text-sm">
           <thead>
             <tr className="border-b border-jul-border text-xs text-jul-muted">
-              <th className="px-4 py-2">Path</th>
-              <th className="px-4 py-2">Action</th>
-              <th className="px-4 py-2">Target</th>
-              <th className="px-4 py-2 text-center">Auth</th>
-              <th className="px-4 py-2 text-center">Cache</th>
+              <th className="px-4 py-2 w-[35%]">Path</th>
+              <th className="px-4 py-2 w-[15%]">Action</th>
+              <th className="px-4 py-2 w-[35%]">Target</th>
+              <th className="px-4 py-2 text-center w-[7.5%]">Auth</th>
+              <th className="px-4 py-2 text-center w-[7.5%]">Cache</th>
             </tr>
           </thead>
           <tbody>

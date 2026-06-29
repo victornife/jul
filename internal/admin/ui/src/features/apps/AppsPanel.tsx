@@ -28,7 +28,7 @@ function HealthDot({ healthy }: { readonly healthy: boolean | undefined }) {
 function BackendRow({ b }: { readonly b: BackendProjection }) {
   return (
     <tr className="border-b border-jul-border last:border-b-0 hover:bg-jul-border/30 transition-colors">
-      <td className="px-4 py-2">
+      <td className="px-4 py-2 truncate">
         <div className="flex items-center gap-2">
           <HealthDot healthy={b.healthy} />
           <span className="font-mono text-sm text-jul-text">{b.address}</span>
@@ -86,12 +86,12 @@ function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen
       {app.backends.length === 0 ? (
         <p className="px-4 py-3 text-xs text-jul-muted">No backends configured.</p>
       ) : (
-        <table className="w-full text-left text-sm">
+        <table className="w-full table-fixed text-left text-sm">
           <thead>
             <tr className="border-b border-jul-border text-xs text-jul-muted">
-              <th className="px-4 py-2">Address</th>
-              <th className="px-4 py-2">Weight</th>
-              <th className="px-4 py-2">In-flight</th>
+              <th className="px-4 py-2 w-1/2">Address</th>
+              <th className="px-4 py-2 w-1/4">Weight</th>
+              <th className="px-4 py-2 w-1/4">In-flight</th>
             </tr>
           </thead>
           <tbody>
