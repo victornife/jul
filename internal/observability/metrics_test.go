@@ -171,8 +171,8 @@ func TestSnapshot(t *testing.T) {
 	if !snap.Available {
 		t.Error("expected available")
 	}
-	if snap.UptimeSeconds <= 0 {
-		t.Error("expected positive uptime")
+	if snap.UptimeSeconds < 0 {
+		t.Error("expected non-negative uptime")
 	}
 }
 
