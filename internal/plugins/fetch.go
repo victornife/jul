@@ -115,11 +115,16 @@ func dialValidatedIPs(ctx context.Context, d dialer, resolver ipResolver, networ
 	}
 
 	// Try each validated IP in order until one connects.
+	var lastErr error
 	for _, ip := range ips {
 		conn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
 		if err == nil {
 			return conn, nil
 		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
 	}
 	return nil, errFetchBlocked
 }

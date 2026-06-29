@@ -52,6 +52,10 @@ func (b *Backend) release() { b.inflight.Add(-1) }
 // Inflight returns the current number of in-flight requests.
 func (b *Backend) Inflight() int64 { return b.inflight.Load() }
 
+// FailCount returns the current number of consecutive passive failures recorded
+// for this backend. It resets to zero when MarkSuccess is called.
+func (b *Backend) FailCount() int32 { return b.fails.Load() }
+
 // Available reports whether the backend may currently receive traffic,
 // combining the active health verdict with passive cooldown. It is exported for
 // operational inspection (the admin console upstream panel).

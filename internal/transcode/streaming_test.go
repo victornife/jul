@@ -386,3 +386,56 @@ func replyMessageField(t *testing.T, body, field string) string {
 	s, _ := m[field].(string)
 	return s
 }
+
+func TestStreamClientDecodeErrorDoesNotClearFailures(t *testing.T) {
+	tr := newStreamTranscoder(t, true, "ndjson")
+	backend := tr.pool.Backends()[0]
+	// Pre-mark the backend with passive failures.
+	tr.pool.MarkFailure(backend)
+	tr.pool.MarkFailure(backend)
+	wantFails := backend.FailCount()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/down", strings.NewReader(`not json`))
+	rec := httptest.NewRecorder()
+	tr.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if backend.FailCount() != wantFails {
+		t.Fatalf("fail count changed from %d to %d, expected unchanged after client decode error", wantFails, backend.FailCount())
+	}
+}
+
+func TestStreamHappyPathClearsFailures(t *testing.T) {
+	tr := newStreamTranscoder(t, true, "ndjson")
+	backend := tr.pool.Backends()[0]
+	// Pre-mark the backend with passive failures.
+	tr.pool.MarkFailure(backend)
+	tr.pool.MarkFailure(backend)
+
+	res, _ := doRequest(t, tr, http.MethodPost, "/v1/down", `{"value":"a,b"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	if backend.FailCount() != 0 {
+		t.Fatalf("fail count = %d, want 0 after successful stream request", backend.FailCount())
+	}
+}
+
+func TestStreamClientStreamDecodeErrorNeutralHealth(t *testing.T) {
+	tr := newStreamTranscoder(t, true, "ndjson")
+	backend := tr.pool.Backends()[0]
+	tr.pool.MarkFailure(backend)
+	tr.pool.MarkFailure(backend)
+	wantFails := backend.FailCount()
+
+	// Send malformed NDJSON body to a client-streaming endpoint.
+	res, _ := doRequest(t, tr, http.MethodPost, "/v1/up", `not json`, nil)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", res.StatusCode)
+	}
+	if backend.FailCount() != wantFails {
+		t.Fatalf("fail count changed from %d to %d, expected unchanged after client decode error", wantFails, backend.FailCount())
+	}
+}

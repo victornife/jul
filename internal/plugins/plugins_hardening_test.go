@@ -258,13 +258,15 @@ func (r multiIPResolver) LookupIPAddr(_ context.Context, _ string) ([]net.IPAddr
 type mockDialer struct {
 	failCount int
 	attempted []string
+	lastErr   error
 }
 
 func (m *mockDialer) DialContext(_ context.Context, network, address string) (net.Conn, error) {
 	m.attempted = append(m.attempted, address)
 	if m.failCount > 0 {
 		m.failCount--
-		return nil, errors.New("connection refused")
+		m.lastErr = errors.New("connection refused")
+		return nil, m.lastErr
 	}
 	c, _ := net.Pipe()
 	_ = network
@@ -291,5 +293,23 @@ func TestFetchTriesMultipleValidatedIPs(t *testing.T) {
 	}
 	if md.attempted[1] != "8.8.4.4:443" {
 		t.Fatalf("second attempt = %q, want 8.8.4.4:443", md.attempted[1])
+	}
+}
+
+func TestFetchReturnsTransportErrorWhenAllIPsFail(t *testing.T) {
+	// Every validated public IP fails to dial: the error must be a transport
+	// failure, not errFetchBlocked, so guests get code -4 instead of -3.
+	resolver := multiIPResolver{ips: []string{"8.8.8.8", "8.8.4.4"}}
+	md := &mockDialer{failCount: 2}
+
+	_, err := dialValidatedIPs(context.Background(), md, resolver, "tcp", "example.com", "443")
+	if err == nil {
+		t.Fatal("dialValidatedIPs err = nil, want a transport error")
+	}
+	if errors.Is(err, errFetchBlocked) {
+		t.Fatalf("dialValidatedIPs err = %v, must not be errFetchBlocked", err)
+	}
+	if len(md.attempted) != 2 {
+		t.Fatalf("attempted %d addrs, want 2: %v", len(md.attempted), md.attempted)
 	}
 }

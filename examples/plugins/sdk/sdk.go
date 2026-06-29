@@ -187,8 +187,8 @@ var (
 
 // Fetch performs a guarded outbound HTTP request (requires the "fetch"
 // capability and an allow-listed host). It returns the response status, the
-// response body, and an error. The body is read with last_fetch_len + fetch_read
-// so an oversize response is fully retrieved without a second outbound call.
+// response body, and an error. The retained/capped response is retrieved so
+// callers should check LastFetchTruncated() to detect cap overflow.
 func Fetch(method, url string, body []byte) (status int, resp []byte, err error) {
 	mb, ub := []byte(method), []byte(url)
 	buf := make([]byte, 256)

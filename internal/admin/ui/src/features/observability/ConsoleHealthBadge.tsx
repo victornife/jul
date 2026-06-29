@@ -8,6 +8,8 @@ function tone(status: string): string {
       return "bg-jul-success/15 text-jul-success";
     case "degraded":
       return "bg-jul-warning/15 text-jul-warning";
+    case "…":
+      return "bg-jul-muted/15 text-jul-muted";
     default:
       return "bg-jul-danger/15 text-jul-danger";
   }
