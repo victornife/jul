@@ -79,26 +79,33 @@ export function LogTailPanel() {
   const visible = needle ? rows.filter((r) => haystack(r).includes(needle)) : rows;
 
   return (
-    <div className="flex h-full flex-col space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-jul-muted">
-          Access log
-        </h2>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-            connected
-              ? "bg-jul-success/15 text-jul-success"
-              : "bg-jul-danger/15 text-jul-danger"
-          }`}
-        >
-          {connected ? "live" : "connecting…"}
-        </span>
-        {paused && (
-          <span className="rounded-full bg-jul-warning/15 px-2 py-0.5 text-xs font-medium text-jul-warning">
-            paused
+    <div className="flex h-full flex-col space-y-6">
+      <div className="space-y-1">
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-semibold">Access log</h1>
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              connected
+                ? "bg-jul-success/15 text-jul-success"
+                : "bg-jul-danger/15 text-jul-danger"
+            }`}
+          >
+            {connected ? "live" : "connecting…"}
           </span>
-        )}
-        <span className="text-xs text-jul-muted">{visible.length} lines</span>
+          {paused && (
+            <span className="rounded-full bg-jul-warning/15 px-2 py-0.5 text-xs font-medium text-jul-warning">
+              paused
+            </span>
+          )}
+          <span className="text-xs text-jul-muted">{visible.length} lines</span>
+        </div>
+        <p className="max-w-3xl text-sm text-jul-muted">
+          Live tail of processed requests with method, path, status, and latency.
+          Filter by any field, pause to inspect a pattern, or clear the buffer to start fresh.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
         <input
           type="text"
           placeholder="Filter by method, path, status, host…"
@@ -106,7 +113,7 @@ export function LogTailPanel() {
           onChange={(e) => {
             setFilter(e.target.value);
           }}
-          className="ml-auto rounded-md border border-jul-border bg-jul-surface px-3 py-1 text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
+          className="rounded-md border border-jul-border bg-jul-surface px-3 py-1 text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
         />
         <button
           onClick={() => {

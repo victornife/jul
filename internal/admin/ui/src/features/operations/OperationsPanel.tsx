@@ -345,7 +345,15 @@ function DiagnosticsTab() {
 
   return (
     <div className="space-y-8">
-      <Section title="Console health" hint="the admin API’s own vitals">
+      <div className="space-y-1">
+        <h1 className="text-xl font-semibold">Console health</h1>
+        <p className="max-w-3xl text-sm text-jul-muted">
+          The admin API's own vitals: request latency, error rate, and SSE connection health.
+          Use this to confirm the console itself is responsive before investigating downstream issues.
+        </p>
+      </div>
+
+      <Section title="Health cards" hint="p50 / p95 / p99 · requests · errors · SSE conns">
         {health.data ? (
           <div className="p-3">
             <ConsoleHealthCards health={health.data} />
