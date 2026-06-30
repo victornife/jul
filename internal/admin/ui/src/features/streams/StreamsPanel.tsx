@@ -359,13 +359,14 @@ export function StreamsPanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <div>
+        <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold">L4 streams</h1>
             <MaturityBadge level="beta" />
           </div>
-          <p className="text-sm text-jul-muted">
+          <p className="max-w-3xl text-sm text-jul-muted">
             Raw TCP and UDP reverse-proxy listeners operating below the HTTP layer.
+            Offload non-HTTP traffic or forward TLS-encrypted streams without termination.
           </p>
         </div>
         <button

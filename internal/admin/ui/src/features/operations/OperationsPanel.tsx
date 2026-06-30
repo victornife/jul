@@ -451,9 +451,9 @@ const TABS: ReadonlyArray<{ id: OperationsTab; label: string; to: string; hint: 
 export function OperationsPanel({ tab = "diagnostics" }: { readonly tab?: OperationsTab }) {
   return (
     <div className="space-y-6">
-      <div>
+      <div className="space-y-1">
         <h1 className="text-xl font-semibold">Operations</h1>
-        <p className="mt-1 text-sm text-jul-muted">
+        <p className="max-w-3xl text-sm text-jul-muted">
           The troubleshooting workspace: recent behavior and health, the live event stream, and the
           merged config/runtime timeline. All views are bounded and privacy-preserving.
         </p>

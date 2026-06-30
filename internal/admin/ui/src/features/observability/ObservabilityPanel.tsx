@@ -64,17 +64,26 @@ export function ObservabilityPanel() {
 
   return (
     <div className="flex h-full flex-col space-y-4">
-      <div className="flex items-center gap-4">
-        <h1 className="text-xl font-semibold">Observability</h1>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-            connected
-              ? "bg-jul-success/15 text-jul-success"
-              : "bg-jul-danger/15 text-jul-danger"
-          }`}
-        >
-          {connected ? "connected" : "disconnected"}
-        </span>
+      <div className="space-y-1">
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-semibold">Observability</h1>
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              connected
+                ? "bg-jul-success/15 text-jul-success"
+                : "bg-jul-danger/15 text-jul-danger"
+            }`}
+          >
+            {connected ? "connected" : "disconnected"}
+          </span>
+        </div>
+        <p className="max-w-3xl text-sm text-jul-muted">
+          Live event stream from the gateway: config changes, reloads, and runtime anomalies.
+          Filter by type or clear the buffer to focus on what matters right now.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
         <input
           type="text"
           placeholder="Filter by type…"
@@ -82,7 +91,7 @@ export function ObservabilityPanel() {
           onChange={(e) => {
             setFilter(e.target.value);
           }}
-          className="ml-auto rounded-md border border-jul-border bg-jul-surface px-3 py-1 text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
+          className="rounded-md border border-jul-border bg-jul-surface px-3 py-1 text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
         />
         <button
           onClick={() => {

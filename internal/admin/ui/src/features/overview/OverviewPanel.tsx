@@ -253,10 +253,10 @@ export function OverviewPanel() {
   const cacheHitPercent = ((stats?.cacheHitRatio ?? 0) * 100).toFixed(1);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-1">
       <div>
         <h1 className="text-xl font-semibold">Overview</h1>
-        <p className="text-sm text-jul-muted">
+        <p className="max-w-3xl text-sm text-jul-muted">
           Real-time health, traffic, and feature-status snapshot of this Jul.IA node.
         </p>
       </div>

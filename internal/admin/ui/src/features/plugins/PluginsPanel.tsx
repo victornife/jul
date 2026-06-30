@@ -538,8 +538,9 @@ export function PluginsPanel() {
             <h1 className="text-xl font-semibold">Plugins</h1>
             <MaturityBadge level="beta" />
           </div>
-          <p className="text-sm text-jul-muted">
+          <p className="max-w-3xl text-sm text-jul-muted">
             WASM plugins attached to routes for custom request/response processing.
+            Build your own middleware or use third-party modules compiled to WebAssembly.
           </p>
         </div>
         <button

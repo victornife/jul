@@ -68,13 +68,16 @@ export function TimelinePanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="space-y-1">
         <h1 className="text-xl font-semibold">Timeline</h1>
-        <span className="text-sm text-jul-muted">
-          Did a config change cause this? Apply, reload, rollback, upstream and certificate events
-          merged newest-first.
-        </span>
-        <label className="ml-auto flex items-center gap-2 text-xs text-jul-muted">
+        <p className="max-w-3xl text-sm text-jul-muted">
+          Merged config and runtime events newest-first: apply, reload, rollback, upstream health,
+          and certificate changes. Use it to trace the cause of an incident back to its origin.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-2 text-xs text-jul-muted">
           Category
           <select
             value={category}

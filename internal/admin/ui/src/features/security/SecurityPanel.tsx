@@ -78,11 +78,12 @@ export function SecurityPanel() {
   const locationWafs = data.location_wafs ?? [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-1">
       <div>
         <h1 className="text-xl font-semibold">Security</h1>
-        <p className="text-sm text-jul-muted">
-          Authentication, mTLS, and WAF posture across all listeners and locations.
+        <p className="max-w-3xl text-sm text-jul-muted">
+          Authentication, mutual TLS, and WAF posture across all listeners and locations.
+          Verify which routes are protected and how requests are inspected before they reach backends.
         </p>
       </div>
       {!data.waf_compiled && (
