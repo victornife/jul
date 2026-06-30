@@ -70,3 +70,29 @@ func TestIntsStr(t *testing.T) {
 		t.Errorf("intsStr(200,204) = %q", got)
 	}
 }
+
+func TestProjectRoutesGRPCTranscodeTarget(t *testing.T) {
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: ":8080",
+			Locations: []config.LocationConfig{{
+				Match: config.MatchConfig{Type: "prefix", Path: "/api"},
+				GRPCTranscode: &config.GRPCTranscodeConfig{
+					Target:        "grpc://backend:50051",
+					DescriptorSet: "./api.pb",
+				},
+			}},
+		}},
+	}
+	routes := projectRoutes(cfg)
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	loc := routes[0].Locations[0]
+	if loc.Action != "grpc_transcode" {
+		t.Errorf("action = %q, want grpc_transcode", loc.Action)
+	}
+	if loc.Target != "grpc://backend:50051" {
+		t.Errorf("target = %q, want grpc://backend:50051", loc.Target)
+	}
+}

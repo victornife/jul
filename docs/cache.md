@@ -166,7 +166,7 @@ An entry larger than a tier's cap is simply not stored in that tier.
 ## Operations
 
 The admin API exposes a purge endpoint (POST only) on the [admin
-listener](../README.md#admin-interface--observability), authenticated with the
+listener](../docs/observability.md), authenticated with the
 admin token:
 
 ```bash

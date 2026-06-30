@@ -100,4 +100,4 @@ The same `[servers.locations.auth]` block also supports:
   ```
 
 Only one credential method may be set per location; combine it with a CIDR gate
-as needed. See the [configuration reference](../../README.md#serverslocationsauth).
+as needed. See the [configuration reference](../../docs/configuration.md#serverslocationsauth).

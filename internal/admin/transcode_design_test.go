@@ -99,4 +99,19 @@ func TestHandleTranscodeDescriptorUpload(t *testing.T) {
 			t.Fatalf("want 405, got %d", rec.Code)
 		}
 	})
+
+	// Large file (> 16 MB)
+	t.Run("oversized descriptor file", func(t *testing.T) {
+		var b bytes.Buffer
+		mw := multipart.NewWriter(&b)
+		fw, _ := mw.CreateFormFile("descriptor", "huge.pb")
+		fw.Write(make([]byte, 18<<20)) // 18 MiB > 17 MiB MaxBytesReader limit
+		mw.Close()
+
+		rec := httptest.NewRecorder()
+		s.handleTranscodeDescriptorUpload(rec, buildRequest(&b, mw.FormDataContentType()))
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("want 413, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
 }

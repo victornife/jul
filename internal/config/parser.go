@@ -162,12 +162,16 @@ func (c *Config) applyDefaults() {
 		if c.Admin.MaxEventConns == 0 {
 			c.Admin.MaxEventConns = 4
 		}
-		// Plugin upload defaults. A zero value means "unset" and adopts the
-		// default; an explicit negative value disables the upload endpoint.
+		// Plugin upload defaults. Upload is enabled by default when admin is
+		// active, but can be explicitly disabled. Only apply max-size default
+		// when upload is enabled.
+		if c.Admin.PluginUploadEnabled == nil {
+			c.Admin.PluginUploadEnabled = boolPtrAdmin(true)
+		}
 		if c.Admin.PluginUploadDir == "" {
 			c.Admin.PluginUploadDir = "./jul-data/plugins"
 		}
-		if c.Admin.PluginUploadMaxSize == 0 {
+		if *c.Admin.PluginUploadEnabled && c.Admin.PluginUploadMaxSize == 0 {
 			c.Admin.PluginUploadMaxSize = 32
 		}
 		// Durable audit-sink rotation defaults (P3-08). Only meaningful when a
@@ -477,3 +481,5 @@ func PreflightClone(c *Config, extra ...func(*Config) error) error {
 	}
 	return nil
 }
+
+func boolPtrAdmin(b bool) *bool { return &b }

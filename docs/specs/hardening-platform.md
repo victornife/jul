@@ -26,7 +26,7 @@ to committed roadmap features — notably **HP-02 Console RBAC** feeds
 
 | ID | Item | Precursor to | Effort |
 | --- | --- | --- | --- |
-| HP-01 | Unified reload transaction + `reload_timeout` | — | M |
+| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | — | M |
 | HP-02 | Console RBAC + multi-user | [Y3-02](../roadmap/) | L |
 | HP-03 | Metric-cardinality & relabel strategy | — | M |
 | HP-04 | Pre-commit hooks / local gate parity | — | M |
@@ -38,7 +38,7 @@ Effort: **M** ≈ weeks · **L** ≈ ~a quarter (per the roadmap T-shirt sizing)
 
 ---
 
-## HP-01 — Unified reload transaction + `reload_timeout`
+## HP-01 — Reload observability / operator diagnostics (`reload_timeout`, result shape)
 
 **Objective.** Make a config apply a single, time-bounded transaction whose result
 truthfully reports per-subsystem (HTTP + stream) outcome, and which cannot stall
@@ -214,7 +214,7 @@ checks run pre-push or in CI only.
 **Already delivered.** The systemd unit gained `LimitNOFILE`/`TasksMax`, a
 `StartLimitBurst` crash-loop guard, and commented `MemoryMax`/`CPUQuota` examples;
 [Dependabot](../../.github/dependabot.yml) tracks the Docker base image; releases
-ship a signed SBOM + provenance. See [README deployment](../../README.md#deployment)
+ship a signed SBOM + provenance. See [README deployment](../../docs/deployment.md)
 and [SECURITY.md](../../SECURITY.md#dependencies--supply-chain).
 
 **Remaining (deferred from the ops pass, with their blockers).**

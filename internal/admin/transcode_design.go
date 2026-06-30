@@ -42,8 +42,13 @@ func (s *Server) handleTranscodeDescriptorUpload(w http.ResponseWriter, r *http.
 		return
 	}
 
-	const maxDescriptorSize = 16 << 20 // 16 MiB
+	const maxDescriptorSize = 16 << 20                               // 16 MiB
+	r.Body = http.MaxBytesReader(w, r.Body, maxDescriptorSize+1<<20) // +1 MiB overhead for multipart boundaries
 	if err := r.ParseMultipartForm(maxDescriptorSize); err != nil {
+		if err.Error() == "multipart: message too large" || err.Error() == "http: request body too large" {
+			http.Error(w, "descriptor exceeds size limit", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)
 		return
 	}

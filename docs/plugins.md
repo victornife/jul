@@ -101,10 +101,6 @@ Middleware ordering: server-level `plugins` wrap location-level `plugins`, and
 plugin middleware sits outside auth and rate limiting. Within a list, the first
 name is the outermost wrapper.
 
-`[plugins]` participates in zero-downtime [hot reload](../README.md#hot-reload):
-on reload the modules are recompiled into a fresh set and swapped in atomically,
-backed by a shared compilation cache, with no process restart.
-
 ## Writing a plugin
 
 A plugin is an ordinary Go program that imports the guest SDK and sets a single

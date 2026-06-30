@@ -908,3 +908,67 @@ func TestApplyPatchRouteSetRateLimitErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyPatchLocationSetTranscode(t *testing.T) {
+	c := patchTestConfig()
+	_, err := applyPatch(c, patchRequest{
+		Op: "location_set_transcode", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Transcode: &transcodePatch{
+			Target:        "grpc://localhost:50051",
+			UseReflection: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	loc := c.Servers[0].Locations[0]
+	if loc.ProxyPass != "" {
+		t.Errorf("proxy_pass must be empty after transcode patch, got %q", loc.ProxyPass)
+	}
+	if loc.GRPCTranscode == nil {
+		t.Fatal("grpc_transcode not set")
+	}
+	if loc.GRPCTranscode.Target != "grpc://localhost:50051" {
+		t.Errorf("grpc_transcode.target = %q, want grpc://localhost:50051", loc.GRPCTranscode.Target)
+	}
+	if loc.GRPCTranscode.UseReflection != true {
+		t.Error("use_reflection not preserved")
+	}
+	if err := config.Validate(c); err != nil {
+		t.Errorf("validated config after transcode patch: %v", err)
+	}
+}
+
+func TestApplyPatchLocationSetTranscodeClearsProxyPass(t *testing.T) {
+	c := patchTestConfig()
+	c.Servers[0].Locations[0].ProxyPass = "http://old"
+	_, err := applyPatch(c, patchRequest{
+		Op: "location_set_transcode", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Transcode: &transcodePatch{
+			Target:        "grpc://localhost:50051",
+			UseReflection: true,
+			Streaming:     true,
+			StreamMode:    "ndjson",
+			PreserveNames: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	loc := c.Servers[0].Locations[0]
+	if loc.ProxyPass != "" {
+		t.Errorf("proxy_pass must be cleared, got %q", loc.ProxyPass)
+	}
+	if !loc.GRPCTranscode.Streaming {
+		t.Error("streaming flag not preserved")
+	}
+	if loc.GRPCTranscode.StreamMode != "ndjson" {
+		t.Errorf("stream_mode = %q, want ndjson", loc.GRPCTranscode.StreamMode)
+	}
+	if !loc.GRPCTranscode.PreserveNames {
+		t.Error("preserve_names flag not preserved")
+	}
+	if err := config.Validate(c); err != nil {
+		t.Errorf("validated config after transcode patch: %v", err)
+	}
+}

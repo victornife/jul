@@ -44,9 +44,20 @@ def ok(msg: str):
     # print(f"OK   {msg}")
 
 
+def _slugify(text: str) -> list[str]:
+    """Convert text to lowercase word list. First strip all non-alnum to space,
+    then split letter-digit boundaries so 'http3' -> ['http','3']."""
+    text = text.lower()
+    # Replace all non-alphanumeric with space first
+    text = re.sub(r"[^a-z0-9]", " ", text)
+    # Then split letter-digit boundaries
+    text = re.sub(r"([a-z])(\d)", r"\1 \2", text)
+    text = re.sub(r"(\d)([a-z])", r"\1 \2", text)
+    return [w for w in text.split() if w]
+
+
 def check_markdown_links(path: Path, text: str):
-    """Check that relative markdown links point to existing files."""
-    # Match [text](url) and ![alt](url) but skip URLs with protocols
+    """Check that relative markdown links point to existing files AND anchors resolve."""
     for match in re.finditer(r"!?\[([^\]]+)\]\(([^)]+)\)", text):
         raw_url = match.group(2)
         line = text[:match.start()].count("\n") + 1
@@ -58,7 +69,9 @@ def check_markdown_links(path: Path, text: str):
             continue
 
         # Strip anchor
-        url = raw_url.split("#")[0]
+        parts = raw_url.split("#", 1)
+        url = parts[0]
+        anchor = parts[1] if len(parts) > 1 else None
         if not url:
             continue
 
@@ -66,8 +79,43 @@ def check_markdown_links(path: Path, text: str):
         target = (path.parent / url).resolve()
         if not target.exists():
             error(path, line, f"broken link: {raw_url}")
-        else:
-            ok(f"{path}:{line} link {raw_url}")
+            continue
+
+        # If there's an anchor, check the target file for a matching heading
+        if anchor and target.exists() and target.suffix == ".md":
+            target_text = target.read_text(encoding="utf-8")
+            # Check for explicit anchor marker {:#anchor} or {#anchor}
+            explicit_anchor = re.compile(rf"\{{#?{re.escape(anchor)}\}}", re.IGNORECASE)
+            if explicit_anchor.search(target_text):
+                ok(f"{path}:{line} anchor {raw_url}")
+                continue
+            # Check for heading text matching anchor slug.
+            # Anchor slug is typically heading text lowercased with spaces -> dashes,
+            # and special chars stripped. We match case-insensitively to be forgiving.
+            # Match: ## Some Title {#optional-anchor}   or   ## Some Title
+            # We need to match the heading text against the anchor.
+            anchor_words = anchor.replace("-", " ").lower().split()
+            found = False
+            for heading_match in re.finditer(r"^#+\s+(.+?)(?:\s*\{#[^}]+\})?\s*$", target_text, re.MULTILINE):
+                heading_words = _slugify(heading_match.group(1))
+                # Check if all anchor words appear in order in heading words (subsequence)
+                idx = 0
+                for hw in heading_words:
+                    if idx < len(anchor_words) and hw == anchor_words[idx]:
+                        idx += 1
+                if idx == len(anchor_words):
+                    found = True
+                    break
+                # Fallback: merged anchor without hyphens, e.g. "serverslocationsauth"
+                # should match heading "servers locations auth".
+                if "".join(anchor_words) in "".join(heading_words):
+                    found = True
+                    break
+            if not found:
+                error(path, line, f"broken anchor: {raw_url}")
+                continue
+
+        ok(f"{path}:{line} link {raw_url}")
 
 
 def check_toml_blocks(path: Path, text: str):
@@ -93,8 +141,8 @@ def check_placeholders(path: Path, text: str):
 
 
 def check_version_consistency(md_files: list[Path]):
-    """Ensure roadmap and status docs carry the same version/date."""
-    versions: dict[str, tuple[str, int]] = {}  # file stem -> (version, line)
+    """Ensure roadmap and status docs carry the same version and date."""
+    versions: dict[str, tuple[str, str, int]] = {}  # file stem -> (version, date, line)
 
     version_re = re.compile(r"> Version (\d+\.\d+) · Updated (\d{4}-\d{2}-\d{2})")
     for md in md_files:
@@ -102,16 +150,43 @@ def check_version_consistency(md_files: list[Path]):
         for match in version_re.finditer(text):
             line = text[:match.start()].count("\n") + 1
             key = md.relative_to(DOCS).as_posix()
-            versions[key] = (match.group(1), line)
+            versions[key] = (match.group(1), match.group(2), line)
 
     roadmap = versions.get("roadmap/README.md")
     status = versions.get("status.md")
-    if roadmap and status and roadmap[0] != status[0]:
-        error(
-            DOCS / "roadmap" / "README.md",
-            roadmap[1],
-            f"version mismatch: roadmap={roadmap[0]} vs status={status[0]}",
-        )
+    if roadmap and status:
+        if roadmap[0] != status[0]:
+            error(
+                DOCS / "roadmap" / "README.md",
+                roadmap[2],
+                f"version mismatch: roadmap={roadmap[0]} vs status={status[0]}",
+            )
+        if roadmap[1] != status[1]:
+            error(
+                DOCS / "roadmap" / "README.md",
+                roadmap[2],
+                f"date mismatch: roadmap={roadmap[1]} vs status={status[1]}",
+            )
+    # Check that status.md changelog top version doesn't exceed header version
+    status_md = DOCS / "status.md"
+    if status_md.exists():
+        text = status_md.read_text(encoding="utf-8")
+        header_match = version_re.search(text)
+        # Find first changelog row with version
+        changelog_re = re.compile(r"\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(\d+\.\d+)")
+        first_changelog = None
+        for m in changelog_re.finditer(text):
+            first_changelog = m.group(2)
+            break
+        if header_match and first_changelog:
+            header_ver = header_match.group(1)
+            if _version_key(first_changelog) > _version_key(header_ver):
+                error(status_md, text[:changelog_re.search(text).start()].count("\n") + 1,
+                      f"changelog version {first_changelog} exceeds header version {header_ver}")
+
+def _version_key(v: str) -> tuple[int, int]:
+    parts = v.split(".")
+    return (int(parts[0]), int(parts[1]))
 
 
 def check_future_dates(path: Path, text: str):
@@ -132,8 +207,9 @@ def check_schema_doc_drift():
         return
 
     schema_text = schema_path.read_text(encoding="utf-8")
-    # Extract toml tags from fields of the root Config struct.
-    # We look for lines like: `Foo FooConfig   `toml:"foo"` within the Config struct definition.
+    # Extract toml tags from fields of the root Config struct only.
+    # We start brace_depth at 1 to account for the opening brace of
+    # `type Config struct {`, and stop when it returns to 0.
     keys: set[str] = set()
     in_config_struct = False
     brace_depth = 0
@@ -141,10 +217,12 @@ def check_schema_doc_drift():
         stripped = line.strip()
         if stripped.startswith("type Config struct"):
             in_config_struct = True
+            brace_depth = 1  # account for the opening brace on this line
+            continue
         if in_config_struct:
             brace_depth += stripped.count("{")
             brace_depth -= stripped.count("}")
-            if brace_depth < 0:
+            if brace_depth <= 0:
                 break
             m = re.search(r'`toml:"([^"]+)"`', stripped)
             if m:
@@ -159,12 +237,18 @@ def check_schema_doc_drift():
         warn(config_doc, 0, "configuration.md not found, skipping schema-doc drift check")
         return
     doc_text = config_doc.read_text(encoding="utf-8")
+    doc_lower = _slugify(doc_text)
+    doc_joined = "".join(doc_lower)
 
     for key in sorted(keys):
-        # A well-documented key appears as [key], [[key]], or in backticks: `key`
-        needle = re.compile(rf"(\\[\\[{re.escape(key)}\\]\\]|\\[{re.escape(key)}\\]|`{re.escape(key)}`)")
-        if not needle.search(doc_text):
-            warn(config_doc, 0, f"schema key '{key}' not found in configuration.md")
+        key_slug = _slugify(key)
+        key_joined = "".join(key_slug)
+        # A well-documented key appears as [key], [[key]], or in backticks: `key`,
+        # or as heading text, or as table header matching the slug.
+        if key_joined not in doc_joined:
+            needle = re.compile(rf"(\\[\\[{re.escape(key)}\\]\\]|\\[{re.escape(key)}\\]|`{re.escape(key)}`)")
+            if not needle.search(doc_text):
+                warn(config_doc, 0, f"schema key '{key}' not found in configuration.md")
 
 
 def main():

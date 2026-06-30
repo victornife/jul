@@ -176,9 +176,10 @@ function PluginEditorDrawer({
     >
       <div className="space-y-4">
         <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
-          A plugin is a WASM module the proxy runs in the request path. The console references the
-          module by file path (it never uploads WASM bytes) and edits its type, host capabilities,
-          and limits. Attach a middleware plugin to routes from the Plugins list.
+          A plugin is a WASM module the proxy runs in the request path. You can either reference an
+          existing server-side <code>.wasm</code> path or upload a module through the Upload drawer.
+          Edit its type, host capabilities, and limits.
+          Attach a middleware plugin to routes from the Plugins list.
         </p>
 
         {isNew && (
@@ -403,21 +404,26 @@ function AttachPluginDrawer({
 function UploadPluginDrawer({
   onClose,
   onUploaded,
+  uploadMaxSizeMB,
 }: {
   readonly onClose: () => void;
   readonly onUploaded: (path: string) => void;
+  readonly uploadMaxSizeMB: number;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   function validateWasm(f: File): string | null {
-    // Quick size guard (the server enforces the real limit).
-    if (f.size > 32 * 1024 * 1024) {
-      return "File exceeds 32 MB.";
+    if (f.size <= 0) {
+      return "File is empty.";
     }
     if (!f.name.endsWith(".wasm")) {
       return "Expected a .wasm file.";
+    }
+    const limit = uploadMaxSizeMB * 1024 * 1024;
+    if (limit > 0 && f.size > limit) {
+      return `File exceeds the server upload limit of ${uploadMaxSizeMB} MB.`;
     }
     return null;
   }
@@ -734,6 +740,7 @@ export function PluginsPanel() {
             void queryClient.invalidateQueries({ queryKey: ["plugins"] });
             setCreating(true);
           }}
+          uploadMaxSizeMB={data.upload_max_size_mb}
         />
       )}
     </div>

@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.26 · Updated 2026-06-30
+> Version 1.27 · Updated 2026-06-30
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -95,7 +95,7 @@ release-blocking regression. Mirrors the
 | mTLS client auth (Y2-07) | 2026-06-21 | ☐ pending |
 | Console (Y1-07 · Y2-09) | 2026-06-23 | ☐ pending |
 
-## Not yet shipped
+## Recently shipped continuous panels
 
 **Y2-09 Console v2 continuous panels** (tracked above as part of the **Console**
 row, Y1-07 · Y2-09):
@@ -103,8 +103,8 @@ row, Y1-07 · Y2-09):
 | Panel | Status | Note |
 | --- | --- | --- |
 | Live log tail | **Shipped** | Operations panel, SSE stream, filter/pause |
-| WASM plugin manager | **Shipped** | Plugins panel, structured CRUD + attach/detach; `.wasm` file upload remains planned |
-| gRPC route designer | **Shipped** | Descriptor upload, `google.api.http` parse, visual mapping editor |
+| WASM plugin manager | **Shipped** | Plugins panel, structured CRUD + attach/detach; `.wasm` file upload included |
+| gRPC route designer | **Shipped** | Descriptor upload (inspection only), `google.api.http` parse, visual mapping editor |
 
 Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 **AI-MVP** AI Gateway. Years 3–5 are the demand-gated vision horizon. See the

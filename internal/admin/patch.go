@@ -523,7 +523,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		loc.FastCGIPass, loc.FastCGIParams, loc.UWSGIPass = "", nil, ""
 		loc.Redirect, loc.Return, loc.Deny = "", 0, false
 		loc.GRPC, loc.Plugin = false, ""
-		loc.ProxyPass = target
+		loc.ProxyPass = ""
 		loc.GRPCTranscode = &config.GRPCTranscodeConfig{
 			Target:         target,
 			DescriptorSet:  strings.TrimSpace(req.Transcode.DescriptorPath),

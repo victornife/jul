@@ -636,7 +636,7 @@ type CompressionConfig struct {
 // per-listener concurrent-connection cap. It applies globally and can be
 // overridden per location (rate/burst/key only). Disabled by default.
 type RateLimitConfig struct {
-	Enabled bool `toml:"enabled"`
+	Enabled bool `tomm:"enabled"`
 	// Key selects the bucket identity: "ip" (client address, the default),
 	// "header:<Name>" (a request header value), or "jwt:<claim>" (a validated
 	// JWT claim once auth is configured). Untrusted X-Forwarded-For is never
@@ -793,8 +793,13 @@ type AdminConfig struct {
 	// missing. Uploads are written atomically and set to owner-only (0o600).
 	PluginUploadDir string `toml:"plugin_upload_dir"`
 	// PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes.
-	// Defaults to 32 when admin is enabled; a non-positive value disables upload.
+	// Defaults to 32 when admin is enabled and upload is enabled.
 	PluginUploadMaxSize int `toml:"plugin_upload_max_size"`
+	// PluginUploadEnabled controls whether the admin console allows uploading
+	// .wasm plugin modules. When nil (default) and admin is enabled, upload is
+	// enabled. An explicit false disables the upload endpoint regardless of
+	// PluginUploadMaxSize.
+	PluginUploadEnabled *bool `toml:"plugin_upload_enabled"`
 }
 
 // ConsoleEnabled reports whether the web console should be served: it defaults

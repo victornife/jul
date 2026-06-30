@@ -133,15 +133,6 @@ export function TranscodeDesignerPanel() {
     }
   }
 
-  function toggleMethod(fullName: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(fullName)) next.delete(fullName);
-      else next.add(fullName);
-      return next;
-    });
-  }
-
   async function openInEditor() {
     setEditorError(null);
     const draft = {
@@ -287,28 +278,16 @@ export function TranscodeDesignerPanel() {
         </div>
 
         {methods.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-jul-text">
-                {selected.size}/{methods.length} methods selected
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => setSelected(new Set(methods.map((m) => m.full_name)))}
-                >
-                  Select all
-                </Button>
-                <Button variant="ghost" onClick={() => setSelected(new Set())}>
-                  Clear
-                </Button>
-              </div>
-            </div>
+          <div className="space-y-3">
+            <p className="text-xs text-jul-muted">
+              <strong>Preview: {methods.length} method(s) found.</strong>{" "}
+              The generated route will expose all methods from this descriptor set. Jul does not
+              support filtering by specific methods at this time.
+            </p>
             <div className="overflow-x-auto rounded-md border border-jul-border">
               <table className="w-full text-left text-sm">
                 <thead className="bg-jul-bg text-xs uppercase text-jul-muted">
                   <tr>
-                    <th className="px-3 py-2"></th>
                     <th className="px-3 py-2">Method</th>
                     <th className="px-3 py-2">HTTP</th>
                     <th className="px-3 py-2">Path</th>
@@ -318,15 +297,7 @@ export function TranscodeDesignerPanel() {
                 </thead>
                 <tbody className="divide-y divide-jul-border">
                   {methods.map((m) => (
-                    <tr key={m.full_name} className={selected.has(m.full_name) ? "" : "opacity-60"}>
-                      <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(m.full_name)}
-                          onChange={() => toggleMethod(m.full_name)}
-                          className="h-4 w-4 accent-jul-accent"
-                        />
-                      </td>
+                    <tr key={m.full_name}>
                       <td className="px-3 py-2 font-mono text-xs text-jul-text">{m.full_name}</td>
                       <td className="px-3 py-2 text-xs text-jul-text">{m.http_method}</td>
                       <td className="px-3 py-2 font-mono text-xs text-jul-text">{m.path}</td>

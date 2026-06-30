@@ -1,7 +1,7 @@
 # Configuration reference
 
 Jul.IA is configured by a single TOML document. The top-level tables are
-`[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, and `[admin]`.
+`[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, `[waf]`, and `[admin]`.
 
 A minimal, working example:
 
@@ -52,6 +52,7 @@ console = true
 history_dir = "./jul-data/config-history"
 history_keep = 50
 plugin_upload_dir = "./jul-data/plugins"
+plugin_upload_enabled = true
 plugin_upload_max_size = 32
 
 ```
@@ -591,6 +592,7 @@ console = true
 history_dir = "./jul-data/config-history"
 history_keep = 50
 plugin_upload_dir = "./jul-data/plugins"
+plugin_upload_enabled = true
 plugin_upload_max_size = 32
 ```
 
@@ -603,7 +605,8 @@ plugin_upload_max_size = 32
 | `history_dir` | string | Directory for configuration snapshots used by the console history/rollback panel |
 | `history_keep` | int | Maximum number of configuration snapshots to retain; older ones are pruned (default `50`) |
 | `plugin_upload_dir` | string | Directory for uploaded `.wasm` modules from the Console Plugins panel (default `./jul-data/plugins`) |
-| `plugin_upload_max_size` | int | Maximum `.wasm` upload size in megabytes; non-positive disables upload (default `32`) |
+| `plugin_upload_enabled` | bool | Enable the `.wasm` upload endpoint. Default `true` when `[admin]` is enabled; set `false` to disable upload regardless of max size. |
+| `plugin_upload_max_size` | int | Maximum `.wasm` upload size in megabytes (default `32`) |
 
 ---
 

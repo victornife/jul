@@ -50,7 +50,7 @@ Releases are a matrix of **operating system × architecture × profile**.
 The build-tag list is kept in sync with `env.FULL_TAGS` in
 [release.yml](../.github/workflows/release.yml) and
 [ci.yml](../.github/workflows/ci.yml). See
-[Building from source](../README.md#building-from-source--cross-compiling) for
+[Building from source](../README.md) for
 what each tag enables.
 
 ## How a release is produced

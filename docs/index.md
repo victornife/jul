@@ -18,7 +18,7 @@ binary.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
 - **[Reload semantics](reload-semantics.md)** — What reloads safely, what needs a restart, and how zero-downtime reload works.
 - **[Security model](../SECURITY.md)** — Threat model, hardening defaults, and per-feature security notes.
-- **[Troubleshooting](../README.md#troubleshooting)** — Common issues and how to resolve them.
+- **[Troubleshooting](../README.md)** — Common issues and how to resolve them.
 
 ### Feature deep-dives
 | Feature | Document |
@@ -37,7 +37,7 @@ binary.
 | WAF | [docs/waf.md](waf.md) |
 
 ### Extending and contributing
-- **[Project layout](../README.md#project-layout)** — How the repository is organized.
+- **[Project layout](architecture.md)** — How the repository is organized.
 - **[ADRs](adr/)** — Architecture Decision Records for durable design choices.
 - **[Engineering specs](specs/)** — Year-by-year execution plans and detailed feature specs.
 - **[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Where the project is headed.

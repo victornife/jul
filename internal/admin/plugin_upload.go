@@ -32,6 +32,10 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.cfg.PluginUploadEnabled != nil && !*s.cfg.PluginUploadEnabled {
+		http.Error(w, "plugin upload disabled", http.StatusForbidden)
+		return
+	}
 	if s.cfg.PluginUploadMaxSize <= 0 {
 		http.Error(w, "plugin upload disabled", http.StatusForbidden)
 		return

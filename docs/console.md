@@ -9,7 +9,7 @@ build) and is gated by the `console` build tag.
 
 ## Enabling the console
 
-The console is served by the [admin listener](../README.md#admin-interface--observability).
+The console is served by the [admin listener](../docs/observability.md).
 Enable admin, keep it on loopback, and set a token:
 
 ```toml

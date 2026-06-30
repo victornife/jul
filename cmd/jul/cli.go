@@ -317,28 +317,25 @@ func cmdCheck(args []string) int {
 	}
 
 	if errs := flattenErrors(config.Validate(cfg)); len(errs) > 0 {
-		if *jsonOut {
-			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "errors": errs})
-		} else {
-			for _, e := range errs {
-				fmt.Fprintln(stderr, e)
+		errStrs := make([]string, len(errs))
+		for i, e := range errs {
+			errStrs[i] = e.Error()
+		}
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "errors": errStrs})
+	} else {
+		if err := validateRuntimeConfig(cfg); err != nil {
+			if *jsonOut {
+				_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
+			} else {
+				fmt.Fprintf(stderr, "runtime check: %v\n", err)
 			}
-			fmt.Fprintf(stderr, "%s: %d error(s)\n", src.Name(), len(errs))
+			return 1
 		}
-		return 1
-	}
-	if err := validateRuntimeConfig(cfg); err != nil {
 		if *jsonOut {
-			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
-		} else {
-			fmt.Fprintf(stderr, "runtime check: %v\n", err)
+			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": true})
+		} else if !*quiet {
+			fmt.Fprintf(stdout, "%s is valid (structural + runtime)\n", src.Name())
 		}
-		return 1
-	}
-	if *jsonOut {
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": true})
-	} else if !*quiet {
-		fmt.Fprintf(stdout, "%s is valid (structural + runtime)\n", src.Name())
 	}
 	return 0
 }

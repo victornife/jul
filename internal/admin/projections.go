@@ -374,7 +374,7 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			switch {
 			case loc.GRPCTranscode != nil:
 				lp.Action = "grpc_transcode"
-				lp.Target = loc.ProxyPass
+				lp.Target = loc.GRPCTranscode.Target
 				tc := &TranscodeProjection{
 					DescriptorSet:      loc.GRPCTranscode.DescriptorSet,
 					UseReflection:      loc.GRPCTranscode.UseReflection,
