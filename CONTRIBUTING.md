@@ -15,9 +15,13 @@ technical merit aligned with the project's vision.
 3. **Install** Go 1.26+ and ensure `$GOPATH/bin` is in your `$PATH`.
 4. **Run tests** before opening a PR:
    ```bash
-   make test
-   make lint
-   make vulncheck
+   make ci-fast          # lean build — fast, catches most issues
+   ```
+   If your change touches an opt-in feature (anything behind a build tag such
+   as `grpc`, `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`,
+   `acme`, `console`, `otel`, `importer`, `brotli`, or `zstd`), also run:
+   ```bash
+   make ci-full          # full feature set — matches CI exactly
    ```
 
 ## Coding standards
@@ -115,7 +119,7 @@ Closes #42.
 ## Pull request process
 
 1. Open a **draft PR** early for feedback.
-2. Ensure CI passes (`make test`, `make lint`).
+2. Ensure CI passes (`make ci-fast`; `make ci-full` if build-tagged features changed).
 3. Request review from at least one maintainer.
 4. Address review comments and mark conversations as resolved.
 5. Maintainers will merge when approved and CI is green.

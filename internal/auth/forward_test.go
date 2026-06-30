@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,4 +81,39 @@ func TestForwardAuthDecide(t *testing.T) {
 			t.Errorf("Location = %q, want /login", res.header.Get("Location"))
 		}
 	})
+}
+
+// errReadCloser simulates a response body that fails on read.
+type errReadCloser struct{ err error }
+
+func (e *errReadCloser) Read([]byte) (int, error) { return 0, e.err }
+func (e *errReadCloser) Close() error             { return nil }
+
+// roundTripperFn lets us inject a raw *http.Response into the client.
+type roundTripperFn func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFn) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestForwardAuthBodyReadError(t *testing.T) {
+	fa := newForwardAuth("http://auth.example", nil, &http.Client{
+		Transport: roundTripperFn(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusUnauthorized,
+				Header:     http.Header{"Location": []string{"/login"}},
+				Body:       &errReadCloser{err: errors.New("connection reset")},
+				Request:    req,
+			}, nil
+		}),
+	})
+	orig := httptest.NewRequest(http.MethodGet, "http://app.example/secret", nil)
+	res, err := fa.decide(context.Background(), orig)
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if res.statusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.statusCode)
+	}
+	if res.body != nil {
+		t.Errorf("body should be nil on read error, got %q", res.body)
+	}
 }

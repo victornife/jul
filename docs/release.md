@@ -92,7 +92,7 @@ sha256sum -c <file>.sha256          # or verify against SHA256SUMS
 
 ```bash
 # Extract the binary first, then:
-gh attestation verify ./jul --repo example/jul
+gh attestation verify ./jul --repo victornife/jul
 ```
 
 This confirms the binary was built by this repository's release workflow from a

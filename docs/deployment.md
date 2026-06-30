@@ -124,7 +124,7 @@ docker run --rm \
   -v jul-state:/var/lib/jul \
   -v jul-cache:/var/cache/jul \
   -v jul-log:/var/log/jul \
-  ghcr.io/example/jul:latest
+  ghcr.io/victornife/jul:latest
 ```
 
 - **Named volumes** are seeded from the image on first use, so the baked

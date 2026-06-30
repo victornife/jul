@@ -207,9 +207,9 @@ fastcgi_pass = "unix:/run/php/php-fpm.sock"
 
 ### gRPC transcoding (`[servers.locations.grpc_transcode]`, `grpc` build tag)
 
-Expose a unary gRPC service as a RESTful JSON API. Jul translates the HTTP
-request into a gRPC call and the protobuf reply back into JSON. This lets
-mobile and web clients consume gRPC backends without a dedicated gateway.
+Expose a gRPC service as a RESTful JSON API (unary and streaming). Jul translates
+the HTTP request into a gRPC call and the protobuf reply back into JSON. This
+lets mobile and web clients consume gRPC backends without a dedicated gateway.
 
 Requires the `grpc` build tag: `go build -tags grpc ./cmd/jul`.
 
@@ -228,6 +228,12 @@ descriptor_set = "/etc/jul/api.pb"
 | `use_reflection` | bool | Discover the service via gRPC server reflection instead of a descriptor file |
 | `tls` | bool | Dial the backend over TLS (default plaintext h2c) |
 | `preserve_proto_field_names` | bool | Emit original `snake_case` proto field names instead of `lowerCamelCase` JSON names |
+| `streaming` | bool | Enable server-, client-, and bidirectional-streaming transcoding (default `false`) |
+| `stream_mode` | string | Frame format for streamed responses: `ndjson` (default) or `sse` |
+| `max_message_size` | string | Maximum per-message body size, e.g. `"4m"` (default `"4MiB"`) |
+
+See [gRPC transcoding deep-dive](./grpc-transcoding.md) for the full streaming
+matrix, path-variable mapping, and benchmark notes.
 
 ### Redirect / control
 
@@ -356,7 +362,7 @@ Metrics: `jul_upstream_backends{pool}` (current backend count) and
 
 ## gRPC ↔ JSON transcoding (`grpc` build tag)
 
-A location with `[servers.locations.grpc_transcode]` exposes a unary gRPC
+A location with `[servers.locations.grpc_transcode]` exposes a gRPC
 service as a RESTful JSON API, translating each HTTP request into a gRPC call
 and the protobuf reply back into JSON.
 

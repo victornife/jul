@@ -8,6 +8,9 @@ build:
 test:
 	go test ./...
 
+test-full:
+	go test -tags "$(FULL_TAGS)" ./...
+
 bench:
 	scripts/bench.sh
 
@@ -25,8 +28,18 @@ format:
 lint:
 	golangci-lint run
 
+lint-full:
+	golangci-lint run --build-tags "$(FULL_TAGS)"
+
 vulncheck:
 	govulncheck ./...
+
+vulncheck-full:
+	govulncheck -tags "$(FULL_TAGS)" ./...
+
+ci-fast: format lint test build
+
+ci-full: format lint-full test-full vulncheck-full build
 
 clean:
 	go clean
@@ -50,3 +63,6 @@ console-check:
 # Build frontend assets then the full Go binary with console tag.
 build-console: console-build
 	go build -tags "console" -o jul ./cmd/jul
+
+# Full opt-in feature tag set — keep in sync with .github/workflows/ci.yml
+FULL_TAGS := brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf

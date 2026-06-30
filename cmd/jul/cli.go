@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 
+	"jul/internal/atomicfile"
 	"jul/internal/config"
 	"jul/internal/signals"
 )
@@ -36,6 +38,8 @@ func dispatchSubcommand(args []string) (handled bool, code int) {
 		return true, cmdFmt(args[1:])
 	case "run":
 		return true, cmdRun(args[1:])
+	case "check":
+		return true, cmdCheck(args[1:])
 	case "import":
 		return true, cmdImport(args[1:])
 	default:
@@ -50,7 +54,10 @@ func usage() {
 
 Usage:
   jul [flags]                          run the server (default)
-  jul lint [-config f] [-strict]       validate and report best-practice warnings
+  jul check [-config f] [-json] [-quiet]
+                                       full runtime preflight check
+  jul lint [-config f] [-strict] [-json] [-quiet]
+                                       validate and report best-practice warnings
   jul fmt  [-config f] [-w]            rewrite the config in canonical TOML
   jul run  --serve <dir> | --proxy <target> [--listen addr]
                                        run a zero-config server (no file needed)
@@ -63,6 +70,13 @@ Flags:
 	flag.PrintDefaults()
 }
 
+// lintOutput is the shape written by cmdLint when -json is used.
+type lintOutput struct {
+	Source   string              `json:"source"`
+	Errors   []string            `json:"errors,omitempty"`
+	Warnings []config.Diagnostic `json:"warnings,omitempty"`
+}
+
 // cmdLint parses and validates a config and reports best-practice warnings,
 // surfacing every error and warning in a single pass. Exit codes: 0 = clean (no
 // errors), 1 = validation error(s), 2 = warnings present under -strict.
@@ -71,6 +85,8 @@ func cmdLint(args []string) int {
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
 	strict := fs.Bool("strict", false, "exit non-zero when warnings are present")
+	jsonOut := fs.Bool("json", false, "emit findings as JSON")
+	quiet := fs.Bool("quiet", false, "suppress warnings (errors still reported)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -78,29 +94,47 @@ func cmdLint(args []string) int {
 	src := config.NewTOMLSource(*configPath)
 	cfg, err := src.Load()
 	if err != nil {
-		fmt.Fprintln(stderr, config.FormatError(err))
+		if *jsonOut {
+			_ = json.NewEncoder(stdout).Encode(lintOutput{Source: src.Name(), Errors: []string{err.Error()}})
+		} else {
+			fmt.Fprintln(stderr, config.FormatError(err))
+		}
 		return 1
 	}
 
-	color := wantColor(stdout)
 	verrs := flattenErrors(config.Validate(cfg))
 	warns := config.Lint(cfg)
-
-	for _, e := range verrs {
-		printDiagnostic(stdout, config.Diagnostic{Severity: config.SeverityError, Message: e.Error()}, color)
-	}
-	for _, d := range warns {
-		printDiagnostic(stdout, d, color)
+	if *quiet {
+		warns = nil
 	}
 
-	fmt.Fprintf(stdout, "\n%s: %d error(s), %d warning(s)\n", src.Name(), len(verrs), len(warns))
+	if *jsonOut {
+		out := lintOutput{Source: src.Name()}
+		for _, e := range verrs {
+			out.Errors = append(out.Errors, e.Error())
+		}
+		out.Warnings = warns
+		_ = json.NewEncoder(stdout).Encode(out)
+	} else {
+		color := wantColor(stdout)
+		for _, e := range verrs {
+			printDiagnostic(stdout, config.Diagnostic{Severity: config.SeverityError, Message: e.Error()}, color)
+		}
+		for _, d := range warns {
+			printDiagnostic(stdout, d, color)
+		}
+		fmt.Fprintf(stdout, "\n%s: %d error(s), %d warning(s)\n", src.Name(), len(verrs), len(warns))
+	}
+
 	switch {
 	case len(verrs) > 0:
 		return 1
 	case *strict && len(warns) > 0:
 		return 2
 	default:
-		fmt.Fprintf(stdout, "%s is valid\n", src.Name())
+		if !*jsonOut {
+			fmt.Fprintf(stdout, "%s is valid\n", src.Name())
+		}
 		return 0
 	}
 }
@@ -141,7 +175,7 @@ func cmdFmt(args []string) int {
 	if bytes.Equal(orig, out) {
 		return 0
 	}
-	if err := os.WriteFile(*configPath, out, 0o644); err != nil {
+	if err := atomicfile.Write(*configPath, out, 0o600); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
@@ -256,3 +290,57 @@ func wantColor(w io.Writer) bool {
 	}
 	return info.Mode()&os.ModeCharDevice != 0
 }
+
+// cmdCheck performs a full runtime preflight of the configuration. It validates
+// structurally *and* dry-runs every component that could fail during serve/reload
+// (WAF compilation, auth initialisation, compression encoder availability, etc.).
+// Exit codes: 0 = ok, 1 = validation/runtime error.
+func cmdCheck(args []string) int {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
+	jsonOut := fs.Bool("json", false, "emit result as JSON")
+	quiet := fs.Bool("quiet", false, "suppress non-error output")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	src := config.NewTOMLSource(*configPath)
+	cfg, err := src.Load()
+	if err != nil {
+		if *jsonOut {
+			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
+		} else {
+			fmt.Fprintln(stderr, config.FormatError(err))
+		}
+		return 1
+	}
+
+	if errs := flattenErrors(config.Validate(cfg)); len(errs) > 0 {
+		if *jsonOut {
+			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "errors": errs})
+		} else {
+			for _, e := range errs {
+				fmt.Fprintln(stderr, e)
+			}
+			fmt.Fprintf(stderr, "%s: %d error(s)\n", src.Name(), len(errs))
+		}
+		return 1
+	}
+	if err := validateRuntimeConfig(cfg); err != nil {
+		if *jsonOut {
+			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
+		} else {
+			fmt.Fprintf(stderr, "runtime check: %v\n", err)
+		}
+		return 1
+	}
+	if *jsonOut {
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": true})
+	} else if !*quiet {
+		fmt.Fprintf(stdout, "%s is valid (structural + runtime)\n", src.Name())
+	}
+	return 0
+}
+
+// cmdFmt rewrites a config into canonical TOML.

@@ -34,48 +34,20 @@ interface — all in a single static, dependency-free binary.
 
 ---
 
-## Table of contents
+## Feature maturity
 
-- [Features](#features)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Command-line usage](#command-line-usage)
-- [Migrating from NGINX](#migrating-from-nginx)
-- [Configuration reference](#configuration-reference)
-  - [`[global]`](#global)
-  - [`[[servers]]`](#servers)
-  - [`[[servers.locations]]`](#serverslocations)
-  - [`[[upstreams]]`](#upstreams)
-  - [`[upstreams.discovery]`](#upstreamsdiscovery)
-  - [`[cache]`](#cache)
-  - [`[compression]`](#compression)
-  - [`[rate_limit]`](#rate_limit)
-  - [`[servers.locations.auth]`](#serverslocationsauth)
-  - [`[admin]`](#admin)
-  - [`[observability.tracing]`](#observabilitytracing)
-  - [`[observability.metrics]`](#observabilitymetrics)
-  - [`[observability.access_log]`](#observabilityaccess_log)
-  - [TLS](#tls)
-  - [Automatic HTTPS (ACME)](#automatic-https-acme)
-  - [HTTP/3 (QUIC)](#http3-quic)
-  - [`[plugins]`](#plugins)
-  - [`[[stream]]`](#stream)
-- [WebAssembly plugins](#webassembly-plugins)
-- [L4 stream proxy](#l4-stream-proxy)
-- [gRPC passthrough](#grpc-passthrough)
-- [Service discovery](#service-discovery)
-- [Web application firewall](#web-application-firewall)
-- [Secrets references](#secrets-references)
-- [Hot reload](#hot-reload)
-- [Admin interface & observability](#admin-interface--observability)
-- [Running real applications behind Jul.IA](#running-real-applications-behind-julia)
-- [Deployment](#deployment)
-  - [As a Linux systemd service](#as-a-linux-systemd-service)
-  - [As a Windows service](#as-a-windows-service)
-  - [With Docker](#with-docker)
-- [Building from source & cross-compiling](#building-from-source--cross-compiling)
-- [Project layout](#project-layout)
-- [Troubleshooting](#troubleshooting)
+The canonical maturity matrix lives in [`docs/status.md`](docs/status.md). At a
+ glance:
+
+| Maturity | Features |
+|----------|----------|
+| **GA — soak pending** | Core HTTP (proxy, static, routing, reload), TLS & ACME, Authentication (Basic, JWT, forward-auth), gRPC transcoding + passthrough, mTLS, Admin Console |
+| **Beta** | Compression (Brotli / Zstd), Rate limiting, Active health checks, `jul import nginx`, OpenTelemetry tracing, HTTP/3, WASM plugins, L4 Stream proxy, Service discovery (Consul / K8s), WAF (Coraza + CRS), Two-tier response cache |
+
+Several Beta features require an opt-in **build tag** (e.g. `grpc`, `acme`,
+`wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default
+`lean` binary ships only the GA surface plus core compression (`gzip`). Build
+with `-tags "…"` or download the `full` release profile to enable everything.
 
 ---
 
@@ -128,7 +100,7 @@ interface — all in a single static, dependency-free binary.
 
 ## Installation
 
-Download the archive for your platform from a [release](https://github.com/example/jul/releases)
+Download the archive for your platform from a [release](https://github.com/victornife/jul/releases)
 (or build it yourself — see [Building from source](#building-from-source--cross-compiling))
 and extract it. Each archive contains the binary, a sample `server.toml`, the
 SBOM, and `README`/`SECURITY` docs.
@@ -201,18 +173,38 @@ Print the version:
 
 ```text
 jul [flags]                                   run the server (default)
-jul lint [-config f] [-strict]                validate + best-practice checks
+jul check [-config f] [-json] [-quiet]        full runtime preflight check
+jul lint [-config f] [-strict] [-json] [-quiet]
+                                              validate + best-practice checks
 jul fmt  [-config f] [-w]                     rewrite the config in canonical TOML
 jul run  --serve <dir> | --proxy <target> [--listen addr]
                                               run a zero-config server (no file)
 jul import nginx [-o out.toml] [-strict] <nginx.conf>
                                               translate an NGINX config (importer tag)
 
-Flags (default command):
+Legacy flags (default command, still supported):
   --config string   path to the TOML configuration file (default "server.toml")
-  --check           validate the configuration and exit
+  --check           validate the configuration and exit  (prefer "jul check")
   --version         print version and exit
 ```
+
+### `jul check`
+
+Performs a **full runtime preflight**: it validates structurally *and* dry-runs
+every component that could fail during serve/reload (WAF rule compilation, auth
+initialisation, compression encoder availability, plugin compile, etc.).  This
+is stronger than `jul lint`, which only checks schema and best-practice
+warnings.  Use `check` in CI before deploying, or locally when you want
+certainty that the binary you built can actually start with this config.
+
+```bash
+jul check -config server.toml
+jul check -config server.toml -json   # machine-readable output
+```
+
+Exit codes: `0` ok, `1` validation or runtime error.  The legacy `--check` flag
+on the default command (`jul -check`) is equivalent but `jul check` is the
+canonical subcommand.
 
 ### `jul lint`
 
@@ -403,4 +395,3 @@ Key sections covered there:
 - [HTTP/3](docs/configuration.md#http3-quic) — QUIC listener
 - [`[plugins]`](docs/configuration.md#plugins) — WASM plugins
 - [`[[stream]]`](docs/configuration.md#stream) — L4 TCP/UDP proxy
-```

@@ -21,8 +21,6 @@ func newForwardAuth(url string, responseHeaders []string, client *http.Client) *
 	if client == nil {
 		client = &http.Client{
 			Timeout: 10 * time.Second,
-			// Do not follow redirects: a 3xx from the auth service is a
-			// decision, not a hop to chase.
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -61,7 +59,11 @@ func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResul
 		return forwardResult{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := readLimited(resp.Body, 64<<10)
+	body, bodyErr := readLimited(resp.Body, 64<<10)
+	if bodyErr != nil {
+		// Do not relay a partially-read body to the client.
+		body = nil
+	}
 
 	res := forwardResult{
 		statusCode: resp.StatusCode,
