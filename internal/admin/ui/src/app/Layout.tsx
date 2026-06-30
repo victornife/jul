@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useTheme, type ThemePreference } from "@/lib/theme.ts";
 import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.ts";
 import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
 import { openCommandPalette } from "@/app/commandPaletteBus.ts";
+import { fetchOverview } from "@/api/client.ts";
 
 type NavLayout = "top" | "side";
 
@@ -342,6 +344,14 @@ export function Layout() {
   const [layout, setLayout] = usePersistentState<NavLayout>("nav_layout", "top", isNavLayout);
   const [collapsed, setCollapsed] = usePersistentState<boolean>("nav_collapsed", false, isBool);
 
+  const { data: overview } = useQuery({
+    queryKey: ["console-version"],
+    queryFn: fetchOverview,
+    refetchInterval: 30000, // version changes rarely, poll every 30s
+  });
+  const product = overview?.product ?? "Jul.IA Console";
+  const version = overview?.version ?? "";
+
   const controlsTop = (
     <div className="flex items-center gap-2">
       <ConsoleHealthBadge />
@@ -387,8 +397,8 @@ export function Layout() {
               <span className="mx-auto font-bold tracking-wide text-jul-accent">J</span>
             ) : (
               <div className="flex items-baseline gap-2">
-                <span className="font-bold tracking-wide text-jul-accent">Jul.IA</span>
-                <span className="text-xs text-jul-muted">v2</span>
+                <span className="font-bold tracking-wide text-jul-accent">{product}</span>
+                {version && <span className="text-xs text-jul-muted">v{version}</span>}
               </div>
             )}
             <button
@@ -417,8 +427,8 @@ export function Layout() {
   return (
     <div className="flex h-screen flex-col bg-jul-bg text-jul-text">
       <header className="flex items-center gap-4 border-b border-jul-border bg-jul-surface px-6 py-3">
-        <span className="font-bold tracking-wide text-jul-accent">Jul.IA</span>
-        <span className="text-xs text-jul-muted">Console v2</span>
+        <span className="font-bold tracking-wide text-jul-accent">{product}</span>
+        {version && <span className="text-xs text-jul-muted">v{version}</span>}
         <div className="ml-auto flex items-center gap-4">
           <NavLinks pathname={loc.pathname} orientation="row" />
           {controlsTop}

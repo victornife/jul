@@ -254,11 +254,6 @@ export function OverviewPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-baseline gap-3">
-        <h1 className="text-xl font-semibold">{data.product}</h1>
-        {data.version && <span className="text-xs text-jul-muted">v{data.version}</span>}
-      </div>
-
       {/* L4 stream-proxy reload failure (Fix2): stream listeners reload
           asynchronously after the HTTP swap, so a rejected stream config cannot
           surface in the apply response. The prior listeners keep serving, so
