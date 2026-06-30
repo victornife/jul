@@ -59,6 +59,10 @@ type LocationProjection struct {
 	// Warnings flags likely-misconfigurations the operator should see before
 	// editing (e.g. cache toggled on but the global cache is disabled).
 	Warnings []string `json:"warnings,omitempty"`
+	// Transcode is the full transcoding configuration when Action is
+	// "grpc_transcode". It seeds the quick-edit form and the "Edit in
+	// designer" deep-edit flow.
+	Transcode *TranscodeProjection `json:"transcode,omitempty"`
 }
 
 // LocationAuthState summarises a location's access-control rule for the guided
@@ -371,6 +375,18 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			case loc.GRPCTranscode != nil:
 				lp.Action = "grpc_transcode"
 				lp.Target = loc.ProxyPass
+				tc := &TranscodeProjection{
+					DescriptorSet:      loc.GRPCTranscode.DescriptorSet,
+					UseReflection:      loc.GRPCTranscode.UseReflection,
+					TLS:                loc.GRPCTranscode.TLS,
+					PreserveProtoNames: loc.GRPCTranscode.PreserveNames,
+					Streaming:          loc.GRPCTranscode.Streaming,
+					StreamMode:         loc.GRPCTranscode.StreamMode,
+				}
+				if loc.GRPCTranscode.MaxMessageSize != 0 {
+					tc.MaxMessageSize = loc.GRPCTranscode.MaxMessageSize.String()
+				}
+				lp.Transcode = tc
 			case loc.GRPC:
 				lp.Action = "grpc"
 				lp.Target = loc.ProxyPass
@@ -845,4 +861,17 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// TranscodeProjection exposes the fields of a grpc_transcode location so the
+// console can offer quick edits for target/descriptor/options and seed the
+// full designer when the operator chooses deep editing.
+type TranscodeProjection struct {
+	DescriptorSet      string `json:"descriptor_set"`
+	UseReflection      bool   `json:"use_reflection"`
+	TLS                bool   `json:"tls"`
+	PreserveProtoNames bool   `json:"preserve_proto_field_names"`
+	Streaming          bool   `json:"streaming"`
+	StreamMode         string `json:"stream_mode,omitempty"`
+	MaxMessageSize     string `json:"max_message_size,omitempty"`
 }

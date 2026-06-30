@@ -324,6 +324,17 @@ export const LocationAuthStateSchema = z.object({
 });
 export type LocationAuthState = z.infer<typeof LocationAuthStateSchema>;
 
+export const TranscodeProjectionSchema = z.object({
+  descriptor_set: z.string().optional(),
+  use_reflection: z.boolean().optional(),
+  tls: z.boolean().optional(),
+  preserve_proto_field_names: z.boolean().optional(),
+  streaming: z.boolean().optional(),
+  stream_mode: z.string().optional(),
+  max_message_size: z.string().optional(),
+});
+export type TranscodeProjection = z.infer<typeof TranscodeProjectionSchema>;
+
 export const LocationProjectionSchema = z.object({
   index: z.number().default(0),
   match: z.string(),
@@ -345,6 +356,7 @@ export const LocationProjectionSchema = z.object({
   require_client_cert: z.boolean().default(false),
   upstream: z.string().optional(),
   waf: LocationWAFStateSchema.optional(),
+  transcode: TranscodeProjectionSchema.optional(),
   warnings: z.array(z.string()).optional(),
 });
 export type LocationProjection = z.infer<typeof LocationProjectionSchema>;
@@ -874,6 +886,20 @@ export type LocationActionPatch =
   | { kind: "return"; status: number }
   | { kind: "deny" };
 
+// TranscodePatch is the location_set_transcode payload — the quick-edit knobs
+// for a grpc_transcode route. The backend replaces the location's
+// GRPCTranscode block wholesale (and clears any conflicting action fields).
+export type TranscodePatch = {
+  target: string;
+  descriptor_path?: string;
+  use_reflection?: boolean;
+  tls?: boolean;
+  preserve_names?: boolean;
+  streaming?: boolean;
+  stream_mode?: "ndjson" | "sse";
+  max_message_size?: string;
+};
+
 // PluginDefPatch is the plugin_set payload — the guided editor's view of a
 // single [plugins.NAME] declaration. The module is identified by source ("path"
 // sets a new file; "inline" keeps an existing inline plugin's bytes, which the
@@ -931,6 +957,7 @@ export type ConfigPatch =
   | ({ op: "location_clear_auth" } & RouteTarget)
   | ({ op: "location_set_match"; match_set: LocationMatchPatch } & RouteTarget)
   | ({ op: "location_set_action"; action: LocationActionPatch } & RouteTarget)
+  | ({ op: "location_set_transcode"; transcode: TranscodePatch } & RouteTarget)
   | ({ op: "location_attach_plugin"; plugin_name: string } & RouteTarget)
   | ({ op: "location_detach_plugin"; plugin_name: string } & RouteTarget)
   | { op: "plugin_set"; plugin_name: string; plugin: PluginDefPatch }

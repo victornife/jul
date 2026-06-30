@@ -104,6 +104,12 @@ func (s Size) MarshalText() ([]byte, error) {
 	return []byte(strconv.FormatInt(n, 10)), nil
 }
 
+// String returns a human-readable size string (e.g. "64m") or "0" for zero.
+func (s Size) String() string {
+	b, _ := s.MarshalText()
+	return string(b)
+}
+
 // UnmarshalText lets an upstream server be written as a bare address string
 // ("127.0.0.1:3000") with an optional weight suffix
 // ("127.0.0.1:3000 weight=5"). Using TextUnmarshaler keeps decoding on the

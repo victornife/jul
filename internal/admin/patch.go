@@ -87,6 +87,10 @@ type patchRequest struct {
 	// redirect/return/deny). The op clears every other action field first.
 	Action *locationActionPayload `json:"action,omitempty"`
 
+	// location_set_transcode payload: the route's grpc_transcode settings.
+	// Only relevant when Op == "location_set_transcode".
+	Transcode *transcodePatch `json:"transcode,omitempty"`
+
 	// Plugin target. PluginName is the [plugins.NAME] key for plugin_set /
 	// plugin_remove, and the plugin to attach/detach for
 	// location_attach_plugin / location_detach_plugin (the location is
@@ -129,6 +133,21 @@ type locationActionPayload struct {
 	Kind   string `json:"kind"`             // proxy | static | redirect | return | deny
 	Target string `json:"target,omitempty"` // proxy_pass / root / redirect URL
 	Status int    `json:"status,omitempty"` // return status, or optional redirect code
+}
+
+// transcodePatch carries the grpc_transcode fields the two-tier editor mutates
+// in-place (location_set_transcode). It does NOT carry the full descriptor —
+// that is uploaded separately — only the configuration knobs that the
+// RouteDetail quick-edit form and the designer both surface.
+type transcodePatch struct {
+	Target         string `json:"target,omitempty"`
+	DescriptorPath string `json:"descriptor_path,omitempty"`
+	UseReflection  bool   `json:"use_reflection,omitempty"`
+	TLS            bool   `json:"tls,omitempty"`
+	PreserveNames  bool   `json:"preserve_names,omitempty"`
+	Streaming      bool   `json:"streaming,omitempty"`
+	StreamMode     string `json:"stream_mode,omitempty"`
+	MaxMessageSize string `json:"max_message_size,omitempty"` // size string, e.g. "4m"
 }
 
 // locationWAF carries the per-location WAF override fields the guided editor
@@ -459,6 +478,63 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("route %s%s action changed to %s", req.Listen, req.Path, kind), nil
+
+	case "location_set_transcode":
+		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		if req.Transcode == nil {
+			return "", fmt.Errorf("location_set_transcode: transcode payload is required")
+		}
+		target := strings.TrimSpace(req.Transcode.Target)
+		if target == "" {
+			return "", fmt.Errorf("location_set_transcode: target is required")
+		}
+		// At least one descriptor source must be configured.
+		hasDescriptor := strings.TrimSpace(req.Transcode.DescriptorPath) != ""
+		hasReflection := req.Transcode.UseReflection
+		if !hasDescriptor && !hasReflection {
+			return "", fmt.Errorf("location_set_transcode: set exactly one of descriptor_path or use_reflection")
+		}
+		if hasDescriptor && hasReflection {
+			return "", fmt.Errorf("location_set_transcode: descriptor_path and use_reflection are mutually exclusive")
+		}
+		var maxSize config.Size
+		if req.Transcode.MaxMessageSize != "" {
+			if err := maxSize.UnmarshalText([]byte(req.Transcode.MaxMessageSize)); err != nil {
+				return "", fmt.Errorf("location_set_transcode: max_message_size: %w", err)
+			}
+		}
+		streamMode := strings.ToLower(strings.TrimSpace(req.Transcode.StreamMode))
+		if streamMode == "" {
+			streamMode = "ndjson"
+		}
+		switch streamMode {
+		case "ndjson", "sse":
+		default:
+			return "", fmt.Errorf("location_set_transcode: stream_mode must be %q or %q", "ndjson", "sse")
+		}
+		// Clear all other action discriminators so the location becomes a
+		// clean grpc_transcode route with no orphaned fields.
+		loc.Root, loc.Index, loc.TryFiles = "", nil, nil
+		loc.DirectoryListing, loc.AllowHidden, loc.CacheControl = false, false, ""
+		loc.ProxyConnectTimeout, loc.ProxyReadTimeout, loc.ProxySendTimeout = 0, 0, 0
+		loc.FastCGIPass, loc.FastCGIParams, loc.UWSGIPass = "", nil, ""
+		loc.Redirect, loc.Return, loc.Deny = "", 0, false
+		loc.GRPC, loc.Plugin = false, ""
+		loc.ProxyPass = target
+		loc.GRPCTranscode = &config.GRPCTranscodeConfig{
+			Target:         target,
+			DescriptorSet:  strings.TrimSpace(req.Transcode.DescriptorPath),
+			UseReflection:  hasReflection,
+			TLS:            req.Transcode.TLS,
+			PreserveNames:  req.Transcode.PreserveNames,
+			Streaming:      req.Transcode.Streaming,
+			StreamMode:     streamMode,
+			MaxMessageSize: maxSize,
+		}
+		return fmt.Sprintf("route %s%s transcode settings updated", req.Listen, req.Path), nil
 
 	case "upstream_add_backend":
 		up, err := findUpstream(c, req.Upstream)

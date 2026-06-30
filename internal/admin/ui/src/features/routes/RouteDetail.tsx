@@ -17,6 +17,7 @@ import {
   RouteRenameEditor,
 } from "@/features/routes/RouteEditors.tsx";
 import { LocationRateLimitEditor } from "@/features/routes/LocationRateLimitEditor.tsx";
+import { TranscodeQuickEdit } from "@/features/routes/TranscodeQuickEdit.tsx";
 import { isEditableAction } from "@/lib/routeEdit.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
@@ -343,6 +344,10 @@ function QuickEdits({
         </button>
       </div>
 
+      {loc.action === "grpc_transcode" && (
+        <TranscodeQuickEdit route={route} loc={loc} />
+      )}
+
       {error && <p className="text-xs text-jul-danger">{error}</p>}
 
       {wafEditing && (
@@ -551,7 +556,14 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
             >
               Transcode
             </Link>{" "}
-            panel.
+            panel, or{" "}
+            <Link
+              to={`/transcode?edit=1&listen=${encodeURIComponent(route.listen)}&server_names=${encodeURIComponent((route.server_names ?? []).join(","))}&match_type=${encodeURIComponent(loc.type)}&path=${encodeURIComponent(loc.match)}`}
+              className="font-medium text-jul-accent underline hover:no-underline"
+            >
+              edit this route in the designer
+            </Link>{" "}
+            for a deeper configuration (re-upload descriptor, pick methods, etc.).
           </p>
         )}
 

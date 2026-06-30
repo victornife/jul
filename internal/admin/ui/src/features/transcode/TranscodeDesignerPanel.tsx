@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader, Button, Loading } from "@/components/ui.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
@@ -78,6 +78,7 @@ function Section({
 
 export function TranscodeDesignerPanel() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const routesQuery = useQuery({ queryKey: ["routes"], queryFn: fetchRoutes });
 
   const [listen, setListen] = useState(":8080");
@@ -98,6 +99,19 @@ export function TranscodeDesignerPanel() {
   const [streamMode, setStreamMode] = useState<"ndjson" | "sse">("ndjson");
 
   const [editorError, setEditorError] = useState<string | null>(null);
+
+  // Pre-fill form from URL params when the operator arrives via "Edit in designer".
+  useEffect(() => {
+    if (searchParams.get("edit") !== "1") return;
+    const l = searchParams.get("listen");
+    if (l) setListen(l);
+    const sn = searchParams.get("server_names");
+    if (sn) setServerNames(sn);
+    const mt = searchParams.get("match_type");
+    if (mt === "prefix" || mt === "exact" || mt === "regex") setMatchType(mt);
+    const p = searchParams.get("path");
+    if (p) setPath(p);
+  }, [searchParams]);
 
   const servers = routesQuery.data ?? [];
   const serverOptions = Array.from(new Map(servers.map((r) => [r.listen, r])).values());
@@ -157,6 +171,14 @@ export function TranscodeDesignerPanel() {
       setEditorError("Could not load the current configuration to merge this route.");
     }
   }
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(searchParams);
+    const target = urlParams.get("target");
+    if (target) {
+      setTarget(target);
+    }
+  }, [searchParams]);
 
   if (routesQuery.isLoading) return <Loading />;
   if (routesQuery.isError) return <PanelError error={routesQuery.error} resource="routes" />;
