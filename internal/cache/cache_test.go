@@ -217,6 +217,78 @@ func TestHandlerStaleWhileRevalidate(t *testing.T) {
 	}
 }
 
+func TestHandlerStaleIfError(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{
+		MemoryMaxSize: config.Size(1 << 20),
+		StaleIfError:  config.Duration(5 * time.Minute),
+	})
+
+	upstreamCalls := 0
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.Header().Set("Cache-Control", "max-age=60")
+		if upstreamCalls == 1 {
+			// First upstream hit is the background revalidation; make it fail.
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("error"))
+			return
+		}
+		_, _ = w.Write([]byte("fresh"))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
+	now := time.Now()
+	// Seed an expired entry with a short stale-while-revalidate window.
+	c.set(key(req), &Entry{
+		Status:     200,
+		Header:     http.Header{"Cache-Control": {"max-age=60"}},
+		Body:       []byte("stale"),
+		CreatedAt:  now.Add(-time.Minute),
+		ExpiresAt:  now.Add(-time.Second),          // expired
+		StaleUntil: now.Add(50 * time.Millisecond), // within grace now
+	})
+
+	// First request serves stale and triggers background revalidation.
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, req)
+	if g := rec1.Header().Get("X-Cache"); g != "STALE" {
+		t.Fatalf("first: X-Cache=%q, want STALE", g)
+	}
+	if rec1.Body.String() != "stale" {
+		t.Fatalf("first: body=%q, want stale", rec1.Body.String())
+	}
+
+	// Spin until the background revalidation runs.
+	for i := 0; i < 200; i++ {
+		time.Sleep(10 * time.Millisecond)
+		if upstreamCalls >= 1 {
+			break
+		}
+	}
+	if upstreamCalls < 1 {
+		t.Fatal("revalidation did not run")
+	}
+
+	// Verify the 503 extended StaleUntil by sif so the entry is still servable.
+	e, ok := c.get(key(req))
+	if !ok {
+		t.Fatal("entry missing after revalidation failure")
+	}
+	if !e.ServableStale(time.Now()) {
+		t.Fatalf("StaleUntil %v is not in the future (stale-if-error extension did not apply)", e.StaleUntil)
+	}
+
+	// A second request must still be served stale, not a cache miss.
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req)
+	if g := rec2.Header().Get("X-Cache"); g != "STALE" {
+		t.Fatalf("second: X-Cache=%q, want STALE (stale-if-error should keep it servable)", g)
+	}
+	if rec2.Body.String() != "stale" {
+		t.Fatalf("second: body=%q, want stale", rec2.Body.String())
+	}
+}
+
 func TestFreshnessRules(t *testing.T) {
 	c := &Cache{defaultTTL: 30 * time.Second}
 	now := time.Now()

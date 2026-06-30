@@ -118,7 +118,7 @@ the HP-m\* micro-fixes register). Nothing here has shipped.
 | HP-04 | Pre-commit hooks / local gate parity | A repo-managed hook running the CI gate's fast path locally (fmt/vet/changed-pkg test + console lint/typecheck), full test + drift/size on push. | Red builds caught before they reach `main` | M |
 | HP-05 | Container & process-supervision hardening | Base-image digest pinning (Dependabot-maintained) + a `jul healthcheck` self target so a shell-less distroless image can declare a `HEALTHCHECK` (systemd resource/crash-loop limits already landed). | Self-healing containers + reproducible images | M |
 | HP-06 | Structured-config parity patch-ops | Create-ops for servers/routes/upstream pools + structured global-table ops (`[global]`/`[cache]`/`[compression]`/global `[rate_limit]`/`[admin]`/access-log), so the console need not drop to raw TOML (the raw editor stays the universal fallback). | Full structured editing parity with the raw editor | L |
-| HP-07 | SSRF allow-list hardening | Optional, default-off egress allow-list (host/CIDR) for config-driven JWKS/forward-auth/ACME/discovery fetches. Defense-in-depth — config is trusted per [SECURITY.md](../SECURITY.md), so this bounds operator-error blast radius, not a request-driven hole. | Limits outbound reach even with a mistaken/compromised config | M |
+| HP-07 | SSRF allow-list hardening | Optional, default-off egress allow-list (host/CIDR) for config-driven JWKS/forward-auth/ACME/discovery fetches. Defense-in-depth — config is trusted per [SECURITY.md](../../SECURITY.md), so this bounds operator-error blast radius, not a request-driven hole. | Limits outbound reach even with a mistaken/compromised config | M |
 
 ---
 

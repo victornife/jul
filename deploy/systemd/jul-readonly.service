@@ -19,7 +19,7 @@
 
 [Unit]
 Description=Jul NGINX-inspired HTTP edge server (read-only config)
-Documentation=https://example.invalid/jul
+Documentation=https://github.com/victornife/jul
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60

@@ -1,6 +1,6 @@
 [Unit]
 Description=Jul NGINX-inspired HTTP edge server
-Documentation=https://example.invalid/jul
+Documentation=https://github.com/victornife/jul
 After=network-online.target
 Wants=network-online.target
 # Crash-loop safeguard: if the unit restarts more than StartLimitBurst times

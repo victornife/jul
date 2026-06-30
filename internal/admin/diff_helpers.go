@@ -558,6 +558,9 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	if b.StaleWhileRevalidate != a.StaleWhileRevalidate {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.StaleWhileRevalidate), After: durStr(a.StaleWhileRevalidate), Detail: "Change cache stale-while-revalidate window"}, "cache swr")
 	}
+	if b.StaleIfError != a.StaleIfError {
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.StaleIfError), After: durStr(a.StaleIfError), Detail: "Change cache stale-if-error window"}, "cache sif")
+	}
 }
 
 // diffGlobalCompression compares the [compression] block.

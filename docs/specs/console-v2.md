@@ -224,7 +224,7 @@ and a **size gate** (~250 KB gz initial route).
 > **Status (2026-06-23, v1.9):** all six phases are complete. The Phase 5 cutover
 > shipped — the v2 SPA is the default admin UI and the hand-written v1 is retired
 > ([ga-push.md](../ga-push.md)) — and the console is **GA — soak pending**
-> ([status.md](status.md)). Per-feature panels now evolve continuously
+> ([status.md](../status.md)). Per-feature panels now evolve continuously
 > ([ADR 0004](../adr/0004-console-ui-invariants.md)); see the
 > [capability matrix](../console.md#capability-matrix).
 ## Excluded for now (with reasons)

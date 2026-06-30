@@ -22,7 +22,10 @@ type Cache struct {
 
 	defaultTTL time.Duration
 	swr        time.Duration
-	maxEntry   int64
+	// sif is stale-if-error: extra grace period to keep serving stale when
+	// a background revalidation encounters an upstream error.
+	sif      time.Duration
+	maxEntry int64
 
 	reMu     sync.Mutex
 	inflight map[string]struct{} // keys with an in-flight background revalidation
@@ -48,6 +51,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 	c := &Cache{
 		defaultTTL: cfg.DefaultTTL.Std(),
 		swr:        cfg.StaleWhileRevalidate.Std(),
+		sif:        cfg.StaleIfError.Std(),
 		maxEntry:   cfg.MemoryMaxSize.Bytes(),
 		inflight:   make(map[string]struct{}),
 	}
@@ -267,6 +271,15 @@ func (c *Cache) revalidate(effKey string, orig *http.Request, next http.Handler,
 			refreshed.ExpiresAt = now.Add(ttl)
 			refreshed.StaleUntil = now.Add(ttl + swr)
 			c.set(effKey, &refreshed)
+		}
+		return
+	}
+	if rec.status >= 500 {
+		// Upstream error during revalidation: extend stale-if-error window
+		// so the stale entry remains servable while the backend recovers.
+		if c.sif > 0 {
+			stale.StaleUntil = now.Add(c.sif)
+			c.set(effKey, stale)
 		}
 		return
 	}

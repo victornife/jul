@@ -723,6 +723,11 @@ type CacheConfig struct {
 	// StaleWhileRevalidate serves stale entries for this grace period after
 	// expiry while an async revalidation refreshes them.
 	StaleWhileRevalidate Duration `toml:"stale_while_revalidate"`
+	// StaleIfError extends the stale-serving window when a background
+	// revalidation encounters an upstream error (5xx or timeout). The entry
+	// remains servable for this additional duration from the point of failure,
+	// shielding clients from backend outages.
+	StaleIfError Duration `toml:"stale_if_error"`
 }
 
 // AdminConfig configures the separate admin/observability listener. It binds

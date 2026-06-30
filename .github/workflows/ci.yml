@@ -342,6 +342,19 @@ jobs:
           name: console-build-log-${{ matrix.profile }}
           path: build.log
 
+  docs-check:
+    name: docs-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install tomli (Python < 3.11 compat)
+        run: pip install tomli
+      - name: validate docs
+        run: python scripts/docs-check.py
+
   vulncheck:
     name: govulncheck
     runs-on: ubuntu-latest

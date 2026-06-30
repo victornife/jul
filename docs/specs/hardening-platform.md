@@ -110,7 +110,7 @@ token (`server.go`); there is one implicit super-user. The
 
 - Principals with roles: at minimum `viewer` (read-only projections), `operator`
   (apply config, no admin-surface changes), `admin` (everything incl. the
-  self-lockout-guarded admin edits — see [SECURITY.md](../SECURITY.md)).
+  self-lockout-guarded admin edits — see [SECURITY.md](../../SECURITY.md)).
 - Scoped, individually revocable tokens (hashed at rest); per-token rate limits.
 - Enforce at the API boundary (function-level + object-level checks), not in the
   UI. The UI hides what a role cannot do; the server is the source of truth.

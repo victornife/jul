@@ -51,6 +51,7 @@ disk_path              = "/var/cache/jul/http"   # enables the disk tier
 disk_max_size          = "4GB"
 default_ttl            = "5m"
 stale_while_revalidate = "30s"
+stale_if_error         = "300s"   # keep serving stale on upstream 5xx
 ```
 
 Per-location opt-in is still required:
@@ -89,6 +90,26 @@ while a fresh copy is fetched in the background, trading a small staleness windo
 for lower tail latency. A burst of concurrent stale hits triggers exactly one
 background revalidation per variant, so the cache shields the origin from a
 thundering herd.
+
+## Stale-if-error
+
+`stale_if_error` extends the stale-serving window when a background
+revalidation encounters an upstream error (HTTP 5xx or timeout). If the
+revalidation fails, the cached entry remains servable for the configured
+`stale_if_error` duration from the point of failure, protecting clients from
+backend outages. Once the error window expires or a subsequent revalidation
+succeeds, normal freshness rules apply.
+
+Example — tolerate a 5-minute backend outage:
+
+```toml
+[cache]
+stale_while_revalidate = "60s"
+stale_if_error         = "300s"
+```
+
+> `stale_if_error` only applies when a stale entry exists and a background
+> revalidation is attempted. It does not create cache entries on its own.
 
 ## On-disk format
 

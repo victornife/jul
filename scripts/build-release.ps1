@@ -16,10 +16,17 @@
 
 .PARAMETER Targets
     Which os/arch pairs to build. Defaults to the common desktop/server set.
+
+.PARAMETER Profile
+    Build profile: `lean` (default, no optional features) or `full` (all opt-in
+    features compiled in). Full adds tags for brotli, zstd, acme, console, otel,
+    grpc, http3, importer, wasmplugins, stream, consul, kubernetes, and waf.
 #>
 [CmdletBinding()]
 param(
     [string]$Version = "0.1.0-dev",
+    [ValidateSet("lean", "full")]
+    [string]$Profile = "lean",
     [string[]]$Targets = @(
         "windows/amd64",
         "windows/arm64",
@@ -32,6 +39,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Build-tag mapping for the full profile.
+$fullTags = "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+
 # Resolve the repository root (parent of this script's folder).
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
@@ -41,23 +51,24 @@ try {
     New-Item -ItemType Directory -Path $distRoot | Out-Null
 
     $ldflags = "-s -w -X main.version=$Version"
+    $buildTags = if ($Profile -eq "full") { "-tags `"$fullTags`"" } else { "" }
 
     foreach ($target in $Targets) {
         $os, $arch = $target.Split("/")
-        $name = "jul-$Version-$os-$arch"
+        $name = "jul-$Version-$os-$arch-$Profile"
         $stage = Join-Path $distRoot $name
         New-Item -ItemType Directory -Path $stage | Out-Null
 
         $binName = if ($os -eq "windows") { "jul.exe" } else { "jul" }
         $binPath = Join-Path $stage $binName
 
-        Write-Host "Building $target -> $binPath" -ForegroundColor Cyan
+        Write-Host "Building $target ($Profile) -> $binPath" -ForegroundColor Cyan
 
         # CGO is disabled so the binary is fully static and portable.
         $env:GOOS = $os
         $env:GOARCH = $arch
         $env:CGO_ENABLED = "0"
-        go build -ldflags $ldflags -o $binPath ./cmd/jul
+        go build $buildTags -ldflags $ldflags -o $binPath ./cmd/jul
         if ($LASTEXITCODE -ne 0) { throw "go build failed for $target" }
 
         # Bundle a sample config and the matching deploy assets.
