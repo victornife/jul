@@ -181,8 +181,8 @@ export function HistoryPanel() {
     return <PanelError error={error} resource="the history" onRetry={() => void refetch()} />;
 
   return (
-    <div className="space-y-1">
-      <div>
+    <div className="space-y-6">
+      <div className="space-y-1">
         <h1 className="text-xl font-semibold">Config History</h1>
         <p className="max-w-3xl text-sm text-jul-muted">
           Saved configuration snapshots with diffs, attribution, and one-click rollback.

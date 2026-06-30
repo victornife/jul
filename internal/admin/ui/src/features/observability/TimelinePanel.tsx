@@ -67,7 +67,7 @@ export function TimelinePanel() {
   const categories = Array.from(new Set(events.map((e) => e.category)));
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">Timeline</h1>
         <p className="max-w-3xl text-sm text-jul-muted">
