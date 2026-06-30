@@ -182,7 +182,12 @@ export function HistoryPanel() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Config History</h1>
+      <div>
+        <h1 className="text-xl font-semibold">Config History</h1>
+        <p className="text-sm text-jul-muted">
+          Saved configuration snapshots with diffs, attribution, and one-click rollback.
+        </p>
+      </div>
 
       {viewing && (
         <SnapshotViewer

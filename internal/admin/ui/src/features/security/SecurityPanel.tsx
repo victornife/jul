@@ -79,7 +79,12 @@ export function SecurityPanel() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Security</h1>
+      <div>
+        <h1 className="text-xl font-semibold">Security</h1>
+        <p className="text-sm text-jul-muted">
+          Authentication, mTLS, and WAF posture across all listeners and locations.
+        </p>
+      </div>
       {!data.waf_compiled && (
         <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-text">
           This build does not include the web application firewall (the <code>waf</code> tag). You

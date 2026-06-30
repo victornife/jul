@@ -533,9 +533,14 @@ export function PluginsPanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold">Plugins</h1>
-          <MaturityBadge level="beta" />
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">Plugins</h1>
+            <MaturityBadge level="beta" />
+          </div>
+          <p className="text-sm text-jul-muted">
+            WASM plugins attached to routes for custom request/response processing.
+          </p>
         </div>
         <button
           type="button"

@@ -221,7 +221,12 @@ export function ConfigPanel() {
   return (
     <div className="flex h-full flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">Configuration</h1>
+        <div>
+          <h1 className="text-xl font-semibold">Configuration</h1>
+          <p className="text-sm text-jul-muted">
+            Live TOML editor with validation, diff previews, and atomic patch support.
+          </p>
+        </div>
         {data.path && <span className="font-mono text-xs text-jul-muted">{data.path}</span>}
         <ValidationPill state={pill} />
         {dirty && <span className="text-xs text-jul-warning">● unsaved changes</span>}

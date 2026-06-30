@@ -53,11 +53,11 @@ export function AuditPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+      <div>
         <h1 className="text-xl font-semibold">Audit log</h1>
-        <span className="text-sm text-jul-muted">
+        <p className="text-sm text-jul-muted">
           Attributable, append-only record of config and security events. Secrets are never stored.
-        </span>
+        </p>
       </div>
 
       <div className="flex flex-wrap items-end gap-3">

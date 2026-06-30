@@ -254,6 +254,13 @@ export function OverviewPanel() {
 
   return (
     <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">Overview</h1>
+        <p className="text-sm text-jul-muted">
+          Real-time health, traffic, and feature-status snapshot of this Jul.IA node.
+        </p>
+      </div>
+
       {/* L4 stream-proxy reload failure (Fix2): stream listeners reload
           asynchronously after the HTTP swap, so a rejected stream config cannot
           surface in the apply response. The prior listeners keep serving, so
