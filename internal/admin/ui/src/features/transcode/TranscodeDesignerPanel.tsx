@@ -243,7 +243,9 @@ export function TranscodeDesignerPanel() {
                   if (f) void handleUpload(f);
                 }}
               />
-              <Button variant="secondary">Upload .pb</Button>
+              <span className="rounded-md border border-jul-border px-3 py-1.5 text-sm font-medium text-jul-text transition-[filter,background-color,color] hover:bg-jul-bg focus:outline-none focus:ring-2 focus:ring-jul-accent">
+                Upload .pb
+              </span>
             </label>
             {uploading && <span className="text-sm text-jul-muted">Parsing…</span>}
             {uploadError && (
