@@ -1,5 +1,9 @@
 # Jul.IA
 
+<p align="center">
+  <img src="docs/assets/logo.png" alt="Jul.IA logo" width="320" />
+</p>
+
 [![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](https://github.com/victornife/jul)
 [![CI](https://github.com/victornife/jul/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/victornife/jul/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://github.com/victornife/jul/blob/main/go.mod)
