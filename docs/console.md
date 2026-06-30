@@ -467,6 +467,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | Server limits / timeouts | Structured-edit | Routes |
 | Plugins (WASM) | Structured-edit + .wasm upload (global defs: path/type/capabilities/limits/config; attach/detach middleware plugins per route; upload module via file picker; handler & server-level plugins stay raw-only) | Plugins |
 | L4 stream proxy | Guided-create · Structured-edit (listen, protocol, default backend, SNI routes, TLS passthrough, PROXY protocol, timeouts) | Streams |
+| gRPC-JSON transcoding | Guided-create (upload descriptor, inspect HTTP bindings, generate route) · Read-only for existing transcode routes; gRPC passthrough remains raw-only | Transcode, Routes |
 | Tracing / OpenTelemetry | Structured-edit (global guided editor: exporter / endpoint / sample ratio / service name / transport) | Traffic Controls, Status |
 | Access / error logs | Live tail (read-only) — bounded, privacy-preserving access-log stream | Operations |
 | Admin listener | No surface | — |
@@ -507,6 +508,7 @@ consumes the endpoints below.
 | Traffic Controls | `GET /api/traffic-controls` |
 | Plugins | `GET /api/plugins`, `POST /api/plugins/upload` |
 | Streams | `GET /api/streams` |
+| Transcode | `POST /api/transcode/descriptor-upload` |
 | Search & Discovery | `GET /api/search` |
 | Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history,logs}`, `GET /api/observability/logs/stream` (SSE), `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |
 | Audit | `GET /api/audit`, `GET /api/audit/export` |

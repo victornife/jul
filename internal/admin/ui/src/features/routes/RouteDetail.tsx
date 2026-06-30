@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
 import {
   patchConfig,
@@ -539,6 +539,20 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
               </p>
             ))}
           </div>
+        )}
+
+        {loc.action === "grpc_transcode" && (
+          <p className="rounded-md border border-jul-accent/30 bg-jul-accent/10 p-3 text-xs text-jul-text">
+            <span className="font-semibold">Tip:</span> You can design new gRPC transcoding routes
+            and inspect descriptor sets in the{" "}
+            <Link
+              to="/transcode"
+              className="font-medium text-jul-accent underline hover:no-underline"
+            >
+              Transcode
+            </Link>{" "}
+            panel.
+          </p>
         )}
 
         <div className="rounded-md border border-jul-border bg-jul-surface px-4 py-2">

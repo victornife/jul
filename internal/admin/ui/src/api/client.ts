@@ -1785,3 +1785,49 @@ export async function uploadPluginWasm(file: File): Promise<PluginUploadResponse
   }
   return PluginUploadResponseSchema.parse(await resp.json());
 }
+
+// ── Transcode designer (Phase 2) ────────────────────────────────────────────
+
+export const TranscodeMethodSchema = z.object({
+  full_name: z.string(),
+  service: z.string(),
+  method: z.string(),
+  http_method: z.string(),
+  path: z.string(),
+  body: z.string(),
+  streaming: z.boolean(),
+});
+export type TranscodeMethod = z.infer<typeof TranscodeMethodSchema>;
+
+export const TranscodeDescriptorResponseSchema = z.object({
+  methods: z.array(TranscodeMethodSchema),
+});
+export type TranscodeDescriptorResponse = z.infer<typeof TranscodeDescriptorResponseSchema>;
+
+/**
+ * Uploads a compiled protobuf FileDescriptorSet (.pb) to the admin backend
+ * and returns the list of methods with google.api.http annotations. Used by
+ * the Transcode designer to let operators pick which gRPC methods to expose
+ * via REST/JSON transcoding.
+ */
+export async function uploadTranscodeDescriptor(file: File): Promise<TranscodeDescriptorResponse> {
+  const form = new FormData();
+  form.append("descriptor", file);
+  const headers = new Headers();
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/transcode/descriptor-upload", {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  if (!resp.ok) {
+    let msg = "Descriptor upload failed";
+    try {
+      msg = await resp.text();
+    } catch { /* ignore */ }
+    throw new ApiError("/api/transcode/descriptor-upload", resp.status, msg);
+  }
+  const data = (await resp.json()) as unknown;
+  return TranscodeDescriptorResponseSchema.parse(data);
+}

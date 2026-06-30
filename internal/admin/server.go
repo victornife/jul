@@ -223,6 +223,11 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/traffic-controls", s.auth(http.HandlerFunc(s.handleTrafficControls)))
 	mux.Handle("/api/plugins", s.auth(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("/api/plugins/upload", s.auth(http.HandlerFunc(s.handlePluginUpload)))
+
+	// Console v2 transcode designer (Phase 2): descriptor upload so operators
+	// can inspect google.api.http annotations before generating a route.
+	mux.Handle("/api/transcode/descriptor-upload", s.auth(http.HandlerFunc(s.handleTranscodeDescriptorUpload)))
+
 	mux.Handle("/api/streams", s.auth(http.HandlerFunc(s.handleStreams)))
 	mux.Handle("/api/mtls", s.auth(http.HandlerFunc(s.handleMTLS)))
 	mux.Handle("/api/search", s.auth(http.HandlerFunc(s.handleSearch)))

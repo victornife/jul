@@ -21,11 +21,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [1.27.0] – 2026-07-01
 
 ### Added
-- Admin Console plugin manager supports direct `.wasm` upload (`POST /api/plugins/upload`). Validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, and broadcasts `plugin_uploaded` SSE event so the panel refreshes automatically. Configurable via `[admin]` keys `plugin_upload_dir` and `plugin_upload_max_size`.  
-- Admin config fields `plugin_upload_dir` and `plugin_upload_max_size` with defaults (`./jul-data/plugins`, `32` MB). Upload disabled when `plugin_upload_max_size <= 0`.
+- Admin Console **WASM plugin upload** (`POST /api/plugins/upload`): validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, broadcasts `plugin_uploaded` SSE event. Configurable via `[admin]` keys `plugin_upload_dir` and `plugin_upload_max_size` (defaults `./jul-data/plugins`, `32` MB). Upload disabled when `plugin_upload_max_size <= 0`.
+- Admin Console **gRPC route designer** (new Transcode panel): upload a compiled protobuf FileDescriptorSet (`.pb`), inspect `google.api.http` annotations in a selectable methods table, configure backend target / TLS / streaming / stream framing, and generate a `grpc_transcode` route that flows through Validate → Diff → Apply. Cross-linked from existing `grpc_transcode` route detail drawers.
+- Admin API endpoint `POST /api/transcode/descriptor-upload` parses uploaded descriptors and returns methods with HTTP bindings (no `grpc` build tag required on the admin side).
 
 ### Changed
-- `docs/status.md` and `docs/roadmap/README.md` corrected: Console continuous panels status footnote now explicitly lists live log tail (shipped), WASM plugin manager (shipped with upload pending), and gRPC route designer (planned).
+- `docs/status.md`: Console continuous panels footnote updated — live log tail ✅ shipped; WASM plugin manager ✅ shipped; gRPC route designer ✅ shipped.
+- `docs/roadmap/README.md`: Y2-09 row updated to reflect closed panel backlog (`.wasm` upload + gRPC designer both shipped); backlog is now empty.
+- `docs/console.md` capability matrix: added gRPC-JSON transcoding row (Guided-create); Plugins row updated to include `.wasm` upload; API endpoint map updated with `POST /api/transcode/descriptor-upload`.
 
 ## [1.26.0] – 2026-06-30
 

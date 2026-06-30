@@ -14,6 +14,7 @@ import { AuditPanel } from "@/features/security/AuditPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
 import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
 import { WizardPanel } from "@/features/wizard/WizardPanel.tsx";
+import { TranscodeDesignerPanel } from "@/features/transcode/TranscodeDesignerPanel.tsx";
 
 export function App() {
   return (
@@ -27,6 +28,7 @@ export function App() {
         <Route path="/traffic" element={<TrafficControlsPanel />} />
         <Route path="/plugins" element={<PluginsPanel />} />
         <Route path="/streams" element={<StreamsPanel />} />
+        <Route path="/transcode" element={<TranscodeDesignerPanel />} />
         <Route path="/search" element={<SearchPanel />} />
         <Route path="/operations" element={<OperationsPanel tab="diagnostics" />} />
         <Route path="/operations/events" element={<OperationsPanel tab="events" />} />

@@ -55,7 +55,8 @@ their parsing is delegated to the Go standard library (`crypto/x509`,
 opaque forward — none add a custom parser of their own to fuzz.
 
 > **Continuous panels status** (Y2-09): Live log tail ✅ shipped; WASM plugin
-> manager ✅ shipped (`.wasm` upload planned); gRPC route designer ⏳ planned.
+> manager ✅ shipped (`.wasm` upload shipped v1.27); gRPC route designer ✅ shipped
+> (visual designer with descriptor upload + method picker, v1.27).
 
 ## Beta (shipped; remaining GA gaps)
 
@@ -103,7 +104,7 @@ row, Y1-07 · Y2-09):
 | --- | --- | --- |
 | Live log tail | **Shipped** | Operations panel, SSE stream, filter/pause |
 | WASM plugin manager | **Shipped** | Plugins panel, structured CRUD + attach/detach; `.wasm` file upload remains planned |
-| gRPC route designer | **Planned** | Descriptor upload, `google.api.http` parse, visual mapping editor |
+| gRPC route designer | **Shipped** | Descriptor upload, `google.api.http` parse, visual mapping editor |
 
 Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 **AI-MVP** AI Gateway. Years 3–5 are the demand-gated vision horizon. See the
