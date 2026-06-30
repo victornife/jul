@@ -290,6 +290,14 @@ export function RoutesPanel() {
               Test route
             </Button>
             <Button
+              variant="secondary"
+              onClick={() => {
+                navigate("/transcode");
+              }}
+            >
+              New transcode
+            </Button>
+            <Button
               variant="primary"
               onClick={() => {
                 setCreating({});
