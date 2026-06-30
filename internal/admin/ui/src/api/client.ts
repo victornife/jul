@@ -1757,3 +1757,31 @@ export function cspNonce(): string {
   if (typeof document === "undefined") return "";
   return document.querySelector('meta[name="csp-nonce"]')?.getAttribute("content") ?? "";
 }
+
+export const PluginUploadResponseSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  size: z.number(),
+});
+export type PluginUploadResponse = z.infer<typeof PluginUploadResponseSchema>;
+
+export async function uploadPluginWasm(file: File): Promise<PluginUploadResponse> {
+  const form = new FormData();
+  form.append("wasm", file);
+  const token = authToken.get();
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/plugins/upload", { method: "POST", headers, body: form });
+  if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
+    let msg = `${String(resp.status)} ${resp.statusText}`;
+    try {
+      const body = (await resp.json()) as { error?: string };
+      if (body.error) msg = body.error;
+    } catch {
+      // ignore
+    }
+    throw new ApiError("/plugins/upload", resp.status, msg);
+  }
+  return PluginUploadResponseSchema.parse(await resp.json());
+}

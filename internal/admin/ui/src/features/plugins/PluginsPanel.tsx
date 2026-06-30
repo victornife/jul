@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, MaturityBadge } from "@/components/ui.tsx";
 import {
   fetchPlugins,
   fetchRoutes,
+  uploadPluginWasm,
   type PluginProjection,
   type PluginAttachment,
   type RouteTarget,
@@ -18,7 +19,6 @@ import {
   pluginDraftWarnings,
   type PluginDraft,
 } from "@/lib/plugins.ts";
-
 
 function TextField({
   label,
@@ -397,6 +397,104 @@ function AttachPluginDrawer({
   );
 }
 
+// UploadPluginDrawer lets an operator upload a compiled .wasm module directly
+// to the server. The uploaded file is stored server-side and its path can then
+// be referenced when declaring a plugin.
+function UploadPluginDrawer({
+  onClose,
+  onUploaded,
+}: {
+  readonly onClose: () => void;
+  readonly onUploaded: (path: string) => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function validateWasm(f: File): string | null {
+    // Quick size guard (the server enforces the real limit).
+    if (f.size > 32 * 1024 * 1024) {
+      return "File exceeds 32 MB.";
+    }
+    if (!f.name.endsWith(".wasm")) {
+      return "Expected a .wasm file.";
+    }
+    return null;
+  }
+
+  async function submit(): Promise<void> {
+    if (!file) return;
+    const validation = validateWasm(file);
+    if (validation) {
+      setErr(validation);
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const resp = await uploadPluginWasm(file);
+      onUploaded(resp.path);
+    } catch (e) {
+      if (e instanceof Error) {
+        setErr(e.message);
+      } else {
+        setErr("Upload failed");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Drawer
+      title="Upload .wasm"
+      subtitle="Choose a compiled WebAssembly module"
+      onClose={onClose}
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          {err && <span className="text-xs text-jul-danger">{err}</span>}
+          <button
+            type="button"
+            disabled={busy || !file}
+            onClick={submit}
+            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+          >
+            {busy ? "Uploading…" : "Upload"}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
+          The module is uploaded to the server and referenced by path in the
+          plugin declaration. After upload, you can create a new plugin that
+          points to the uploaded file.
+        </p>
+        <label className="block space-y-1">
+          <span className="text-sm font-medium text-jul-text">Module file</span>
+          <input
+            type="file"
+            accept=".wasm"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null;
+              setFile(f);
+              setErr(null);
+            }}
+            className="block w-full text-sm text-jul-text file:mr-4 file:rounded-md file:border-0 file:bg-jul-accent file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-jul-bg hover:file:brightness-110"
+          />
+          <span className="text-xs text-jul-muted">Accepted: .wasm, up to 32 MB.</span>
+        </label>
+        {file && (
+          <div className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
+            <span className="font-medium text-jul-text">{file.name}</span>
+            <span className="ml-2">{`${(file.size / 1024).toFixed(1)} KB`}</span>
+          </div>
+        )}
+      </div>
+    </Drawer>
+  );
+}
+
 function PluginCard({
   plugin,
   onEdit,
@@ -503,6 +601,7 @@ function PluginCard({
 
 export function PluginsPanel() {
   const { run: runDetach } = useRunPatch();
+  const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["plugins"],
     queryFn: fetchPlugins,
@@ -510,6 +609,7 @@ export function PluginsPanel() {
   const [editing, setEditing] = useState<PluginProjection | null>(null);
   const [creating, setCreating] = useState(false);
   const [attaching, setAttaching] = useState<PluginProjection | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   if (isLoading) return <Loading label="Loading plugins…" />;
   if (isError || !data)
@@ -543,15 +643,26 @@ export function PluginsPanel() {
             Build your own middleware or use third-party modules compiled to WebAssembly.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setCreating(true);
-          }}
-          className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
-        >
-          New plugin
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setUploading(true);
+            }}
+            className="rounded-md border border-jul-border px-3 py-1.5 text-sm font-medium text-jul-text hover:border-jul-accent"
+          >
+            Upload .wasm
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCreating(true);
+            }}
+            className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
+          >
+            New plugin
+          </button>
+        </div>
       </div>
 
       {!data.compiled && (
@@ -610,6 +721,18 @@ export function PluginsPanel() {
           plugin={attaching}
           onClose={() => {
             setAttaching(null);
+          }}
+        />
+      )}
+      {uploading && (
+        <UploadPluginDrawer
+          onClose={() => {
+            setUploading(false);
+          }}
+          onUploaded={(_path) => {
+            setUploading(false);
+            void queryClient.invalidateQueries({ queryKey: ["plugins"] });
+            setCreating(true);
           }}
         />
       )}

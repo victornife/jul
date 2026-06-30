@@ -47,8 +47,13 @@ stale_if_error = "5s"
 [admin]
 enabled = true
 listen = "127.0.0.1:9090"
-token = "change-me"
+token = "${env:JUL_ADMIN_TOKEN}"
 console = true
+history_dir = "./jul-data/config-history"
+history_keep = 50
+plugin_upload_dir = "./jul-data/plugins"
+plugin_upload_max_size = 32
+
 ```
 
 ---
@@ -585,6 +590,8 @@ token = "${env:JUL_ADMIN_TOKEN}"
 console = true
 history_dir = "./jul-data/config-history"
 history_keep = 50
+plugin_upload_dir = "./jul-data/plugins"
+plugin_upload_max_size = 32
 ```
 
 | Key | Type | Description |
@@ -595,6 +602,8 @@ history_keep = 50
 | `console` | bool | Serve the web console dashboard at the admin root (default `true`; requires `console` build tag) |
 | `history_dir` | string | Directory for configuration snapshots used by the console history/rollback panel |
 | `history_keep` | int | Maximum number of configuration snapshots to retain; older ones are pruned (default `50`) |
+| `plugin_upload_dir` | string | Directory for uploaded `.wasm` modules from the Console Plugins panel (default `./jul-data/plugins`) |
+| `plugin_upload_max_size` | int | Maximum `.wasm` upload size in megabytes; non-positive disables upload (default `32`) |
 
 ---
 

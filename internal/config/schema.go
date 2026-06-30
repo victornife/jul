@@ -786,6 +786,15 @@ type AdminConfig struct {
 	// Audit logs are intentionally not deleted by age (no MaxAge): retention is
 	// governed only by size and backup count so a quiet system keeps its trail.
 	AuditLogRotateKeep int `toml:"audit_log_rotate_keep"`
+
+	// PluginUploadDir is the directory where uploaded .wasm files are stored
+	// when operators use the Console Plugins panel upload feature. Defaults to
+	// "./jul-data/plugins" when admin is enabled. The directory is created if
+	// missing. Uploads are written atomically and set to owner-only (0o600).
+	PluginUploadDir string `toml:"plugin_upload_dir"`
+	// PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes.
+	// Defaults to 32 when admin is enabled; a non-positive value disables upload.
+	PluginUploadMaxSize int `toml:"plugin_upload_max_size"`
 }
 
 // ConsoleEnabled reports whether the web console should be served: it defaults

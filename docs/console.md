@@ -465,7 +465,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | Web application firewall (WAF) | Structured-edit (global + per-location, incl. advanced fields: block status / paranoia / body limits / rule files / inline rules / response-body inspection) | Security |
 | Secret references | Read-only (externalize helper) | Security |
 | Server limits / timeouts | Structured-edit | Routes |
-| Plugins (WASM) | Structured-edit (global defs: path/type/capabilities/limits/config; attach/detach middleware plugins per route; handler & server-level plugins stay raw-only) | Plugins |
+| Plugins (WASM) | Structured-edit + .wasm upload (global defs: path/type/capabilities/limits/config; attach/detach middleware plugins per route; upload module via file picker; handler & server-level plugins stay raw-only) | Plugins |
 | L4 stream proxy | Guided-create · Structured-edit (listen, protocol, default backend, SNI routes, TLS passthrough, PROXY protocol, timeouts) | Streams |
 | Tracing / OpenTelemetry | Structured-edit (global guided editor: exporter / endpoint / sample ratio / service name / transport) | Traffic Controls, Status |
 | Access / error logs | Live tail (read-only) — bounded, privacy-preserving access-log stream | Operations |
@@ -505,7 +505,7 @@ consumes the endpoints below.
 | TLS & Certificates | `GET /api/tls`, `GET /api/certs`, `GET /api/mtls` |
 | Security | `GET /api/security` |
 | Traffic Controls | `GET /api/traffic-controls` |
-| Plugins | `GET /api/plugins` |
+| Plugins | `GET /api/plugins`, `POST /api/plugins/upload` |
 | Streams | `GET /api/streams` |
 | Search & Discovery | `GET /api/search` |
 | Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history,logs}`, `GET /api/observability/logs/stream` (SSE), `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |

@@ -1,0 +1,199 @@
+package admin
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"log/slog"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"jul/internal/config"
+)
+
+func TestHandlePluginUpload(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.AdminConfig{Enabled: true, PluginUploadDir: tmpDir, PluginUploadMaxSize: 32}
+	srv := New(cfg, testLogger(t), Deps{})
+
+	buildUpload := func(name string, data []byte) (*http.Request, *multipart.Writer) {
+		var b bytes.Buffer
+		w := multipart.NewWriter(&b)
+		part, _ := w.CreateFormFile("wasm", name)
+		_, _ = part.Write(data)
+		_ = w.Close()
+		req := httptest.NewRequest(http.MethodPost, "/api/plugins/upload", &b)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		return req, w
+	}
+
+	t.Run("valid WASM upload", func(t *testing.T) {
+		data := append(wasmMagic, 0x01, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04)
+		req, _ := buildUpload("test.wasm", data)
+		rr := httptest.NewRecorder()
+		srv.handlePluginUpload(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), `"name":"test.wasm"`) {
+			t.Errorf("response missing expected name: %s", rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), `"path"`) {
+			t.Errorf("response missing expected path: %s", rr.Body.String())
+		}
+
+		// Verify file landed on disk.
+		dest := filepath.Join(tmpDir, "test.wasm")
+		if _, err := os.Stat(dest); err != nil {
+			t.Errorf("uploaded file not found: %v", err)
+		}
+	})
+
+	t.Run("re-upload atomically replaces", func(t *testing.T) {
+		data1 := append(wasmMagic, 0x01, 0x00, 0x00, 0x00, 0x01)
+		req1, _ := buildUpload("replace.wasm", data1)
+		rr1 := httptest.NewRecorder()
+		srv.handlePluginUpload(rr1, req1)
+		if rr1.Code != http.StatusOK {
+			t.Fatalf("first upload: status = %d, want 200", rr1.Code)
+		}
+
+		data2 := append(wasmMagic, 0x01, 0x00, 0x00, 0x00, 0x02)
+		req2, _ := buildUpload("replace.wasm", data2)
+		rr2 := httptest.NewRecorder()
+		srv.handlePluginUpload(rr2, req2)
+		if rr2.Code != http.StatusOK {
+			t.Fatalf("second upload: status = %d, want 200", rr2.Code)
+		}
+
+		dest := filepath.Join(tmpDir, "replace.wasm")
+		content, err := os.ReadFile(dest)
+		if err != nil {
+			t.Fatalf("read replaced file: %v", err)
+		}
+		if content[len(content)-1] != 0x02 {
+			t.Errorf("file was not replaced atomically")
+		}
+	})
+
+	t.Run("non-WASM rejected", func(t *testing.T) {
+		req, _ := buildUpload("bad.txt", []byte("not wasm"))
+		rr := httptest.NewRecorder()
+		srv.handlePluginUpload(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rr.Code)
+		}
+		if !strings.Contains(rr.Body.String(), "magic number") {
+			t.Errorf("expected magic-number error, got: %s", rr.Body.String())
+		}
+	})
+
+	t.Run("oversized rejected", func(t *testing.T) {
+		// Create a small server with a 1-byte max to test the cap.
+		smallCfg := config.AdminConfig{Enabled: true, PluginUploadDir: t.TempDir(), PluginUploadMaxSize: 0}
+		smallSrv := New(smallCfg, testLogger(t), Deps{})
+
+		data := append(wasmMagic, 0x01, 0x00, 0x00, 0x00, 0x01)
+		req, _ := buildUpload("big.wasm", data)
+		rr := httptest.NewRecorder()
+		smallSrv.handlePluginUpload(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", rr.Code)
+		}
+	})
+
+	t.Run("missing wasm field", func(t *testing.T) {
+		var b bytes.Buffer
+		w := multipart.NewWriter(&b)
+		_ = w.WriteField("other", "value")
+		_ = w.Close()
+		req := httptest.NewRequest(http.MethodPost, "/api/plugins/upload", &b)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		rr := httptest.NewRecorder()
+		srv.handlePluginUpload(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rr.Code)
+		}
+		if !strings.Contains(rr.Body.String(), "missing") {
+			t.Errorf("expected missing-field error, got: %s", rr.Body.String())
+		}
+	})
+
+	t.Run("file too short", func(t *testing.T) {
+		req, _ := buildUpload("short.wasm", wasmMagic[:3])
+		rr := httptest.NewRecorder()
+		srv.handlePluginUpload(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rr.Code)
+		}
+	})
+
+	t.Run("unsupported version", func(t *testing.T) {
+		data := append(wasmMagic, 0x02, 0x00, 0x00, 0x00)
+		req, _ := buildUpload("v2.wasm", data)
+		rr := httptest.NewRecorder()
+		srv.handlePluginUpload(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rr.Code)
+		}
+		if !strings.Contains(rr.Body.String(), "unsupported WASM version") {
+			t.Errorf("expected version error, got: %s", rr.Body.String())
+		}
+	})
+
+	t.Run("concurrent uploads do not race", func(t *testing.T) {
+		concurrentDir := t.TempDir()
+		concurrentCfg := config.AdminConfig{Enabled: true, PluginUploadDir: concurrentDir, PluginUploadMaxSize: 32}
+		concurrentSrv := New(concurrentCfg, testLogger(t), Deps{})
+
+		done := make(chan struct{}, 10)
+		for i := 0; i < 10; i++ {
+			go func(n int) {
+				defer func() { done <- struct{}{} }()
+				data := append(wasmMagic, 0x01, 0x00, 0x00, 0x00, byte(n))
+				req, _ := buildUpload(fmt.Sprintf("concurrent-%d.wasm", n), data)
+				rr := httptest.NewRecorder()
+				concurrentSrv.handlePluginUpload(rr, req)
+				if rr.Code != http.StatusOK {
+					t.Errorf("concurrent upload %d: status = %d, body = %s", n, rr.Code, rr.Body.String())
+				}
+			}(i)
+		}
+		for i := 0; i < 10; i++ {
+			<-done
+		}
+	})
+
+	t.Run("uploaded file is owner-only", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Unix permission bits not applicable on Windows")
+		}
+		data := append(wasmMagic, 0x01, 0x00, 0x00, 0x00, 0x01)
+		req, _ := buildUpload("perms.wasm", data)
+		rr := httptest.NewRecorder()
+		srv.handlePluginUpload(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d", rr.Code)
+		}
+		dest := filepath.Join(tmpDir, "perms.wasm")
+		fi, err := os.Stat(dest)
+		if err != nil {
+			t.Fatalf("stat uploaded file: %v", err)
+		}
+		mode := fi.Mode().Perm()
+		if mode != 0o600 {
+			t.Errorf("mode = %#o, want 0o600", mode)
+		}
+	})
+}
+
+func testLogger(t *testing.T) *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}

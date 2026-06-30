@@ -12,6 +12,20 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ### Added
 - `stale_if_error` configuration option in `[cache]` to extend the stale-serving window when a background revalidation encounters an upstream error (5xx or timeout). This protects clients from backend outages by keeping the cached response servable for the configured duration after a failed revalidation.
 - Admin config diff support for `stale_if_error` changes in the Console.
+- Admin Console plugin manager supports direct `.wasm` upload (`POST /api/plugins/upload`). Validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, and broadcasts `plugin_uploaded` SSE event so the panel refreshes automatically. Configurable via `[admin]` keys `plugin_upload_dir` and `plugin_upload_max_size`.  
+- Admin config fields `plugin_upload_dir` and `plugin_upload_max_size` with defaults (`./jul-data/plugins`, `32` MB). Upload disabled when `plugin_upload_max_size <= 0`.
+
+### Changed
+- `docs/status.md` and `docs/roadmap/README.md` corrected: Console continuous panels status footnote now explicitly lists live log tail (shipped), WASM plugin manager (shipped with upload pending), and gRPC route designer (planned).
+
+## [1.27.0] – 2026-07-01
+
+### Added
+- Admin Console plugin manager supports direct `.wasm` upload (`POST /api/plugins/upload`). Validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, and broadcasts `plugin_uploaded` SSE event so the panel refreshes automatically. Configurable via `[admin]` keys `plugin_upload_dir` and `plugin_upload_max_size`.  
+- Admin config fields `plugin_upload_dir` and `plugin_upload_max_size` with defaults (`./jul-data/plugins`, `32` MB). Upload disabled when `plugin_upload_max_size <= 0`.
+
+### Changed
+- `docs/status.md` and `docs/roadmap/README.md` corrected: Console continuous panels status footnote now explicitly lists live log tail (shipped), WASM plugin manager (shipped with upload pending), and gRPC route designer (planned).
 
 ## [1.26.0] – 2026-06-30
 

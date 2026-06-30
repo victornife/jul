@@ -162,6 +162,14 @@ func (c *Config) applyDefaults() {
 		if c.Admin.MaxEventConns == 0 {
 			c.Admin.MaxEventConns = 4
 		}
+		// Plugin upload defaults. A zero value means "unset" and adopts the
+		// default; an explicit negative value disables the upload endpoint.
+		if c.Admin.PluginUploadDir == "" {
+			c.Admin.PluginUploadDir = "./jul-data/plugins"
+		}
+		if c.Admin.PluginUploadMaxSize == 0 {
+			c.Admin.PluginUploadMaxSize = 32
+		}
 		// Durable audit-sink rotation defaults (P3-08). Only meaningful when a
 		// durable path is configured; a zero value adopts the default. Audit
 		// retention favors keeping the trail, so the backup count is generous
