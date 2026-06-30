@@ -166,6 +166,16 @@ export function TranscodeDesignerPanel() {
       <PageHeader
         title="gRPC Route Designer"
         description="Design a gRPC-JSON transcoding route by uploading a compiled protobuf descriptor set, inspecting HTTP bindings, and generating the configuration."
+        actions={
+          <Button
+            variant="secondary"
+            onClick={() => {
+              navigate("/routes");
+            }}
+          >
+            ← Back to routes
+          </Button>
+        }
       />
 
       <Section title="Server &amp; route">
