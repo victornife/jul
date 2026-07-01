@@ -30,10 +30,22 @@ release branches yet (see [Supported versions](#supported-versions)).
 
 ## Supported versions
 
-Jul.IA is pre-1.0. The entire shipped feature set is **GA — soak pending**: it
-meets the eight non-soak GA criteria of
-[ADR 0003](docs/adr/0003-maturity-and-ga.md), with the long-running soak test
-reclassified to a post-GA gate by [ADR 0005](docs/adr/0005-soak-post-ga-gate.md).
+Jul.IA is pre-1.0. Maturity is tracked per feature in
+[docs/status.md](docs/status.md), which is the canonical source of truth:
+
+- **Core GA — soak pending features** (Core HTTP, TLS/ACME, authentication, gRPC
+  transcoding, native gRPC passthrough, mTLS and the Console) meet the eight
+  non-soak GA criteria of [ADR 0003](docs/adr/0003-maturity-and-ga.md), with the
+  long-running soak test reclassified to a post-GA gate by
+  [ADR 0005](docs/adr/0005-soak-post-ga-gate.md). Security fixes here are
+  first-class.
+- **Beta features** (plugins, L4 stream proxy, WAF, service discovery, response
+  cache, HTTP/3, OTel/access-log sinks, compression and rate limiting) are
+  shipped with remaining GA gaps and receive **best-effort** security fixes on
+  `main` until they reach GA.
+
+See [docs/status.md](docs/status.md) for the per-feature maturity and GA-gap
+burndown.
 
 | Version | Security fixes |
 | --- | --- |

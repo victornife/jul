@@ -20,8 +20,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 - CLI JSON output schema documented in [docs/configuration.md](docs/configuration.md).
 - `stale_if_error` configuration option in `[cache]` to extend the stale-serving window when a background revalidation encounters an upstream error (5xx or timeout). This protects clients from backend outages by keeping the cached response servable for the configured duration after a failed revalidation.
 - Admin config diff support for `stale_if_error` changes in the Console.
-- Admin Console plugin manager supports direct `.wasm` upload (`POST /api/plugins/upload`). Validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, and broadcasts `plugin_uploaded` SSE event so the panel refreshes automatically. Configurable via `[admin]` keys `plugin_upload_dir` and `plugin_upload_max_size`.  
-- Admin config fields `plugin_upload_dir` and `plugin_upload_max_size` with defaults (`./jul-data/plugins`, `32` MB). Upload disabled when `plugin_upload_max_size <= 0`.
+- Admin Console plugin manager supports direct `.wasm` upload (`POST /api/plugins/upload`). Validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, and broadcasts `plugin_uploaded` SSE event so the panel refreshes automatically. Configurable via `[admin]` keys `plugin_upload_enabled`, `plugin_upload_dir`, and `plugin_upload_max_size`.  
+- Admin config fields `plugin_upload_enabled`, `plugin_upload_dir`, and `plugin_upload_max_size` with defaults (upload enabled, `./jul-data/plugins`, `32` MB). Set `plugin_upload_enabled = false` to disable the upload endpoint regardless of the size cap.
 
 ### Changed
 - `jul lint -json` now emits a stable schema: lowercase field names and a string `severity` (`"warning"`/`"error"`) instead of a numeric enum.
@@ -35,8 +35,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [1.27.0] – 2026-07-01
 
 ### Added
-- Admin Console **WASM plugin upload** (`POST /api/plugins/upload`): validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, broadcasts `plugin_uploaded` SSE event. Configurable via `[admin]` keys `plugin_upload_dir` and `plugin_upload_max_size` (defaults `./jul-data/plugins`, `32` MB). Upload disabled when `plugin_upload_max_size <= 0`.
-- Admin Console **gRPC route designer** (new Transcode panel): upload a compiled protobuf FileDescriptorSet (`.pb`), inspect `google.api.http` annotations in a selectable methods table, configure backend target / TLS / streaming / stream framing, and generate a `grpc_transcode` route that flows through Validate → Diff → Apply. Cross-linked from existing `grpc_transcode` route detail drawers.
+- Admin Console **WASM plugin upload** (`POST /api/plugins/upload`): validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, broadcasts `plugin_uploaded` SSE event. Configurable via `[admin]` keys `plugin_upload_enabled`, `plugin_upload_dir`, and `plugin_upload_max_size` (defaults enabled, `./jul-data/plugins`, `32` MB). Set `plugin_upload_enabled = false` to disable the endpoint.
+- Admin Console **gRPC route designer** (new Transcode panel): upload a compiled protobuf FileDescriptorSet (`.pb`) for inspection-only preview of the `google.api.http` annotations it declares, configure backend target / TLS / streaming / stream framing, then open the generated `grpc_transcode` route in the config editor for the standard Validate → Diff → Apply flow. The generated route exposes all methods from the descriptor set (per-method filtering is not supported). Cross-linked from existing `grpc_transcode` route detail drawers.
 - Admin API endpoint `POST /api/transcode/descriptor-upload` parses uploaded descriptors and returns methods with HTTP bindings (no `grpc` build tag required on the admin side).
 
 ### Changed

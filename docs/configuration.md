@@ -1,7 +1,13 @@
 # Configuration reference
 
 Jul.IA is configured by a single TOML document. The top-level tables are
-`[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, `[waf]`, and `[admin]`.
+`[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, `[admin]`,
+`[compression]`, `[rate_limit]`, `[observability]`, `[waf]`, `[[plugins]]`, and
+`[[stream]]`. The `[[mail]]` table is reserved for future use. Several tables
+are only honoured when the matching build tag is present (for example `[waf]`
+requires the `waf` tag, `[[stream]]` the `stream` tag, and `[[plugins]]` the
+`wasmplugins` tag); absent tags are rejected at preflight rather than silently
+ignored.
 
 A minimal, working example:
 

@@ -19,7 +19,7 @@ binary.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
 - **[Reload semantics](reload-semantics.md)** — What reloads safely, what needs a restart, and how zero-downtime reload works.
 - **[Security model](../SECURITY.md)** — Threat model, hardening defaults, and per-feature security notes.
-- **[Troubleshooting](../README.md)** — Common issues and how to resolve them.
+- **[Troubleshooting](troubleshooting.md)** — Common issues and how to resolve them.
 
 ### Feature deep-dives
 | Feature | Document |

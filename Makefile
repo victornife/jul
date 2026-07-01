@@ -1,4 +1,4 @@
-.PHONY: build test bench fuzz soak format lint vulncheck clean \
+.PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
         console-dev console-build console-check build-console build-full
 
 # ── Default ──────────────────────────────────────────────────────────
@@ -25,6 +25,13 @@ soak:
 format:
 	gofmt -w .
 
+# Non-mutating formatting gate (matches CI). Fails if any file needs gofmt.
+format-check:
+	@files=$$(gofmt -l .); \
+	if [ -n "$$files" ]; then \
+		echo "gofmt needed on:"; echo "$$files"; exit 1; \
+	fi
+
 lint:
 	golangci-lint run
 
@@ -37,9 +44,9 @@ vulncheck:
 vulncheck-full:
 	govulncheck -tags "$(FULL_TAGS)" ./...
 
-ci-fast: format lint test build
+ci-fast: format-check lint test build
 
-ci-full: format lint-full test-full vulncheck-full build-full
+ci-full: format-check lint-full test-full vulncheck-full build-full
 
 clean:
 	go clean
