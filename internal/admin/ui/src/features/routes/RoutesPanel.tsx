@@ -222,7 +222,7 @@ export function RoutesPanel() {
             const parsed = JSON.parse(stored) as Selection;
             const route = data.find((r) => r.listen === parsed.route.listen);
             if (route) {
-              const loc = route.locations[Number(parsed.loc.index)];
+              const loc = route.locations[parsed.loc.index];
               if (loc) {
                 setSelected({ route, loc });
                 setCreating({
@@ -292,7 +292,7 @@ export function RoutesPanel() {
             <Button
               variant="secondary"
               onClick={() => {
-                navigate("/transcode");
+                void navigate("/transcode");
               }}
             >
               New transcode

@@ -240,7 +240,7 @@ export function ConfigPanel() {
           <button
             type="button"
             onClick={() => {
-              navigate(-1);
+              void navigate(-1);
             }}
             className="rounded-md border border-jul-border px-3 py-1 text-sm text-jul-text hover:bg-jul-surface"
           >

@@ -423,7 +423,7 @@ function UploadPluginDrawer({
     }
     const limit = uploadMaxSizeMB * 1024 * 1024;
     if (limit > 0 && f.size > limit) {
-      return `File exceeds the server upload limit of ${uploadMaxSizeMB} MB.`;
+      return `File exceeds the server upload limit of ${String(uploadMaxSizeMB)} MB.`;
     }
     return null;
   }
@@ -462,7 +462,7 @@ function UploadPluginDrawer({
           <button
             type="button"
             disabled={busy || !file}
-            onClick={submit}
+            onClick={() => { void submit(); }}
             className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
             {busy ? "Uploading…" : "Upload"}
@@ -490,7 +490,7 @@ function UploadPluginDrawer({
           />
           <span className="text-xs text-jul-muted">
             {uploadMaxSizeMB > 0
-              ? `Accepted: .wasm, up to ${uploadMaxSizeMB} MB.`
+              ? `Accepted: .wasm, up to ${String(uploadMaxSizeMB)} MB.`
               : "Uploads are disabled by admin config."}
           </span>
         </label>

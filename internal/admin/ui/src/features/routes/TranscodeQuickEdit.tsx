@@ -24,7 +24,7 @@ function Toggle({
       <input
         type="checkbox"
         checked={on}
-        onChange={(e) => onChange(e.target.checked)}
+        onChange={(e) => { onChange(e.target.checked); }}
         className="h-4 w-4 rounded border-jul-border text-jul-accent accent-jul-accent"
       />
       {label}
@@ -40,22 +40,30 @@ function useTranscodeQuickEdit(route: RouteProjection, loc: LocationProjection) 
 
   const [tcTarget, setTcTarget]               = useState(loc.target ?? "");
   const [tcDescPath, setTcDescPath]           = useState(t?.descriptor_set ?? "");
-  const [tcReflect, setTcReflect]             = useState(t?.use_reflection ?? false);
+
+  const tcReflectDefault: boolean | undefined = t?.use_reflection;
+  const tcPreserveDefault: boolean | undefined = t?.preserve_proto_field_names;
+  const tcStreamDefault: boolean | undefined = t?.streaming;
+  const tcModeDefault: "ndjson" | "sse" | undefined = t?.stream_mode as "ndjson" | "sse" | undefined;
+  const tcMaxSizeDefault: string | undefined = t?.max_message_size;
+  const tcDescDefault: string | undefined = t?.descriptor_set;
+
+  const [tcPreserve, setTcPreserve]           = useState(tcPreserveDefault ?? false);
+  const [tcReflect, setTcReflect]             = useState(tcReflectDefault ?? false);
   const [tcTLS, setTcTLS]                     = useState(t?.tls ?? false);
-  const [tcPreserve, setTcPreserve]           = useState(t?.preserve_proto_field_names ?? false);
-  const [tcStream, setTcStream]               = useState(t?.streaming ?? false);
-  const [tcMode, setTcMode]                   = useState<"ndjson" | "sse">((t?.stream_mode as "ndjson" | "sse") ?? "ndjson");
-  const [tcMaxSize, setTcMaxSize]             = useState(t?.max_message_size ?? "");
+  const [tcStream, setTcStream]               = useState(tcStreamDefault ?? false);
+  const [tcMode, setTcMode]                   = useState<"ndjson" | "sse">(tcModeDefault ?? "ndjson");
+  const [tcMaxSize, setTcMaxSize]             = useState(tcMaxSizeDefault ?? "");
 
   const dirty =
     tcTarget.trim()    !== (loc.target ?? "").trim() ||
-    tcDescPath.trim()  !== (t?.descriptor_set ?? "").trim() ||
-    tcReflect          !== (t?.use_reflection ?? false) ||
+    tcDescPath.trim()  !== (tcDescDefault ?? "").trim() ||
+    tcReflect          !== (tcReflectDefault ?? false) ||
     tcTLS              !== (t?.tls ?? false) ||
-    tcPreserve         !== (t?.preserve_proto_field_names ?? false) ||
-    tcStream           !== (t?.streaming ?? false) ||
-    tcMode             !== ((t?.stream_mode as "ndjson" | "sse") ?? "ndjson") ||
-    tcMaxSize.trim()   !== (t?.max_message_size ?? "").trim();
+    tcPreserve         !== (tcPreserveDefault ?? false) ||
+    tcStream           !== (tcStreamDefault ?? false) ||
+    tcMode             !== (tcModeDefault ?? "ndjson") ||
+    tcMaxSize.trim()   !== (tcMaxSizeDefault ?? "").trim();
 
   function buildPatch(): ConfigPatch {
     const payload: TranscodePatch = {
@@ -103,9 +111,9 @@ function useTranscodeQuickEdit(route: RouteProjection, loc: LocationProjection) 
     busy, error,
     tcTarget, setTcTarget,
     tcDescPath, setTcDescPath,
+    tcPreserve, setTcPreserve,
     tcReflect, setTcReflect,
     tcTLS, setTcTLS,
-    tcPreserve, setTcPreserve,
     tcStream, setTcStream,
     tcMode, setTcMode,
     tcMaxSize, setTcMaxSize,
@@ -135,7 +143,7 @@ export function TranscodeQuickEdit({
           type="text"
           value={edit.tcTarget}
           placeholder="grpc-backend:50051"
-          onChange={(e) => edit.setTcTarget(e.target.value)}
+          onChange={(e) => { edit.setTcTarget(e.target.value); }}
           className="flex-1 rounded-md border border-jul-border bg-jul-bg px-3 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
         />
 
@@ -145,7 +153,7 @@ export function TranscodeQuickEdit({
             type="text"
             value={edit.tcDescPath}
             placeholder="/path/to/descriptor_set.pb"
-            onChange={(e) => edit.setTcDescPath(e.target.value)}
+            onChange={(e) => { edit.setTcDescPath(e.target.value); }}
             className="flex-1 rounded-md border border-jul-border bg-jul-bg px-3 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
           />
         )}
@@ -166,7 +174,7 @@ export function TranscodeQuickEdit({
             <span className="text-sm text-jul-text">Mode</span>
             <select
               value={edit.tcMode}
-              onChange={(e) => edit.setTcMode(e.target.value as "ndjson" | "sse")}
+              onChange={(e) => { edit.setTcMode(e.target.value as "ndjson" | "sse"); }}
               disabled={!edit.tcStream}
               className="rounded-md border border-jul-border bg-jul-bg px-2 py-1 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent disabled:opacity-40"
             >
@@ -181,7 +189,7 @@ export function TranscodeQuickEdit({
           type="text"
           value={edit.tcMaxSize}
           placeholder="e.g. 4m"
-          onChange={(e) => edit.setTcMaxSize(e.target.value)}
+          onChange={(e) => { edit.setTcMaxSize(e.target.value); }}
           className="flex-1 rounded-md border border-jul-border bg-jul-bg px-3 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
         />
       </div>

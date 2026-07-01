@@ -31,7 +31,7 @@ function TextField({
         type="text"
         value={value}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => { onChange(e.target.value); }}
         className={`w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent ${mono ? "font-mono" : ""}`}
       />
       {hint && <span className="text-xs text-jul-muted">{hint}</span>}
@@ -53,7 +53,7 @@ function Toggle({
       <input
         type="checkbox"
         checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
+        onChange={(e) => { onChange(e.target.checked); }}
         className="h-4 w-4 rounded border-jul-border bg-jul-surface accent-jul-accent"
       />
       {label}
@@ -178,7 +178,7 @@ export function TranscodeDesignerPanel() {
           <Button
             variant="secondary"
             onClick={() => {
-              navigate("/routes");
+              void navigate("/routes");
             }}
           >
             ← Back to routes
@@ -193,7 +193,7 @@ export function TranscodeDesignerPanel() {
               <span className="text-sm font-medium text-jul-text">Listen address</span>
               <select
                 value={listen}
-                onChange={(e) => setListen(e.target.value)}
+                onChange={(e) => { setListen(e.target.value); }}
                 className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
               >
                 <option value=":8080">New server — :8080</option>
@@ -227,7 +227,7 @@ export function TranscodeDesignerPanel() {
             <span className="text-sm font-medium text-jul-text">Match type</span>
             <select
               value={matchType}
-              onChange={(e) => setMatchType(e.target.value as "prefix" | "exact" | "regex")}
+              onChange={(e) => { setMatchType(e.target.value as "prefix" | "exact" | "regex"); }}
               className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
             >
               <option value="prefix">Prefix</option>
@@ -349,7 +349,7 @@ export function TranscodeDesignerPanel() {
               <span className="text-sm font-medium text-jul-text">Stream framing</span>
               <select
                 value={streamMode}
-                onChange={(e) => setStreamMode(e.target.value as "ndjson" | "sse")}
+                onChange={(e) => { setStreamMode(e.target.value as "ndjson" | "sse"); }}
                 className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
               >
                 <option value="ndjson">NDJSON (newline-delimited JSON)</option>

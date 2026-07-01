@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -223,11 +224,11 @@ func TestHandlerStaleIfError(t *testing.T) {
 		StaleIfError:  config.Duration(5 * time.Minute),
 	})
 
-	upstreamCalls := 0
+	var upstreamCalls atomic.Int32
 	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upstreamCalls++
+		upstreamCalls.Add(1)
 		w.Header().Set("Cache-Control", "max-age=60")
-		if upstreamCalls == 1 {
+		if upstreamCalls.Load() == 1 {
 			// First upstream hit is the background revalidation; make it fail.
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte("error"))
@@ -261,11 +262,11 @@ func TestHandlerStaleIfError(t *testing.T) {
 	// Spin until the background revalidation runs.
 	for i := 0; i < 200; i++ {
 		time.Sleep(10 * time.Millisecond)
-		if upstreamCalls >= 1 {
+		if upstreamCalls.Load() >= 1 {
 			break
 		}
 	}
-	if upstreamCalls < 1 {
+	if upstreamCalls.Load() < 1 {
 		t.Fatal("revalidation did not run")
 	}
 

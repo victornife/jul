@@ -231,7 +231,6 @@ func TestFetchClearsLastFetchOnError(t *testing.T) {
 	}
 }
 
-
 // errRoundTripper returns a fixed *http.Response; used to inject a body reader
 // that fails mid-read without involving real network I/O.
 type errRoundTripper struct{ resp *http.Response }

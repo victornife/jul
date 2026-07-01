@@ -52,7 +52,9 @@ func (s *Server) handleTranscodeDescriptorUpload(w http.ResponseWriter, r *http.
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)
 		return
 	}
-	defer r.MultipartForm.RemoveAll()
+	defer func() {
+		_ = r.MultipartForm.RemoveAll()
+	}()
 
 	file, _, err := r.FormFile("descriptor")
 	if err != nil {
