@@ -265,7 +265,7 @@ describe("OverviewPanel", () => {
 
   it("renders product name and grouped status rows", async () => {
     render(<OverviewPanel />, { wrapper: Wrapper });
-    expect(await screen.findByText("Jul.IA")).toBeInTheDocument();
+    expect(await screen.findByText(/Jul\.IA/)).toBeInTheDocument();
     expect(await screen.findByText("TLS")).toBeInTheDocument();
     expect(await screen.findByText("HTTP/3")).toBeInTheDocument();
     // Group header

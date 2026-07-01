@@ -35,6 +35,8 @@ describe("PluginsProjectionSchema", () => {
   it("parses a plugin set with attachments", () => {
     const parsed = PluginsProjectionSchema.parse({
       compiled: true,
+      upload_enabled: false,
+      upload_max_size_mb: 0,
       plugins: [
         {
           name: "inject",
@@ -48,6 +50,8 @@ describe("PluginsProjectionSchema", () => {
       ],
     });
     expect(parsed.compiled).toBe(true);
+    expect(parsed.upload_enabled).toBe(false);
+    expect(parsed.upload_max_size_mb).toBe(0);
     expect(parsed.plugins[0]?.attachments?.[0]?.role).toBe("middleware");
   });
 
@@ -55,6 +59,8 @@ describe("PluginsProjectionSchema", () => {
     expect(() =>
       PluginsProjectionSchema.parse({
         compiled: false,
+        upload_enabled: false,
+        upload_max_size_mb: 0,
         plugins: [{ name: "x", source: "path", kv: false, fetch: false }],
       }),
     ).toThrow();
@@ -123,6 +129,8 @@ describe("plugins lib", () => {
 
 const projection = {
   compiled: true,
+  upload_enabled: false,
+  upload_max_size_mb: 0,
   plugins: [
     {
       name: "inject",
