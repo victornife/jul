@@ -9,7 +9,7 @@ export interface TranscodeRouteDraft {
 	path: string;
 	matchType: "prefix" | "exact" | "regex";
 	target: string; // upstream name or host:port
-	descriptorSet: string; // path on disk (where the backend saved the .pb)
+	descriptorSet: string; // path on the server filesystem; designer upload is inspection-only
 	tls: boolean;
 	preserveNames: boolean;
 	streaming: boolean;
@@ -28,9 +28,10 @@ function tomlStringArray(items: string[]): string {
  * Generates a complete [[servers]] block for a gRPC transcoding route.
  *
  * The descriptor_set path is the absolute/relative path on the server's
- * filesystem where the uploaded .pb was saved (e.g. via plugin_upload_dir or
- * configured separately). The designer seeds it from the file path the operator
- * enters; Jul does not manage descriptor file placement automatically.
+ * filesystem. The designer's descriptor upload is inspection-only; it parses
+ * and previews methods but does not persist the .pb. The path the operator
+ * enters must already exist on the server. Jul does not manage descriptor
+ * file placement automatically.
  */
 export function generateTranscodeRouteToml(d: TranscodeRouteDraft): string {
 	const lines: string[] = [];

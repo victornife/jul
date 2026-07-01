@@ -248,7 +248,7 @@ def check_schema_doc_drift():
         if key_joined not in doc_joined:
             needle = re.compile(rf"(\\[\\[{re.escape(key)}\\]\\]|\\[{re.escape(key)}\\]|`{re.escape(key)}`)")
             if not needle.search(doc_text):
-                warn(config_doc, 0, f"schema key '{key}' not found in configuration.md")
+                error(config_doc, 0, f"schema key '{key}' not found in configuration.md")
 
 
 def check_balanced_fences(path: Path, text: str):

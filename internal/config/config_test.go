@@ -1728,3 +1728,19 @@ require_client_cert = true
 		t.Error("require_client_cert not parsed")
 	}
 }
+
+func TestAdminPluginUploadDisabled(t *testing.T) {
+	cfg, err := Parse([]byte("[admin]\nenabled = true\nplugin_upload_enabled = false\nplugin_upload_max_size = 32\n\n[[servers]]\nlisten = \":8080\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("validate rejected valid upload-disabled config: %v", err)
+	}
+	if cfg.Admin.PluginUploadEnabled == nil || *cfg.Admin.PluginUploadEnabled {
+		t.Fatal("PluginUploadEnabled should be false")
+	}
+	if cfg.Admin.PluginUploadMaxSize != 32 {
+		t.Fatalf("PluginUploadMaxSize = %d, want 32", cfg.Admin.PluginUploadMaxSize)
+	}
+}
