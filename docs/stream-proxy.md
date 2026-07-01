@@ -304,3 +304,21 @@ session cap with all sessions active — raise `max_udp_sessions`, shorten
   active L4 probe in v1.
 - **Pool state resets on reload.** A reload rebuilds pools, so passive health
   counters start fresh for the new generation.
+
+### TCP socket reuse behaviour
+
+Stream TCP listeners use platform-specific socket options to balance rapid
+restart against operational safety:
+
+- **Unix / Linux / macOS:** `SO_REUSEADDR` is set. This allows the new process
+  to rebind the port immediately even when the old socket is still in
+  `TIME_WAIT`, which is the common case during a hot reload or quick restart.
+
+- **Windows:** no special socket option is applied. The Windows semantics of
+  `SO_REUSEADDR` are different from Unix — it would allow a second process to
+  forcibly hijack the port, producing indeterminate behaviour. Instead, Jul
+  relies on the default “Enhanced Socket Security” provided by the OS. On
+  Windows, a rapid restart may encounter a brief `TIME_WAIT` window; use a
+  service manager (SCM) that waits for the old process to release the port, or
+  accept a short bind delay. See
+  [Microsoft docs](https://learn.microsoft.com/en-us/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse).

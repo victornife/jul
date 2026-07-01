@@ -225,4 +225,25 @@ describe("PluginsPanel", () => {
     expect(await screen.findByText("enrich")).toBeInTheDocument();
     expect(screen.getByText("api.example.com, auth.example.com")).toBeInTheDocument();
   });
+
+  it("does not show Upload .wasm when upload is disabled", async () => {
+    render(<PluginsPanel />, { wrapper: Wrapper });
+    await screen.findByText("inject");
+    expect(screen.queryByRole("button", { name: "Upload .wasm" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Uploads disabled by admin config/i)).toBeInTheDocument();
+  });
+
+  it("shows Upload .wasm when upload is enabled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ ...projection, upload_enabled: true }),
+      }),
+    );
+    render(<PluginsPanel />, { wrapper: Wrapper });
+    await screen.findByText("inject");
+    expect(screen.getByRole("button", { name: "Upload .wasm" })).toBeInTheDocument();
+    expect(screen.queryByText(/Uploads disabled by admin config/i)).not.toBeInTheDocument();
+  });
 });
