@@ -1744,3 +1744,54 @@ func TestAdminPluginUploadDisabled(t *testing.T) {
 		t.Fatalf("PluginUploadMaxSize = %d, want 32", cfg.Admin.PluginUploadMaxSize)
 	}
 }
+
+func TestAdminPluginUploadEnabled(t *testing.T) {
+	cfg, err := Parse([]byte("[admin]\nenabled = true\nplugin_upload_enabled = true\nplugin_upload_max_size = 32\n\n[[servers]]\nlisten = \":8080\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("validate rejected valid upload-enabled config: %v", err)
+	}
+	if cfg.Admin.PluginUploadEnabled == nil || !*cfg.Admin.PluginUploadEnabled {
+		t.Fatal("PluginUploadEnabled should be true")
+	}
+	if cfg.Admin.PluginUploadMaxSize != 32 {
+		t.Fatalf("PluginUploadMaxSize = %d, want 32", cfg.Admin.PluginUploadMaxSize)
+	}
+}
+
+func TestAdminPluginUploadMaxSizeValidation(t *testing.T) {
+	t.Run("zero_defaults_to_32_when_enabled", func(t *testing.T) {
+		cfg, err := Parse([]byte("[admin]\nenabled = true\nplugin_upload_enabled = true\nplugin_upload_max_size = 0\n\n[[servers]]\nlisten = \":8080\"\n"))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := Validate(cfg); err != nil {
+			t.Fatalf("validate rejected config after parser default: %v", err)
+		}
+		if cfg.Admin.PluginUploadMaxSize != 32 {
+			t.Fatalf("expected parser to default max_size to 32, got %d", cfg.Admin.PluginUploadMaxSize)
+		}
+	})
+
+	t.Run("negative_when_enabled", func(t *testing.T) {
+		cfg, err := Parse([]byte("[admin]\nenabled = true\nplugin_upload_enabled = true\nplugin_upload_max_size = -1\n\n[[servers]]\nlisten = \":8080\"\n"))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := Validate(cfg); err == nil {
+			t.Fatal("expected validate to reject negative max_size when upload is enabled")
+		}
+	})
+
+	t.Run("negative_when_disabled", func(t *testing.T) {
+		cfg, err := Parse([]byte("[admin]\nenabled = true\nplugin_upload_enabled = false\nplugin_upload_max_size = -1\n\n[[servers]]\nlisten = \":8080\"\n"))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := Validate(cfg); err == nil {
+			t.Fatal("expected validate to reject negative max_size even when upload is disabled")
+		}
+	})
+}

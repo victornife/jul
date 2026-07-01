@@ -20,8 +20,9 @@ import (
 )
 
 // transcodeMethod is one gRPC method with its HTTP binding extracted from a
-// descriptor set. The frontend shows these in a selectable table so the operator
-// can pick which methods to expose via REST/JSON transcoding.
+// descriptor set. The frontend shows these as a preview table. Jul currently
+// exposes all annotated methods from the configured descriptor; method-level
+// allowlisting is not implemented.
 type transcodeMethod struct {
 	FullName   string `json:"full_name"`   // e.g. "echo.Echo.SayHello"
 	Service    string `json:"service"`     // e.g. "echo.Echo"
