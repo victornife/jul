@@ -29,14 +29,15 @@ func TestAuthAndWAFScopeAreStableAndDistinctPerLocation(t *testing.T) {
 	loc2 := config.LocationConfig{Match: config.MatchConfig{Type: "prefix", Path: "/api"}}
 
 	// Stable: same inputs -> same key. Auth and WAF share the scope shape.
-	if AuthScope(srv, loc1) != AuthScope(srv, loc1) {
+	k1 := AuthScope(srv, loc1)
+	if k1 != AuthScope(srv, loc1) {
 		t.Error("AuthScope not stable for identical inputs")
 	}
-	if AuthScope(srv, loc1) != WAFScope(srv, loc1) {
+	if k1 != WAFScope(srv, loc1) {
 		t.Error("AuthScope and WAFScope should produce the same scope for a location")
 	}
 	// Distinct: different location paths -> different keys.
-	if AuthScope(srv, loc1) == AuthScope(srv, loc2) {
+	if k1 == AuthScope(srv, loc2) {
 		t.Error("AuthScope must differ for different location paths")
 	}
 }
