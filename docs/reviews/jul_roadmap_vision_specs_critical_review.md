@@ -1,5 +1,10 @@
 # Jul.IA Roadmap, Vision and Specs — Critical Product Review
 
+> **⚠️ Superseded (2026-07-01).** For *current repository state*, this critical
+> review is superseded by the consolidated
+> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07.md) — the
+> authoritative single source of truth. Preserved below as a historical decision input.
+
 > **Reviewed — 2026-06-21 ✅** · Status: **Adopted / Reframed.** This critique was
 > evaluated in depth and largely accepted; the resulting decisions live in
 > [ADR 0003 — Maturity & GA](../adr/0003-maturity-and-ga.md),

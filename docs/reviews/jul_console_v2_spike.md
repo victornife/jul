@@ -1,5 +1,9 @@
 # Jul Console v2 Spike: Self-Explanatory Operations and Configuration UI
 
+> **See also (2026-07-01).** Current repository state is tracked in the consolidated
+> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07.md) (single
+> source of truth). This document remains a valid historical strategy input.
+
 > **Reviewed — 2026-06-23 ✅** · Status: **Adopted.** This internal spike was
 > evaluated and accepted; its operating model and P0/P1/P2 plan are now durable
 > decisions in [ADR 0006 — Console v2 stack](../adr/0006-console-v2-stack.md) and
