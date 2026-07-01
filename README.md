@@ -113,12 +113,12 @@ you specifically want the smaller lean binary.
 
 | Platform | Archive (full profile) |
 | -------- | ------- |
-| Windows (Intel/AMD 64-bit) | `jul_<version>_windows_amd64_full.zip` |
-| Windows (ARM64) | `jul_<version>_windows_arm64_full.zip` |
-| Linux (Intel/AMD 64-bit) | `jul_<version>_linux_amd64_full.tar.gz` |
-| Linux (ARM64) | `jul_<version>_linux_arm64_full.tar.gz` |
-| macOS (Apple Silicon) | `jul_<version>_darwin_arm64_full.tar.gz` |
-| macOS (Intel) | `jul_<version>_darwin_amd64_full.tar.gz` |
+| Windows (Intel/AMD 64-bit) | [`jul_<version>_windows_amd64_full.zip`](https://github.com/victornife/jul/releases) |
+| Windows (ARM64) | [`jul_<version>_windows_arm64_full.zip`](https://github.com/victornife/jul/releases) |
+| Linux (Intel/AMD 64-bit) | [`jul_<version>_linux_amd64_full.tar.gz`](https://github.com/victornife/jul/releases) |
+| Linux (ARM64) | [`jul_<version>_linux_arm64_full.tar.gz`](https://github.com/victornife/jul/releases) |
+| macOS (Apple Silicon) | [`jul_<version>_darwin_arm64_full.tar.gz`](https://github.com/victornife/jul/releases) |
+| macOS (Intel) | [`jul_<version>_darwin_amd64_full.tar.gz`](https://github.com/victornife/jul/releases) |
 
 Swap `full` for `lean` for the minimal build. Verify your download and the
 build provenance before running it — see [docs/release.md](docs/release.md) for
