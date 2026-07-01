@@ -244,9 +244,9 @@ func (s *Server) PreflightListeners(old, next []config.StreamServer) error {
 			_ = pc.Close()
 			continue
 		}
-		ln, err := net.Listen("tcp", next[i].Listen)
+		ln, err := ListenTCPWithReuse(next[i].Listen)
 		if err != nil {
-			return fmt.Errorf("stream listen address %s (tcp): %w", next[i].Listen, err)
+			return fmt.Errorf("stream: listen tcp %s: %w", next[i].Listen, err)
 		}
 		_ = ln.Close()
 	}
@@ -333,7 +333,7 @@ func (s *Server) bindListener(key string, r *route) (*listener, error) {
 		}
 		l.udpLn = pc.(*net.UDPConn)
 	} else {
-		ln, err := net.Listen("tcp", addr)
+		ln, err := ListenTCPWithReuse(addr)
 		if err != nil {
 			return nil, fmt.Errorf("stream: listen tcp %s: %w", addr, err)
 		}
