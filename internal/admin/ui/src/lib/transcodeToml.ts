@@ -10,7 +10,6 @@ export interface TranscodeRouteDraft {
 	matchType: "prefix" | "exact" | "regex";
 	target: string; // upstream name or host:port
 	descriptorSet: string; // path on disk (where the backend saved the .pb)
-	selectedMethods: string[]; // full names of methods to expose; empty = all
 	tls: boolean;
 	preserveNames: boolean;
 	streaming: boolean;

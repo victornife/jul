@@ -90,7 +90,6 @@ export function TranscodeDesignerPanel() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [methods, setMethods] = useState<TranscodeMethod[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const [target, setTarget] = useState("");
   const [tls, setTls] = useState(false);
@@ -120,12 +119,9 @@ export function TranscodeDesignerPanel() {
     setUploading(true);
     setUploadError(null);
     setMethods([]);
-    setSelected(new Set());
     try {
       const res = await uploadTranscodeDescriptor(file);
       setMethods(res.methods);
-      // Default: select all
-      setSelected(new Set(res.methods.map((m) => m.full_name)));
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -142,7 +138,6 @@ export function TranscodeDesignerPanel() {
       matchType,
       target,
       descriptorSet: descriptorPath,
-      selectedMethods: Array.from(selected),
       tls,
       preserveNames,
       streaming,
@@ -367,7 +362,7 @@ export function TranscodeDesignerPanel() {
 
       <div className="flex items-center justify-between gap-3">
         {editorError && <span className="text-sm text-jul-danger">{editorError}</span>}
-        {methods.length > 0 && selected.size === 0 && (
+        {methods.length > 0 && (
           <span className="text-sm text-jul-warning">
             Select at least one method to generate the route.
           </span>

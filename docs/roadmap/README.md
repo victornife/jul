@@ -78,9 +78,9 @@ post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md).
 
 ---
 
-## Planned
+## Delivered / closed committed work
 
-### Year 2 — committed remaining 🚧 (Protocol Gateway + Extensibility)
+### Year 2 — delivered / closed ✅ (Protocol Gateway + Extensibility)
 
 The near-term, demand-backed work. Each ships at **Beta** with its own Console
 panel ([ADR 0004](../adr/0004-console-ui-invariants.md)) as part of Definition of

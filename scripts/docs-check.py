@@ -251,6 +251,29 @@ def check_schema_doc_drift():
                 warn(config_doc, 0, f"schema key '{key}' not found in configuration.md")
 
 
+def check_balanced_fences(path: Path, text: str):
+    """Ensure every ``` opening fence has a matching closing fence."""
+    count = text.count("```")
+    if count % 2 != 0:
+        # Rough line estimate: find the last fence and report near it
+        last = text.rfind("```")
+        line = text[:last].count("\n") + 1
+        error(path, line, f"unbalanced markdown fences: {count} fence markers (odd number)")
+
+
+def check_denylist(path: Path, text: str):
+    """Detect raw prompt/template strings that should not be committed."""
+    patterns = [
+        r"<userPrompt>",
+        r"</userPrompt>",
+        r"Provide the fully rewritten file",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            line = text[:match.start()].count("\n") + 1
+            error(path, line, f"denylist match: {pattern}")
+
+
 def main():
     SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__"}
     md_files = [
@@ -267,6 +290,8 @@ def main():
         check_toml_blocks(md, text)
         check_placeholders(md, text)
         check_future_dates(md, text)
+        check_balanced_fences(md, text)
+        check_denylist(md, text)
 
     check_version_consistency(md_files)
     check_schema_doc_drift()

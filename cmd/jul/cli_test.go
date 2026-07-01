@@ -52,6 +52,15 @@ listen = ":8080"
   root = "/srv"
 `
 
+const invalidConfig = `[compression]
+enabled = true
+
+[[servers]]
+listen = ":8080"
+  [[servers.locations]]
+  root = "/srv"
+`
+
 func TestDispatchSubcommand(t *testing.T) {
 	cases := map[string]bool{
 		"lint": true, "fmt": true, "run": true, "import": true,
@@ -206,5 +215,50 @@ func TestZeroConfigServesDirectory(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "zero-config") {
 		t.Errorf("unexpected body: %q", body)
+	}
+}
+
+func TestCmdCheckInvalidNoJson(t *testing.T) {
+	path := writeTemp(t, invalidConfig)
+	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path}) })
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	if out != "" {
+		t.Errorf("expected no stdout output, got: %q", out)
+	}
+	if !strings.Contains(errOut, "error") && !strings.Contains(errOut, "Error") {
+		t.Errorf("expected error text in stderr, got: %q", errOut)
+	}
+}
+
+func TestCmdCheckInvalidJson(t *testing.T) {
+	path := writeTemp(t, invalidConfig)
+	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path, "-json"}) })
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	if errOut != "" {
+		t.Errorf("expected no stderr output in json mode, got: %q", errOut)
+	}
+	if !strings.Contains(out, `"ok":false`) {
+		t.Errorf("expected ok=false in JSON output: %s", out)
+	}
+	if !strings.Contains(out, `"errors":`) {
+		t.Errorf("expected errors array in JSON output: %s", out)
+	}
+}
+
+func TestCmdCheckValidQuiet(t *testing.T) {
+	path := writeTemp(t, validConfig)
+	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path, "-quiet"}) })
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	if out != "" {
+		t.Errorf("expected no output with -quiet, got stdout: %q", out)
+	}
+	if errOut != "" {
+		t.Errorf("expected no stderr with -quiet, got: %q", errOut)
 	}
 }

@@ -24,8 +24,8 @@ var wasmMagic = []byte{0x00, 0x61, 0x73, 0x6d}
 // handlePluginUpload serves POST /api/plugins/upload. It accepts a multipart
 // form with a single file field named "wasm", validates the magic number,
 // writes the file atomically to the configured upload directory, and returns
-// the stored path. The upload endpoint is disabled when PluginUploadMaxSize
-// is non-positive.
+// the stored path. The upload endpoint is disabled when PluginUploadEnabled is
+// explicitly false or when PluginUploadMaxSize is non-positive.
 func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)

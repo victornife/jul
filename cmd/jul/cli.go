@@ -321,7 +321,15 @@ func cmdCheck(args []string) int {
 		for i, e := range errs {
 			errStrs[i] = e.Error()
 		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "errors": errStrs})
+		if *jsonOut {
+			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "errors": errStrs})
+		} else {
+			for _, e := range errStrs {
+				fmt.Fprintln(stderr, e)
+			}
+			fmt.Fprintf(stderr, "%s: %d error(s)\n", src.Name(), len(errStrs))
+		}
+		return 1
 	} else {
 		if err := validateRuntimeConfig(cfg); err != nil {
 			if *jsonOut {

@@ -568,6 +568,7 @@ export const PluginsProjectionSchema = z.object({
   // wasmplugins build tag). When false, declarations still validate but the
   // apply preflight rejects them, so the panel warns up front.
   compiled: z.boolean(),
+  upload_enabled: z.boolean(),
   upload_max_size_mb: z.number().int().nonnegative(),
   plugins: z.array(PluginProjectionSchema),
 });

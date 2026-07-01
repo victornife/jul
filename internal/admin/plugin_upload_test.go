@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +14,7 @@ import (
 	"testing"
 
 	"jul/internal/config"
+	"log/slog"
 )
 
 func TestHandlePluginUpload(t *testing.T) {
@@ -192,8 +192,49 @@ func TestHandlePluginUpload(t *testing.T) {
 			t.Errorf("mode = %#o, want 0o600", mode)
 		}
 	})
+
+	t.Run("explicitly disabled returns 403 even with positive max size", func(t *testing.T) {
+		disabled := false
+		explicitCfg := config.AdminConfig{Enabled: true, PluginUploadDir: t.TempDir(), PluginUploadMaxSize: 32, PluginUploadEnabled: &disabled}
+		explicitSrv := New(explicitCfg, testLogger(t), Deps{})
+
+		data := append(wasmMagic, 0x01, 0x00, 0x00, 0x00, 0x01)
+		req, _ := buildUpload("disabled.wasm", data)
+		rr := httptest.NewRecorder()
+		explicitSrv.handlePluginUpload(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+		}
+	})
 }
 
 func testLogger(t *testing.T) *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestProjectPluginsUploadEnabled(t *testing.T) {
+	t.Run("enabled by default", func(t *testing.T) {
+		c := pluginPatchConfig()
+		c.Admin.PluginUploadMaxSize = 32
+		proj := projectPlugins(c, true)
+		if !proj.UploadEnabled {
+			t.Error("UploadEnabled = false, want true when PluginUploadEnabled is nil")
+		}
+		if proj.UploadMaxSizeMB == 0 {
+			t.Error("UploadMaxSizeMB should be positive when enabled by default")
+		}
+	})
+
+	t.Run("explicitly disabled forces max size to zero", func(t *testing.T) {
+		c := pluginPatchConfig()
+		c.Admin.PluginUploadEnabled = boolPtr(false)
+		c.Admin.PluginUploadMaxSize = 32
+		proj := projectPlugins(c, true)
+		if proj.UploadEnabled {
+			t.Error("UploadEnabled = true, want false")
+		}
+		if proj.UploadMaxSizeMB != 0 {
+			t.Errorf("UploadMaxSizeMB = %d, want 0 when disabled", proj.UploadMaxSizeMB)
+		}
+	})
 }

@@ -189,6 +189,7 @@ type PluginsProjection struct {
 	// "wasmplugins" build tag). When false, declaring a plugin still validates
 	// but the apply preflight rejects it, so the panel can warn up front.
 	Compiled        bool               `json:"compiled"`
+	UploadEnabled   bool               `json:"upload_enabled"`
 	UploadMaxSizeMB int                `json:"upload_max_size_mb"` // 0 if upload disabled
 	Plugins         []PluginProjection `json:"plugins"`
 }
@@ -226,10 +227,15 @@ type PluginAttachment struct {
 // projectPlugins builds the Plugins panel projection from the parsed config.
 // compiled reports whether the running binary includes the plugin runtime.
 func projectPlugins(c *config.Config, compiled bool) PluginsProjection {
+	uploadEnabled := c.Admin.PluginUploadEnabled == nil || *c.Admin.PluginUploadEnabled
 	out := PluginsProjection{
 		Compiled:        compiled,
-		UploadMaxSizeMB: c.Admin.PluginUploadMaxSize,
+		UploadEnabled:   uploadEnabled,
+		UploadMaxSizeMB: 0,
 		Plugins:         make([]PluginProjection, 0, len(c.Plugins)),
+	}
+	if uploadEnabled {
+		out.UploadMaxSizeMB = c.Admin.PluginUploadMaxSize
 	}
 	for _, name := range sortedKeys(c.Plugins) {
 		p := c.Plugins[name]

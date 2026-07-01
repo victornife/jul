@@ -488,7 +488,11 @@ function UploadPluginDrawer({
             }}
             className="block w-full text-sm text-jul-text file:mr-4 file:rounded-md file:border-0 file:bg-jul-accent file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-jul-bg hover:file:brightness-110"
           />
-          <span className="text-xs text-jul-muted">Accepted: .wasm, up to 32 MB.</span>
+          <span className="text-xs text-jul-muted">
+            {uploadMaxSizeMB > 0
+              ? `Accepted: .wasm, up to ${uploadMaxSizeMB} MB.`
+              : "Uploads are disabled by admin config."}
+          </span>
         </label>
         {file && (
           <div className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
@@ -650,15 +654,21 @@ export function PluginsPanel() {
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setUploading(true);
-            }}
-            className="rounded-md border border-jul-border px-3 py-1.5 text-sm font-medium text-jul-text hover:border-jul-accent"
-          >
-            Upload .wasm
-          </button>
+          {data.upload_enabled ? (
+            <button
+              type="button"
+              onClick={() => {
+                setUploading(true);
+              }}
+              className="rounded-md border border-jul-border px-3 py-1.5 text-sm font-medium text-jul-text hover:border-jul-accent"
+            >
+              Upload .wasm
+            </button>
+          ) : (
+            <span className="rounded-md border border-jul-border/40 bg-jul-surface px-3 py-1.5 text-sm text-jul-muted">
+              Uploads disabled by admin config
+            </span>
+          )}
           <button
             type="button"
             onClick={() => {
