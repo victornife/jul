@@ -61,6 +61,16 @@ listen = ":8080"
   root = "/srv"
 `
 
+// runtimePreflightConfig is structurally valid but references a missing htpasswd
+// file so validateRuntimeConfig fails during the auth dry-run.
+const runtimePreflightConfig = `[[servers]]
+listen = ":8080"
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "/srv"
+  auth = { basic = { file = "/nonexistent/htpasswd.txt" } }
+`
+
 func TestDispatchSubcommand(t *testing.T) {
 	cases := map[string]bool{
 		"lint": true, "fmt": true, "run": true, "import": true,
@@ -249,6 +259,51 @@ func TestCmdCheckInvalidJson(t *testing.T) {
 	}
 }
 
+func TestCmdCheckValid(t *testing.T) {
+	path := writeTemp(t, validConfig)
+	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path}) })
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	if !strings.Contains(out, "is valid (structural + runtime)") {
+		t.Errorf("expected validation success message, got stdout: %q", out)
+	}
+	if errOut != "" {
+		t.Errorf("expected no stderr, got: %q", errOut)
+	}
+}
+
+func TestCmdCheckInvalidNoJSON(t *testing.T) {
+	path := writeTemp(t, invalidConfig)
+	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path}) })
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	if out != "" {
+		t.Errorf("expected no stdout output, got: %q", out)
+	}
+	if !strings.Contains(errOut, "error") && !strings.Contains(errOut, "Error") {
+		t.Errorf("expected error text in stderr, got: %q", errOut)
+	}
+}
+
+func TestCmdCheckInvalidJSON(t *testing.T) {
+	path := writeTemp(t, invalidConfig)
+	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path, "-json"}) })
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	if errOut != "" {
+		t.Errorf("expected no stderr output in json mode, got: %q", errOut)
+	}
+	if !strings.Contains(out, `"ok":false`) {
+		t.Errorf("expected ok=false in JSON output: %s", out)
+	}
+	if !strings.Contains(out, `"errors":`) {
+		t.Errorf("expected errors array in JSON output: %s", out)
+	}
+}
+
 func TestCmdCheckValidQuiet(t *testing.T) {
 	path := writeTemp(t, validConfig)
 	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path, "-quiet"}) })
@@ -260,5 +315,16 @@ func TestCmdCheckValidQuiet(t *testing.T) {
 	}
 	if errOut != "" {
 		t.Errorf("expected no stderr with -quiet, got: %q", errOut)
+	}
+}
+
+func TestCmdCheckRuntimePreflightFailure(t *testing.T) {
+	path := writeTemp(t, runtimePreflightConfig)
+	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path}) })
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 (runtime preflight failure)\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
+	}
+	if !strings.Contains(errOut, "basic auth") {
+		t.Errorf("expected stderr to mention basic auth error; got:\n%s", errOut)
 	}
 }
