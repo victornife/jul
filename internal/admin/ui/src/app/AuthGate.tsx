@@ -15,6 +15,9 @@ import { useFocusTrap } from "@/lib/useFocusTrap.ts";
  */
 export function AuthGate() {
   const [open, setOpen] = useState(false);
+  const openRef = useRef(open);
+  useEffect(() => { openRef.current = open; }, [open]);
+
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -22,6 +25,7 @@ export function AuthGate() {
 
   useEffect(() => {
     function onUnauthorized(): void {
+      if (openRef.current) return; // already open — don't reset what the user is typing
       setValue(authToken.get());
       setSaved(false);
       setOpen(true);
