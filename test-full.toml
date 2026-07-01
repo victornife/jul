@@ -361,7 +361,7 @@ proxy_pass = "127.0.0.1:15354"
 idle_timeout = "30s"
 
 [[stream]]
-listen = "127.0.0.1:38443"
+listen = "127.0.0.1:58443"
   [stream.sni_routes]
   "api.localhost" = "backend"
   "*"               = "user-service"
