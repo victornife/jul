@@ -22,6 +22,7 @@ startup if it is populated, so misconfiguration fails loudly.
 - [The guest SDK](#the-guest-sdk)
 - [The `jul-abi/v1` ABI](#the-jul-abiv1-abi)
 - [Sandbox & capabilities](#sandbox--capabilities)
+- [Uploading modules (Console API)](#uploading-modules-console-api)
 - [Observability](#observability)
 - [Limits and reserved features](#limits-and-reserved-features)
 
@@ -241,6 +242,45 @@ Every invocation updates Prometheus metrics:
 - `jul_plugin_panics_total{plugin}` — guest panics/timeouts contained as `500`.
 
 Guest `log` output is emitted on the server log with the plugin name attached.
+
+## Uploading modules (Console API)
+
+The Console can upload a `.wasm` module to the server over
+`POST /api/plugins/upload` (multipart form, file field `wasm`). This is the
+highest-consequence write the admin API exposes — it places executable code on
+the server — so it is guarded and **off unless explicitly configured**.
+
+**Enablement.** The endpoint is disabled unless `[admin]` sets a positive
+`plugin_upload_max_size` (MB); setting `plugin_upload_enabled = false` disables
+it even when a size is set. Uploaded files are written to
+`plugin_upload_dir` (default `./jul-data/plugins`).
+
+**Validation performed before anything is written:**
+
+- **Authentication.** Like every admin write, the request requires the admin
+  bearer token; keep the admin listener on loopback (see
+  [docs/console.md](console.md)).
+- **Size cap.** The body is bounded by `plugin_upload_max_size`; an oversized
+  upload is rejected with `413` and nothing is stored.
+- **Format check.** The first bytes must be the WebAssembly magic (`\0asm`) and
+  version `1`; anything else is rejected with `400`. (This is a shape check, not
+  a proof of safety — the sandbox is the real containment boundary.)
+- **Filename hardening.** The stored name is reduced to its base name and must be
+  a simple `<name>.wasm` using only letters, digits, `.`, `_` or `-`. Names with
+  path separators, `..`, a leading dot, a non-`.wasm` extension, or any other
+  character are rejected, and the resolved path is re-checked to sit directly
+  inside `plugin_upload_dir` — an uploaded module can never escape that
+  directory (path-traversal defense).
+- **Atomic write.** The module is written via a temp file + rename at mode
+  `0600`, so a concurrent reader never sees a partially-written module and
+  re-uploads replace atomically.
+
+**Trust model.** An uploaded module is still *untrusted code*: it is confined by
+the wazero sandbox and the capability rules above (no ambient file/network/clock;
+`kv`/`fetch` only when granted). Because upload lets an authenticated operator
+add code, treat the admin token as a code-execution credential: restrict the
+admin listener to loopback or mTLS, rotate the token, and prefer
+`plugin_upload_enabled = false` in environments that ship modules out-of-band.
 
 ## Limits and reserved features
 

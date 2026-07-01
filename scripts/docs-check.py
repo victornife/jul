@@ -226,7 +226,11 @@ def check_schema_doc_drift():
                 break
             m = re.search(r'`toml:"([^"]+)"`', stripped)
             if m:
-                keys.add(m.group(1))
+                # Strip struct-tag options like ",omitempty" so the key is just
+                # the field name (e.g. "upstreams,omitempty" -> "upstreams").
+                key = m.group(1).split(",", 1)[0].strip()
+                if key:
+                    keys.add(key)
 
     if not keys:
         warn(schema_path, 0, "no toml keys found in Config struct")

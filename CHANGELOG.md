@@ -10,13 +10,27 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- Goroutine-leak detection for the `internal/server` package (`goleak.VerifyTestMain`), plus a Windows CI test lane (lean + full) to catch platform-specific lifecycle bugs.
+- Concurrency and negative regression tests: transcode rejects reflection against a non-reflective backend, WASM plugin reload-under-load, and concurrent admin apply/rollback.
+- Plugin upload filename hardening: uploads must be a simple `<name>.wasm` (safe charset, no path separators/`..`), with a defense-in-depth check that the stored path stays inside the upload directory. Threat model documented in [docs/plugins.md](docs/plugins.md).
+- Soak evidence log ([docs/soak-evidence.md](docs/soak-evidence.md)) with dated runs; CI and release soak jobs now upload a `soak-results` artifact so the ADR-0005 gate is verifiable.
+- GA-evidence burndown table in [docs/status.md](docs/status.md) tracking the per-Beta-feature evidence bundle (matrix/bench/threat-note/fuzz/soak).
+- Troubleshooting guide ([docs/troubleshooting.md](docs/troubleshooting.md)) and a first-run hint that points to zero-config mode when no `server.toml` is found.
+- `internal/app` package with unit-tested composition-root wiring helpers (ADR-0007 testability follow-through).
+- CLI JSON output schema documented in [docs/configuration.md](docs/configuration.md).
 - `stale_if_error` configuration option in `[cache]` to extend the stale-serving window when a background revalidation encounters an upstream error (5xx or timeout). This protects clients from backend outages by keeping the cached response servable for the configured duration after a failed revalidation.
 - Admin config diff support for `stale_if_error` changes in the Console.
 - Admin Console plugin manager supports direct `.wasm` upload (`POST /api/plugins/upload`). Validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, and broadcasts `plugin_uploaded` SSE event so the panel refreshes automatically. Configurable via `[admin]` keys `plugin_upload_dir` and `plugin_upload_max_size`.  
 - Admin config fields `plugin_upload_dir` and `plugin_upload_max_size` with defaults (`./jul-data/plugins`, `32` MB). Upload disabled when `plugin_upload_max_size <= 0`.
 
 ### Changed
+- `jul lint -json` now emits a stable schema: lowercase field names and a string `severity` (`"warning"`/`"error"`) instead of a numeric enum.
+- `jul fmt` no longer emits reserved (`mail`) or empty top-level (`upstreams`, `stream`, `plugins`) tables in canonical output.
+- History rollback (`POST /api/history/rollback`) now serializes under the same `applyMu` as config apply, closing a read-modify-write race with a concurrent apply.
 - `docs/status.md` and `docs/roadmap/README.md` corrected: Console continuous panels status footnote now explicitly lists live log tail (shipped), WASM plugin manager (shipped with upload pending), and gRPC route designer (planned).
+
+### Fixed
+- Intermittent hang/timeout in the `internal/server` test suite under parallel load, caused by leaked keep-alive `persistConn` goroutines in the test HTTP clients.
 
 ## [1.27.0] – 2026-07-01
 

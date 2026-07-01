@@ -634,6 +634,11 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	// Serialize with raw apply and structured patch apply: a rollback is a
+	// config write, so it must be mutually exclusive with other writes to avoid
+	// two writers interleaving snapshot-and-write and clobbering each other.
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
 	prev := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(raw); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

@@ -386,6 +386,33 @@ Legend: **Repo claim** from `docs/status.md`; **My verdict** = Agree / Agree-wit
 
 ## 13. Prioritized backlog
 
+> **Implementation status (updated 2026-07-01).** The immediate and near-term
+> backlog has been worked down in this repository:
+>
+> - **P0-1 ✅** `internal/server` flaky hang fixed — root cause was the
+>   `fetch`/`reachable` test helpers pooling keep-alive connections via
+>   `http.DefaultTransport`; now a keep-alive-free client plus a
+>   `goleak.VerifyTestMain` guard (`internal/server/main_test.go`).
+> - **P0-2 ✅** Soak evidence published — [`docs/soak-evidence.md`](../soak-evidence.md)
+>   with dated runs; CI + release soak jobs now upload a `soak-results` artifact.
+> - **P1-1 ✅** `jul lint -json` schema stabilized — lowercase keys + string
+>   severity (`config.Diagnostic` tags + `Severity.MarshalJSON`), golden test,
+>   documented in [`configuration.md`](../configuration.md#cli-json-output).
+> - **P1-2 ✅** Concurrency/negative tests added — transcode reflection-negative,
+>   plugin reload-under-load, admin concurrent apply/rollback; **fixed** an
+>   unserialized rollback write path (`handleHistoryRollback` now holds `applyMu`).
+> - **P1-3 ✅** Plugin upload hardening — strict `<name>.wasm` filename validation
+>   + containment check + threat note in [`plugins.md`](../plugins.md#uploading-modules-console-api).
+> - **P1-4 ✅** Windows CI test lane added (lean + full matrix).
+> - **P2-2 ✅** GA-evidence burndown table added to [`status.md`](../status.md#ga-evidence-burndown-beta).
+> - **P2-3 ✅** Backend↔Console apply/rollback e2e smoke added.
+> - **P2-4 ✅** `jul fmt` no longer emits reserved/empty tables (`omitempty`).
+> - **P2-5 ✅** First-run no-config hint + [`troubleshooting.md`](../troubleshooting.md).
+> - **P2-1 ◐** `internal/app` factory package seam created with unit-tested wiring
+>   helpers; the full `main.go` reduction to <250 LOC remains staged (ADR-0007).
+> - **P2-6 ⏸** Beta evidence bundles remain demand-gated; the burndown above is
+>   the tracker.
+
 ### Immediate / P0–P1 (before any next release or hardened GA-soak claim)
 
 | ID | Title | Area | Sev | Impact | Effort | Deps | Acceptance | Owner |

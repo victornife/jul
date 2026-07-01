@@ -333,6 +333,60 @@ func TestTranscodeViaReflection(t *testing.T) {
 	}
 }
 
+// TestTranscodeReflectionRejectsUnreflectiveBackend proves that requesting
+// reflection-based transcoding against a backend that does not serve the gRPC
+// reflection API fails cleanly at construction — a bounded error, not a hang or
+// a partially-built transcoder. This is the negative side of the reflection
+// path: an operator who enables use_reflection against a server without
+// reflection (or an untrusted/descriptor-less endpoint) gets a clear failure
+// instead of a silently empty route table (Finding QA-1 / SEC gRPC hardening).
+func TestTranscodeReflectionRejectsUnreflectiveBackend(t *testing.T) {
+	fdp := echoFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	files, err := filesFromSet(set)
+	if err != nil {
+		t.Fatalf("build descriptors: %v", err)
+	}
+	fd, err := files.FindFileByPath("echo/echo.proto")
+	if err != nil {
+		t.Fatalf("find echo file: %v", err)
+	}
+
+	// Serve the echo service WITHOUT registering the reflection API.
+	addr := startEchoServer(t, fd, false)
+
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:        "test-echo-noreflect",
+		Strategy:    "round_robin",
+		Servers:     []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails:    3,
+		FailTimeout: config.Duration(time.Minute),
+	}, "http")
+	if err != nil {
+		t.Fatalf("create test pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	// A short reflect timeout bounds the test even if the backend stalls.
+	tr, err := New(
+		config.GRPCTranscodeConfig{Target: addr, UseReflection: true},
+		pool,
+		Options{reflectTimeout: 3 * time.Second},
+	)
+	if err == nil {
+		if tr != nil {
+			_ = tr.Close()
+		}
+		t.Fatal("New with use_reflection against a non-reflective backend: got nil error, want failure")
+	}
+	if tr != nil {
+		t.Errorf("New returned a non-nil transcoder alongside an error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "grpc_transcode") {
+		t.Errorf("error = %q, want it to identify the grpc_transcode target", err)
+	}
+}
+
 func TestTranscodePassiveHealthMarking(t *testing.T) {
 	fdp := echoFileDescriptorProto(t)
 	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}

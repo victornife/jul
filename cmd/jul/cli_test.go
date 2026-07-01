@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -149,6 +150,54 @@ func TestCmdLintParseError(t *testing.T) {
 	}
 }
 
+// TestCmdLintJSONSchema pins the `jul lint -json` contract: lowercase field
+// names and a string severity ("warning"/"error"), never an enum ordinal, so
+// automation can rely on a stable shape (Finding UX-1).
+func TestCmdLintJSONSchema(t *testing.T) {
+	path := writeTemp(t, warnConfig)
+	code, out, _ := capture(t, func() int { return cmdLint([]string{"-config", path, "-json"}) })
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (warnings are not errors)\n%s", code, out)
+	}
+
+	// Raw-string assertions guard against regressions in key casing / severity type.
+	if !strings.Contains(out, `"severity":"warning"`) {
+		t.Errorf("expected string severity %q in JSON:\n%s", `"severity":"warning"`, out)
+	}
+	if strings.Contains(out, `"Severity"`) || strings.Contains(out, `"severity":0`) || strings.Contains(out, `"severity":1`) {
+		t.Errorf("JSON must not use uppercase keys or a numeric severity:\n%s", out)
+	}
+
+	// Decode into a mirror of the documented schema and assert the shape.
+	var got struct {
+		Source   string   `json:"source"`
+		Errors   []string `json:"errors"`
+		Warnings []struct {
+			Severity string `json:"severity"`
+			Field    string `json:"field"`
+			Message  string `json:"message"`
+			Hint     string `json:"hint"`
+		} `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if got.Source == "" {
+		t.Errorf("expected a non-empty source field:\n%s", out)
+	}
+	if len(got.Warnings) == 0 {
+		t.Fatalf("expected at least one warning:\n%s", out)
+	}
+	for i, w := range got.Warnings {
+		if w.Severity != "warning" && w.Severity != "error" {
+			t.Errorf("warnings[%d].severity = %q, want %q or %q", i, w.Severity, "warning", "error")
+		}
+		if w.Message == "" {
+			t.Errorf("warnings[%d].message is empty", i)
+		}
+	}
+}
+
 func TestCmdFmtStdout(t *testing.T) {
 	path := writeTemp(t, validConfig)
 	code, out, _ := capture(t, func() int { return cmdFmt([]string{"-config", path}) })
@@ -165,6 +214,25 @@ func TestCmdFmtStdout(t *testing.T) {
 	orig, _ := os.ReadFile(path)
 	if string(orig) != validConfig {
 		t.Error("cmd fmt without -w must not modify the file")
+	}
+}
+
+// TestCmdFmtOmitsReservedAndEmptyTables pins the UX-2 fix: a minimal static
+// config declares no upstreams, streams, plugins, or the reserved mail table, so
+// canonical `jul fmt` output must not surface any of them.
+func TestCmdFmtOmitsReservedAndEmptyTables(t *testing.T) {
+	path := writeTemp(t, validConfig)
+	code, out, _ := capture(t, func() int { return cmdFmt([]string{"-config", path}) })
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\n%s", code, out)
+	}
+	for _, banned := range []string{"mail", "upstreams = []", "stream = []", "[plugins]"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("canonical fmt output must not contain %q:\n%s", banned, out)
+		}
+	}
+	if _, err := config.Parse([]byte(out)); err != nil {
+		t.Errorf("formatted output does not parse: %v", err)
 	}
 }
 

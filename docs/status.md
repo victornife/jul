@@ -79,11 +79,45 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | Secrets references + log redaction | SEC-1 | core | ① ref-source matrix · ② resolve-cost bench · ⑦ leak/precedence note (docs ✅) |
 | Response cache (memory + disk) | — | core | ⑥ docs · ① key/TTL/overflow matrix · ② hit/miss bench · ⑦ poisoning/isolation |
 
+### GA evidence burndown (Beta)
+
+The authoritative, per-release burndown of the GA evidence bundle for each Beta
+feature. Columns are the evidence-bearing criteria: ① matrix, ② benchmark,
+⑦ threat note, ⑧ fuzz, ⑤ soak. Cell key: ✅ done · ☐ open · n/a not applicable
+(no custom parser to fuzz). A cell is ☐ exactly when it appears in that feature's
+*Remaining GA gaps* row above; ⑤ soak is open for every Beta feature by
+definition. Update this table as bundles land; a feature reaches GA when its row
+is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
+
+| Feature | ① Matrix | ② Bench | ⑦ Threat | ⑧ Fuzz | ⑤ Soak | Open |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| Compression | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Rate + connection limiting | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Active health checks | ☐ | ✅ | ✅ | n/a | ☐ | 2 |
+| Zero-config + `jul lint` | ☐ | ✅ | ✅ | ☐ | ☐ | 3 |
+| NGINX config importer | ☐ | ✅ | ✅ | ☐ | ☐ | 3 |
+| OTel tracing + access-log sinks | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| HTTP/3 over QUIC | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| WASM plugin system | ☐ | ☐ | ☐ | ☐ | ☐ | 5 |
+| L4 stream proxy | ☐ | ☐ | ☐ | ☐ | ☐ | 5 |
+| Service discovery / dynamic upstreams | ☐ | ✅ | ☐ | n/a | ☐ | 3 |
+| Web application firewall (WAF) | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Secrets references + log redaction | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Response cache (memory + disk) | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+
+> A ✅ in this table means the criterion is not an open gap in the per-feature
+> analysis above (docs may already exist even where ⑦ remains open — the "(docs
+> ✅)" notes above refer to criterion ⑥). This burndown tracks the evidence
+> bundle only; ③ limits, ④ semver contract, ⑥ docs, and ⑨ Console surface are
+> tracked in [ga-push.md](ga-push.md).
+
 ## Soak tracking (post-GA gate)
 
 Criterion 5 for the GA — soak pending features. A soak failure is a
 release-blocking regression. Mirrors the
 [GA push soak table](ga-push.md#soak-tracking-post-ga-gate-per-adr-0005).
+Dated soak runs and where the CI/release artifacts are published are recorded in
+the [soak evidence log](soak-evidence.md).
 
 | Feature | GA on | Soak status |
 | --- | --- | --- |

@@ -954,3 +954,50 @@ relays: `sni_routes`, `tls_passthrough`, and `proxy_protocol` are TCP-only and
 rejected on a UDP block.
 
 See [docs/stream-proxy.md](stream-proxy.md) for the full runtime model.
+
+---
+
+## CLI JSON output
+
+`jul lint` and `jul check` accept `-json` for machine-readable output so CI can
+parse findings instead of scraping text. Field names are lowercase and stable.
+
+### `jul lint -json`
+
+```json
+{
+  "source": "server.toml",
+  "errors": ["servers[0].locations[0]: match is required"],
+  "warnings": [
+    {
+      "severity": "warning",
+      "field": "servers[0] (listen \":8080\")",
+      "message": "server has no locations; every request will return 404",
+      "hint": "add a [[servers.locations]] block, or set redirect_https for an HTTP->HTTPS redirector"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+| --- | ---- | ----------- |
+| `source` | string | Config source name (path or `stdin`) |
+| `errors` | string[] | Validation errors; omitted when empty. Any entry ⇒ exit code `1` |
+| `warnings` | object[] | Lint findings; omitted when empty |
+| `warnings[].severity` | string | `"warning"` or `"error"` — always a string, never a number |
+| `warnings[].field` | string | Config path the finding applies to; omitted when empty |
+| `warnings[].message` | string | Human-readable description of the finding |
+| `warnings[].hint` | string | Suggested fix; omitted when empty |
+
+Exit codes: `0` = no errors, `1` = validation error(s), `2` = warnings present
+under `-strict`.
+
+### `jul check -json`
+
+```json
+{ "source": "server.toml", "ok": true }
+```
+
+On failure `ok` is `false` and either `error` (single message) or `errors`
+(string array) is present.
+

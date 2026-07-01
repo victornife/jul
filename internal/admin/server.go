@@ -143,9 +143,10 @@ type Server struct {
 	health   *consoleHealth
 	quit     chan struct{}
 	httpd    *http.Server
-	// applyMu serializes config writes (raw apply and structured patch apply) so
-	// optimistic-concurrency checks and the write they guard are atomic, closing
-	// the read-modify-write race between concurrent edits (P2-12).
+	// applyMu serializes config writes (raw apply, structured patch apply, and
+	// history rollback) so optimistic-concurrency checks and the write they guard
+	// are atomic, closing the read-modify-write race between concurrent edits
+	// (P2-12).
 	applyMu sync.Mutex
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"jul/internal/admin"
+	"jul/internal/app"
 	"jul/internal/atomicfile"
 	"jul/internal/auth"
 	"jul/internal/cache"
@@ -73,6 +74,17 @@ func run() int {
 	src := config.NewTOMLSource(configPath)
 	cfg, err := src.Load()
 	if err != nil {
+		// A missing config file on a bare `jul` is the most common first-run
+		// stumble; point the operator at zero-config mode and the docs instead of
+		// only surfacing a raw open error.
+		if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
+			fmt.Fprintf(os.Stderr, "error: no configuration file at %q\n\n", configPath)
+			fmt.Fprintln(os.Stderr, "Start without a config file using zero-config mode:")
+			fmt.Fprintln(os.Stderr, "  jul run --serve .              # serve the current directory")
+			fmt.Fprintln(os.Stderr, "  jul run --proxy http://:3000   # reverse-proxy a local app")
+			fmt.Fprintln(os.Stderr, "\nOr create a server.toml and run `jul`. See `jul --help` and docs/getting-started.md.")
+			return 1
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
@@ -252,7 +264,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		},
 	})
 	defer func() { _ = streamSrv.Close() }()
-	if err := streamSrv.Reload(cfg.Streams, indexUpstreams(cfg.Upstreams)); err != nil {
+	if err := streamSrv.Reload(cfg.Streams, app.IndexUpstreams(cfg.Upstreams)); err != nil {
 		log.Error("failed to start stream proxy", "error", err)
 		return 1
 	}
@@ -313,7 +325,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		if err := config.ExpandSecrets(c); err != nil {
 			return nil, nil, fmt.Errorf("secrets: %w", err)
 		}
-		upstreams := indexUpstreams(c.Upstreams)
+		upstreams := app.IndexUpstreams(c.Upstreams)
 
 		// Reconcile the upstream pool set for this build: Begin stages a new
 		// generation, each proxy location's resolvePool stages or reuses its
@@ -433,7 +445,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if !rl.Enabled {
 				return nil
 			}
-			kind := rateKeyKind(rl.Key)
+			kind := app.RateKeyKind(rl.Key)
 			lim := rlStore.Scoped(scope, rl.Rate, rl.Burst)
 			return middleware.RateLimit(lim, middleware.RateKeyFunc(rl.Key), func() {
 				metrics.ObserveRateLimited(kind)
@@ -450,7 +462,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				if loc.Auth == nil {
 					continue
 				}
-				key := authScope(c.Servers[i], loc)
+				key := app.AuthScope(c.Servers[i], loc)
 				a, err := auth.New(*loc.Auth, auth.Options{
 					Logger:     log,
 					OnDecision: metrics.ObserveAuthDecision,
@@ -465,7 +477,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if loc.Auth == nil {
 				return nil
 			}
-			if a := authByScope[authScope(srv, loc)]; a != nil {
+			if a := authByScope[app.AuthScope(srv, loc)]; a != nil {
 				return a.Wrap
 			}
 			return nil
@@ -482,7 +494,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		for i := range c.Servers {
 			for j := range c.Servers[i].Locations {
 				loc := c.Servers[i].Locations[j]
-				wcfg, ok := effectiveWAF(c, loc)
+				wcfg, ok := app.EffectiveWAF(c, loc)
 				if !ok {
 					continue
 				}
@@ -491,13 +503,13 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					Hooks:  waf.Hooks{OnEvent: metrics.ObserveWAFEvent},
 				})
 				if err != nil {
-					return nil, nil, fmt.Errorf("location %s: %w", wafScope(c.Servers[i], loc), err)
+					return nil, nil, fmt.Errorf("location %s: %w", app.WAFScope(c.Servers[i], loc), err)
 				}
-				wafByScope[wafScope(c.Servers[i], loc)] = fw
+				wafByScope[app.WAFScope(c.Servers[i], loc)] = fw
 			}
 		}
 		locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
-			fw := wafByScope[wafScope(srv, loc)]
+			fw := wafByScope[app.WAFScope(srv, loc)]
 			if fw == nil {
 				return nil
 			}
@@ -592,7 +604,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 
 		handlers := make(map[string]http.Handler)
-		for _, addr := range uniqueListenAddrs(c.Servers) {
+		for _, addr := range app.UniqueListenAddrs(c.Servers) {
 			// Global middleware chain, outermost to innermost:
 			//   RequestID  — assigns/propagates the request id first so every
 			//                inner layer (observers, Recover's panic log) sees it.
@@ -625,7 +637,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			// On plain HTTP listeners, answer ACME HTTP-01 challenges outermost so
 			// certificate issuance/renewal works even when the listener otherwise
 			// redirects to HTTPS. Non-challenge requests fall through to h.
-			if acmeMgr != nil && !addrServesTLS(c.Servers, addr) {
+			if acmeMgr != nil && !app.AddrServesTLS(c.Servers, addr) {
 				h = acmeMgr.ChallengeHandler(h)
 			}
 			handlers[addr] = h
@@ -690,7 +702,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// prove they build too before the config is accepted; otherwise a bad
 		// [[stream]] block would surface only in the asynchronous OnReloaded,
 		// after "applied" was already reported.
-		return streamSrv.PreflightBuild(clone.Streams, indexUpstreams(clone.Upstreams))
+		return streamSrv.PreflightBuild(clone.Streams, app.IndexUpstreams(clone.Upstreams))
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -706,7 +718,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		fileWatch = watchConfig(ctx, ts.Path, log)
 	}
 	// Merge SIGHUP (when present), config file-watch, and admin-triggered reloads.
-	reload := mergeReload(ctx, sigReload, fileWatch, adminReload)
+	reload := app.MergeReload(ctx, sigReload, fileWatch, adminReload)
 
 	triggerReload := func() {
 		select {
@@ -912,7 +924,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// listeners. Stream binding errors are logged and do not roll back the HTTP
 	// reload (the listener sets are independent).
 	srv.OnReloaded = func(c *config.Config) {
-		if err := streamSrv.Reload(c.Streams, indexUpstreams(c.Upstreams)); err != nil {
+		if err := streamSrv.Reload(c.Streams, app.IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)
 			msg := "failed: " + err.Error()
 			lastStreamReload.Store(&msg)
@@ -931,69 +943,6 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	return 0
 }
 
-// rateKeyKind maps a rate-limit key spec to its kind label for metrics, keeping
-// cardinality bounded (the raw client value is never used as a label).
-func rateKeyKind(spec string) string {
-	switch {
-	case strings.HasPrefix(spec, "header:"):
-		return "header"
-	case strings.HasPrefix(spec, "jwt:"):
-		return "jwt"
-	default:
-		return "ip"
-	}
-}
-
-// authScope builds a stable identity for a location's auth policy, used to map a
-// pre-built Authenticator back to the location during router construction.
-func authScope(srv config.ServerConfig, loc config.LocationConfig) string {
-	return srv.Listen + "|" + strings.Join(srv.ServerNames, ",") + "|" + loc.Match.Path
-}
-
-// wafScope builds a stable identity for a location's WAF policy, used to map a
-// pre-built Firewall back to the location during router construction.
-func wafScope(srv config.ServerConfig, loc config.LocationConfig) string {
-	return srv.Listen + "|" + strings.Join(srv.ServerNames, ",") + "|" + loc.Match.Path
-}
-
-// effectiveWAF resolves the WAF policy that applies to a location: its own [waf]
-// override when present, otherwise the global [waf] policy. The bool reports
-// whether an enabled policy applies (so the caller builds a firewall).
-func effectiveWAF(c *config.Config, loc config.LocationConfig) (config.WAFConfig, bool) {
-	if loc.WAF != nil {
-		return *loc.WAF, loc.WAF.Enabled
-	}
-	return c.WAF, c.WAF.Enabled
-}
-
-// uniqueListenAddrs returns the distinct listen addresses across server blocks.
-func uniqueListenAddrs(servers []config.ServerConfig) []string {
-	seen := map[string]struct{}{}
-	var addrs []string
-	for _, srv := range servers {
-		if srv.Listen == "" {
-			continue
-		}
-		if _, ok := seen[srv.Listen]; ok {
-			continue
-		}
-		seen[srv.Listen] = struct{}{}
-		addrs = append(addrs, srv.Listen)
-	}
-	return addrs
-}
-
-// addrServesTLS reports whether any server block on addr enables TLS. It marks
-// plain HTTP listeners, where ACME HTTP-01 challenge responses are mounted.
-func addrServesTLS(servers []config.ServerConfig, addr string) bool {
-	for _, srv := range servers {
-		if srv.Listen == addr && srv.TLS != nil && srv.TLS.Enabled {
-			return true
-		}
-	}
-	return false
-}
-
 // watchConfig starts a debounced file watcher for the config path, returning a
 // reload channel. On failure it logs and returns nil (file-watch disabled).
 func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan struct{} {
@@ -1003,42 +952,6 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan stru
 		return nil
 	}
 	return ch
-}
-
-// mergeReload fans multiple reload sources into one channel.
-func mergeReload(ctx context.Context, sources ...<-chan struct{}) <-chan struct{} {
-	out := make(chan struct{}, 1)
-	for _, src := range sources {
-		if src == nil {
-			continue
-		}
-		go func(in <-chan struct{}) {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case _, ok := <-in:
-					if !ok {
-						return
-					}
-					select {
-					case out <- struct{}{}:
-					default:
-					}
-				}
-			}
-		}(src)
-	}
-	return out
-}
-
-// indexUpstreams builds a name -> upstream lookup table.
-func indexUpstreams(ups []config.UpstreamConfig) map[string]config.UpstreamConfig {
-	m := make(map[string]config.UpstreamConfig, len(ups))
-	for _, u := range ups {
-		m[u.Name] = u
-	}
-	return m
 }
 
 // adminCache adapts the response cache to the admin Purger interface, returning
@@ -1095,57 +1008,5 @@ func adaptCerts(in []server.CertSummary) []admin.CertStatus {
 // (WAF rule compilation, auth initialisation, etc.).  The original config
 // is never modified.
 func validateRuntimeConfig(c *config.Config) error {
-	wafExtra := func(clone *config.Config) error {
-		if err := waf.Check(clone); err != nil {
-			return err
-		}
-		if waf.Compiled {
-			for i := range clone.Servers {
-				for j := range clone.Servers[i].Locations {
-					loc := clone.Servers[i].Locations[j]
-					wcfg, ok := effectiveWAF(clone, loc)
-					if !ok {
-						continue
-					}
-					if _, err := waf.New(wcfg, waf.Options{}); err != nil {
-						return fmt.Errorf("waf: %w", err)
-					}
-				}
-			}
-		}
-		authExtra := func(c2 *config.Config) error {
-			for i := range c2.Servers {
-				for j := range c2.Servers[i].Locations {
-					loc := c2.Servers[i].Locations[j]
-					if loc.Auth == nil {
-						continue
-					}
-					if _, err := auth.New(*loc.Auth, auth.Options{}); err != nil {
-						return fmt.Errorf("auth: %w", err)
-					}
-				}
-			}
-			return nil
-		}
-		if err := authExtra(clone); err != nil {
-			return err
-		}
-		// Dry-run the compression middleware so a configured encoder that is not
-		// compiled into this build (br/zstd behind their tags) fails the
-		// preflight here, before the config file is written, instead of only at
-		// the asynchronous reload — keeping admin "apply" truthful: a rejected
-		// build never reports success. Mirrors the WAF/auth dry-runs above.
-		if clone.Compression.Enabled {
-			if _, err := middleware.NewCompression(middleware.CompressionOptions{
-				Encoders: clone.Compression.Encoders,
-				Level:    clone.Compression.Level,
-				MinSize:  clone.Compression.MinSize.Bytes(),
-				Types:    clone.Compression.Types,
-			}); err != nil {
-				return fmt.Errorf("compression: %w", err)
-			}
-		}
-		return nil
-	}
-	return config.PreflightClone(c, wafExtra)
+	return app.ValidateRuntimeConfig(c)
 }

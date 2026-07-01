@@ -77,9 +77,17 @@ func freePort(t *testing.T) string {
 	return addr
 }
 
+// testTransport disables keep-alives so no client-side connection is pooled
+// after a request completes. A pooled keep-alive connection would keep a
+// net/http persistConn readLoop goroutine parked in an I/O wait until an idle
+// timeout elapsed, which under parallel load leaked goroutines and could hang
+// the package's goroutine-leak checks (see Finding CQ-1).
+var testTransport = &http.Transport{DisableKeepAlives: true}
+
 // fetch returns the body served at url, or ("", err) on failure.
 func fetch(url string) (string, error) {
-	resp, err := http.Get(url)
+	client := &http.Client{Transport: testTransport}
+	resp, err := client.Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -90,7 +98,7 @@ func fetch(url string) (string, error) {
 
 // reachable reports whether url responds to a GET.
 func reachable(url string) bool {
-	client := http.Client{Timeout: 200 * time.Millisecond}
+	client := http.Client{Transport: testTransport, Timeout: 200 * time.Millisecond}
 	resp, err := client.Get(url)
 	if err != nil {
 		return false

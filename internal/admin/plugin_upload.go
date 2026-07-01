@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"jul/internal/atomicfile"
 )
@@ -20,6 +21,39 @@ type pluginUploadResponse struct {
 
 // wasmMagic is the WebAssembly binary format magic number: \x00asm.
 var wasmMagic = []byte{0x00, 0x61, 0x73, 0x6d}
+
+// validPluginFilename reports whether name is a safe plugin filename: a single
+// path component ending in ".wasm" whose base is non-empty and which contains
+// only ASCII letters, digits, '.', '_' or '-'. It rejects path separators (of
+// either OS), "..", leading dots, and over-long names. This keeps an uploaded
+// module inside the upload directory (path-traversal defense) and blocks
+// surprising or non-wasm filenames before anything is written to disk.
+func validPluginFilename(name string) bool {
+	if name == "" || len(name) > 128 {
+		return false
+	}
+	if !strings.HasSuffix(name, ".wasm") {
+		return false
+	}
+	if strings.HasPrefix(name, ".") {
+		return false
+	}
+	if strings.TrimSuffix(name, ".wasm") == "" {
+		return false
+	}
+	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // handlePluginUpload serves POST /api/plugins/upload. It accepts a multipart
 // form with a single file field named "wasm", validates the magic number,
@@ -120,11 +154,18 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := filepath.Base(header.Filename)
-	if name == "" || name == "." || name == ".." {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+	if !validPluginFilename(name) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename: must be a simple <name>.wasm using letters, digits, '.', '_' or '-'"})
 		return
 	}
 	dest := filepath.Join(dir, name)
+	// Defense in depth: the resolved destination must sit directly inside the
+	// upload directory. validPluginFilename already rejects separators and "..",
+	// but this guards against any surprising Join/Clean interaction.
+	if filepath.Dir(dest) != filepath.Clean(dir) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		return
+	}
 
 	if err := atomicfile.Write(dest, data, 0o600); err != nil {
 		s.log.Error("plugin upload: atomic write failed", "path", dest, "error", err)

@@ -178,5 +178,7 @@ before committing.
   transcoding, WASM plugins, ACME auto-HTTPS, and more.
 - Review **[Deployment](deployment.md)** to run Jul.IA as a systemd or Windows
   service.
+- Hit a snag? See **[Troubleshooting](troubleshooting.md)** for common first-run
+  and operational issues.
 - Check **[Security](../SECURITY.md)** for threat model and hardening
   recommendations.

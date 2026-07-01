@@ -29,14 +29,22 @@ func (s Severity) String() string {
 	}
 }
 
+// MarshalJSON emits the severity as its lowercase string label ("warning" or
+// "error") so the CLI JSON contract is stable and self-describing rather than an
+// opaque enum ordinal.
+func (s Severity) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + s.String() + `"`), nil
+}
+
 // Diagnostic is a single finding produced by Lint. Field locates the offending
 // block (e.g. "servers[0].tls"), Message states the problem, and Hint suggests
-// a fix.
+// a fix. The JSON field names are lowercase and stable so the `jul lint -json`
+// output can be consumed by automation.
 type Diagnostic struct {
-	Severity Severity
-	Field    string
-	Message  string
-	Hint     string
+	Severity Severity `json:"severity"`
+	Field    string   `json:"field,omitempty"`
+	Message  string   `json:"message"`
+	Hint     string   `json:"hint,omitempty"`
 }
 
 // Lint inspects a (defaulted) Config for best-practice and security issues that

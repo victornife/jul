@@ -61,6 +61,34 @@ jobs:
       - name: go test
         run: go test -tags "${{ matrix.tags }}" ./...
 
+  test-windows:
+    name: test-windows (${{ matrix.profile }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: lean
+            tags: ""
+          - profile: full
+            tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # A Windows lane catches platform-specific lifecycle bugs the Linux runners
+      # miss: SO_REUSEADDR handling (internal/stream/reuseaddr_windows.go),
+      # service integration (cmd/jul/service_windows.go), the Windows syslog stub,
+      # and listener drain timing (the CQ-1 class of intermittent hang). Race is
+      # not run here — it needs a CGO C toolchain and is covered on the Linux
+      # `race` job — but the goroutine-leak checks (goleak) still run.
+      - name: go build
+        run: go build -tags "${{ matrix.tags }}" ./...
+      - name: go test
+        run: go test -tags "${{ matrix.tags }}" ./...
+
   race:
     name: test -race
     runs-on: ubuntu-latest
@@ -188,7 +216,15 @@ jobs:
         env:
           SOAK_DURATION: 20s
           SOAK_WORKERS: 24
-        run: scripts/soak.sh
+        run: scripts/soak.sh | tee soak-results.txt
+      # Publish the soak output so "soak pending" is a verifiable, dated artifact
+      # (see docs/soak-evidence.md), not an unbacked assertion.
+      - name: upload soak results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: soak-results
+          path: soak-results.txt
 
   format:
     name: gofmt

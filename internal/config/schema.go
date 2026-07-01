@@ -14,7 +14,7 @@ package config
 type Config struct {
 	Global        GlobalConfig        `toml:"global"`
 	Servers       []ServerConfig      `toml:"servers"`
-	Upstreams     []UpstreamConfig    `toml:"upstreams"`
+	Upstreams     []UpstreamConfig    `toml:"upstreams,omitempty"`
 	Cache         CacheConfig         `toml:"cache"`
 	Admin         AdminConfig         `toml:"admin"`
 	Compression   CompressionConfig   `toml:"compression"`
@@ -30,16 +30,18 @@ type Config struct {
 	// Plugins declares WASM plugins by name ([plugins.NAME]). Locations and
 	// servers reference them by name. Plugins are loaded only in builds with the
 	// "wasmplugins" tag; a lean build refuses any config that declares them.
-	Plugins map[string]PluginConfig `toml:"plugins"`
+	Plugins map[string]PluginConfig `toml:"plugins,omitempty"`
 
 	// Streams declares L4 (TCP/UDP) reverse-proxy listeners ([[stream]]). They
 	// are served only in builds with the "stream" tag; a lean build refuses any
 	// config that declares them (see internal/stream.Check).
-	Streams []StreamServer `toml:"stream"`
+	Streams []StreamServer `toml:"stream,omitempty"`
 
 	// Reserved for future versions. Parsed so that presence can be detected
 	// and rejected with a clear message during validation (see validate.go).
-	Mail []map[string]any `toml:"mail"`
+	// Marshaled with omitempty so the canonical `jul fmt` output never surfaces
+	// this reserved-and-rejected table when it is absent (the normal case).
+	Mail []map[string]any `toml:"mail,omitempty"`
 }
 
 // StreamServer is one L4 (TCP or UDP) reverse-proxy listener ([[stream]]). It

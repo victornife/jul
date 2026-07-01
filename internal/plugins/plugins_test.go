@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -251,6 +253,82 @@ func TestReloadReusesManager(t *testing.T) {
 	s2.Middleware("hi")(next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if !*called || rec.Header().Get("X-Plugin") != "header-inject" {
 		t.Fatal("second generation did not function after first was closed")
+	}
+}
+
+// TestReloadUnderLoad drives a burst of config reloads while concurrent
+// requests flow through a live plugin generation, proving that building and
+// retiring new generations on the shared manager never disrupts in-flight
+// traffic on the live one (Finding QA-1: plugin reload atomicity under load).
+func TestReloadUnderLoad(t *testing.T) {
+	m := testManager(t)
+	cfg := map[string]config.PluginConfig{"hi": pcfg("header-inject")}
+
+	// The live generation that serves traffic for the whole test.
+	live, err := m.Build(cfg)
+	if err != nil {
+		t.Fatalf("Build live: %v", err)
+	}
+	t.Cleanup(func() { _ = live.Close() })
+
+	var (
+		wg      sync.WaitGroup
+		ok      atomic.Int64
+		bad     atomic.Int64
+		stop    atomic.Bool
+		handler = live.Middleware("hi")
+	)
+
+	// Traffic: many concurrent requests through the live generation.
+	const workers = 16
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			next, _ := okNext()
+			h := handler(next)
+			for !stop.Load() {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+				if rec.Code == http.StatusOK && rec.Header().Get("X-Plugin") == "header-inject" {
+					ok.Add(1)
+				} else {
+					bad.Add(1)
+				}
+			}
+		}()
+	}
+
+	// Reloads: repeatedly build and immediately retire new generations on the
+	// same manager (shared compilation cache) while traffic flows through the
+	// live generation.
+	for r := 0; r < 12; r++ {
+		gen, err := m.Build(cfg)
+		if err != nil {
+			stop.Store(true)
+			wg.Wait()
+			t.Fatalf("reload build #%d: %v", r, err)
+		}
+		// Exercise the fresh generation once, then retire it.
+		next, _ := okNext()
+		rec := httptest.NewRecorder()
+		gen.Middleware("hi")(next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		if rec.Code != http.StatusOK {
+			stop.Store(true)
+			wg.Wait()
+			t.Fatalf("reload gen #%d served %d, want 200", r, rec.Code)
+		}
+		_ = gen.Close()
+	}
+
+	stop.Store(true)
+	wg.Wait()
+
+	if bad.Load() != 0 {
+		t.Fatalf("live traffic saw %d failed requests during reloads (want 0); ok=%d", bad.Load(), ok.Load())
+	}
+	if ok.Load() == 0 {
+		t.Fatal("no successful live requests were recorded")
 	}
 }
 

@@ -47,7 +47,15 @@ jobs:
         env:
           SOAK_DURATION: 5m
           SOAK_WORKERS: 32
-        run: scripts/soak.sh
+        run: scripts/soak.sh | tee soak-results.txt
+      # Publish the release-gate soak output as the authoritative, dated GA-soak
+      # evidence artifact (see docs/soak-evidence.md).
+      - name: upload soak results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: soak-results
+          path: soak-results.txt
 
   build:
     name: build (${{ matrix.os }}/${{ matrix.arch }} ${{ matrix.profile }})

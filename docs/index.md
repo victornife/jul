@@ -10,6 +10,7 @@ binary.
 - **[README](../README.md)** — What Jul.IA is, what it can do, and how to install it.
 - **[Getting started](getting-started.md)** — Your first server: zero-config mode, a static site, a reverse proxy, and TLS.
 - **[Configuration reference](configuration.md)** — Every config key, type, and default, with examples.
+- **[Troubleshooting](troubleshooting.md)** — Common first-run and operational issues and their fixes.
 - **[Concepts appendix](vision/appendix.md)** — New to HTTP, proxies, TLS, caching, or observability? Start here.
 
 ### Evaluating or operating?
@@ -42,6 +43,7 @@ binary.
 - **[Engineering specs](specs/)** — Year-by-year execution plans and detailed feature specs.
 - **[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Where the project is headed.
 - **[Release process](release.md)** — How releases are cut, versioned, and signed.
+- **[Soak evidence log](soak-evidence.md)** — Dated soak runs and where the CI/release soak artifacts are published (ADR-0005 post-GA gate).
 - **[Changelog](../CHANGELOG.md)** — Release history.
 
 ## Build tags quick reference
