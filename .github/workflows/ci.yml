@@ -92,6 +92,7 @@ jobs:
   race:
     name: test -race
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -99,8 +100,10 @@ jobs:
           go-version-file: go.mod
           cache: true
       # The race detector needs CGO + a C toolchain, available on the Linux runner.
+      # Limit test parallelism (-p 2) because the race detector multiplies memory
+      # usage and internal/plugins stress tests can exhaust a standard runner.
       - name: go test -race
-        run: go test -race -tags "${{ env.FULL_TAGS }}" ./...
+        run: go test -race -p 2 -tags "${{ env.FULL_TAGS }}" ./...
 
   coverage:
     name: coverage gate
