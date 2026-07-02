@@ -29,6 +29,7 @@ binary.
 | Web console | [docs/console.md](console.md) |
 | gRPC passthrough | [docs/grpc-proxy.md](grpc-proxy.md) |
 | gRPC-JSON transcoding | [docs/grpc-transcoding.md](grpc-transcoding.md) |
+| Health checks | [docs/health.md](health.md) |
 | Mutual TLS | [docs/mtls.md](mtls.md) |
 | WASM plugins | [docs/plugins.md](plugins.md) |
 | Secrets resolution | [docs/secrets.md](secrets.md) |

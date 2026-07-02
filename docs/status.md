@@ -67,7 +67,7 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | --- | --- | --- | --- |
 | Compression (gzip; brotli/zstd) | Y1-02 | `brotli`,`zstd` | ⑥ docs · ① encoder matrix · ② throughput bench · ⑦ BREACH note |
 | Rate + connection limiting | Y1-03 | core | ⑥ docs · ① key/algorithm matrix · ② limiter bench · ⑦ bypass note |
-| Active health checks | Y1-05 | core | ⑥ docs · ① probe matrix · ③ limits |
+| Active health checks | Y1-05 | core | ① probe matrix · ③ limits |
 | Zero-config + `jul lint` | Y1-08 | core | ⑥ docs · ① lint-checks matrix · ⑧ TOML config-parser fuzz |
 | NGINX config importer | Y1-09 | `importer` | ⑥ docs · ① directive-support matrix · ⑧ nginx.conf parser fuzz · ③ unmapped-directive limits |
 | OTel tracing + access-log sinks | Y1-10 | `otel` | ⑥ docs · ① exporter/sink matrix · ② overhead bench · ⑦ PII note |
