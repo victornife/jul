@@ -15,6 +15,12 @@ export default mergeConfig(
         reporter: ["text", "html"],
         include: ["src/**/*.{ts,tsx}"],
         exclude: ["src/test/**", "src/**/*.d.ts"],
+        thresholds: {
+          statements: 50,
+          branches: 45,
+          functions: 40,
+          lines: 50,
+        },
       },
     },
   })

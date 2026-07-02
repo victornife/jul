@@ -305,7 +305,7 @@ jobs:
       - name: lint
         run: pnpm --dir ${{ env.CONSOLE_UI }} run lint
       - name: test
-        run: pnpm --dir ${{ env.CONSOLE_UI }} run test
+        run: pnpm --dir ${{ env.CONSOLE_UI }} run test:coverage
 
       - name: build
         id: build
