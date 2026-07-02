@@ -116,12 +116,21 @@ func waitForServe(t *testing.T, url, want string) {
 }
 
 // eventually polls url until it serves want or a timeout elapses.
+// Each attempt uses a short client timeout so an in-flight request that
+// happens to reach the old (blocking) generation does not hang the poll
+// loop forever (see Finding CQ-1).
 func eventually(t *testing.T, url, want string) bool {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
+	client := &http.Client{Transport: testTransport, Timeout: 200 * time.Millisecond}
 	for time.Now().Before(deadline) {
-		if body, err := fetch(url); err == nil && body == want {
-			return true
+		resp, err := client.Get(url)
+		if err == nil {
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if string(b) == want {
+				return true
+			}
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
