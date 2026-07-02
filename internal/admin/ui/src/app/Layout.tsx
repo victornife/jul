@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTheme, type ThemePreference } from "@/lib/theme.ts";
 import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.ts";
+import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
 import { openCommandPalette } from "@/app/commandPaletteBus.ts";
@@ -147,6 +148,7 @@ function PreferenceMenu({
 }) {
   const { preference, setPreference } = useTheme();
   const [open, setOpen] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   return (
     <div className="relative">
@@ -252,8 +254,7 @@ function PreferenceMenu({
               <button
                 type="button"
                 onClick={() => {
-                  resetPreferences();
-                  window.location.reload();
+                  setShowResetConfirm(true);
                 }}
                 className="w-full rounded-md border border-jul-danger/50 px-2 py-1 text-xs font-medium text-jul-danger hover:bg-jul-danger/10"
               >
@@ -262,6 +263,23 @@ function PreferenceMenu({
             </div>
           </div>
         </>
+      )}
+      {showResetConfirm && (
+        <ConfirmDialog
+          title="Reset preferences"
+          confirmLabel="Reset"
+          danger
+          onConfirm={() => {
+            resetPreferences();
+            window.location.reload();
+          }}
+          onCancel={() => setShowResetConfirm(false)}
+        >
+          <p className="text-sm text-jul-text">
+            Reset all view preferences (theme, layout) to their defaults and
+            reload the page?
+          </p>
+        </ConfirmDialog>
       )}
     </div>
   );
