@@ -44,6 +44,9 @@ func runService() (handled bool, exitCode int) {
 type edgeService struct {
 	configPath string
 	exitCode   int
+	// serveFn, when non-nil, replaces the call to serve() inside Execute.
+	// It is used by unit tests to avoid binding real listeners.
+	serveFn func(context.Context, <-chan struct{}, config.Source, *config.Config) int
 }
 
 // Execute is invoked by the SCM. It loads configuration, starts serving, and
@@ -65,7 +68,13 @@ func (s *edgeService) Execute(_ []string, r <-chan svc.ChangeRequest, status cha
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
-	go func() { done <- serve(ctx, nil, src, cfg) }()
+	go func() {
+		if s.serveFn != nil {
+			done <- s.serveFn(ctx, nil, src, cfg)
+			return
+		}
+		done <- serve(ctx, nil, src, cfg)
+	}()
 
 	status <- svc.Status{State: svc.Running, Accepts: accepted}
 	for {
