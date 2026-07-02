@@ -1,6 +1,3 @@
-stream = []
-mail = []
-
 [global]
 worker_threads = 'auto'
 access_log = ''

@@ -16,7 +16,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 - Soak evidence log ([docs/soak-evidence.md](docs/soak-evidence.md)) with dated runs; CI and release soak jobs now upload a `soak-results` artifact so the ADR-0005 gate is verifiable.
 - GA-evidence burndown table in [docs/status.md](docs/status.md) tracking the per-Beta-feature evidence bundle (matrix/bench/threat-note/fuzz/soak).
 - Troubleshooting guide ([docs/troubleshooting.md](docs/troubleshooting.md)) and a first-run hint that points to zero-config mode when no `server.toml` is found.
-- `internal/app` package with unit-tested composition-root wiring helpers (ADR-0007 testability follow-through).
+- `internal/app` package with unit-tested composition-root wiring — scope/index/reload helpers and the runtime preflight (`wiring.go`), the admin-deps builder and view adapters (`admin_deps.go`), and the admin write-preflight gate sequence (`preflight.go`) — reducing `cmd/jul/main.go` toward a thin entry point (ADR-0007 testability follow-through).
 - CLI JSON output schema documented in [docs/configuration.md](docs/configuration.md).
 - `stale_if_error` configuration option in `[cache]` to extend the stale-serving window when a background revalidation encounters an upstream error (5xx or timeout). This protects clients from backend outages by keeping the cached response servable for the configured duration after a failed revalidation.
 - Admin config diff support for `stale_if_error` changes in the Console.
@@ -26,7 +26,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ### Changed
 - `jul lint -json` now emits a stable schema: lowercase field names and a string `severity` (`"warning"`/`"error"`) instead of a numeric enum.
 - `jul fmt` no longer emits reserved (`mail`) or empty top-level (`upstreams`, `stream`, `plugins`) tables in canonical output.
-- History rollback (`POST /api/history/rollback`) now serializes under the same `applyMu` as config apply, closing a read-modify-write race with a concurrent apply.
+- Both configuration rollback endpoints (`POST /api/history/rollback` and the Console-facing `POST /api/config/rollback`) now route through a single `applyMu`-guarded write path, closing a read-modify-write race with a concurrent apply. A v1.1 fix had serialized only the first endpoint; the Console calls the second, so the race remained until this change.
+- Split the two largest admin/config source files by concern to keep each under ~600 LOC: `internal/admin/api.go` (1214→502; extracted `api_status.go`, `api_history.go`, `api_wizard.go`) and `internal/config/validate.go` (1005→561; extracted `validate_location.go`, `validate_backends.go`). Behavior unchanged.
+- Example configs (`examples/migrate/jul.toml`, `server.full.apps.toml`) no longer carry the empty `stream = []` / `mail = []` tables that `jul fmt` now omits.
 - `docs/status.md` and `docs/roadmap/README.md` corrected: Console continuous panels status footnote now explicitly lists live log tail (shipped), WASM plugin manager (shipped with upload pending), and gRPC route designer (planned).
 
 ### Fixed

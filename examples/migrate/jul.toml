@@ -8,9 +8,6 @@
 #   - location ~* "\\.(jpg|png|css|js)$" at line 34: case-insensitive regex mapped to regex (case sensitivity not preserved)
 #   - upstream app: server 10.0.0.3:8080 (line 18) is marked down and was omitted
 
-stream = []
-mail = []
-
 [global]
 worker_threads = ''
 access_log = ''
