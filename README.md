@@ -98,6 +98,12 @@ with `-tags "…"` or download the `full` release profile to enable everything.
 
 ---
 
+## Performance & benchmarks
+
+Jul.IA ships with an in-tree benchmark suite covering the hot path (routing, TLS, auth, proxy, cache, gRPC, and HTTP/3). For how to run benchmarks, what each measures, and tuning recommendations (connection pooling, cache sizing, compression levels, worker limits), see **[docs/benchmarks.md](docs/benchmarks.md)**.
+
+---
+
 ## Installation
 
 Download the archive for your platform from a [release](https://github.com/victornife/jul/releases)

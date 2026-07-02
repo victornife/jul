@@ -211,3 +211,9 @@ to disable a specific limit.
 - [ ] Enable tracing (`otel` tag) in staging first to validate overhead.
 - [ ] Monitor `jul_cert_expiry` for upcoming certificate renewals.
 - [ ] Use `/readyz` for orchestrator readiness probes.
+
+## Benchmarks & tuning
+
+For a catalogue of in-tree benchmarks, how to run the harness, and production
+tuning recommendations (connection pooling, cache sizing, compression levels,
+worker limits), see [benchmarks.md](benchmarks.md).
