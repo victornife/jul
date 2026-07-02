@@ -281,7 +281,7 @@ complete `[[servers]]`/`[[upstreams]]` TOML fragment and routes it through the
 validated **Validate → Diff → Apply → Rollback** pipeline — the editors never
 write directly, so an invalid draft never replaces the running config.
 
-> **Append-as-draft vs. structured in-place edit.** "Edit as new route/app"
+> **Append-as-draft vs. structured in-place edit.** "Clone route/app"
 > opens an existing block as a new draft appended to the raw config, which the
 > operator reviews in the editor before applying — a deliberately conservative
 > path that never rewrites existing TOML in the browser (so comments and

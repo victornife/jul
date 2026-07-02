@@ -124,7 +124,7 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
 // QuickEdits performs true in-place edits via the structured patch API (Wave B):
 // the server applies the change to the parsed config and returns the candidate
 // TOML, which we hand to the Config editor for diff review + apply. Unlike
-// "Edit as new route" (which appends a draft block), these modify the existing
+// "Clone route" (which appends a draft block), these modify the existing
 // route, so there are no duplicate blocks to prune.
 function QuickEdits({
   route,
@@ -524,7 +524,7 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           onClick={onEdit}
           className="ml-auto block rounded-md border border-jul-border px-4 py-1.5 text-sm text-jul-text hover:bg-jul-surface"
         >
-          Edit as new route →
+          Clone route →
         </button>
       }
     >
