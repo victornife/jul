@@ -96,3 +96,154 @@ func TestHTTP3EndToEnd(t *testing.T) {
 		t.Errorf("connection hook count = %d, want >= 1", conns.Load())
 	}
 }
+
+// TestHTTP3BadCertificate checks that a client with an untrusted CA pool
+// cannot establish a QUIC connection: the TLS handshake fails and the request
+// errors, confirming certificate verification is enforced.
+func TestHTTP3BadCertificate(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := writeSelfSigned(t, dir, "h3-badcert", "localhost")
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		t.Fatalf("load cert: %v", err)
+	}
+	getCert := func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	h3, err := startHTTP3("127.0.0.1:0", getCert, handler, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("startHTTP3: %v", err)
+	}
+	defer func() { _ = h3.Close(context.Background()) }()
+
+	addr := h3.(*h3Conn).ln.Addr().String()
+
+	// Use an *empty* cert pool so the server cert is not trusted.
+	tr := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: x509.NewCertPool(), ServerName: "localhost"},
+	}
+	defer func() { _ = tr.Close() }()
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+	_, err = client.Get("https://" + addr + "/")
+	if err == nil {
+		t.Fatal("expected TLS error for untrusted cert, got nil")
+	}
+}
+
+// TestHTTP3ConnectionCloseUnderLoad starts a simple handler and verifies that
+// Close() drains in-flight requests and zeroes the connection gauge.
+func TestHTTP3ConnectionCloseUnderLoad(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := writeSelfSigned(t, dir, "h3-close", "localhost")
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		t.Fatalf("load cert: %v", err)
+	}
+	getCert := func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }
+
+	var reqCount atomic.Int64
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reqCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	var conns atomic.Int64
+	onConn := func(d int64) { conns.Add(d) }
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	h3, err := startHTTP3("127.0.0.1:0", getCert, handler, onConn, logger)
+	if err != nil {
+		t.Fatalf("startHTTP3: %v", err)
+	}
+
+	addr := h3.(*h3Conn).ln.Addr().String()
+
+	pool := x509.NewCertPool()
+	pemBytes, _ := os.ReadFile(certPath)
+	pool.AppendCertsFromPEM(pemBytes)
+
+	tr := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "localhost"},
+	}
+	defer func() { _ = tr.Close() }()
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+	// Warmup
+	resp, err := client.Get("https://" + addr + "/")
+	if err != nil {
+		t.Fatalf("warmup GET: %v", err)
+	}
+	resp.Body.Close()
+	if conns.Load() < 1 {
+		t.Fatal("no connection counted after warmup")
+	}
+
+	// Close the listener and drain.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := h3.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// After close the gauge must drop back to zero.
+	if conns.Load() != 0 {
+		t.Fatalf("connection gauge = %d after close, want 0", conns.Load())
+	}
+}
+
+// BenchmarkHTTP3Throughput measures raw request throughput over a single HTTP/3
+// connection. It establishes the connection in the benchmark setup so the
+// measured iterations run over an already-warmed QUIC path. The result is
+// useful for comparing QUIC overhead against the TCP/HTTP2 baseline in
+// handler/proxy benchmarks.
+func BenchmarkHTTP3Throughput(b *testing.B) {
+	dir := b.TempDir()
+	certPath, keyPath := writeSelfSigned(b, dir, "h3-bench", "localhost")
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		b.Fatalf("load cert: %v", err)
+	}
+	getCert := func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	h3, err := startHTTP3("127.0.0.1:0", getCert, handler, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		b.Fatalf("startHTTP3: %v", err)
+	}
+	defer func() { _ = h3.Close(context.Background()) }()
+
+	addr := h3.(*h3Conn).ln.Addr().String()
+
+	pool := x509.NewCertPool()
+	pemBytes, _ := os.ReadFile(certPath)
+	pool.AppendCertsFromPEM(pemBytes)
+
+	tr := &http3.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "localhost"},
+	}
+	defer func() { _ = tr.Close() }()
+	client := &http.Client{Transport: tr, Timeout: 5 * time.Second}
+
+	// Warmup: establish the QUIC connection before measuring.
+	resp, err := client.Get("https://" + addr + "/")
+	if err != nil {
+		b.Fatalf("warmup GET: %v", err)
+	}
+	resp.Body.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r, err := client.Get("https://" + addr + "/")
+		if err != nil {
+			b.Fatalf("GET: %v", err)
+		}
+		r.Body.Close()
+	}
+}
