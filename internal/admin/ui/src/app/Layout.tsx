@@ -273,7 +273,9 @@ function PreferenceMenu({
             resetPreferences();
             window.location.reload();
           }}
-          onCancel={() => setShowResetConfirm(false)}
+          onCancel={() => {
+            setShowResetConfirm(false);
+          }}
         >
           <p className="text-sm text-jul-text">
             Reset all view preferences (theme, layout) to their defaults and

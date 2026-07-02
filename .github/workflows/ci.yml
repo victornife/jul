@@ -380,6 +380,7 @@ jobs:
         with:
           name: console-build-log-${{ matrix.profile }}
           path: build.log
+          if-no-files-found: ignore
 
   docs-check:
     name: docs-check
