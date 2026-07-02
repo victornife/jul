@@ -39,14 +39,20 @@ func ExpandSecrets(c *Config) error {
 	// removes the override restores the default.
 	redact.SetMinLen(c.Global.RedactMinSecretLength)
 	var errs []error
+	active := make(map[string]struct{})
+	minLen := redact.DefaultMinLen
+	if c.Global.RedactMinSecretLength > 0 {
+		minLen = c.Global.RedactMinSecretLength
+	}
 	walkConfigStrings(c, func(s string) string {
-		out, err := resolveSecretRefs(s)
+		out, err := resolveSecretRefs(s, active, minLen)
 		if err != nil {
 			errs = append(errs, err)
 			return s
 		}
 		return out
 	})
+	redact.Replace(active)
 	return errors.Join(errs...)
 }
 
@@ -72,7 +78,7 @@ func containsSecretRef(s string) bool {
 // resolveSecretRefs replaces every recognized secret reference in s with its
 // resolved value, registering the value for log redaction. A reference using an
 // unknown scheme (e.g. ${vault:...}) is an error so typos fail loudly.
-func resolveSecretRefs(s string) (string, error) {
+func resolveSecretRefs(s string, active map[string]struct{}, minLen int) (string, error) {
 	if !strings.Contains(s, "${") {
 		return s, nil
 	}
@@ -96,7 +102,9 @@ func resolveSecretRefs(s string) (string, error) {
 			}
 			return match
 		}
-		redact.Add(val)
+		if len(val) >= minLen {
+			active[val] = struct{}{}
+		}
 		return val
 	})
 	if resolveErr != nil {

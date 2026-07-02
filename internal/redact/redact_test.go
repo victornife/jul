@@ -78,3 +78,27 @@ func TestSetMinLen(t *testing.T) {
 		t.Errorf("SetMinLen(0) did not restore the default floor")
 	}
 }
+
+func TestReplacePrunesDeletedSecrets(t *testing.T) {
+	// Start with a known secret in the registry.
+	Add("keep-this-secret")
+	Add("delete-this-secret")
+	if Count() < 2 {
+		t.Fatal("expected both secrets registered")
+	}
+
+	// Replace with a set that only contains the first secret.
+	Replace(map[string]struct{}{"keep-this-secret": {}})
+
+	// The kept secret must still mask.
+	if got := Apply("token=keep-this-secret"); !strings.Contains(got, Mask) {
+		t.Errorf("kept secret not masked: %q", got)
+	}
+	// The deleted secret must NOT mask anymore.
+	if got := Apply("token=delete-this-secret"); strings.Contains(got, Mask) {
+		t.Errorf("deleted secret still masked after Replace: %q", got)
+	}
+
+	// Restore the kept secret and normal state.
+	Add("keep-this-secret")
+}

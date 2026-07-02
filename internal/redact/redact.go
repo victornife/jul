@@ -103,3 +103,12 @@ func (rw *redactingWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// Replace replaces the entire secret registry with newSecrets.
+// It is used on config reload to prune secrets that were deleted from the
+// configuration so their values no longer get redacted from logs.
+func Replace(newSecrets map[string]struct{}) {
+	mu.Lock()
+	defer mu.Unlock()
+	secrets = newSecrets
+}
