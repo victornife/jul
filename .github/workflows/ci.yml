@@ -108,6 +108,7 @@ jobs:
   coverage:
     name: coverage gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       # Statement-coverage floor for the full opt-in tag set. The current merged
       # total sits comfortably above this; the gate guards against large

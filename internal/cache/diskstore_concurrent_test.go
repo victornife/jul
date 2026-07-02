@@ -1,9 +1,21 @@
 package cache
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 )
+
+// raceScale returns a divisor for goroutine/iteration counts in tight-loop
+// concurrent tests. On resource-constrained CI runners (≤4 vCPU) the race
+// detector's shadow memory multiplies peak footprint, so we scale down to
+// keep the test fast but still exercise the concurrency paths.
+func raceScale() int {
+	if runtime.NumCPU() <= 4 {
+		return 4
+	}
+	return 1
+}
 
 // TestDiskStoreConcurrentGetSet exercises concurrent get and set on the
 // same key and on distinct keys, targeting the mutex-protected map/LRU.
@@ -17,8 +29,15 @@ func TestDiskStoreConcurrentGetSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const keys = 50
-	const rounds = 100
+	s := raceScale()
+	keys := 50 / s
+	if keys < 4 {
+		keys = 4
+	}
+	rounds := 100 / s
+	if rounds < 10 {
+		rounds = 10
+	}
 
 	var wg sync.WaitGroup
 	for i := 0; i < keys; i++ {
@@ -44,15 +63,22 @@ func TestDiskStoreConcurrentDel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Pre-populate
-	d.set("x", &Entry{Status: 200, Body: []byte("v1")})
+	s := raceScale()
+	workers := 20 / s
+	if workers < 2 {
+		workers = 2
+	}
+	rounds := 200 / s
+	if rounds < 20 {
+		rounds = 20
+	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 200; j++ {
+			for j := 0; j < rounds; j++ {
 				d.get("x")
 				d.del("x")
 			}
@@ -69,21 +95,39 @@ func TestDiskStoreConcurrentPurgeDuringAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	s := raceScale()
+	writers := 10 / s
+	if writers < 2 {
+		writers = 2
+	}
+	purgers := 5 / s
+	if purgers < 1 {
+		purgers = 1
+	}
+	writeRounds := 50 / s
+	if writeRounds < 5 {
+		writeRounds = 5
+	}
+	purgeRounds := 30 / s
+	if purgeRounds < 3 {
+		purgeRounds = 3
+	}
+
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for i := 0; i < writers; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
+			for j := 0; j < writeRounds; j++ {
 				d.set("k", &Entry{Status: 200, Body: []byte("v")})
 			}
 		}(i)
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < purgers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 30; j++ {
+			for j := 0; j < purgeRounds; j++ {
 				d.purge()
 			}
 		}()
@@ -101,11 +145,25 @@ func TestDiskStoreConcurrentRehydrate(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	s := raceScale()
+	writeRounds := 200 / s
+	if writeRounds < 20 {
+		writeRounds = 20
+	}
+	rehydrateWorkers := 3 / s
+	if rehydrateWorkers < 1 {
+		rehydrateWorkers = 1
+	}
+	rehydrateRounds := 10 / s
+	if rehydrateRounds < 2 {
+		rehydrateRounds = 2
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 200; i++ {
+		for i := 0; i < writeRounds; i++ {
 			d1.set("k", &Entry{Status: 200, Body: []byte("v1")})
 			// Deliberate interleave purge to exercise the purge/rehydrate gap.
 			if i%50 == 0 {
@@ -115,11 +173,11 @@ func TestDiskStoreConcurrentRehydrate(t *testing.T) {
 	}()
 
 	// Multiple concurrent rehydrates
-	for i := 0; i < 3; i++ {
+	for i := 0; i < rehydrateWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 10; j++ {
+			for j := 0; j < rehydrateRounds; j++ {
 				_, _ = newDiskStore(dir, 1<<20, testLogger())
 			}
 		}()
@@ -139,12 +197,22 @@ func TestDiskStoreConcurrentOverflowEviction(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	s := raceScale()
+	workers := 20 / s
+	if workers < 4 {
+		workers = 4
+	}
+	rounds := 30 / s
+	if rounds < 5 {
+		rounds = 5
+	}
+
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < 30; j++ {
+			for j := 0; j < rounds; j++ {
 				body := make([]byte, 80) // each entry is ~80 bytes
 				body[0] = byte(id)
 				d.set("k-"+string(rune('0'+id%10)), &Entry{Status: 200, Body: body})

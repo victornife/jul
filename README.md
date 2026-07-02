@@ -164,7 +164,7 @@ go run ./cmd/jul --config server.toml
 Validate a configuration without starting the server:
 
 ```bash
-./jul --config server.toml --check
+jul check -config server.toml
 ```
 
 Print the version:
