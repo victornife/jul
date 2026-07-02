@@ -426,6 +426,25 @@ func validateWAF(c WAFConfig, where string) []error {
 	if !c.CRSEnabled && len(c.DirectivesFiles) == 0 && strings.TrimSpace(c.InlineRules) == "" {
 		errs = append(errs, fmt.Errorf("%s enabled but has no rules; set crs_enabled, directives_files, or inline_rules", where))
 	}
+	// Validate inline_rules for dangerous directives that would subvert WAF policy.
+	if ir := strings.TrimSpace(c.InlineRules); ir != "" {
+		for i, line := range strings.Split(ir, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			upper := strings.ToUpper(line)
+			// SecRuleEngine from inline_rules would silently override the configured mode.
+			// SecDefaultAction would conflict with the block_status default or CRS setup.
+			if strings.HasPrefix(upper, "SECRULEENGINE") {
+				errs = append(errs, fmt.Errorf("%s inline_rules line %d: SecRuleEngine is not allowed (use mode to control engine state)", where, i+1))
+			}
+			if strings.HasPrefix(upper, "SECDEFAULTACTION") {
+				errs = append(errs, fmt.Errorf("%s inline_rules line %d: SecDefaultAction is not allowed (use block_status or crs_enabled to control defaults)", where, i+1))
+			}
+		}
+	}
+
 	if c.RequestBodyLimit < 0 {
 		errs = append(errs, fmt.Errorf("%s request_body_limit must be >= 0", where))
 	}

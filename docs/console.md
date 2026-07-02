@@ -324,14 +324,7 @@ editor covering exporter, collector endpoint, sample ratio, service name, and
 transport security), and **WASM plugins** (the **Plugins** panel: declare a
 global `[plugins.NAME]` — module path, type, host capabilities and limits,
 config — and attach or detach middleware plugins per route; handler and
-server-level plugins stay raw-only). Enabling **outbound fetch** requires a
-non-empty `allowed_hosts` allowlist (the editor blocks save and the apply
-preflight rejects an empty list), and the plugin card surfaces the egress
-allowlist so the operator can see where a fetch-enabled plugin may reach.
-Plugin module bytes are referenced by file
-path — the console never uploads WASM. In a build without the `wasmplugins`
-tag the editor still works, but the apply preflight rejects a config that
-declares plugins, and the panel warns up front.
+server-level plugins stay raw-only) |
 
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,

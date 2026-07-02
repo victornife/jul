@@ -1,6 +1,6 @@
 # Security Policy
 
-> Last reviewed: 2026-06-21
+> Last reviewed: 2026-07-02
 
 This is the umbrella security document for **Jul.IA** (`jul`). It defines the
 trust model the server is built around, the hardening defaults you should know
@@ -24,36 +24,30 @@ When reporting, please include:
 - any suggested remediation, if you have one.
 
 We aim to acknowledge a report within a few working days, agree on a disclosure
-timeline, and credit reporters who want it once a fix is available. Until the
-project tags **v1.0**, security fixes land on `main`; there are no back-ported
-release branches yet (see [Supported versions](#supported-versions)).
+timeline, and credit reporters who want it once a fix is available. Security
+fixes land on `main` first; back-port policy is described in
+[Supported versions](#supported-versions).
 
 ## Supported versions
 
-Jul.IA is pre-1.0. Maturity is tracked per feature in
-[docs/status.md](docs/status.md), which is the canonical source of truth:
+Jul.IA follows [Semantic Versioning](https://semver.org/) and the
+[compatibility policy](docs/compatibility.md). Security fixes are handled as
+follows:
 
-- **Core GA — soak pending features** (Core HTTP, TLS/ACME, authentication, gRPC
-  transcoding, native gRPC passthrough, mTLS and the Console) meet the eight
-  non-soak GA criteria of [ADR 0003](docs/adr/0003-maturity-and-ga.md), with the
-  long-running soak test reclassified to a post-GA gate by
-  [ADR 0005](docs/adr/0005-soak-post-ga-gate.md). Security fixes here are
-  first-class.
-- **Beta features** (plugins, L4 stream proxy, WAF, service discovery, response
-  cache, HTTP/3, OTel/access-log sinks, compression and rate limiting) are
-  shipped with remaining GA gaps and receive **best-effort** security fixes on
-  `main` until they reach GA.
-
-See [docs/status.md](docs/status.md) for the per-feature maturity and GA-gap
-burndown.
+- **`main`** — receives security fixes first. Development happens here.
+- **Latest `v1.x` release** — security fixes from `main` are back-ported to the
+  latest minor release branch when feasible.
+- **Older releases** — no committed back-ports; upgrade to the latest `v1.x`
+  release.
 
 | Version | Security fixes |
 | --- | --- |
-| `main` (pre-1.0) | ✅ yes — fixes land here |
-| Tagged releases < v1.0 | ⚠️ no back-ports yet; track `main` |
+| `main` | ✅ yes — fixes land here first |
+| Latest `v1.x` release | ✅ yes — back-ported from `main` when feasible |
+| Older `v1.x` / pre-1.0 tags | ⚠️ best effort; upgrade recommended |
 
-Once **v1.0** is cut, the [compatibility policy](docs/compatibility.md) governs
-how breaking and security changes are versioned.
+The [compatibility policy](docs/compatibility.md) governs how breaking and
+security changes are versioned.
 
 ## Trust model
 

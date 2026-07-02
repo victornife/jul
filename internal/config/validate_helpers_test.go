@@ -124,7 +124,7 @@ func TestValidateWAF(t *testing.T) {
 	})
 
 	t.Run("valid detect mode", func(t *testing.T) {
-		cfg := base(WAFConfig{Enabled: true, Mode: "detect", BlockStatus: 403, InlineRules: "SecRuleEngine On"})
+		cfg := base(WAFConfig{Enabled: true, Mode: "detect", BlockStatus: 403, InlineRules: `SecAction "id:1,phase:1,nolog,pass"`})
 		if err := Validate(cfg); err != nil {
 			t.Errorf("valid detect mode rejected: %v", err)
 		}
@@ -180,6 +180,29 @@ func TestValidateWAF(t *testing.T) {
 		}
 		if err := Validate(cfg); err == nil {
 			t.Error("expected error for global WAF invalid mode")
+		}
+	})
+
+	t.Run("inline_rules rejects SecRuleEngine", func(t *testing.T) {
+		cfg := base(WAFConfig{Enabled: true, Mode: "block", BlockStatus: 403, InlineRules: `SecRuleEngine Off`})
+		err := Validate(cfg)
+		if err == nil || !strings.Contains(err.Error(), "SecRuleEngine is not allowed") {
+			t.Fatalf("expected SecRuleEngine rejection, got %v", err)
+		}
+	})
+
+	t.Run("inline_rules rejects SecDefaultAction", func(t *testing.T) {
+		cfg := base(WAFConfig{Enabled: true, Mode: "block", BlockStatus: 403, InlineRules: `SecDefaultAction "phase:1,deny,status:500,log"`})
+		err := Validate(cfg)
+		if err == nil || !strings.Contains(err.Error(), "SecDefaultAction is not allowed") {
+			t.Fatalf("expected SecDefaultAction rejection, got %v", err)
+		}
+	})
+
+	t.Run("inline_rules allows safe directives", func(t *testing.T) {
+		cfg := base(WAFConfig{Enabled: true, Mode: "block", BlockStatus: 403, InlineRules: `SecRule REQUEST_URI "@contains /forbidden" "id:100,phase:1,deny,status:403,log"`})
+		if err := Validate(cfg); err != nil {
+			t.Errorf("safe inline_rules rejected: %v", err)
 		}
 	})
 }
