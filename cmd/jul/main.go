@@ -1,4 +1,20 @@
 // Command jul is an NGINX-inspired HTTP edge server configured via TOML.
+//
+// serve() has four logical sections:
+//  1. Init         — logging, secrets, cache, metrics, tracing, ACME,
+//     stream proxy, WAF, rate limiter, upstream registry,
+//     plugin manager.
+//  2. buildHandlers — per-reload handler tree (static, proxy, FastCGI,
+//     gRPC transcoding, plugins) with middleware chain.
+//  3. Preflight     — admin-write validation gate (6-gate sequence via
+//     app.Preflight.Apply: validate → TLS → handler dry-run
+//     → stream dry-run → bind probes → restart checks).
+//  4. Admin deps    — web-console wiring (app.BuildAdminDeps) and listener
+//     startup.
+//
+// Pure wiring helpers (scope keys, indexing, preflight, admin deps) live in
+// internal/app/ so they can be unit-tested without a full process boot
+// (see docs/architecture.md#composition-root-helpers).
 package main
 
 import (
@@ -675,36 +691,6 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return buildHandlers(c, true)
 	}
 
-	// preflightBuild dry-runs the full composition root on a CLONE of the config
-	// to prove it will build before it is persisted, without disturbing the live
-	// runtime. Cloning is essential: ExpandSecrets resolves secret references in
-	// place and SaveConfig marshals the caller's config after preflight, so
-	// building on the original could write resolved secrets to disk. The recover
-	// guard turns a panic in an edge configuration into a rejection instead of
-	// crashing the admin goroutine, and prevents a panicking config from ever
-	// reaching the asynchronous reload.
-	preflightBuild := func(c *config.Config) (err error) {
-		clone, cerr := c.Clone()
-		if cerr != nil {
-			return fmt.Errorf("clone config for preflight: %w", cerr)
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("configuration rejected: building it panicked: %v", r)
-			}
-		}()
-		// buildHandlers expands secrets on the clone in place, so the stream
-		// preflight below sees the same resolved targets the reload will use.
-		if _, _, err = buildHandlers(clone, false); err != nil {
-			return err
-		}
-		// The L4 stream listeners reload independently of the HTTP handlers, so
-		// prove they build too before the config is accepted; otherwise a bad
-		// [[stream]] block would surface only in the asynchronous OnReloaded,
-		// after "applied" was already reported.
-		return streamSrv.PreflightBuild(clone.Streams, app.IndexUpstreams(clone.Upstreams))
-	}
-
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 
@@ -732,79 +718,35 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Configuration GUI wiring. File read/write is only available when the
 	// source is a TOML file on disk; other sources leave these deps nil and the
 	// GUI degrades to read-only / disabled accordingly.
-	deps := admin.Deps{
-		Product:        productName,
-		Version:        version,
-		ConfigPath:     src.Name(),
-		Metrics:        metrics.Handler(),
-		Stats:          metrics.Snapshot,
-		TrafficSources: metrics.TrafficSnapshot,
-		Cache:          adminCache(responseCache),
-		Reload:         triggerReload,
-		Ready:          readyFlag.Ready,
-		LoadConfig:     src.Load,
+	subsystems := app.Subsystems{
+		ResponseCache:    responseCache,
+		Metrics:          metrics,
+		PoolReg:          poolReg,
+		LogTail:          logTail,
+		PluginsCompiled:  plugins.Compiled,
+		StreamCompiled:   stream.Compiled,
+		WAFCompiled:      waf.Compiled,
+		LastStreamReload: &lastStreamReload,
 	}
-	// Operational-depth panels (Console v2 Phase 5): recent request samples, the
-	// top failing routes, upstream health history, and certificate renewal
-	// history — all bounded, privacy-preserving, in-memory projections.
-	deps.RequestSamples = metrics.RequestSamples
-	deps.FailingRoutes = metrics.FailingRoutes
-	deps.UpstreamHealthHistory = metrics.UpstreamHealthHistory
-	deps.CertRenewalHistory = metrics.CertRenewalHistory
-	// Operations Log tab (Phase 4g): recent access-log entries and a live
-	// follower stream, both served from the bounded ring-buffer sink above.
-	deps.RecentLogs = logTail.Snapshot
-	deps.SubscribeLogs = logTail.Subscribe
-	// Plugins panel (Phase 4h): report whether this binary can run WASM plugins
-	// so the guided editor warns when declarations would fail the apply
-	// preflight on a lean (non-wasmplugins) build.
-	deps.PluginsCompiled = plugins.Compiled
-	deps.StreamCompiled = stream.Compiled
-	// Security panel: report whether this binary can enforce WAF rules so the
-	// guided editor warns that an enabled WAF validates here but the apply
-	// preflight rejects it on a lean (non-waf) build.
-	deps.WAFCompiled = waf.Compiled
-	// Live operational panels for the console: upstream health from the pool
-	// registry, and configured-certificate metadata from the current config.
-	deps.Upstreams = func() []admin.UpstreamStatus { return adaptUpstreams(poolReg.Snapshot()) }
-	deps.Certs = func() []admin.CertStatus {
-		c, err := src.Load()
-		if err != nil {
-			return nil
-		}
-		return adaptCerts(server.InspectCerts(c.Servers))
-	}
-	// StreamStatus reports the most recent L4 stream-proxy reload outcome for the
-	// console Overview (see lastStreamReload). It is empty when no stream is
-	// configured, so the console omits the panel in the common HTTP-only case.
-	deps.StreamStatus = func() string {
-		if p := lastStreamReload.Load(); p != nil {
-			return *p
-		}
-		return ""
-	}
-	// applyPreflight is the truthfulness gate for every config write: a config
-	// that passes it is guaranteed to build, so the subsequent asynchronous reload
+	deps := app.BuildAdminDeps(productName, version, src, subsystems)
+	deps.Reload = triggerReload
+	deps.Ready = readyFlag.Ready
+	deps.LoadConfig = src.Load
+	deps.TrafficSources = metrics.TrafficSnapshot
+
+	// preflight is the truthfulness gate for every config write: a config that
+	// passes it is guaranteed to build, so the subsequent asynchronous reload
 	// cannot fail for configuration reasons and "applied" stays honest. It runs the
 	// cheap structural + stateless validation first (validateRuntimeConfig also
-	// gates WAF config in lean builds), then preflightBuild, which dry-runs the
+	// gates WAF config in lean builds), then preflight.Apply, which dry-runs the
 	// ENTIRE composition root — the same factory the reload uses — on a clone:
 	// plugins, static roots, proxy/gRPC/FastCGI handlers, auth, WAF, router and
 	// compression. Any error (or panic) aborts the write before the file is
 	// persisted, instead of surfacing only at the reload where the old runtime
 	// keeps serving while audit/history have already recorded success.
-	applyPreflight := func(c *config.Config) error {
-		if err := validateRuntimeConfig(c); err != nil {
-			return err
-		}
-		// Validate file-based TLS certificates before the heavier full dry-run so
-		// a broken cert/key pair fails the apply here rather than only at the
-		// asynchronous reload (preflightBuild dry-runs handlers but never loads
-		// certificates or binds listeners).
-		if err := server.PreflightTLS(c.Servers); err != nil {
-			return err
-		}
-		return preflightBuild(c)
+	preflight := app.Preflight{
+		BuildHandlers: buildHandlers,
+		Stream:        streamSrv,
 	}
 	if ts, ok := src.(*config.TOMLSource); ok {
 		path := ts.Path
@@ -814,69 +756,17 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil {
 				return err
 			}
-			if err := applyPreflight(cfg); err != nil {
-				return err
-			}
 			// Compare the candidate against the running (on-disk) config to gate
 			// changes that the asynchronous reload would otherwise apply
 			// best-effort and only log on failure.
+			var prevCfg *config.Config
 			if prevData, rerr := os.ReadFile(path); rerr == nil {
-				if prevCfg, perr := config.Parse(prevData); perr == nil {
-					// Probe every NEWLY introduced listen address so an apply that
-					// adds an unbindable port (already in use, invalid, privileged)
-					// fails here rather than being recorded as applied while the
-					// new listener silently never serves.
-					if err := server.PreflightListeners(prevCfg.Servers, cfg.Servers); err != nil {
-						return err
-					}
-					// Symmetrically probe newly introduced stream (L4) listen
-					// addresses. PreflightBuild (run in applyPreflight above) proves
-					// the [[stream]] config builds but deliberately does not bind, so
-					// without this an unbindable new stream port would be recorded as
-					// applied while the asynchronous reload's bind fails and surfaces
-					// only in the Overview StreamStatus.
-					if err := streamSrv.PreflightListeners(prevCfg.Streams, cfg.Streams); err != nil {
-						return err
-					}
-					// Refuse to hot-apply a change that is valid but cannot take
-					// effect without a restart: the ACME issued-domain set and
-					// issuer are frozen when the autocert manager is built at
-					// startup. The on-disk config still reflects startup for ACME,
-					// since such changes are never written, so reject without
-					// writing — the operator restarts instead of believing it
-					// applied.
-					if reason, need := server.ACMERestartRequired(prevCfg.Servers, cfg.Servers); need {
-						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-					}
-					// Likewise refuse a change to a bind-time-frozen listener
-					// setting (timeouts, header limits, h2c, HTTP/3, TLS minimum
-					// version, mutual TLS, or the connection cap) on an address
-					// that already serves: doReload swaps handlers and refreshes
-					// certificates but never rebinds a kept listener, so such an
-					// edit would persist yet never take effect until a restart.
-					// Reject it here so "applied" stays honest.
-					if reason, need := server.ListenerRebindRequired(prevCfg, cfg); need {
-						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-					}
-					// Tracing is wired once at startup (the OTLP exporter
-					// pipeline and the global tracing seam), so doReload keeps the
-					// running tracer. Reject a changed [observability.tracing]
-					// block here so it is not persisted while the live tracer
-					// stays on the old settings — the operator restarts to apply
-					// it, exactly like ACME.
-					if reason, need := server.TracingRestartRequired(prevCfg, cfg); need {
-						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-					}
-					// Access-log sinks (stdout/file/syslog, their paths, format,
-					// and rotation) are built once at startup and persist across
-					// reloads, so a changed [observability.access_log] block would
-					// be written yet keep logging through the startup sinks until a
-					// restart. Reject it here, exactly like tracing and ACME, so
-					// "applied" stays honest.
-					if reason, need := server.AccessLogRestartRequired(prevCfg, cfg); need {
-						return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-					}
+				if prev, perr := config.Parse(prevData); perr == nil {
+					prevCfg = prev
 				}
+			}
+			if err := preflight.Apply(cfg, prevCfg); err != nil {
+				return err
 			}
 			// Write the validated config atomically with a secure default mode.
 			// A new config file is created 0o600 (it may hold inline credentials);
@@ -889,7 +779,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
-			if err := applyPreflight(c); err != nil {
+			if err := preflight.Apply(c, nil); err != nil {
 				return err
 			}
 			data, err := config.Marshal(c)
@@ -952,54 +842,6 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan stru
 		return nil
 	}
 	return ch
-}
-
-// adminCache adapts the response cache to the admin Purger interface, returning
-// a nil interface (not a typed nil) when caching is disabled so the admin
-// server can detect the absence reliably.
-func adminCache(c *cache.Cache) admin.Purger {
-	if c == nil {
-		return nil
-	}
-	return c
-}
-
-// adaptUpstreams maps the upstream registry snapshot onto the admin console's
-// decoupled view types so the admin package needs no upstream import.
-func adaptUpstreams(in []upstream.PoolStatus) []admin.UpstreamStatus {
-	out := make([]admin.UpstreamStatus, 0, len(in))
-	for _, p := range in {
-		ps := admin.UpstreamStatus{Name: p.Name, Strategy: p.Strategy}
-		for _, b := range p.Backends {
-			ps.Backends = append(ps.Backends, admin.BackendStatus{
-				Address:  b.Address,
-				Weight:   b.Weight,
-				Healthy:  b.Healthy,
-				Inflight: b.Inflight,
-			})
-		}
-		out = append(out, ps)
-	}
-	return out
-}
-
-// adaptCerts maps the server certificate summaries onto the admin console's view
-// types. It carries no key material.
-func adaptCerts(in []server.CertSummary) []admin.CertStatus {
-	out := make([]admin.CertStatus, 0, len(in))
-	for _, c := range in {
-		out = append(out, admin.CertStatus{
-			ServerNames: c.ServerNames,
-			Source:      c.Source,
-			Subject:     c.Subject,
-			Issuer:      c.Issuer,
-			DNSNames:    c.DNSNames,
-			NotBefore:   c.NotBefore,
-			NotAfter:    c.NotAfter,
-			Error:       c.Error,
-		})
-	}
-	return out
 }
 
 // validateRuntimeConfig performs a deep preflight of the configuration:
