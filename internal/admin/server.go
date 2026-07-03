@@ -124,10 +124,25 @@ type Deps struct {
 	StreamCompiled bool
 
 	// WAFCompiled reports whether this binary includes the web application
-	// firewall (the waf build tag). The Console Security panel surfaces it so the
-	// guided WAF editor can warn that a policy validates here but the apply
+	// firewall (the waf build tag). The Console Security panel surfaces it so
+	// the guided WAF editor can warn that a policy validates here but the apply
 	// preflight rejects an enabled WAF on a non-waf build.
 	WAFCompiled bool
+
+	// LastReload reports the outcome and timing of the most recent runtime
+	// reload. Nil when no reload has been attempted yet. Used by the apply
+	// handler to augment the response and by the status endpoint to surface
+	// reload health.
+	LastReload func() *ReloadSnapshot
+}
+
+// ReloadSnapshot is the admin-package view of the most recent reload outcome.
+type ReloadSnapshot struct {
+	OK       bool          `json:"ok"`
+	TimedOut bool          `json:"timed_out"`
+	Duration time.Duration `json:"duration"`
+	At       time.Time     `json:"at"`
+	Error    string        `json:"error,omitempty"`
 }
 
 // Server is the admin HTTP listener.

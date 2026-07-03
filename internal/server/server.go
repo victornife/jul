@@ -65,11 +65,11 @@ type Server struct {
 	MTLSResultHook func(result string)
 
 	// OnReloaded, when set, is invoked with the newly applied configuration at
-	// the end of every successful reload. The composition root uses it to drive
-	// reloads of subsystems that run alongside the HTTP listeners (presently the
-	// L4 stream proxy) without this package importing them. It is not called at
-	// startup; the composition root applies the initial configuration directly.
+	// the end of a successful reload, after the HTTP handler swap and listener
+	// diff complete.
 	OnReloaded func(*config.Config)
+
+	lastReload atomic.Pointer[lastReloadInfo]
 
 	mu        sync.Mutex
 	cfg       *config.Config
@@ -78,6 +78,25 @@ type Server struct {
 
 	wg       sync.WaitGroup
 	serveErr chan error
+}
+
+// lastReloadInfo captures the outcome and timing of the most recent reload.
+type lastReloadInfo struct {
+	OK       bool
+	TimedOut bool
+	Duration time.Duration
+	At       time.Time
+	Error    string
+}
+
+// LastReload returns a copy of the most recent reload outcome. It returns nil
+// if no reload has been attempted.
+func (s *Server) LastReload() *lastReloadInfo {
+	if p := s.lastReload.Load(); p != nil {
+		cp := *p
+		return &cp
+	}
+	return nil
 }
 
 // handlerGen is one generation of the per-listen-address handler map plus the
@@ -103,7 +122,6 @@ func newHandlerGen(handlers map[string]http.Handler) *handlerGen {
 }
 
 // release marks an in-flight request against this generation done. The request
-// that drops a retiring generation's in-flight count to zero signals that the
 // generation has drained so its resources can be closed.
 func (g *handlerGen) release() {
 	if g.inflight.Add(-1) == 0 && g.retiring.Load() {
@@ -378,79 +396,126 @@ func (s *Server) doReload() {
 	newCfg, err := s.source.Load()
 	if err != nil {
 		s.log.Error("reload aborted: load failed", "error", err)
-		return
-	}
-	if s.validate != nil {
-		if err := s.validate(newCfg); err != nil {
-			s.log.Error("reload aborted: invalid configuration", "error", err)
-			return
-		}
-	}
-	newHandlers, retirePrev, err := s.factory(newCfg)
-	if err != nil {
-		s.log.Error("reload aborted: build handlers failed", "error", err)
+		s.lastReload.Store(&lastReloadInfo{OK: false, At: time.Now(), Error: err.Error()})
 		return
 	}
 
-	// Swap request handlers atomically, then retire the previous generation once
-	// its in-flight requests drain. New requests immediately use the new
-	// generation; the old generation's handler-owned resources (gRPC backend
-	// connections, WASM plugin runtimes, static-file directory handles) are
-	// closed only after no request is still executing against them, so a reload
-	// never tears resources out from under an in-flight request.
-	prevGen := s.handlers.Load()
-	s.handlers.Store(newHandlerGen(newHandlers))
-	s.retireGen(prevGen, retirePrev)
-
-	oldCfg := s.cfg
-	s.cfg = newCfg
-
-	// Tracing is wired once at startup (the OTLP exporter pipeline and the
-	// global tracing seam), so a reload keeps the running tracer. Warn when the
-	// block changes so the operator knows a restart is needed to apply it.
-	if oldCfg.Observability.Tracing != newCfg.Observability.Tracing {
-		s.log.Warn("tracing settings changed; restart required to apply (running tracer kept)")
+	// Time-bound the reload using the configured timeout. Zero means unbounded.
+	var ctx context.Context
+	var cancel context.CancelFunc
+	d := newCfg.Global.ReloadTimeout.Std()
+	if d > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), d)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
 	}
+	defer cancel()
 
-	// Access-log sinks are likewise wired once at startup; warn when a reload
-	// that bypassed the admin gate (a direct file edit plus SIGHUP) changes the
-	// block, so the operator knows a restart is needed to apply it.
-	if !accessLogEqual(oldCfg.Observability.AccessLog, newCfg.Observability.AccessLog) {
-		s.log.Warn("access-log settings changed; restart required to apply (running sinks kept)")
+	start := time.Now()
+	info := &lastReloadInfo{At: start}
+
+	// Wrap factory, validate, and OnReloaded with timeout observance.
+	type reloadResult struct {
+		handlers map[string]http.Handler
+		retire   func()
+		newCfg   *config.Config
+		oldCfg   *config.Config
+		err      error
+		stage    string
 	}
+	resCh := make(chan reloadResult, 1)
 
-	// Refresh TLS certificates for listeners that remain TLS-enabled.
-	s.reloadCertificates()
-
-	// Diff listen addresses: bind added, drain removed, keep unchanged.
-	oldAddrs := setOf(uniqueListenAddrs(oldCfg.Servers))
-	newAddrs := setOf(uniqueListenAddrs(newCfg.Servers))
-
-	for addr := range newAddrs {
-		if _, existed := oldAddrs[addr]; !existed {
-			if err := s.bind(addr); err != nil {
-				s.log.Error("reload: failed to bind new listener", "addr", addr, "error", err)
-			} else {
-				s.log.Info("reload: added listener", "addr", addr)
+	go func() {
+		var r reloadResult
+		if s.validate != nil {
+			if err := s.validate(newCfg); err != nil {
+				r.err = err
+				r.stage = "validate"
+				resCh <- r
+				return
 			}
 		}
-	}
-	for addr := range oldAddrs {
-		if _, kept := newAddrs[addr]; !kept {
-			s.removeListener(addr)
-			s.log.Info("reload: removed listener", "addr", addr)
+		newHandlers, retirePrev, err := s.factory(newCfg)
+		if err != nil {
+			r.err = err
+			r.stage = "build"
+			resCh <- r
+			return
 		}
-	}
+		r.handlers = newHandlers
+		r.retire = retirePrev
+		r.newCfg = newCfg
+		r.oldCfg = s.cfg
+		// OnReloaded is lightweight but may do network I/O (stream rebind).
+		// We still run it under the timeout.
+		if s.OnReloaded != nil {
+			s.OnReloaded(newCfg)
+		}
+		resCh <- r
+	}()
 
-	// Drive subsystems that run alongside the HTTP listeners (the L4 stream
-	// proxy) from the same validated configuration. They manage their own
-	// listeners and report binding errors internally, so a stream failure does
-	// not roll back the HTTP swap already applied above.
-	if s.OnReloaded != nil {
-		s.OnReloaded(newCfg)
-	}
+	select {
+	case <-ctx.Done():
+		info.TimedOut = true
+		info.Duration = time.Since(start)
+		info.Error = "reload timed out after " + d.String()
+		s.log.Error("reload timed out", "duration", info.Duration)
+		s.lastReload.Store(info)
+		return
+	case res := <-resCh:
+		info.Duration = time.Since(start)
+		if res.err != nil {
+			info.OK = false
+			info.Error = res.stage + ": " + res.err.Error()
+			s.log.Error("reload aborted", "stage", res.stage, "error", res.err)
+			s.lastReload.Store(info)
+			return
+		}
 
-	s.log.Info("configuration reloaded")
+		// Swap request handlers atomically, then retire the previous generation once
+		// its in-flight requests drain.
+		prevGen := s.handlers.Load()
+		s.handlers.Store(newHandlerGen(res.handlers))
+		s.retireGen(prevGen, res.retire)
+
+		oldCfg := res.oldCfg
+		s.cfg = res.newCfg
+
+		// Tracing / access-log change warnings.
+		if oldCfg.Observability.Tracing != res.newCfg.Observability.Tracing {
+			s.log.Warn("tracing settings changed; restart required to apply (running tracer kept)")
+		}
+		if !accessLogEqual(oldCfg.Observability.AccessLog, res.newCfg.Observability.AccessLog) {
+			s.log.Warn("access-log settings changed; restart required to apply (running sinks kept)")
+		}
+
+		// Refresh TLS certificates.
+		s.reloadCertificates()
+
+		// Diff listen addresses.
+		oldAddrs := setOf(uniqueListenAddrs(oldCfg.Servers))
+		newAddrs := setOf(uniqueListenAddrs(res.newCfg.Servers))
+
+		for addr := range newAddrs {
+			if _, existed := oldAddrs[addr]; !existed {
+				if err := s.bind(addr); err != nil {
+					s.log.Error("reload: failed to bind new listener", "addr", addr, "error", err)
+				} else {
+					s.log.Info("reload: added listener", "addr", addr)
+				}
+			}
+		}
+		for addr := range oldAddrs {
+			if _, kept := newAddrs[addr]; !kept {
+				s.removeListener(addr)
+				s.log.Info("reload: removed listener", "addr", addr)
+			}
+		}
+
+		info.OK = true
+		s.lastReload.Store(info)
+		s.log.Info("configuration reloaded", "duration", info.Duration)
+	}
 }
 
 // reloadCertificates rebuilds and swaps the cert provider for each currently

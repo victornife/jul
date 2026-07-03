@@ -110,6 +110,9 @@ name = "app"
 	if cfg.Global.ShutdownTimeout.Std() != 30*time.Second {
 		t.Errorf("default shutdown_timeout = %v, want 30s", cfg.Global.ShutdownTimeout.Std())
 	}
+	if cfg.Global.ReloadTimeout.Std() != 10*time.Second {
+		t.Errorf("default reload_timeout = %v, want 10s", cfg.Global.ReloadTimeout.Std())
+	}
 
 	srv := cfg.Servers[0]
 	if srv.ReadHeaderTimeout.Std() != 10*time.Second {

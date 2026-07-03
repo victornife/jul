@@ -76,6 +76,9 @@ func (c *Config) applyDefaults() {
 	if c.Global.ShutdownTimeout == 0 {
 		c.Global.ShutdownTimeout = Duration(30 * time.Second)
 	}
+	if c.Global.ReloadTimeout == 0 {
+		c.Global.ReloadTimeout = Duration(10 * time.Second)
+	}
 
 	for i := range c.Servers {
 		srv := &c.Servers[i]

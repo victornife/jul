@@ -303,3 +303,41 @@ func TestApplyEmitsTimelineAndAudit(t *testing.T) {
 		t.Fatalf("audit apply success = %d, want 1", len(au))
 	}
 }
+
+func TestApplyResponseIncludesReloadBlock(t *testing.T) {
+	s, _ := v2WriteServer(t)
+	// Seed a mock last-reload snapshot.
+	s.deps.LastReload = func() *ReloadSnapshot {
+		return &ReloadSnapshot{
+			OK:       true,
+			TimedOut: false,
+			Duration: 150 * time.Millisecond,
+			At:       time.Now().Add(-time.Second),
+			Error:    "",
+		}
+	}
+	body := validTOML(t, "./public", ":8080")
+
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", strings.NewReader(string(body))))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("apply status = %d, want 200", rr.Code)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	reload, ok := out["reload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reload object in response, got %T", out["reload"])
+	}
+	if reload["ok"] != true {
+		t.Errorf("reload.ok = %v, want true", reload["ok"])
+	}
+	if reload["timed_out"] != false {
+		t.Errorf("reload.timed_out = %v, want false", reload["timed_out"])
+	}
+	if reload["error"] != nil && reload["error"] != "" {
+		t.Errorf("reload.error = %q, want nil or empty", reload["error"])
+	}
+}

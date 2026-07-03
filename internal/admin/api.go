@@ -443,21 +443,24 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	if s.deps.LoadConfig != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
 			status = s.runtimeStatus(cfg)
-			// version is the fresh optimistic-concurrency fingerprint after this
-			// apply, so the raw editor can keep editing without a spurious 409 on
-			// its next save.
 			if marshaled, merr := config.Marshal(cfg); merr == nil {
 				version = configVersion(marshaled)
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"ok":             true,
 		"pending_reload": true,
 		"message":        "Configuration validated and saved. The live runtime is reloading to apply it.",
 		"status":         status,
 		"version":        version,
-	})
+	}
+	if s.deps.LastReload != nil {
+		if snap := s.deps.LastReload(); snap != nil {
+			resp["reload"] = snap
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // adminGuardResponse is the 409 body when an apply would change a setting that

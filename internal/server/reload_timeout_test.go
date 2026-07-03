@@ -1,0 +1,106 @@
+package server
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"jul/internal/config"
+)
+
+func cfgWithReloadTimeout(addr string, timeout time.Duration) *config.Config {
+	c := cfgWith(addr)
+	c.Global.ReloadTimeout = config.Duration(timeout)
+	return c
+}
+
+// factoryFor returns a HandlerFactory that serves body for every listen address.
+func factoryFor(c *config.Config, body string) map[string]http.Handler {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, body)
+	})
+	m := make(map[string]http.Handler, len(c.Servers))
+	for _, srv := range c.Servers {
+		m[srv.Listen] = h
+	}
+	return m
+}
+
+func TestReloadTimeout(t *testing.T) {
+	addr := freePort(t)
+
+	src := &stubSource{}
+	src.set(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil)
+
+	// Factory that sleeps longer than the reload timeout.
+	slowFactory := func(c *config.Config) (map[string]http.Handler, func(), error) {
+		time.Sleep(200 * time.Millisecond)
+		return factoryFor(c, "v1"), nil, nil
+	}
+
+	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }()
+	waitDialable(t, addr)
+
+	// Trigger a reload that should time out.
+	reload <- struct{}{}
+	time.Sleep(100 * time.Millisecond)
+
+	li := srv.LastReload()
+	if li == nil {
+		t.Fatal("expected LastReload to be set after timeout")
+	}
+	if !li.TimedOut {
+		t.Fatalf("expected TimedOut=true, got OK=%v TimedOut=%v", li.OK, li.TimedOut)
+	}
+	cancel()
+	<-done
+}
+
+func TestReloadRecordsSuccessAndDuration(t *testing.T) {
+	addr := freePort(t)
+
+	src := &stubSource{}
+	src.set(cfgWithReloadTimeout(addr, 5*time.Second), nil)
+
+	tag := &atomic.Pointer[string]{}
+	v1 := "v1"
+	tag.Store(&v1)
+
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }() //nolint:errcheck
+	waitDialable(t, addr)
+
+	reload <- struct{}{}
+	time.Sleep(50 * time.Millisecond)
+
+	li := srv.LastReload()
+	if li == nil {
+		t.Fatal("expected LastReload after reload")
+	}
+	if !li.OK {
+		t.Fatalf("expected OK=true, got OK=%v Error=%q", li.OK, li.Error)
+	}
+	if li.TimedOut {
+		t.Fatal("expected TimedOut=false for a fast reload")
+	}
+	if li.At.IsZero() {
+		t.Fatal("expected At set")
+	}
+
+	cancel()
+	<-done
+}

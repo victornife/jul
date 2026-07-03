@@ -97,24 +97,26 @@ closed connection. A **rejected** reload never reaches step 1's swap: its
 freshly built (staged) resources are closed immediately and the live generation
 is untouched.
 
-## Why there is no asynchronous reload timeout
+## Reload timeout (`[global].reload_timeout`)
 
-The apply response intentionally does **not** carry a per-layer reload result
-(`http_ok` / `stream_ok`) or wait on a reload deadline. The two failure modes
-that such machinery would guard against are already eliminated earlier:
+A reload is bounded by `[global].reload_timeout` (default 10s, 0 = unbounded).
+It measures the time from the server reading the new config through the end of
+the reload goroutine (build + optional `OnReloaded` hook). If the deadline
+fires, the reload is aborted and recorded as `timed_out`:
 
-- A configuration that cannot **build** is caught by the composition-root and
-  stream dry-runs (preflight steps 2–3).
-- A configuration that cannot **bind** is caught by the HTTP and stream listener
-  bind-probes (preflight steps 4–5).
+- The **running configuration keeps serving** — no partial swap occurs.
+- The apply response carries `reload.timed_out: true` and `reload.error`.
+- A timeout does **not** roll back an already-completed HTTP handler swap; the
+timeout fires only while the reload goroutine is still running (build or
+`OnReloaded`). In practice the only long-running operation is `OnReloaded`,
+which for the L4 stream proxy may bind new TCP/UDP listeners.
 
-Anything that survives the preflight builds and binds, and the per-layer swap is
-transactional with rollback. A reload that is "accepted but never converges" is
-therefore not a reachable state, so a reload deadline and an
-applied-versus-converged response field would add moving parts without guarding
-a real scenario. The honesty guarantee is provided at the source — by the
-preflight — rather than by reporting a late failure after the file is already
-written.
+The apply preflight already eliminates build and bind failures before the file
+is written, so a timeout is a safety rail for pathological stalls (a wedged
+`OnReloaded` or an unexpectedly slow factory) rather than a guard for a
+frequently reachable failure mode. The default 10s should accommodate all normal
+configs; operators may raise it for very large configs or environments with
+slow DNS.
 
 ## Changes that require a restart
 

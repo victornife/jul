@@ -808,6 +808,18 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv := server.New(cfg, log, factory, src, validateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = acmeMgr
+	deps.LastReload = func() *admin.ReloadSnapshot {
+		if li := srv.LastReload(); li != nil {
+			return &admin.ReloadSnapshot{
+				OK:       li.OK,
+				TimedOut: li.TimedOut,
+				Duration: li.Duration,
+				At:       li.At,
+				Error:    li.Error,
+			}
+		}
+		return nil
+	}
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
 	srv.MTLSResultHook = metrics.ObserveMTLSHandshake
 	// Drive L4 stream-proxy reloads from the same validated config as the HTTP

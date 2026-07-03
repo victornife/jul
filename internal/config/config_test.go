@@ -115,6 +115,17 @@ func TestValidateRejectsNegativeRedactFloor(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsNegativeReloadTimeout(t *testing.T) {
+	cfg := &Config{
+		Global:  GlobalConfig{ReloadTimeout: Duration(-1 * time.Second)},
+		Servers: []ServerConfig{{Listen: "127.0.0.1:80"}},
+	}
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "reload_timeout") {
+		t.Fatalf("expected reload_timeout validation error, got %v", err)
+	}
+}
+
 func TestValidateStreams(t *testing.T) {
 	base := func() *Config {
 		return &Config{
@@ -1794,4 +1805,15 @@ func TestAdminPluginUploadMaxSizeValidation(t *testing.T) {
 			t.Fatal("expected validate to reject negative max_size even when upload is disabled")
 		}
 	})
+}
+
+func TestValidateReloadTimeout(t *testing.T) {
+	cfg := &Config{
+		Global:  GlobalConfig{ReloadTimeout: Duration(-1 * time.Second)},
+		Servers: []ServerConfig{{Listen: "127.0.0.1:80"}},
+	}
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "reload_timeout") {
+		t.Fatalf("expected reload_timeout validation error, got %v", err)
+	}
 }

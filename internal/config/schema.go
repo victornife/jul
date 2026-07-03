@@ -181,6 +181,9 @@ type GlobalConfig struct {
 	// shorter than the default, accepting that short values may also mask
 	// incidental log text.
 	RedactMinSecretLength int `toml:"redact_min_secret_length"`
+	// ReloadTimeout is how long a hot reload may run before it is reported as
+	// timed out. The previous config keeps serving. Zero means unbounded.
+	ReloadTimeout Duration `toml:"reload_timeout"`
 }
 
 // ServerConfig is a virtual host bound to one listen address.

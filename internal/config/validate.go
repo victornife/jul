@@ -32,6 +32,9 @@ func Validate(c *Config) error {
 	if c.Global.RedactMinSecretLength < 0 {
 		errs = append(errs, fmt.Errorf("global: redact_min_secret_length must be >= 0, got %d", c.Global.RedactMinSecretLength))
 	}
+	if c.Global.ReloadTimeout < 0 {
+		errs = append(errs, errors.New("global: reload_timeout must be >= 0"))
+	}
 
 	// Index upstream names for proxy_pass reference checks and detect dups.
 	upstreamNames := map[string]int{}
