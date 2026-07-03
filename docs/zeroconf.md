@@ -112,7 +112,7 @@ A typical config lints in **< 1 ms**, including parse + validate + lint.
 | **Information disclosure** | `directory_listing` leaks directory contents | Check L4 flags it |
 | **Unreachable config** | Duplicate location blocks shadow later rules | Check L3 surfaces the collision |
 | **Lint bypass via `-strict` confusion** | Operator thinks `-strict` upgrades warnings to errors, but they skip fixes | `-strict` makes warnings fatal; document the difference from `Validate` errors |
-| **False sense of security** | Clean lint does not mean secure deployment | Lint is advisory; pair with `Validate`, `jul check`, and the [hardening guide](hardening.md) |
+| **False sense of security** | Clean lint does not mean secure deployment | Lint is advisory; pair with `Validate`, `jul check`, and the [hardening guide](../SECURITY.md#hardening-defaults--recommendations) |
 
 ## GA status
 

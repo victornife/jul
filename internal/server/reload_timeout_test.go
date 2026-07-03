@@ -112,3 +112,49 @@ func TestReloadRecordsSuccessAndDuration(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// TestReloadTimeoutExplicitZero verifies that reload_timeout = "0s" disables the
+// advisory timeout entirely. A slow factory should still succeed without
+// TimedOut=true because the 0 threshold skips the advisory check.
+func TestReloadTimeoutExplicitZero(t *testing.T) {
+	addr := freePort(t)
+
+	src := &stubSource{}
+	src.set(cfgWithReloadTimeout(addr, 0), nil)
+
+	// Factory that sleeps longer than any reasonable timeout.
+	slowFactory := func(c *config.Config) (map[string]http.Handler, func(), error) {
+		time.Sleep(200 * time.Millisecond)
+		return factoryFor(c, "v1"), nil, nil
+	}
+
+	srv := New(cfgWithReloadTimeout(addr, 0), quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }()
+	waitDialable(t, addr)
+
+	reload <- struct{}{}
+	time.Sleep(350 * time.Millisecond)
+
+	li := srv.LastReload()
+	if li == nil {
+		t.Fatal("expected LastReload to be set after slow reload")
+	}
+	if li.TimedOut {
+		t.Fatalf("expected TimedOut=false when reload_timeout=0 (disabled), got TimedOut=%v OK=%v", li.TimedOut, li.OK)
+	}
+	if !li.OK {
+		t.Fatalf("expected OK=true despite slow factory (timeout disabled), got OK=%v Error=%q", li.OK, li.Error)
+	}
+	// Swap must still have completed.
+	prevGen := srv.handlers.Load()
+	if prevGen == nil {
+		t.Fatal("expected handler generation to exist after reload with timeout=0")
+	}
+	cancel()
+	<-done
+}

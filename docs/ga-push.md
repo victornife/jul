@@ -75,3 +75,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | L4 stream proxy (Y2-03) | **GA — soak pending** | none — [stream.md](stream.md) doc + 23-row behaviour matrix (TCP/UDP relay, SNI routing, PROXY protocol, reload, preflight, UDP sessions), 4 benchmarks (`BenchmarkTCPPassthrough` ~3.2 ms, `BenchmarkTCPParallel` ~3.3 ms, `BenchmarkUDPRelay` ~33 μs, `BenchmarkUDPAdmitAtCap` up to 254 μs for 10k sessions), 5-item limitation list, 6-row threat note, fuzz targets `FuzzReadProxyHeader` and `FuzzPeekSNI`. UDP-churn soak test added behind `soak` tag. | M | ✅ |
 
 > **All 20 shipped features are now GA — soak pending.** Waves 2 and 3 are retired; all features consolidated into Wave 1 above. The only remaining work is the soak test (post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)).
+
+## Soak tracking (post-GA gate per ADR 0005)
+
+A soak failure is a release-blocking regression. Dated soak runs and artifacts are recorded in the [soak evidence log](soak-evidence.md).

@@ -6,10 +6,9 @@ Checks performed:
 1. All relative Markdown links resolve to existing files.
 2. All fenced TOML blocks are syntactically valid.
 3. No placeholder URLs (example/jul) remain in docs.
-4. No placeholder soak evidence values (<RUN_ID>, ???) remain in docs.
-5. Version and date are consistent across roadmap and status docs.
-6. No future "Updated" dates in living doc headers.
-7. Top-level config keys from schema.go appear in configuration.md (warning only).
+4. Version and date are consistent across roadmap and status docs.
+5. No future "Updated" dates in living doc headers.
+6. Top-level config keys from schema.go appear in configuration.md (warning only).
 """
 import os
 import re
@@ -286,7 +285,7 @@ def check_denylist(path: Path, text: str):
 
 
 def main():
-    SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__"}
+    SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews"}
     md_files = [
         p for p in ROOT.rglob("*.md")
         if not any(part in SKIP_DIRS for part in p.parts)

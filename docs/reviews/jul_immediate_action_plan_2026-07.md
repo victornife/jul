@@ -18,6 +18,8 @@
 
 **`go test ./...` ✅ All tests pass.**
 
+| **P1.5 Pre-soak hardening** | ✅ Complete | 2 tasks | `reload_timeout=0s` test; pre-commit hook with tests + docs-check |
+
 ---
 
 ## 1. Executive Summary
@@ -283,10 +285,10 @@ The docs are internally consistent on maturity labels, but:
 |---|-------|--------|----------|-------|-------|
 | 13 | Fix plugin upload docs (config ref, plugins.md, CHANGELOG) | S | P1 | Docs | Code default is `false`; docs must match |
 | 14 | Fix soak placeholders: remove ✅ or replace with real links | S | P1 | QA/Docs | 17 rows across status.md + ga-push.md |
-| 15 | Fix `ga-push.md` Wave 1 table | XS | P2 | Docs | HTTP/3 maturity cell; add WASM + stream rows |
-| 16 | Fix `reload-semantics.md` stale API key | XS | P2 | Docs | `reload.timed_out` → `previous_reload.timed_out` |
-| 17 | Fix `OnReloaded` comment or move hook | S | P2 | Backend | Comment promises post-swap, code is pre-swap |
-| 18 | Fix `docs-check.py`: implement promised checks | S | P1 | DevEx | Header claims `<RUN_ID>`/`???` checks; implement or remove claim |
+| 15 | Fix ga-push.md Wave 1 table | XS | P2 | Docs | HTTP/3 maturity cell; add WASM + stream rows |
+| 16 | Fix reload-semantics.md Stale API key | XS | P2 | Docs | `reload.timed_out` → `previous_reload.timed_out` |
+| 17 | Fix OnReloaded comment or move hook | S | P2 | Backend | Comment promises post-swap, code is pre-swap |
+| 18 | Fix docs-check.py: implement promised checks | S | P1 | DevEx | Header claims `<RUN_ID>`/`???` checks; implement or remove claim |
 | 19 | Property-based reload safety quickcheck | M | P2 | QA | Seed configs, assert no swap regression |
 | 20 | Harden `reload_timeout=0s` explicit test | M | P2 | QA | Ensure 0 genuinely disables timeout |
 | 21 | Pre-commit hook for tests + docs-check | S | P2 | DevEx | Block bad commits at dev time |
