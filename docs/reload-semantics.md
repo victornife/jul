@@ -107,9 +107,10 @@ If the reload takes longer than the configured threshold, it is recorded as `tim
   What was previously an unsafe goroutine-based "abort" has been replaced by a
   warning so that operators know the reload was slow, while the runtime stays
   consistent.
-- The apply response carries `reload.timed_out: true` so the UI can warn the
-  operator that the reload exceeded the expected duration.
-- `reload.error` is empty when the timeout is advisory; the reload succeeded but
+- The apply response may include `previous_reload.timed_out: true` so the UI can warn the
+  operator that the last completed reload exceeded the expected duration. Note: this
+  describes the previous reload, not necessarily the one triggered by the current apply.
+- `previous_reload.error` is empty when the timeout is advisory; the reload succeeded but
     was slow.
 
 The apply preflight already eliminates build and bind failures before the file

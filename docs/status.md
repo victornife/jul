@@ -75,23 +75,23 @@ the [soak evidence log](soak-evidence.md).
 
 | Feature | GA on | Soak status |
 | --- | --- | --- |
-| Core HTTP | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Authentication (Y1-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Native gRPC passthrough (Y2-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| mTLS client auth (Y2-07) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Active health checks (Y1-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Web application firewall (WAF) (Y2-06) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Compression (Y1-02) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| NGINX config importer (Y1-09) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| Response cache (memory + disk) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Core HTTP | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Authentication (Y1-04) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Native gRPC passthrough (Y2-04) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| mTLS client auth (Y2-07) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Console (Y1-07 · Y2-09) | 2026-06-23 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Active health checks (Y1-05) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Web application firewall (WAF) (Y2-06) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Secrets references + log redaction (SEC-1) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Rate + connection limiting (Y1-03) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Compression (Y1-02) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| NGINX config importer (Y1-09) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Response cache (memory + disk) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
 | WASM plugin system (Y2-02) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
 | L4 stream proxy (Y2-03) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running, udp-churn scenario) |

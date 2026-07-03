@@ -58,6 +58,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 - Admin Console **WASM plugin upload** (`POST /api/plugins/upload`): validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, broadcasts `plugin_uploaded` SSE event. Configurable via `[admin]` keys `plugin_upload_enabled`, `plugin_upload_dir`, and `plugin_upload_max_size` (defaults enabled, `./jul-data/plugins`, `32` MB). Set `plugin_upload_enabled = false` to disable the endpoint.
+
+> **Note:** Default changed to `false` (secure-by-default) in v1.29.0 ([`internal/config/parser.go`](../internal/config/parser.go)).
+
 - Admin Console **gRPC route designer** (new Transcode panel): upload a compiled protobuf FileDescriptorSet (`.pb`) for inspection-only preview of the `google.api.http` annotations it declares, configure backend target / TLS / streaming / stream framing, then open the generated `grpc_transcode` route in the config editor for the standard Validate → Diff → Apply flow. The generated route exposes all methods from the descriptor set (per-method filtering is not supported). Cross-linked from existing `grpc_transcode` route detail drawers.
 - Admin API endpoint `POST /api/transcode/descriptor-upload` parses uploaded descriptors and returns methods with HTTP bindings (no `grpc` build tag required on the admin side).
 

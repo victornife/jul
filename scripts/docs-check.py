@@ -134,7 +134,13 @@ def check_toml_blocks(path: Path, text: str):
 
 def check_placeholders(path: Path, text: str):
     """Detect placeholder URLs/names that should have been replaced."""
-    bad = [r"example/jul", r"example\.com/jul"]
+    bad = [
+        r"example/jul",
+        r"example\.com/jul",
+        r"<RUN_ID>",
+        r"actions/runs/<RUN_ID>",
+        r"\?\?\?",
+    ]
     for pattern in bad:
         for match in re.finditer(pattern, text):
             line = text[:match.start()].count("\n") + 1

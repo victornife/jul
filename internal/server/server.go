@@ -64,9 +64,10 @@ type Server struct {
 	// reported here.
 	MTLSResultHook func(result string)
 
-	// OnReloaded, when set, is invoked with the newly applied configuration at
-	// the end of a successful reload, after the HTTP handler swap and listener
-	// diff complete.
+	// OnReloaded, when set, is invoked after the new configuration has validated
+	// and handlers have been built, but before the HTTP handler swap and listener
+	// diff are finalized. It must be idempotent and must not assume the HTTP
+	// generation is already live.
 	OnReloaded func(*config.Config)
 
 	lastReload atomic.Pointer[lastReloadInfo]

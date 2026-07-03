@@ -98,7 +98,7 @@ soak/udp: goroutines stable, heap bounded
 > is leak-free under sustained load. Link the artifact below when the CI run
 > completes.
 >
-> Artifact: `https://github.com/victornife/jul/actions/runs/<RUN_ID>`
+> Artifact: `https://github.com/victornife/jul/actions/runs/PENDING`
 
 ### 2026-07-03 — release soak queued (v1.29.0 tag)
 

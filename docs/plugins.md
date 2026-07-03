@@ -250,9 +250,10 @@ The Console can upload a `.wasm` module to the server over
 highest-consequence write the admin API exposes — it places executable code on
 the server — so it is guarded and **off unless explicitly configured**.
 
-**Enablement.** The endpoint is disabled unless `[admin]` sets a positive
-`plugin_upload_max_size` (MB); setting `plugin_upload_enabled = false` disables
-it even when a size is set. Uploaded files are written to
+**Enablement.** The endpoint is disabled by default. To enable it, set both
+`plugin_upload_enabled = true` and a positive `plugin_upload_max_size` (MB) in
+`[admin]`. Uploading executable code is a high-consequence write and must be
+explicitly opt-in. Uploaded files are written to
 `plugin_upload_dir` (default `./jul-data/plugins`).
 
 **Validation performed before anything is written:**

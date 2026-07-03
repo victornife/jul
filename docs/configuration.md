@@ -60,7 +60,8 @@ console = true
 history_dir = "./jul-data/config-history"
 history_keep = 50
 plugin_upload_dir = "./jul-data/plugins"
-plugin_upload_enabled = true
+# plugin_upload_enabled defaults to false. Set to true only if you need WASM upload.
+plugin_upload_enabled = false
 plugin_upload_max_size = 32
 
 ```
@@ -602,7 +603,8 @@ console = true
 history_dir = "./jul-data/config-history"
 history_keep = 50
 plugin_upload_dir = "./jul-data/plugins"
-plugin_upload_enabled = true
+# plugin_upload_enabled defaults to false. Set to true only if you need WASM upload.
+plugin_upload_enabled = false
 plugin_upload_max_size = 32
 ```
 
