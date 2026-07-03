@@ -48,7 +48,7 @@ pending** in the [GA push](../ga-push.md) (the soak test is a post-GA gate per
 | Y1-05 | Active health checks (HTTP/TCP probes) | **GA — soak pending** |
 | Y1-06 | gRPC ↔ JSON transcoding (MVP, `grpc` tag) | Beta |
 | Y1-07 | Console v1 (web dashboard, `console` tag) | Beta |
-| Y1-08 | Zero-config + `jul lint` | Beta |
+| Y1-08 | Zero-config + `jul lint` | **GA — soak pending** |
 | Y1-09 | NGINX config importer (`importer` tag) | Beta |
 | Y1-10 | OpenTelemetry tracing + access-log sinks (`otel` tag) | Beta |
 | Y1-11 | HTTP/3 over QUIC (`http3` tag) | Beta |
@@ -179,7 +179,7 @@ Counts are *shipped* features, regardless of maturity. Most ship at **Beta**;
 some have since cleared the GA bar to **GA — soak pending** (the canonical
 [status matrix](../status.md) is the source of truth). They are not GA counts.
 
-- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; Y1-01, Y1-03, Y1-04, Y1-05 at **GA — soak pending**, the rest **Beta**)
+- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; Y1-01, Y1-03, Y1-04, Y1-05, Y1-08 at **GA — soak pending**, the rest **Beta**)
 - [ ] **Year 2** — Protocol Gateway + Extensibility (8/9 shipped; Y2-01 + Y2-04 +
   Y2-07 at **GA — soak pending**, the rest **Beta**). Committed remaining: Y2-09
   Console. Y2-08 GraphQL **deferred** (demand-gated); AI-MVP is a **time-boxed
