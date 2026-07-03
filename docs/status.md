@@ -56,7 +56,7 @@ opaque forward — none add a custom parser of their own to fuzz.
 
 > **Continuous panels status** (Y2-09): Live log tail ✅ shipped; WASM plugin
 > manager ✅ shipped (`.wasm` upload shipped v1.27); gRPC route designer ✅ shipped
-> (visual designer with descriptor upload + method picker, v1.27).
+> (visual designer with descriptor upload + method preview, v1.27).
 
 ## Beta (shipped; remaining GA gaps)
 

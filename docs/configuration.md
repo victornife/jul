@@ -2,10 +2,10 @@
 
 Jul.IA is configured by a single TOML document. The top-level tables are
 `[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, `[admin]`,
-`[compression]`, `[rate_limit]`, `[observability]`, `[waf]`, `[[plugins]]`, and
+`[compression]`, `[rate_limit]`, `[observability]`, `[waf]`, `[plugins.<name>]`, and
 `[[stream]]`. The `[[mail]]` table is reserved for future use. Several tables
 are only honoured when the matching build tag is present (for example `[waf]`
-requires the `waf` tag, `[[stream]]` the `stream` tag, and `[[plugins]]` the
+requires the `waf` tag, `[[stream]]` the `stream` tag, and `[plugins.<name>]` the
 `wasmplugins` tag); absent tags are rejected at preflight rather than silently
 ignored.
 
@@ -866,13 +866,13 @@ Notes:
 
 ---
 
-## `[plugins]`
+## `[plugins.<name>]`
 
 > Requires a binary built with `-tags wasmplugins`.
 
 The WebAssembly plugin runtime lets you extend Jul without recompiling the
-server. Each entry under `[plugins]` declares one Wasm module by name. Plugins
-can act as middleware (wrapping a location) or as a terminal handler (replacing
+server. Each entry under `[plugins]` declares one Wasm module by name.
+Plugins can act as middleware (wrapping a location) or as a terminal handler (replacing
 a location action). Capabilities — KV store, outbound HTTP fetch — are disabled
 by default and granted explicitly per plugin for security.
 

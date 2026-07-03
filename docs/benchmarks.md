@@ -92,17 +92,24 @@ Jul.IA uses Go's default goroutine-per-request model. There is no fixed worker p
 
 ```toml
 [cache]
-type   = "memory"
-max_size = "128m"   # hard cap on cached response bytes
+enabled          = true
+memory_max_size  = "64m"
+default_ttl      = "60s"
+stale_while_revalidate = "30s"
+stale_if_error   = "5s"
 ```
 
-Or use a disk cache for larger working sets:
+Or use a disk tier for larger working sets:
 
 ```toml
 [cache]
-type   = "disk"
-max_size = "1g"
-path     = "/var/cache/jul"
+enabled          = true
+memory_max_size  = "64m"
+disk_path        = "/var/cache/jul"
+disk_max_size    = "1g"
+default_ttl      = "60s"
+stale_while_revalidate = "30s"
+stale_if_error   = "5s"
 ```
 
 **Rule of thumb:** Size the memory cache to hold your hottest 20% of responses. Disk cache is for larger working sets where memory is too expensive.
