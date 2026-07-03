@@ -69,7 +69,7 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 
 | Feature | ID | Tag | Remaining GA gaps (excl. soak) |
 | --- | --- | --- | --- |
-| Compression (gzip; brotli/zstd) | Y1-02 | `brotli`,`zstd` | ⑥ docs · ① encoder matrix · ② throughput bench · ⑦ BREACH note |
+| Compression (gzip; brotli/zstd) | Y1-02 | `brotli`,`zstd` | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Rate + connection limiting | Y1-03 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Active health checks | Y1-05 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Zero-config + `jul lint` | Y1-08 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
@@ -94,7 +94,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 
 | Feature | ① Matrix | ② Bench | ⑦ Threat | ⑧ Fuzz | ⑤ Soak | Open |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| Compression | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Compression | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Rate + connection limiting | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Active health checks | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Zero-config + `jul lint` | ✅ | ✅ | ✅ | ✅ | ☐ | 1 |
@@ -137,6 +137,7 @@ the [soak evidence log](soak-evidence.md).
 | Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Compression (Y1-02) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Recently shipped continuous panels
 
@@ -160,6 +161,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** SEC-1 Secrets references (`env`/`file`/`secret` refs + log redaction + lint) reaches GA — soak pending. Evidence: 12-row behaviour matrix, 5 redaction benchmarks (0-allocation miss path), 8-row threat note (VCS leak, log exposure, short-secret floor, env/file permissions). | [secrets.md](secrets.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-03 Rate + connection limiting reaches GA — soak pending. Evidence: 12-row behaviour matrix (key strategies, scope rules, eviction), 4 rate-limiter benchmarks (~300 ns Allow), threat note (IP spoofing, key collision, slowloris, bypass). | [ratelimit.md](ratelimit.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-08 Zero-config + `jul lint` reaches GA — soak pending. Evidence: 10-row lint checks matrix, 5 benchmarks (lint ~380ns, synthesiser ~2μs), `FuzzParse` fuzz target for TOML config round-trip, threat note (literal secrets, admin exposure, weak TLS, lint bypass). | [zeroconf.md](zeroconf.md), [status.md](status.md) |
+| 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-02 Response compression (gzip/brotli/zstd) reaches GA — soak pending. Evidence: 3-encoder matrix, 4 benchmarks (pass-through ~7μs, small gzip ~49μs, large gzip ~306μs), 6-row threat note (BREACH, CRIME, compression bomb, cache poisoning, sidecar leak, CPU exhaustion). | [compression.md](compression.md), [status.md](status.md) |
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y2-05 Service discovery and Y2-06 WAF reach GA — soak pending. Evidence: provider matrices, balancer benchmarks, threat notes. | [service-discovery.md](service-discovery.md), [waf.md](waf.md), [status.md](status.md) |
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y1-05 Active health checks reaches GA — soak pending. Evidence: probe conformance matrix, threshold/limitation docs, balancer benchmarks. | [health.md](health.md), [status.md](status.md) |
 | 2026-06-30 | 1.27 | **Console continuous panels status correction:** the Console v2 Y2-09 remaining-work note is updated to show that live log tail, the WASM plugin manager, the gRPC route designer, and the `.wasm` upload incremental feature are all shipped. The roadmap `Not yet shipped` wording is corrected from "none" to an explicit panel table so the source of truth does not drift. | [status.md](status.md), [roadmap/README.md](roadmap/README.md) |

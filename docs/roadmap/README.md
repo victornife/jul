@@ -42,7 +42,7 @@ pending** in the [GA push](../ga-push.md) (the soak test is a post-GA gate per
 | ID | Feature | Maturity |
 | --- | --- | --- |
 | Y1-01 | Automatic HTTPS (ACME: HTTP-01, TLS-ALPN-01, OCSP stapling) | **GA — soak pending** |
-| Y1-02 | Response compression (gzip core; `brotli`/`zstd` tags) | Beta |
+| Y1-02 | Response compression (gzip core; `brotli`/`zstd` tags) | **GA — soak pending** |
 | Y1-03 | Rate limiting + connection limiting | **GA — soak pending** |
 | Y1-04 | Authentication (Basic, bearer/JWT, forward-auth) | **GA — soak pending** |
 | Y1-05 | Active health checks (HTTP/TCP probes) | **GA — soak pending** |
@@ -179,7 +179,7 @@ Counts are *shipped* features, regardless of maturity. Most ship at **Beta**;
 some have since cleared the GA bar to **GA — soak pending** (the canonical
 [status matrix](../status.md) is the source of truth). They are not GA counts.
 
-- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; Y1-01, Y1-03, Y1-04, Y1-05, Y1-08 at **GA — soak pending**, the rest **Beta**)
+- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; Y1-01, Y1-02, Y1-03, Y1-04, Y1-05, Y1-08 at **GA — soak pending**, the rest **Beta**)
 - [ ] **Year 2** — Protocol Gateway + Extensibility (8/9 shipped; Y2-01 + Y2-04 +
   Y2-07 at **GA — soak pending**, the rest **Beta**). Committed remaining: Y2-09
   Console. Y2-08 GraphQL **deferred** (demand-gated); AI-MVP is a **time-boxed
