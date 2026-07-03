@@ -118,10 +118,6 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 > tracked in [ga-push.md](ga-push.md).
 
 ## Soak tracking (post-GA gate)
-==
-> **All 20 shipped features are now GA — soak pending. No Beta backlog remains.** The struck-through tables above are preserved as history. The only remaining GA gate is criterion ⑤ (soak), tracked below.
-
-## Soak tracking (post-GA gate)
 
 Criterion 5 for the GA — soak pending features. A soak failure is a
 release-blocking regression. Mirrors the

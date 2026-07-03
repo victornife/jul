@@ -1,7 +1,5 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.28 · Updated 2026-07-03
-==
 > Version 1.30 · Updated 2026-07-03
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
