@@ -59,6 +59,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Core HTTP (static, reverse proxy, FastCGI/uWSGI, vhosts, routing) | **GA — soak pending** | none — [core-http.md](core-http.md) doc + matrix + threat note + benchmarks + router/FastCGI fuzz landed | L | ✅ |
 | TLS + ACME (Y1-01) | **GA — soak pending** | none — [tls-acme.md](tls-acme.md) doc + matrix + threat note + benchmarks landed | M | ✅ |
 | Auth (Basic, JWT/JWKS, forward-auth) (Y1-04) | **GA — soak pending** | none — [auth.md](auth.md) doc + behaviour matrix + threat note + Basic/JWT benchmarks + JWKS/token fuzz landed | L | ✅ |
+| Console (Y1-07 · Y2-09) | **GA — soak pending** | none — [console.md](console.md) doc + [endpoint/panel matrix](console.md#api-endpoint-to-panel-map) + CSP-nonce/bearer security model landed; v1 retired by the embedded-SPA substrate cutover (Y2-09) | M | ✅ |
 
 ## Wave 2 — P1 (demand-pull + security-sensitive)
 
@@ -74,7 +75,6 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Service discovery (Y2-05) | Beta | ① provider matrix · ③ keep-last-good limits · ⑦ K8s-token/SSRF (docs ✅) | M | ☐ |
 | WAF (Y2-06) | Beta | ① rule/CRS/mode matrix · ② request-overhead bench · ⑦ false-positive/bypass note (docs ✅) | M–L | ☐ |
 | Secrets references (SEC-1) | Beta | ① ref-source matrix · ② resolve-cost bench · ⑦ leak/precedence note (docs ✅) | S–M | ☐ |
-| Active health checks (Y1-05) | Beta | ⑥ docs · ① probe matrix · ③ limits | S–M | ☐ |
 | Console (Y1-07 · Y2-09) | **GA — soak pending** | none — [console.md](console.md) doc + [endpoint/panel matrix](console.md#api-endpoint-to-panel-map) + CSP-nonce/bearer security model landed; v1 retired by the embedded-SPA substrate cutover (Y2-09) | M | ✅ |
 
 ## Wave 3 — P2 (dev-time CLI tools)
@@ -104,12 +104,14 @@ job (block tag on red).
 | Core HTTP (static/proxy/FastCGI/vhosts/routing) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Auth (CIDR/Basic/JWT/forward-auth) (Y1-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Active health checks (Y1-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Changelog
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
 | 2026-06-26 | 1.26 | **Cross-cutting: soak harness + enforced release gate** (makes criterion ⑤ a real gate, per [ADR 0005](adr/0005-soak-post-ga-gate.md)). Added [scripts/soak.sh](../scripts/soak.sh) wrapping an in-tree `TestSoak` (behind the `soak` build tag) that drives sustained concurrent traffic through the reverse-proxy data path and asserts zero request errors, a steady goroutine count, and bounded post-GC heap growth (a leak gate); a `soak (smoke)` [CI job](../.github/workflows/ci.yml) runs a short burst on every push so the harness cannot rot; and a tag-triggered [release workflow](../.github/workflows/release.yml) runs the full multi-minute soak and gates the release job on it — a red soak blocks the tagged release. Added a CI status badge to the [README](../README.md). | The waves, the bar, and the GA — soak-pending features; soak stays a post-GA gate (ADR 0005) — it is now enforced rather than only tracked in prose. | [scripts/soak.sh](../scripts/soak.sh), [.github/workflows/release.yml](../.github/workflows/release.yml), [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
+| 2026-07-03 | 1.28 | **Active health checks (Y1-05) → GA — soak pending.** Published [health.md](health.md) with a full conformance matrix (HTTP vs TCP probe behaviours), threshold/limitations section, and GA status table; the evidence bundle closes remaining gaps ①②③⑥⑦. Added to soak-tracking table. The Beta burndown row is now cleared. | The remaining ☐ features; soak stays a post-GA gate (ADR 0005). | [health.md](health.md), [internal/upstream/health.go](../internal/upstream/health.go), [internal/upstream/health_test.go](../internal/upstream/health_test.go) |
 | 2026-06-24 | 1.25 | Added the two newly shipped **Beta** features to Wave 2: **Y2-06 WAF** (`waf`) and **SEC-1 secrets references** (core). Both ship with docs ([waf.md](waf.md), [secrets.md](secrets.md)) and a Console surface (⑥ + ⑨ met); their remaining GA gaps are the behaviour matrix (①), a benchmark (②), and a threat note (⑦). ⑧ is **n/a** for both (Coraza owns SecLang parsing; secret references reuse the config parser). | The waves, the bar, and the GA — soak-pending features; soak stays a post-GA gate (ADR 0005). | [waf.md](waf.md), [secrets.md](secrets.md), [status.md](status.md) |
 | 2026-06-23 | 1.24 | **Console (Y1-07 · Y2-09) → GA — soak pending.** The embedded-SPA substrate cutover (React/TS/Vite, Node-free build, ~250 KB gz budget) flips the v2 console to the default admin UI at `/`, retires the hand-written v1 (`console.html`) and its dev route, and closes the last two Console GA gaps — ① the [endpoint/panel matrix](console.md#api-endpoint-to-panel-map) and ⑦ the formalised CSP-nonce + constant-time bearer security model. Added Console to the soak-tracking table. | The waves, the bar, and the remaining ☐ features; soak stays a post-GA gate (ADR 0005); ⑧ stays **n/a** (the console adds no custom parser). | [console.md](console.md), [console-v2 spec](specs/console-v2.md), [status.md](status.md) |
 | 2026-06-21 | 1.23 | **Cross-cutting: `SECURITY.md` umbrella threat model** (anchors criterion ⑦ fleet-wide). Added a top-level [SECURITY.md](../SECURITY.md): the edge trust model (config trusted, requests untrusted, no request-selected upstreams/JWKS), hardening defaults, a per-feature threat-note index (Core HTTP, auth, TLS/ACME, mTLS, gRPC transcoding/passthrough, console), the fuzzed-parser inventory, a cryptography summary, and a private vulnerability-reporting policy. **This completes all four cross-cutting tasks** — every GA criterion is now hosted/anchored fleet-wide. | Every feature's runtime behaviour and per-feature threat notes (the umbrella only indexes + links them); the waves and the bar. | [SECURITY.md](../SECURITY.md) |

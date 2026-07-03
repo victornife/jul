@@ -48,11 +48,13 @@ each linked doc's *GA status* table.
 | Native gRPC passthrough + h2c | Y2-04 | `grpc` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [grpc-proxy.md](grpc-proxy.md) |
 | mTLS client auth + `$ssl_client_*` | Y2-07 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
+| Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 
-Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, and the Console:
-their parsing is delegated to the Go standard library (`crypto/x509`,
-`encoding/json`) or the separately-tracked TOML config parser (Y1-08), or is an
-opaque forward — none add a custom parser of their own to fuzz.
+Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, the Console, and
+active health checks: their parsing is delegated to the Go standard library
+(`crypto/x509`, `encoding/json`, `net/http`, `net`) or the separately-tracked
+TOML config parser (Y1-08), or is an opaque forward — none add a custom parser
+of their own to fuzz.
 
 > **Continuous panels status** (Y2-09): Live log tail ✅ shipped; WASM plugin
 > manager ✅ shipped (`.wasm` upload shipped v1.27); gRPC route designer ✅ shipped
@@ -67,7 +69,7 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | --- | --- | --- | --- |
 | Compression (gzip; brotli/zstd) | Y1-02 | `brotli`,`zstd` | ⑥ docs · ① encoder matrix · ② throughput bench · ⑦ BREACH note |
 | Rate + connection limiting | Y1-03 | core | ⑥ docs · ① key/algorithm matrix · ② limiter bench · ⑦ bypass note |
-| Active health checks | Y1-05 | core | ① probe matrix · ③ limits |
+| Active health checks | Y1-05 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Zero-config + `jul lint` | Y1-08 | core | ⑥ docs · ① lint-checks matrix · ⑧ TOML config-parser fuzz |
 | NGINX config importer | Y1-09 | `importer` | ⑥ docs · ① directive-support matrix · ⑧ nginx.conf parser fuzz · ③ unmapped-directive limits |
 | OTel tracing + access-log sinks | Y1-10 | `otel` | ⑥ docs · ① exporter/sink matrix · ② overhead bench · ⑦ PII note |
@@ -93,7 +95,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 | --- | :-: | :-: | :-: | :-: | :-: | :-: |
 | Compression | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
 | Rate + connection limiting | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
-| Active health checks | ☐ | ✅ | ✅ | n/a | ☐ | 2 |
+| Active health checks | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Zero-config + `jul lint` | ☐ | ✅ | ✅ | ☐ | ☐ | 3 |
 | NGINX config importer | ☐ | ✅ | ✅ | ☐ | ☐ | 3 |
 | OTel tracing + access-log sinks | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
@@ -128,6 +130,7 @@ the [soak evidence log](soak-evidence.md).
 | Native gRPC passthrough (Y2-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | mTLS client auth (Y2-07) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Active health checks (Y1-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Recently shipped continuous panels
 

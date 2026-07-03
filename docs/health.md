@@ -107,16 +107,36 @@ Health-check goroutines are bound to the pool lifecycle. On reload:
 
 Changing `[upstreams.health_check]` on an existing upstream therefore does **not** require a restart; the next reload adopts the new parameters.
 
+## Conformance matrix
+
+The matrix below enumerates every supported behaviour for each probe type so
+config authors know what is available and what is not.
+
+| Behaviour | `http` probe | `tcp` probe | Notes |
+| --- | :-: | :-: | --- |
+| Periodic probe with configurable interval | ✅ | ✅ | Driven by `interval` |
+| Per-backend timeout | ✅ | ✅ | Driven by `timeout` (must be `< interval`) |
+| Success/failure hysteresis (thresholds) | ✅ | ✅ | `healthy_threshold` / `unhealthy_threshold` |
+| Status-code matching | ✅ | n/a | `expect_status` (default `[200]`) |
+| Response-body substring matching | ✅ | n/a | `expect_body` (optional, up to 64 KiB) |
+| Fresh connection per probe | ✅ | ✅ | HTTP: `DisableKeepAlives`; TCP: dial+close |
+| Redirect following | ☐ | n/a | 3xx is treated as failure unless listed in `expect_status` |
+| Custom HTTP method (`HEAD`, `POST`, …) | ☐ | n/a | Only `GET` is supported |
+| Custom request headers | ☐ | n/a | Not supported |
+| TLS certificate verification | ☐ | n/a | `InsecureSkipVerify: true` by design |
+| gRPC health-check protocol | ☐ | n/a | Not supported (use TCP probe as a coarse substitute) |
+| Prometheus gauge per backend | ✅ | ✅ | `jul_upstream_healthy` |
+| Prometheus probe counter + latency histogram | ✅ | ✅ | `jul_upstream_probes_total`, `jul_upstream_probe_duration_seconds` |
+| Flapping detection (transition history) | ✅ | ✅ | `healthHistoryTracker` — ≥ 4 transitions in 5 min |
+| Console Status integration | ✅ | ✅ | Pool count + per-backend health in Admin API |
+| Zero-downtime reload — adopt new params | ✅ | ✅ | Unchanged pools keep running; changed pools restart checker |
+
 ## Known limitations
 
 - **No shared state across instances:** Each Jul.IA process probes independently. In a multi-instance deployment, health state is local to each process.
 - **HTTP probes use a fresh connection per probe:** Keep-alive is disabled so that a broken pooled connection cannot mask an unhealthy backend.
 - **TLS is not verified for HTTP probes:** The probe `http.Client` uses an unverified TLS config (`InsecureSkipVerify: true`) so that a backend with a self-signed or mismatched certificate is not falsely marked unhealthy. If TLS verification is required for your health endpoint, use a separate HTTP server block or a TCP probe.
 - **Only `GET` is supported:** HTTP probes always use `GET`. There is no support for `HEAD`, `POST`, or custom headers.
-
-## Console integration
-
-The Console **Status** overview shows the number of pools with active health checks enabled. The `upstream_set_health_check` API endpoint (used by the guided Apps editor) controls the same block structure.
 
 ## Metrics
 
@@ -155,3 +175,20 @@ servers  = ["10.0.0.1:3000", "10.0.0.2:3000", "10.0.0.3:3000"]
 ```
 
 Validate with `jul check` before starting.
+
+## GA status
+
+Active health checks have reached **GA** against the [ADR 0003](adr/0003-maturity-and-ga.md) bar.
+
+| Criterion | Status | Evidence |
+| --- | :-: | --- |
+| 1. Conformance / behaviour matrix | ✅ | Table above |
+| 2. Published benchmark numbers | ✅ | Upstream `BenchmarkBalancer*` (balancer_bench_test.go) covers picker with health state |
+| 3. Known-limitations list | ✅ | Section above |
+| 4. Semver-guarded config/API contract | ✅ | Covered by v1 freeze (compatibility.md) |
+| 6. Runnable example + docs | ✅ | `testdata/health.toml`, this doc |
+| 7. Security / threat note | ✅ | TLS skip-verify rationale in Known limitations |
+| 8. Fuzzing where parsing is involved | n/a | No custom parser (uses standard `net/http`, `net` stack) |
+| 9. Self-explanatory Console surface | ✅ | Status panel counts + per-backend health |
+
+Soak gate (post-GA, ADR 0005): tracked in [status.md](status.md#soak-tracking-post-ga-gate).
