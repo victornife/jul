@@ -289,3 +289,114 @@ The `jul-abi/v1` ABI is request-phase only in v1:
 - **No separate response phase.** There is no `handle_response` export in v1.
   Response headers and status set during `handle_request` apply because they are
   written before the next handler runs.
+
+## Conformance matrix
+
+| Scenario | Input | Expected | Covered by |
+| -------- | ----- | -------- | ---------- |
+| Middleware injects header | `header-inject.wasm`, no special headers | `X-Plugin: header-inject`, next called, `200` | TestMiddlewareInjectsResponseHeader |
+| Middleware blocks request | `request-block.wasm`, `X-Block: 1` | `403`, next **not** called | TestMiddlewareBlocksRequest |
+| Middleware passes through | `request-block.wasm`, no `X-Block` | `200`, next called | TestMiddlewarePassesThrough |
+| Handler plugin blocks | `request-block.wasm` as handler, `X-Block: 1` | `403` | TestHandlerPluginBlocks |
+| Guest panic contained | `testguest-panic.wasm` | `500`, next **not** called, server stable | TestPanicIsContained |
+| Guest timeout contained | `testguest-loop.wasm`, 150 ms timeout | `500`, next **not** called | TestTimeoutIsContained |
+| KV capability granted | `kv-counter.wasm`, `kv = true` | Counter increments across requests, `X-Count` grows | TestKVCounterWithCapability |
+| KV capability denied | `kv-counter.wasm`, `kv = false` | Counter resets every request, `X-Count = 1` | TestKVDeniedWithoutCapability |
+| Reload reuses compilation cache | Same module, two generations | Second generation works, first can be closed | TestReloadReusesManager |
+| Reload under concurrent load | Live gen + 12 reload cycles while traffic flows | Zero failures (≤5 tolerated for jitter) | TestReloadUnderLoad |
+| Fetch allow-list match | `allowed_hosts = ["api.example.com"]` | Allowed host succeeds | TestFetchBlocksDisallowedHost |
+| Fetch blocked (evil host) | `allowed_hosts = ["api.example.com"]`, fetch evil.com | `errFetchBlocked` | TestFetchBlocksDisallowedHost |
+| Fetch blocks loopback | `allowed_hosts = ["127.0.0.1"]`, fetch loopback | Blocked by SSRF guard | TestFetchBlocksLoopbackEvenIfAllowed |
+| Fetch blocks DNS rebinding | Allow-listed host resolves to `127.0.0.1` | Blocked by SSRF guard after resolution | TestFetchBlocksDNSRebinding |
+| KV enforces max entries | `kv_max_entries = 2`, three distinct keys | Third `kv_set` rejected | TestKVSetEnforcesBounds |
+| KV enforces max bytes | `kv_max_bytes = 100`, 200-byte value | `kv_set` rejected | TestKVSetEnforcesBounds |
+| Flush rejects invalid status | Guest status `700` | Host replaces with `500` | TestFlushRejectsInvalidStatus |
+| Fetch truncation detected | Response 200 B, `max_fetch_response = 100` | Body capped at 100 B, `lastFetchTruncated = true` | TestFetchTruncationDetected |
+| Fetch not truncated | Response 5 B, `max_fetch_response = 100` | Body完整, `lastFetchTruncated = false` | TestFetchNotTruncated |
+| Build rejects missing module | `path` points to non-existent file | Build error | TestBuildRejectsMissingModule |
+| Set.Has membership | Plugin declared vs missing | `true` / `false` | TestSetHas |
+
+## Benchmarks
+
+All benchmarks are relative to `BenchmarkNativeHandler` (plain Go handler, no
+plugin overhead). The delta is the guest-invocation cost: ABI boundary crossing,
+import trampolines, linear-memory reads/writes, and (for KV) store access.
+
+Run: `go test -tags wasmplugins -bench='BenchmarkPlugin.*' -run='^$' -benchmem ./internal/plugins/`
+
+| Benchmark | Ops | Time/op | B/op | Allocs/op | vs Native |
+| --- | --- | --- | --- | --- | --- |
+| NativeHandler (baseline) | 6,086,704 | 192 ns | 0 | 0 | 1× |
+| PluginMiddleware (Continue, set header) | 61,150 | 16,521 ns | 15,405 | 46 | ~86× |
+| PluginHandler (Stop, set status + body) | 57,481 | 20,150 ns | 15,615 | 58 | ~105× |
+| PluginKVCounterWithCapability | 45,710 | 23,019 ns | 16,919 | 63 | ~120× |
+| PluginParallel (16 threads) | 323,972 | 3,423 ns | 14,725 | 43 | ~18× (amortised) |
+
+**Interpretation.** A single guest call adds ~16–23 μs of wall-clock latency and
+~15 KB of transient allocations (mostly wazero runtime state per instance). The
+parallel benchmark shows that under concurrency the effective per-request cost
+drops to ~3.4 μs because the runtime keeps warm instances and the host reuses
+the compilation cache. This is acceptable for middleware that performs
+non-trivial work (auth, transformation, enrichment) but not for passthrough
+paths where every microsecond counts.
+
+## Known limitations
+
+1. **Request-phase only.** `jul-abi/v1` has no `handle_response` export; response
+   inspection or mutation after the next handler runs is not possible in v1.
+2. **No shared plugin state across names.** Each plugin name gets its own wazero
+   runtime and KV namespace. Two plugins cannot share memory or KV keys even if
+   they load the same `.wasm` file.
+3. **No streaming request/response bodies.** The host buffers the full request
+   body (up to `max_request_body`) and the guest accumulates the full response
+   body (up to `max_response_body`) before anything is written to the HTTP
+   response writer. Large uploads/downloads should bypass the plugin (use a
+   handler route without plugins).
+4. **One ABI version in v1.** Only `jul-abi/v1` is implemented; future ABIs
+   (proxy-wasm, http-wasm) require a new ABI id and host-module registrar.
+5. **Build-tag required.** Binaries compiled without `wasmplugins` reject any
+   config that declares plugins at startup. This is intentional (fail loud) but
+   means plugin-enabled builds are larger and have a wider dependency surface
+   (wazero).
+
+## Threat model
+
+WASM plugins run untrusted code inside the request path. The following threats
+are addressed by design, configuration, or runtime containment:
+
+| Threat | Vector | Mitigation | Residual risk |
+| ------ | ------ | ---------- | ------------- |
+| Guest escape via memory corruption | Malformed `.wasm` or JIT bug | wazero is a pure-Go interpreter with no JIT/no cgo; the linear memory cap bounds blast radius; Go memory safety protects the host runtime | Unknown engine bug in wazero (defense-in-depth: keep wazero updated) |
+| Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
+| SSRF via `fetch` | Guest calls allowed host that redirects to private IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
+| KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |
+| Admin uploads malicious module | Attacker with admin token uploads crafted `.wasm` | Admin endpoint requires bearer token; upload disabled by default; filename hardened; path-traversal defense; module still sandboxed | Compromised admin token (rotate tokens, restrict admin to loopback/mTLS) |
+| Information leak via guest error | Guest panics and leaks stack or data in error message | Panic is contained; the host returns generic "plugin error" `500`; guest log goes to server log, not the HTTP client | Server log exposed to attacker (standard log-hardening hygiene) |
+| ABI compatibility breakage | New host release changes host function signature | ABI surface is golden-pinned (`abi-v1.golden`); additive-only policy within v1; breaking changes require new ABI id | Operator overrides golden check or builds from unreviewed ABI patch |
+
+## Fuzz coverage
+
+The following fuzz targets exercise the ABI boundary and guard logic:
+
+| Target | File | What it fuzzes | Oracle |
+| ------ | ---- | -------------- | ------ |
+| `FuzzPluginInvoke` | `internal/plugins/fuzz_test.go` | Random request shape (method, URI, headers, body) into `header-inject.wasm` | No host panic; status ∈ [100,599]; no cross-invocation state leak |
+| `FuzzHostAllowed` | `internal/plugins/fuzz_test.go` | Adversarial host strings and allow-lists | No panic; deterministic allow/block decision |
+
+Run: `go test -tags wasmplugins -fuzz='FuzzPluginInvoke|FuzzHostAllowed' -fuzztime=30s ./internal/plugins/`
+
+## GA status
+
+| Criterion | Status | Evidence |
+| --------- | ------ | -------- |
+| ① Behaviour conformance matrix | **Met** | 19-row matrix above +
+`internal/plugins/plugins_test.go` |
+| ② Benchmarks | **Met** | 5 benchmarks in `internal/plugins/bench_test.go` |
+| ③ Known limitations | **Met** | 5-item list above |
+| ④ Compatibility policy | **Met** | Additive-only ABI policy, golden-pinned surface, prebuilt-guest tested; documented in [abi.md](abi.md) |
+| ⑤ Soak test | **Pending** | Tracked in [ga-push.md](ga-push.md) soak table |
+| ⑥ Feature documentation | **Met** | This document + [abi.md](abi.md) +
+[configuration.md](configuration.md) |
+| ⑦ Threat model | **Met** | 7-row threat table above |
+| ⑧ Parser/input fuzzing | **Met** | `FuzzPluginInvoke`, `FuzzHostAllowed` in `internal/plugins/fuzz_test.go` |
+| ⑨ Console surface | **Met** | Plugins panel (declare, attach, detach, upload) shipped in Console v2 |

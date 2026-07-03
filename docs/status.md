@@ -76,7 +76,7 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | NGINX config importer | Y1-09 | `importer` | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | OTel tracing + access-log sinks | Y1-10 | `otel` | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | HTTP/3 over QUIC | Y1-11 | `http3` | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| WASM plugin system | Y2-02 | `wasmplugins` | ① ABI/caps matrix · ② call-overhead bench · ⑦ sandbox note · ⑧ ABI fuzz |
+| WASM plugin system | Y2-02 | `wasmplugins` | **~None — ①②③⑥⑦⑧⑨ done~** |
 | L4 stream proxy | Y2-03 | `stream` | ① TCP/UDP/SNI/PROXY matrix · ② throughput bench · ⑧ PROXY+SNI parser fuzz · ⑦ spoofing note |
 | Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Secrets references + log redaction | SEC-1 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
@@ -101,7 +101,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 | NGINX config importer | ✅ | ✅ | ✅ | ✅ | ☐ | 1 |
 | OTel tracing + access-log sinks | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | HTTP/3 over QUIC | ✅ | ✅ | ✅ | n/a | ☐ | **1** |
-| WASM plugin system | ☐ | ☐ | ☐ | ☐ | ☐ | **5** |
+| WASM plugin system | ✅ | ✅ | ✅ | ✅ | ☐ | **1** |
 | L4 stream proxy | ☐ | ☐ | ☐ | ☐ | ☐ | **5** |
 | Service discovery / dynamic upstreams | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Web application firewall (WAF) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
@@ -169,6 +169,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Response cache (memory + disk) reaches GA — soak pending. Evidence: 14-row behaviour matrix (key, Vary, TTL, status codes, conditional requests, eviction), 4 benchmarks (`BenchmarkCacheHit` ~2.4 μs, `Miss` ~10.6 μs, `VaryHit` ~2.9 μs, `MemOverflow` ~4.4 ms), 4-item limitation list, and 6-row threat note (Host poisoning, Vary leakage, Web Cache Deception, SIF DoS, disk PII, header smuggling). Evidence bundle closes remaining gaps ①②③⑥⑦. Added to soak-tracking table. | [cache.md](cache.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **OTel tracing + access-log sinks (Y1-10) → GA — soak pending.** Published [otel.md](otel.md) with exporter/sink matrix (OTLP-gRPC/HTTP, span types, W3C propagation, access-log sinks/fields), 5 benchmarks (middleware ~10.4 μs, seam child span ~2.5 μs, no-op seam ~20 ns), 4-item limitation list, and 5-row PII threat note (URL tokens, trace id linking, file leakage, insecure collector, error disclosure). Evidence bundle closes remaining gaps ①②③⑥⑦. Added to soak-tracking table. | [otel.md](otel.md), [observability.md](observability.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-11 HTTP/3 over QUIC reaches GA — soak pending. Evidence: QUIC/Alt-Svc behaviour matrix (protocol negotiation, build-time, defaults), `BenchmarkHTTP3Throughput` (~259 μs/op, 13.9 KB/op), 4-item limitation list (no WebSocket, restart required for Alt-Svc, UDP port sharing, bind-time handler generation), 5-row threat note (0-RTT replay, UDP amplification, UDP exhaustion, cert sharing, Alt-Svc tracking). Evidence bundle closes remaining gaps ①②③⑥⑦⑧. Added to soak-tracking table. | [http3.md](http3.md), [status.md](status.md) |
+| 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y2-02 WASM plugins reaches GA — soak pending. Evidence: 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas), 5 benchmarks (middleware ~16.5 μs, handler ~20 μs, KV ~23 μs, parallel ~3.4 μs amortised), 5-item limitation list (request-phase only, no shared state, no streaming, one ABI, build-tag required), 7-row threat note (memory escape, CPU exhaustion, SSRF, KV DoS, upload, info leak, ABI breakage), `FuzzPluginInvoke` and `FuzzHostAllowed` in `internal/plugins/fuzz_test.go`. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. Added to soak-tracking table. | [plugins.md](plugins.md), [status.md](status.md) |
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y2-05 Service discovery and Y2-06 WAF reach GA — soak pending. Evidence: provider matrices, balancer benchmarks, threat notes. | [service-discovery.md](service-discovery.md), [waf.md](waf.md), [status.md](status.md) |
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y1-05 Active health checks reaches GA — soak pending. Evidence: probe conformance matrix, threshold/limitation docs, balancer benchmarks. | [health.md](health.md), [status.md](status.md) |
 | 2026-06-30 | 1.27 | **Console continuous panels status correction:** the Console v2 Y2-09 remaining-work note is updated to show that live log tail, the WASM plugin manager, the gRPC route designer, and the `.wasm` upload incremental feature are all shipped. The roadmap `Not yet shipped` wording is corrected from "none" to an explicit panel table so the source of truth does not drift. | [status.md](status.md), [roadmap/README.md](roadmap/README.md) |
