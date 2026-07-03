@@ -9,6 +9,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+## [1.28.0] – 2026-07-03
+
 ### Added
 - Goroutine-leak detection for the `internal/server` package (`goleak.VerifyTestMain`), plus a Windows CI test lane (lean + full) to catch platform-specific lifecycle bugs.
 - Concurrency and negative regression tests: transcode rejects reflection against a non-reflective backend, WASM plugin reload-under-load, and concurrent admin apply/rollback.
@@ -20,8 +22,6 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 - CLI JSON output schema documented in [docs/configuration.md](docs/configuration.md).
 - `stale_if_error` configuration option in `[cache]` to extend the stale-serving window when a background revalidation encounters an upstream error (5xx or timeout). This protects clients from backend outages by keeping the cached response servable for the configured duration after a failed revalidation.
 - Admin config diff support for `stale_if_error` changes in the Console.
-- Admin Console plugin manager supports direct `.wasm` upload (`POST /api/plugins/upload`). Validates WASM magic and version, enforces configurable size cap, writes atomically via `atomicfile`, and broadcasts `plugin_uploaded` SSE event so the panel refreshes automatically. Configurable via `[admin]` keys `plugin_upload_enabled`, `plugin_upload_dir`, and `plugin_upload_max_size`.  
-- Admin config fields `plugin_upload_enabled`, `plugin_upload_dir`, and `plugin_upload_max_size` with defaults (upload enabled, `./jul-data/plugins`, `32` MB). Set `plugin_upload_enabled = false` to disable the upload endpoint regardless of the size cap.
 
 ### Changed
 - `jul lint -json` now emits a stable schema: lowercase field names and a string `severity` (`"warning"`/`"error"`) instead of a numeric enum.
