@@ -72,25 +72,58 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | NGINX config importer (Y1-09) | **GA — soak pending** | none — [nginx-importer.md](nginx-importer.md) doc + full directive-support matrix (top-level, http, server, location, upstream, modifiers) + 2 benchmarks (`BenchmarkParse` ~45 μs, `BenchmarkTranslate` ~6.5 μs) + `FuzzTranslate` fuzz target for parse+translate+marshal round-trip, 9-item known-limitations list, and 6-row threat note (craft-conf crash, path traversal, credential leak, info disclosure, translation misconfig, dependency trust). Evidence bundle closes remaining gaps ①②③⑥⑦⑧. Added to soak-tracking table. | M | ✅ |
 | Response cache (memory + disk) | **GA — soak pending** | none — [cache.md](cache.md) doc + 14-row behaviour matrix (key, Vary, TTL, status codes, conditional requests, eviction) + 4 benchmarks (`BenchmarkCacheHit` ~2.4 μs, `Miss` ~10.6 μs, `VaryHit` ~2.9 μs, `MemOverflow` ~4.4 ms) + 4-item limitation list + 6-row threat note (Host poisoning, Vary leakage, Web Cache Deception, SIF DoS, disk PII, header smuggling) landed | M | ✅ |
 | OTel tracing + access-log sinks (Y1-10) | **GA — soak pending** | none — [otel.md](otel.md) doc + exporter/sink matrix (OTLP-gRPC/HTTP, span types, W3C propagation, access-log sinks/fields), 5 benchmarks (`BenchmarkTracingMiddleware` ~10.4 μs, `SeamChildSpan` ~2.5 μs, no-op seam ~20 ns), 4-item limitation list, 5-row PII threat note (URL tokens, trace id linking, file leakage, insecure collector, error disclosure). Evidence bundle closes remaining gaps ①②③⑥⑦. | M | ✅ |
-| HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on next tag (add to soak pipeline on v1.29) |
-
-## Wave 2 — P1 (demand-pull + security-sensitive)
-
-| Feature | Maturity | Gaps to GA (excl. soak) | Effort | Status |
-| --- | --- | --- | --- | --- |
-| WASM plugins (Y2-02) | **GA — soak pending** | none — [plugins.md](plugins.md) doc + 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas) + 5 benchmarks (`BenchmarkPluginMiddleware` ~16.5 μs, `BenchmarkPluginHandler` ~20 μs, `BenchmarkPluginKVCounterWithCapability` ~23 μs, `BenchmarkPluginParallel` ~3.4 μs amortised) + 5-item limitation list (request-phase only, no shared state, no streaming, one ABI, build-tag required) + 7-row threat note (memory escape, CPU exhaustion, SSRF, KV DoS, upload, info leak, ABI breakage) + `FuzzPluginInvoke` and `FuzzHostAllowed` in `internal/plugins/fuzz_test.go`. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | L | ✅ |
-| L4 stream proxy (Y2-03) | **GA — soak pending** | none — [stream.md](stream.md) doc + 23-row behaviour matrix (TCP/UDP relay, SNI routing, PROXY protocol, reload, preflight, UDP sessions) + 4 benchmarks (`BenchmarkTCPPassthrough` ~3.2 ms, `BenchmarkTCPParallel` ~3.3 ms, `BenchmarkUDPRelay` ~33 μs, `BenchmarkUDPAdmitAtCap` up to 254 μs for 10k sessions) + 5-item limitation list (no L7 inspection, single-record SNI, UDP session memory, PROXY v1 only inbound, no HTTP features) + 6-row threat note (UDP spoofing, PROXY injection, SNI leak, bind hijack, backend exhaustion, UDP amplification) + `FuzzReadProxyHeader`/`FuzzPeekSNI` in `internal/stream/fuzz_test.go`. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | M–L | ✅ |
-| Response cache (memory + disk) | **GA — soak pending** | none — [cache.md](cache.md) doc + 14-row behaviour matrix (key, Vary, TTL, status codes, conditional requests, eviction) + 4 benchmarks (`BenchmarkCacheHit` ~2.4 μs, `Miss` ~10.6 μs, `VaryHit` ~2.9 μs, `MemOverflow` ~4.4 ms) + 4-item limitation list + 6-row threat note (Host poisoning, Vary leakage, Web Cache Deception, SIF DoS, disk PII, header smuggling) landed | M | ✅ |
-| HTTP/3 over QUIC (Y1-11) | **GA — soak pending** | none — [http3.md](http3.md) doc + QUIC/Alt-Svc behaviour matrix (protocol negotiation, build-time, defaults) + `BenchmarkHTTP3Throughput` (~259 μs/op, 13.9 KB/op) + 4-item limitation list (no WebSocket, restart required for Alt-Svc, UDP port sharing, bind-time handler generation) + 5-row threat note (0-RTT replay, UDP amplification, UDP exhaustion, cert sharing, Alt-Svc tracking). Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | M | ✅ |
-| OTel tracing + access-log sinks (Y1-10) | **GA — soak pending** | none — [otel.md](otel.md) doc + exporter/sink matrix (OTLP-gRPC/HTTP, span types, W3C propagation, access-log sinks/fields), 5 benchmarks (`BenchmarkTracingMiddleware` ~10.4 μs, `SeamChildSpan` ~2.5 μs, no-op seam ~20 ns), 4-item limitation list, 5-row PII threat note (URL tokens, trace id linking, file leakage, insecure collector, error disclosure). Evidence bundle closes remaining gaps ①②③⑥⑦. | M | ✅ |
-| Console (Y1-07 · Y2-09) | **GA — soak pending** | none — [console.md](console.md) doc + [endpoint/panel matrix](console.md#api-endpoint-to-panel-map) + CSP-nonce/bearer security model landed; v1 retired by the embedded-SPA substrate cutover (Y2-09) | M | ✅ |
-
-## Wave 3 — P2 (dev-time CLI tools)
-
-| Feature | Maturity | Gaps to GA (excl. soak) | Effort | Status |
-| --- | --- | --- | --- | --- |
-| NGINX importer (Y1-09) | **GA — soak pending** | none — [nginx-importer.md](nginx-importer.md) doc + full directive-support matrix (top-level, http, server, location, upstream, modifiers) + 2 benchmarks (`BenchmarkParse` / `BenchmarkTranslate`) + `FuzzTranslate` fuzz target for parse+translate+marshal round-trip + 9-item limitation list + 6-row threat note landed | M | ✅ |
+| HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
 
 > **All 20 shipped features are now GA — soak pending.** Waves 2 and 3 are retired; all features consolidated into Wave 1 above. The only remaining work is the soak test (post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)).
 
 ## Soak tracking (post-GA gate, per ADR 0005)
+
+The one deferred criterion. A GA feature is added here and its soak run tracked;
+a soak failure is a release-blocking regression. The gate is **enforced**, not
+just asserted: [scripts/soak.sh](../scripts/soak.sh) runs the in-tree `TestSoak`
+(sustained traffic through the reverse-proxy data path with zero-error,
+steady-goroutine, and bounded-heap assertions), a `soak (smoke)` [CI job](../.github/workflows/ci.yml)
+keeps the harness green on every push, and the [release workflow](../.github/workflows/release.yml)
+runs the full multi-minute soak on a version tag — a red soak blocks the release
+job (block tag on red).
+
+| Feature | GA on | Soak status |
+| --- | --- | --- |
+| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| gRPC passthrough + h2c (Y2-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| mTLS client auth (Y2-07) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| TLS + ACME (Y1-01) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Core HTTP (static/proxy/FastCGI/vhosts/routing) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Auth (CIDR/Basic/JWT/forward-auth) (Y1-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Active health checks (Y1-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Web application firewall (WAF) (Y2-06) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Compression (Y1-02) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| NGINX config importer (Y1-09) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Response cache (memory + disk) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
+| WASM plugins (Y2-02) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
+| L4 stream proxy (Y2-03) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running, udp-churn scenario) |
+
+## Changelog
+
+| Date | Ver | What changed | What stayed | Source |
+| --- | --- | --- | --- | --- |
+| 2026-07-03 | 1.30 | **Beta backlog cleared — all 20 shipped features GA — soak pending.** The last 10 Beta features completed their evidence bundles and moved to GA — soak pending. Year-1 checklist 11/11, Year-2 checklist 9/9 — zero committed Beta features remain. The only remaining GA gate is the soak test (post-GA per ADR 0005). Next work is the Hardening & platform backlog (HP-01..HP-07), the AI-MVP bet, or demand-gated horizon items. | All Year 3–5 vision rows remain horizon-demand-gated; no feature rows or IDs changed, only maturity labels and checklist counts. | [status.md](status.md), [ga-push.md](ga-push.md), http3.md, plugins.md, stream.md |
+| 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-11 HTTP/3, Y2-02 WASM plugins, Y2-03 L4 stream proxy reach GA — soak pending. Evidence bundles closed for all three. Added to soak-tracking table. | No remaining ☐ Beta features; soak stays a post-GA gate (ADR 0005). | [http3.md](http3.md), [plugins.md](plugins.md), [stream.md](stream.md) |
+| 2026-07-03 | 1.28 | **Active health checks (Y1-05) → GA — soak pending.** Published [health.md](health.md) with full conformance matrix, threshold/limitations section, and GA status table. | The remaining ☐ features; soak stays a post-GA gate (ADR 0005). | [health.md](health.md) |
+| 2026-07-03 | 1.28 | **Web application firewall (Y2-06) → GA — soak pending.** Published [waf.md](waf.md) with full behaviour matrix, request-overhead benchmarks, and threat note. | The remaining ☐ features; soak stays a post-GA gate (ADR 0005). | [waf.md](waf.md) |
+| 2026-07-03 | 1.28 | **Service discovery / dynamic upstreams (Y2-05) → GA — soak pending.** Published [service-discovery.md](service-discovery.md) with provider behaviour matrix, known-limitations, and threat note. | The remaining ☐ features; soak stays a post-GA gate (ADR 0005). | [service-discovery.md](service-discovery.md) |
+| 2026-06-24 | 1.25 | Added the two newly shipped **Beta** features to Wave 2: **Y2-06 WAF** (`waf`) and **SEC-1 secrets references** (core). | The waves, the bar, and the GA — soak-pending features; soak stays a post-GA gate (ADR 0005). | [waf.md](waf.md), [secrets.md](secrets.md), [status.md](status.md) |
+| 2026-06-23 | 1.24 | **Console (Y1-07 · Y2-09) → GA — soak pending.** The embedded-SPA substrate cutover closes the last two Console GA gaps. | The waves, the bar, and the remaining ☐ features; soak stays a post-GA gate (ADR 0005). | [console.md](console.md) |
+| 2026-06-21 | 1.23 | **Cross-cutting: `SECURITY.md` umbrella threat model** (anchors criterion ⑦ fleet-wide). | Every feature's runtime behaviour and per-feature threat notes; the waves and the bar. | [SECURITY.md](../SECURITY.md) |
+| 2026-06-21 | 1.22 | **Cross-cutting: fuzz corpus + CI fuzz job** (hosts criterion ⑧ fleet-wide). | Every feature's runtime behaviour, the waves, the bar, and the existing fuzz targets. | [scripts/fuzz.sh](../scripts/fuzz.sh) |
+| 2026-06-21 | 1.21 | **Cross-cutting: perf-gate benchmark harness + CI job** (hosts criterion ② fleet-wide). | Every feature's runtime behaviour, the waves, the bar, and the documented benchmark numbers. | [scripts/bench.sh](../scripts/bench.sh) |
+| 2026-06-21 | 1.19 | **Core HTTP → GA.** Published [core-http.md](core-http.md) and added router/balancer benchmarks + fuzz targets. | The waves, plan, and remaining ☐ features; soak stays a post-GA gate. | [core-http.md](core-http.md) |
+| 2026-06-21 | 1.17 | **First three GA features.** Flipped Wave 1 quick wins to **GA**: gRPC transcoding (Y2-01), gRPC passthrough (Y2-04), mTLS (Y2-07). | The plan, waves, effort sizing, and the remaining ☐ features; soak stays a post-GA gate (ADR 0005). | [compatibility.md](compatibility.md), [mtls.md](mtls.md) |
+| 2026-06-21 | 1.0 | Created the GA push log: the per-feature Beta→GA plan in three waves with effort + gaps, the cross-cutting tasks, and the soak-tracking table. Records the decision (ADR 0005) to treat the soak test as a post-GA gate so GA is declared against the other eight criteria. | The maturity ladder, the other eight GA criteria, and the Console-first invariant (ADR 0004) are unchanged. | [ADR 0003](adr/0003-maturity-and-ga.md), [ADR 0005](adr/0005-soak-post-ga-gate.md) |

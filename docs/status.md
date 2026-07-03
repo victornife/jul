@@ -148,9 +148,9 @@ the [soak evidence log](soak-evidence.md).
 | NGINX config importer (Y1-09) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Response cache (memory + disk) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
-| HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on next tag (add to soak pipeline on v1.30) |
-| WASM plugin system (Y2-02) | 2026-07-03 | ☐ soak queued on next tag (add to soak pipeline on v1.30) |
-| L4 stream proxy (Y2-03) | 2026-07-03 | ☐ soak queued on next tag (add to soak pipeline on v1.30) |
+| HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
+| WASM plugin system (Y2-02) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
+| L4 stream proxy (Y2-03) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running, udp-churn scenario) |
 
 ## Recently shipped continuous panels
 
