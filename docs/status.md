@@ -70,7 +70,7 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | Feature | ID | Tag | Remaining GA gaps (excl. soak) |
 | --- | --- | --- | --- |
 | Compression (gzip; brotli/zstd) | Y1-02 | `brotli`,`zstd` | ⑥ docs · ① encoder matrix · ② throughput bench · ⑦ BREACH note |
-| Rate + connection limiting | Y1-03 | core | ⑥ docs · ① key/algorithm matrix · ② limiter bench · ⑦ bypass note |
+| Rate + connection limiting | Y1-03 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Active health checks | Y1-05 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Zero-config + `jul lint` | Y1-08 | core | ⑥ docs · ① lint-checks matrix · ⑧ TOML config-parser fuzz |
 | NGINX config importer | Y1-09 | `importer` | ⑥ docs · ① directive-support matrix · ⑧ nginx.conf parser fuzz · ③ unmapped-directive limits |
@@ -95,7 +95,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 | Feature | ① Matrix | ② Bench | ⑦ Threat | ⑧ Fuzz | ⑤ Soak | Open |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: |
 | Compression | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
-| Rate + connection limiting | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Rate + connection limiting | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Active health checks | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Zero-config + `jul lint` | ☐ | ✅ | ✅ | ☐ | ☐ | 3 |
 | NGINX config importer | ☐ | ✅ | ✅ | ☐ | ☐ | 3 |
@@ -135,6 +135,7 @@ the [soak evidence log](soak-evidence.md).
 | Web application firewall (WAF) (Y2-06) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Recently shipped continuous panels
 
@@ -156,6 +157,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** SEC-1 Secrets references (`env`/`file`/`secret` refs + log redaction + lint) reaches GA — soak pending. Evidence: 12-row behaviour matrix, 5 redaction benchmarks (0-allocation miss path), 8-row threat note (VCS leak, log exposure, short-secret floor, env/file permissions). | [secrets.md](secrets.md), [status.md](status.md) |
+| 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-03 Rate + connection limiting reaches GA — soak pending. Evidence: 12-row behaviour matrix (key strategies, scope rules, eviction), 4 rate-limiter benchmarks (~300 ns Allow), threat note (IP spoofing, key collision, slowloris, bypass). | [ratelimit.md](ratelimit.md), [status.md](status.md) |
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y2-05 Service discovery and Y2-06 WAF reach GA — soak pending. Evidence: provider matrices, balancer benchmarks, threat notes. | [service-discovery.md](service-discovery.md), [waf.md](waf.md), [status.md](status.md) |
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y1-05 Active health checks reaches GA — soak pending. Evidence: probe conformance matrix, threshold/limitation docs, balancer benchmarks. | [health.md](health.md), [status.md](status.md) |
 | 2026-06-30 | 1.27 | **Console continuous panels status correction:** the Console v2 Y2-09 remaining-work note is updated to show that live log tail, the WASM plugin manager, the gRPC route designer, and the `.wasm` upload incremental feature are all shipped. The roadmap `Not yet shipped` wording is corrected from "none" to an explicit panel table so the source of truth does not drift. | [status.md](status.md), [roadmap/README.md](roadmap/README.md) |
