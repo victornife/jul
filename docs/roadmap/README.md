@@ -69,7 +69,7 @@ post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md).
 | --- | --- | --- | --- |
 | Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | **GA — soak pending** |
 | Y2-02 | WASM plugin system (wazero) | `wasmplugins` | **GA — soak pending** |
-| Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | Beta |
+| Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | **GA — soak pending** |
 | Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | **GA — soak pending** |
 | Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | **GA — soak pending** |
 | Y2-06 | WAF (Coraza + OWASP CRS; block/detect per-location) | `waf` | **GA — soak pending** |

@@ -77,7 +77,7 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | OTel tracing + access-log sinks | Y1-10 | `otel` | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | HTTP/3 over QUIC | Y1-11 | `http3` | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | WASM plugin system | Y2-02 | `wasmplugins` | **~None — ①②③⑥⑦⑧⑨ done~** |
-| L4 stream proxy | Y2-03 | `stream` | ① TCP/UDP/SNI/PROXY matrix · ② throughput bench · ⑧ PROXY+SNI parser fuzz · ⑦ spoofing note |
+| L4 stream proxy | Y2-03 | `stream` | **~None — ①②③⑥⑦⑧⑨ done~** |
 | Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Secrets references + log redaction | SEC-1 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Response cache (memory + disk) | — | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
@@ -102,7 +102,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 | OTel tracing + access-log sinks | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | HTTP/3 over QUIC | ✅ | ✅ | ✅ | n/a | ☐ | **1** |
 | WASM plugin system | ✅ | ✅ | ✅ | ✅ | ☐ | **1** |
-| L4 stream proxy | ☐ | ☐ | ☐ | ☐ | ☐ | **5** |
+| L4 stream proxy | ✅ | ✅ | ✅ | ✅ | ☐ | **1** |
 | Service discovery / dynamic upstreams | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Web application firewall (WAF) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Secrets references + log redaction | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
