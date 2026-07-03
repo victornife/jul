@@ -21,7 +21,7 @@ $env:FULL_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins st
 $env:SOAK_WORKERS="16"   # see per-duration guidance below
 ```
 
-> **Windows note:** `SOAK_WORKERS=32` can exhaust ephemeral ports on the client side (the test dials repeatedly from the same machine). Stay at 16 or below for reliable local runs. The Linux CI release gate uses 32.
+> **Windows note:** `SOAK_WORKERS=32` can exhaust ephemeral ports on the client side (the test dials repeatedly from the same machine). Even at 16 workers, the proxy soak fails on Windows within ~2 minutes (2026-07-03/04). **The proxy soak is only viable on Windows for smoke durations (≤20s).** For longer proxy validation, use the Linux CI release gate or a real binary burn-in (see procedure C below). The UDP-churn soak works reliably on Windows at 16 workers.
 
 ---
 
@@ -214,11 +214,102 @@ The in-tree soak tests (`TestSoak`, `TestSoakUDPChurn`) use `httptest.NewServer`
 
 ## Quick reference
 
-| Duration | Workers | Command prefix | Time per scenario | Use case |
-|----------|---------|----------------|-------------------|----------|
-| 5 min | 16 | `SOAK_DURATION=5m` | 5 min | Release gate, quick validation |
-| 1 hour | 16 | `SOAK_DURATION=1h` | 1 hour | Medium validation, pre-minor-release |
-| 24 hours | 8 | `SOAK_DURATION=24h` | 24 hours | Major burn-in, Go version bump |
+| Duration | Workers | Scenario | Command prefix | Time | Use case |
+|----------|---------|----------|----------------|------|----------|
+| 5 min | 16 | **udp-churn only** | `SOAK_DURATION=5m` | 5 min | Release gate, local validation |
+| 20 s | 16–24 | proxy (smoke) | `SOAK_DURATION=20s` | 20 s | Quick proxy sanity check |
+| 1 hour | 16 | udp-churn only | `SOAK_DURATION=1h` | 1 hour | Medium validation |
+| 24 hours | 16 | udp-churn only | `SOAK_DURATION=24h` | 24 hours | Major burn-in |
+
+> **Windows limitation:** The `proxy` scenario exhausts ephemeral TCP ports on the test client within ~2 minutes at 16 workers. It is **only viable for smoke durations (≤20s)** on Windows. For full proxy soak coverage, see the Linux CI release gate or use a real binary burn-in (procedure below).
+
+---
+
+## Track 2 — Real binary burn-in (for production-like soak)
+
+The in-tree soak tests are self-contained CI gates. For a **true production burn-in** that validates the full stack (config parser, admin API, TLS, reload, middleware chain):
+
+### 1. Build
+
+```powershell
+go build -tags "$env:FULL_TAGS" -o jul.exe ./cmd/jul
+```
+
+### 2. Create a production-like `burn-in.toml`
+
+Use static + proxy routes, health checks, rate limiting, and the admin API.
+Example skeleton:
+```toml
+[global]
+log_level = "info"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://127.0.0.1:8081"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "testdata/www"
+
+[admin]
+listen = "127.0.0.1:9090"
+```
+
+### 3. Start the backend
+
+Spin up a simple backend server (or use `python -m http.server 8081`).
+
+### 4. Start Jul
+
+```powershell
+.\jul.exe -config burn-in.toml
+```
+
+### 5. Drive traffic with `wrk2` or `k6`
+
+```powershell
+# In another PowerShell window:
+wrk -t4 -c100 -d24h --latency http://127.0.0.1:8080/static/
+```
+
+Or with k6:
+
+```powershell
+k6 run --duration 24h --vus 50 burn-in.js
+```
+
+### 6. Monitor
+
+```powershell
+# Health check every 5 minutes
+while ($true) {
+    $r = curl -s http://127.0.0.1:9090/api/healthz
+    $t = (Measure-Command { curl -s http://127.0.0.1:8080/ }).TotalMilliseconds
+    Write-Host "$(Get-Date -Format 'HH:mm:ss') health=$r latency=${t}ms"
+    Start-Sleep -Seconds 300
+}
+```
+
+### 7. Capture pprof snapshots
+
+```powershell
+# T+0, T+12h, T+24h
+curl -s http://127.0.0.1:9090/debug/pprof/goroutine -o goroutine-T0.out
+curl -s http://127.0.0.1:9090/debug/pprof/heap -o heap-T0.out
+curl -s http://127.0.0.1:9090/debug/pprof/profile -o cpu-T0.out
+```
+
+### 8. Assert
+
+- Zero HTTP 5xx errors
+- Goroutine count flat (+/- 10%)
+- Heap growth < 10 MiB over 24h post-GC
+- p99 latency stable (±20%)
+- Jul process did not restart
 
 ---
 

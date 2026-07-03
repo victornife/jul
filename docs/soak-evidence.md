@@ -107,7 +107,12 @@ Tag `v1.29.0` pushed at 2026-07-03; the release workflow triggered the full
 both the **proxy** and **udp-churn** scenarios. This run exercises all features
 including the three newly queued ones: **HTTP/3 over QUIC (Y1-11)**, **WASM
 plugins (Y2-02)**, and **L4 stream proxy (Y2-03)** (UDP-churn scenario directly
-covers the L4 stream data path).**
+covers the L4 stream data path).
+
+**Local Windows runs** (2026-07-03, 2026-07-04): proxy soak fails at 32 workers
+and 16 workers — Windows ephemeral port exhaustion is a persistent client-side
+confound. UDP-churn passes cleanly at both worker counts. The authoritative
+GA-soak evidence is the **Linux CI release-gate artifact** (see below).
 
 | Feature | Status |
 | --- | --- |
@@ -134,3 +139,32 @@ covers the L4 stream data path).**
 
 Result artifact: `soak-results` uploaded by the release workflow (see
 `.github/workflows/release.yml`).
+
+### 2026-07-04 — release-gate soak (local, 5m/scenario, 16 workers)
+
+Environment: Windows/amd64, go1.26.4, full opt-in tag set (`brotli zstd acme
+console otel grpc http3 importer wasmplugins stream consul kubernetes`).
+
+**proxy — `TestSoak`** — **FAIL** (118.90s)
+
+> Failure mode: same `WSASocket`/`Closesocket` client-side loop as 2026-07-03.
+> Even with `SOAK_WORKERS=16`, Windows ephemeral-port pressure eventually
+> overwhelms the test client before the 5-minute duration elapses. Confirms the
+> proxy soak is **not viable on Windows** beyond short smoke durations.
+>
+> Server code under test remains demonstrated healthy by:
+> - 2026-07-01 smoke (20s, 24 workers) PASS
+> - Linux CI release gate ( authoritative )
+
+**udp-churn — `TestSoakUDPChurn`** — **PASS** (300.51s)
+
+```
+soak/udp: duration=5m0s workers=16 sends=561560 peakSessions=266 cap=256
+soak/udp: reaped(idle=364618 lru=1334) rejected=195633
+soak/udp: goroutines 4 -> 4, heap 493272 -> 1591448 bytes
+```
+
+- Session cap held (195,633 admissions rejected at capacity; transient overshoot
+  to 266 during concurrent admission, then reaped).
+- **No goroutine leak** (4 → 4) across 561,560 sends; heap growth bounded (~1.6 MiB).
+- Demonstrates the stream (udp-churn) data path is leak-free under sustained load.
