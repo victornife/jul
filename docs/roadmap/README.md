@@ -50,8 +50,8 @@ pending** in the [GA push](../ga-push.md) (the soak test is a post-GA gate per
 | Y1-07 | Console v1 (web dashboard, `console` tag) | Beta |
 | Y1-08 | Zero-config + `jul lint` | **GA — soak pending** |
 | Y1-09 | NGINX config importer (`importer` tag) | **GA — soak pending** |
-| Y1-10 | OpenTelemetry tracing + access-log sinks (`otel` tag) | Beta |
-| Y1-11 | HTTP/3 over QUIC (`http3` tag) | Beta |
+| Y1-10 | OpenTelemetry tracing + access-log sinks (`otel` tag) | **GA — soak pending** |
+| Y1-11 | HTTP/3 over QUIC (`http3` tag) | **GA — soak pending** |
 
 ### Year 2 — partial ✅
 
