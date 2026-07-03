@@ -566,7 +566,11 @@ commitments, keyboard-shortcut map, and verification live in
 
 ## Known limitations
 
-- No RBAC/SSO or multi-node management (single-token, single-node).
+- No RBAC/SSO or multi-node management (single-token, single-node). All
+  Console users share the same `[admin].token`; there is no per-user
+  authentication, authorization scopes, or session isolation. Token rotation
+  requires editing the configuration file and reloading the server (or applying
+  the change through the Console, which is itself gated by the current token).
 - The in-console **Operations → Logs** tail is a bounded, privacy-preserving view
   of recent access-log lines (paths redacted, query strings dropped, User-Agents
   reduced to a coarse family); the configured sinks (server log, file, or syslog)

@@ -342,3 +342,65 @@ func TestFirewallClose(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 }
+
+func TestFirewallCRSBlocksPathTraversal(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:    true,
+		Mode:       "block",
+		CRSEnabled: true,
+	}
+	// A local-file-inclusion probe with path traversal. CRS rule 930100
+	// (Path Traversal Attack) should match and push anomaly score above
+	// threshold, causing inbound blocking.
+	req := httptest.NewRequest(http.MethodGet, "/?file=../../../etc/passwd", nil)
+	rr, rec := buildAndServe(t, cfg, req)
+
+	if rr.Code == http.StatusOK {
+		t.Errorf("status = %d, want a block (path traversal should be rejected by CRS)", rr.Code)
+	}
+	if rec.count() == 0 {
+		t.Error("expected CRS rule events to be recorded for the LFI probe")
+	}
+}
+
+func TestFirewallCRSBlocksXSS(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:    true,
+		Mode:       "block",
+		CRSEnabled: true,
+	}
+	// A reflected XSS payload in the User-Agent header. CRS rule 941100
+	// (XSS Attack Detected) or 941101 should match and push anomaly score
+	// above the threshold, causing rule 949110 to block.
+	req := httptest.NewRequest(http.MethodGet, "/search", nil)
+	req.Header.Set("User-Agent", `<script>alert('XSS')</script>`)
+	rr, rec := buildAndServe(t, cfg, req)
+
+	if rr.Code == http.StatusOK {
+		t.Errorf("status = %d, want a block (XSS should be rejected by CRS)", rr.Code)
+	}
+	if rec.count() == 0 {
+		t.Error("expected CRS rule events to be recorded for the XSS probe")
+	}
+}
+
+func TestFirewallCRSDetectModeAllows(t *testing.T) {
+	cfg := config.WAFConfig{
+		Enabled:    true,
+		Mode:       "detect",
+		CRSEnabled: true,
+	}
+	// A SQLi probe that CRS would block in enforcement mode.
+	req := httptest.NewRequest(http.MethodGet, "/?id=1%27%20OR%20%271%27%3D%271", nil)
+	rr, rec := buildAndServe(t, cfg, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (detect mode must allow the request)", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "reached-action") {
+		t.Error("detect-mode request should still reach the action")
+	}
+	if rec.count() == 0 {
+		t.Error("expected CRS rule events to be recorded in detect mode")
+	}
+}
