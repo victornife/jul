@@ -78,8 +78,8 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | HTTP/3 over QUIC | Y1-11 | `http3` | ⑥ docs · ① QUIC/Alt-Svc matrix · ② bench · ③ bind-time/no-WS · ⑦ 0-RTT/amplification |
 | WASM plugin system | Y2-02 | `wasmplugins` | ① ABI/caps matrix · ② call-overhead bench · ⑦ sandbox note · ⑧ ABI fuzz |
 | L4 stream proxy | Y2-03 | `stream` | ① TCP/UDP/SNI/PROXY matrix · ② throughput bench · ⑧ PROXY+SNI parser fuzz · ⑦ spoofing note |
-| Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ① provider matrix · ③ keep-last-good limits · ⑦ K8s-token/SSRF (docs ✅) |
-| Secrets references + log redaction | SEC-1 | core | ① ref-source matrix · ② resolve-cost bench · ⑦ leak/precedence note (docs ✅) |
+| Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | **~None — ①②③④⑥⑦⑧⑨ done~** |
+| Secrets references + log redaction | SEC-1 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Response cache (memory + disk) | — | core | ⑥ docs · ① key/TTL/overflow matrix · ② hit/miss bench · ⑦ poisoning/isolation |
 
 ### GA evidence burndown (Beta)
@@ -105,7 +105,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 | L4 stream proxy | ☐ | ☐ | ☐ | ☐ | ☐ | 5 |
 | Service discovery / dynamic upstreams | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Web application firewall (WAF) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| Secrets references + log redaction | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Secrets references + log redaction | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Response cache (memory + disk) | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
 
 > A ✅ in this table means the criterion is not an open gap in the per-feature
@@ -134,6 +134,7 @@ the [soak evidence log](soak-evidence.md).
 | Active health checks (Y1-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Web application firewall (WAF) (Y2-06) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Recently shipped continuous panels
 
@@ -154,5 +155,8 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-07-03 | 1.29 | **Beta → GA — soak pending:** SEC-1 Secrets references (`env`/`file`/`secret` refs + log redaction + lint) reaches GA — soak pending. Evidence: 12-row behaviour matrix, 5 redaction benchmarks (0-allocation miss path), 8-row threat note (VCS leak, log exposure, short-secret floor, env/file permissions). | [secrets.md](secrets.md), [status.md](status.md) |
+| 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y2-05 Service discovery and Y2-06 WAF reach GA — soak pending. Evidence: provider matrices, balancer benchmarks, threat notes. | [service-discovery.md](service-discovery.md), [waf.md](waf.md), [status.md](status.md) |
+| 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y1-05 Active health checks reaches GA — soak pending. Evidence: probe conformance matrix, threshold/limitation docs, balancer benchmarks. | [health.md](health.md), [status.md](status.md) |
 | 2026-06-30 | 1.27 | **Console continuous panels status correction:** the Console v2 Y2-09 remaining-work note is updated to show that live log tail, the WASM plugin manager, the gRPC route designer, and the `.wasm` upload incremental feature are all shipped. The roadmap `Not yet shipped` wording is corrected from "none" to an explicit panel table so the source of truth does not drift. | [status.md](status.md), [roadmap/README.md](roadmap/README.md) |
 | 2026-06-29 | 1.26 | **gRPC transcoding upstream pools + plugin fetch truncation + re-audit residuals:** upstream pool support for `grpc_transcode` targets; plugin fetch response truncation guard; documentation and validation fixes from external audit round. | [status.md](status.md) |

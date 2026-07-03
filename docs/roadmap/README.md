@@ -74,7 +74,7 @@ post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md).
 | Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | **GA — soak pending** |
 | Y2-06 | WAF (Coraza + OWASP CRS; block/detect per-location) | `waf` | **GA — soak pending** |
 | Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | **GA — soak pending** |
-| SEC-1 | Secrets references (`env`/`file`/`secret` refs + log redaction + lint) | core | Beta |
+| SEC-1 | Secrets references (`env`/`file`/`secret` refs + log redaction + lint) | core | **GA — soak pending** |
 
 ---
 

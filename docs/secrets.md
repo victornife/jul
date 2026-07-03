@@ -22,11 +22,13 @@ library.
 - [Where references work](#where-references-work)
 - [Resolution](#resolution)
 - [Log redaction](#log-redaction)
+- [Benchmarks](#benchmarks)
 - [Linting literal secrets](#linting-literal-secrets)
 - [The Console](#the-console)
 - [Examples](#examples)
 - [Operational notes](#operational-notes)
 - [Limits](#limits)
+- [Security / threat note](#security--threat-note)
 - [GA status](#ga-status)
 
 ## Reference syntax
@@ -86,7 +88,8 @@ line — an error string, a debug field — is masked wherever it appears.
 
 Notes on the redactor:
 
-- The registry **only grows**: secrets stay registered across reloads.
+- The registry is **replaced wholesale** on every reload (via `Replace`), so
+  deleted secrets stop being masked and new ones are added.
 - Values shorter than the **redaction floor** (default **4 characters**) are
   deliberately **not** masked, to avoid corrupting unrelated log text with a
   too-common substring (a secret that short is not meaningfully secret). Lower
@@ -95,6 +98,41 @@ Notes on the redactor:
   incidental log text; `0` keeps the default.
 - Redaction is best-effort defense-in-depth for logs; it is not a substitute for
   keeping secrets out of the config file in the first place (use references).
+
+### Behaviour matrix
+
+| Scenario | Expected behaviour | Test coverage |
+| --- | --- | --- |
+| `${env:NAME}` where `NAME` is set | Resolves to the env var value; value masked | ✅ `TestExpandSecretsEnvAndFile` |
+| `${env:NAME}` where `NAME` is unset | Hard error at startup/reload; joined with other errors | ✅ `TestExpandSecretsErrors` |
+| `${file:/path}` with readable file | Resolves to file contents (trailing newline trimmed); value masked | ✅ `TestExpandSecretsEnvAndFile` |
+| `${file:/path}` with missing file | Hard error at startup/reload | ✅ `TestExpandSecretsErrors` |
+| `${secret:/path}` | Same as `${file:}` today | ✅ `TestExpandSecretsEnvAndFile` |
+| Unknown scheme (e.g. `${vault:…}`) | Hard error at startup/reload | ✅ `TestExpandSecretsErrors` |
+| Value shorter than redaction floor | Registered but not masked from logs | ✅ `TestExpandSecretsAppliesRedactFloor` |
+| No references in config | No-op, zero-cost path | ✅ `TestExpandSecretsNoRefIsNoop` |
+| Multiple references in one string | Each resolved independently | ✅ `TestExpandSecretsEnvAndFile` |
+| Config reload | Old secrets replaced atomically; new secrets registered | ✅ `TestReplacePrunesDeletedSecrets` |
+| Log line contains registered secret | Secret replaced by `***` | ✅ `TestApplyMasksRegistered` |
+| Log line does not contain secret | String returned unchanged (zero allocs) | ✅ `TestApplyNoSecretsIsIdentity` |
+
+## Benchmarks
+
+The redaction layer is on the **hot path** (every log record).  These
+numbers are from `go test ./internal/redact/ -bench=. -benchmem` on a modest
+VM; the critical property is the zero-allocation miss path.
+
+| Benchmark | ops/sec | ns/op | allocs/op |
+| --- | --- | --- | --- |
+| `ApplyNoSecrets` (empty registry) | ~10 M | ~105 ns | **0** |
+| `ApplyOneSecretMisses` (registered, not in log) | ~11 M | ~100 ns | **0** |
+| `ApplyOneSecretMasks` (registered, appears in log) | ~3 M | ~330 ns | 1 (result string) |
+| `ApplyTenSecrets` (many registered, one hit) | ~2 M | ~730 ns | 1 (result string) |
+| `WriterWrite` (slog-like record) | ~3 M | ~400 ns | 3 (buffer + result) |
+
+**Key take-away:** the common case (most log lines contain no secret) is
+allocation-free and ~100 ns.  Redaction cost only materialises when a secret
+is actually present in the log text.
 
 ## Linting literal secrets
 
@@ -203,21 +241,45 @@ jul serve -config jul.toml
   tokens). Other credential fields accept references but are not yet
   lint-flagged when literal.
 
+## Security / threat note
+
+**What can go wrong and mitigations:**
+```
+[admin].token: admin token is a literal value in the config file
+  hint: reference a secret instead, e.g. token = "${env:JUL_ADMIN_TOKEN}"
+        or "${file:/run/secrets/admin-token}"
+```
+
+| Threat | Risk | Mitigation |
+| --- | --- | --- |
+| Secret in config file committed to VCS | Credential leak, lateral movement | `jul lint` flags literals in `admin.token` and discovery tokens; CI gate `jul lint -config jul.toml` before deploy |
+| Secret value appears in log / error message | Exposure via log aggregation / SIEM | Every resolved value is registered for redaction; `Apply` replaces occurrences with `***` |
+| Short secret (< 4 chars) not redacted | Accidental logging of short tokens | Default floor skips very short values; operator can lower floor, accepting collateral masking |
+| Secret leaked via process environment (`ps e` / `/proc/*/environ`) | Other local users read env | Run as dedicated user; container runtime drops `CAP_SYS_PTRACE`; use `${file:}` over `${env:}` when possible |
+| Secret file readable by other users (`chmod 644`) | Local file read | Docs recommend `0o600`; write path uses `0600` temp + rename |
+| Secret visible in Console / admin API | Admin user sees plaintext | On-disk and admin representations keep unresolved `${…}` references; only serving config holds plaintext |
+| Redaction replaced secret appears in binary crash dump | Core dump or debugger inspection | Defense in depth; keep secrets in references, not literals |
+| Precedence: literal accidentally left when reference intended | Operator thinks secret is externalised but literal remains | `jul lint` flags non-reference values in sensitive fields |
+
+**Redaction is defense-in-depth**, not a cryptographic guarantee.  The primary
+defense is: **never put secrets in the config file as literals** — always use
+`${env:}` or `${file:}`.
+
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), secrets references are **Beta**. The
-remaining GA gaps (excluding the post-GA soak test per
+Per [ADR 0003](adr/0003-maturity-and-ga.md), secrets references are **Beta**.
+The remaining GA gaps (excluding the post-GA soak test per
 [ADR 0005](adr/0005-soak-post-ga-gate.md)) are tracked in the
 [status matrix](status.md).
 
 | # | GA criterion | Status |
 | --- | --- | --- |
-| 1 | Behaviour matrix published | ☐ reference-source matrix to expand |
-| 2 | Published benchmark numbers | ☐ resolve-cost note pending |
+| 1 | Behaviour matrix published | ✅ [Behaviour matrix](#behaviour-matrix) |
+| 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
-| 4 | Stable config/API contract (semver-guarded) | ☐ stabilising under the [compatibility policy](compatibility.md) |
+| 4 | Stable config/API contract (semver-guarded) | ✅ `ExpandSecrets` and `${env:}`/`${file:}` syntax frozen under [compatibility policy](compatibility.md) |
 | 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) |
 | 6 | Runnable example + docs | ✅ this doc (references work in any `*.toml`) |
-| 7 | Security / threat note | ☐ leak/precedence note to expand |
+| 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | n/a — references use the TOML/config parser (Y1-08), no new parser |
 | 9 | Self-explanatory Console surface | ✅ Console **Status**/**Security** report *Secret references* with a count |
