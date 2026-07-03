@@ -4,9 +4,10 @@
 // internal/config) register their plaintext here; a redacting io.Writer wrapped
 // around the log sink then replaces any occurrence with a fixed mask.
 //
-// The registry only ever grows (resolved secrets stay registered across config
-// reloads) and is safe for concurrent use. It deliberately ignores very short
-// values to avoid masking incidental substrings.
+// The registry is replaced wholesale on every config reload (via Replace) so
+// deleted secrets stop being masked and new ones are added. It is safe for
+// concurrent use and deliberately ignores very short values to avoid masking
+// incidental substrings.
 package redact
 
 import (
