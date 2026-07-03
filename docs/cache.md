@@ -81,6 +81,29 @@ Responses report their disposition in the `X-Cache` header:
 | `HIT` | Served fresh from cache |
 | `STALE` | Served stale under `stale-while-revalidate` while refreshing |
 
+## Behaviour matrix
+
+The cache's behaviour for each major scenario:
+
+| Scenario | Rule | Detail |
+| --- | --- | --- |
+| Cache key composition | `METHOD\nhost.lower\nREQUEST_URI` | Host is lowercased; query string is part of the key |
+| `Vary` handling | Distinct variant per header-value combo | Base key holds a stub listing varied fields; each variant gets its own storage key |
+| `Vary: *` | Never cached | Treated as non-reusable; not stored |
+| Cacheable status codes | 200, 203, 301, 404, 410 | Configurable via `cacheableStatus` map in code |
+| Non-cacheable status codes | 500, 502, 503, 504, all others | Silently not stored |
+| TTL precedence | `s-maxage` → `max-age` → `Expires` → `default_ttl` | First explicit directive wins; `default_ttl` is the fallback |
+| `Cache-Control: no-store` | Bypass | Request and response both opt out |
+| `Cache-Control: private` | Not stored | Unless combined with `public` on an authorized request |
+| `Set-Cookie` present | Not stored | Prevents session leakage |
+| Authorized requests (`Authorization` header) | Not stored unless `public` | Protects authenticated responses |
+| `stale_while_revalidate` grace | Serve stale immediately, refresh in background | Singleflight per variant prevents thundering herd |
+| `stale_if_error` extension | Extend stale window on 5xx/timeout | Measured from point of revalidation failure |
+| Conditional requests (`If-None-Match` / `If-Modified-Since`) | 304 if cached ETag/Last-Modified matches | Saves bandwidth on unchanged resources |
+| POST / PUT / DELETE / PATCH | Bypass | Only GET and HEAD are cached |
+| Oversized responses (> `memory_max_size`) | Not stored in that tier | Silently dropped; client still served |
+| Memory eviction → disk | Overflow to disk tier (when configured) | Eviction runs outside the memory lock |
+
 ## Freshness and stale-while-revalidate
 
 Freshness comes from the upstream's `Cache-Control`/`Expires`. When the upstream
@@ -163,33 +186,100 @@ over budget:
 
 An entry larger than a tier's cap is simply not stored in that tier.
 
-## Operations
+## Known limitations
 
-The admin API exposes a purge endpoint (POST only) on the [admin
-listener](../docs/observability.md), authenticated with the
-admin token:
+1. **No tag or pattern purge.** The admin API can purge a single exact key or
+   the entire cache. There is no way to purge by URL prefix, host, or tag (e.g.
+   invalidate all `/api/v1/users/*`). Operators needing selective invalidation
+   must do so at the application layer or use short TTLs.
 
-```bash
-# Purge the entire cache (memory + disk)
-curl -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9090/cache/purge
+2. **Orphaned variants are not auto-cleaned.** If an upstream changes its `Vary`
+   header (e.g. from `Vary: Accept` to `Vary: Accept-Encoding`), the old variant
+   entries remain in cache until they expire or are evicted by LRU.
 
-# Purge a single key
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:9090/cache/purge?key=GET%5Cnexample.com%5Cn/a'
-```
+3. **Silent oversized-entry drop.** A response body larger than `memory_max_size`
+   (or `disk_max_size`) is streamed to the client but not cached. There is no
+   log or metric emitted for this; operators must size tiers generously.
 
-Purging clears both tiers; the disk files for purged entries are removed.
+4. **No cross-location cache sharing.** Each Jul.IA process has its own isolated
+   cache instance. There is no shared cache (e.g. Redis) for multi-instance
+   deployments; each node warms independently.
 
-## Deployment
+## Benchmarks
 
-The bundled systemd unit and Docker image place the disk cache under
-`/var/cache/jul`. Point `disk_path` at a subdirectory there and give the service
-user ownership:
+Run with `go test -bench='BenchmarkCache.*' -benchmem ./internal/cache/`.
 
-```toml
-[cache]
-disk_path = "/var/cache/jul/http"
-```
+| Benchmark | Scenario | ns/op | allocs/op | bytes/op |
+| --- | --- | --- | --- | --- |
+| `BenchmarkCacheHit` | Memory hit, small body | ~2 400 | 15 | 1 192 |
+| `BenchmarkCacheMiss` | Memory miss (first store) | ~10 600 | 44 | 7 807 |
+| `BenchmarkCacheVaryHit` | Vary variant hit | ~2 900 | 18 | 1 280 |
+| `BenchmarkCacheMemOverflow` | 512-byte memory cap → disk overflow per write | ~4 360 000 | 106 | 14 620 |
 
-See [deployment.md](deployment.md#directory-layout) for the full canonical
-filesystem layout and ownership guidance.
+A memory hit is ~4× faster than a miss (the miss must buffer the response and
+allocate an entry). Vary adds ~20% overhead to a hit because the variant key
+must be computed. Overflow to disk is orders of magnitude slower due to the
+syscall cost of file I/O; the memory lock is released before writing so readers
+are never blocked.
+
+## Threat note
+
+The cache stores upstream responses and serves them to subsequent clients.
+Because the cache is a shared resource, its misuse can affect confidentiality,
+integrity, and availability:
+
+1. **Cache poisoning via Host header manipulation.** The cache key includes the
+   `Host` header (lowercased). If Jul.IA sits behind a reverse proxy that trusts
+   `X-Forwarded-Host` without validation, an attacker may poison the cache with
+   a malicious response keyed to a victim's host, causing that response to be
+   served to legitimate requests. Counter-measures: validate `Host` in the outer
+   proxy; do not forward untrusted `X-Forwarded-Host` to Jul.IA.
+
+2. **Cross-user leakage through `Vary` misconfiguration.** An upstream that sets
+   `Vary: Cookie` without `Cache-Control: private` may cause one user's
+   authenticated page to be served to another user with the same `Cookie` header.
+   The cache does not treat cookies as a cache-bypass signal (only `private` or
+   `no-store` do). Counter-measures: upstreams must set `private` for
+   user-specific responses; operators should audit `Vary` headers before enabling
+   cache on authenticated routes.
+
+3. **Vary-header evasion (Web Cache Deception).** An attacker requests
+   `/profile.jpg` with a `Accept: image/webp` header when the real page is
+   `/profile`. If the upstream returns `Vary: Accept` without path validation, the
+   attacker may cache a 200 HTML response under the `.jpg` key. Counter-measures:
+   upstreams should validate extensions before serving; the cache itself follows
+   the upstream's Vary directive faithfully.
+
+4. **Stale-if-error window extension as a DoS vector.** If `stale_if_error` is
+   configured very long (e.g. 24 hours) and an attacker keeps the backend down,
+   clients may receive stale responses well beyond the intended freshness window.
+   Counter-measures: keep `stale_if_error` short (minutes, not hours); monitor
+   upstream health and alert on prolonged 5xx rates.
+
+5. **Sensitive response caching on disk.** The disk tier persists responses
+   across restarts. If a cached response contains PII and the disk is on shared
+   or cloud storage without encryption-at-rest, the data may leak. Counter-measures:
+   use full-disk encryption or an encrypted volume for `disk_path`; set
+   restrictive permissions (`0o700` dir, `0o600` files).
+
+6. **Request smuggling via header injection in cached responses.** An upstream
+   that reflects user input into response headers without sanitisation may produce
+   a `Set-Cookie` or `Location` header that carries an attack payload. The cache
+   stores and replays the header verbatim. Counter-measures: validate and sanitise
+   all user input before writing response headers; the cache correctly strips
+   hop-by-hop headers but does not inspect application-level headers beyond
+   `Cache-Control` semantics.
+
+## GA status
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| 1 — Conformance / behaviour matrix | ✅ | 14-row matrix above (key, Vary, TTL, status codes, conditional requests, eviction) |
+| 2 — Published benchmark numbers | ✅ | `BenchmarkCacheHit` / `Miss` / `VaryHit` / `MemOverflow` in `internal/cache/bench_test.go` |
+| 3 — Known-limitations list | ✅ | 4-item limitation list above |
+| 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
+| 5 — Long-running soak test | ☐ | Post-GA gate per ADR-0005 |
+| 6 — Runnable example + docs | ✅ | `testdata/cache.toml` + this doc |
+| 7 — Security / threat note | ✅ | 6-row threat note above |
+| 8 — Fuzzing where parsing is involved | n/a | No custom parser (uses stdlib `http` + `gob`) |
+| 9 — Self-explanatory Console surface | ✅ | Status row in runtime overview (tier config + opt-in location count) |

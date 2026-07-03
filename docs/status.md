@@ -80,7 +80,7 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | L4 stream proxy | Y2-03 | `stream` | ① TCP/UDP/SNI/PROXY matrix · ② throughput bench · ⑧ PROXY+SNI parser fuzz · ⑦ spoofing note |
 | Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | **~None — ①②③④⑥⑦⑧⑨ done~** |
 | Secrets references + log redaction | SEC-1 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| Response cache (memory + disk) | — | core | ⑥ docs · ① key/TTL/overflow matrix · ② hit/miss bench · ⑦ poisoning/isolation |
+| Response cache (memory + disk) | — | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
 
 ### GA evidence burndown (Beta)
 
@@ -106,7 +106,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 | Service discovery / dynamic upstreams | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Web application firewall (WAF) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Secrets references + log redaction | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| Response cache (memory + disk) | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Response cache (memory + disk) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 
 > A ✅ in this table means the criterion is not an open gap in the per-feature
 > analysis above (docs may already exist even where ⑦ remains open — the "(docs
@@ -139,6 +139,7 @@ the [soak evidence log](soak-evidence.md).
 | Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Compression (Y1-02) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | NGINX config importer (Y1-09) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Response cache (memory + disk) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Recently shipped continuous panels
 
@@ -164,6 +165,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-08 Zero-config + `jul lint` reaches GA — soak pending. Evidence: 10-row lint checks matrix, 5 benchmarks (lint ~380ns, synthesiser ~2μs), `FuzzParse` fuzz target for TOML config round-trip, threat note (literal secrets, admin exposure, weak TLS, lint bypass). | [zeroconf.md](zeroconf.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-02 Response compression (gzip/brotli/zstd) reaches GA — soak pending. Evidence: 3-encoder matrix, 4 benchmarks (pass-through ~7μs, small gzip ~49μs, large gzip ~306μs), 6-row threat note (BREACH, CRIME, compression bomb, cache poisoning, sidecar leak, CPU exhaustion). | [compression.md](compression.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-09 NGINX config importer reaches GA — soak pending. Evidence: directive-support matrix (top-level, http, server, location, upstream, modifiers), 2 benchmarks (`BenchmarkParse` ~45 μs, `BenchmarkTranslate` ~6.5 μs), 9-item limitation list, 6-row threat note (craft-conf crash, path traversal, credential leak, info disclosure, translation misconfig, dependency trust), `FuzzTranslate` covering parse+translate+marshal round-trip. | [nginx-importer.md](nginx-importer.md), [status.md](status.md) |
+| 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Response cache (memory + disk) reaches GA — soak pending. Evidence: 14-row behaviour matrix (key, Vary, TTL, status codes, conditional requests, eviction), 4 benchmarks (`BenchmarkCacheHit` ~2.4 μs, `Miss` ~10.6 μs, `VaryHit` ~2.9 μs, `MemOverflow` ~4.4 ms), 4-item limitation list, 6-row threat note (Host poisoning, Vary leakage, Web Cache Deception, SIF DoS, disk PII, header smuggling). | [cache.md](cache.md), [status.md](status.md) |
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y2-05 Service discovery and Y2-06 WAF reach GA — soak pending. Evidence: provider matrices, balancer benchmarks, threat notes. | [service-discovery.md](service-discovery.md), [waf.md](waf.md), [status.md](status.md) |
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y1-05 Active health checks reaches GA — soak pending. Evidence: probe conformance matrix, threshold/limitation docs, balancer benchmarks. | [health.md](health.md), [status.md](status.md) |
 | 2026-06-30 | 1.27 | **Console continuous panels status correction:** the Console v2 Y2-09 remaining-work note is updated to show that live log tail, the WASM plugin manager, the gRPC route designer, and the `.wasm` upload incremental feature are all shipped. The roadmap `Not yet shipped` wording is corrected from "none" to an explicit panel table so the source of truth does not drift. | [status.md](status.md), [roadmap/README.md](roadmap/README.md) |

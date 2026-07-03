@@ -1,0 +1,42 @@
+[global]
+log_level = "info"
+
+[cache]
+enabled                = true
+memory_max_size        = "128MB"
+disk_path              = "/var/cache/jul/http"
+disk_max_size          = "2GB"
+default_ttl            = "5m"
+stale_while_revalidate = "30s"
+stale_if_error         = "300s"
+
+[[servers]]
+listen = ":8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/v1/users" }
+  cache = true
+  proxy_pass = "http://user-service"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  cache = true
+  root = "/var/www/static"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  # cache = false (default) — health checks should always reach the backend
+  return = 200
+
+[[servers]]
+listen = ":8443"
+  [servers.tls]
+  enabled     = true
+  cert        = "certs/server.crt"
+  key         = "certs/server.key"
+  min_version = "1.2"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  cache = true
+  proxy_pass = "http://origin"
