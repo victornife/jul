@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.27 · Updated 2026-06-30
+> Version 1.30 · Updated 2026-07-03
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -23,10 +23,9 @@ multi-quarter.
 Alpha · **Beta** · **GA** · Deprecated. *Implemented ≠ GA:* a shipped feature is
 **Beta** until it meets the full GA bar. The [GA push](../ga-push.md) is hardening
 shipped features to GA; the soak test is a post-GA gate per
-[ADR 0005](../adr/0005-soak-post-ga-gate.md). GA features so far (all soak
-pending): the foundational **Core HTTP** stack (static, reverse proxy,
-FastCGI/uWSGI, virtual hosts, routing), gRPC transcoding, native gRPC
-passthrough, mTLS, TLS + automatic HTTPS, and authentication.
+[ADR 0005](../adr/0005-soak-post-ga-gate.md). All Year 1 and Year 2 shipped
+features have now reached **GA — soak pending**; the only remaining work is the
+**soak test** (post-GA gate) and any new features from the backlog.
 
 ---
 
@@ -34,10 +33,8 @@ passthrough, mTLS, TLS + automatic HTTPS, and authentication.
 
 ### Year 1 — Credibility & effortlessness ✅
 
-Shipped (feature-complete for the year). Most rows are **Beta**; **Y1-01 (TLS +
-automatic HTTPS)** and **Y1-04 (authentication)** have reached **GA — soak
-pending** in the [GA push](../ga-push.md) (the soak test is a post-GA gate per
-[ADR 0005](../adr/0005-soak-post-ga-gate.md)).
+Shipped and **all features GA — soak pending** (the soak test is a post-GA gate
+per [ADR 0005](../adr/0005-soak-post-ga-gate.md)).
 
 | ID | Feature | Maturity |
 | --- | --- | --- |
@@ -46,24 +43,18 @@ pending** in the [GA push](../ga-push.md) (the soak test is a post-GA gate per
 | Y1-03 | Rate limiting + connection limiting | **GA — soak pending** |
 | Y1-04 | Authentication (Basic, bearer/JWT, forward-auth) | **GA — soak pending** |
 | Y1-05 | Active health checks (HTTP/TCP probes) | **GA — soak pending** |
-| Y1-06 | gRPC ↔ JSON transcoding (MVP, `grpc` tag) | Beta |
-| Y1-07 | Console v1 (web dashboard, `console` tag) | Beta |
+| Y1-06 | gRPC ↔ JSON transcoding (MVP, `grpc` tag) | **GA — soak pending** |
+| Y1-07 | Console v1 → v2 (web dashboard, `console` tag) | **GA — soak pending** |
 | Y1-08 | Zero-config + `jul lint` | **GA — soak pending** |
 | Y1-09 | NGINX config importer (`importer` tag) | **GA — soak pending** |
 | Y1-10 | OpenTelemetry tracing + access-log sinks (`otel` tag) | **GA — soak pending** |
 | Y1-11 | HTTP/3 over QUIC (`http3` tag) | **GA — soak pending** |
 
-### Year 2 — partial ✅
+### Year 2 — Protocol Gateway + Extensibility ✅
 
-Shipped at **Beta**, except the first **GA** features from the
-[GA push](../ga-push.md). gRPC transcoding (Y2-01) + passthrough (Y2-04) and mTLS
-(Y2-07) are now **GA — soak pending**: published
-[conformance matrices](../grpc-transcoding.md#conformance-matrix), benchmark
-numbers (including the [mTLS handshake cost](../mtls.md#benchmarks)),
-known-limitations lists, threat notes, parser fuzzing where applicable, a
-semver-guarded [compatibility policy](../compatibility.md), and Console **Status**
-surfaces. The only open item is the long-running **soak test**, reclassified to a
-post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md).
+Shipped and **all features GA — soak pending**. The only open item is the
+long-running **soak test**, reclassified to a post-GA gate per
+[ADR 0005](../adr/0005-soak-post-ga-gate.md).
 
 | ID | Feature | Tag | Maturity |
 | --- | --- | --- | --- |
@@ -179,11 +170,8 @@ Counts are *shipped* features, regardless of maturity. Most ship at **Beta**;
 some have since cleared the GA bar to **GA — soak pending** (the canonical
 [status matrix](../status.md) is the source of truth). They are not GA counts.
 
-- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; Y1-01, Y1-02, Y1-03, Y1-04, Y1-05, Y1-08 at **GA — soak pending**, the rest **Beta**)
-- [ ] **Year 2** — Protocol Gateway + Extensibility (8/9 shipped; Y2-01 + Y2-04 +
-  Y2-07 at **GA — soak pending**, the rest **Beta**). Committed remaining: Y2-09
-  Console. Y2-08 GraphQL **deferred** (demand-gated); AI-MVP is a **time-boxed
-  bet**.
+- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; **all GA — soak pending**)
+- [x] **Year 2** — Protocol Gateway + Extensibility (9/9 shipped; **all GA — soak pending**). No remaining committed features; Y2-08 GraphQL stays **deferred** (demand-gated); AI-MVP stays a **time-boxed bet**.
 - [ ] **Years 3–5** — **Vision horizon (demand-gated)** — not committed; entered
   per evidence gates ([ADR 0003](../adr/0003-maturity-and-ga.md)).
 
@@ -211,6 +199,7 @@ committed roadmap with a Maturity state.
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
 | 2026-06-30 | 1.27 | Added the **Hardening & platform** pre-1.0 robustness backlog (HP-01..HP-07) under *Planned*, with a dedicated [engineering spec](../specs/hardening-platform.md): unified reload transaction + `[global].reload_timeout`, Console RBAC/multi-user, metric-cardinality strategy, pre-commit gate parity, container/supervision hardening (image digest pinning + a `jul healthcheck` target), structured-config parity patch-ops, and an optional SSRF allow-list. This records the strategic items and work deferred out of the pre-1.0 hardening pass so they are tracked, not lost. | All Delivered/Planned feature rows, IDs, and maturity states; the 5-year vision horizon is unchanged and nothing moved to Delivered. | [specs/hardening-platform.md](../specs/hardening-platform.md) |
+| 2026-07-03 | 1.30 | **Beta backlog cleared — all 20 shipped features are GA — soak pending.** The last 10 Beta features (Y1-02, Y1-03, Y1-08, Y1-09, Y1-10, Y1-11, cache, Y2-02, Y2-03, SEC-1) completed their evidence bundles (behaviour matrix, benchmarks, limitations, threat note, fuzz targets, docs, Console surface) and moved to **GA — soak pending**. Year-1 checklist is **11/11**, Year-2 checklist is **9/9** — zero committed Beta features remain. The only remaining GA gate is the **soak test** (post-GA per [ADR 0005](../adr/0005-soak-post-ga-gate.md)). Next work is the **Hardening & platform** backlog (HP-01..HP-07), the **AI-MVP bet** (time-boxed), or demand-gated horizon items. | All Year 3–5 vision rows remain horizon-demand-gated; no feature rows or IDs changed, only maturity labels and checklist counts. | [status.md](../status.md), [ga-push.md](../ga-push.md), http3.md, plugins.md, stream.md |
 | 2026-06-24 | 1.12 | Shipped **Y2-06 WAF** (Coraza + OWASP CRS, `waf` tag) and **SEC-1 secrets references** (core), both **Beta**. WAF adds block/detect engines per-location, embedded CRS (paranoia 0–4), inline SecLang rules, request/response body inspection, the `jul_waf_events_total` metric, and a Console **Status**/**Security** surface. SEC-1 adds `${env:}`/`${file:}`/`${secret:}` references resolved across all string config, automatic log redaction of resolved values, a `jul lint` rule for literal secrets, and a Console secret-reference count. Year-2 checklist **6/9 → 8/9**; committed remaining is now just Y2-09 Console. | All other feature rows, IDs, and maturity states; Y2-08 GraphQL stays deferred and AI-MVP stays a time-boxed bet. | [waf.md](../waf.md), [secrets.md](../secrets.md), [year-2.md](../specs/year-2.md), [status.md](../status.md) |
 | 2026-06-23 | 1.11 | Recorded the **Console v2 substrate migration** under Y2-09: a one-time cutover from the hand-written v1 to a prebuilt, embedded **React/TS/Vite/Tailwind** SPA (Node-free build, no external assets, ~250 KB gz budget), closing Console GA gaps ① + ⑦ and targeting **GA — soak pending**. | All other feature rows, IDs, and maturity states; the Y2-09 continuous-panels framing stands (the cutover is a bounded exception). | [ADR 0006](../adr/0006-console-v2-stack.md); [console-v2 spec](../specs/console-v2.md) |
 | 2026-06-22 | 1.10 | Linked the new beginner-friendly [concepts appendix](../vision/appendix.md) (HTTP, proxies, TLS, caching, observability from first principles) from the intro. | All feature rows, IDs, maturity states, and the 5-year plan. | [appendix.md](../vision/appendix.md) |

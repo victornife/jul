@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.28 · Updated 2026-07-03
+> Version 1.30 · Updated 2026-07-03
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -51,6 +51,9 @@ each linked doc's *GA status* table.
 | Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 | Web application firewall (WAF) | Y2-06 | `waf` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
 | Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [service-discovery.md](service-discovery.md) |
+| HTTP/3 over QUIC | Y1-11 | `http3` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
+| WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
+| L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
 
 Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, the Console, active
 health checks, the WAF, and service discovery: their parsing is delegated to the
@@ -115,6 +118,10 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 > tracked in [ga-push.md](ga-push.md).
 
 ## Soak tracking (post-GA gate)
+==
+> **All 20 shipped features are now GA — soak pending. No Beta backlog remains.** The struck-through tables above are preserved as history. The only remaining GA gate is criterion ⑤ (soak), tracked below.
+
+## Soak tracking (post-GA gate)
 
 Criterion 5 for the GA — soak pending features. A soak failure is a
 release-blocking regression. Mirrors the
@@ -141,6 +148,9 @@ the [soak evidence log](soak-evidence.md).
 | NGINX config importer (Y1-09) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Response cache (memory + disk) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on next tag (add to soak pipeline on v1.30) |
+| WASM plugin system (Y2-02) | 2026-07-03 | ☐ soak queued on next tag (add to soak pipeline on v1.30) |
+| L4 stream proxy (Y2-03) | 2026-07-03 | ☐ soak queued on next tag (add to soak pipeline on v1.30) |
 
 ## Recently shipped continuous panels
 
