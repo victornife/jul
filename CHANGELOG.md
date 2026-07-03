@@ -9,6 +9,26 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+## [1.29.0] – 2026-07-03
+
+### Added
+
+**GA evidence bundles — post-GA soak gate**
+- All remaining Beta features promoted to **GA — soak pending** (criteria ①②③④⑥⑦⑧⑨ met; criterion ⑤ soak is a post-GA gate per ADR 0005). This clears the Beta backlog entirely — all 20 shipped features are now GA — soak pending.
+
+**Per-feature new evidence**
+- **HTTP/3 over QUIC (Y1-11)** — `docs/http3.md` with QUIC/Alt-Svc behaviour matrix, `BenchmarkHTTP3Throughput` (~259 μs/op), 4-item limitation list, 5-row threat note, and `docs/status.md` soak-tracking row. | [http3.md](http3.md)
+- **WASM plugin system (Y2-02)** — `docs/plugins.md` expanded with a 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas), 5 benchmarks in `internal/plugins/bench_test.go` (`BenchmarkPluginMiddleware` ~16.5 μs, `BenchmarkPluginHandler` ~20 μs, `BenchmarkPluginKVCounterWithCapability` ~23 μs, `BenchmarkPluginParallel` ~3.4 μs amortised), 5-item limitation list, 7-row threat note, fuzz targets `FuzzPluginInvoke` and `FuzzHostAllowed` in `internal/plugins/fuzz_test.go`. | [plugins.md](plugins.md)
+- **L4 stream proxy (Y2-03)** — `docs/stream.md` with 23-row behaviour matrix (TCP/UDP relay, SNI routing, PROXY protocol, reload, preflight, UDP sessions), 4 benchmarks in `internal/stream/bench_test.go` (`BenchmarkTCPPassthrough` ~3.2 ms, `BenchmarkTCPParallel` ~3.3 ms, `BenchmarkUDPRelay` ~33 μs, `BenchmarkUDPAdmitAtCap` up to 254 μs for 10k sessions), 5-item limitation list, 6-row threat note, fuzz targets `FuzzReadProxyHeader` and `FuzzPeekSNI` in `internal/stream/fuzz_test.go`. UDP-churn soak test `TestSoakUDPChurn` added behind the `soak` tag. | [stream.md](stream.md)
+
+**Tracking docs**
+- `docs/roadmap/README.md` — v1.30, year-completion checklists corrected: Year 1 is 11/11 GA, Year 2 is 9/9 GA; changelog row added.
+- `docs/status.md` — v1.30, GA table now lists all 20 shipped features (including HTTP/3, WASM plugins, L4 stream); Beta section replaced with an "all GA" notice; soak tracking table updated with the 3 newest features.
+- `docs/ga-push.md` — v1.30, obsolete Wave 2 and Wave 3 tables removed (consolidated into Wave 1); soak tracking table updated.
+
+### Changed
+- `docs/soak-evidence.md` — updated run-log with the 2026-07-01 smoke soak (proxy + udp-churn) verifiable artifact.
+
 ## [1.28.0] – 2026-07-03
 
 ### Added

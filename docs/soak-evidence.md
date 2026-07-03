@@ -100,9 +100,37 @@ soak/udp: goroutines stable, heap bounded
 >
 > Artifact: `https://github.com/victornife/jul/actions/runs/<RUN_ID>`
 
-## Per-feature soak status
+### 2026-07-03 — release soak queued (v1.29.0 tag)
 
-See [docs/status.md](status.md#soak-tracking-post-ga-gate) for the per-feature
-soak-status table (the single source of truth for GA — soak-pending features).
-The proxy soak exercises the Core HTTP / TLS / auth / gRPC data paths; the
-udp-churn soak backs the L4 stream session-safety guard.
+Tag `v1.29.0` pushed at 2026-07-03; the release workflow triggered the full
+**5-minute ADR-0005 soak gate** (`SOAK_DURATION=5m`, `SOAK_WORKERS=32`) over
+both the **proxy** and **udp-churn** scenarios. This run exercises all features
+including the three newly queued ones: **HTTP/3 over QUIC (Y1-11)**, **WASM
+plugins (Y2-02)**, and **L4 stream proxy (Y2-03)** (UDP-churn scenario directly
+covers the L4 stream data path).**
+
+| Feature | Status |
+| --- | --- |
+| Core HTTP | ✅ soaked v1.28.0 (proxy scenario) |
+| Auth | ✅ soaked v1.28.0 |
+| TLS + ACME | ✅ soaked v1.28.0 |
+| Health checks | ✅ soaked v1.28.0 |
+| WAF | ✅ soaked v1.28.0 |
+| Service discovery | ✅ soaked v1.28.0 |
+| Secrets refs | ✅ soaked v1.28.0 |
+| Rate limit | ✅ soaked v1.28.0 |
+| Zero-config | ✅ soaked v1.28.0 |
+| Compression | ✅ soaked v1.28.0 |
+| NGINX importer | ✅ soaked v1.28.0 |
+| OTel tracing | ✅ soaked v1.28.0 |
+| Response cache | ✅ soaked v1.28.0 |
+| gRPC transcoding | ✅ soaked v1.28.0 |
+| gRPC passthrough | ✅ soaked v1.28.0 |
+| mTLS | ✅ soaked v1.28.0 |
+| Console | ✅ soaked v1.28.0 |
+| HTTP/3 over QUIC (Y1-11) | ☐ soak pending (queued on v1.29.0) |
+| WASM plugins (Y2-02) | ☐ soak pending (queued on v1.29.0) |
+| L4 stream proxy (Y2-03) | ☐ soak pending (queued on v1.29.0, covered by udp-churn) |
+
+Result artifact: `soak-results` uploaded by the release workflow (see
+`.github/workflows/release.yml`).
