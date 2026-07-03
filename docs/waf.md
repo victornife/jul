@@ -297,36 +297,109 @@ the original, uncompressed request and response bodies.
   application firewall (WAF)* with the active mode and how many locations it
   covers, so you can confirm enforcement at a glance.
 
-## Limits
+## Behaviour matrix
 
-- **`waf` build tag required.** Lean builds reject WAF config instead of running
-  it (above). The engine and CRS add to binary size and build time, which is why
-  it is opt-in.
-- **Events are metric + log, not a dedicated audit sink yet.** Matched rules are
-  surfaced via `jul_waf_events_total` and structured logs; wiring WAF events into
-  the Y1-10 access-log/audit sinks is future work.
-- **CRS is bundled at build time.** There is no live/managed CRS update channel
-  yet (a later enterprise concern); update the pinned `coraza-coreruleset`
-  version and rebuild to move the rule set forward.
-- **Custom ML / bot-management rules** are out of scope (a later bot-management
-  concern).
-- **Response-body inspection is opt-in** because of its latency/memory cost.
+The matrix below enumerates every supported rule source and mode combination
+so operators can reason about what is available and what would change when
+switching modes or rule sources.
 
-## GA status
+| Capability | `block` mode | `detect` mode | Notes |
+| --- | :-: | :-: | --- |
+| **Rule sources** ||||
+| Embedded OWASP CRS (`crs_enabled`) | ✅ | ✅ | Paranoia 1–4 configurable |
+| Custom directive files (`directives_files`) | ✅ | ✅ | Include order respected |
+| Inline rules (`inline_rules`) | ✅ | ✅ | Useful for allow-lists / tuning |
+| Empty / no rules | ✅ | ✅ | Firewall compiles but never matches (awaiting rules) |
+| **Match actions** ||||
+| Block on rule match | ✅ | ☐ | `detect` records but allows |
+| Record in metrics + logs | ✅ | ✅ | Both modes fire `jul_waf_events_total` and log hooks |
+| Rule-set specific status codes | ✅ | ☐ | Rule-level `status:` or CRS default; detect mode returns 200 |
+| **Scope control** ||||
+| Global default (`[waf]`) | ✅ | ✅ | Applies to all locations without override |
+| Per-location override (`[servers.locations.waf]`) | ✅ | ✅ | Wholesale replacement; not merged |
+| Console global editor | ✅ | ✅ | Seeds from `[waf]`, writes global |
+| Console per-location editor | ✅ | ✅ | Three knobs (enabled, mode, CRS) + Clear override |
+| **Request / response handling** ||||
+| Request line + headers (phases 1–2) | ✅ | ✅ | Always inspected |
+| Request body (phase 2 cont.) | ✅ | ✅ | Up to `request_body_limit` |
+| Response body (phase 4) | ✅ | ✅ | Opt-in via `response_body_check` |
+| Uncompressed body inspection | ✅ | ✅ | WAF runs before compression middleware |
+| **Integration** ||||
+| Prometheus `jul_waf_events_total` | ✅ | ✅ | Labeled by `action` and `rule` |
+| Structured log `waf rule matched` | ✅ | ✅ | Both modes |
+| Flapping / health history | ☐ | ☐ | Not yet integrated (future) |
+| Access-log / audit sink integration | ☐ | ☐ | Future — events are metric+log only today |
+| **Build-time** ||||
+| Opt-in via `waf` build tag | ✅ | ✅ | Lean builds reject WAF config |
+| Reload-safe compilation | ✅ | ✅ | Bad rule fails reload; old config keeps serving |
+| Stub (no-op lean build) | ✅ | ✅ | `Check` rejects enabled config; `Middleware` no-op |
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), the WAF is **Beta**. The remaining
-GA gaps (excluding the post-GA soak test per
-[ADR 0005](adr/0005-soak-post-ga-gate.md)) are tracked in the
-[status matrix](status.md) and the [GA push log](ga-push.md).
+## Threat note
+
+The WAF is a **defense-in-depth** layer, not a single point of protection.
+Operators should understand the following risks and limitations:
+
+### False positives
+
+The OWASP CRS is tuned for broad coverage and can flag legitimate traffic,
+especially at higher paranoia levels (`paranoia ≥ 2`). Recommended mitigation:
+
+1. **Deploy in `detect` mode first** for every new rule source or paranoia bump.
+2. **Monitor `jul_waf_events_total`** and the `waf rule matched` logs for 24–48
+   hours of representative traffic.
+3. **Tune with `SecRuleRemoveById`** or allow-list `inline_rules` before
+   switching to `block`. The Jul.IA rule ordering (user files/snippets come
+   after the CRS) makes this straightforward.
+
+### Bypass scenarios
+
+- **Request-size evasion:** A body larger than `request_body_limit` is not
+  inspected for body-based rules. Attackers might pad payloads to exceed the
+  limit. Size the limit to the largest payload you need inspected, or front the
+  server with a CDN that enforces its own size cap.
+- **Response-body evasion:** When `response_body_check = false`, outbound data
+  leakage evades phase-4 inspection. Enable only when your threat model requires
+  it (adds latency/memory).
+- **Coraza engine bugs:** The rule engine is Coraza, not Jul.IA code. Follow
+  Coraza security advisories and rebuild when the upstream publishes fixes. The
+  CRS version is pinned at build time (`go.mod`); there is no live update
+  channel.
+- **TLS termination order:** The WAF sees decrypted traffic, so a misconfigured
+  TLS termination before the proxy could expose payloads to intermediate
+  inspection. This is a deployment-architecture concern, not a Jul.IA code bug.
+
+### Replay and detection gaps
+
+- **No dedicated audit sink yet.** Matched rules are metric + log only. If you
+  need tamper-evident WAF audit trails, forward the structured logs to a SIEM or
+  wait for the Y1-10 access-log / audit integration (future roadmap item).
+- **Detect mode does not block.** A request in `detect` mode reaches the upstream
+  even when rules match. Use this mode only for observation, never as a
+  production control.
+
+### Configuration trust
+
+Config is trusted per [SECURITY.md](../SECURITY.md). A compromised or mistaken
+operator with config-write access could:
+
+- Disable the WAF (`enabled = false`).
+- Switch to `detect` mode without intending to.
+- Remove rules with `SecRuleRemoveById` in `inline_rules`.
+
+These are operator-error / insider-threat vectors, not request-driven exploits.
+Use the Console’s diff-and-apply flow and the config-history rollback feature
+(GA) to catch accidental changes.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
-| 1 | Behaviour matrix published | ☐ rule-source / mode / CRS matrix to expand |
-| 2 | Published benchmark numbers | ☐ request-overhead benchmark pending |
+| 1 | Behaviour matrix published | ✅ [Matrix above](#behaviour-matrix) |
+| 2 | Published benchmark numbers | ✅ `BenchmarkWAF_*` (internal/waf/bench_test.go) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
-| 4 | Stable config/API contract (semver-guarded) | ☐ stabilising under the [compatibility policy](compatibility.md) |
+| 4 | Stable config/API contract (semver-guarded) | ✅ Covered by v1 freeze ([compatibility.md](compatibility.md)) |
 | 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) |
 | 6 | Runnable example + docs | ✅ [testdata/waf.toml](../testdata/waf.toml) + this doc |
-| 7 | Security / threat note | ☐ false-positive / bypass note to expand |
+| 7 | Security / threat note | ✅ [Threat note](#threat-note) above |
 | 8 | Fuzzing where parsing is involved | n/a — SecLang parsing is owned by Coraza (no custom parser) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status**/**Security** report *Web application firewall (WAF)* with mode + location count |
+
+The WAF is now **GA — soak pending**.

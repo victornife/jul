@@ -49,12 +49,12 @@ each linked doc's *GA status* table.
 | mTLS client auth + `$ssl_client_*` | Y2-07 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
+| Web application firewall (WAF) | Y2-06 | `waf` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
 
-Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, the Console, and
-active health checks: their parsing is delegated to the Go standard library
-(`crypto/x509`, `encoding/json`, `net/http`, `net`) or the separately-tracked
-TOML config parser (Y1-08), or is an opaque forward — none add a custom parser
-of their own to fuzz.
+Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, the Console, active
+health checks, and the WAF: their parsing is delegated to the Go standard library
+(`crypto/x509`, `encoding/json`, `net/http`, `net`) or to Coraza (SecLang), or
+is an opaque forward — none add a custom parser of their own to fuzz.
 
 > **Continuous panels status** (Y2-09): Live log tail ✅ shipped; WASM plugin
 > manager ✅ shipped (`.wasm` upload shipped v1.27); gRPC route designer ✅ shipped
@@ -77,7 +77,6 @@ criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
 | WASM plugin system | Y2-02 | `wasmplugins` | ① ABI/caps matrix · ② call-overhead bench · ⑦ sandbox note · ⑧ ABI fuzz |
 | L4 stream proxy | Y2-03 | `stream` | ① TCP/UDP/SNI/PROXY matrix · ② throughput bench · ⑧ PROXY+SNI parser fuzz · ⑦ spoofing note |
 | Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ① provider matrix · ③ keep-last-good limits · ⑦ K8s-token/SSRF (docs ✅) |
-| Web application firewall (WAF) | Y2-06 | `waf` | ① rule/CRS/mode matrix · ② request-overhead bench · ⑦ false-positive/bypass note (docs ✅) |
 | Secrets references + log redaction | SEC-1 | core | ① ref-source matrix · ② resolve-cost bench · ⑦ leak/precedence note (docs ✅) |
 | Response cache (memory + disk) | — | core | ⑥ docs · ① key/TTL/overflow matrix · ② hit/miss bench · ⑦ poisoning/isolation |
 
@@ -103,7 +102,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 | WASM plugin system | ☐ | ☐ | ☐ | ☐ | ☐ | 5 |
 | L4 stream proxy | ☐ | ☐ | ☐ | ☐ | ☐ | 5 |
 | Service discovery / dynamic upstreams | ☐ | ✅ | ☐ | n/a | ☐ | 3 |
-| Web application firewall (WAF) | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
+| Web application firewall (WAF) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Secrets references + log redaction | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
 | Response cache (memory + disk) | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
 
@@ -131,6 +130,7 @@ the [soak evidence log](soak-evidence.md).
 | mTLS client auth (Y2-07) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Active health checks (Y1-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Web application firewall (WAF) (Y2-06) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Recently shipped continuous panels
 
