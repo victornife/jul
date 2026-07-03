@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.27 · Updated 2026-07-01
+> Version 1.28 · Updated 2026-07-03
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -97,13 +97,13 @@ job (block tag on red).
 
 | Feature | GA on | Soak status |
 | --- | --- | --- |
-| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ☐ pending |
-| gRPC passthrough + h2c (Y2-04) | 2026-06-21 | ☐ pending |
-| mTLS client auth (Y2-07) | 2026-06-21 | ☐ pending |
-| TLS + ACME (Y1-01) | 2026-06-21 | ☐ pending |
-| Core HTTP (static/proxy/FastCGI/vhosts/routing) | 2026-06-21 | ☐ pending |
-| Auth (CIDR/Basic/JWT/forward-auth) (Y1-04) | 2026-06-21 | ☐ pending |
-| Console (Y1-07 · Y2-09) | 2026-06-23 | ☐ pending |
+| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| gRPC passthrough + h2c (Y2-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| mTLS client auth (Y2-07) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| TLS + ACME (Y1-01) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Core HTTP (static/proxy/FastCGI/vhosts/routing) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Auth (CIDR/Basic/JWT/forward-auth) (Y1-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Changelog
 

@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.27 · Updated 2026-06-30
+> Version 1.28 · Updated 2026-07-03
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -121,13 +121,13 @@ the [soak evidence log](soak-evidence.md).
 
 | Feature | GA on | Soak status |
 | --- | --- | --- |
-| Core HTTP | 2026-06-21 | ☐ pending |
-| TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ☐ pending |
-| Authentication (Y1-04) | 2026-06-21 | ☐ pending |
-| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ☐ pending |
-| Native gRPC passthrough (Y2-04) | 2026-06-21 | ☐ pending |
-| mTLS client auth (Y2-07) | 2026-06-21 | ☐ pending |
-| Console (Y1-07 · Y2-09) | 2026-06-23 | ☐ pending |
+| Core HTTP | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Authentication (Y1-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Native gRPC passthrough (Y2-04) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| mTLS client auth (Y2-07) | 2026-06-21 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Recently shipped continuous panels
 

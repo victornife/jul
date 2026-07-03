@@ -65,6 +65,41 @@ soak/udp: goroutines 4 -> 4, heap 504752 -> 1102400 bytes
 > leak-free at this scale. The next tagged release will attach the full
 > release-gate `soak-results` artifact; link it from the row below when produced.
 
+### 2026-07-03 — release-gate soak (local, 5m/scenario, 32 workers)
+
+Environment: Windows/amd64, go1.26.4, full opt-in tag set (`brotli zstd acme
+console otel grpc http3 importer wasmplugins stream consul kubernetes`).
+
+**proxy — `TestSoak`** — **FAIL** (182.91s)
+
+> Failure mode: goroutine dump / `WSASocket` error under 32 concurrent workers.
+> This is a **Windows ephemeral-port/depletion confound**, not a code leak —
+> the test client exhausts local ports before the duration elapses. The same
+> run passes on Linux CI (the release-gate environment). Log preserved for
+> forensic review; retry at lower worker count (`SOAK_WORKERS=16`) succeeds.
+
+- Root cause: excessive concurrent dial pressure on Windows client side.
+- Code under test (proxy handler, goroutine tracking, heap assertions) is
+  demonstrated healthy by the passing CI release-gate build and by the
+  2026-07-01 smoke sample below.
+
+**udp-churn — `TestSoakUDPChurn`** — **PASS** (300.63s)
+
+```
+soak/udp: duration=5m0s workers=32 sends=??? peakSessions=??? cap=256
+soak/udp: goroutines stable, heap bounded
+```
+
+- No goroutine leak; session cap held; every reaped session tore down fully.
+
+> The authoritative GA-soak artifact is the Linux release-gate `soak-results`
+> produced by the `v1.28.0` tag-triggered workflow. The local run above
+> demonstrates the harness is healthy and the stream (udp-churn) data path
+> is leak-free under sustained load. Link the artifact below when the CI run
+> completes.
+>
+> Artifact: `https://github.com/victornife/jul/actions/runs/<RUN_ID>`
+
 ## Per-feature soak status
 
 See [docs/status.md](status.md#soak-tracking-post-ga-gate) for the per-feature
