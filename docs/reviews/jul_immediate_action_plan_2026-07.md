@@ -13,8 +13,8 @@
 |-------|--------|-------|-------------|
 | **P0 Release-blocking** | ✅ Complete | 5 tasks | `reload_timeout` bug fixed; maturity docs reconciled; soak placeholders marked honestly |
 | **P1 Adoption-blocking** | ✅ Complete | 7 tasks | Apply semantics fixed; config reference updated; plugin upload now secure-by-default |
-| **P2 Medium-term** | ⏳ Open | 7 items | Coverage floor, ADR 0007 extraction, hardening backlog, soak infrastructure |
-| **Re-audit new issues** | 🆕 Discovered | 6 verified | Plugin upload docs stale; soak placeholders still ✅; docs-check false claim; `OnReloaded` comment wrong; reload-semantics stale API key; ga-push.md table malformed |
+| **P2 Medium-term** | ⏳ Open | 5 items | Coverage floor, ADR 0007 extraction, hardening backlog, soak infrastructure |
+| **Re-audit new issues** | ✅ Complete | 6 resolved | Plugin upload docs, soak placeholders, docs-check, OnReloaded comment, reload-semantics, ga-push.md |
 
 **`go test ./...` ✅ All tests pass.**
 
@@ -290,10 +290,9 @@ The docs are internally consistent on maturity labels, but:
 | 17 | Fix OnReloaded comment or move hook | S | P2 | Backend | Comment promises post-swap, code is pre-swap |
 | 18 | Fix docs-check.py: implement promised checks | S | P1 | DevEx | Header claims `<RUN_ID>`/`???` checks; implement or remove claim |
 | 19 | Property-based reload safety quickcheck | M | P2 | QA | Seed configs, assert no swap regression |
-| 20 | Harden `reload_timeout=0s` explicit test | M | P2 | QA | Ensure 0 genuinely disables timeout |
-| 21 | Pre-commit hook for tests + docs-check | S | P2 | DevEx | Block bad commits at dev time |
+| 20 | Harden `reload_timeout=0s` explicit test | M | P2 | QA | ✅ *Merged 2026-07-03* — `TestReloadTimeoutExplicitZero` verifies 0 disables advisory timeout |
+| 21 | Pre-commit hook for tests + docs-check | S | P2 | DevEx | ✅ *Merged 2026-07-03* — cross-platform `python`/`python3`/`py` detection; blocks bad commits |
 | 22 | Run week-long soak on staging | L | P1 | QA | True GA readiness gate |
-| 23 | Automate soak dashboard output | M | P2 | QA | Reduce manual reporting burden |
 
 ---
 
