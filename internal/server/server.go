@@ -401,121 +401,90 @@ func (s *Server) doReload() {
 	}
 
 	// Time-bound the reload using the configured timeout. Zero means unbounded.
-	var ctx context.Context
-	var cancel context.CancelFunc
-	d := newCfg.Global.ReloadTimeout.Std()
-	if d > 0 {
-		ctx, cancel = context.WithTimeout(context.Background(), d)
-	} else {
-		ctx, cancel = context.WithCancel(context.Background())
-	}
-	defer cancel()
-
 	start := time.Now()
 	info := &lastReloadInfo{At: start}
 
-	// Wrap factory, validate, and OnReloaded with timeout observance.
-	type reloadResult struct {
-		handlers map[string]http.Handler
-		retire   func()
-		newCfg   *config.Config
-		oldCfg   *config.Config
-		err      error
-		stage    string
-	}
-	resCh := make(chan reloadResult, 1)
-
-	go func() {
-		var r reloadResult
-		if s.validate != nil {
-			if err := s.validate(newCfg); err != nil {
-				r.err = err
-				r.stage = "validate"
-				resCh <- r
-				return
-			}
-		}
-		newHandlers, retirePrev, err := s.factory(newCfg)
-		if err != nil {
-			r.err = err
-			r.stage = "build"
-			resCh <- r
-			return
-		}
-		r.handlers = newHandlers
-		r.retire = retirePrev
-		r.newCfg = newCfg
-		r.oldCfg = s.cfg
-		// OnReloaded is lightweight but may do network I/O (stream rebind).
-		// We still run it under the timeout.
-		if s.OnReloaded != nil {
-			s.OnReloaded(newCfg)
-		}
-		resCh <- r
-	}()
-
-	select {
-	case <-ctx.Done():
-		info.TimedOut = true
-		info.Duration = time.Since(start)
-		info.Error = "reload timed out after " + d.String()
-		s.log.Error("reload timed out", "duration", info.Duration)
-		s.lastReload.Store(info)
-		return
-	case res := <-resCh:
-		info.Duration = time.Since(start)
-		if res.err != nil {
+	// Run validation, factory, and OnReloaded synchronously. A timeout is
+	// advisory (duration reporting and warning) rather than a hard cancellation,
+	// because the factory is side-effectful and cannot be safely interrupted
+	// mid-flight. The preflight already eliminates build and bind failures.
+	if s.validate != nil {
+		if err := s.validate(newCfg); err != nil {
+			info.Duration = time.Since(start)
 			info.OK = false
-			info.Error = res.stage + ": " + res.err.Error()
-			s.log.Error("reload aborted", "stage", res.stage, "error", res.err)
+			info.Error = "validate: " + err.Error()
+			s.log.Error("reload aborted", "stage", "validate", "error", err)
 			s.lastReload.Store(info)
 			return
 		}
-
-		// Swap request handlers atomically, then retire the previous generation once
-		// its in-flight requests drain.
-		prevGen := s.handlers.Load()
-		s.handlers.Store(newHandlerGen(res.handlers))
-		s.retireGen(prevGen, res.retire)
-
-		oldCfg := res.oldCfg
-		s.cfg = res.newCfg
-
-		// Tracing / access-log change warnings.
-		if oldCfg.Observability.Tracing != res.newCfg.Observability.Tracing {
-			s.log.Warn("tracing settings changed; restart required to apply (running tracer kept)")
-		}
-		if !accessLogEqual(oldCfg.Observability.AccessLog, res.newCfg.Observability.AccessLog) {
-			s.log.Warn("access-log settings changed; restart required to apply (running sinks kept)")
-		}
-
-		// Refresh TLS certificates.
-		s.reloadCertificates()
-
-		// Diff listen addresses.
-		oldAddrs := setOf(uniqueListenAddrs(oldCfg.Servers))
-		newAddrs := setOf(uniqueListenAddrs(res.newCfg.Servers))
-
-		for addr := range newAddrs {
-			if _, existed := oldAddrs[addr]; !existed {
-				if err := s.bind(addr); err != nil {
-					s.log.Error("reload: failed to bind new listener", "addr", addr, "error", err)
-				} else {
-					s.log.Info("reload: added listener", "addr", addr)
-				}
-			}
-		}
-		for addr := range oldAddrs {
-			if _, kept := newAddrs[addr]; !kept {
-				s.removeListener(addr)
-				s.log.Info("reload: removed listener", "addr", addr)
-			}
-		}
-
-		info.OK = true
-		s.lastReload.Store(info)
-		s.log.Info("configuration reloaded", "duration", info.Duration)
 	}
+	newHandlers, retirePrev, err := s.factory(newCfg)
+	if err != nil {
+		info.Duration = time.Since(start)
+		info.OK = false
+		info.Error = "build: " + err.Error()
+		s.log.Error("reload aborted", "stage", "build", "error", err)
+		s.lastReload.Store(info)
+		return
+	}
+	// OnReloaded may do network I/O (stream rebind); it is the only potentially
+	// long-running step after the build.
+	if s.OnReloaded != nil {
+		s.OnReloaded(newCfg)
+	}
+	info.Duration = time.Since(start)
+
+	// Advisory timeout check: if the reload took longer than the configured
+	// threshold, record TimedOut=true and warn, but the swap still completes.
+	threshold := newCfg.Global.ReloadTimeout.Std()
+	if threshold > 0 && info.Duration > threshold {
+		info.TimedOut = true
+		s.log.Warn("reload exceeded timeout threshold", "duration", info.Duration, "threshold", threshold)
+	}
+
+	// Swap request handlers atomically, then retire the previous generation once
+	// its in-flight requests drain.
+	prevGen := s.handlers.Load()
+	s.handlers.Store(newHandlerGen(newHandlers))
+	s.retireGen(prevGen, retirePrev)
+
+	oldCfg := s.cfg
+	s.cfg = newCfg
+
+	// Tracing / access-log change warnings.
+	if oldCfg.Observability.Tracing != newCfg.Observability.Tracing {
+		s.log.Warn("tracing settings changed; restart required to apply (running tracer kept)")
+	}
+	if !accessLogEqual(oldCfg.Observability.AccessLog, newCfg.Observability.AccessLog) {
+		s.log.Warn("access-log settings changed; restart required to apply (running sinks kept)")
+	}
+
+	// Refresh TLS certificates.
+	s.reloadCertificates()
+
+	// Diff listen addresses.
+	oldAddrs := setOf(uniqueListenAddrs(oldCfg.Servers))
+	newAddrs := setOf(uniqueListenAddrs(newCfg.Servers))
+
+	for addr := range newAddrs {
+		if _, existed := oldAddrs[addr]; !existed {
+			if err := s.bind(addr); err != nil {
+				s.log.Error("reload: failed to bind new listener", "addr", addr, "error", err)
+			} else {
+				s.log.Info("reload: added listener", "addr", addr)
+			}
+		}
+	}
+	for addr := range oldAddrs {
+		if _, kept := newAddrs[addr]; !kept {
+			s.removeListener(addr)
+			s.log.Info("reload: removed listener", "addr", addr)
+		}
+	}
+
+	info.OK = true
+	s.lastReload.Store(info)
+	s.log.Info("configuration reloaded", "duration", info.Duration)
 }
 
 // reloadCertificates rebuilds and swaps the cert provider for each currently

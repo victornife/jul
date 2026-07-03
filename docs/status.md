@@ -65,58 +65,6 @@ own to fuzz.
 > manager ✅ shipped (`.wasm` upload shipped v1.27); gRPC route designer ✅ shipped
 > (visual designer with descriptor upload + method preview, v1.27).
 
-## Beta (shipped; remaining GA gaps)
-
-Feature-complete and in use, not yet through the GA bar. Gaps reference the
-criteria above; see [ga-push.md](ga-push.md) for the per-feature push plan.
-
-| Feature | ID | Tag | Remaining GA gaps (excl. soak) |
-| --- | --- | --- | --- |
-| Compression (gzip; brotli/zstd) | Y1-02 | `brotli`,`zstd` | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| Rate + connection limiting | Y1-03 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| Active health checks | Y1-05 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| Zero-config + `jul lint` | Y1-08 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| NGINX config importer | Y1-09 | `importer` | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| OTel tracing + access-log sinks | Y1-10 | `otel` | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| HTTP/3 over QUIC | Y1-11 | `http3` | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| WASM plugin system | Y2-02 | `wasmplugins` | **~None — ①②③⑥⑦⑧⑨ done~** |
-| L4 stream proxy | Y2-03 | `stream` | **~None — ①②③⑥⑦⑧⑨ done~** |
-| Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| Secrets references + log redaction | SEC-1 | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
-| Response cache (memory + disk) | — | core | **~None — ①②③④⑥⑦⑧⑨ done~** |
-
-### GA evidence burndown (Beta)
-
-The authoritative, per-release burndown of the GA evidence bundle for each Beta
-feature. Columns are the evidence-bearing criteria: ① matrix, ② benchmark,
-⑦ threat note, ⑧ fuzz, ⑤ soak. Cell key: ✅ done · ☐ open · n/a not applicable
-(no custom parser to fuzz). A cell is ☐ exactly when it appears in that feature's
-*Remaining GA gaps* row above; ⑤ soak is open for every Beta feature by
-definition. Update this table as bundles land; a feature reaches GA when its row
-is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
-
-| Feature | ① Matrix | ② Bench | ⑦ Threat | ⑧ Fuzz | ⑤ Soak | Open |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| Compression | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| Rate + connection limiting | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| Active health checks | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| Zero-config + `jul lint` | ✅ | ✅ | ✅ | ✅ | ☐ | 1 |
-| NGINX config importer | ✅ | ✅ | ✅ | ✅ | ☐ | 1 |
-| OTel tracing + access-log sinks | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| HTTP/3 over QUIC | ✅ | ✅ | ✅ | n/a | ☐ | **1** |
-| WASM plugin system | ✅ | ✅ | ✅ | ✅ | ☐ | **1** |
-| L4 stream proxy | ✅ | ✅ | ✅ | ✅ | ☐ | **1** |
-| Service discovery / dynamic upstreams | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| Web application firewall (WAF) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| Secrets references + log redaction | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-| Response cache (memory + disk) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
-
-> A ✅ in this table means the criterion is not an open gap in the per-feature
-> analysis above (docs may already exist even where ⑦ remains open — the "(docs
-> ✅)" notes above refer to criterion ⑥). This burndown tracks the evidence
-> bundle only; ③ limits, ④ semver contract, ⑥ docs, and ⑨ Console surface are
-> tracked in [ga-push.md](ga-push.md).
-
 ## Soak tracking (post-GA gate)
 
 Criterion 5 for the GA — soak pending features. A soak failure is a
@@ -162,6 +110,12 @@ row, Y1-07 · Y2-09):
 Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 **AI-MVP** AI Gateway. Years 3–5 are the demand-gated vision horizon. See the
 [roadmap](roadmap/README.md) for the full plan.
+
+## Beta (shipped; remaining GA gaps)
+
+> **All shipped features are now GA — soak pending.** This section is retired.
+> See the GA — soak pending table above for the canonical maturity matrix, and
+> [ga-push.md](ga-push.md) for the per-feature push plan.
 
 ## Changelog
 

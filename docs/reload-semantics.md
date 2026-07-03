@@ -99,20 +99,21 @@ is untouched.
 
 ## Reload timeout (`[global].reload_timeout`)
 
-A reload is bounded by `[global].reload_timeout` (default 10s, 0 = unbounded).
-It measures the time from the server reading the new config through the end of
-the reload goroutine (build + optional `OnReloaded` hook). If the deadline
-fires, the reload is aborted and recorded as `timed_out`:
+A reload measures its own duration against `[global].reload_timeout` (default 10s; zero or omitted defaults to 10s).
+If the reload takes longer than the configured threshold, it is recorded as `timed_out`:
 
-- The **running configuration keeps serving** — no partial swap occurs.
-- The apply response carries `reload.timed_out: true` and `reload.error`.
-- A timeout does **not** roll back an already-completed HTTP handler swap; the
-timeout fires only while the reload goroutine is still running (build or
-`OnReloaded`). In practice the only long-running operation is `OnReloaded`,
-which for the L4 stream proxy may bind new TCP/UDP listeners.
+- The **swap still completes** — the timeout is advisory, not a hard cancellation,
+  because the factory is side-effectful and cannot be safely interrupted mid-flight.
+  What was previously an unsafe goroutine-based "abort" has been replaced by a
+  warning so that operators know the reload was slow, while the runtime stays
+  consistent.
+- The apply response carries `reload.timed_out: true` so the UI can warn the
+  operator that the reload exceeded the expected duration.
+- `reload.error` is empty when the timeout is advisory; the reload succeeded but
+    was slow.
 
 The apply preflight already eliminates build and bind failures before the file
-is written, so a timeout is a safety rail for pathological stalls (a wedged
+is written, so a timeout is a diagnоstic signal for pathological stalls (a wedged
 `OnReloaded` or an unexpectedly slow factory) rather than a guard for a
 frequently reachable failure mode. The default 10s should accommodate all normal
 configs; operators may raise it for very large configs or environments with

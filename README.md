@@ -41,8 +41,12 @@ The canonical maturity matrix lives in [`docs/status.md`](docs/status.md). At a
 
 | Maturity | Features |
 |----------|----------|
-| **GA — soak pending** | Core HTTP (proxy, static, routing, reload), TLS & ACME, Authentication (Basic, JWT, forward-auth), gRPC transcoding + passthrough, mTLS, Admin Console |
-| **Beta** | Compression (Brotli / Zstd), Rate limiting, Active health checks, `jul import nginx`, OpenTelemetry tracing, HTTP/3, WASM plugins, L4 Stream proxy, Service discovery (Consul / K8s), WAF (Coraza + CRS), Two-tier response cache |
+| **GA — soak pending** | Core HTTP (proxy, static, routing, reload), TLS & ACME, Authentication (Basic, JWT, forward-auth), gRPC transcoding + passthrough, mTLS, Admin Console, Active health checks, WAF, Service discovery, HTTP/3, WASM plugins, L4 Stream proxy, Compression (Brotli / Zstd), Rate limiting, `jul import nginx`, OpenTelemetry tracing, Two-tier response cache |
+| **Beta** | *(none — all shipped features are tracked as GA — soak pending or GA)* |
+
+> See [`docs/status.md`](docs/status.md) for the full GA criteria matrix and
+> per-feature evidence links. The soak test is the last remaining gate for the
+> GA — soak pending features per [ADR 0005](docs/adr/0005-soak-post-ga-gate.md).
 
 Several Beta features require an opt-in **build tag** (e.g. `grpc`, `acme`,
 `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default

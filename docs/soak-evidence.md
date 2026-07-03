@@ -86,7 +86,7 @@ console otel grpc http3 importer wasmplugins stream consul kubernetes`).
 **udp-churn — `TestSoakUDPChurn`** — **PASS** (300.63s)
 
 ```
-soak/udp: duration=5m0s workers=32 sends=??? peakSessions=??? cap=256
+soak/udp: duration=5m0s workers=32 sends=(not captured) peakSessions=(not captured) cap=256
 soak/udp: goroutines stable, heap bounded
 ```
 

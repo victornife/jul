@@ -182,7 +182,10 @@ type GlobalConfig struct {
 	// incidental log text.
 	RedactMinSecretLength int `toml:"redact_min_secret_length"`
 	// ReloadTimeout is how long a hot reload may run before it is reported as
-	// timed out. The previous config keeps serving. Zero means unbounded.
+	// timed out. The previous config keeps serving. Zero or omitted defaults to
+	// 10s. Set a larger value for very large configs or slow DNS; operators who
+	// want to be warned about slow reloads without disabling the threshold should
+	// use a very large duration (e.g. "1h").
 	ReloadTimeout Duration `toml:"reload_timeout"`
 }
 

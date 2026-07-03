@@ -457,7 +457,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.deps.LastReload != nil {
 		if snap := s.deps.LastReload(); snap != nil {
-			resp["reload"] = snap
+			resp["previous_reload"] = snap
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

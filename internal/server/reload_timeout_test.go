@@ -50,16 +50,24 @@ func TestReloadTimeout(t *testing.T) {
 	go func() { done <- srv.Run(ctx, reload) }()
 	waitDialable(t, addr)
 
-	// Trigger a reload that should time out.
+	// Trigger a reload that exceeds the timeout threshold.
 	reload <- struct{}{}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(350 * time.Millisecond)
 
 	li := srv.LastReload()
 	if li == nil {
-		t.Fatal("expected LastReload to be set after timeout")
+		t.Fatal("expected LastReload to be set after slow reload")
 	}
 	if !li.TimedOut {
-		t.Fatalf("expected TimedOut=true, got OK=%v TimedOut=%v", li.OK, li.TimedOut)
+		t.Fatalf("expected TimedOut=true for slow reload, got OK=%v TimedOut=%v", li.OK, li.TimedOut)
+	}
+	if !li.OK {
+		t.Fatal("expected OK=true because the advisory timeout still completes the swap")
+	}
+	// The swap must still have completed despite the timeout warning.
+	prevGen := srv.handlers.Load()
+	if prevGen == nil {
+		t.Fatal("expected handler generation to exist after advisory timeout")
 	}
 	cancel()
 	<-done

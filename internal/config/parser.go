@@ -76,6 +76,9 @@ func (c *Config) applyDefaults() {
 	if c.Global.ShutdownTimeout == 0 {
 		c.Global.ShutdownTimeout = Duration(30 * time.Second)
 	}
+	// Zero or omitted reload_timeout defaults to 10s. Explicitly setting zero
+	// behaves the same as omitting the field (unbounded reload is not supported
+	// to prevent accidentally unbounded stalls in production).
 	if c.Global.ReloadTimeout == 0 {
 		c.Global.ReloadTimeout = Duration(10 * time.Second)
 	}
@@ -165,11 +168,9 @@ func (c *Config) applyDefaults() {
 		if c.Admin.MaxEventConns == 0 {
 			c.Admin.MaxEventConns = 4
 		}
-		// Plugin upload defaults. Upload is enabled by default when admin is
-		// active, but can be explicitly disabled. Only apply max-size default
-		// when upload is enabled.
+		// Plugin upload defaults. Upload defaults to disabled for security.
 		if c.Admin.PluginUploadEnabled == nil {
-			c.Admin.PluginUploadEnabled = boolPtrAdmin(true)
+			c.Admin.PluginUploadEnabled = boolPtrAdmin(false)
 		}
 		if c.Admin.PluginUploadDir == "" {
 			c.Admin.PluginUploadDir = "./jul-data/plugins"

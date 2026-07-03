@@ -131,8 +131,7 @@ type Deps struct {
 
 	// LastReload reports the outcome and timing of the most recent runtime
 	// reload. Nil when no reload has been attempted yet. Used by the apply
-	// handler to augment the response and by the status endpoint to surface
-	// reload health.
+	// handler to include the previous reload snapshot in the apply response.
 	LastReload func() *ReloadSnapshot
 }
 

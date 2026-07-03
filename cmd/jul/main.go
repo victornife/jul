@@ -50,7 +50,7 @@ import (
 )
 
 // version is overridable at build time via -ldflags "-X main.version=...".
-var version = "0.1.0-dev"
+var version = "unknown (build without -ldflags)"
 
 // productName is the commercial product name shown to users.
 const productName = "Jul.IA"

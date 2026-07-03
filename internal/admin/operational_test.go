@@ -327,9 +327,9 @@ func TestApplyResponseIncludesReloadBlock(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	reload, ok := out["reload"].(map[string]any)
+	reload, ok := out["previous_reload"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected reload object in response, got %T", out["reload"])
+		t.Fatalf("expected previous_reload object in response, got %T", out["previous_reload"])
 	}
 	if reload["ok"] != true {
 		t.Errorf("reload.ok = %v, want true", reload["ok"])
