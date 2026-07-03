@@ -71,8 +71,8 @@ post-GA gate per [ADR 0005](../adr/0005-soak-post-ga-gate.md).
 | Y2-02 | WASM plugin system (wazero) | `wasmplugins` | Beta |
 | Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | Beta |
 | Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | **GA — soak pending** |
-| Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | Beta |
-| Y2-06 | WAF (Coraza + OWASP CRS; block/detect per-location) | `waf` | Beta |
+| Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | **GA — soak pending** |
+| Y2-06 | WAF (Coraza + OWASP CRS; block/detect per-location) | `waf` | **GA — soak pending** |
 | Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | **GA — soak pending** |
 | SEC-1 | Secrets references (`env`/`file`/`secret` refs + log redaction + lint) | core | Beta |
 

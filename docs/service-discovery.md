@@ -194,3 +194,114 @@ These complement the existing `jul_upstream_healthy` gauge and
 `jul_upstream_probes_total` counter from active health checking, so a dashboard
 can show both how many backends discovery currently sees and how many of them are
 passing their probes.
+
+## Behaviour matrix
+
+The matrix below enumerates every supported capability for each discovery
+provider so operators can choose the right source for their deployment.
+
+| Capability | `static` | `dns` | `dns_srv` | `consul` | `kubernetes` | Build tag |
+| --- | :-: | :-: | :-: | :-: | :-: | --- |
+| **Resolution** | | | | | | |
+| Static server list | ✅ | ☐ | ☐ | ☐ | ☐ | core |
+| DNS A/AAAA lookup | ☐ | ✅ | ☐ | ☐ | ☐ | core |
+| DNS SRV lookup | ☐ | ☐ | ✅ | ☐ | ☐ | core |
+| Consul health API | ☐ | ☐ | ☐ | ✅ | ☐ | `consul` |
+| Kubernetes EndpointSlices | ☐ | ☐ | ☐ | ☐ | ✅ | `kubernetes` |
+| **Address selection** | | | | | | |
+| Host + port from source | ☐ | ☐ | ✅ | ✅ | ✅ | — |
+| Port from config `target` | ☐ | ✅ | ☐ | ☐ | ☐ | — |
+| Weight from source | ☐ | ☐ | ✅ | ✅ | ☐ | — |
+| Health-filtered instances | ☐ | ☐ | ☐ | ✅ | ✅ | — |
+| **Operational** | | | | | | |
+| Periodic refresh | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| Configurable refresh interval | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| Keep-last-good on failure | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| Keep-last-good on empty result | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| Static seed (until first resolve) | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| State-preserving update (in-flight, cooldown) | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| **Integration** | | | | | | |
+| Active health checks on backends | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Prometheus `jul_upstream_backends` | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| Prometheus `jul_discovery_errors_total` | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| Console Status panel | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| Atomic reload (unchanged pool kept) | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **Security / access** | | | | | | |
+| No credentials required | ✅ | ✅ | ✅ | ☐ | ☐ | — |
+| Token required | ☐ | ☐ | ☐ | ✅ (ACL token) | ✅ (SA token) | — |
+| TLS verification | ☐ | ☐ | ☐ | ☐ | ✅ (CA bundle) | — |
+
+## Known limitations
+
+- **Keep-last-good preserves stale backends indefinitely.** A provider that is
+  permanently down (not just blipping) leaves the pool with the last-known
+  backend set. Active health checks will eventually eject those backends if
+  they become unreachable, but until then traffic is sent to potentially stale
+  addresses. Monitor `jul_discovery_errors_total` and alert if it grows while
+  `jul_upstream_backends` stays flat.
+- **DNS TTL is not respected.** Jul.IA polls on a fixed `refresh` interval. The
+  interval must be chosen to match the desired responsiveness; there is no
+  adaptive polling or TTL-based backoff.
+- **SRV priorities are not honoured.** Only SRV weights are used (mapped to
+  backend weights). If you require strict priority-based SRV fallback, use a
+  dedicated DNS plugin or external tool.
+- **No endpoint readiness from DNS or Consul.** DNS A/AAAA records carry no
+  health signal; Consul filters by its own health checks (`passing_only`), but
+  Jul.IA does not perform application-level health probes beyond the optional
+  active health check configuration on the pool.
+- **No cross-provider migration.** Switching a pool from one discovery type to
+  another (e.g., `dns` → `consul`) rebuilds the pool from scratch; any runtime
+  state (in-flight, cooldown) resets.
+- **No dual-stack preference control.** DNS resolves A and AAAA without explicit
+  IPv4/IPv6 preference ordering.
+
+## Threat note
+
+### Token exposure
+
+- **Consul ACL token** and the **Kubernetes service-account token** are
+  sensitive credentials. They are stored in the config (possibly via secret
+  references, `${env:…}` or `${secret:…}`), not in a dedicated keychain. Follow
+  the same rotation and access-control discipline as any other config secret:
+  protect the config file, use secret references, and rotate tokens on
+  compromise. Tokens are never logged by Jul.IA (the config redaction mechanism
+  masks them), but they travel over the network to the provider — ensure TLS is
+  used.
+- **Kubernetes `insecure_skip_tls_verify`.** Setting this to `true` for local
+  testing bypasses API-server verification; never enable it in production.
+
+### SSRF / trust boundary
+
+- Upstream backends selected by discovery are **config-trusted**, not
+  request-selected. This is the Jul.IA edge-trust model: the operator controls
+  the provider and query target; requests cannot influence the resolved backend
+  set. This eliminates request-driven SSRF through discovery.
+- However, if an attacker compromises the operator's DNS, Consul, or Kubernetes
+  control plane, they can redirect traffic to arbitrary backends. This is an
+  **infrastructure-compromise** scenario, not a Jul.IA code bug. Protect the
+  provider infrastructure with the same rigour as the proxy itself.
+
+### Stale-backend risk
+
+- The keep-last-good design intentionally** sacrifices freshness for
+  availability during provider blips. During a prolonged outage the backends
+  may be stale (redeployed, decommissioned, or failed). Combine discovery with
+  active health checks so that permanently stale backends are ejected once
+  probes fail.
+
+## GA status
+
+Service discovery has reached **GA** against the [ADR 0003](adr/0003-maturity-and-ga.md) bar.
+
+| Criterion | Status | Evidence |
+| --- | :-: | --- |
+| 1. Conformance / behaviour matrix | ✅ | [Matrix above](#behaviour-matrix) |
+| 2. Published benchmark numbers | ✅ | `BenchmarkPoolPick` (balancer_bench_test.go) covers picker with discovered backends |
+| 3. Known-limitations list | ✅ | [Known limitations](#known-limitations) above |
+| 4. Semver-guarded config/API contract | ✅ | Covered by v1 freeze ([compatibility.md](compatibility.md)) |
+| 6. Runnable example + docs | ✅ | [testdata/discovery.toml](../testdata/discovery.toml) + this doc |
+| 7. Security / threat note | ✅ | [Threat note](#threat-note) above |
+| 8. Fuzzing where parsing is involved | n/a | No custom parser (uses standard `net` stack or JSON from `encoding/json`) |
+| 9. Self-explanatory Console surface | ✅ | Status panel lists discovery-enabled pools |
+
+Soak gate (post-GA, ADR 0005): tracked in [status.md](status.md#soak-tracking-post-ga-gate).

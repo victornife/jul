@@ -50,11 +50,13 @@ each linked doc's *GA status* table.
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 | Web application firewall (WAF) | Y2-06 | `waf` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
+| Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [service-discovery.md](service-discovery.md) |
 
 Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, the Console, active
-health checks, and the WAF: their parsing is delegated to the Go standard library
-(`crypto/x509`, `encoding/json`, `net/http`, `net`) or to Coraza (SecLang), or
-is an opaque forward — none add a custom parser of their own to fuzz.
+health checks, the WAF, and service discovery: their parsing is delegated to the
+Go standard library (`crypto/x509`, `encoding/json`, `net/http`, `net`) or to
+Coraza (SecLang), or is an opaque forward — none add a custom parser of their
+own to fuzz.
 
 > **Continuous panels status** (Y2-09): Live log tail ✅ shipped; WASM plugin
 > manager ✅ shipped (`.wasm` upload shipped v1.27); gRPC route designer ✅ shipped
@@ -101,7 +103,7 @@ is ☐-free except ⑤, then GA — soak pending until ⑤ closes.
 | HTTP/3 over QUIC | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
 | WASM plugin system | ☐ | ☐ | ☐ | ☐ | ☐ | 5 |
 | L4 stream proxy | ☐ | ☐ | ☐ | ☐ | ☐ | 5 |
-| Service discovery / dynamic upstreams | ☐ | ✅ | ☐ | n/a | ☐ | 3 |
+| Service discovery / dynamic upstreams | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Web application firewall (WAF) | ✅ | ✅ | ✅ | n/a | ☐ | 1 |
 | Secrets references + log redaction | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
 | Response cache (memory + disk) | ☐ | ☐ | ☐ | n/a | ☐ | 4 |
@@ -131,6 +133,7 @@ the [soak evidence log](soak-evidence.md).
 | Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Active health checks (Y1-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 | Web application firewall (WAF) (Y2-06) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
+| Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ [v1.28.0 soak](https://github.com/victornife/jul/actions/runs/<RUN_ID>) |
 
 ## Recently shipped continuous panels
 
