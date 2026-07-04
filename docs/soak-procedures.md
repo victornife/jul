@@ -229,19 +229,28 @@ The in-tree soak tests (`TestSoak`, `TestSoakUDPChurn`) use `httptest.NewServer`
 
 The in-tree soak tests are self-contained CI gates. For a **true production burn-in** that validates the full stack (config parser, admin API, TLS, reload, middleware chain):
 
-### 1. Build
+### 1. Build (with console tag)
 
 ```powershell
+$env:FULL_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
 go build -tags "$env:FULL_TAGS" -o jul.exe ./cmd/jul
 ```
+
+> **Always include the `console` tag.** The web console on the admin listener gives you live traffic, latency, error-rate, and feature-status visibility during the soak. Without it, the admin root serves a static page and the dashboard is unavailable.
 
 ### 2. Create a production-like `burn-in.toml`
 
 Use static + proxy routes, health checks, rate limiting, and the admin API.
-Example skeleton:
+The admin listener **must** be enabled and carry a token so the console is reachable:
+
 ```toml
 [global]
 log_level = "info"
+
+[admin]
+enabled = true
+listen  = "127.0.0.1:9090"
+token   = "change-me"
 
 [[servers]]
 listen = "127.0.0.1:8080"
@@ -254,9 +263,6 @@ server_names = ["localhost"]
   [[servers.locations]]
   match = { type = "prefix", path = "/static/" }
   root = "testdata/www"
-
-[admin]
-listen = "127.0.0.1:9090"
 ```
 
 ### 3. Start the backend
@@ -293,6 +299,8 @@ while ($true) {
     Start-Sleep -Seconds 300
 }
 ```
+
+> **Prefer the web console:** Open `http://127.0.0.1:9090/` in a browser and enter the admin token. The **Overview** panel shows real-time req/s, error rate (5xx), latency (avg/p50/p95/p99), in-flight requests, active connections, cache hit ratio, and 2-minute trend sparklines — far richer than CLI polling. Keep a browser tab open during the soak for at-a-glance health checks.
 
 ### 7. Capture pprof snapshots
 

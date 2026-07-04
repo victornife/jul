@@ -1,5 +1,9 @@
 # Track 2 burn-in config — production-like static + proxy routes
 # for real binary soak testing.
+#
+# IMPORTANT: Always build Jul with `-tags console` (included in FULL_TAGS)
+# so the admin dashboard is available at http://127.0.0.1:9090/ for live
+# traffic/error-rate monitoring during the soak.
 
 [global]
 log_level = "info"
