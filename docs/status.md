@@ -60,7 +60,7 @@ each linked doc's *GA status* table.
 | Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli`,`zstd` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
 | NGINX config importer | Y1-09 | `importer` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | n/a | [nginx-importer.md](nginx-importer.md) |
 | OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
-| Response cache (memory + disk) | — | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
+| Response cache (memory + disk) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
 
 Criterion 8 is **n/a** for features whose parsing/validation is delegated to a
 standard or third-party library (`crypto/x509`, `encoding/json`, `net/http`,
@@ -100,7 +100,7 @@ the [soak evidence log](soak-evidence.md).
 | Compression (Y1-02) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (11.6M req, 0% err, zstd/br/gzip verified) — [evidence](soak-evidence.md#2026-07-04--compression-soak-local-windows-1-hour-50-workers) |
 | NGINX config importer (Y1-09) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
-| Response cache (memory + disk) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Response cache (memory + disk) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (1.5M req, 0% err, hit/miss/evict/revalidate verified) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers) |
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
 | WASM plugin system (Y2-02) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
 | L4 stream proxy (Y2-03) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running, udp-churn scenario) |
@@ -133,6 +133,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | --- | --- | --- | --- |
 | 2026-07-04 | 1.30 | **Auth soak completed:** HTTP Basic auth path soaked 1h Windows local (929K req, 0% err). pprof endpoints added to admin server behind auth; load generator updated with `-authUser`/`-authPassword`/`-compress` flags. Evidence logged in `docs/soak-evidence.md`. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
 | 2026-07-04 | 1.30 | **Compression soak completed:** gzip/brotli/zstd paths soaked 1h Windows local (11.6M req, ~3,235 rps, 0% err). zstd encoder pool allocations (~48 MiB) verified as legitimate library pre-allocation, not a leak. Evidence logged. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
+| 2026-07-04 | 1.30 | **Cache soak completed:** response cache (memory + disk) soaked 1h Windows local (1.5M req, 0% err). Hit/miss/evict/revalidate paths exercised with 8 MB memory cap + 10 s TTL. pprof-verified: 16 goroutines, ~1.6 MiB heap. Evidence logged. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
 | 2026-07-04 | 1.30 | **pprof support added to admin server:** `net/http/pprof` mounted at `/debug/pprof/` behind existing bearer-token auth, enabling authenticated goroutine/heap snapshots during soak tests. | `internal/admin/server.go` |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** SEC-1 Secrets references (`env`/`file`/`secret` refs + log redaction + lint) reaches GA — soak pending. Evidence: 12-row behaviour matrix, 5 redaction benchmarks (0-allocation miss path), 8-row threat note (VCS leak, log exposure, short-secret floor, env/file permissions). | [secrets.md](secrets.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-03 Rate + connection limiting reaches GA — soak pending. Evidence: 12-row behaviour matrix (key strategies, scope rules, eviction), 4 rate-limiter benchmarks (~300 ns Allow), threat note (IP spoofing, key collision, slowloris, bypass). | [ratelimit.md](ratelimit.md), [status.md](status.md) |

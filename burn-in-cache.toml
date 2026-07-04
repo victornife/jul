@@ -1,0 +1,60 @@
+# Track 2 burn-in config — Cache soak
+# Tests sustained load through the memory + disk response cache.
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/burn-in-backend.go
+#   Window 2: .\jul.exe -config burn-in-cache.toml
+#   Window 3: go run scripts/burn-in-load.go -duration 1h -workers 50 -cache
+
+[global]
+log_level = "warn"
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+[cache]
+enabled = true
+# Small memory cap to force overflow to disk and eviction pressure.
+memory_max_size = "8MB"
+disk_path = "jul-data/cache-disk"
+disk_max_size = "64MB"
+# Short TTL so entries expire quickly, exercising revalidation + eviction.
+default_ttl = "10s"
+stale_while_revalidate = "5s"
+stale_if_error = "30s"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  # Cached API proxy — backend JSON responses cached with 10s TTL.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://127.0.0.1:8081"
+  cache = true
+
+  # Uncached API path for baseline comparison.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/nocache/" }
+  proxy_pass = "http://127.0.0.1:8081"
+  cache = false
+
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["health"]
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200

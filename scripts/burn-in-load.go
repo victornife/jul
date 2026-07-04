@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,7 @@ func main() {
 		authPassword = flag.String("authPassword", "", "HTTP Basic auth password")
 		authRatio    = flag.Int("authRatio", 100, "Percentage of requests that include auth headers (0-100)")
 		compress     = flag.Bool("compress", false, "Send Accept-Encoding: gzip, br, zstd for compression soak")
+		cache        = flag.Bool("cache", false, "Exercise cache hit/miss/evict/revalidate patterns for cache soak")
 	)
 	flag.Parse()
 
@@ -90,6 +92,9 @@ func main() {
 		authHeader = "Basic " + base64.StdEncoding.EncodeToString([]byte(*authUser+":"+*authPassword))
 		fmt.Printf("Auth           : Basic auth user=%s ratio=%d%%\n", *authUser, *authRatio)
 	}
+	if *cache {
+		fmt.Println("Cache mode     : enabled (hits/misses/evict/revalidate mix)")
+	}
 
 	endTime := time.Now().Add(*duration)
 	var totalReqs, errConnReset, errTimeout, errOther, status5xx int64
@@ -106,9 +111,29 @@ func main() {
 				Transport: sharedTransport,
 			}
 			for time.Now().Before(endTime) {
-				path := "/api/"
-				if rand.Intn(2) == 0 {
-					path = "/static/"
+				var path string
+				if *cache {
+					// Cache traffic pattern:
+					//   50% warm hits (same URL, should be cached after first fetch)
+					//   25% unique URLs (forced misses, evict pressure)
+					//   15% uncached baseline (bypass cache, verify backend health)
+					//   10% alternate warm path
+					r := rand.Intn(100)
+					switch {
+					case r < 50:
+						path = "/api/items"
+					case r < 75:
+						path = "/api/item-" + strconv.Itoa(rand.Intn(100000))
+					case r < 90:
+						path = "/nocache/api/items"
+					default:
+						path = "/api/static/test"
+					}
+				} else {
+					path = "/api/"
+					if rand.Intn(2) == 0 {
+						path = "/static/"
+					}
 				}
 				url := *baseURL + path
 
