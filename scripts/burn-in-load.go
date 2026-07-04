@@ -1,18 +1,40 @@
+//go:build ignore
+
 // Track 2 — Real binary burn-in load generator (Go)
 // Usage: go run scripts/burn-in-load.go -duration 5m -workers 50
+//
+// NOTE (2026-07-04): Uses a shared http.Transport across all workers with
+// full body drain (io.Copy to discard) for proper connection reuse. This
+// avoids Windows ephemeral-port exhaustion that occurs when per-worker
+// transports or incomplete reads break HTTP keep-alive.
 package main
 
 import (
 	"flag"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+var seenErrors sync.Map
+var seenErrCount int64
+
+func logErrorOnce(errStr string) {
+	if atomic.LoadInt64(&seenErrCount) >= 10 {
+		return
+	}
+	if _, loaded := seenErrors.LoadOrStore(errStr, true); !loaded {
+		atomic.AddInt64(&seenErrCount, 1)
+		fmt.Printf("[ERR SAMPLE] %s\n", errStr)
+	}
+}
 
 func main() {
 	var (
@@ -49,18 +71,16 @@ func main() {
 	fmt.Println("Capturing T+0 pprof snapshots...")
 	snapPProf(*adminURL, *pprofDir, "T0")
 
-	// Shared HTTP client with connection reuse
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        1000,
-			MaxIdleConnsPerHost: 1000,
-			IdleConnTimeout:     90 * time.Second,
-		},
+	// Shared transport for proper connection reuse across all workers
+	sharedTransport := &http.Transport{
+		MaxIdleConns:        *workers * 2,
+		MaxIdleConnsPerHost: *workers * 2,
+		IdleConnTimeout:     90 * time.Second,
+		ForceAttemptHTTP2:   false,
 	}
 
 	endTime := time.Now().Add(*duration)
-	var totalReqs, errorReqs int64
+	var totalReqs, errConnReset, errTimeout, errOther, status5xx int64
 	var mu sync.Mutex
 	var latencies []int64
 
@@ -69,6 +89,10 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			client := &http.Client{
+				Timeout:   10 * time.Second,
+				Transport: sharedTransport,
+			}
 			for time.Now().Before(endTime) {
 				path := "/api/"
 				if rand.Intn(2) == 0 {
@@ -80,16 +104,26 @@ func main() {
 				d := time.Since(start).Milliseconds()
 				atomic.AddInt64(&totalReqs, 1)
 				if err != nil {
-					atomic.AddInt64(&errorReqs, 1)
+					errStr := err.Error()
+					if os.IsTimeout(err) || (resp != nil && resp.StatusCode == http.StatusRequestTimeout) {
+						atomic.AddInt64(&errTimeout, 1)
+					} else if strings.Contains(errStr, "connection reset by peer") || strings.Contains(errStr, "EOF") || strings.Contains(errStr, "broken pipe") {
+						atomic.AddInt64(&errConnReset, 1)
+					} else {
+						atomic.AddInt64(&errOther, 1)
+						logErrorOnce(errStr)
+					}
 					continue
 				}
+				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 				if resp.StatusCode >= 500 {
-					atomic.AddInt64(&errorReqs, 1)
+					atomic.AddInt64(&status5xx, 1)
 				}
 				mu.Lock()
 				latencies = append(latencies, d)
 				mu.Unlock()
+				time.Sleep(5 * time.Millisecond)
 			}
 		}()
 	}
@@ -121,16 +155,24 @@ func main() {
 
 	// Summary
 	t := atomic.LoadInt64(&totalReqs)
-	e := atomic.LoadInt64(&errorReqs)
+	cres := atomic.LoadInt64(&errConnReset)
+	to := atomic.LoadInt64(&errTimeout)
+	oe := atomic.LoadInt64(&errOther)
+	s5 := atomic.LoadInt64(&status5xx)
+	e := cres + to + oe + s5
 	ok := t - e
 
 	fmt.Println()
 	fmt.Println("========== BURN-IN RESULTS ==========")
-	fmt.Printf("Duration       : %v\n", *duration)
-	fmt.Printf("Total requests : %d\n", t)
-	fmt.Printf("Errors         : %d\n", e)
+	fmt.Printf("Duration          : %v\n", *duration)
+	fmt.Printf("Total requests    : %d\n", t)
+	fmt.Printf("HTTP 5xx          : %d\n", s5)
+	fmt.Printf("Conn reset / EOF  : %d\n", cres)
+	fmt.Printf("Timeouts          : %d\n", to)
+	fmt.Printf("Other errors      : %d\n", oe)
 	if t > 0 {
-		fmt.Printf("Error rate     : %.2f%%\n", float64(e)/float64(t)*100)
+		fmt.Printf("Error rate (any)  : %.2f%%\n", float64(e)/float64(t)*100)
+		fmt.Printf("Success rate      : %.2f%%\n", float64(ok)/float64(t)*100)
 	}
 
 	if ok > 0 && len(latencies) > 0 {

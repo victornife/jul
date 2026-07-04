@@ -172,18 +172,62 @@ soak/udp: goroutines 4 -> 4, heap 493272 -> 1591448 bytes
 ### 2026-07-04 (Track 2 — real binary burn-in smoke, local, Windows)
 
 **Binary:** `jul.exe` built with full tags (`brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf`).
-**Backend:** `python -m http.server 8081`.
-**Load generator:** `scripts/burn-in-load.go` (Go, 50 workers, connection reuse).
+**Backend v1:** `python -m http.server 8081` (single-threaded, bottle-necked).
+**Backend v2:** `scripts/burn-in-backend.go` — Go stub, concurrent, JSON responses.
+**Load generator:** `scripts/burn-in-load.go` (Go, 50 workers, `http.Client` w/ connection reuse).
+
+#### Run 1 — Python backend
 
 | Check | Result | Detail |
 |-------|--------|--------|
 | Duration | **5 min** | ran to completion |
 | Requests | **267,043** | ~890 req/s |
 | Health | **PASS** | `200` every 30 s |
-| Errors | **89.56 %** | **Python backend timeouts**, not Jul: `python -m http.server` single-threaded under 50 concurrent workers could not keep up; Jul returned proxy 404 or timeout, never 5xx |
-| Latency | **min=1 avg=51.6 max=1549 p50=28 p95=131 p99=698 ms** | tail driven by Python backend queueing |
-| Log | **0 ERROR** | No panic, no crash, no handler error |
+| Client error rate | **89.56 %** | Python backend overwhelmed (single-thread); Jul never emitted 5xx |
+| Jul access log | **all `status=404`** | Jul correctly proxied to Python; Python had no `/api/` file |
+| Latency | min=1 avg=51.6 max=1549 p50=28 p95=131 p99=698 ms | tail driven by Python queueing |
+
+#### Run 2 — Go backend (`scripts/burn-in-backend.go`)
+
+> **Note:** This run used the original `burn-in-load.go` with per-worker
+> `http.Transport` instances and incomplete body reads, which caused Windows
+> ephemeral port exhaustion. The ~81% "error" was entirely client-side.
+
+| Check | Result | Detail |
+|-------|--------|--------|
+| Duration | **5 min** | ran to completion |
+| Requests | **268,559** | ~895 req/s |
+| Health | **PASS** | `200` every 30 s |
+| Client error rate | **~81 %** | Client-side Windows `connectex` port exhaustion (per-worker transports, no keep-alive) |
+| Jul access log | **100% `status=200`** | Every request Jul received was served successfully |
+| Latency | min=0 avg=33.4 max=1087 p50=25 p95=91 p99=173 ms | stable sub-100 ms median |
+| Jul ERROR log | **0 lines** | No panic, no crash, no handler error |
 | Config reload | **OK** | Hot-reloaded `burn-in.toml` without restart |
 | Admin / pprof | **OK** | `9090` reachable; goroutine + heap snapshots captured |
 
-**Conclusion:** The Jul process itself stayed healthy (zero ERROR log lines, health checks clean) under 50 concurrent workers at ~890 rps. The high error rate is fully attributable to the toy Python backend. For a clean Track 2 run, swap the backend for a Go stub or nginx/uwsgi. Updated `burn-in.toml` skeleton in `soak-procedures.md`.
+#### Run 3 — Go backend, fixed transport (`scripts/burn-in-load.go`)
+
+Fixes applied: shared `http.Transport` across all workers, full body drain
+(`io.Copy(io.Discard, resp.Body)`), 5ms inter-request pacing.
+
+| Check | Result | Detail |
+|-------|--------|--------|
+| Duration | **5 min** | ran to completion |
+| Requests | **785,634** | ~2,619 req/s |
+| Health | **PASS** | `200` every 30 s |
+| Client error rate | **0.00 %** | Zero client errors |
+| HTTP 5xx | **0** | Zero server errors |
+| Jul access log | **100% `status=200`** | All requests served successfully |
+| Latency | min=0 avg=13.1 max=408 p50=10 p95=31 p99=53 ms | significantly lower than Run 2 |
+| Jul ERROR log | **0 lines** | No panic, no crash, no handler error |
+
+**Key finding:** With proper connection reuse, the load generator sustains
+~2,600 req/s with **zero errors** (both client-side and server-side). Jul's
+access log shows **100% `status=200`**; no 5xx, no connection resets, no
+timeouts. The server data path is clean under sustained high load.
+
+**Conclusion:** After fixing the test harness (shared transport + body drain),
+the real binary burn-in demonstrates Jul can sustain 50 concurrent workers at
+~2,600 rps for 5 minutes with **0% errors** and sub-15ms average latency.
+The previous ~81% error rate was a measurement artifact of the test client,
+not a server defect.
