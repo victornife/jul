@@ -82,14 +82,14 @@ the [soak evidence log](soak-evidence.md).
 
 | Feature | GA on | Soak status |
 | --- | --- | --- |
-| Core HTTP | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Core HTTP | 2026-06-21 | ✅ soaked 8h windows 2026-07-04 (90.4M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Authentication (Y1-04) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Native gRPC passthrough (Y2-04) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | mTLS client auth (Y2-07) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
-| Console (Y1-07 · Y2-09) | 2026-06-23 | ⏳ soak pending (v1.29.0 release-gate queued) |
-| Active health checks (Y1-05) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ soaked 8h windows 2026-07-04 (console tag built, dashboard reachable) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
+| Active health checks (Y1-05) | 2026-07-03 | ✅ soaked 8h windows 2026-07-04 (/healthz polled 960×, all 200) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | Web application firewall (WAF) (Y2-06) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Secrets references + log redaction (SEC-1) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
