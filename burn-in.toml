@@ -6,7 +6,14 @@
 # traffic/error-rate monitoring during the soak.
 
 [global]
-log_level = "info"
+log_level = "warn"
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
 
 [admin]
 enabled = true

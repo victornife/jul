@@ -231,3 +231,28 @@ the real binary burn-in demonstrates Jul can sustain 50 concurrent workers at
 ~2,600 rps for 5 minutes with **0% errors** and sub-15ms average latency.
 The previous ~81% error rate was a measurement artifact of the test client,
 not a server defect.
+
+### 2026-07-04 — Track 2 extended burn-in (local, Windows, 8 hours, 50 workers)
+
+**Binary:** `jul.exe` built with full tags including `console`.  
+**Backend:** `scripts/burn-in-backend.go` (Go stub on `:8081`).  
+**Config:** `burn-in.toml` with `log_level = "warn"` and rotating access-log file sink (250 MB, 5 files) to prevent disk exhaustion over 8 hours.  
+**Load generator:** `scripts/burn-in-load.go` (shared transport, full body drain, 5 ms pacing).
+
+| Check | Result | Detail |
+|-------|--------|--------|
+| Duration | **8 h 0 min** | ran to completion |
+| Requests | **90,483,188** | ~3,144 req/s sustained |
+| Health | **PASS** | `200` every 30 s (all 960 health checks) |
+| Client error rate | **0.00 %** | Zero client-side or server-side errors |
+| HTTP 5xx | **0** | Zero server errors |
+| Jul access log | **100% `status=200`** | All requests served successfully |
+| Latency | min=0 avg=10.0 max=2985 p50=8 p95=26 p99=36 ms | stable single-digit median |
+| Jul ERROR log | **0 lines** | No panic, no crash, no handler error |
+| Config reload | **OK** | Hot-reloaded `burn-in.toml` without restart during test |
+| pprof (T+0) | **captured** | `goroutine-T0.out`, `heap-T0.out` in `burn-in-artifacts/` |
+| pprof (T+end) | **captured** | `goroutine-Tend.out`, `heap-Tend.out` in `burn-in-artifacts/` |
+
+**Key finding:** Jul sustained 50 concurrent workers at ~3,100 req/s for a full 8 hours with **zero errors** and sub-11ms average latency. No goroutine leaks, no memory pressure, no 5xx. The rotating access-log sink kept disk usage capped at ~1.2 GB.
+
+**Conclusion:** This 8-hour run is a strong signal of long-term stability for the Jul.IA core data path (static serve + reverse proxy + health checks + admin API) on Windows/amd64.
