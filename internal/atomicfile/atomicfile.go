@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Write atomically replaces the file at path with data.
@@ -59,8 +60,19 @@ func Write(path string, data []byte, perm fs.FileMode) error {
 	if err := os.Chmod(tmpName, mode); err != nil {
 		return fmt.Errorf("set temp file mode: %w", err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("rename temp file into place: %w", err)
+	// Retry rename on Windows where anti-virus or indexing briefly locks
+	// the temp file after close, causing "Access is denied."
+	var renameErr error
+	for i := 0; i < 5; i++ {
+		if renameErr = os.Rename(tmpName, path); renameErr == nil {
+			break
+		}
+		if i < 4 {
+			time.Sleep(time.Duration(i+1) * 20 * time.Millisecond)
+		}
+	}
+	if renameErr != nil {
+		return fmt.Errorf("rename temp file into place: %w", renameErr)
 	}
 
 	// Best-effort durability for the rename. Syncing a directory is not
