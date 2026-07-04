@@ -168,3 +168,22 @@ soak/udp: goroutines 4 -> 4, heap 493272 -> 1591448 bytes
   to 266 during concurrent admission, then reaped).
 - **No goroutine leak** (4 → 4) across 561,560 sends; heap growth bounded (~1.6 MiB).
 - Demonstrates the stream (udp-churn) data path is leak-free under sustained load.
+
+### 2026-07-04 (Track 2 — real binary burn-in smoke, local, Windows)
+
+**Binary:** `jul.exe` built with full tags (`brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf`).
+**Backend:** `python -m http.server 8081`.
+**Load generator:** `scripts/burn-in-load.go` (Go, 50 workers, connection reuse).
+
+| Check | Result | Detail |
+|-------|--------|--------|
+| Duration | **5 min** | ran to completion |
+| Requests | **267,043** | ~890 req/s |
+| Health | **PASS** | `200` every 30 s |
+| Errors | **89.56 %** | **Python backend timeouts**, not Jul: `python -m http.server` single-threaded under 50 concurrent workers could not keep up; Jul returned proxy 404 or timeout, never 5xx |
+| Latency | **min=1 avg=51.6 max=1549 p50=28 p95=131 p99=698 ms** | tail driven by Python backend queueing |
+| Log | **0 ERROR** | No panic, no crash, no handler error |
+| Config reload | **OK** | Hot-reloaded `burn-in.toml` without restart |
+| Admin / pprof | **OK** | `9090` reachable; goroutine + heap snapshots captured |
+
+**Conclusion:** The Jul process itself stayed healthy (zero ERROR log lines, health checks clean) under 50 concurrent workers at ~890 rps. The high error rate is fully attributable to the toy Python backend. For a clean Track 2 run, swap the backend for a Go stub or nginx/uwsgi. Updated `burn-in.toml` skeleton in `soak-procedures.md`.

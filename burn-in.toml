@@ -1,0 +1,33 @@
+# Track 2 burn-in config — production-like static + proxy routes
+# for real binary soak testing.
+
+[global]
+log_level = "info"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "testdata/www"
+  try_files = ["$uri", "$uri/", "/index.html"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://127.0.0.1:8081"
+  # NOTE: For real burn-in, replace python -m http.server with a Go stub or
+  # nginx backend. The toy Python server cannot sustain >50 concurrent workers.
+
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["health"]
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
