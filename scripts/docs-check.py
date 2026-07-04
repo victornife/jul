@@ -138,6 +138,8 @@ def check_placeholders(path: Path, text: str):
         r"example\.com/jul",
         r"<RUN_ID>",
         r"actions/runs/<RUN_ID>",
+        r"actions/runs/PENDING",
+        r"\bPENDING\b",
         r"\?\?\?",
     ]
     for pattern in bad:

@@ -279,15 +279,15 @@ func TestPluginUploadFilenameHardening(t *testing.T) {
 }
 
 func TestProjectPluginsUploadEnabled(t *testing.T) {
-	t.Run("enabled by default", func(t *testing.T) {
+	t.Run("disabled when PluginUploadEnabled is nil", func(t *testing.T) {
 		c := pluginPatchConfig()
 		c.Admin.PluginUploadMaxSize = 32
 		proj := projectPlugins(c, true)
-		if !proj.UploadEnabled {
-			t.Error("UploadEnabled = false, want true when PluginUploadEnabled is nil")
+		if proj.UploadEnabled {
+			t.Error("UploadEnabled = true, want false when PluginUploadEnabled is nil")
 		}
-		if proj.UploadMaxSizeMB == 0 {
-			t.Error("UploadMaxSizeMB should be positive when enabled by default")
+		if proj.UploadMaxSizeMB != 0 {
+			t.Errorf("UploadMaxSizeMB = %d, want 0 when disabled", proj.UploadMaxSizeMB)
 		}
 	})
 

@@ -113,9 +113,6 @@ func TestReloadRecordsSuccessAndDuration(t *testing.T) {
 	<-done
 }
 
-// TestReloadTimeoutExplicitZero verifies that reload_timeout = "0s" disables the
-// advisory timeout entirely. A slow factory should still succeed without
-// TimedOut=true because the 0 threshold skips the advisory check.
 func TestReloadTimeoutExplicitZero(t *testing.T) {
 	addr := freePort(t)
 

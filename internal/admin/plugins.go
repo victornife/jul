@@ -227,7 +227,7 @@ type PluginAttachment struct {
 // projectPlugins builds the Plugins panel projection from the parsed config.
 // compiled reports whether the running binary includes the plugin runtime.
 func projectPlugins(c *config.Config, compiled bool) PluginsProjection {
-	uploadEnabled := c.Admin.PluginUploadEnabled == nil || *c.Admin.PluginUploadEnabled
+	uploadEnabled := c.Admin.PluginUploadEnabled != nil && *c.Admin.PluginUploadEnabled
 	out := PluginsProjection{
 		Compiled:        compiled,
 		UploadEnabled:   uploadEnabled,

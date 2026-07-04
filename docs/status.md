@@ -54,6 +54,13 @@ each linked doc's *GA status* table.
 | HTTP/3 over QUIC | Y1-11 | `http3` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
 | WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
 | L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
+| Secrets references + log redaction | SEC-1 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [secrets.md](secrets.md) |
+| Rate + connection limiting | Y1-03 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [ratelimit.md](ratelimit.md) |
+| Zero-config + `jul lint` | Y1-08 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | n/a | [zeroconf.md](zeroconf.md) |
+| Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli`,`zstd` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
+| NGINX config importer | Y1-09 | `importer` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | n/a | [nginx-importer.md](nginx-importer.md) |
+| OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
+| Response cache (memory + disk) | — | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
 
 Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, the Console, active
 health checks, the WAF, and service discovery: their parsing is delegated to the
@@ -95,6 +102,7 @@ the [soak evidence log](soak-evidence.md).
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
 | WASM plugin system (Y2-02) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
 | L4 stream proxy (Y2-03) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running, udp-churn scenario) |
+| Secrets references + log redaction | SEC-1 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [secrets.md](secrets.md) |
 
 ## Recently shipped continuous panels
 

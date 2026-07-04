@@ -48,7 +48,7 @@ The canonical maturity matrix lives in [`docs/status.md`](docs/status.md). At a
 > per-feature evidence links. The soak test is the last remaining gate for the
 > GA — soak pending features per [ADR 0005](docs/adr/0005-soak-post-ga-gate.md).
 
-Several Beta features require an opt-in **build tag** (e.g. `grpc`, `acme`,
+Several GA -- soak pending features require an opt-in **build tag** (e.g. `grpc`, `acme`,
 `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default
 `lean` binary ships only the GA surface plus core compression (`gzip`). Build
 with `-tags "…"` or download the `full` release profile to enable everything.

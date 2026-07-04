@@ -157,6 +157,24 @@ func TestConfigClone(t *testing.T) {
 	}
 }
 
+
+func TestParseReloadTimeoutZeroDefaultsToTenSeconds(t *testing.T) {
+	// Explicit zero in TOML must still default to 10s (unbounded reload is
+	// intentionally not supported to prevent accidental production stalls).
+	cfg, err := Parse([]byte(`[global]
+reload_timeout = "0s"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := Duration(10 * time.Second)
+	if cfg.Global.ReloadTimeout != want {
+		t.Fatalf("reload_timeout = %v, want %v (zero/omitted must default to 10s)", cfg.Global.ReloadTimeout, want)
+	}
+}
 func TestPreflightClone(t *testing.T) {
 	cfg, _ := Parse([]byte("[global]\nlog_level = \"info\"\n\n[[servers]]\nlisten=\":80\"\n"))
 	if err := PreflightClone(cfg); err != nil {

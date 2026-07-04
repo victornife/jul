@@ -107,18 +107,18 @@ If the reload takes longer than the configured threshold, it is recorded as `tim
   What was previously an unsafe goroutine-based "abort" has been replaced by a
   warning so that operators know the reload was slow, while the runtime stays
   consistent.
-- The apply response may include `previous_reload.timed_out: true` so the UI can warn the
-  operator that the last completed reload exceeded the expected duration. Note: this
-  describes the previous reload, not necessarily the one triggered by the current apply.
-- `previous_reload.error` is empty when the timeout is advisory; the reload succeeded but
-    was slow.
+- The server records the reload result (including `timed_out: true`) as soon as the
+  reload completes. This is a diagnostic signal for pathological stalls (a wedged
+  `OnReloaded` or an unexpectedly slow factory) rather than a guard for a
+  frequently reachable failure mode.
+- The apply response may include `previous_reload` so the UI can warn the operator
+  that the last completed reload exceeded the expected duration. Note: this
+  describes the previous reload, not necessarily the one triggered by the current
+  apply. `previous_reload.error` is empty when the timeout is advisory; the reload
+  succeeded but was slow.
 
-The apply preflight already eliminates build and bind failures before the file
-is written, so a timeout is a diagnоstic signal for pathological stalls (a wedged
-`OnReloaded` or an unexpectedly slow factory) rather than a guard for a
-frequently reachable failure mode. The default 10s should accommodate all normal
-configs; operators may raise it for very large configs or environments with
-slow DNS.
+The default 10s should accommodate all normal configs; operators may raise it for
+very large configs or environments with slow DNS.
 
 ## Changes that require a restart
 
