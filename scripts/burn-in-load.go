@@ -10,6 +10,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io"
@@ -38,12 +39,16 @@ func logErrorOnce(errStr string) {
 
 func main() {
 	var (
-		duration  = flag.Duration("duration", 5*time.Minute, "How long to run")
-		workers   = flag.Int("workers", 50, "Number of concurrent workers")
-		baseURL   = flag.String("base", "http://127.0.0.1:8080", "Jul server base URL")
-		healthURL = flag.String("health", "http://127.0.0.1:8082/healthz", "Health endpoint")
-		adminURL  = flag.String("admin", "http://127.0.0.1:9090", "Admin / pprof base URL")
-		pprofDir  = flag.String("out", "burn-in-artifacts", "Directory for pprof snapshots")
+		duration     = flag.Duration("duration", 5*time.Minute, "How long to run")
+		workers      = flag.Int("workers", 50, "Number of concurrent workers")
+		baseURL      = flag.String("base", "http://127.0.0.1:8080", "Jul server base URL")
+		healthURL    = flag.String("health", "http://127.0.0.1:8082/healthz", "Health endpoint")
+		adminURL     = flag.String("admin", "http://127.0.0.1:9090", "Admin / pprof base URL")
+		pprofDir     = flag.String("out", "burn-in-artifacts", "Directory for pprof snapshots")
+		authUser     = flag.String("authUser", "", "HTTP Basic auth username (empty = no auth)")
+		authPassword = flag.String("authPassword", "", "HTTP Basic auth password")
+		authRatio    = flag.Int("authRatio", 100, "Percentage of requests that include auth headers (0-100)")
+		compress     = flag.Bool("compress", false, "Send Accept-Encoding: gzip, br, zstd for compression soak")
 	)
 	flag.Parse()
 
@@ -69,7 +74,7 @@ func main() {
 
 	// T+0 pprof snapshots
 	fmt.Println("Capturing T+0 pprof snapshots...")
-	snapPProf(*adminURL, *pprofDir, "T0")
+	snapPProf(*adminURL, *pprofDir, "T0", "burnintoken")
 
 	// Shared transport for proper connection reuse across all workers
 	sharedTransport := &http.Transport{
@@ -77,6 +82,13 @@ func main() {
 		MaxIdleConnsPerHost: *workers * 2,
 		IdleConnTimeout:     90 * time.Second,
 		ForceAttemptHTTP2:   false,
+	}
+
+	// Pre-compute Basic auth header if credentials are provided.
+	var authHeader string
+	if *authUser != "" {
+		authHeader = "Basic " + base64.StdEncoding.EncodeToString([]byte(*authUser+":"+*authPassword))
+		fmt.Printf("Auth           : Basic auth user=%s ratio=%d%%\n", *authUser, *authRatio)
 	}
 
 	endTime := time.Now().Add(*duration)
@@ -99,8 +111,23 @@ func main() {
 					path = "/static/"
 				}
 				url := *baseURL + path
+
+				req, err := http.NewRequest("GET", url, nil)
+				if err != nil {
+					atomic.AddInt64(&totalReqs, 1)
+					atomic.AddInt64(&errOther, 1)
+					logErrorOnce(err.Error())
+					continue
+				}
+				if authHeader != "" && rand.Intn(100) < *authRatio {
+					req.Header.Set("Authorization", authHeader)
+				}
+				if *compress {
+					req.Header.Set("Accept-Encoding", "gzip, br, zstd")
+				}
+
 				start := time.Now()
-				resp, err := client.Get(url)
+				resp, err := client.Do(req)
 				d := time.Since(start).Milliseconds()
 				atomic.AddInt64(&totalReqs, 1)
 				if err != nil {
@@ -195,7 +222,7 @@ func main() {
 
 	// T+end pprof snapshots
 	fmt.Println("Capturing T+end pprof snapshots...")
-	snapPProf(*adminURL, *pprofDir, "Tend")
+	snapPProf(*adminURL, *pprofDir, "Tend", "burnintoken")
 	fmt.Printf("Artifacts saved to %s/\n", *pprofDir)
 }
 
@@ -212,13 +239,18 @@ func healthCheck(url string) error {
 	return nil
 }
 
-func snapPProf(admin, dir, suffix string) {
+func snapPProf(admin, dir, suffix, token string) {
 	urls := map[string]string{
 		"goroutine": admin + "/debug/pprof/goroutine",
 		"heap":      admin + "/debug/pprof/heap",
 	}
 	for name, u := range urls {
-		resp, err := http.Get(u)
+		req, err := http.NewRequest("GET", u, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			continue
 		}

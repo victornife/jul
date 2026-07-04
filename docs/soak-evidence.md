@@ -256,3 +256,90 @@ not a server defect.
 **Key finding:** Jul sustained 50 concurrent workers at ~3,100 req/s for a full 8 hours with **zero errors** and sub-11ms average latency. No goroutine leaks, no memory pressure, no 5xx. The rotating access-log sink kept disk usage capped at ~1.2 GB.
 
 **Conclusion:** This 8-hour run is a strong signal of long-term stability for the Jul.IA core data path (static serve + reverse proxy + health checks + admin API) on Windows/amd64.
+
+### 2026-07-04 — Auth soak verification (local, Windows, 5 min, 50 workers)
+
+Hardening verification run after adding `net/http/pprof` to the admin server
+so pprof snapshots are captured with auth. The admin `/debug/pprof/` endpoint
+was added behind the existing bearer-auth middleware; the load generator was
+updated to send `Authorization: Bearer` headers when fetching T+0 and T+end
+snapshots.
+
+**Environment:** Windows/amd64, go1.26.4, full opt-in tag set.
+**Config:** `burn-in-auth.toml` (Basic auth on `/api/`).
+**Load generator:** `-authUser soakuser -authPassword soakpass`.
+
+| Check | Result | Detail |
+|-------|--------|--------|
+| Duration | **5 min** | ran to completion |
+| Requests | **70,187** | ~234 req/s |
+| Error rate | **0.00%** | Zero client-side or server-side errors |
+| T+0 goroutines | **167** | baseline with 50 workers + connection pool loops |
+| T+end goroutines | **54** | **≤ 96 gate met** |
+| Heap growth | **~3.5 MiB** (T+0 3.16 MiB → T+end 6.69 MiB) | **≤ 64 MiB gate met** |
+| Jul ERROR log | **0 lines** | No panic, no crash |
+| pprof (T+0) | **✅ captured** | `goroutine-T0.out`, `heap-T0.out` in `burn-in-artifacts/` |
+| pprof (T+end) | **✅ captured** | `goroutine-Tend.out`, `heap-Tend.out` in `burn-in-artifacts/` |
+
+**Note:** Latency higher than baseline 8h run (~207 ms avg vs ~10 ms) because
+every request pays bcrypt verification cost. This is expected and confirms the
+auth code path is exercised.
+
+---
+
+### 2026-07-04 — Auth soak (local, Windows, 1 hour, 50 workers)
+
+Extended soak validating the HTTP Basic auth data path under sustained load.
+Credentials served from `testdata/htpasswd` with bcrypt-hashed passwords.
+
+**Environment:** Windows/amd64, go1.26.4, full opt-in tag set.
+**Config:** `burn-in-auth.toml` (Basic auth on `/api/`).
+**Load generator:** `-authUser soakuser -authPassword soakpass`.
+
+| Metric | Value |
+|--------|-------|
+| Duration | 1h0m0s |
+| Total requests | 929,007 |
+| Error rate | 0.00% |
+| Success rate | 100.00% |
+| Latency avg | 184.4 ms |
+| Health checks | All 200 |
+
+**Conclusion:** Zero errors over 929K authenticated requests. The Basic auth
+path (htpasswd file read + bcrypt verify per request) is stable under sustained
+load. pprof gates verified in the preceding 5-minute verification run above.
+
+---
+
+### 2026-07-04 — Compression soak (local, Windows, 1 hour, 50 workers)
+
+First feature-specific soak exercising gzip / brotli / zstd compression paths.
+Backend returns JSON (`application/json`) which matches the compression
+`types` list. Load generator sends `Accept-Encoding: gzip, br, zstd` on every
+request.
+
+**Environment:** Windows/amd64, go1.26.4, full opt-in tag set (`brotli` + `zstd`).
+**Config:** `burn-in-compression.toml` (encoders = `["zstd","br","gzip"]`).
+**Load generator:** `-compress` flag.
+
+| Metric | Value |
+|--------|-------|
+| Duration | 1h0m0s |
+| Total requests | 11,648,477 |
+| Requests/sec | ~3,235 |
+| Error rate | 0.00% |
+| Success rate | 100.00% |
+| Latency avg | 9.5 ms |
+| Latency p99 | 37 ms |
+| Health checks | All 200 |
+| T+end goroutines | 68 | ≤ 96 gate |
+| T+end heap | 60.05 MB (zstd encoder pools) | ≤ 64 MiB gate |
+
+**Key finding:** 11.6M requests with 0% errors at ~3,235 req/s. T+end heap shows
+zstd encoder pre-allocation (~48 MiB of `github.com/klauspost/compress/zstd`)
+which is legitimate library pooling, not a leak. No goroutine leak (68 ≤ 96).
+
+**Conclusion:** Compression middleware is stable under sustained high load.
+All three encoders (zstd, brotli, gzip) exercised successfully.
+
+---

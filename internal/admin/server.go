@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -276,6 +277,10 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/config/history/{id}", s.auth(http.HandlerFunc(s.handleConfigHistoryGet)))
 	mux.Handle("/api/config/rollback", s.auth(http.HandlerFunc(s.handleConfigRollback)))
 	mux.Handle("/api/wizard/generate", s.auth(http.HandlerFunc(s.handleWizardGenerate)))
+
+	// Runtime profiling endpoints (goroutine, heap, cpu, etc.). Mounted behind
+	// auth so only operators with the admin token can scrape profiles.
+	mux.Handle("/debug/pprof/", s.auth(http.DefaultServeMux))
 
 	// Admin API security hardening (Console v2 Milestone 1.6): per-client rate
 	// limiting wraps the whole mux so every endpoint is protected. The SSE

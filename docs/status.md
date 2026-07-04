@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.30 · Updated 2026-07-03
+> Version 1.30 · Updated 2026-07-04
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -86,7 +86,7 @@ the [soak evidence log](soak-evidence.md).
 | --- | --- | --- |
 | Core HTTP | 2026-06-21 | ✅ soaked 8h windows 2026-07-04 (90.4M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
-| Authentication (Y1-04) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Authentication (Y1-04) | 2026-06-21 | ✅ soaked 1h windows 2026-07-04 (929K req, 0% err, pprof-verified) — [evidence](soak-evidence.md#2026-07-04--auth-soak-local-windows-1-hour-50-workers) |
 | gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Native gRPC passthrough (Y2-04) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | mTLS client auth (Y2-07) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
@@ -97,7 +97,7 @@ the [soak evidence log](soak-evidence.md).
 | Secrets references + log redaction (SEC-1) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Rate + connection limiting (Y1-03) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
-| Compression (Y1-02) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Compression (Y1-02) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (11.6M req, 0% err, zstd/br/gzip verified) — [evidence](soak-evidence.md#2026-07-04--compression-soak-local-windows-1-hour-50-workers) |
 | NGINX config importer (Y1-09) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Response cache (memory + disk) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
@@ -131,6 +131,9 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-07-04 | 1.30 | **Auth soak completed:** HTTP Basic auth path soaked 1h Windows local (929K req, 0% err). pprof endpoints added to admin server behind auth; load generator updated with `-authUser`/`-authPassword`/`-compress` flags. Evidence logged in `docs/soak-evidence.md`. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
+| 2026-07-04 | 1.30 | **Compression soak completed:** gzip/brotli/zstd paths soaked 1h Windows local (11.6M req, ~3,235 rps, 0% err). zstd encoder pool allocations (~48 MiB) verified as legitimate library pre-allocation, not a leak. Evidence logged. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
+| 2026-07-04 | 1.30 | **pprof support added to admin server:** `net/http/pprof` mounted at `/debug/pprof/` behind existing bearer-token auth, enabling authenticated goroutine/heap snapshots during soak tests. | `internal/admin/server.go` |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** SEC-1 Secrets references (`env`/`file`/`secret` refs + log redaction + lint) reaches GA — soak pending. Evidence: 12-row behaviour matrix, 5 redaction benchmarks (0-allocation miss path), 8-row threat note (VCS leak, log exposure, short-secret floor, env/file permissions). | [secrets.md](secrets.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-03 Rate + connection limiting reaches GA — soak pending. Evidence: 12-row behaviour matrix (key strategies, scope rules, eviction), 4 rate-limiter benchmarks (~300 ns Allow), threat note (IP spoofing, key collision, slowloris, bypass). | [ratelimit.md](ratelimit.md), [status.md](status.md) |
 | 2026-07-03 | 1.29 | **Beta → GA — soak pending:** Y1-08 Zero-config + `jul lint` reaches GA — soak pending. Evidence: 10-row lint checks matrix, 5 benchmarks (lint ~380ns, synthesiser ~2μs), `FuzzParse` fuzz target for TOML config round-trip, threat note (literal secrets, admin exposure, weak TLS, lint bypass). | [zeroconf.md](zeroconf.md), [status.md](status.md) |

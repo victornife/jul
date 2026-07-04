@@ -1,0 +1,60 @@
+# Track 2 burn-in config — Compression soak
+# Tests sustained load through gzip / brotli / zstd compression paths.
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/burn-in-backend.go
+#   Window 2: .\jul.exe -config burn-in-compression.toml
+#   Window 3: go run scripts/burn-in-load.go -duration 1h -workers 50 -compress
+
+[global]
+log_level = "warn"
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+[compression]
+enabled = true
+# Server preference order: pick zstd, then br, then gzip when the client allows.
+# br/zstd only take effect in a build that includes their tags; gzip is the
+# universal fallback.
+encoders = ["zstd", "br", "gzip"]
+level = 0
+# Lower min_size so the backend JSON responses (~100 B) are compressed.
+min_size = "10B"
+types = ["text/*", "application/json", "application/javascript", "application/xml", "application/wasm", "image/svg+xml"]
+precompressed = true
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  # Static files (compressed by default if matched by types).
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "testdata/www"
+  try_files = ["$uri", "$uri/", "/index.html"]
+
+  # API proxy — backend returns JSON, which will be compressed.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://127.0.0.1:8081"
+
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["health"]
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
