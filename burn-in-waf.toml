@@ -1,0 +1,59 @@
+# Track 2 burn-in config — WAF soak
+# Tests sustained load with both clean and malicious traffic through WAF.
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/burn-in-backend.go
+#   Window 2: .\jul.exe -config burn-in-waf.toml
+#   Window 3: go run scripts/burn-in-load.go -duration 1h -workers 50 -waf
+
+[global]
+log_level = "warn"
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+[waf]
+enabled = true
+crs_enabled = true
+mode = "block"
+block_status = 403
+paranoia = 1
+request_body_limit = "128kb"
+response_body_check = false
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  # WAF-protected API proxy.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://127.0.0.1:8081"
+
+  # Baseline without WAF for comparison.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/baseline/" }
+  proxy_pass = "http://127.0.0.1:8081"
+
+    [servers.locations.waf]
+    enabled = false
+
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["health"]
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200

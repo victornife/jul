@@ -1,0 +1,60 @@
+# Track 2 burn-in config — Rate limit soak
+# Tests sustained load through the token-bucket rate limiter.
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/burn-in-backend.go
+#   Window 2: .\jul.exe -config burn-in-ratelimit.toml
+#   Window 3: go run scripts/burn-in-load.go -duration 1h -workers 50 -ratelimit
+
+[global]
+log_level = "warn"
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+[rate_limit]
+enabled = true
+# IP-keyed so all localhost traffic shares one bucket.
+# rate=150/s, burst=300 gives a mix of ~60% 200 / ~40% 429 with 50 workers.
+key = "ip"
+rate = 150
+burst = 300
+max_conns = 1024
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+
+  # Rate-limited API proxy.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://127.0.0.1:8081"
+
+  # Baseline without rate limit for comparison.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/baseline/" }
+  proxy_pass = "http://127.0.0.1:8081"
+
+    # Disable rate limit for baseline path.
+    [servers.locations.rate_limit]
+    enabled = false
+
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["health"]
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
