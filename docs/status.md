@@ -54,7 +54,7 @@ each linked doc's *GA status* table.
 | HTTP/3 over QUIC | Y1-11 | `http3` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
 | WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
 | L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
-
+| Secrets references + log redaction | Y2-07 | `secrets` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [secrets.md](secrets.md) |
 | Rate + connection limiting | Y1-03 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [ratelimit.md](ratelimit.md) |
 | Zero-config + `jul lint` | Y1-08 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | n/a | [zeroconf.md](zeroconf.md) |
 | Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli`,`zstd` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
@@ -62,11 +62,13 @@ each linked doc's *GA status* table.
 | OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
 | Response cache (memory + disk) | — | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
 
-Criterion 8 is **n/a** for TLS + ACME, gRPC passthrough, mTLS, the Console, active
-health checks, the WAF, and service discovery: their parsing is delegated to the
-Go standard library (`crypto/x509`, `encoding/json`, `net/http`, `net`) or to
-Coraza (SecLang), or is an opaque forward — none add a custom parser of their
-own to fuzz.
+Criterion 8 is **n/a** for features whose parsing/validation is delegated to a
+standard or third-party library (`crypto/x509`, `encoding/json`, `net/http`,
+`net`, Coraza/SecLang, etc.) or is an opaque forward. This covers TLS + ACME,
+gRPC passthrough, mTLS, Secrets references, Rate limiting, Compression,
+Zero-config + `jul lint`, the Console, active health checks, the WAF, service
+discovery, the NGINX config importer, OTel tracing, and the response cache —
+none add a custom parser of their own to fuzz.
 
 > **Continuous panels status** (Y2-09): Live log tail ✅ shipped; WASM plugin
 > manager ✅ shipped (`.wasm` upload shipped v1.27); gRPC route designer ✅ shipped
