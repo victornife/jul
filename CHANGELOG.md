@@ -9,6 +9,25 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+## [1.30.0] – 2026-07-05
+
+### Fixed
+
+- **Compression auto-enable bug** (`internal/config/parser.go`): a `[compression]` block with explicit settings (`encoders`, `min_size`, `types`) but without `enabled = true` was silently skipped, leaving responses uncompressed and the console showing "compression disabled". The parser now auto-enables compression when any setting is present — the block implies intent. Users can still explicitly disable with `enabled = false`.
+- **OTel schema-URL conflict** (`internal/observability/tracing.go`): imported `semconv/v1.39.0` while the build pulls `otel v1.44.0` (which uses `semconv/v1.41.0`). `resource.Merge()` failed with mismatched schema URLs, preventing tracer initialization. Fixed by updating the import to `semconv/v1.41.0`.
+
+### Added
+
+- **Phase 2A consolidated burn-in harness**: `burn-in-full.toml` exercises **all 10 shipped features simultaneously** (proxy, cache, rate-limit, WAF, auth, compression, TLS, mTLS, upstream health-checks, OTel tracing) in a single config.
+- **Load-generator `-full` mode** (`scripts/burn-in-load.go`): `-full` flag exercises all 10 features in one run with TLS + mTLS client cert support, per-status counters (2xx/401/403/429/5xx), and authenticated traffic mix.
+- **TLS certificate generator** (`scripts/gen-certs.go`): generates fresh CA + server (localhost) + client certificates for burn-in mTLS testing (1-year validity).
+- **mTLS test certificates**: `testdata/tls/client.crt`, `client.key`, `localhost.ext` — enables end-to-end mTLS soak verification.
+
+### Changed
+
+- `docs/soak-evidence.md`: added Phase 2A 5-minute pilot (29,587 req, 0% err) and **8-hour completed soak** (2,120,299 req, 0% err, 100% success) — the most demanding soak test in the project history.
+- `docs/status.md`: updated version stamp to v1.30 / 2026-07-05; added Phase 2A soak-tracking row; added v1.30.0 changelog entry.
+
 ## [1.29.0] – 2026-07-03
 
 ### Added
