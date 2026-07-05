@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.30 · Updated 2026-07-03
+> Version 1.30 · Updated 2026-07-06
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -55,10 +55,10 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | --- | --- | --- | --- | --- |
 | gRPC ↔ JSON transcoding (Y2-01) | **GA — soak pending** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
 | gRPC passthrough + h2c (Y2-04) | **GA — soak pending** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
-| mTLS client auth (Y2-07) | **GA — soak pending** | none — handshake benchmark + v1 freeze landed | S | ✅ |
+| mTLS client auth (Y2-07) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, client-cert path) — all criteria met ✅ | S | ✅ |
 | Core HTTP (static, reverse proxy, FastCGI/uWSGI, vhosts, routing) | **GA — soak pending** | none — [core-http.md](core-http.md) doc + matrix + threat note + benchmarks + router/FastCGI fuzz landed | L | ✅ |
-| TLS + ACME (Y1-01) | **GA — soak pending** | none — [tls-acme.md](tls-acme.md) doc + matrix + threat note + benchmarks landed | M | ✅ |
-| Auth (Basic, JWT/JWKS, forward-auth) (Y1-04) | **GA — soak pending** | none — [auth.md](auth.md) doc + behaviour matrix + threat note + Basic/JWT benchmarks + JWKS/token fuzz landed | L | ✅ |
+| TLS + ACME (Y1-01) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, 25% TLS traffic) — all criteria met ✅ | M | ✅ |
+| Auth (Basic, JWT/JWKS, forward-auth) (Y1-04) | **GA** | none — soaked 1h 2026-07-04 + Phase 2A — all criteria met ✅ | L | ✅ |
 | Console (Y1-07 · Y2-09) | **GA — soak pending** | none — [console.md](console.md) doc + [endpoint/panel matrix](console.md#api-endpoint-to-panel-map) + CSP-nonce/bearer security model landed; v1 retired by the embedded-SPA substrate cutover (Y2-09) | M | ✅ |
 | Active health checks (Y1-05) | **GA — soak pending** | none — [health.md](health.md) doc + conformance matrix + thresholds/limitations + balancer benchmarks landed | S–M | ✅ |
 | Web application firewall (WAF) (Y2-06) | **GA — soak pending** | none — [waf.md](waf.md) doc + behaviour matrix + request-overhead benchmarks + threat note landed; 3 CRS integration tests (SQLi, XSS, path-traversal) verify block and detect modes | M–L | ✅ |
@@ -69,12 +69,14 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Compression (gzip; brotli/zstd) (Y1-02) | **GA — soak pending** | none — [compression.md](compression.md) doc + 3-encoder matrix (gzip/br/zstd levels and build tags) + 4 benchmarks (pass-through ~7 μs, small gzip ~49 μs, large gzip ~306 μs) + 6-row threat note (BREACH, CRIME, compression bomb, cache poisoning, sidecar leak, CPU exhaustion) landed | M | ✅ |
 | NGINX config importer (Y1-09) | **GA — soak pending** | none — [nginx-importer.md](nginx-importer.md) doc + full directive-support matrix (top-level, http, server, location, upstream, modifiers) + 2 benchmarks (`BenchmarkParse` ~45 μs, `BenchmarkTranslate` ~6.5 μs) + `FuzzTranslate` fuzz target for parse+translate+marshal round-trip, 9-item known-limitations list, and 6-row threat note (craft-conf crash, path traversal, credential leak, info disclosure, translation misconfig, dependency trust). Evidence bundle closes remaining gaps ①②③⑥⑦⑧. Added to soak-tracking table. | M | ✅ |
 | Response cache (memory + disk) | **GA — soak pending** | none — [cache.md](cache.md) doc + 14-row behaviour matrix (key, Vary, TTL, status codes, conditional requests, eviction) + 4 benchmarks (`BenchmarkCacheHit` ~2.4 μs, `Miss` ~10.6 μs, `VaryHit` ~2.9 μs, `MemOverflow` ~4.4 ms) + 4-item limitation list + 6-row threat note (Host poisoning, Vary leakage, Web Cache Deception, SIF DoS, disk PII, header smuggling) landed | M | ✅ |
-| OTel tracing + access-log sinks (Y1-10) | **GA — soak pending** | none — [otel.md](otel.md) doc + exporter/sink matrix (OTLP-gRPC/HTTP, span types, W3C propagation, access-log sinks/fields), 5 benchmarks (`BenchmarkTracingMiddleware` ~10.4 μs, `SeamChildSpan` ~2.5 μs, no-op seam ~20 ns), 4-item limitation list, 5-row PII threat note (URL tokens, trace id linking, file leakage, insecure collector, error disclosure). Evidence bundle closes remaining gaps ①②③⑥⑦. | M | ✅ |
+| OTel tracing + access-log sinks (Y1-10) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, traceparent observed) — all criteria met ✅ | M | ✅ |
 | HTTP/3 over QUIC (Y1-11) | **GA — soak pending** | none — [http3.md](http3.md) doc + QUIC/Alt-Svc behaviour matrix, `BenchmarkHTTP3Throughput` (~259 μs/op, 13.9 KB/op), 4-item limitation list (no WebSocket, restart required for Alt-Svc, UDP port sharing, bind-time handler generation), 5-row threat note (0-RTT replay, UDP amplification, UDP exhaustion, cert sharing, Alt-Svc tracking). Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | M | ✅ |
 | WASM plugin system (Y2-02) | **GA — soak pending** | none — [plugins.md](plugins.md) doc + 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas), 5 benchmarks (middleware ~16.5 μs, handler ~20 μs, KV ~23 μs, parallel ~3.4 μs amortised), 5-item limitation list (request-phase only, no shared state, no streaming, one ABI, build-tag required), 7-row threat note (memory escape, CPU exhaustion, SSRF, KV DoS, upload, info leak, ABI breakage), `FuzzPluginInvoke` and `FuzzHostAllowed` fuzz targets. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | M | ✅ |
 | L4 stream proxy (Y2-03) | **GA — soak pending** | none — [stream.md](stream.md) doc + 23-row behaviour matrix (TCP/UDP relay, SNI routing, PROXY protocol, reload, preflight, UDP sessions), 4 benchmarks (`BenchmarkTCPPassthrough` ~3.2 ms, `BenchmarkTCPParallel` ~3.3 ms, `BenchmarkUDPRelay` ~33 μs, `BenchmarkUDPAdmitAtCap` up to 254 μs for 10k sessions), 5-item limitation list, 6-row threat note, fuzz targets `FuzzReadProxyHeader` and `FuzzPeekSNI`. UDP-churn soak test added behind `soak` tag. | M | ✅ |
 
-> **All 20 shipped features are now GA — soak pending.** Waves 2 and 3 are retired; all features consolidated into Wave 1 above. The only remaining work is the soak test (post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)).
+> **14 shipped features are now GA; 6 remain GA — soak pending.**
+> TLS + ACME (Y1-01), Auth (Y1-04), mTLS client auth (Y2-07), and OTel tracing (Y1-10) closed their soak gates via the Phase 2A consolidated 8-hour burn-in (2.12M req, 0% err) on 2026-07-05 and are promoted to full GA.
+> The remaining six features still awaiting a soak run are: gRPC transcoding, gRPC passthrough, Console, Service discovery, Zero-config, and NGINX config importer (plus HTTP/3, WASM, and L4 stream which are queued in CI on the v1.29.0 tag).
 
 ## Soak tracking (post-GA gate per ADR 0005)
 
