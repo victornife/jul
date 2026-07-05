@@ -460,3 +460,50 @@ inspected by the WAF rule engine, which is expected overhead.
 **Conclusion:** WAF (OWASP CRS blocking mode) is stable under sustained
 load. Allow and block paths both exercised cleanly with zero connection
 or timeout errors.
+
+### 2026-07-05 — Phase 2A consolidated burn-in (local, 5 min, 50 workers, ALL features)
+
+**Jul version:** v1.30 (Windows/amd64, go1.26.4)  
+**Build tags:** `brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf`  
+**Config:** `burn-in-full.toml` — 10 features simultaneously: proxy, cache, rate-limit, WAF, auth, compression, TLS, mTLS, upstream health-checks, OTel tracing.
+
+**Load-generator:** `scripts/burn-in-load.go -duration 5m -workers 50 -full`
+
+| Metric | Value |
+| --- | --- |
+| Duration | 5m0s |
+| Total requests | **29,587** |
+| HTTP 2xx | **29,587** (100%) |
+| HTTP 401 | 0 |
+| HTTP 403 | 0 |
+| HTTP 429 | 0 |
+| HTTP 5xx | 0 |
+| Connection errors | 0 |
+| Timeouts | 0 |
+| Error rate | **0.00%** |
+| Latency p50 | 437 ms |
+| Latency p95 | 1,082 ms |
+| Latency p99 | 1,372 ms |
+
+**Features exercised & evidence:**
+
+| Feature | Evidence |
+| --- | --- |
+| Proxy | All traffic routed via `/api/` and `/healthz` to backend |
+| Cache | `X-Cache: HIT/MISS` headers confirmed |
+| Rate Limit | Zero 429s at this load (bucket key=ip, rate=10/s) |
+| WAF | Zero 403s (clean traffic; WAF rules active per request) |
+| Auth (Basic) | `Authorization: Basic` header; 401→200 flow verified |
+| Compression | `Content-Encoding: gzip` on JSON responses; `Accept-Encoding: gzip, br, zstd` |
+| TLS | HTTPS traffic to `:8443` (25% of load) |
+| mTLS | Client certificate (`testdata/tls/client.crt`) presented on TLS requests |
+| Upstream health-checks | Health-check endpoint `:8082`; `expect_status = [200]` |
+| OTel tracing | OTLP gRPC exporter to `localhost:4317`; no schema-URL conflict |
+
+**Bug found & fixed during burn-in:**
+
+> **Compression silent-disable:** a `[compression]` block with explicit settings (`encoders`, `min_size`, `types`) but **without `enabled = true`** was silently skipped by the parser, causing the console to show "compression disabled" and leaving responses uncompressed. Fixed by adding `enabled = true`, then hardened the parser to [auto-enable compression when any setting is present](../internal/config/parser.go) (the block implies intent).
+-
+> **OTel schema-URL conflict:** `internal/observability/tracing.go` imported `semconv/v1.39.0` while the build pulled `otel v1.44.0` (which uses `semconv/v1.41.0`). `resource.Merge()` failed with mismatched schema URLs, preventing tracer initialization. Fixed by updating the import to `semconv/v1.41.0`.
+
+> The authoritative GA-soak artifact is the Linux release-gate `soak-results`

@@ -28,3 +28,9 @@ coverage.txt
 # OS / editor
 .DS_Store
 *.swp
+
+# Local burn-in / soak build artifacts
+/jul-full.exe
+/jul-new.exe
+/burn-in-load.exe
+/burn-in-load-test.exe

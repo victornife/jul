@@ -10,6 +10,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"flag"
 	"fmt"
@@ -42,17 +43,21 @@ func main() {
 	var (
 		duration     = flag.Duration("duration", 5*time.Minute, "How long to run")
 		workers      = flag.Int("workers", 50, "Number of concurrent workers")
-		baseURL      = flag.String("base", "http://127.0.0.1:8080", "Jul server base URL")
+		baseURL      = flag.String("base", "http://localhost:8080", "Jul server base URL")
+		tlsBase      = flag.String("tls", "https://localhost:8443", "Jul TLS server base URL")
 		healthURL    = flag.String("health", "http://127.0.0.1:8082/healthz", "Health endpoint")
 		adminURL     = flag.String("admin", "http://127.0.0.1:9090", "Admin / pprof base URL")
 		pprofDir     = flag.String("out", "burn-in-artifacts", "Directory for pprof snapshots")
-		authUser     = flag.String("authUser", "", "HTTP Basic auth username (empty = no auth)")
-		authPassword = flag.String("authPassword", "", "HTTP Basic auth password")
+		authUser     = flag.String("authUser", "soakuser", "HTTP Basic auth username")
+		authPassword = flag.String("authPassword", "soakpass", "HTTP Basic auth password")
 		authRatio    = flag.Int("authRatio", 100, "Percentage of requests that include auth headers (0-100)")
 		compress     = flag.Bool("compress", false, "Send Accept-Encoding: gzip, br, zstd for compression soak")
 		cache        = flag.Bool("cache", false, "Exercise cache hit/miss/evict/revalidate patterns for cache soak")
 		ratelimit    = flag.Bool("ratelimit", false, "Exercise rate limiter: expect 429s on /api/, baseline 200s on /baseline/")
 		waf          = flag.Bool("waf", false, "Exercise WAF: mix clean/malicious traffic (expect 200s and 403s)")
+		full         = flag.Bool("full", false, "Phase 2A: exercise ALL features simultaneously (cache+ratelimit+waf+auth+compress)")
+		clientCert   = flag.String("clientCert", "testdata/tls/client.crt", "Client certificate for mTLS")
+		clientKey    = flag.String("clientKey", "testdata/tls/client.key", "Client key for mTLS")
 	)
 	flag.Parse()
 
@@ -80,8 +85,20 @@ func main() {
 	fmt.Println("Capturing T+0 pprof snapshots...")
 	snapPProf(*adminURL, *pprofDir, "T0", "burnintoken")
 
+	// Load client certificate for mTLS (TLS :8443) if available.
+	var tlsConfig *tls.Config
+	if cert, err := tls.LoadX509KeyPair(*clientCert, *clientKey); err == nil {
+		tlsConfig = &tls.Config{
+			InsecureSkipVerify: true,
+			Certificates:       []tls.Certificate{cert},
+		}
+	} else {
+		tlsConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
 	// Shared transport for proper connection reuse across all workers
 	sharedTransport := &http.Transport{
+		TLSClientConfig:     tlsConfig,
 		MaxIdleConns:        *workers * 2,
 		MaxIdleConnsPerHost: *workers * 2,
 		IdleConnTimeout:     90 * time.Second,
@@ -105,7 +122,7 @@ func main() {
 	}
 
 	endTime := time.Now().Add(*duration)
-	var totalReqs, errConnReset, errTimeout, errOther, status5xx int64
+	var totalReqs, errConnReset, errTimeout, errOther, status2xx, status401, status403, status429, status5xx int64
 	var mu sync.Mutex
 	var latencies []int64
 
@@ -119,8 +136,45 @@ func main() {
 				Transport: sharedTransport,
 			}
 			for time.Now().Before(endTime) {
-				var path string
-				if *cache {
+				var path, url string
+				if *full {
+					// Phase 2A FULL mode — exercise ALL features simultaneously
+					//   18% /api/      (HTTP)  -> cache + rate-limit + WAF + auth + compress
+					//   10% /baseline/ (HTTP)  -> no cache, no rate-limit, no WAF, no auth, compress
+					//   10% /nocache/  (HTTP)  -> no cache, rate-limit + WAF + auth + compress
+					//   10% /static/   (HTTP)  -> static files, compress, no cache
+					//   12% /admin/    (HTTP)  -> basic auth + compress
+					//   15% /api/      (HTTPS) -> TLS + mTLS + auth + compress
+					//   10% /healthz   (HTTPS) -> TLS health check
+					//   15% cache warm hits (same URLs as above)
+					r := rand.Intn(100)
+					switch {
+					case r < 18:
+						path = "/api/items"
+						url = *baseURL + path
+					case r < 28:
+						path = "/baseline/"
+						url = *baseURL + path
+					case r < 38:
+						path = "/nocache/api/items"
+						url = *baseURL + path
+					case r < 50:
+						path = "/static/"
+						url = *baseURL + path
+					case r < 62:
+						path = "/admin/dashboard"
+						url = *baseURL + path
+					case r < 77:
+						path = "/api/items"
+						url = *tlsBase + path
+					case r < 87:
+						path = "/healthz"
+						url = *tlsBase + path
+					default:
+						path = "/api/static/test"
+						url = *baseURL + path
+					}
+				} else if *cache {
 					// Cache traffic pattern:
 					//   50% warm hits (same URL, should be cached after first fetch)
 					//   25% unique URLs (forced misses, evict pressure)
@@ -130,12 +184,16 @@ func main() {
 					switch {
 					case r < 50:
 						path = "/api/items"
+						url = *baseURL + path
 					case r < 75:
 						path = "/api/item-" + strconv.Itoa(rand.Intn(100000))
+						url = *baseURL + path
 					case r < 90:
 						path = "/nocache/api/items"
+						url = *baseURL + path
 					default:
 						path = "/api/static/test"
+						url = *baseURL + path
 					}
 				} else if *waf {
 					// WAF traffic pattern:
@@ -147,26 +205,33 @@ func main() {
 					switch {
 					case r < 40:
 						path = "/api/items"
+						url = *baseURL + path
 					case r < 60:
 						path = "/baseline/"
+						url = *baseURL + path
 					case r < 80:
 						path = "/api/search?q=" + maliciousSQLPayloads[rand.Intn(len(maliciousSQLPayloads))]
+						url = *baseURL + path
 					default:
 						path = "/api/items"
+						url = *baseURL + path
 					}
 				} else if *ratelimit {
 					if rand.Intn(100) < 80 {
 						path = "/api/"
+						url = *baseURL + path
 					} else {
 						path = "/baseline/"
+						url = *baseURL + path
 					}
 				} else {
 					path = "/api/"
+					url = *baseURL + path
 					if rand.Intn(2) == 0 {
 						path = "/static/"
+						url = *baseURL + path
 					}
 				}
-				url := *baseURL + path
 
 				req, err := http.NewRequest("GET", url, nil)
 				if err != nil {
@@ -175,10 +240,10 @@ func main() {
 					logErrorOnce(err.Error())
 					continue
 				}
-				if authHeader != "" && rand.Intn(100) < *authRatio {
+				if authHeader != "" && (rand.Intn(100) < *authRatio || *full) {
 					req.Header.Set("Authorization", authHeader)
 				}
-				if *compress {
+				if *compress || *full {
 					req.Header.Set("Accept-Encoding", "gzip, br, zstd")
 				}
 
@@ -200,8 +265,17 @@ func main() {
 				}
 				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
-				if resp.StatusCode >= 500 {
+				switch {
+				case resp.StatusCode >= 500:
 					atomic.AddInt64(&status5xx, 1)
+				case resp.StatusCode == 401:
+					atomic.AddInt64(&status401, 1)
+				case resp.StatusCode == 403:
+					atomic.AddInt64(&status403, 1)
+				case resp.StatusCode == 429:
+					atomic.AddInt64(&status429, 1)
+				case resp.StatusCode >= 200 && resp.StatusCode < 300:
+					atomic.AddInt64(&status2xx, 1)
 				}
 				mu.Lock()
 				latencies = append(latencies, d)
@@ -241,6 +315,10 @@ func main() {
 	cres := atomic.LoadInt64(&errConnReset)
 	to := atomic.LoadInt64(&errTimeout)
 	oe := atomic.LoadInt64(&errOther)
+	s2 := atomic.LoadInt64(&status2xx)
+	s401 := atomic.LoadInt64(&status401)
+	s403 := atomic.LoadInt64(&status403)
+	s429 := atomic.LoadInt64(&status429)
 	s5 := atomic.LoadInt64(&status5xx)
 	e := cres + to + oe + s5
 	ok := t - e
@@ -249,6 +327,10 @@ func main() {
 	fmt.Println("========== BURN-IN RESULTS ==========")
 	fmt.Printf("Duration          : %v\n", *duration)
 	fmt.Printf("Total requests    : %d\n", t)
+	fmt.Printf("HTTP 2xx          : %d\n", s2)
+	fmt.Printf("HTTP 401          : %d\n", s401)
+	fmt.Printf("HTTP 403          : %d\n", s403)
+	fmt.Printf("HTTP 429          : %d\n", s429)
 	fmt.Printf("HTTP 5xx          : %d\n", s5)
 	fmt.Printf("Conn reset / EOF  : %d\n", cres)
 	fmt.Printf("Timeouts          : %d\n", to)
@@ -297,8 +379,8 @@ func healthCheck(url string) error {
 
 func snapPProf(admin, dir, suffix, token string) {
 	urls := map[string]string{
-		"goroutine": admin + "/debug/pprof/goroutine",
-		"heap":      admin + "/debug/pprof/heap",
+		"goroutine": admin + "/debug/pprof/goroutine?debug=1",
+		"heap":      admin + "/debug/pprof/heap?debug=1",
 	}
 	for name, u := range urls {
 		req, err := http.NewRequest("GET", u, nil)

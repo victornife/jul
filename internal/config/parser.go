@@ -202,14 +202,29 @@ func (c *Config) applyDefaults() {
 	}
 
 	if c.Compression.Enabled {
-		if len(c.Compression.Encoders) == 0 {
-			c.Compression.Encoders = []string{"gzip"}
+		// Auto-enable compression if the block is present with configuration but
+		// the user didn't explicitly set enabled = true. Writing a [compression]
+		// block with settings implies intent.
+		if !c.Compression.Enabled {
+			hasSettings := len(c.Compression.Encoders) > 0 ||
+				len(c.Compression.Types) > 0 ||
+				c.Compression.MinSize > 0 ||
+				c.Compression.Level != 0
+			if hasSettings {
+				c.Compression.Enabled = true
+			}
 		}
-		if c.Compression.MinSize == 0 {
-			c.Compression.MinSize = Size(1 << 10) // 1 KiB
-		}
-		if len(c.Compression.Types) == 0 {
-			c.Compression.Types = defaultCompressionTypes()
+
+		if c.Compression.Enabled {
+			if len(c.Compression.Encoders) == 0 {
+				c.Compression.Encoders = []string{"gzip"}
+			}
+			if c.Compression.MinSize == 0 {
+				c.Compression.MinSize = Size(1 << 10) // 1 KiB
+			}
+			if len(c.Compression.Types) == 0 {
+				c.Compression.Types = defaultCompressionTypes()
+			}
 		}
 	}
 
