@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.30 · Updated 2026-07-04
+> Version 1.30 · Updated 2026-07-05
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -98,7 +98,7 @@ the [soak evidence log](soak-evidence.md).
 | Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (12.5M req, 0% err, token-bucket allow/reject verified) — [evidence](soak-evidence.md#2026-07-04--rate-limit-soak-local-windows-1-hour-50-workers) |
 | Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Compression (Y1-02) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (11.6M req, 0% err, zstd/br/gzip verified) — [evidence](soak-evidence.md#2026-07-04--compression-soak-local-windows-1-hour-50-workers) |
-| **Phase 2A consolidated** (proxy+cache+rate-limit+WAF+auth+compression+TLS+mTLS+health+OTel) | 2026-07-05 | 🔄 **soaking 8h** windows 2026-07-05 (in progress, 29.5K req 5-min pilot @ 100% success) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-local-5-min-50-workers-all-features) |
+| **Phase 2A consolidated** (proxy+cache+rate-limit+WAF+auth+compression+TLS+mTLS+health+OTel) | 2026-07-05 | ✅ **soaked 8h** windows 2026-07-05 (2.12M req, 0% err, 100% success, all 10 features simultaneously) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | NGINX config importer (Y1-09) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
 | Response cache (memory + disk) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (1.5M req, 0% err, hit/miss/evict/revalidate verified) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers) |

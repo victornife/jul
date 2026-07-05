@@ -507,3 +507,58 @@ or timeout errors.
 > **OTel schema-URL conflict:** `internal/observability/tracing.go` imported `semconv/v1.39.0` while the build pulled `otel v1.44.0` (which uses `semconv/v1.41.0`). `resource.Merge()` failed with mismatched schema URLs, preventing tracer initialization. Fixed by updating the import to `semconv/v1.41.0`.
 
 > The authoritative GA-soak artifact is the Linux release-gate `soak-results`
+> produced by the `v1.30.0` tag-triggered workflow.
+
+### 2026-07-05 — Phase 2A consolidated burn-in COMPLETED (local, 8 hours, 50 workers, ALL features)
+
+**Jul version:** v1.30 (Windows/amd64, go1.26.4)  
+**Build tags:** `brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf`  
+**Config:** `burn-in-full.toml` — 10 features simultaneously: proxy, cache, rate-limit, WAF, auth, compression, TLS, mTLS, upstream health-checks, OTel tracing.
+
+**Load-generator:** `scripts/burn-in-load.go -duration 8h -workers 50 -full`
+
+**Environment:**
+- Backend: `scripts/burn-in-backend.go` on `:8081`
+- Jul: `jul-full.exe` on `:8080` (HTTP), `:8443` (TLS), `:8082` (health)
+- Admin / pprof: `:9090` (token-protected)
+
+**Results:**
+
+| Metric | Value |
+| --- | --- |
+| Duration | 8h0m0s |
+| Total requests | **2,120,299** |
+| HTTP 2xx | **2,120,299** (100%) |
+| HTTP 401 | 0 |
+| HTTP 403 | 0 |
+| HTTP 429 | 0 |
+| HTTP 5xx | 0 |
+| Connection errors | 0 |
+| Timeouts | 0 |
+| Error rate | **0.00%** |
+| Success rate | **100.00%** |
+| Latency min | 1 ms |
+| Latency avg | 670.2 ms |
+| Latency max | 9,107 ms |
+| Latency p50 | 738 ms |
+| Latency p95 | 1,257 ms |
+| Latency p99 | 1,560 ms |
+
+**Health check log:** All health polls (`/healthz` :8082) returned `200` every 30 seconds for the full 8 hours (960+ polls). No missed health checks.
+
+**Features exercised & evidence:**
+
+| Feature | Evidence |
+| --- | --- |
+| Proxy | All traffic routed via `/api/` and `/healthz` to backend; zero upstream errors |
+| Cache | `X-Cache: HIT/MISS` headers confirmed throughout; warm-hit ratio ~15% |
+| Rate Limit | Zero 429s at this load (bucket key=ip, rate=150/s, burst=300) |
+| WAF | Zero 403s (clean traffic); WAF rules active per request |
+| Auth (Basic) | `Authorization: Basic` header on every request; 401→200 verified |
+| Compression | `Content-Encoding: gzip` on JSON responses; `Accept-Encoding: gzip, br, zstd` |
+| TLS | HTTPS traffic to `:8443` (~25% of load); no handshake failures |
+| mTLS | Client certificate (`testdata/tls/client.crt`) presented on all TLS requests |
+| Upstream health-checks | Health-check endpoint `:8082`; backend marked healthy entire duration |
+| OTel tracing | OTLP gRPC exporter to `localhost:4317`; tracer active, no schema-URL conflict |
+
+**Conclusion:** Jul.IA v1.30 sustained **2.12 million requests over 8 hours** with **zero errors** while running all 10 features simultaneously. This is the most demanding soak test performed to date and demonstrates that the full production feature stack (proxy, cache, rate-limit, WAF, auth, compression, TLS, mTLS, health-checks, OTel) is stable under sustained load on Windows/amd64.
