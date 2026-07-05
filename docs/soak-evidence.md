@@ -503,7 +503,7 @@ or timeout errors.
 **Bug found & fixed during burn-in:**
 
 > **Compression silent-disable:** a `[compression]` block with explicit settings (`encoders`, `min_size`, `types`) but **without `enabled = true`** was silently skipped by the parser, causing the console to show "compression disabled" and leaving responses uncompressed. Fixed by adding `enabled = true`, then hardened the parser to [auto-enable compression when any setting is present](../internal/config/parser.go) (the block implies intent).
--
+>
 > **OTel schema-URL conflict:** `internal/observability/tracing.go` imported `semconv/v1.39.0` while the build pulled `otel v1.44.0` (which uses `semconv/v1.41.0`). `resource.Merge()` failed with mismatched schema URLs, preventing tracer initialization. Fixed by updating the import to `semconv/v1.41.0`.
 
 > The authoritative GA-soak artifact is the Linux release-gate `soak-results`
