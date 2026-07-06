@@ -81,8 +81,8 @@ proxy_protocol = "out"
 [[upstreams]]
 name = "postgres_pool"
 strategy = "least_conn"
-max_fails = 3
-fail_timeout = "10s"
+max_fails = 10
+fail_timeout = "3s"
 servers = ["127.0.0.1:55432", "127.0.0.1:55433"]
 
 [[upstreams]]
