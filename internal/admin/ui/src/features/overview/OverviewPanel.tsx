@@ -258,6 +258,7 @@ export function OverviewPanel() {
       value: anyInactive ? "attention" : "healthy",
       tone: anyInactive ? "warn" : "ok",
       tooltip: `${healthyCount} healthy / ${unhealthyCount} unhealthy`,
+      onClick: () => navigate("/apps"),
     });
   }
   // Certificate risk from the real cert health data returned by the overview.
