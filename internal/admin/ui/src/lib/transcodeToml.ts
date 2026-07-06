@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Client-side generator for the gRPC route designer (Phase 2). It emits a
 // complete [[servers]] block with a grpc_transcode location, then appends it
 // to the running configuration and routes through the authoritative

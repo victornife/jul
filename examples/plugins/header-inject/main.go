@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // header-inject is a Jul.IA middleware plugin that adds a response header and
 // then passes the request to the next handler.
 //

@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package auth implements per-location access control for the edge server:
 // CIDR allow/deny lists, HTTP Basic authentication, JWT bearer-token validation
 // against a JWKS endpoint, and forward-auth subrequests. Each method is built

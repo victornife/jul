@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 //go:build ignore
 
 // gen_descriptor.go writes a compiled FileDescriptorSet for echo.proto without

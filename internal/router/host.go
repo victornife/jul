@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package router maps incoming requests to handlers based on the listen
 // address, Host header, and request path, following a simplified subset of
 // NGINX server_name and location semantics.

@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package tracing is a dependency-free seam for emitting child spans from
 // packages that must stay free of OpenTelemetry imports in the lean default
 // build (handler, cache, upstream). The otel build injects a real,

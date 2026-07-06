@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Command-palette event bus. Kept in its own module (not in CommandPalette.tsx)
 // so the component file only exports components — React Fast Refresh requires
 // that, and it lets any affordance open the palette without lifting its state.

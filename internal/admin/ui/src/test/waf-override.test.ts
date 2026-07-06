@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Unit tests for the pure per-location WAF override mapping (Phase 4e). They
  * pin the draft <-> patch round-trip and the blocking-warning logic that mirrors
  * the server's validateWAF, so the guided editor refuses saves the backend would

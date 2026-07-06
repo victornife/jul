@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useEffect, useState } from "react";
 
 // Theme preference for the Console (Milestone 4.1). "system" follows the OS via

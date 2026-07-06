@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package observability provides logging and Prometheus metrics for the edge
 // server.
 package observability

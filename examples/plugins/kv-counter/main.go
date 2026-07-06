@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // kv-counter is a Jul.IA middleware plugin that counts requests in the plugin
 // key/value store and reports the running total in the X-Count response header.
 // It demonstrates the capability-gated KV host functions: the plugin must be

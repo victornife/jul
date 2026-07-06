@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // testguest-panic is used by the plugin sandbox tests: it panics inside
 // handle_request to verify the host contains the trap (returns 500, server stays
 // alive). It is not a usage example.

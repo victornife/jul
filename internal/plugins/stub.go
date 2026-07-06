@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 //go:build !wasmplugins
 
 // Package plugins is compiled without the WASM plugin runtime in this build. It

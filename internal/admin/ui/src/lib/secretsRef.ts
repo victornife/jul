@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Client-side helper for the "externalize a literal secret" workflow (Wave A).
 // It does not patch config fields in place (that arrives with the structured
 // patch API in a later wave); instead it builds the correctly-formatted secret

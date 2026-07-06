@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { describeApiError, type ApiErrorKind } from "@/api/client.ts";
 import { Button } from "@/components/ui.tsx";
 

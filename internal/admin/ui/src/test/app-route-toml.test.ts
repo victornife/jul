@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { describe, it, expect } from "vitest";
 import { generateAppToml, generateAppWithRouteToml, type AppDraft } from "@/lib/routeToml.ts";
 

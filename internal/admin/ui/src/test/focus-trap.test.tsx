@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { describe, it, expect, afterEach } from "vitest";
 import { useRef, useState } from "react";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";

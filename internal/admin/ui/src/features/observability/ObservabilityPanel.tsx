@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useEffect, useRef, useState } from "react";
 import { subscribeEvents, type SseEvent } from "@/api/client.ts";
 

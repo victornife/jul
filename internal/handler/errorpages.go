@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package handler implements the content actions a location can dispatch to:
 // static file serving, reverse proxying, FastCGI, and custom error pages.
 package handler

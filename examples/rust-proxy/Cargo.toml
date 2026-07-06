@@ -1,7 +1,11 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 [package]
 name = "rust-proxy-example"
 version = "0.1.0"
 edition = "2021"
+license = "AGPL-3.0-or-later"
 
 # The example is a single standalone file (app.rs) with no dependencies.
 # This points Cargo (and rust-analyzer) at it without restructuring.

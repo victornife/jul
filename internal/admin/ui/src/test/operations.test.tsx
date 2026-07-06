@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Vitest tests for Console v2 Phase 5/6 frontend additions.
  *
  * Coverage:

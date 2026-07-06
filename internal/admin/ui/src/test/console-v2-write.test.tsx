@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Component tests for the Console v2 write flows. The CodeMirror editor is
  * mocked to a plain textarea so these tests stay fast and deterministic and
  * exercise the panel logic (validate-on-edit, diff preview, and the mandatory

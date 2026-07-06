@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import type { AppProjection, DiscoveryPatch, HealthCheckPatch } from "@/api/client.ts";
 
 // appSettings holds the pure draft <-> patch mapping and warning logic for the

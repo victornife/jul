@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package config defines the configuration schema for the edge server and the
 // machinery to load, validate, and hot-reload it.
 //

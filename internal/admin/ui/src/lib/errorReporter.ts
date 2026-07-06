@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { reportClientError } from "@/api/client.ts";
 
 // SLOW_REQUEST_MS is the threshold above which a network request is considered

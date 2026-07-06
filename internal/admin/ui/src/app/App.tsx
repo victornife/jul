@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/app/Layout.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";

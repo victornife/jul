@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Component test for the guided TracingEditor drawer (Phase 4d). It mounts the
  * editor, seeds it from the traffic-controls projection, and asserts that saving
  * fetches the raw config, upserts the [observability.tracing] table, and stages

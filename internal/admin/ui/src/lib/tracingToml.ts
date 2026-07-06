@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Client-side generator for the guided tracing editor (Phase 4d). It produces
 // the global [observability.tracing] table, which the editor upserts into the
 // running config and routes through the authoritative Validate → Diff → Apply →

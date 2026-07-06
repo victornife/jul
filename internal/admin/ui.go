@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 package admin
 
 // configUIPage is the self-contained configuration GUI served at the admin

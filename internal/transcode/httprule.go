@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 //go:build grpc
 
 // Package transcode implements gRPC<->REST/JSON transcoding: it maps REST

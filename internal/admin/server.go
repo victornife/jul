@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package admin exposes a separate operational HTTP listener bound to loopback
 // by default. It serves health checks, Prometheus metrics, cache purge, and a
 // configuration reload trigger. It must never be attached to the main traffic

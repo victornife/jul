@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 """Minimal WSGI application served behind Jul via the uWSGI protocol."""
 
 

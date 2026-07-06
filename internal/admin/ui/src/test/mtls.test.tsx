@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Vitest tests for the Console v2 guided mutual-TLS editor (Phase 4j): the
  * projection schema, the draft → patch lib helpers, the TLS panel's Mutual TLS
  * section (server posture + per-location require_client_cert toggle, bind-time

@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Tests for the Console v2 write-path client: validate / apply / wizard, plus
  * the fetch-based SSE transport (bearer header, no token in URL) and the CSP
  * nonce reader.

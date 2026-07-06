@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Component test for the per-location AuthEditor drawer (Phase 4a). It mounts
  * the editor, seeds it from a no-secrets projection state, and asserts that
  * saving posts a structured location_set_auth patch and hands the previewed

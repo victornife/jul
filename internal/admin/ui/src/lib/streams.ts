@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import type { StreamProjection, StreamDefPatch } from "@/api/client.ts";
 
 // StreamDraft is the editable form state for one [[stream]] L4 listener. It

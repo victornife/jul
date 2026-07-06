@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import type { LocationWAF, LocationWAFPatch } from "@/api/client.ts";
 
 // wafOverride holds the pure draft <-> patch mapping and warning logic for the

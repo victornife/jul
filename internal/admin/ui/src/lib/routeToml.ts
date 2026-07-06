@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Client-side generators for the guided Route and App editors (Milestones 2.2
 // and 2.5). They emit a TOML fragment (a complete [[servers]] or [[upstreams]]
 // block) that is appended to the running configuration and then routed through

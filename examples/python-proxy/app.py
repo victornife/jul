@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 """Minimal WSGI app served over plain HTTP behind Jul via proxy_pass.
 
 This is the Windows-friendly alternative to the uWSGI example: it runs as a

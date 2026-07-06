@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Unit tests for the pure in-place route-edit mapping (Phase 4f). They pin the
  * seed / change-detection / validation / toPatch logic for the three editors —
  * match (type + path), action switch, and server host-name rename — so each

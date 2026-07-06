@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -439,6 +444,9 @@ export function Layout() {
         <main className="flex-1 p-6">
           <Outlet />
         </main>
+        <footer className="px-6 py-2 text-[10px] text-jul-muted">
+          Licensed under AGPL-3.0-or-later
+        </footer>
         {palette}
       </div>
     );
@@ -457,6 +465,9 @@ export function Layout() {
       <main className="flex-1 overflow-auto p-6">
         <Outlet />
       </main>
+      <footer className="border-t border-jul-border px-6 py-2 text-[10px] text-jul-muted">
+        Licensed under AGPL-3.0-or-later
+      </footer>
       {palette}
     </div>
   );

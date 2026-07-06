@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package stream implements the L4 (TCP/UDP) reverse proxy that serves the
 // [[stream]] configuration tables alongside the HTTP listeners. It forwards raw
 // connections and datagrams to backends without parsing the application

@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";

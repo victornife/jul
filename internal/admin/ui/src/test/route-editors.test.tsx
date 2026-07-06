@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Component tests for the in-place route editors (Phase 4f). They mount each
  * drawer, seed it from the route projection, and assert that saving posts the
  * structured patch (location_set_match / location_set_action / route_rename) and

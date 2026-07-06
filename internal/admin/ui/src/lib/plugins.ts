@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import type { PluginProjection, PluginDefPatch } from "@/api/client.ts";
 
 // PluginDraft is the editable form state for a [plugins.NAME] declaration. It

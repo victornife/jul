@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Tests for the load-failure taxonomy (describeApiError). Each HTTP status and
  * the network/unknown fallbacks must map to a distinct, actionable description
  * so panels stop rendering an identical "Failed to load X" for every cause.

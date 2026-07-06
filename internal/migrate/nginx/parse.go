@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 //go:build importer
 
 // Package nginx translates an NGINX configuration into a Jul.IA configuration.

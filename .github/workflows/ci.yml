@@ -19,6 +19,20 @@ env:
   FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
 
 jobs:
+  license-check:
+    name: license-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install addlicense
+        run: go install github.com/google/addlicense@latest
+      - name: check license headers
+        run: make license-check
+
   build:
     name: build (${{ matrix.profile }})
     runs-on: ubuntu-latest

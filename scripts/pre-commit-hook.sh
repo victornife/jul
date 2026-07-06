@@ -46,4 +46,11 @@ gofmt -l . | grep -q . && {
     exit 1
 }
 
+# Check for DCO sign-off in the commit message
+if ! grep -q "Signed-off-by:" "$(git rev-parse --git-dir)/COMMIT_EDITMSG" 2>/dev/null; then
+    echo "[pre-commit] FAILED: Missing Signed-off-by line."
+    echo "[pre-commit]          Use 'git commit -s' to add it automatically."
+    exit 1
+fi
+
 echo "[pre-commit] All checks passed."

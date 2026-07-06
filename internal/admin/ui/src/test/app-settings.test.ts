@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { describe, it, expect } from "vitest";
 import type { AppProjection } from "@/api/client.ts";
 import {

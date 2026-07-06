@@ -133,3 +133,23 @@ Only maintainers cut releases. See `docs/release.md` for the full checklist.
 - Open a **discussion** for questions about usage or architecture.
 - Open an **issue** for bugs or feature requests.
 - Join the community channels listed in the repository README.
+
+## Licensing & DCO
+
+Jul.IA is licensed under the **GNU Affero General Public License v3.0 or later**
+(AGPL-3.0-or-later). By contributing to this project, you agree that your
+contributions will be licensed under the same terms.
+
+We use the **Developer Certificate of Origin (DCO)**. By submitting a pull
+request, you certify that you have the right to submit the code and that you
+agree to the DCO (https://developercertificate.org).
+
+All commits must include a `Signed-off-by:` line indicating who authored the
+work. Use `git commit -s` to add it automatically:
+
+```bash
+git commit -s -m "feat(cache): add stale-if-error support"
+```
+
+The repository also uses the **DCO GitHub App**, which blocks pull requests
+that contain commits without a `Signed-off-by` line.

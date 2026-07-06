@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Minimal Node.js HTTP app served behind Jul via proxy_pass.
 //
 // Dependency-free: uses only the built-in `http` module, so there is nothing

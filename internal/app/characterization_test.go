@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // These characterization tests lock the behavior of the composition-root
 // helpers extracted into package app (adapters, preflight, BuildAdminDeps).
 // They must continue to pass after each extraction phase.

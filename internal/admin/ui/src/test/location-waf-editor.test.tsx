@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Component tests for the guided per-location WAF override editor (Phase 4e).
  * They mount the drawer, seed it from the security projection, and assert that
  * saving posts the full location_waf_set patch and stages the resulting diff for

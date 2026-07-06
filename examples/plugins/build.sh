@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Builds the example plugins to ../../testdata/plugins/<name>.wasm.
 # Requires Go 1.26+ with the wasip1/wasm target.
 set -euo pipefail

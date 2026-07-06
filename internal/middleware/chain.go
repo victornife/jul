@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package middleware provides composable http.Handler wrappers for
 // cross-cutting concerns: request IDs, panic recovery, access logging,
 // timeouts, and body-size limits.

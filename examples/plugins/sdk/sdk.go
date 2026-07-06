@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package sdk is a minimal guest SDK for writing Jul.IA WASM plugins in Go.
 //
 // It wraps the jul-abi/v1 host ABI (the "jul" host module imported below) in a

@@ -1,5 +1,5 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
-        console-dev console-build console-check build-console build-full
+        console-dev console-build console-check build-console build-full license-check
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
@@ -44,9 +44,9 @@ vulncheck:
 vulncheck-full:
 	govulncheck -tags "$(FULL_TAGS)" ./...
 
-ci-fast: format-check lint test build
+ci-fast: format-check lint test build license-check
 
-ci-full: format-check lint-full test-full vulncheck-full build-full
+ci-full: format-check lint-full test-full vulncheck-full build-full license-check
 
 clean:
 	go clean
@@ -77,3 +77,17 @@ build-full:
 
 # Full opt-in feature tag set — keep in sync with .github/workflows/ci.yml
 FULL_TAGS := brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf
+
+license-check:
+	addlicense -check -c "Victor Niharra <vniharrafe@gmail.com>" -l agpl -s \
+	  -ignore "**/node_modules/**" \
+	  -ignore "**/.git/**" \
+	  -ignore "**/assets/dist/**" \
+	  -ignore "**/pnpm-lock.yaml" \
+	  -ignore "**/*.log" \
+	  -ignore "**/*.exe" \
+	  -ignore "**/go.mod" \
+	  -ignore "**/go.sum" \
+	  -ignore "**/tmp/**" \
+	  -ignore "**/jul-data/**" \
+	  cmd/ internal/ examples/

@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // testguest-loop is used by the plugin sandbox tests: it spins forever inside
 // handle_request to verify the host enforces the per-call timeout and aborts the
 // runaway guest. It is not a usage example.

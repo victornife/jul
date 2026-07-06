@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package admin exposes a separate operational HTTP listener bound to loopback
 // by default. This file implements the gRPC route designer endpoints that let
 // operators upload compiled protobuf descriptor sets and inspect the HTTP

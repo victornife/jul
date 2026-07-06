@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Component tests for the guided Apps editors (Phase 4b). They mount the
  * HealthCheck and Discovery drawers, seed them from the Apps projection, and
  * assert that saving posts the structured patch op and stages the resulting

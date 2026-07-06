@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 /// <reference types="vitest/config" />
 import { defineConfig, mergeConfig } from "vite";
 import viteConfig from "./vite.config";

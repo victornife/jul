@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useCallback, useEffect, useState } from "react";
 
 // Generic localStorage-backed state for UI preferences (Milestone 4.6). Values

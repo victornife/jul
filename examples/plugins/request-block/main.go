@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // request-block is a Jul.IA middleware plugin that rejects a request with 403
 // when it carries the header "X-Block: 1", and otherwise passes it through. It
 // demonstrates reading request headers and the body and writing a response from

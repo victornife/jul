@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Component tests for the Operations Log tab (Phase 4g). They mount the live
  * access-log tail with a mocked subscribeLogs transport and assert it renders
  * streamed entries, reflects connection status, pauses (dropping incoming

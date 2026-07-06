@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package waf implements the web application firewall (WAF) that inspects HTTP
 // requests (and, optionally, responses) against ModSecurity-compatible SecLang
 // rules — including the embedded OWASP Core Rule Set — and either blocks or

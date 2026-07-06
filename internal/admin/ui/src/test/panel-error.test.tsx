@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Render tests for PanelError: it surfaces the taxonomy headline + message,
  * exposes the kind via a data attribute, announces itself with role="alert",
  * and only offers Retry for retryable failures.

@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package redact maintains a process-wide registry of secret values so they can
 // be masked wherever the server emits text an operator might see — primarily
 // logs. Secret references resolved from the configuration (see SEC-1 in

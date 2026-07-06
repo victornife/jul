@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Sparkline is a compact SVG line chart for visualizing small time-series data.
  * Used to display 2-minute windows of metrics like requests/sec or latency.
  */

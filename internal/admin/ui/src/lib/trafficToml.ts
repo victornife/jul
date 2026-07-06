@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Client-side generators for the guided Traffic Controls editors (Phase 3).
 // Compression, cache, and rate limiting map to top-level TOML tables
 // ([compression], [cache], [rate_limit]). Each editor emits an updated raw

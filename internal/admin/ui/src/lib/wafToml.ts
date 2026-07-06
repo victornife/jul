@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Client-side generator for the guided WAF editor (Wave A). It produces the
 // global [waf] top-level table, which the editor upserts into the running
 // config and routes through the authoritative Validate → Diff → Apply →

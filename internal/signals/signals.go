@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package signals wires OS signals to shutdown and reload events in a
 // cross-platform way. Shutdown signals (SIGINT/SIGTERM) work everywhere;
 // reload via SIGHUP is Unix-only. On Windows, reload is driven solely by the

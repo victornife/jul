@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package upstream implements named backend pools with pluggable load
 // balancing and passive health checking for the reverse proxy.
 package upstream

@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Command jul is an NGINX-inspired HTTP edge server configured via TOML.
 //
 // serve() has four logical sections:

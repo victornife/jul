@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 // Client-side generator for the guided TLS/ACME editor (Wave A, Milestone 2.x).
 // Like the route and app editors it emits a complete [[servers]] block that is
 // appended to the running configuration and routed through the authoritative

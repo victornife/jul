@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // egress-check is a Jul.IA middleware plugin that calls an allow-listed upstream
 // before passing the request on, demonstrating the capability-gated `fetch` host
 // function. The plugin must be granted `fetch = true` and a non-empty

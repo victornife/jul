@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useEffect, useRef } from "react";
 import { EditorState, type Extension } from "@codemirror/state";
 import {

@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Minimal Rust HTTP app served behind Jul via proxy_pass.
 //
 // Dependency-free: uses only the Rust standard library, so no crates are

@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package app holds the composition-root wiring helpers for the jul command.
 //
 // These functions are the pure, dependency-light pieces of the server's

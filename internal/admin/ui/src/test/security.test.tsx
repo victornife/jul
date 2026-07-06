@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Vitest tests for the Console Security panel build-tag degradation (Phase 1.4):
  * the schema default and the WAF "not compiled" banner that warns the apply
  * preflight will reject an enabled WAF on a non-`waf` build.

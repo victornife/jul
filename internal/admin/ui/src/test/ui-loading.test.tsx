@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Render tests for the shared async-feedback primitives (Phase 2): Spinner is a
  * decorative animated indicator and Loading is the standard role="status"
  * progress line used by every panel.

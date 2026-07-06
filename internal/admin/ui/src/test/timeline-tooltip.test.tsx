@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Render test for the TimelinePanel severity tooltips (Phase 2): each event dot
  * carries an accessible label and a native title so operators can tell what the
  * coloured dot means without decoding the palette.

@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package server owns the network listeners and HTTP serving lifecycle,
 // including hot configuration reload without dropping in-flight connections.
 package server

@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchConsoleHealth } from "@/api/client.ts";

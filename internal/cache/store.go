@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package cache implements a two-tier (in-memory + disk overflow) HTTP response
 // cache with size-bounded LRU eviction, Vary handling, conditional
 // revalidation, and stale-while-revalidate support.

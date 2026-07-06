@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useQuery } from "@tanstack/react-query";
 import { fetchOverview, type FeatureStatus, type TrafficSources } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";

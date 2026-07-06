@@ -1,4 +1,9 @@
 /**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
+/**
  * Vitest tests for the Console v2 Streams panel (Phase 4i): the schema, the
  * draft → patch lib helpers, and the panel/editor rendering + interactions.
  */

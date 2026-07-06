@@ -136,6 +136,7 @@ jobs:
           dir="stage/${{ steps.prof.outputs.name }}"
           cp README.md SECURITY.md server.toml "$dir/"
           [ -f LICENSE ] && cp LICENSE "$dir/" || true
+          [ -f COPYRIGHT ] && cp COPYRIGHT "$dir/" || true
           mkdir -p dist
           if [ "${{ steps.prof.outputs.archive }}" = "zip" ]; then
             out="dist/${{ steps.prof.outputs.name }}.zip"

@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useRef, useState, type ReactNode } from "react";
 import { useFocusTrap } from "@/lib/useFocusTrap.ts";
 

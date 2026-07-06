@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Jul config: serve a Node.js HTTP app via reverse proxy.
 #
 # 1. Start the Node app (listens on http://127.0.0.1:3032):

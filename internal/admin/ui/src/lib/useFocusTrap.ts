@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import { useEffect, type RefObject } from "react";
 
 const FOCUSABLE_SELECTOR = [

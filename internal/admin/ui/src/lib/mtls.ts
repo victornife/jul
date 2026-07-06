@@ -1,3 +1,8 @@
+/**
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+ * SPDX-License-Identifier: agpl
+ */
+
 import type { MTLSServerProjection, ClientAuthPatch } from "@/api/client.ts";
 
 export type MTLSMode = "none" | "request" | "require";

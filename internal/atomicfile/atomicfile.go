@@ -1,3 +1,6 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
 // Package atomicfile writes a file's contents atomically and crash-safely.
 //
 // Data is written to a temporary file in the destination directory, flushed to
