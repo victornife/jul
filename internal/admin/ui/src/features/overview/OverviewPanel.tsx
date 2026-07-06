@@ -254,13 +254,34 @@ export function OverviewPanel() {
       tooltip: `${healthyCount} healthy / ${unhealthyCount} unhealthy`,
     });
   }
-  // Certificate risk from the Security group detail text, if present.
-  const certRow = data.status.find((r) => r.group === "Security" && /cert|tls|acme/i.test(r.name));
-  if (certRow) {
+  // Certificate risk from the real cert health data returned by the overview.
+  if (data.cert_risk) {
+    const cr = data.cert_risk;
+    let value: string;
+    let tone: Tone;
+    let detailText: string;
+    if (cr.expired > 0) {
+      value = "expired";
+      tone = "down";
+      detailText = `${cr.expired} expired, ${cr.expiring_soon} expiring ≤ 7d`;
+    } else if (cr.expiring_soon > 0) {
+      value = "renew soon";
+      tone = "warn";
+      detailText = `${cr.expiring_soon} expiring ≤ 7d`;
+    } else if (cr.errors > 0) {
+      value = "unknown";
+      tone = "warn";
+      detailText = `${cr.errors} with no live expiry data`;
+    } else {
+      value = "ok";
+      tone = "ok";
+      detailText = "all certs valid";
+    }
     summary.push({
       label: "Certificates",
-      value: certRow.active ? "ok" : "off",
-      tone: certRow.active ? "ok" : "idle",
+      value,
+      tone,
+      tooltip: `${cr.count} certs — ${detailText}`,
     });
   }
 

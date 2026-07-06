@@ -87,15 +87,22 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var status []FeatureStatus
+	var certRisk *CertRiskProjection
 	if s.deps.LoadConfig != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
 			status = s.runtimeStatus(cfg)
+			var certs []CertStatus
+			if s.deps.Certs != nil {
+				certs = s.deps.Certs()
+			}
+			certRisk = projectCertRisk(projectTLS(cfg, certs))
 		}
 	}
 	out := RuntimeOverview{
-		Product: s.deps.Product,
-		Version: s.deps.Version,
-		Status:  status,
+		Product:  s.deps.Product,
+		Version:  s.deps.Version,
+		Status:   status,
+		CertRisk: certRisk,
 	}
 	if s.deps.Stats != nil {
 		out.Stats = s.deps.Stats()

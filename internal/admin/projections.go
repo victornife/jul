@@ -308,6 +308,16 @@ type TracingProjection struct {
 	Insecure    bool    `json:"insecure,omitempty"`
 }
 
+// CertRiskProjection surfaces certificate health for the Overview summary card.
+// When there are no TLS server blocks it is omitted so the card stays hidden.
+type CertRiskProjection struct {
+	Count        int    `json:"count"`
+	ExpiringSoon int    `json:"expiring_soon"`
+	Expired      int    `json:"expired"`
+	Errors       int    `json:"errors"`
+	Details      string `json:"details,omitempty"`
+}
+
 // RuntimeOverview is the top-level dashboard summary.
 type RuntimeOverview struct {
 	Product string          `json:"product"`
@@ -327,6 +337,10 @@ type RuntimeOverview struct {
 	// whether the compliance trail is actually being persisted; a degraded sink
 	// (open or write failure) is surfaced here rather than silently dropped.
 	AuditSink *AuditSinkStatus `json:"audit_sink,omitempty"`
+	// CertRisk surfaces real certificate health (counts, expiry, errors) so the
+	// Overview "Certificates" card is truthful rather than just reporting TLS
+	// configuration presence. Omitted when no TLS server blocks are configured.
+	CertRisk *CertRiskProjection `json:"cert_risk,omitempty"`
 }
 
 // ── Projection helpers ──────────────────────────────────────────────────────
@@ -652,6 +666,36 @@ func projectTLS(c *config.Config, live []CertStatus) []CertProjection {
 		certs = append(certs, cp)
 	}
 	return certs
+}
+
+func projectCertRisk(certs []CertProjection) *CertRiskProjection {
+	if len(certs) == 0 {
+		return nil
+	}
+	cr := CertRiskProjection{Count: len(certs)}
+	for _, cp := range certs {
+		if cp.NotAfter != "" {
+			// Live metadata available — days_left is authoritative.
+			if cp.DaysLeft < 0 {
+				cr.Expired++
+			} else if cp.DaysLeft <= 7 {
+				cr.ExpiringSoon++
+			}
+		} else {
+			// No live metadata for this cert.
+			cr.Errors++
+		}
+	}
+	if cr.Expired > 0 {
+		cr.Details = fmt.Sprintf("%d expired, %d expiring ≤ 7d", cr.Expired, cr.ExpiringSoon)
+	} else if cr.ExpiringSoon > 0 {
+		cr.Details = fmt.Sprintf("%d expiring ≤ 7d", cr.ExpiringSoon)
+	} else if cr.Errors > 0 {
+		cr.Details = fmt.Sprintf("%d with no live expiry data", cr.Errors)
+	} else {
+		cr.Details = "all certs valid"
+	}
+	return &cr
 }
 
 func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {

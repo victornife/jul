@@ -269,6 +269,15 @@ export const AuditSinkStatusSchema = z.object({
 });
 export type AuditSinkStatus = z.infer<typeof AuditSinkStatusSchema>;
 
+export const CertRiskSchema = z.object({
+  count: z.number(),
+  expiring_soon: z.number(),
+  expired: z.number(),
+  errors: z.number(),
+  details: z.string().optional(),
+});
+export type CertRisk = z.infer<typeof CertRiskSchema>;
+
 export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
@@ -284,6 +293,10 @@ export const OverviewSchema = z.object({
   // durable audit sink is configured; a degraded sink (open or write failure)
   // is surfaced here so the broken compliance trail is visible, not silent.
   audit_sink: AuditSinkStatusSchema.optional(),
+  // cert_risk surfaces real certificate health (counts, expiry, errors) so the
+  // Overview "Certificates" card is truthful rather than just reporting TLS
+  // configuration presence. Absent when no TLS server blocks are configured.
+  cert_risk: CertRiskSchema.optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 
