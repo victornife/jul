@@ -97,3 +97,60 @@ log_level = "` + string(make([]byte, 1<<16)) + `"`)) // huge string
 		_, _ = Marshal(cfg)
 	})
 }
+
+// FuzzValidateConfig exercises the config validation logic with random input.
+// It is the fuzz target for criterion ⑧ of the Y1-08 Zero-config + jul lint GA bundle.
+// go-toml/v2 handles the heavy lifting; this target verifies that our Config
+// struct, custom UnmarshalText implementations, and applyDefaults() never
+// panic on malformed or edge-case input.
+func FuzzValidateConfig(f *testing.F) {
+	seeds := [][]byte{
+		[]byte(`[global]
+log_level = "info"
+
+[[servers]]
+listen = ":8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "/srv"`),
+		[]byte(`[global]
+log_level = "debug"
+
+[[servers]]
+listen = "0.0.0.0:443"
+server_names = ["example.com"]
+
+  [servers.tls]
+  enabled = true
+  cert = "/etc/ssl/cert.pem"
+  key = "/etc/ssl/key.pem"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://up1"
+
+[[upstreams]]
+name = "up1"
+strategy = "round_robin"
+
+  [[upstreams.servers]]
+  address = "127.0.0.1:8081"
+`),
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		cfg, err := Parse(raw)
+		if err != nil {
+			// Parse errors are expected for random input; skip them.
+			return
+		}
+		// Apply defaults so validation sees a fully-populated config.
+		cfg.applyDefaults()
+		_ = Validate(cfg)
+		// Validate must never panic, even on bizarre struct states.
+	})
+}

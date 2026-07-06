@@ -504,7 +504,8 @@ func securityCSP(styleNonce string) string {
 	}
 	return "default-src 'self'; " + style + "; " +
 		"script-src 'self'; img-src 'self' data:; " +
-		"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+		"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; " +
+		"report-uri /csp-violation-report"
 }
 
 // writeSecurityHeadersLegacy applies the CSP for the legacy config/console v1

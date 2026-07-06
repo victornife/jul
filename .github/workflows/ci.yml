@@ -434,3 +434,45 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: govulncheck
         run: govulncheck -tags "${{ env.FULL_TAGS }}" ./...
+
+  console:
+    name: console v2 (audit + coverage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: internal/admin/ui
+    env:
+      COVERAGE_FLOOR: "70"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - run: corepack enable && corepack prepare pnpm@latest --activate
+      - run: pnpm install --frozen-lockfile
+      - name: dependency vulnerability audit
+        run: pnpm audit --audit-level moderate
+      - name: build SPA
+        run: pnpm run build
+      - name: typecheck
+        run: pnpm run typecheck
+      - name: lint
+        run: pnpm run lint
+      - name: test with coverage
+        run: pnpm run test:coverage
+      - name: enforce coverage floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          # vitest --coverage outputs a summary line like: All files | 54.24 | 49.41 | 43.27 | 55.16 |
+          total=$(pnpm run test:coverage 2>&1 | awk '/All files/ {gsub(/%/,"",$2); print $2}')
+          echo "Console statement coverage: ${total}% (floor: ${COVERAGE_FLOOR}%)"
+          if awk -v t="$total" -v f="$COVERAGE_FLOOR" 'BEGIN { exit (t >= f) ? 0 : 1 }'; then
+            echo "PASS: coverage meets the floor."
+          else
+            echo "ERROR: coverage ${total}% is below the ${COVERAGE_FLOOR}% floor."
+            exit 1
+          fi

@@ -3,7 +3,10 @@
 
 package router
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+)
 
 // FuzzHostScore checks that host matching never panics and only ever returns
 // one of the defined scores (3 exact, 2 leading-wildcard, 0 no match) for
@@ -42,5 +45,34 @@ func FuzzMatchLocation(f *testing.F) {
 		if loc := sr.matchLocation(path); loc == nil {
 			t.Fatalf("matchLocation(%q) = nil, want non-nil (fallback present)", path)
 		}
+	})
+}
+
+// FuzzLocationMatch exercises location resolution with arbitrary paths,
+// checking that all possible match types (exact, prefix, regex, fallback)
+// are exercised and never panic. It uses a serverRoute with all match types
+// populated.
+func FuzzLocationMatch(f *testing.F) {
+	sr := &serverRoute{
+		locations: []*locationRoute{
+			{matchType: "exact", path: "/api/health"},
+			{matchType: "prefix", path: "/api/v1"},
+			{matchType: "prefix", path: "/static"},
+			{matchType: "regex", re: regexp.MustCompile(`^/files/.*\.pdf$`)},
+		},
+		fallback: &locationRoute{matchType: "prefix", path: "/"},
+	}
+	seeds := []string{
+		"/api/health", "/api/v1/users", "/static/css/main.css",
+		"/files/report.pdf", "/files/report.docx", "/", "",
+		"//double-slash//", "\x00", "/../../../etc/passwd",
+		"/api/health/extra", "/api", "/STATIC", "/files/.pdf",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, path string) {
+		_ = sr.matchLocation(path)
+		// Must never panic. matchLocation always returns non-nil because fallback is set.
 	})
 }
