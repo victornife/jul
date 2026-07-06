@@ -90,9 +90,7 @@ with `-tags "…"` or download the `full` release profile to enable everything.
 | **L4 stream proxy** | TCP and UDP reverse proxying (`[[stream]]`) with load balancing and health checks across an upstream pool, TLS **SNI routing** by host without terminating, and HAProxy **PROXY protocol** v1/v2 (in and out) to preserve the client address — survives hot reload, opt-in `stream` build tag |
 | **Portability** | Single static binary, no runtime dependencies; Windows, Linux, and macOS on amd64/arm64 |
 
-> Note: The `[[mail]]` table is reserved for a future version. It is parsed but
-> **rejected during validation** in v1 so configs fail loudly rather than
-> silently. The `[[stream]]` (L4 proxy) table is active in binaries built with
+> Note: The `[[stream]]` (L4 proxy) table is active in binaries built with
 > the `stream` tag; in a binary without that tag a populated `[[stream]]` table
 > is rejected at startup. The `[plugins]` table is active in binaries built with
 > the `wasmplugins` tag; in a binary without that tag a populated `[plugins]`

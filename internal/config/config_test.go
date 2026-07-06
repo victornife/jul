@@ -96,17 +96,6 @@ func TestUpstreamServerUnmarshal(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsReserved(t *testing.T) {
-	cfg := &Config{
-		Servers: []ServerConfig{{Listen: "127.0.0.1:80"}},
-		Mail:    []map[string]any{{"listen": "1.2.3.4:25"}},
-	}
-	err := Validate(cfg)
-	if err == nil {
-		t.Fatal("expected error for reserved [[mail]] table")
-	}
-}
-
 func TestValidateRejectsNegativeRedactFloor(t *testing.T) {
 	cfg := &Config{
 		Global:  GlobalConfig{RedactMinSecretLength: -1},

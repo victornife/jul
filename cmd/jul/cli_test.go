@@ -221,15 +221,15 @@ func TestCmdFmtStdout(t *testing.T) {
 }
 
 // TestCmdFmtOmitsReservedAndEmptyTables pins the UX-2 fix: a minimal static
-// config declares no upstreams, streams, plugins, or the reserved mail table, so
-// canonical `jul fmt` output must not surface any of them.
+// config declares no upstreams, streams, or plugins, so canonical `jul fmt`
+// output must not surface any of them.
 func TestCmdFmtOmitsReservedAndEmptyTables(t *testing.T) {
 	path := writeTemp(t, validConfig)
 	code, out, _ := capture(t, func() int { return cmdFmt([]string{"-config", path}) })
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0\n%s", code, out)
 	}
-	for _, banned := range []string{"mail", "upstreams = []", "stream = []", "[plugins]"} {
+	for _, banned := range []string{"upstreams = []", "stream = []", "[plugins]"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("canonical fmt output must not contain %q:\n%s", banned, out)
 		}

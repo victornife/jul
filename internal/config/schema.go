@@ -7,10 +7,8 @@
 // The schema mirrors common NGINX concepts (listen, server_name, location,
 // proxy_pass, upstream, ...) but deliberately uses TOML rather than NGINX
 // syntax. The [[stream]] table configures L4 (TCP/UDP) proxying and is active
-// in builds with the "stream" tag; [[mail]] is reserved for a future version:
-// it is parsed but rejected during validation so configs written today fail
-// loudly rather than silently. The [plugins] table configures WASM plugins and
-// is active in builds with the "wasmplugins" tag.
+// in builds with the "stream" tag. The [plugins] table configures WASM plugins
+// and is active in builds with the "wasmplugins" tag.
 package config
 
 // Config is the root configuration document.
@@ -39,12 +37,6 @@ type Config struct {
 	// are served only in builds with the "stream" tag; a lean build refuses any
 	// config that declares them (see internal/stream.Check).
 	Streams []StreamServer `toml:"stream,omitempty"`
-
-	// Reserved for future versions. Parsed so that presence can be detected
-	// and rejected with a clear message during validation (see validate.go).
-	// Marshaled with omitempty so the canonical `jul fmt` output never surfaces
-	// this reserved-and-rejected table when it is absent (the normal case).
-	Mail []map[string]any `toml:"mail,omitempty"`
 }
 
 // StreamServer is one L4 (TCP or UDP) reverse-proxy listener ([[stream]]). It

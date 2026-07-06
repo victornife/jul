@@ -73,7 +73,7 @@ func TestPathPrefixLen(t *testing.T) {
 		"upstreams[1].servers[0]: x": 23,
 		"at least one [[servers]]":   2, // "at" is a bare token (no colon follows)
 		"waf: x":                     3, // "waf"
-		"[[mail]] reserved":          0, // starts with '[', not an identifier
+		"[[unknown]] reserved":       0, // starts with '[', not an identifier
 		"servers[: malformed":        0, // malformed index
 	}
 	for in, want := range cases {

@@ -18,11 +18,6 @@ import (
 func Validate(c *Config) error {
 	var errs []error
 
-	// Reject reserved-but-unimplemented features explicitly.
-	if len(c.Mail) > 0 {
-		errs = append(errs, errors.New("[[mail]] (mail proxy) is reserved for a future version and not supported in v1"))
-	}
-
 	// Validate WASM plugin declarations and index them for reference checks
 	// below. Whether the "wasmplugins" build tag is actually compiled in is
 	// reported at plugin-set build time, mirroring compression/grpc/otel.
