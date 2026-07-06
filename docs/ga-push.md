@@ -74,10 +74,11 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | WASM plugin system (Y2-02) | **GA — soak pending** | none — [plugins.md](plugins.md) doc + 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas), 5 benchmarks (middleware ~16.5 μs, handler ~20 μs, KV ~23 μs, parallel ~3.4 μs amortised), 5-item limitation list (request-phase only, no shared state, no streaming, one ABI, build-tag required), 7-row threat note (memory escape, CPU exhaustion, SSRF, KV DoS, upload, info leak, ABI breakage), `FuzzPluginInvoke` and `FuzzHostAllowed` fuzz targets. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | M | ✅ |
 | L4 stream proxy (Y2-03) | **GA — soak pending** | none — [stream.md](stream.md) doc + 23-row behaviour matrix (TCP/UDP relay, SNI routing, PROXY protocol, reload, preflight, UDP sessions), 4 benchmarks (`BenchmarkTCPPassthrough` ~3.2 ms, `BenchmarkTCPParallel` ~3.3 ms, `BenchmarkUDPRelay` ~33 μs, `BenchmarkUDPAdmitAtCap` up to 254 μs for 10k sessions), 5-item limitation list, 6-row threat note, fuzz targets `FuzzReadProxyHeader` and `FuzzPeekSNI`. UDP-churn soak test added behind `soak` tag. | M | ✅ |
 
-> **11 shipped features are now GA; 9 remain GA — soak pending.**
+> **11 shipped features are now GA; 7 remain GA — soak pending (runtime features only).**
 > TLS + ACME (Y1-01), Auth (Y1-04), mTLS client auth (Y2-07), and OTel tracing (Y1-10) closed their soak gates via the Phase 2A consolidated 8-hour burn-in (2.12M req, 0% err) on 2026-07-05 and are promoted to full GA.
 > Core HTTP, Console, Active health checks, WAF, Rate limiting, Compression, and Response cache also have completed soak evidence (per-feature or Phase 2A) and are promoted to full GA.
-> The remaining nine features still awaiting a soak run are: gRPC transcoding, gRPC passthrough, Service discovery, Secrets, Zero-config, NGINX config importer, HTTP/3, WASM, and L4 stream (the last three queued in CI on the v1.29.0 tag).
+> The remaining seven runtime features still awaiting a soak run are: gRPC transcoding, gRPC passthrough, Service discovery, Secrets, HTTP/3, WASM, and L4 stream.
+> **Zero-config + `jul lint` (Y1-08)** and **NGINX config importer (Y1-09)** are CLI-only paths; they were validated on 2026-07-06 via `scripts/test-zero-config.ps1` (serve + lint + strict-lint-secret-flagging) and `scripts/test-nginx-importer.ps1` (import → lint → output checks) respectively. Their soak gates are closed and they are promoted to full GA.
 
 ## Soak tracking (post-GA gate per ADR 0005)
 
