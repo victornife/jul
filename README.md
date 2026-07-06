@@ -41,12 +41,15 @@ The canonical maturity matrix lives in [`docs/status.md`](docs/status.md). At a
 
 | Maturity | Features |
 |----------|----------|
-| **GA — soak pending** | Core HTTP (proxy, static, routing, reload), TLS & ACME, Authentication (Basic, JWT, forward-auth), gRPC transcoding + passthrough, mTLS, Admin Console, Active health checks, WAF, Service discovery, HTTP/3, WASM plugins, L4 Stream proxy, Compression (Brotli / Zstd), Rate limiting, `jul import nginx`, OpenTelemetry tracing, Two-tier response cache |
-| **Beta** | *(none — all shipped features are tracked as GA — soak pending or GA)* |
+| **GA** | Core HTTP, TLS & ACME, Authentication, mTLS, Console, Active health checks, WAF, Rate limiting, Compression, OTel tracing, Response cache |
+| **GA — soak pending** | gRPC transcoding + passthrough, Service discovery, Secrets references, Zero-config + `jul lint`, NGINX importer, HTTP/3, WASM plugins, L4 stream proxy |
 
 > See [`docs/status.md`](docs/status.md) for the full GA criteria matrix and
 > per-feature evidence links. The soak test is the last remaining gate for the
 > GA — soak pending features per [ADR 0005](docs/adr/0005-soak-post-ga-gate.md).
+> A consolidated **Phase 2A** 8-hour soak (2026-07-05, 2.12M req, 0% err)
+> promoted TLS, mTLS, auth, health checks, WAF, rate-limit, compression,
+> OTel tracing, and response cache to **GA**.
 
 Several GA -- soak pending features require an opt-in **build tag** (e.g. `grpc`, `acme`,
 `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default
