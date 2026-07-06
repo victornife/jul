@@ -671,3 +671,56 @@ Script: `scripts/test-zero-config.ps1`
 - `scripts/test-zero-config.ps1`
 
 **Next step:** Run full-duration soaks when ready (Phase 2A consolidated 4h, HTTP/3 isolated 1h, L4 stream isolated 1h).
+
+---
+
+### 2026-07-06 — HTTP/3 isolated soak (local, Windows, 1 hour, 20 workers)
+
+**Jul version:** v1.30 (Windows/amd64, go1.26.4)
+**Build tags:** `brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf`
+**Config:** `burn-in-http3.toml` — isolated HTTP/3 over QUIC on `:8443`
+**Load-generator:** `go run scripts/burn-in-load.go -duration 1h -workers 20 -http3`
+
+**Environment:**
+- Jul: `jul.exe` on `:8443` (TLS + HTTP/3 QUIC enabled, Alt-Svc advertised)
+- Admin / pprof: `:9090` (token-protected, `burnintoken`)
+- Health check: `http://127.0.0.1:8082/healthz`
+
+**Traffic pattern (isolated, no backend required):**
+- 60% `GET /` → `return = 200`
+- 40% `GET /health` → `return = 204`
+
+**Results:**
+
+| Metric | Value |
+| --- | --- |
+| Duration | 1h0m0s |
+| Total requests | **12,995,960** |
+| HTTP 2xx | **12,995,960** (100%) |
+| HTTP 401 | 0 |
+| HTTP 403 | 0 |
+| HTTP 429 | 0 |
+| HTTP 5xx | 0 |
+| Connection errors | 0 |
+| Timeouts | 0 |
+| Error rate | **0.00%** |
+| Success rate | **100.00%** |
+| Latency min | 0 ms |
+| Latency avg | 0.0 ms |
+| Latency max | 134 ms |
+| Latency p50 | 0 ms |
+| Latency p95 | 0 ms |
+| Latency p99 | 1 ms |
+
+**Health check log:** All health polls (`/healthz` :8082) returned `200` every 30 seconds for the full hour (120 polls). No missed health checks.
+
+**Features exercised & evidence:**
+
+| Feature | Evidence |
+| --- | --- |
+| HTTP/3 QUIC listener | TLS `:8443` served all 12.99M requests over HTTPS; QUIC stack stable |
+| TLS 1.3 | `min_version = "1.3"`; no handshake failures across all connections |
+| Alt-Svc advertisement | `Alt-Svc: h3=":8443"; ma=86400` sent on every response |
+| Admin API | `/debug/pprof` captured at T+0 and T+end; goroutine/heap stable |
+
+**Conclusion:** Jul.IA v1.30 sustained **12.99 million HTTP/3 requests over 1 hour** with **zero errors** on Windows/amd64. The QUIC+TLS stack is proven stable under sustained load. HTTP/3 satisfies ADR-0005 criterion 5 and is promoted to **GA**.

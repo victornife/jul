@@ -170,7 +170,7 @@ full QUIC handshake + request/response path.
 | 2 — Published benchmark numbers | ✅ | `BenchmarkHTTP3Throughput` in `internal/server/http3_test.go` |
 | 3 — Known-limitations list | ✅ | 4-item limitation list above |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
-| 5 — Long-running soak test | ☐ | Post-GA gate per ADR-0005 |
+| 5 — Long-running soak test | ✅ | **1h isolated soak** 2026-07-06 (12.99M req, 0.00% err, 100% success) — [evidence](soak-evidence.md#2026-07-06--http3-isolated-soak-local-windows-1-hour-20-workers) |
 | 6 — Runnable example + docs | ✅ | `testdata/http3.toml` + this doc |
 | 7 — Security / threat note | ✅ | 5-row threat note (0-RTT replay, amplification, UDP exhaustion, cert sharing, Alt-Svc tracking) |
 | 8 — Fuzzing where parsing is involved | n/a | No custom parser (delegates to quic-go) |

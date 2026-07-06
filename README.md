@@ -41,8 +41,8 @@ The canonical maturity matrix lives in [`docs/status.md`](docs/status.md). At a
 
 | Maturity | Features |
 |----------|----------|
-| **GA** | Core HTTP, TLS & ACME, Authentication, mTLS, Console, Active health checks, WAF, Rate limiting, Compression, OTel tracing, Response cache, Zero-config + `jul lint`, NGINX importer |
-| **GA — soak pending** | gRPC transcoding + passthrough, Service discovery, Secrets references, HTTP/3, WASM plugins, L4 stream proxy |
+| **GA** | Core HTTP, TLS & ACME, Authentication, mTLS, Console, Active health checks, WAF, Rate limiting, Compression, OTel tracing, Response cache, Zero-config + `jul lint`, NGINX importer, HTTP/3 |
+| **GA — soak pending** | gRPC transcoding + passthrough, Service discovery, Secrets references, WASM plugins, L4 stream proxy |
 
 > See [`docs/status.md`](docs/status.md) for the full GA criteria matrix and
 > per-feature evidence links. The soak test is the last remaining gate for the
