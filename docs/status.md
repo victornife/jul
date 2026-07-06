@@ -34,45 +34,46 @@ labelled **GA — soak pending** until its soak run completes.
 
 Cell key: ✅ met · ☐ open · n/a not applicable (no custom parser).
 
-## GA — soak pending
+## GA
 
-Eight criteria met; only the soak test (5) is open. Per-feature detail lives in
-each linked doc's *GA status* table.
+All nine criteria met, including the post-GA soak gate in
+[ADR 0005](adr/0005-soak-post-ga-gate.md). A soak failure on a GA feature is a
+release-blocking regression, not a reason to retract the label.
 
 | Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Core HTTP (static/proxy/FastCGI/vhosts/routing) | — | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
 | TLS + automatic HTTPS | Y1-01 | core · `acme` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [tls-acme.md](tls-acme.md) |
 | Authentication (CIDR/Basic/JWT/forward-auth) | Y1-04 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [auth.md](auth.md) |
+| mTLS client auth + `$ssl_client_*` | Y2-07 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
+| Web application firewall (WAF) | Y2-06 | `waf` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
+| Rate + connection limiting | Y1-03 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [ratelimit.md](ratelimit.md) |
+| OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
+| Response cache (memory + disk) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
+| Core HTTP (static/proxy/FastCGI/vhosts/routing) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
+| Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
+| Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
+| Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli`,`zstd` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
+
+Criterion 8 is **n/a** for features whose parsing/validation is delegated to a
+standard or third-party library — see the GA — soak pending section for the
+rationale.
+
+## GA — soak pending
+
+Eight criteria met (1–4, 6–9); only the soak test (criterion 5) is open.
+Per-feature detail lives in each linked doc's *GA status* table.
+
+| Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
+| --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
 | gRPC ↔ JSON transcoding | Y2-01 | `grpc` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
 | Native gRPC passthrough + h2c | Y2-04 | `grpc` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [grpc-proxy.md](grpc-proxy.md) |
-| mTLS client auth + `$ssl_client_*` | Y2-07 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
-| Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
-| Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
-| Web application firewall (WAF) | Y2-06 | `waf` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
 | Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [service-discovery.md](service-discovery.md) |
 | HTTP/3 over QUIC | Y1-11 | `http3` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
 | WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
 | L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
 | Secrets references + log redaction | SEC-1 | `secrets` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [secrets.md](secrets.md) |
-| Rate + connection limiting | Y1-03 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [ratelimit.md](ratelimit.md) |
 | Zero-config + `jul lint` | Y1-08 | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | n/a | [zeroconf.md](zeroconf.md) |
-| Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli`,`zstd` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
 | NGINX config importer | Y1-09 | `importer` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | n/a | [nginx-importer.md](nginx-importer.md) |
-| OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
-| Response cache (memory + disk) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
-
-Criterion 8 is **n/a** for features whose parsing/validation is delegated to a
-standard or third-party library (`crypto/x509`, `encoding/json`, `net/http`,
-`net`, Coraza/SecLang, etc.) or is an opaque forward. This covers TLS + ACME,
-HTTP/3 over QUIC, gRPC passthrough, mTLS, Secrets references, Rate limiting,
-Compression, Zero-config + `jul lint`, the Console, active health checks, the
-WAF, service discovery, the NGINX config importer, OTel tracing, and the
-response cache — none add a custom parser of their own to fuzz.
-
-> **Continuous panels status** (Y2-09): Live log tail ✅ shipped; WASM plugin
-> manager ✅ shipped (`.wasm` upload shipped v1.27); gRPC route designer ✅ shipped
-> (visual designer with descriptor upload + method preview, v1.27).
 
 ## Soak tracking (post-GA gate)
 

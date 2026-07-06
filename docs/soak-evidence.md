@@ -9,13 +9,27 @@ This page makes the soak claim **verifiable** — "soak pending" without a dated
 artifact is an unverifiable assertion. It records where soak evidence is produced
 and keeps a log of dated runs.
 
+## Minimum soak parameters
+
+Per [ADR 0005](adr/0005-soak-post-ga-gate.md), soak evidence must meet these
+wall-clock minimums to count toward the post-GA gate:
+
+| Scope | Minimum | Recommended |
+| --- | --- | --- |
+| **Per feature** (single feature exercised alone) | **1 hour** | **8 hours** |
+| **Multiple features / consolidated** (two or more exercised together) | **4 hours** | **8 hours** |
+
+Runs below the minimum (e.g., the 20-second CI smoke or the 5-minute release gate)
+are **smoke tests only** — they validate that the harness compiles and the feature
+does not immediately crash, but they do **not** satisfy the post-GA soak criterion.
+
 ## Where soak evidence is produced
 
-| Context | Trigger | Duration | Artifact |
-| --- | --- | --- | --- |
-| CI smoke (`soak (smoke)` job) | every push / PR | 20s × 2 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run |
-| Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 2 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release |
-| Local | `scripts/soak.sh` | configurable | stdout (see runs below) |
+| Context | Trigger | Duration | Artifact | Counts toward gate? |
+| --- | --- | --- | --- | --- |
+| CI smoke (`soak (smoke)` job) | every push / PR | 20s × 2 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run | ❌ No (smoke only) |
+| Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 2 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release | ❌ No (smoke only) |
+| Local | `scripts/soak.sh` | configurable | stdout (see runs below) | ✅ Yes, if duration meets the minimum for the scope exercised |
 
 Both scenarios are driven by the in-tree soak tests behind the `soak` build tag:
 
@@ -27,9 +41,10 @@ Both scenarios are driven by the in-tree soak tests behind the `soak` build tag:
   live-session count stays capped and every reaped/evicted session tears down
   fully (no goroutine or backend-socket leak).
 
-The authoritative **GA-soak** evidence for a release is the 5-minute release-gate
-artifact. The runs below are shorter smoke-duration samples that demonstrate the
-harness is healthy and the data paths do not leak.
+The 20-second CI smoke and 5-minute release gate are **not** GA-soak evidence.
+They are quick-health checks. The runs below are the **authoritative GA-soak**
+artifacts; each entry states the scope (single-feature vs. consolidated) and
+whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 

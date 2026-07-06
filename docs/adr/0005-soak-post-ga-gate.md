@@ -50,6 +50,22 @@ blocker to a continuous post-GA stability gate.**
 This amends **only** criterion 5 of ADR 0003. The maturity ladder, the evidence
 gates, and every other GA criterion stand as written.
 
+## Minimum soak test parameters
+
+Soak tests are categorised by scope. The table below defines the wall-clock runtime minimums and recommendations:
+
+| Scope | Minimum duration | Recommended duration |
+| --- | --- | --- |
+| **Per feature** (e.g., rate limiting, compression, WAF) | **1 hour** | **8 hours** |
+| **Multiple features / consolidated** (two or more features exercised together) | **4 hours** | **8 hours** |
+
+Shorter runs are acceptable only as **smoke tests** (CI validation that the harness compiles and the feature does not immediately crash). They do **not** count toward the post-GA soak gate.
+
+Rationale for the minimums:
+- **1 hour per feature** is the floor at which most goroutine leaks, memory growth, and resource exhaustion patterns become observable under sustained load.
+- **4 hours consolidated** balances cost with coverage: running multiple features together multiplies the interaction surface, so the minimum is higher than a single-feature smoke but lower than the ideal 8-hour run.
+- **8 hours recommended** aligns with overnight/off-hours CI windows and captures slow-burn issues (e.g., gradual connection pool exhaustion, log rotation edge cases, certificate renewal timing windows) that a 1–4 hour run can miss.
+
 ## Rationale
 
 - **Capacity.** Solo / part-time delivery cannot block the whole label on the one
