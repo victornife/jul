@@ -470,7 +470,7 @@ export function OverviewPanel() {
                     <MetricCard
                       key={method}
                       label={method}
-                      value={Math.round(count).toLocaleString()}
+                      value={Math.round(count)}
                       unit="requests"
                     />
                   ))}
