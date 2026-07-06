@@ -423,7 +423,7 @@ export function Layout() {
             ) : (
               <div className="flex items-baseline gap-2">
                 <span className="font-bold tracking-wide text-jul-accent">{product}</span>
-                {version && <span className="text-xs text-jul-muted">v{version}</span>}
+                {version && version !== "dev" && <span className="text-xs text-jul-muted">v{version}</span>}
               </div>
             )}
             <button

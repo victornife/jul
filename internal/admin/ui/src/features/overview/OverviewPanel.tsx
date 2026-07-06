@@ -3,12 +3,21 @@
  * SPDX-License-Identifier: agpl
  */
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchOverview, type FeatureStatus, type TrafficSources } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
 import { PanelError } from "@/components/PanelError.tsx";
-import { Loading } from "@/components/ui.tsx";
+import { Loading, Modal } from "@/components/ui.tsx";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
+
+// Compact a large number into human-readable SI form (e.g., 1,234,567 → 1.2 M).
+function compactNumber(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)} B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)} k`;
+  return n.toLocaleString();
+}
 
 // Group status rows by their `group` field.
 function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
@@ -50,13 +59,18 @@ function HealthChip({
   label,
   value,
   tone,
+  tooltip,
 }: {
   readonly label: string;
   readonly value: string;
   readonly tone: Tone;
+  readonly tooltip?: string;
 }) {
   return (
-    <div className={`rounded-lg border px-4 py-3 ${TONE_CLASS[tone]}`}>
+    <div
+      className={`rounded-lg border px-4 py-3 ${TONE_CLASS[tone]}`}
+      title={tooltip}
+    >
       <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{label}</div>
       <div className="mt-1 text-sm font-semibold">{value}</div>
     </div>
@@ -74,13 +88,13 @@ function MetricCard({
   readonly unit?: string;
   readonly subtext?: string;
 }) {
+  const display = typeof value === "number" ? compactNumber(value) : value;
+  const raw = typeof value === "number" ? value.toLocaleString() : value;
   return (
-    <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+    <div className="rounded-lg border border-jul-border bg-jul-surface p-4" title={`${label}: ${raw}`}>
       <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">{label}</div>
       <div className="mt-2 flex items-baseline gap-2">
-        <div className="text-2xl font-bold text-jul-text">
-          {typeof value === "number" ? value.toLocaleString() : value}
-        </div>
+        <div className="text-2xl font-bold text-jul-text">{display}</div>
         {unit && <div className="text-sm text-jul-muted">{unit}</div>}
       </div>
       {subtext && <div className="mt-1 text-xs text-jul-muted">{subtext}</div>}
@@ -121,7 +135,7 @@ function TopList({
               <span className="flex-1 truncate font-mono text-xs text-jul-text" title={key}>
                 {key}
               </span>
-              <span className="text-xs text-jul-muted">{Math.round(count).toLocaleString()}</span>
+              <span className="text-xs text-jul-muted">{compactNumber(Math.round(count))}</span>
             </li>
           ))}
         </ul>
@@ -190,6 +204,8 @@ export function OverviewPanel() {
 
   const history = useMetricsHistory(data?.stats);
 
+  const [activeMetric, setActiveMetric] = useState<{ name: string; data: number[]; color: string } | null>(null);
+
   if (isLoading) {
     return <Loading label="Loading overview…" />;
   }
@@ -205,7 +221,7 @@ export function OverviewPanel() {
   // degraded / action needed" at a glance; details live in the grids below.
   const errRate = stats?.errorRate ?? 0;
   const p95 = stats?.latencyP95Ms ?? 0;
-  const summary: Array<{ label: string; value: string; tone: Tone }> = [];
+  const summary: Array<{ label: string; value: string; tone: Tone; tooltip?: string }> = [];
   if (stats?.available) {
     summary.push({
       label: "Traffic",
@@ -216,21 +232,26 @@ export function OverviewPanel() {
       label: "Errors (5xx)",
       value: `${(errRate * 100).toFixed(1)}%`,
       tone: errRate >= 0.05 ? "down" : errRate > 0 ? "warn" : "ok",
+      tooltip: "Error thresholds: < 0% = OK, > 0% = Warn, ≥ 5% = Down",
     });
     summary.push({
       label: "Latency p95",
       value: `${p95.toFixed(0)} ms`,
       tone: p95 >= 1000 ? "down" : p95 >= 250 ? "warn" : "ok",
+      tooltip: "Latency thresholds: < 250 ms = OK, 250–999 ms = Warn, ≥ 1000 ms = Down",
     });
   }
   // Backend health from the Upstreams status group (counts only; coarse tone).
   const upstreamRows = data.status.filter((r) => r.group === "Upstreams");
   if (upstreamRows.length > 0) {
+    const healthyCount = upstreamRows.filter((r) => r.active).length;
+    const unhealthyCount = upstreamRows.filter((r) => !r.active).length;
     const anyInactive = upstreamRows.some((r) => !r.active);
     summary.push({
       label: "Backends",
       value: anyInactive ? "attention" : "healthy",
       tone: anyInactive ? "warn" : "ok",
+      tooltip: `${healthyCount} healthy / ${unhealthyCount} unhealthy`,
     });
   }
   // Certificate risk from the Security group detail text, if present.
@@ -307,7 +328,7 @@ export function OverviewPanel() {
       {summary.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {summary.map((s) => (
-            <HealthChip key={s.label} label={s.label} value={s.value} tone={s.tone} />
+            <HealthChip key={s.label} label={s.label} value={s.value} tone={s.tone} tooltip={s.tooltip ?? ""} />
           ))}
         </div>
       )}
@@ -432,10 +453,15 @@ export function OverviewPanel() {
           {history.requestsPerSec.length > 0 && (
             <div className="space-y-4 pt-2">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                2-Minute Trends
+                2-Minute Trends (click for detail)
               </h3>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                <div
+                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
+                  role="button"
+                  title="Open request rate detail"
+                  onClick={() => setActiveMetric({ name: "Request Rate", data: history.requestsPerSec, color: "rgb(34, 197, 94)" })}
+                >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Request Rate Trend
                   </div>
@@ -453,7 +479,12 @@ export function OverviewPanel() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                <div
+                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
+                  role="button"
+                  title="Open error rate detail"
+                  onClick={() => setActiveMetric({ name: "Error Rate", data: history.errorRate, color: "rgb(239, 68, 68)" })}
+                >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Error Rate Trend
                   </div>
@@ -471,7 +502,12 @@ export function OverviewPanel() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                <div
+                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
+                  role="button"
+                  title="Open P95 latency detail"
+                  onClick={() => setActiveMetric({ name: "P95 Latency", data: history.latencyP95, color: "rgb(59, 130, 246)" })}
+                >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     P95 Latency Trend
                   </div>
@@ -489,7 +525,12 @@ export function OverviewPanel() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                <div
+                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
+                  role="button"
+                  title="Open in-flight detail"
+                  onClick={() => setActiveMetric({ name: "In-flight Requests", data: history.inFlight, color: "rgb(234, 179, 8)" })}
+                >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     In-flight Trend
                   </div>
@@ -507,7 +548,12 @@ export function OverviewPanel() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                <div
+                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
+                  role="button"
+                  title="Open average latency detail"
+                  onClick={() => setActiveMetric({ name: "Avg Latency", data: history.latencyAvg, color: "rgb(14, 165, 233)" })}
+                >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Avg Latency Trend
                   </div>
@@ -525,7 +571,12 @@ export function OverviewPanel() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-jul-border bg-jul-surface p-4">
+                <div
+                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
+                  role="button"
+                  title="Open cache hit ratio detail"
+                  onClick={() => setActiveMetric({ name: "Cache Hit Ratio", data: history.cacheHitRatio, color: "rgb(168, 85, 247)" })}
+                >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Cache Hit Ratio Trend
                   </div>
@@ -563,6 +614,25 @@ export function OverviewPanel() {
             ))}
           </div>
         </div>
+      )}
+
+      {activeMetric && (
+        <Modal title={activeMetric.name} onClose={() => setActiveMetric(null)}>
+          <div className="h-64 w-full">
+            <Sparkline
+              data={activeMetric.data}
+              height={256}
+              width={600}
+              color={activeMetric.color}
+              className="w-full"
+            />
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-jul-muted">
+            <div>Min: {Math.min(...activeMetric.data).toFixed(2)}</div>
+            <div>Avg: {(activeMetric.data.reduce((a, b) => a + b, 0) / activeMetric.data.length).toFixed(2)}</div>
+            <div>Max: {Math.max(...activeMetric.data).toFixed(2)}</div>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -14,6 +14,7 @@ export function Sparkline({
   strokeWidth = 2,
   color = "currentColor",
   className = "",
+  onClick,
 }: {
   readonly data: number[];
   readonly height?: number;
@@ -21,6 +22,7 @@ export function Sparkline({
   readonly strokeWidth?: number;
   readonly color?: string;
   readonly className?: string;
+  readonly onClick?: () => void;
 }) {
   if (data.length < 2) {
     return (
@@ -63,10 +65,11 @@ export function Sparkline({
     <svg
       width={width}
       height={height}
-      className={className}
+      className={`cursor-pointer ${className}`}
       viewBox={`0 0 ${String(width)} ${String(height)}`}
       preserveAspectRatio="none"
       style={{ display: "block" }}
+      onClick={onClick}
     >
       <polyline
         points={points.join(" ")}
@@ -76,6 +79,19 @@ export function Sparkline({
         strokeLinecap="round"
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
+      />
+      <circle
+        cx={width / 2}
+        cy={height / 2}
+        r={height / 2}
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+        cursor="pointer"
+        onClick={onClick}
       />
     </svg>
   );

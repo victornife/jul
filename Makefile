@@ -3,7 +3,7 @@
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
-	go build -o jul ./cmd/jul
+	go build -ldflags "-X main.version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o jul ./cmd/jul
 
 test:
 	go test ./...
