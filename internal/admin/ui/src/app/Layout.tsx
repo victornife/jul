@@ -4,7 +4,7 @@
  */
 
 import { useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTheme, type ThemePreference } from "@/lib/theme.ts";
 import { usePersistentState, resetPreferences } from "@/lib/usePersistentState.ts";
@@ -12,7 +12,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
 import { openCommandPalette } from "@/app/commandPaletteBus.ts";
-import { fetchOverview } from "@/api/client.ts";
+import { fetchOverview, type CertRisk } from "@/api/client.ts";
 
 type NavLayout = "top" | "side";
 
@@ -88,7 +88,8 @@ const COMMANDS: readonly CommandItem[] = [
 ];
 
 function isActive(navTo: string, pathname: string, exact = false): boolean {
-  return exact ? pathname === navTo : pathname.startsWith(navTo);
+	const re = new RegExp(`^${navTo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+	return exact ? pathname === navTo : re.test(pathname);
 }
 
 const THEME_LABEL: Record<ThemePreference, string> = {
@@ -364,6 +365,44 @@ function NavLinks({
   );
 }
 
+// CertAlertBanner shows a persistent alert at the top of every page when
+// certificates are expired or expiring soon. It is dismissible per session.
+function CertAlertBanner({ certRisk }: { readonly certRisk: CertRisk | undefined }) {
+	const navigate = useNavigate();
+	const [dismissed, setDismissed] = useState(false);
+
+	if (dismissed || !certRisk) return null;
+
+	let text: string;
+	let tone = "";
+	if (certRisk.expired > 0) {
+		text = `${certRisk.expired} certificate${certRisk.expired > 1 ? "s" : ""} expired`;
+		if (certRisk.expiring_soon > 0) {
+			text += `, ${certRisk.expiring_soon} expiring ≤ 7d`;
+		}
+		tone = "bg-jul-danger/15 text-jul-danger border-jul-danger/40";
+	} else if (certRisk.expiring_soon > 0) {
+		text = `${certRisk.expiring_soon} certificate${certRisk.expiring_soon > 1 ? "s" : ""} expiring within 7d`;
+		tone = "bg-jul-warning/15 text-jul-warning border-jul-warning/40";
+	} else if (certRisk.errors > 0) {
+		text = `${certRisk.errors} certificate${certRisk.errors > 1 ? "s" : ""} with no live data`;
+		tone = "bg-jul-warning/15 text-jul-warning border-jul-warning/40";
+	} else {
+		return null;
+	}
+
+	return (
+		<div className={`border-b ${tone} px-6 py-2 text-xs font-medium flex items-center justify-between`} role="alert">
+			<span>
+				{text}. <button className="underline" onClick={() => navigate("/tls")}>Review →</button>
+			</span>
+			<button type="button" onClick={() => setDismissed(true)} className="text-xs opacity-60 hover:opacity-100" aria-label="Dismiss alert">
+				✕
+			</button>
+		</div>
+	);
+}
+
 export function Layout() {
   const loc = useLocation();
   const [layout, setLayout] = usePersistentState<NavLayout>("nav_layout", "top", isNavLayout);
@@ -376,6 +415,7 @@ export function Layout() {
   });
   const product = overview?.product ?? "Jul.IA Console";
   const version = overview?.version ?? "";
+  const certRisk = overview?.cert_risk;
 
   const controlsTop = (
     <div className="flex items-center gap-2">
@@ -442,6 +482,7 @@ export function Layout() {
           {controlsSide}
         </aside>
         <main className="flex-1 p-6">
+          <CertAlertBanner certRisk={certRisk} />
           <Outlet />
         </main>
         <footer className="px-6 py-2 text-[10px] text-jul-muted">
@@ -462,6 +503,7 @@ export function Layout() {
           {controlsTop}
         </div>
       </header>
+      <CertAlertBanner certRisk={certRisk} />
       <main className="flex-1 overflow-auto p-6">
         <Outlet />
       </main>
