@@ -69,8 +69,4 @@ require (
 	rsc.io/binaryregexp v0.2.0 // indirect
 )
 
-// TODO(ADR-0008): gofast@v0.8.0 imports golang.org/x/tools/godoc/vfs, which was removed in x/tools
-// v0.30.0+. Transitive deps (x/text) pull x/tools v0.40.0, so pin x/tools to the last
-// version that still ships godoc/vfs. Nothing in this module needs x/tools at runtime
-// beyond gofast's vfs use; drop this replace once gofast is upgraded or replaced.
-replace golang.org/x/tools => golang.org/x/tools v0.6.0
+replace github.com/yookoala/gofast => ./third_party/gofast
