@@ -1,0 +1,250 @@
+# Track 2 burn-in config — Phase 2A consolidated (features #1-5 + #8)
+# Tests: gRPC transcoding + gRPC passthrough + service discovery (DNS)
+#        + secrets + zero-config + WASM plugins
+#        + existing: TLS/mTLS + auth + cache + rate-limit + WAF + compression + admin
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/burn-in-backend.go        (HTTP backend :8081)
+#   Window 2: go run scripts/grpc-echo-server.go       (gRPC backend :50051, optional)
+#   Window 3: .\jul.exe -config burn-in-phase2a.toml
+#   Window 4: go run scripts/burn-in-load.go -duration 5m -workers 50 -phase2a
+#
+# Environment variables needed for secrets soak:
+#   $env:JUL_ADMIN_TOKEN = "burnintoken"
+#   $env:JUL_JWT_SECRET  = "jwtsecretvalue"
+
+[global]
+log_level = "warn"
+
+[observability]
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "${env:JUL_ADMIN_TOKEN}"
+
+[compression]
+enabled = true
+encoders = ["gzip", "br", "zstd"]
+min_size = "8b"
+types = ["application/json", "text/html", "application/x-javascript", "text/plain", "application/javascript", "text/xml", "application/xml"]
+
+[cache]
+enabled = true
+memory_max_size = "8MB"
+disk_path = "jul-data/cache-disk"
+disk_max_size = "64MB"
+default_ttl = "10s"
+stale_while_revalidate = "5s"
+stale_if_error = "30s"
+
+[rate_limit]
+enabled = true
+key = "ip"
+rate = 150
+burst = 300
+max_conns = 1024
+
+[waf]
+enabled = true
+crs_enabled = true
+mode = "block"
+block_status = 403
+paranoia = 1
+request_body_limit = "128kb"
+response_body_check = false
+
+# ---------------------------------------------------------------------------
+# WASM plugins (feature #8)
+# ---------------------------------------------------------------------------
+[plugins.header-inject]
+path = "testdata/plugins/header-inject.wasm"
+type = "middleware"
+config = { header = "X-Soak-Plugin", value = "header-inject" }
+
+[plugins.kv-counter]
+path = "testdata/plugins/kv-counter.wasm"
+kv = true
+
+[plugins.request-block]
+path = "testdata/plugins/request-block.wasm"
+type = "handler"
+
+# ---------------------------------------------------------------------------
+# Upstream pools: static backend + service discovery (feature #3)
+# ---------------------------------------------------------------------------
+[[upstreams]]
+name = "backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:8081"]
+  [upstreams.health_check]
+  enabled = true
+  type = "http"
+  path = "/healthz"
+  interval = "5s"
+  timeout = "2s"
+  healthy_threshold = 1
+  unhealthy_threshold = 3
+  expect_status = [200]
+
+# DNS discovery soak: resolves 127.0.0.1 explicitly (localhost may yield ::1)
+[[upstreams]]
+name = "dns-backend"
+strategy = "round_robin"
+  [upstreams.discovery]
+  type = "dns"
+  target = "127.0.0.1:8081"
+  refresh = "15s"
+
+# ---------------------------------------------------------------------------
+# HTTP server (port 8080): canonical proxy + plugins + static
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost"]
+plugins = ["header-inject"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "testdata/www"
+  try_files = ["$uri", "$uri/", "/index.html"]
+
+  # Normal API path: cache + rate-limit + WAF + auth + compress + WASM (kv-counter)
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://backend"
+  cache = true
+  plugins = ["kv-counter"]
+    [servers.locations.auth.basic]
+    file = "testdata/htpasswd"
+    realm = "Burn-in API"
+
+  # Baseline path: no auth, no rate-limit, no WAF, no cache
+  [[servers.locations]]
+  match = { type = "prefix", path = "/baseline/" }
+  proxy_pass = "http://backend"
+    [servers.locations.rate_limit]
+    enabled = false
+    [servers.locations.waf]
+    enabled = false
+
+  # No-cache path: auth + rate-limit + WAF, no cache
+  [[servers.locations]]
+  match = { type = "prefix", path = "/nocache/" }
+  proxy_pass = "http://backend"
+  cache = false
+    [servers.locations.auth.basic]
+    file = "testdata/htpasswd"
+    realm = "Burn-in NoCache"
+
+  # Admin path: auth only, no cache, no rate-limit, no WAF
+  [[servers.locations]]
+  match = { type = "prefix", path = "/admin/" }
+  proxy_pass = "http://backend"
+    [servers.locations.auth.basic]
+    file = "testdata/htpasswd"
+    realm = "Burn-in Admin"
+    [servers.locations.rate_limit]
+    enabled = false
+    [servers.locations.waf]
+    enabled = false
+
+  # Service discovery path (feature #3): traffic via DNS-discovered upstream
+  [[servers.locations]]
+  match = { type = "prefix", path = "/discovery/" }
+  proxy_pass = "http://dns-backend"
+  cache = false
+    [servers.locations.rate_limit]
+    enabled = false
+    [servers.locations.waf]
+    enabled = false
+
+  # WASM plugin handler path (feature #8): request-block plugin
+  [[servers.locations]]
+  match = { type = "exact", path = "/blocked" }
+  plugin = "request-block"
+
+# ---------------------------------------------------------------------------
+# gRPC transcoding server (feature #1) — REST/JSON -> gRPC on :8092
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8092"
+server_names = ["grpc-transcode"]
+
+  # Uses precompiled descriptor set (testdata/grpc/api.pb) if present,
+  # otherwise falls back to reflection (which needs a running gRPC backend).
+  [[servers.locations]]
+  match = { type = "prefix", path = "/v1/" }
+    [servers.locations.grpc_transcode]
+    target = "grpc-backend"
+    descriptor_set = "testdata/grpc/api.pb"
+    preserve_proto_field_names = false
+
+# ---------------------------------------------------------------------------
+# gRPC passthrough server (feature #2) — native gRPC over h2c on :8095
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8095"
+h2c = true
+server_names = ["grpc-pass"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://grpc-backend"
+  grpc = true
+
+[[upstreams]]
+name = "grpc-backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:50051"]
+
+# ---------------------------------------------------------------------------
+# TLS server (port 8443): TLS termination + mTLS optional + secrets via file
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+  [servers.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+  min_version = "1.2"
+    [servers.tls.client_auth]
+    mode = "request"
+    ca_file = "testdata/tls/clients-ca.pem"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://backend"
+  require_client_cert = true
+    [servers.locations.auth.basic]
+    file = "testdata/htpasswd"
+    realm = "Burn-in TLS API"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
+
+# ---------------------------------------------------------------------------
+# Health server (port 8082): plain health endpoint
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["health"]
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
+    [servers.locations.rate_limit]
+    enabled = false
+    [servers.locations.waf]
+    enabled = false

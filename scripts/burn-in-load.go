@@ -58,6 +58,7 @@ func main() {
 		full         = flag.Bool("full", false, "Phase 2A: exercise ALL features simultaneously (cache+ratelimit+waf+auth+compress)")
 		clientCert   = flag.String("clientCert", "testdata/tls/client.crt", "Client certificate for mTLS")
 		clientKey    = flag.String("clientKey", "testdata/tls/client.key", "Client key for mTLS")
+		phase2a      = flag.Bool("phase2a", false, "Phase 2A: exercise transcoding + passthrough + discovery + secrets + zero-config + WASM plugins")
 	)
 	flag.Parse()
 
@@ -120,6 +121,9 @@ func main() {
 	if *waf {
 		fmt.Println("WAF mode       : enabled (benign + malicious traffic mix)")
 	}
+	if *phase2a {
+		fmt.Println("Phase 2A mode  : enabled (transcode + passthrough + discovery + secrets + zero-config + WASM)")
+	}
 
 	endTime := time.Now().Add(*duration)
 	var totalReqs, errConnReset, errTimeout, errOther, status2xx, status401, status403, status429, status5xx int64
@@ -168,6 +172,51 @@ func main() {
 						path = "/api/items"
 						url = *tlsBase + path
 					case r < 87:
+						path = "/healthz"
+						url = *tlsBase + path
+					default:
+						path = "/api/static/test"
+						url = *baseURL + path
+					}
+				} else if *phase2a {
+					// Phase 2A consolidated — features #1-5 + #8
+					// 15% /api/      (cache + rate-limit + WAF + auth + compress + WASM)
+					// 10% /baseline/ (no cache, no rate-limit, no WAF, no auth)
+					// 10% /nocache/  (no cache, rate-limit + WAF + auth + compress)
+					// 10% /static/   (static files, compress)
+					// 10% /admin/    (basic auth + compress)
+					// 10% /discovery/ (service discovery)
+					//  5% /blocked   (WASM request-block => expect non-200)
+					// 15% /api/ HTTPS (TLS + mTLS + auth + compress)
+					// 10% /healthz HTTPS (TLS health check)
+					//  5% warm hits
+					r := rand.Intn(100)
+					switch {
+					case r < 15:
+						path = "/api/items"
+						url = *baseURL + path
+					case r < 25:
+						path = "/baseline/"
+						url = *baseURL + path
+					case r < 35:
+						path = "/nocache/api/items"
+						url = *baseURL + path
+					case r < 45:
+						path = "/static/"
+						url = *baseURL + path
+					case r < 55:
+						path = "/admin/dashboard"
+						url = *baseURL + path
+					case r < 65:
+						path = "/discovery/health"
+						url = *baseURL + path
+					case r < 70:
+						path = "/blocked"
+						url = *baseURL + path
+					case r < 85:
+						path = "/api/items"
+						url = *tlsBase + path
+					case r < 95:
 						path = "/healthz"
 						url = *tlsBase + path
 					default:

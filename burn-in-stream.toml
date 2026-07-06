@@ -1,0 +1,98 @@
+# Track 2 burn-in config — L4 stream proxy isolated soak (feature #9)
+# Requires -tags stream to actually run stream listeners.
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/burn-in-backend.go      (HTTP backend :8081)
+#   Window 2: go run scripts/stream-echo-backend.go  (TCP echo :5432 backends)
+#   Window 3: .\jul.exe -config burn-in-stream.toml
+#   Window 4: go run scripts/burn-in-load.go -duration 5m -workers 20 -stream-tcp
+
+[global]
+log_level = "warn"
+log_format = "text"
+
+[observability]
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+# ---------------------------------------------------------------------------
+# Coexisting HTTP server (port 8080)
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["example.com"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 204
+
+# ---------------------------------------------------------------------------
+# TCP load balancing (port 15432 -> 55432 / 55433)
+# ---------------------------------------------------------------------------
+[[stream]]
+listen = "127.0.0.1:15432"
+proxy_pass = "postgres_pool"
+connect_timeout = "5s"
+idle_timeout = "1h"
+
+# ---------------------------------------------------------------------------
+# TLS SNI routing (passthrough) — port 8443
+# ---------------------------------------------------------------------------
+[[stream]]
+listen = "127.0.0.1:8443"
+  [stream.sni_routes]
+  "api.example.com" = "api_pool"
+  "db.example.com"  = "fallback_db"
+  "*"               = "postgres_pool"
+
+# ---------------------------------------------------------------------------
+# UDP relay (DNS-like) — port 15353
+# ---------------------------------------------------------------------------
+[[stream]]
+listen = "127.0.0.1:15353"
+protocol = "udp"
+proxy_pass = "dns_pool"
+idle_timeout = "30s"
+
+# ---------------------------------------------------------------------------
+# TCP with PROXY protocol emitted outbound — port 16379
+# ---------------------------------------------------------------------------
+[[stream]]
+listen = "127.0.0.1:16379"
+proxy_pass = "127.0.0.1:16380"
+proxy_protocol = "out"
+
+# ---------------------------------------------------------------------------
+# Upstream pools
+# ---------------------------------------------------------------------------
+[[upstreams]]
+name = "postgres_pool"
+strategy = "least_conn"
+max_fails = 3
+fail_timeout = "10s"
+servers = ["127.0.0.1:55432", "127.0.0.1:55433"]
+
+[[upstreams]]
+name = "api_pool"
+servers = ["127.0.0.1:19443"]
+
+[[upstreams]]
+name = "fallback_db"
+servers = ["127.0.0.1:19444"]
+
+[[upstreams]]
+name = "dns_pool"
+servers = ["127.0.0.1:25353"]

@@ -1,0 +1,67 @@
+# Track 2 burn-in config — HTTP/3 isolated soak (feature #7)
+# Requires -tags http3 to actually serve HTTP/3 (QUIC).
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
+#
+# Run:
+#   Window 1: .\jul.exe -config burn-in-http3.toml
+#   Window 2: go run scripts/burn-in-load.go -duration 5m -workers 20 -http3
+
+[global]
+log_level = "warn"
+
+[observability]
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+# HTTPS server with HTTP/3 (QUIC) enabled on :8443
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+
+  [servers.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+  min_version = "1.3"
+
+  [servers.http3]
+  enabled = true
+  alt_svc_max_age = 86400
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/health" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/" }
+  return = 200
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://backend"
+
+# Upstream backend pool
+[[upstreams]]
+name = "backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:8081"]
+
+# Plain health server on port 8082 (for load-gen health checks)
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["health"]
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
