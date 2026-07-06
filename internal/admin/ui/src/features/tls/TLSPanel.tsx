@@ -17,6 +17,7 @@ import { TLSEditor } from "@/features/tls/TLSEditor.tsx";
 import { MTLSEditor } from "@/features/tls/MTLSEditor.tsx";
 import { mtlsServerSummary } from "@/lib/mtls.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
+import { usePersistentState } from "@/lib/usePersistentState.ts";
 
 function daysLeftColor(days: number | undefined): string {
   if (days === undefined) return "text-jul-muted";
@@ -27,9 +28,11 @@ function daysLeftColor(days: number | undefined): string {
 
 function CertCard({ cert }: { readonly cert: CertProjection }) {
   const daysLeft = cert.days_left;
+  const hasError = cert.error && cert.error.length > 0;
+  const cardBorder = hasError ? "border-jul-danger/60" : "border-jul-border";
 
   return (
-    <div className="rounded-lg border border-jul-border bg-jul-surface p-4 space-y-3">
+    <div className={`rounded-lg border ${cardBorder} bg-jul-surface p-4 space-y-3`}>
       {/* server names */}
       <div className="flex flex-wrap items-center gap-2">
         {cert.server_names.map((sn) => (
@@ -68,6 +71,12 @@ function CertCard({ cert }: { readonly cert: CertProjection }) {
             <dd className={`col-span-1 sm:col-span-2 font-semibold ${daysLeftColor(daysLeft)}`}>
               {daysLeft}
             </dd>
+          </>
+        )}
+        {hasError && (
+          <>
+            <dt className="text-jul-danger">Error</dt>
+            <dd className="col-span-1 sm:col-span-2 text-jul-danger">{cert.error}</dd>
           </>
         )}
       </dl>
@@ -219,8 +228,81 @@ function MTLSSection() {
   );
 }
 
+function CertTable({ certs }: { readonly certs: CertProjection[] }) {
+  const [sortBy, setSortBy] = useState<"days_left" | "source">("days_left");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const sorted = [...certs].sort((a, b) => {
+    if (sortBy === "days_left") {
+      const av = a.days_left ?? Number.POSITIVE_INFINITY;
+      const bv = b.days_left ?? Number.POSITIVE_INFINITY;
+      return sortDir === "asc" ? av - bv : bv - av;
+    }
+    return sortDir === "asc" ? a.source.localeCompare(b.source) : b.source.localeCompare(a.source);
+  });
+
+  function toggle(col: "days_left" | "source") {
+    if (sortBy === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(col);
+      setSortDir("asc");
+    }
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-jul-border">
+      <table className="w-full text-xs">
+        <thead className="bg-jul-surface text-jul-muted">
+          <tr>
+            <th className="px-4 py-2 text-left font-semibold">Server Names</th>
+            <th className="px-4 py-2 text-left font-semibold">Source</th>
+            <th className="px-4 py-2 text-left font-semibold">Issuer</th>
+            <th className="px-4 py-2 text-left font-semibold">Expires</th>
+            <th className="px-4 py-2 text-left font-semibold cursor-pointer select-none" onClick={() => toggle("days_left")}>
+              Days left {sortBy === "days_left" ? (sortDir === "asc" ? "↑" : "↓") : ""}
+            </th>
+            <th className="px-4 py-2 text-left font-semibold">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((cert) => {
+            const dl = cert.days_left;
+            const expired = dl !== undefined && dl < 0;
+            const warn = dl !== undefined && dl <= 7;
+            const hasError = cert.error && cert.error.length > 0;
+            const statusClass = expired || hasError
+              ? "text-jul-danger"
+              : warn
+                ? "text-jul-warning"
+                : "text-jul-success";
+            const statusText = hasError ? "error" : expired ? "expired" : warn ? "renew soon" : "ok";
+            return (
+              <tr key={cert.server_names.join(",")} className="border-t border-jul-border hover:bg-jul-surface/50">
+                <td className="px-4 py-2 font-mono text-jul-text">{cert.server_names.join(", ")}</td>
+                <td className="px-4 py-2">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    cert.source === "acme" ? "bg-jul-accent/15 text-jul-accent" : "bg-jul-border text-jul-muted"
+                  }`}>
+                    {cert.source}
+                  </span>
+                </td>
+                <td className="px-4 py-2 font-mono text-jul-text">{cert.issuer || "—"}</td>
+                <td className="px-4 py-2 font-mono text-jul-text">{cert.not_after || "—"}</td>
+                <td className={`px-4 py-2 font-semibold ${daysLeftColor(dl)}`}>{dl ?? "—"}</td>
+                <td className={`px-4 py-2 font-semibold ${statusClass}`}>{statusText}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function TLSPanel() {
   const [creating, setCreating] = useState(false);
+  const [viewMode, setViewMode] = usePersistentState<"cards" | "table">("tls_view", "cards");
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["tls"],
     queryFn: fetchTLS,
@@ -237,20 +319,38 @@ export function TLSPanel() {
         title="TLS & Certificates"
         description="Secure a listener with a certificate — automatically via ACME / Let's Encrypt, or with your own cert and key. The guided editor builds a TLS server block and routes it through the validated apply pipeline."
         actions={
-          <Button
-            variant="primary"
-            onClick={() => {
-              setCreating(true);
-            }}
-          >
-            New TLS server
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-md border border-jul-border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setViewMode("cards")}
+                className={`px-3 py-1 text-xs ${viewMode === "cards" ? "bg-jul-accent text-white" : "bg-jul-surface text-jul-text hover:bg-jul-border"}`}
+              >
+                Cards
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={`px-3 py-1 text-xs ${viewMode === "table" ? "bg-jul-accent text-white" : "bg-jul-surface text-jul-text hover:bg-jul-border"}`}
+              >
+                Table
+              </button>
+            </div>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setCreating(true);
+              }}
+            >
+              New TLS server
+            </Button>
+          </div>
         }
       />
 
       {expiringSoon.length > 0 && (
         <div className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm text-jul-warning">
-          ⚠ {expiringSoon.length} certificate{expiringSoon.length > 1 ? "s" : ""} expiring within 30
+          {expiringSoon.length} certificate{expiringSoon.length > 1 ? "s" : ""} expiring within 30
           days.
         </div>
       )}
@@ -259,12 +359,14 @@ export function TLSPanel() {
         <p className="text-jul-muted text-sm">
           No TLS-enabled server blocks. Use “New TLS server” to add one.
         </p>
-      ) : (
+      ) : viewMode === "cards" ? (
         <div className="grid gap-4 sm:grid-cols-2">
           {data.map((cert, i) => (
             <CertCard key={`${cert.server_names.join(",")}-${String(i)}`} cert={cert} />
           ))}
         </div>
+      ) : (
+        <CertTable certs={data} />
       )}
 
       <MTLSSection />

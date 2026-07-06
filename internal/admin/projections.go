@@ -186,6 +186,7 @@ type CertProjection struct {
 	Issuer      string   `json:"issuer,omitempty"`
 	NotAfter    string   `json:"not_after,omitempty"`
 	DaysLeft    int      `json:"days_left,omitempty"`
+	Error       string   `json:"error,omitempty"`
 }
 
 // SecurityProjection is the security posture for the Security panel.
@@ -660,6 +661,9 @@ func projectTLS(c *config.Config, live []CertStatus) []CertProjection {
 				if !l.NotAfter.IsZero() {
 					cp.NotAfter = l.NotAfter.UTC().Format(time.RFC3339)
 					cp.DaysLeft = int(math.Round(l.NotAfter.Sub(now).Hours() / 24))
+				}
+				if l.Error != "" {
+					cp.Error = l.Error
 				}
 			}
 		}

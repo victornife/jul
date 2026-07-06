@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { fetchOverview, type FeatureStatus, type TrafficSources } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
 import { PanelError } from "@/components/PanelError.tsx";
@@ -60,16 +61,20 @@ function HealthChip({
   value,
   tone,
   tooltip,
+  onClick,
 }: {
   readonly label: string;
   readonly value: string;
   readonly tone: Tone;
   readonly tooltip?: string;
+  readonly onClick?: (() => void) | undefined;
 }) {
   return (
     <div
-      className={`rounded-lg border px-4 py-3 ${TONE_CLASS[tone]}`}
+      className={`rounded-lg border px-4 py-3 ${TONE_CLASS[tone]} ${onClick ? "cursor-pointer" : ""}`}
       title={tooltip}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
     >
       <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{label}</div>
       <div className="mt-1 text-sm font-semibold">{value}</div>
@@ -196,6 +201,7 @@ function StatusGroup({ name, rows }: { readonly name: string; readonly rows: Fea
 }
 
 export function OverviewPanel() {
+  const navigate = useNavigate();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["overview"],
     queryFn: fetchOverview,
@@ -221,7 +227,7 @@ export function OverviewPanel() {
   // degraded / action needed" at a glance; details live in the grids below.
   const errRate = stats?.errorRate ?? 0;
   const p95 = stats?.latencyP95Ms ?? 0;
-  const summary: Array<{ label: string; value: string; tone: Tone; tooltip?: string }> = [];
+  const summary: Array<{ label: string; value: string; tone: Tone; tooltip?: string; onClick?: () => void }> = [];
   if (stats?.available) {
     summary.push({
       label: "Traffic",
@@ -282,6 +288,7 @@ export function OverviewPanel() {
       value,
       tone,
       tooltip: `${cr.count} certs — ${detailText}`,
+      onClick: () => navigate("/tls"),
     });
   }
 
@@ -349,7 +356,7 @@ export function OverviewPanel() {
       {summary.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {summary.map((s) => (
-            <HealthChip key={s.label} label={s.label} value={s.value} tone={s.tone} tooltip={s.tooltip ?? ""} />
+            <HealthChip key={s.label} label={s.label} value={s.value} tone={s.tone} tooltip={s.tooltip ?? ""} {...(s.onClick ? { onClick: s.onClick } : {})} />
           ))}
         </div>
       )}

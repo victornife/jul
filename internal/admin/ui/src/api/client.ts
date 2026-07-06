@@ -450,6 +450,7 @@ export const CertProjectionSchema = z.object({
   issuer: z.string().optional(),
   not_after: z.string().optional(),
   days_left: z.number().optional(),
+  error: z.string().optional(),
 });
 export type CertProjection = z.infer<typeof CertProjectionSchema>;
 
