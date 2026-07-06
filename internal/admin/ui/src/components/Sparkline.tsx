@@ -80,19 +80,6 @@ export function Sparkline({
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
       />
-      <circle
-        cx={width / 2}
-        cy={height / 2}
-        r={height / 2}
-        fill="none"
-        stroke={color}
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
-        cursor="pointer"
-        onClick={onClick}
-      />
     </svg>
   );
 }

@@ -409,7 +409,7 @@ export function Tooltip({
       {children}
       <span
         role="tooltip"
-        className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-jul-border bg-jul-surface px-2 py-1 text-xs text-jul-text opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
+        className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-jul-border bg-jul-bg px-2 py-1 text-xs text-jul-text opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
       >
         {text}
       </span>
@@ -446,7 +446,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative z-50 w-full max-w-lg space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5 shadow-xl outline-none"
+        className="relative z-50 h-3/4 w-full max-w-4xl space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5 shadow-xl outline-none"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-jul-text">{title}</h2>
