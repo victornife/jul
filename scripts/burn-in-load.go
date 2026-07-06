@@ -59,6 +59,7 @@ func main() {
 		clientCert   = flag.String("clientCert", "testdata/tls/client.crt", "Client certificate for mTLS")
 		clientKey    = flag.String("clientKey", "testdata/tls/client.key", "Client key for mTLS")
 		phase2a      = flag.Bool("phase2a", false, "Phase 2A: exercise transcoding + passthrough + discovery + secrets + zero-config + WASM plugins")
+		http3        = flag.Bool("http3", false, "HTTP/3 isolated soak: exercise / and /health on HTTPS (no backend)")
 	)
 	flag.Parse()
 
@@ -222,6 +223,19 @@ func main() {
 					default:
 						path = "/api/static/test"
 						url = *baseURL + path
+					}
+				} else if *http3 {
+					// HTTP/3 isolated soak — paths that exist in burn-in-http3.toml
+					// No backend required for / and /health
+					// https://localhost:8443 only (TLS + HTTP/3)
+					r := rand.Intn(100)
+					switch {
+					case r < 60:
+						path = "/"
+						url = *tlsBase + path
+					default:
+						path = "/health"
+						url = *tlsBase + path
 					}
 				} else if *cache {
 					// Cache traffic pattern:

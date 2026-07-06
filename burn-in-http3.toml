@@ -5,8 +5,12 @@
 #   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
 #
 # Run:
-#   Window 1: .\jul.exe -config burn-in-http3.toml
-#   Window 2: go run scripts/burn-in-load.go -duration 5m -workers 20 -http3
+#   Window 1: $env:JUL_ADMIN_TOKEN="burnintoken"; .\jul.exe -config burn-in-http3.toml
+#   Window 2: go run scripts/burn-in-load.go -duration 1h -workers 20 -http3
+#
+# Notes:
+#   - The -http3 load-test mode does NOT require a backend (tested against / and /health only).
+#   - All traffic goes to https://localhost:8443 (TLS). Port 8443 is also the HTTP/3 QUIC endpoint.
 
 [global]
 log_level = "warn"
