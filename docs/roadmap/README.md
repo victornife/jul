@@ -24,8 +24,7 @@ Alpha · **Beta** · **GA** · Deprecated. *Implemented ≠ GA:* a shipped featu
 **Beta** until it meets the full GA bar. The [GA push](../ga-push.md) is hardening
 shipped features to GA; the soak test is a post-GA gate per
 [ADR 0005](../adr/0005-soak-post-ga-gate.md). All Year 1 and Year 2 shipped
-features have now reached **GA — soak pending**; the only remaining work is the
-**soak test** (post-GA gate) and any new features from the backlog.
+features have now reached **GA**; the soak test post-GA gate is **fully closed**.
 
 ---
 
@@ -33,39 +32,37 @@ features have now reached **GA — soak pending**; the only remaining work is th
 
 ### Year 1 — Credibility & effortlessness ✅
 
-Shipped and **all features GA — soak pending** (the soak test is a post-GA gate
-per [ADR 0005](../adr/0005-soak-post-ga-gate.md)).
+Shipped and **all features GA**.
 
 | ID | Feature | Maturity |
 | --- | --- | --- |
-| Y1-01 | Automatic HTTPS (ACME: HTTP-01, TLS-ALPN-01, OCSP stapling) | **GA — soak pending** |
-| Y1-02 | Response compression (gzip core; `brotli`/`zstd` tags) | **GA — soak pending** |
-| Y1-03 | Rate limiting + connection limiting | **GA — soak pending** |
-| Y1-04 | Authentication (Basic, bearer/JWT, forward-auth) | **GA — soak pending** |
-| Y1-05 | Active health checks (HTTP/TCP probes) | **GA — soak pending** |
-| Y1-06 | gRPC ↔ JSON transcoding (MVP, `grpc` tag) | **GA — soak pending** |
-| Y1-07 | Console v1 → v2 (web dashboard, `console` tag) | **GA — soak pending** |
-| Y1-08 | Zero-config + `jul lint` | **GA — soak pending** |
-| Y1-09 | NGINX config importer (`importer` tag) | **GA — soak pending** |
-| Y1-10 | OpenTelemetry tracing + access-log sinks (`otel` tag) | **GA — soak pending** |
-| Y1-11 | HTTP/3 over QUIC (`http3` tag) | **GA — soak pending** |
+| Y1-01 | Automatic HTTPS (ACME: HTTP-01, TLS-ALPN-01, OCSP stapling) | **GA** |
+| Y1-02 | Response compression (gzip core; `brotli`/`zstd` tags) | **GA** |
+| Y1-03 | Rate limiting + connection limiting | **GA** |
+| Y1-04 | Authentication (Basic, bearer/JWT, forward-auth) | **GA** |
+| Y1-05 | Active health checks (HTTP/TCP probes) | **GA** |
+| Y1-06 | gRPC ↔ JSON transcoding (MVP, `grpc` tag) | **GA** |
+| Y1-07 | Console v1 → v2 (web dashboard, `console` tag) | **GA** |
+| Y1-08 | Zero-config + `jul lint` | **GA** |
+| Y1-09 | NGINX config importer (`importer` tag) | **GA** |
+| Y1-10 | OpenTelemetry tracing + access-log sinks (`otel` tag) | **GA** |
+| Y1-11 | HTTP/3 over QUIC (`http3` tag) | **GA** |
 
 ### Year 2 — Protocol Gateway + Extensibility ✅
 
-Shipped and **all features GA — soak pending**. The only open item is the
-long-running **soak test**, reclassified to a post-GA gate per
+Shipped and **all features GA**. The post-GA soak gate is fully closed per
 [ADR 0005](../adr/0005-soak-post-ga-gate.md).
 
 | ID | Feature | Tag | Maturity |
 | --- | --- | --- | --- |
-| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | **GA — soak pending** |
-| Y2-02 | WASM plugin system (wazero) | `wasmplugins` | **GA — soak pending** |
-| Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | **GA — soak pending** |
-| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | **GA — soak pending** |
-| Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | **GA — soak pending** |
-| Y2-06 | WAF (Coraza + OWASP CRS; block/detect per-location) | `waf` | **GA — soak pending** |
-| Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | **GA — soak pending** |
-| SEC-1 | Secrets references (`env`/`file`/`secret` refs + log redaction + lint) | core | **GA — soak pending** |
+| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | **GA** |
+| Y2-02 | WASM plugin system (wazero) | `wasmplugins` | **GA** |
+| Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | **GA** |
+| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | **GA** |
+| Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | **GA** |
+| Y2-06 | WAF (Coraza + OWASP CRS; block/detect per-location) | `waf` | **GA** |
+| Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | **GA** |
+| SEC-1 | Secrets references (`env`/`file`/`secret` refs + log redaction + lint) | core | **GA** |
 
 ---
 

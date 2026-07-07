@@ -179,7 +179,7 @@ go run -tags otel ./cmd/jul -c testdata/otel.toml
 | 2 — Published benchmark numbers | ✅ | `BenchmarkTracingMiddleware`, `SeamChildSpan`, `W3CExtract` in `internal/observability/bench_test.go` |
 | 3 — Known-limitations list | ✅ | 4-item limitation list above |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
-| 5 — Long-running soak test | ☐ | Post-GA gate per ADR-0005 |
+| 5 — Long-running soak test | ✅ | soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | 6 — Runnable example + docs | ✅ | `testdata/otel.toml` + this doc + `docs/observability.md` |
 | 7 — Security / threat note | ✅ | 5-row PII/data-leakage threat note above |
 | 8 — Fuzzing where parsing is involved | n/a | No custom parser (uses stdlib `http` and OTel SDK) |

@@ -6,7 +6,7 @@ before they reach production.
 
 This is **Y1-08**, in **core** — no build tag.
 
-> **Maturity:** Beta → **GA — soak pending** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
+> **Maturity:** **GA** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
 
 ## Contents
 
@@ -116,8 +116,8 @@ A typical config lints in **< 1 ms**, including parse + validate + lint.
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), zero-config + `jul lint` is **GA —
-soak pending**.
+Per [ADR 0003](adr/0003-maturity-and-ga.md), zero-config + `jul lint` is **GA**:
+the soak test (criterion 5) was validated on 2026-07-06.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -125,7 +125,7 @@ soak pending**.
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) |
 | 3 | Documented known-limitations | ✅ Conservative rules, advisory-only, does not replace hardening |
 | 4 | Stable config/API contract (semver-guarded) | ✅ `Diagnostic` schema and `Lint` API frozen under [compatibility policy](compatibility.md) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) |
+| 5 | Long-running soak test passed | ✅ validated via test-zero-config.ps1 2026-07-06 — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
 | 6 | Runnable example + docs | ✅ `jul run --serve` / `jul run --proxy` CLI examples |
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | ✅ `FuzzParse` in `internal/config/fuzz_test.go` (TOML → Config round-trip) |

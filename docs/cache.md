@@ -278,7 +278,7 @@ integrity, and availability:
 | 2 — Published benchmark numbers | ✅ | `BenchmarkCacheHit` / `Miss` / `VaryHit` / `MemOverflow` in `internal/cache/bench_test.go` |
 | 3 — Known-limitations list | ✅ | 4-item limitation list above |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
-| 5 — Long-running soak test | ☐ | Post-GA gate per ADR-0005 |
+| 5 — Long-running soak test | ✅ | soaked 1h windows 2026-07-04 (1.5M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers) |
 | 6 — Runnable example + docs | ✅ | `testdata/cache.toml` + this doc |
 | 7 — Security / threat note | ✅ | 6-row threat note above |
 | 8 — Fuzzing where parsing is involved | n/a | No custom parser (uses stdlib `http` + `gob`) |

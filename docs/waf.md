@@ -396,10 +396,10 @@ Use the Console’s diff-and-apply flow and the config-history rollback feature
 | 2 | Published benchmark numbers | ✅ `BenchmarkWAF_*` (internal/waf/bench_test.go) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
 | 4 | Stable config/API contract (semver-guarded) | ✅ Covered by v1 freeze ([compatibility.md](compatibility.md)) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) |
+| 5 | Long-running soak test passed | ✅ soaked 1h windows 2026-07-04 (1.67M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--waf-soak-local-windows-1-hour-50-workers) |
 | 6 | Runnable example + docs | ✅ [testdata/waf.toml](../testdata/waf.toml) + this doc |
 | 7 | Security / threat note | ✅ [Threat note](#threat-note) above |
 | 8 | Fuzzing where parsing is involved | n/a — SecLang parsing is owned by Coraza (no custom parser) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status**/**Security** report *Web application firewall (WAF)* with mode + location count |
 
-The WAF is now **GA — soak pending**.
+The WAF is now **GA**.

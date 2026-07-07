@@ -186,6 +186,7 @@ Active health checks have reached **GA** against the [ADR 0003](adr/0003-maturit
 | 2. Published benchmark numbers | ✅ | Upstream `BenchmarkBalancer*` (balancer_bench_test.go) covers picker with health state |
 | 3. Known-limitations list | ✅ | Section above |
 | 4. Semver-guarded config/API contract | ✅ | Covered by v1 freeze (compatibility.md) |
+| 5. Long-running soak test | ✅ | soaked 8h windows 2026-07-04 (/healthz polled 960×, all 200) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | 6. Runnable example + docs | ✅ | `testdata/health.toml`, this doc |
 | 7. Security / threat note | ✅ | TLS skip-verify rationale in Known limitations |
 | 8. Fuzzing where parsing is involved | n/a | No custom parser (uses standard `net/http`, `net` stack) |

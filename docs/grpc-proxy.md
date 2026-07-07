@@ -181,9 +181,9 @@ re-originating the HTTP/2 stream.
 
 ## GA status
 
-Per ADR [0003](adr/0003-maturity-and-ga.md), native passthrough is **GA — soak pending** (with
-[transcoding](grpc-transcoding.md)). The soak test (criterion 5) is a post-GA
-gate per [ADR 0005](adr/0005-soak-post-ga-gate.md).
+Per ADR [0003](adr/0003-maturity-and-ga.md), native passthrough is **GA**.
+The soak test (criterion 5) was completed on 2026-07-07 and is tracked in
+[soak-evidence.md](soak-evidence.md) and [ga-push.md](ga-push.md).
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -191,13 +191,13 @@ gate per [ADR 0005](adr/0005-soak-post-ga-gate.md).
 | 2 | Published benchmark numbers | ✅ above + `grpcproxy_bench_test.go` |
 | 3 | Documented known-limitations | ✅ above |
 | 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) — tracked in [ga-push.md](ga-push.md) |
+| 5 | Long-running soak test passed | ✅ 6.8 M req, 0.0002 % err (1 h, 2026-07-07) — [soak-evidence.md](soak-evidence.md) |
 | 6 | Runnable example + docs | ✅ [examples/grpc-proxy](../examples/grpc-proxy) + this doc |
 | 7 | Security / threat note | ✅ keep the listener on loopback / front with TLS; payload never inspected |
 | 8 | Fuzzing where parsing is involved | n/a — passthrough parses no payloads (opaque forward) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** panel reports gRPC passthrough active |
 
-The one open item is the post-GA **soak test** (criterion 5).
+All GA criteria are satisfied.
 
 ## See also
 

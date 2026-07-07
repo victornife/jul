@@ -1,7 +1,6 @@
 # Core HTTP
 
-> **Maturity:** GA — soak pending (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
-> a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)). TLS termination
+> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). TLS termination
 > is documented in [tls-acme.md](tls-acme.md); client certificates in
 > [mtls.md](mtls.md).
 
@@ -278,9 +277,8 @@ go test -run '^$' -bench . -benchmem ./internal/router/ ./internal/upstream/ ./i
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), Core HTTP is **GA — soak pending**. The soak test
-(criterion 5) is a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md);
-the other eight criteria are met.
+Per [ADR 0003](adr/0003-maturity-and-ga.md), Core HTTP is **GA**. The soak test
+(criterion 5) was completed on 2026-07-04.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -288,13 +286,13 @@ the other eight criteria are met.
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) (routing, balancing, static serve) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
 | 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) — tracked in [ga-push.md](ga-push.md) |
+| 5 | Long-running soak test passed | ✅ soaked 8h windows 2026-07-04 (90.4M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | 6 | Runnable example + docs | ✅ [testdata/static.toml](../testdata/static.toml), [testdata/vhosts.toml](../testdata/vhosts.toml) + this doc |
 | 7 | Security / threat note | ✅ [Security / threat notes](#security--threat-notes) |
 | 8 | Fuzzing where parsing is involved | ✅ `FuzzHostScore`, `FuzzMatchLocation` (router), `FuzzScriptName`, `FuzzParseSocketAddress` (FastCGI) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** → *Traffic* group reports *Virtual hosts*, *Static file serving*, *Reverse proxy*, *FastCGI / uWSGI* |
 
-The one open item is the post-GA **soak test** (criterion 5).
+All GA criteria are satisfied.
 
 ## Build tags
 

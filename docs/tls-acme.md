@@ -1,7 +1,6 @@
 # TLS & automatic HTTPS (ACME)
 
-> **Maturity:** GA — soak pending (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
-> a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)). Mutual TLS
+> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). Mutual TLS
 > (client certificates) is documented separately in [mtls.md](mtls.md).
 
 Jul.IA terminates TLS for HTTP/1.1, HTTP/2, and (with the `http3` tag) HTTP/3 on
@@ -216,9 +215,8 @@ go test -run '^$' -bench 'SNICertSelection|TLSHandshakeServerAuth' -benchmem ./i
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), TLS + automatic HTTPS is **GA — soak pending**. The
-soak test (criterion 5) is a post-GA gate per
-[ADR 0005](adr/0005-soak-post-ga-gate.md); the other eight criteria are met.
+Per [ADR 0003](adr/0003-maturity-and-ga.md), TLS + automatic HTTPS is **GA**. The
+soak test (criterion 5) was completed on 2026-07-05 via Phase 2A.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -226,13 +224,13 @@ soak test (criterion 5) is a post-GA gate per
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) (`BenchmarkTLSHandshakeServerAuth`, `BenchmarkSNICertSelection`) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
 | 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) — tracked in [ga-push.md](ga-push.md) |
+| 5 | Long-running soak test passed | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | 6 | Runnable example + docs | ✅ [testdata/tls.toml](../testdata/tls.toml) + this doc |
 | 7 | Security / threat note | ✅ [Security / threat notes](#security--threat-notes) |
 | 8 | Fuzzing where parsing is involved | n/a — certificate/CA parsing is stdlib `crypto/x509`; config parsing is covered by the shared TOML/`validate` tests (no custom parser) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** panel reports *TLS* and *Automatic HTTPS (ACME)* |
 
-The one open item is the post-GA **soak test** (criterion 5).
+All GA criteria are satisfied.
 
 ## Build tags
 

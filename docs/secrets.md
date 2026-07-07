@@ -12,7 +12,7 @@ literal.
 This is **SEC-1**, in **core** — no build tag — and uses only the standard
 library.
 
-> **Maturity:** Beta (see [ADR 0003](adr/0003-maturity-and-ga.md)). `${env:}` and
+> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). `${env:}` and
 > `${file:}` cover the local secret sources today; a secret-manager backend
 > (Vault/KMS) is future work.
 
@@ -267,10 +267,8 @@ defense is: **never put secrets in the config file as literals** — always use
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), secrets references are **Beta**.
-The remaining GA gaps (excluding the post-GA soak test per
-[ADR 0005](adr/0005-soak-post-ga-gate.md)) are tracked in the
-[status matrix](status.md).
+Per [ADR 0003](adr/0003-maturity-and-ga.md), secrets references are **GA**.
+The soak test (criterion 5) was completed via Phase 2A on 2026-07-06.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -278,7 +276,7 @@ The remaining GA gaps (excluding the post-GA soak test per
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
 | 4 | Stable config/API contract (semver-guarded) | ✅ `ExpandSecrets` and `${env:}`/`${file:}` syntax frozen under [compatibility policy](compatibility.md) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) |
+| 5 | Long-running soak test passed | ✅ soaked via Phase 2A 8h windows 2026-07-06 (admin token expanded; API reachable) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | 6 | Runnable example + docs | ✅ this doc (references work in any `*.toml`) |
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | n/a — references use the TOML/config parser (Y1-08), no new parser |

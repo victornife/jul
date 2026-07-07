@@ -395,7 +395,7 @@ Run: `go test -tags wasmplugins -fuzz='FuzzPluginInvoke|FuzzHostAllowed' -fuzzti
 | ② Benchmarks | **Met** | 5 benchmarks in `internal/plugins/bench_test.go` |
 | ③ Known limitations | **Met** | 5-item list above |
 | ④ Compatibility policy | **Met** | Additive-only ABI policy, golden-pinned surface, prebuilt-guest tested; documented in [abi.md](abi.md) |
-| ⑤ Soak test | **Pending** | Tracked in [ga-push.md](ga-push.md) soak table |
+| ⑤ Soak test | **Met** | soaked via Phase 2A 8h windows 2026-07-06 (kv-counter, request-block, header-inject exercised) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | ⑥ Feature documentation | **Met** | This document + [abi.md](abi.md) +
 [configuration.md](configuration.md) |
 | ⑦ Threat model | **Met** | 7-row threat table above |

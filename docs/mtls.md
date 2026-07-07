@@ -11,8 +11,7 @@ your CA reach the backend, and the backend can authorize on *who* they are.
 mTLS is in **core** — no build tag — and uses only the standard library's
 `crypto/x509`.
 
-> **Maturity:** GA — soak pending (see [ADR 0003](adr/0003-maturity-and-ga.md); the soak test is
-> a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md)). It coexists
+> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). It coexists
 > with ACME/static server certificates; the server certificate and the client CA
 > are independent.
 
@@ -255,9 +254,8 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), mTLS is **GA — soak pending**. The soak test
-(criterion 5) is a post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md) and
-is tracked in the [GA push log](ga-push.md); the other eight criteria are met.
+Per [ADR 0003](adr/0003-maturity-and-ga.md), mTLS is **GA**. The soak test
+(criterion 5) was completed on 2026-07-05 via Phase 2A.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -265,11 +263,13 @@ is tracked in the [GA push log](ga-push.md); the other eight criteria are met.
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) (`BenchmarkMTLSHandshake`) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
 | 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) — tracked in [ga-push.md](ga-push.md) |
+| 5 | Long-running soak test passed | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | 6 | Runnable example + docs | ✅ [testdata/mtls.toml](../testdata/mtls.toml) + this doc |
 | 7 | Security / threat note | ✅ [trust boundary](#identity-variables) + signature-verified CRL |
 | 8 | Fuzzing where parsing is involved | n/a — CA/CRL parsing is stdlib `crypto/x509` (no custom parser) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** panel reports *Mutual TLS (client certs)* active |
 
-The one open item is the post-GA **soak test** (criterion 5).
+All GA criteria are satisfied.
+
+## Build tags
 

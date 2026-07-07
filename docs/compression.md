@@ -8,7 +8,7 @@ sidecar files (`.gz`, `.br`) to avoid recompression cost.
 This is **Y1-02**.  `gzip` is in **core**; `brotli` requires the `brotli` build
 tag and `zstd` requires the `zstd` build tag.
 
-> **Maturity:** Beta → **GA — soak pending** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
+> **Maturity:** **GA** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
 
 ## Contents
 
@@ -137,7 +137,8 @@ overhead).  Encoder pooling keeps allocation count flat.
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), compression is **GA — soak pending**.
+Per [ADR 0003](adr/0003-maturity-and-ga.md), compression is **GA**:
+the soak test (criterion 5) was completed on 2026-07-04.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -145,7 +146,7 @@ Per [ADR 0003](adr/0003-maturity-and-ga.md), compression is **GA — soak pendin
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) |
 | 3 | Documented known-limitations | ✅ brotli/zstd build-tagged; zstd sidecars not supported; no BREACH mitigation |
 | 4 | Stable config/API contract (semver-guarded) | ✅ `CompressionConfig` frozen under [compatibility policy](compatibility.md) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) |
+| 5 | Long-running soak test passed | ✅ soaked 1h windows 2026-07-04 (11.6M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--compression-soak-local-windows-1-hour-50-workers) |
 | 6 | Runnable example + docs | ✅ [testdata/compression.toml](../testdata/compression.toml) + this doc |
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | n/a — uses go-toml parser (Y1-08); q-value parser is covered by unit tests |

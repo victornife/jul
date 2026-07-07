@@ -53,12 +53,12 @@ release-blocking regression, not a reason to retract the label.
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 | Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli`,`zstd` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
-| Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
-| Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | HTTP/3 over QUIC | Y1-11 | `http3` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
-| **Native gRPC passthrough + h2c** | **Y2-04** | **`grpc`** | **✅** | **✅** | **✅** | **✅** | **✅** | **✅** | **✅** | **n/a** | **✅** | **[grpc-proxy.md](grpc-proxy.md)** |
+| gRPC ↔ JSON transcoding | Y2-01 | `grpc` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
+| Native gRPC passthrough + h2c | Y2-04 | `grpc` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [grpc-proxy.md](grpc-proxy.md) |
 | WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
 | L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
+| Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [service-discovery.md](service-discovery.md) |
 | Secrets references + log redaction | SEC-1 | `secrets` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [secrets.md](secrets.md) |
 
 Criterion 8 is **n/a** for features whose parsing/validation is delegated to a
@@ -67,15 +67,12 @@ rationale.
 
 ## GA — soak pending
 
-Eight criteria met (1–4, 6–9); only the soak test (criterion 5) is open.
-Per-feature detail lives in each linked doc's *GA status* table.
+All shipped features are now **GA**. This table is empty until a new feature
+ships and reaches the post-GA soak gate.
 
 | Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [service-discovery.md](service-discovery.md) |
-| WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
-| L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
-| Secrets references + log redaction | SEC-1 | `secrets` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [secrets.md](secrets.md) |
+| *(none)* | — | — | — | — | — | — | — | — | — | — | — | — |
 
 ## Soak tracking (post-GA gate)
 
@@ -96,8 +93,8 @@ the [soak evidence log](soak-evidence.md).
 | Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ soaked 8h windows 2026-07-04 (console tag built, dashboard reachable) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | Active health checks (Y1-05) | 2026-07-03 | ✅ soaked 8h windows 2026-07-04 (/healthz polled 960×, all 200) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | Web application firewall (WAF) (Y2-06) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (1.67M req, 0% err, CRS block mode verified) — [evidence](soak-evidence.md#2026-07-04--waf-soak-local-windows-1-hour-50-workers) |
-| Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ⏳ soak pending (requires gRPC traffic — not exercised by HTTP-only load harness) |
-| Secrets references + log redaction (SEC-1) | 2026-07-03 | ⏳ soak pending (requires gRPC traffic — not exercised by HTTP-only load harness) |
+| Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (`/discovery/` traffic via `dns-backend`, resolved successfully) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
+| Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (admin token `${env:JUL_ADMIN_TOKEN}` expanded; API reachable) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (12.5M req, 0% err, token-bucket allow/reject verified) — [evidence](soak-evidence.md#2026-07-04--rate-limit-soak-local-windows-1-hour-50-workers) |
 | Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ validated via `test-zero-config.ps1` 2026-07-06: zero-config serve returns 200, lint passes with secret refs, strict lint correctly flags literal secrets — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
 | Compression (Y1-02) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (11.6M req, 0% err, zstd/br/gzip verified) — [evidence](soak-evidence.md#2026-07-04--compression-soak-local-windows-1-hour-50-workers) |
@@ -106,7 +103,7 @@ the [soak evidence log](soak-evidence.md).
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, W3C traceparent observed in telemetry) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Response cache (memory + disk) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (1.5M req, 0% err, hit/miss/evict/revalidate verified) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers) |
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ✅ **soaked 1h** windows 2026-07-06 (12.99M req, 0.00% err, 100% success, isolated QUIC+TLS on `:8443`) — [evidence](soak-evidence.md#2026-07-06--http3-isolated-soak-local-windows-1-hour-20-workers) |
-| WASM plugin system (Y2-02) | 2026-07-03 | ⏳ soak pending (requires gRPC traffic — not exercised by HTTP-only load harness) |
+| WASM plugin system (Y2-02) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (`kv-counter`, `request-block`, `header-inject` plugins exercised) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | L4 stream proxy (Y2-03) | 2026-07-03 | ✅ soaked 1h isolated 2026-07-06 (4M rounds, 0% err, persistent TCP connections) + Phase 2A 8h 2026-07-06 — [evidence](soak-evidence.md#2026-07-06--l4-stream-proxy-isolated-soak-local-windows-5-min--1h-510-workers) |
 
 ## Recently shipped continuous panels

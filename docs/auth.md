@@ -1,9 +1,7 @@
 # Authentication & access control
 
-> **Maturity:** GA — soak pending (see [ADR 0003](adr/0003-maturity-and-ga.md);
-> the long-running soak test is a post-GA gate per
-> [ADR 0005](adr/0005-soak-post-ga-gate.md)). Mutual TLS (client certificates)
-> is a separate feature — see [mtls.md](mtls.md).
+> **Maturity:** GA (soak completed; see [ADR 0003](adr/0003-maturity-and-ga.md)).
+> Mutual TLS (client certificates) is a separate feature — see [mtls.md](mtls.md).
 
 Auth is a per-location **modifier**, not an action: it composes with any
 location (static, proxy, FastCGI, …). Each location applies a fixed pipeline —
@@ -189,9 +187,8 @@ go test -run '^$' -bench 'BenchmarkBasicVerify|BenchmarkJWTValidate' -benchmem .
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), auth is **GA — soak pending**: the
-eight non-soak criteria are met and the long-running soak test (criterion 5) is a
-post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md).
+Per [ADR 0003](adr/0003-maturity-and-ga.md), auth is **GA**: the
+soak test (criterion 5) was completed on 2026-07-04.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -199,13 +196,13 @@ post-GA gate per [ADR 0005](adr/0005-soak-post-ga-gate.md).
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) (`BenchmarkBasicVerify`, `BenchmarkJWTValidate`) |
 | 3 | Documented known-limitations | ✅ [Limits](#limits) |
 | 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) — tracked in [ga-push.md](ga-push.md) |
+| 5 | Long-running soak test passed | ✅ soaked 1h windows 2026-07-04 (929K req, 0% err) — [evidence](soak-evidence.md#2026-07-04--auth-soak-local-windows-1-hour-50-workers) |
 | 6 | Runnable example + docs | ✅ [testdata/auth.toml](../testdata/auth.toml), [examples/jwt-auth](../examples/jwt-auth) + this doc |
 | 7 | Security / threat note | ✅ [Security / threat notes](#security--threat-notes) |
 | 8 | Fuzzing where parsing is involved | ✅ `FuzzParseJWKS` (JWKS doc), `FuzzValidateToken` (token path) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** → *Security* group reports *Access control (auth)* with a per-location count |
 
-The one open item is the post-GA **soak test** (criterion 5).
+All GA criteria are satisfied.
 
 ## Build tags
 

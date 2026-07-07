@@ -299,6 +299,7 @@ Service discovery has reached **GA** against the [ADR 0003](adr/0003-maturity-an
 | 2. Published benchmark numbers | ✅ | `BenchmarkPoolPick` (balancer_bench_test.go) covers picker with discovered backends |
 | 3. Known-limitations list | ✅ | [Known limitations](#known-limitations) above |
 | 4. Semver-guarded config/API contract | ✅ | Covered by v1 freeze ([compatibility.md](compatibility.md)) |
+| 5. Long-running soak test | ✅ | soaked via Phase 2A 8h windows 2026-07-06 (/discovery/ via dns-backend) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | 6. Runnable example + docs | ✅ | [testdata/discovery.toml](../testdata/discovery.toml) + this doc |
 | 7. Security / threat note | ✅ | [Threat note](#threat-note) above |
 | 8. Fuzzing where parsing is involved | n/a | No custom parser (uses standard `net` stack or JSON from `encoding/json`) |

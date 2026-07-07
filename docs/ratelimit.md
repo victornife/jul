@@ -7,7 +7,7 @@ connection exhaustion.
 
 This is **Y1-03**, in **core** — no build tag.
 
-> **Maturity:** Beta → **GA — soak pending** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
+> **Maturity:** **GA** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
 
 ## Contents
 
@@ -169,8 +169,8 @@ At 10 000 req/s per key the overhead is well under 1 % of request lifecycle.
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), rate limiting is **GA — soak
-pending**.
+Per [ADR 0003](adr/0003-maturity-and-ga.md), rate limiting is **GA**:
+the soak test (criterion 5) was completed on 2026-07-04.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -178,7 +178,7 @@ pending**.
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) |
 | 3 | Documented known-limitations | ✅ Algorithm (token bucket), eviction TTL, max_conns scope |
 | 4 | Stable config/API contract (semver-guarded) | ✅ `RateLimitConfig` frozen under [compatibility policy](compatibility.md) |
-| 5 | Long-running soak test passed | ☐ post-GA gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) |
+| 5 | Long-running soak test passed | ✅ soaked 1h windows 2026-07-04 (12.5M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--rate-limit-soak-local-windows-1-hour-50-workers) |
 | 6 | Runnable example + docs | ✅ [testdata/ratelimit.toml](../testdata/ratelimit.toml) + this doc |
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | n/a — uses config parser (Y1-08), no custom parser |
