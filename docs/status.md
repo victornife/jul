@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.30 · Updated 2026-07-06
+> Version 1.31 · Updated 2026-07-07
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -56,6 +56,7 @@ release-blocking regression, not a reason to retract the label.
 | Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | HTTP/3 over QUIC | Y1-11 | `http3` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
+| **Native gRPC passthrough + h2c** | **Y2-04** | **`grpc`** | **✅** | **✅** | **✅** | **✅** | **✅** | **✅** | **✅** | **n/a** | **✅** | **[grpc-proxy.md](grpc-proxy.md)** |
 | WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
 | L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
 | Secrets references + log redaction | SEC-1 | `secrets` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [secrets.md](secrets.md) |
@@ -71,8 +72,6 @@ Per-feature detail lives in each linked doc's *GA status* table.
 
 | Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| gRPC ↔ JSON transcoding | Y2-01 | `grpc` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
-| Native gRPC passthrough + h2c | Y2-04 | `grpc` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [grpc-proxy.md](grpc-proxy.md) |
 | Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [service-discovery.md](service-discovery.md) |
 | WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
 | L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
@@ -91,8 +90,8 @@ the [soak evidence log](soak-evidence.md).
 | Core HTTP | 2026-06-21 | ✅ soaked 8h windows 2026-07-04 (90.4M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, 25% TLS traffic mix) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Authentication (Y1-04) | 2026-06-21 | ✅ soaked 1h windows 2026-07-04 (929K req, 0% err, pprof-verified) — [evidence](soak-evidence.md#2026-07-04--auth-soak-local-windows-1-hour-50-workers) |
-| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ⏳ soak pending (requires gRPC traffic — not exercised by HTTP-only load harness) |
-| Native gRPC passthrough (Y2-04) | 2026-06-21 | ⏳ soak pending (requires gRPC traffic — not exercised by HTTP-only load harness) |
+| **gRPC ↔ JSON transcoding (Y2-01)** | **2026-06-21** | **✅ soaked 1h windows 2026-07-07 (14.2M req, 0.000007% err, connection-pooled REST/JSON → gRPC) — [evidence](soak-evidence.md#2026-07-07--grpc-transcoding--passthrough-isolated-soak-local-windows-1-hour-20-workers)** |
+| **Native gRPC passthrough (Y2-04)** | **2026-06-21** | **✅ soaked 1h windows 2026-07-07 (6.8M req, 0.0002% err, native gRPC/h2c → upstream gRPC) — [evidence](soak-evidence.md#2026-07-07--grpc-transcoding--passthrough-isolated-soak-local-windows-1-hour-20-workers)** |
 | mTLS client auth (Y2-07) | 2026-06-21 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, TLS + client-cert auth path exercised) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ soaked 8h windows 2026-07-04 (console tag built, dashboard reachable) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | Active health checks (Y1-05) | 2026-07-03 | ✅ soaked 8h windows 2026-07-04 (/healthz polled 960×, all 200) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
@@ -154,3 +153,4 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | 2026-06-30 | 1.27 | **Console continuous panels status correction:** the Console v2 Y2-09 remaining-work note is updated to show that live log tail, the WASM plugin manager, the gRPC route designer, and the `.wasm` upload incremental feature are all shipped. The roadmap `Not yet shipped` wording is corrected from "none" to an explicit panel table so the source of truth does not drift. | [status.md](status.md), [roadmap/README.md](roadmap/README.md) |
 | 2026-06-29 | 1.26 | **gRPC transcoding upstream pools + plugin fetch truncation + re-audit residuals:** upstream pool support for `grpc_transcode` targets; plugin fetch response truncation guard; documentation and validation fixes from external audit round. | [status.md](status.md) |
 | 2026-07-05 | 1.30 | **Phase 2A soak completed + mass promotion to GA.** Consolidated 10-feature 8h burn-in finished (2.12M req, 0% err, 100% success) → mass-closes soak for TLS, mTLS, and OTel tracing in status + ga-push. All promoted rows now ✅. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [ga-push.md](ga-push.md) |
+| 2026-07-07 | 1.31 | **gRPC soak completed + promotion to GA.** Isolated 1h soak for transcoding (14.2M req, 0.000007% err) and passthrough (6.8M req, 0.0002% err) on Windows/amd64. Fixed `scripts/grpc-load.go` connection-pooling + body-drain to eliminate Windows ephemeral-port exhaustion on the test client (not a server bug). Both features promoted from GA — soak pending → GA. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |

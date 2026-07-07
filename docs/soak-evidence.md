@@ -805,4 +805,67 @@ Script: `scripts/test-zero-config.ps1`
 - gRPC transcoding (Y2-01) — port `:8092` configured, no gRPC client calls
 - gRPC passthrough (Y2-04) — port `:8095` configured, no gRPC client calls
 
-**Conclusion:** Jul.IA sustained **5.05 M requests over ~8 hours** exercising **13 features simultaneously** (the 10 Phase 2A core features + service discovery + secrets + WASM plugins) with **zero errors** (excluding expected 429 throttles). Together with previously-completed isolated soaks, **18 features are GA**; **gRPC transcoding and gRPC passthrough remain GA — soak pending** until a gRPC client harness can exercise them. **Phase 2A non-gRPC soak gate is CLOSED.**
+**Conclusion:** Jul.IA sustained **5.05 M requests over ~8 hours** exercising **13 features simultaneously** (the 10 Phase 2A core features + service discovery + secrets + WASM plugins) with **zero errors** (excluding expected 429 throttles). Together with previously-completed isolated soaks, **18 features are GA**; gRPC transcoding and gRPC passthrough were present in config but not exercised by the HTTP-only harness and completed their isolated soak on 2026-07-07 (see below). **Phase 2A non-gRPC soak gate is CLOSED.**
+
+---
+
+### 2026-07-07 — gRPC transcoding + passthrough isolated soak (local, Windows, 1 hour, 20 workers)
+
+**Jul version:** v1.31 (Windows/amd64, go1.26.4)
+**Build tags:** `grpc`
+**Backend:** `go run scripts/grpc-echo-server.go` (dynamic gRPC echo service on `:50051`)
+**Config:** `burn-in-grpc.toml` — transcoding on `:8092`, passthrough on `:8095`, admin on `:9090`
+**Load generator:** `go run scripts/grpc-load.go -mode <transcoding|passthrough> -duration 1h -workers 20`
+
+**Pre-run bug discovered in test harness:**
+The original `scripts/grpc-load.go` created an `http.Client` without connection pooling (`&http.Client{Timeout: 10s}`) and used `defer resp.Body.Close()` without draining the body. On Windows, this caused **ephemeral port exhaustion** within 1–2 minutes, producing ~68% errors that were entirely client-side (Jul's access logs showed zero `:8092` entries — the connections never reached the server). Two fixes were applied:
+
+1. **Connection pooling:** added `Transport: &http.Transport{MaxIdleConns: 100, MaxIdleConnsPerHost: 100, IdleConnTimeout: 90s}` to the transcoding `http.Client`
+2. **Body drain:** replaced `defer resp.Body.Close()` with `io.Copy(io.Discard, resp.Body); resp.Body.Close()` so Go's HTTP transport can return connections to the idle pool
+
+**Passthrough results (native gRPC → h2c `:8095`):**
+
+| Metric | Value |
+|--------|-------|
+| Duration | 1h0m0s |
+| Total requests | **6,845,380** |
+| Errors | **14** |
+| Error rate | **0.0002%** |
+| Latency avg | ~10.5 ms |
+
+All 14 errors occurred at the very end when the context timed out and workers drained. Prior to that, **zero errors for the entire hour**. Jul's access log shows 100% `status=200` for `:8095`.
+
+**Transcoding results (REST/JSON → gRPC `:8092`, AFTER fix):**
+
+| Metric | Value |
+|--------|-------|
+| Duration | 1h0m0s |
+| Total requests | **14,204,426** |
+| Errors | **1** |
+| Error rate | **0.000007%** |
+| Latency avg | ~5.1 ms |
+
+The single error was a context-timeout drain at the end. Latency was stable at ~5.1ms throughout. RPS averaged ~3,945 sustained.
+
+**Failure mode (first attempt, before fix — documented for forensic review):**
+
+| Metric | Value |
+|--------|-------|
+| Duration | ~1h |
+| Total requests | 1,664,162 |
+| Errors | 1,140,507 |
+| Error rate | **68.5%** |
+| Root cause | **Client-side Windows ephemeral port exhaustion** (not a Jul bug) |
+
+Jul access logs showed **zero entries** for port `:8092`; every failure was a client-side connection-level error.
+
+**Features exercised & evidence:**
+
+| Feature | Evidence |
+| --- | --- |
+| gRPC transcoding | `POST /v1/echo` and `GET /v1/echo/{id}` both handled; JSON → protobuf → gRPC → backend round-trip verified; 14.2M requests with ~0% errors |
+| gRPC passthrough | Native gRPC/h2c on `:8095`; `grpc-go/1.81.1` client; trailers preserved; 6.8M requests with ~0% errors |
+| Upstream health | Backend `:50051` healthy entire duration |
+| Admin API | `:9090` reachable; access logs captured |
+
+**Conclusion:** Both gRPC features sustained **>20M combined requests over 1 hour** with **near-zero errors**. The transcoding initial "failure" was a measurement artifact of the test client (no connection reuse + no body drain), not a server defect. After fixing the harness, both paths are proven stable under sustained load. **gRPC transcoding (Y2-01) and gRPC passthrough (Y2-04) are promoted to GA.**
