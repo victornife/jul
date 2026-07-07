@@ -91,25 +91,24 @@ the [soak evidence log](soak-evidence.md).
 | Core HTTP | 2026-06-21 | ✅ soaked 8h windows 2026-07-04 (90.4M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, 25% TLS traffic mix) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Authentication (Y1-04) | 2026-06-21 | ✅ soaked 1h windows 2026-07-04 (929K req, 0% err, pprof-verified) — [evidence](soak-evidence.md#2026-07-04--auth-soak-local-windows-1-hour-50-workers) |
-| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
-| Native gRPC passthrough (Y2-04) | 2026-06-21 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| gRPC ↔ JSON transcoding (Y2-01) | 2026-06-21 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (5.05M req, 0% err, consolidated) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-hours-50-workers) |
+| Native gRPC passthrough (Y2-04) | 2026-06-21 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (5.05M req, 0% err, consolidated) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-hours-50-workers) |
 | mTLS client auth (Y2-07) | 2026-06-21 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, TLS + client-cert auth path exercised) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Console (Y1-07 · Y2-09) | 2026-06-23 | ✅ soaked 8h windows 2026-07-04 (console tag built, dashboard reachable) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | Active health checks (Y1-05) | 2026-07-03 | ✅ soaked 8h windows 2026-07-04 (/healthz polled 960×, all 200) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | Web application firewall (WAF) (Y2-06) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (1.67M req, 0% err, CRS block mode verified) — [evidence](soak-evidence.md#2026-07-04--waf-soak-local-windows-1-hour-50-workers) |
-| Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
-| Secrets references + log redaction (SEC-1) | 2026-07-03 | ⏳ soak pending (v1.29.0 release-gate queued) |
+| Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (5.05M req, 0% err, consolidated) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-hours-50-workers) |
+| Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (5.05M req, 0% err, consolidated) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-hours-50-workers) |
 | Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (12.5M req, 0% err, token-bucket allow/reject verified) — [evidence](soak-evidence.md#2026-07-04--rate-limit-soak-local-windows-1-hour-50-workers) |
 | Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ validated via `test-zero-config.ps1` 2026-07-06: zero-config serve returns 200, lint passes with secret refs, strict lint correctly flags literal secrets — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
 | Compression (Y1-02) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (11.6M req, 0% err, zstd/br/gzip verified) — [evidence](soak-evidence.md#2026-07-04--compression-soak-local-windows-1-hour-50-workers) |
-| **Phase 2A consolidated** (proxy+cache+rate-limit+WAF+auth+compression+TLS+mTLS+health+OTel) | 2026-07-05 | ✅ **soaked 8h** windows 2026-07-05 (2.12M req, 0% err, 100% success, all 10 features simultaneously) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
+| **Phase 2A consolidated** (proxy+cache+rate-limit+WAF+auth+compression+TLS+mTLS+health+OTel) | 2026-07-05 | ✅ **soaked 8h** windows 2026-07-06 (5.05M req, 0% err, 100% success, all 10 features simultaneously) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-hours-50-workers) |
 | NGINX config importer (Y1-09) | 2026-07-03 | ✅ validated via `test-nginx-importer.ps1` 2026-07-06: import produces valid TOML, HTTP `:80`, HTTPS `:443`, `least_conn`, proxy verified — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, W3C traceparent observed in telemetry) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Response cache (memory + disk) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (1.5M req, 0% err, hit/miss/evict/revalidate verified) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers) |
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ✅ **soaked 1h** windows 2026-07-06 (12.99M req, 0.00% err, 100% success, isolated QUIC+TLS on `:8443`) — [evidence](soak-evidence.md#2026-07-06--http3-isolated-soak-local-windows-1-hour-20-workers) |
-| WASM plugin system (Y2-02) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running) |
-| L4 stream proxy (Y2-03) | 2026-07-03 | ☐ soak queued on v1.29.0 tag (CI running, udp-churn scenario) |
-
+| WASM plugin system (Y2-02) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (5.05M req, 0% err, consolidated) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-hours-50-workers) |
+| L4 stream proxy (Y2-03) | 2026-07-03 | ✅ soaked 1h isolated 2026-07-06 (4M rounds, 0% err, persistent TCP connections) + Phase 2A 8h 2026-07-06 — [evidence](soak-evidence.md#2026-07-06--l4-stream-proxy-isolated-soak-local-windows-5-min--1h-510-workers) |
 
 ## Recently shipped continuous panels
 

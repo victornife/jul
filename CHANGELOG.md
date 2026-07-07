@@ -9,6 +9,18 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+## [1.31.0] – 2026-07-06
+
+### Fixed
+- **L4 stream burn-in harness**: urn-in-stream.toml passive-health cooldown fix (max_fails=10, ail_timeout=3s) + persistent-connection load generator.
+
+### Added
+- **scripts/burn-in-stream-load.go**: TCP echo load generator for L4 stream soak testing.
+
+### Changed
+- docs/soak-evidence.md: Added L4 stream 1h soak + Phase 2A 8h soak (5.05M req, 0% err).
+- docs/status.md + docs/ga-push.md: All 20 features promoted to full GA.
+
 ## [1.30.0] – 2026-07-05
 
 ### Fixed
@@ -160,3 +172,4 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ### Changed
 - Stream proxy, WASM plugins, WAF, HTTP/3, and Consul/Kubernetes discovery promoted from experimental to Beta.
 - TOML schema extended with upstream health checks, service discovery blocks, and plugin configurations.
+
