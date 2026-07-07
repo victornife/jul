@@ -52,6 +52,8 @@ release-blocking regression, not a reason to retract the label.
 | Core HTTP (static/proxy/FastCGI/vhosts/routing) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
+| Zero-config + `jul lint` | Y1-08 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [zeroconf.md](zeroconf.md) |
+| NGINX config importer | Y1-09 | `importer` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [nginx-importer.md](nginx-importer.md) |
 | Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli`,`zstd` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
 | HTTP/3 over QUIC | Y1-11 | `http3` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
 | gRPC ↔ JSON transcoding | Y2-01 | `grpc` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
