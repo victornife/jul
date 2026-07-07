@@ -54,7 +54,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Feature | Maturity | Gaps to GA (excl. soak) | Effort | Status |
 | --- | --- | --- | --- | --- |
 | gRPC ↔ JSON transcoding (Y2-01) | **GA** | none — soaked via Phase 2A 2026-07-06 (5.05M req, 0% err, consolidated) — all criteria met ✅ | S | ✅ |
-| gRPC passthrough + h2c (Y2-04) | **GA** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
+| gRPC passthrough + h2c (Y2-04) | **GA — soak pending** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
 | mTLS client auth (Y2-07) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, client-cert path) — all criteria met ✅ | S | ✅ |
 | Core HTTP (static, reverse proxy, FastCGI/uWSGI, vhosts, routing) | **GA** | none — soaked 8h 2026-07-04 + Phase 2A 2026-07-05 (2.12M req, 0% err) — all criteria met ✅ | L | ✅ |
 | TLS + ACME (Y1-01) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, 25% TLS traffic) — all criteria met ✅ | M | ✅ |
@@ -74,14 +74,19 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | WASM plugin system (Y2-02) | **GA** | none — [plugins.md](plugins.md) doc + 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas), 5 benchmarks (middleware ~16.5 μs, handler ~20 μs, KV ~23 μs, parallel ~3.4 μs amortised), 5-item limitation list (request-phase only, no shared state, no streaming, one ABI, build-tag required), 7-row threat note (memory escape, CPU exhaustion, SSRF, KV DoS, upload, info leak, ABI breakage), `FuzzPluginInvoke` and `FuzzHostAllowed` fuzz targets. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | M | ✅ |
 | L4 stream proxy (Y2-03) | **GA** | none — [stream.md](stream.md) doc + 23-row behaviour matrix (TCP/UDP relay, SNI routing, PROXY protocol, reload, preflight, UDP sessions), 4 benchmarks (`BenchmarkTCPPassthrough` ~3.2 ms, `BenchmarkTCPParallel` ~3.3 ms, `BenchmarkUDPRelay` ~33 μs, `BenchmarkUDPAdmitAtCap` up to 254 μs for 10k sessions), 5-item limitation list, 6-row threat note, fuzz targets `FuzzReadProxyHeader` and `FuzzPeekSNI`. UDP-churn soak test added behind `soak` tag. | M | ✅ |
 
-> - **All 20 shipped features are now GA.**
+> - **18 shipped features are GA with completed soak evidence. 2 remain GA — soak pending.**
 >
 > **Phase 2B soaks (2026-07-06):**
 > - **HTTP/3 over QUIC (Y1-11)**: 1h isolated soak (12.99M req, 0% err, QUIC+TLS) — promoted to GA
 > - **L4 stream proxy (Y2-03)**: 1h isolated soak (4M rounds, 0% err, persistent TCP) — promoted to GA
 >
 > **Phase 2A consolidated soak (2026-07-06):**
-> - **8 hours, 5.05M requests, 0% errors** — all features exercised simultaneously
+> - **8 hours, 5.05M requests, 0% errors** — proxy + auth + cache + rate-limit +
+>   WAF + compression + TLS + mTLS + health-checks + OTel + service discovery +
+>   secrets + WASM exercised simultaneously
+>
+> **GA — soak pending (require separate exercise):**
+> - gRPC transcoding (Y2-01), gRPC passthrough (Y2-04)
 ## Soak tracking (post-GA gate per ADR 0005)
 
 A soak failure is a release-blocking regression. Dated soak runs and artifacts are recorded in the [soak evidence log](soak-evidence.md).
