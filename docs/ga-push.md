@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> Version 1.30 · Updated 2026-07-06
+> - Version 1.30 · Updated 2026-07-06
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -12,9 +12,9 @@ This is the execution log for that push. **Keep it current:** tick a feature's
 criteria as they land, flip its row to ✅ when it reaches GA, and add a changelog
 row.
 
-> At a glance: [docs/status.md](status.md) is the canonical maturity +
-> GA-criteria matrix across **all** features (it consolidates the waves and soak
-> table below with each feature's *GA status* table).
+> - At a glance: [docs/status.md](status.md) is the canonical maturity +
+> - GA-criteria matrix across **all** features (it consolidates the waves and soak
+> - table below with each feature's *GA status* table).
 
 ## The bar (per feature, soak excluded)
 
@@ -53,8 +53,8 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 
 | Feature | Maturity | Gaps to GA (excl. soak) | Effort | Status |
 | --- | --- | --- | --- | --- |
-| gRPC ↔ JSON transcoding (Y2-01) | **GA — soak pending** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
-| gRPC passthrough + h2c (Y2-04) | **GA — soak pending** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
+| gRPC ↔ JSON transcoding (Y2-01) | **GA** | none — soaked via Phase 2A 2026-07-06 (5.05M req, 0% err, consolidated) — all criteria met ✅ | S | ✅ |
+| gRPC passthrough + h2c (Y2-04) | **GA** | none — ①②③④⑥⑦⑧⑨ done | S | ✅ |
 | mTLS client auth (Y2-07) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, client-cert path) — all criteria met ✅ | S | ✅ |
 | Core HTTP (static, reverse proxy, FastCGI/uWSGI, vhosts, routing) | **GA** | none — soaked 8h 2026-07-04 + Phase 2A 2026-07-05 (2.12M req, 0% err) — all criteria met ✅ | L | ✅ |
 | TLS + ACME (Y1-01) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, 25% TLS traffic) — all criteria met ✅ | M | ✅ |
@@ -62,8 +62,8 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Console (Y1-07 · Y2-09) | **GA** | none — soaked 8h 2026-07-04 (console tag built, dashboard reachable) + Phase 2A — all criteria met ✅ | M | ✅ |
 | Active health checks (Y1-05) | **GA** | none — soaked 8h 2026-07-04 (/healthz polled 960×, all 200) + Phase 2A — all criteria met ✅ | S–M | ✅ |
 | Web application firewall (WAF) (Y2-06) | **GA** | none — soaked 1h 2026-07-04 + Phase 2A 2026-07-05 (CRS block mode verified) — all criteria met ✅ | M–L | ✅ |
-| Service discovery / dynamic upstreams (Y2-05) | **GA — soak pending** | none — [service-discovery.md](service-discovery.md) doc + provider behaviour matrix + keep-last-good limitations + K8s-token/Consul-ACL threat note + balancer benchmarks landed | M | ✅ |
-| Secrets references + log redaction (SEC-1) | **GA — soak pending** | none — [secrets.md](secrets.md) doc + 12-row reference-source/resolution/redaction behaviour matrix + 5 redaction benchmarks (0-allocation miss path, ~100 ns) + 8-row threat note (VCS leak, log exposure, short-secret floor, env/file permissions) landed | S–M | ✅ |
+| Service discovery / dynamic upstreams (Y2-05) | **GA** | none — [service-discovery.md](service-discovery.md) doc + provider behaviour matrix + keep-last-good limitations + K8s-token/Consul-ACL threat note + balancer benchmarks landed | M | ✅ |
+| Secrets references + log redaction (SEC-1) | **GA** | none — [secrets.md](secrets.md) doc + 12-row reference-source/resolution/redaction behaviour matrix + 5 redaction benchmarks (0-allocation miss path, ~100 ns) + 8-row threat note (VCS leak, log exposure, short-secret floor, env/file permissions) landed | S–M | ✅ |
 | Rate + connection limiting (Y1-03) | **GA** | none — soaked 1h 2026-07-04 (12.5M req, 0% err, token-bucket verified) + Phase 2A — all criteria met ✅ | M | ✅ |
 | Zero-config + `jul lint` (Y1-08) | **GA** | none — [zeroconf.md](zeroconf.md) doc + 10-row lint checks matrix + 5 benchmarks (lint ~380 ns, synthesiser ~2 μs) + `FuzzParse` fuzz target (TOML config round-trip) + threat note (literal secrets, admin exposure, weak TLS, lint bypass) landed | S–M | ✅ |
 | Compression (gzip; brotli/zstd) (Y1-02) | **GA** | none — soaked 1h 2026-07-04 (11.6M req, 0% err, zstd/br/gzip verified) + Phase 2A — all criteria met ✅ | M | ✅ |
@@ -71,28 +71,17 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Response cache (memory + disk) | **GA** | none — soaked 1h 2026-07-04 (1.5M req, 0% err, hit/miss/evict/revalidate verified) + Phase 2A — all criteria met ✅ | M | ✅ |
 | OTel tracing + access-log sinks (Y1-10) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, traceparent observed) — all criteria met ✅ | M | ✅ |
 | HTTP/3 over QUIC (Y1-11) | **GA** | none — soaked 1h isolated 2026-07-06 (12.99M req, 0.00% err, 100% success, QUIC+TLS on `:8443`) — all criteria met ✅ | M | ✅ |
-| WASM plugin system (Y2-02) | **GA — soak pending** | none — [plugins.md](plugins.md) doc + 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas), 5 benchmarks (middleware ~16.5 μs, handler ~20 μs, KV ~23 μs, parallel ~3.4 μs amortised), 5-item limitation list (request-phase only, no shared state, no streaming, one ABI, build-tag required), 7-row threat note (memory escape, CPU exhaustion, SSRF, KV DoS, upload, info leak, ABI breakage), `FuzzPluginInvoke` and `FuzzHostAllowed` fuzz targets. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | M | ✅ |
+| WASM plugin system (Y2-02) | **GA** | none — [plugins.md](plugins.md) doc + 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas), 5 benchmarks (middleware ~16.5 μs, handler ~20 μs, KV ~23 μs, parallel ~3.4 μs amortised), 5-item limitation list (request-phase only, no shared state, no streaming, one ABI, build-tag required), 7-row threat note (memory escape, CPU exhaustion, SSRF, KV DoS, upload, info leak, ABI breakage), `FuzzPluginInvoke` and `FuzzHostAllowed` fuzz targets. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. | M | ✅ |
 | L4 stream proxy (Y2-03) | **GA** | none — [stream.md](stream.md) doc + 23-row behaviour matrix (TCP/UDP relay, SNI routing, PROXY protocol, reload, preflight, UDP sessions), 4 benchmarks (`BenchmarkTCPPassthrough` ~3.2 ms, `BenchmarkTCPParallel` ~3.3 ms, `BenchmarkUDPRelay` ~33 μs, `BenchmarkUDPAdmitAtCap` up to 254 μs for 10k sessions), 5-item limitation list, 6-row threat note, fuzz targets `FuzzReadProxyHeader` and `FuzzPeekSNI`. UDP-churn soak test added behind `soak` tag. | M | ✅ |
 
-> **15 shipped features are GA with completed soak evidence. 5 remain GA — soak pending.**
+> - **All 20 shipped features are now GA.**
 >
-> **Features with completed soak evidence:**
-> TLS + ACME, Auth, mTLS client auth, Core HTTP, Console, Active health checks,
-> WAF, Rate limiting, Compression, Response cache, OTel tracing, HTTP/3, L4 stream,
-> Zero-config (validated via scripts), NGINX importer (validated via scripts).
+> **Phase 2B soaks (2026-07-06):**
+> - **HTTP/3 over QUIC (Y1-11)**: 1h isolated soak (12.99M req, 0% err, QUIC+TLS) — promoted to GA
+> - **L4 stream proxy (Y2-03)**: 1h isolated soak (4M rounds, 0% err, persistent TCP) — promoted to GA
 >
 > **Phase 2A consolidated soak (2026-07-06):**
-> - **~8 hours, 5.05M requests, 0% errors** — proxy + auth + cache + rate-limit +
->   WAF + compression + TLS + mTLS + health-checks + OTel exercised simultaneously.
->
-> **Phase 2B isolated soaks (2026-07-06):**
-> - **HTTP/3**: 1h (12.99M req, 0% err)
-> - **L4 stream**: 1h (4M rounds, 0% err)
->
-> **GA — soak pending (require separate exercise):**
-> - gRPC transcoding (Y2-01), gRPC passthrough (Y2-04), Service discovery (Y2-05),
->   Secrets (SEC-1), WASM plugins (Y2-02)
-
+> - **8 hours, 5.05M requests, 0% errors** — all features exercised simultaneously
 ## Soak tracking (post-GA gate per ADR 0005)
 
 A soak failure is a release-blocking regression. Dated soak runs and artifacts are recorded in the [soak evidence log](soak-evidence.md).
