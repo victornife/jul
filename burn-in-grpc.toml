@@ -1,0 +1,56 @@
+# gRPC soak test config — exercises transcoding + passthrough only
+# Build: go build -tags "grpc" -o jul.exe ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/grpc-echo-server.go
+#   Window 2: .\jul.exe -config burn-in-grpc.toml
+#   Window 3: go run scripts/grpc-load.go -mode transcoding -duration 1h -workers 20
+#   Window 4: go run scripts/grpc-load.go -mode passthrough -duration 1h -workers 20
+
+[global]
+log_level = "warn"
+
+[observability]
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+# ---------------------------------------------------------------------------
+# gRPC transcoding server (feature #1) — REST/JSON -> gRPC on :8092
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8092"
+server_names = ["grpc-transcode"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/v1/" }
+    [servers.locations.grpc_transcode]
+    target = "grpc-backend"
+    descriptor_set = "testdata/grpc/api.pb"
+    preserve_proto_field_names = false
+
+# ---------------------------------------------------------------------------
+# gRPC passthrough server (feature #2) — native gRPC over h2c on :8095
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8095"
+h2c = true
+server_names = ["grpc-pass"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://grpc-backend"
+  grpc = true
+
+[[upstreams]]
+name = "grpc-backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:50051"]
