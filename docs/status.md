@@ -123,8 +123,8 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 ## Beta (shipped; remaining GA gaps)
 
-> **All shipped features are now GA — soak pending.** This section is retired.
-> See the GA — soak pending table above for the canonical maturity matrix, and
+> **All shipped features are now GA.** This section is retired.
+> See the GA table above for the canonical maturity matrix, and
 > [ga-push.md](ga-push.md) for the per-feature push plan.
 
 ## Changelog

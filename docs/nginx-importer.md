@@ -207,7 +207,7 @@ so users can diff against it.
 | 2 — Published benchmark numbers | ✅ | `BenchmarkParse` / `BenchmarkTranslate` in `internal/migrate/nginx/bench_test.go` |
 | 3 — Known-limitations list | ✅ | 9-item limitation list above |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
-| 5 — Long-running soak test | ☐ | Post-GA gate per ADR-0005 |
+| 5 — Long-running soak test | ✅ | validated via `test-nginx-importer.ps1` 2026-07-06 — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
 | 6 — Runnable example + docs | ✅ | `examples/migrate/nginx.conf` + `imported.toml` + this doc |
 | 7 — Security / threat note | ✅ | 6-row threat note above |
 | 8 — Fuzzing where parsing is involved | ✅ | `FuzzTranslate` in `internal/migrate/nginx/fuzz_test.go` (parse + translate + marshal round-trip) |

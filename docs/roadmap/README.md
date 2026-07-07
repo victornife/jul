@@ -164,11 +164,11 @@ tables are intentionally preserved (not deleted) to show where Jul.IA *can* go.
 ## Year completion checklist
 
 Counts are *shipped* features, regardless of maturity. Most ship at **Beta**;
-some have since cleared the GA bar to **GA — soak pending** (the canonical
-[status matrix](../status.md) is the source of truth). They are not GA counts.
+some have since reached **GA** (the canonical [status matrix](../status.md) is
+the source of truth).
 
-- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; **all GA — soak pending**)
-- [x] **Year 2** — Protocol Gateway + Extensibility (9/9 shipped; **all GA — soak pending**). No remaining committed features; Y2-08 GraphQL stays **deferred** (demand-gated); AI-MVP stays a **time-boxed bet**.
+- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; **all GA**)
+- [x] **Year 2** — Protocol Gateway + Extensibility (9/9 shipped; **all GA**). No remaining committed features; Y2-08 GraphQL stays **deferred** (demand-gated); AI-MVP stays a **time-boxed bet**.
 - [ ] **Years 3–5** — **Vision horizon (demand-gated)** — not committed; entered
   per evidence gates ([ADR 0003](../adr/0003-maturity-and-ga.md)).
 
