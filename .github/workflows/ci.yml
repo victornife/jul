@@ -291,9 +291,7 @@ jobs:
       matrix:
         include:
           - profile: source
-            install: true
           - profile: released
-            install: false
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -446,12 +444,14 @@ jobs:
       COVERAGE_FLOOR: "70"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
         with:
-          node-version: 22
+          version: 11.8.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: internal/admin/ui/package.json
           cache: pnpm
           cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
-      - run: corepack enable && corepack prepare pnpm@latest --activate
       - run: pnpm install --frozen-lockfile
       - name: dependency vulnerability audit
         run: pnpm audit --audit-level moderate
@@ -461,14 +461,16 @@ jobs:
         run: pnpm run typecheck
       - name: lint
         run: pnpm run lint
-      - name: test with coverage
-        run: pnpm run test:coverage
-      - name: enforce coverage floor
+      - name: test with coverage and enforce floor
         shell: bash
         run: |
           set -euo pipefail
-          # vitest --coverage outputs a summary line like: All files | 54.24 | 49.41 | 43.27 | 55.16 |
-          total=$(pnpm run test:coverage 2>&1 | awk '/All files/ {gsub(/%/,"",$2); print $2}')
+          # Run once: pipe to tee so output is visible in the log AND capturable
+          # for the floor check. vitest text coverage table (space-split fields):
+          #   All files | <stmts> | <branch> | <funcs> | <lines> |
+          #   $1=All  $2=files  $3=|  $4=<stmts%>
+          pnpm run test:coverage 2>&1 | tee coverage-output.txt
+          total=$(awk '/All files/ {print $4}' coverage-output.txt)
           echo "Console statement coverage: ${total}% (floor: ${COVERAGE_FLOOR}%)"
           if awk -v t="$total" -v f="$COVERAGE_FLOOR" 'BEGIN { exit (t >= f) ? 0 : 1 }'; then
             echo "PASS: coverage meets the floor."
@@ -476,3 +478,10 @@ jobs:
             echo "ERROR: coverage ${total}% is below the ${COVERAGE_FLOOR}% floor."
             exit 1
           fi
+      - name: upload coverage output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: console-coverage-output
+          path: internal/admin/ui/coverage-output.txt
+          if-no-files-found: ignore
