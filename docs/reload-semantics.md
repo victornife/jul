@@ -3,7 +3,10 @@
 > Canonical reference for how Jul.IA applies a configuration change and what
 > "applied" actually guarantees. It consolidates the reload behaviour that is
 > also described, per feature, in [core-http.md](core-http.md),
-> [stream-proxy.md](stream-proxy.md), and [console.md](console.md).
+> [stream-proxy.md](stream-proxy.md), and [console.md](console.md). For operator
+> symptoms and fixes — a change that did not apply, a `restart_required`
+> rejection, a degraded-subsystem apply — see
+> [troubleshooting.md](troubleshooting.md#reloads).
 
 Jul.IA reloads configuration **without dropping connections**. A reload can be
 triggered three ways, all of which converge on the same validated path:

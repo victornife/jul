@@ -4,6 +4,9 @@
 >
 > Step-by-step soak guide for three target durations. All procedures target a
 > Windows/amd64 development workstation with Go 1.26+ and PowerShell.
+>
+> How to read the pass/fail signals is summarised in
+> [troubleshooting.md](troubleshooting.md#soak--load-test-interpretation).
 
 ## Prerequisites
 

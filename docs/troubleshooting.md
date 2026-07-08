@@ -65,14 +65,83 @@ Console and re-apply your change.
 
 ### A `SIGHUP`/reload did not apply a change
 
-Some settings are bound at startup and a reload keeps the running value (it logs
-a warning): TLS `client_auth`, tracing, and access-log sinks require a restart.
-See [reload-semantics.md](reload-semantics.md) for exactly what hot-reloads.
+Some settings are **bound at startup** and a hot reload keeps the running value
+(it logs a warning rather than silently misapplying): the ACME issued-domain set
+and issuer, listener bind-time settings (max-connections, listener timeouts, max
+header bytes, HTTP/3 or h2c toggles), TLS handshake parameters (`min_version`,
+mutual-TLS `client_auth`), tracing, and access-log sinks. These require a
+**restart** to take effect. See [reload-semantics.md](reload-semantics.md) for
+the exact *applied vs. serving* model and the full restart-required list.
+
+### An apply is rejected with `restart_required` (nothing was saved)
+
+When you apply a config through the admin API/Console that changes one of the
+startup-bound settings above, the write path **refuses it without persisting
+anything** and returns **HTTP 409** with `restart_required: true`. The Console
+shows a distinct *Restart required — not applied* banner. This is deliberate: the
+alternative — recording the change as applied while the old value keeps serving —
+would be dishonest. Edit the configuration file directly and restart the server.
+See [console.md](console.md#restart-required-changes).
+
+### The Console shows "Applied with a degraded subsystem"
+
+The HTTP configuration was accepted, but an **asynchronous** subsystem reload
+failed — most commonly the L4 stream (`[[stream]]`) proxy, whose listener rebind
+runs after the apply response is sent. The banner names the failed subsystem and
+its error. Check the server logs for the stream reload error, fix the offending
+`[[stream]]` block, and re-apply. The four possible apply outcomes (fully live,
+runtime-reloading, degraded-subsystem, restart-required) are described in
+[console.md](console.md#apply-outcomes).
 
 ### A bad edit did not take down the server
 
 By design: a reload that fails to load or validate is rejected and the running
 configuration is kept. Check the logs for `reload aborted: ...` and fix the file.
+
+## Service discovery
+
+Dynamic upstreams (`[upstreams.discovery]`) refresh a pool live from Consul,
+Kubernetes EndpointSlices, or DNS. The Consul and Kubernetes providers require
+the matching build tag (`consul`, `kubernetes`); DNS discovery is core. See
+[service-discovery.md](service-discovery.md).
+
+### The backend pool is empty / all requests return `502`
+
+The provider returned no usable instances **and** there was no prior good set to
+fall back to (a cold start). Check, in order:
+
+- The provider is reachable from the server. If an `[egress]` allow-list is
+  enabled, a discovery `address`/`api_server` that is not allow-listed is refused
+  at dial time — see [egress.md](egress.md).
+- **Consul:** the `service` name is registered and, when `passing_only = true`,
+  at least one instance is passing its health check.
+- **Kubernetes:** the `namespace`/`service` is correct, the EndpointSlice has
+  `ready` endpoints, and the service account can `get`/`list`/`watch`
+  `endpointslices`. A `403` from the API server means the Role/RoleBinding is
+  missing or wrong.
+
+### Backends do not update after a change in the provider
+
+Discovery polls on an interval — check `refresh` on the discovery block (a large
+value means slow convergence). The server **keeps the last good set** on a failed
+or empty resolve, so a transient provider outage will not drop live backends;
+they update on the next successful poll.
+
+### Metrics to watch
+
+- `jul_upstream_backends{pool}` — current backend count discovery sees.
+- `jul_discovery_errors_total{pool}` — failed/empty resolves (last-good kept).
+- `jul_upstream_healthy{pool}` — of those, how many pass active health checks.
+
+A rising `jul_discovery_errors_total` with a flat `jul_upstream_backends` is the
+signature of a provider outage masked by keep-last-good.
+
+### Validating discovery end-to-end
+
+Reproduce a real Consul/Kubernetes convergence locally with the live integration
+runbook (and the CI lane that automates the Consul path):
+[service-discovery.md](service-discovery.md#local-live-integration-runbook-issue-24).
+
 
 ## Plugins
 
@@ -174,6 +243,43 @@ For heavier debugging, build a test-guest that deliberately panics (`testguest-p
 ```bash
 go test -tags wasmplugins ./internal/plugins/ -run "TestPanic|TestTimeout" -v
 ```
+
+## Soak & load-test interpretation
+
+The soak harness (`scripts/soak.sh`, or the `soak`-tagged `TestSoak*` tests)
+drives sustained concurrent load and reports whether resource use stays bounded.
+It is the **post-GA gate** ([ADR 0005](adr/0005-soak-post-ga-gate.md)); published
+runs live in the [soak evidence log](soak-evidence.md), and the step-by-step
+procedures in [soak-procedures.md](soak-procedures.md).
+
+### Reading the output
+
+```
+soak: duration=5m0s workers=16 requests=1234567 errors=0
+soak: goroutines 42 -> 44, heap 1600000 -> 1900000 bytes
+```
+
+| Signal | Healthy | Investigate |
+| --- | --- | --- |
+| `errors=` | exactly `0` | any non-zero means a request failed under load |
+| Goroutine growth | ≤ `4*workers+32` | unbounded growth is a goroutine leak |
+| Heap growth | ≤ 64 MiB | a steady climb is a heap leak (take a pprof profile) |
+
+### "Heap grew but it is not a leak"
+
+Some libraries pre-allocate pools. The zstd encoder, for example, reserves
+~48 MiB up front: that is a one-time legitimate allocation, not a leak — it
+appears once and then stays flat. A real leak keeps climbing across the whole
+run. Confirm with a heap profile from the admin `/debug/pprof/heap` endpoint
+(behind the admin token).
+
+### The proxy soak fails on Windows within minutes
+
+Expected on Windows: the client side exhausts ephemeral ports dialling
+repeatedly from one machine. The proxy soak is only viable on Windows for smoke
+durations (≤ 20 s); use the Linux CI release gate or a real-binary burn-in for
+longer proxy validation. The UDP-churn and L4 stream soaks run reliably on
+Windows. See [soak-procedures.md](soak-procedures.md).
 
 ## Diagnostics
 

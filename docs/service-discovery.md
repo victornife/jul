@@ -5,6 +5,10 @@ discovery** instead resolves the backend set from an external source and
 refreshes the pool *live* — backends come and go without a config reload while
 load balancing, passive health, and active health checks keep applying.
 
+> **Troubleshooting:** an empty pool, stale backends, Consul/Kubernetes auth, and
+> the discovery metrics to watch are covered in
+> [troubleshooting.md](troubleshooting.md#service-discovery).
+
 Four providers are available:
 
 | Type | Source | Build | Carries |

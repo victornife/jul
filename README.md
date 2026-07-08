@@ -37,25 +37,27 @@ interface — all in a single static, dependency-free binary.
 ## Feature maturity
 
 The canonical maturity matrix lives in [`docs/status.md`](docs/status.md). At a
- glance:
+glance:
 
 | Maturity | Features |
 |----------|----------|
-| **GA** | Core HTTP, TLS & ACME, Authentication, mTLS, Console, Active health checks, WAF, Rate limiting, Compression, OTel tracing, Response cache, Zero-config + `jul lint`, NGINX importer, HTTP/3, **gRPC transcoding + passthrough** |
-| **GA — soak pending** | Service discovery, Secrets references, WASM plugins, L4 stream proxy |
+| **GA** | Core HTTP, TLS & ACME, Authentication, mTLS, Console, Active health checks, WAF, Rate limiting, Compression, OTel tracing, Response cache, Zero-config + `jul lint`, NGINX importer, HTTP/3, gRPC transcoding + passthrough, Service discovery, Secrets references, WASM plugins, L4 stream proxy |
+| **GA — soak pending** | *(none — all shipped features are GA)* |
 
-> See [`docs/status.md`](docs/status.md) for the full GA criteria matrix and
-> per-feature evidence links. The soak test is the last remaining gate for the
-> GA — soak pending features per [ADR 0005](docs/adr/0005-soak-post-ga-gate.md).
-> A consolidated **Phase 2A** 8-hour soak (2026-07-05, 2.12M req, 0% err)
-> promoted TLS, mTLS, auth, health checks, WAF, rate-limit, compression,
-> OTel tracing, and response cache to **GA**. A dedicated **gRPC soak**
-> (2026-07-07, 14.2M transcoding + 6.8M passthrough req, ~0% err) promoted
-> gRPC transcoding and passthrough to **GA**.
+> **All shipped features are now GA**, including the post-GA soak gate per
+> [ADR 0005](docs/adr/0005-soak-post-ga-gate.md). See
+> [`docs/status.md`](docs/status.md) for the full nine-criteria matrix and
+> per-feature soak-evidence links, and [`docs/ga-push.md`](docs/ga-push.md) for
+> the push log. The final promotions were a consolidated **Phase 2A** ~8-hour
+> soak (2026-07-06, 5.05M req, 0% err, 13 features simultaneously) covering
+> service discovery, secrets, WASM plugins, and the L4 stream proxy, and a
+> dedicated **gRPC soak** (2026-07-07, 14.2M transcoding + 6.8M passthrough req,
+> ~0% err). A soak failure on a GA feature is a release-blocking regression, not
+> a reason to retract the label.
 
-Several GA -- soak pending features require an opt-in **build tag** (e.g. `grpc`, `acme`,
+Many features require an opt-in **build tag** (e.g. `grpc`, `acme`,
 `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default
-`lean` binary ships only the GA surface plus core compression (`gzip`). Build
+`lean` binary ships the core GA surface plus core compression (`gzip`). Build
 with `-tags "…"` or download the `full` release profile to enable everything.
 
 ---
@@ -296,6 +298,10 @@ go build -ldflags "-X main.version=1.2.3" -o jul ./cmd/jul
 ```
 
 ### CLI troubleshooting
+
+For a full incident playbook — startup, reloads and restart-required changes,
+service discovery, plugins, and soak interpretation — see
+[docs/troubleshooting.md](docs/troubleshooting.md).
 
 - **Config rejected on start or reload?** Run `jul lint -config server.toml` to
   see every error and warning at once; the running server keeps its last valid
