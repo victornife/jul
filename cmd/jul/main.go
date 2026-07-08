@@ -4,19 +4,23 @@
 // Command jul is an NGINX-inspired HTTP edge server configured via TOML.
 //
 // serve() has four logical sections:
-//  1. Init         — logging, secrets, cache, metrics, tracing, ACME,
-//     stream proxy, WAF, rate limiter, upstream registry,
-//     plugin manager.
+//  1. Init         — logging, secrets, cache, metrics, and the process-lifetime
+//     runtime subsystems (tracing, ACME, stream server, build-tag feature
+//     gates) built once via app.RuntimeBuilder, plus the rate limiter, upstream
+//     registry, and plugin manager.
 //  2. buildHandlers — per-reload handler tree (static, proxy, FastCGI,
-//     gRPC transcoding, plugins) with middleware chain.
+//     gRPC transcoding, plugins) with middleware chain, whose generational
+//     teardown lifecycle (pool staging + live handler closers) is owned by
+//     app.GenerationResources.
 //  3. Preflight     — admin-write validation gate (6-gate sequence via
 //     app.Preflight.Apply: validate → TLS → handler dry-run
 //     → stream dry-run → bind probes → restart checks).
 //  4. Admin deps    — web-console wiring (app.BuildAdminDeps) and listener
 //     startup.
 //
-// Pure wiring helpers (scope keys, indexing, preflight, admin deps) live in
-// internal/app/ so they can be unit-tested without a full process boot
+// The composition-root helpers (scope keys, indexing, preflight, admin deps,
+// RuntimeBuilder, GenerationResources) live in internal/app/ so they can be
+// unit-tested without a full process boot
 // (see docs/architecture.md#composition-root-helpers).
 package main
 
@@ -30,7 +34,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"jul/internal/admin"
@@ -152,24 +155,20 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// [observability.metrics] takes effect only after a restart.
 	metrics := observability.NewMetrics(observability.WithHostLabel(cfg.Observability.Metrics.HostLabel))
 
-	// Tracing is initialized once at startup (like ACME): the OTLP pipeline and
-	// global TracerProvider are fixed for the process, so changing
-	// [observability.tracing] takes effect only after a restart. It is a no-op
-	// unless enabled and built with the "otel" tag; an enabled block in a binary
-	// without that tag is a startup error. Shutdown flushes buffered spans on
-	// graceful exit.
-	tracer, err := observability.NewTracer(cfg.Observability.Tracing)
+	// The process-lifetime runtime subsystems — the tracing pipeline, the ACME
+	// manager, and the L4 stream server — are built once at startup and outlive
+	// every reload. RuntimeBuilder also runs the build-tag feature gates (HTTP/3,
+	// stream, WAF) that fail fast when the configuration needs a capability this
+	// binary was not built with. Extracting this out of serve() keeps the startup
+	// sequence unit-testable without a full process boot (ADR-0007). rt.Close
+	// (deferred) shuts the tracer down and closes the stream server on graceful
+	// exit.
+	rt, err := app.RuntimeBuilder{Config: cfg, Logger: log, Metrics: metrics}.Build()
 	if err != nil {
-		log.Error("failed to initialize tracing", "error", err)
+		log.Error("failed to initialize server runtime", "error", err)
 		return 1
 	}
-	defer func() {
-		shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancelShut()
-		if err := tracer.Shutdown(shutCtx); err != nil {
-			log.Warn("tracing shutdown", "error", err)
-		}
-	}()
+	defer rt.Close()
 
 	// Access-log sinks are built once at startup (like tracing): the "file" sink
 	// owns a rotating file handle and the "syslog" sink a system-log connection,
@@ -193,44 +192,6 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// access-log chain below and exposed to the admin server via deps.
 	logTail := observability.NewLogTail(0)
 	accessSinks = append(accessSinks, logTail)
-
-	// Build the ACME manager once from the startup configuration. It covers the
-	// union of acme-enabled domains, caches certificates on disk, auto-renews,
-	// and answers HTTP-01 challenges. nil means no block enables ACME; an error
-	// means ACME is enabled but this binary lacks the "acme" build tag. Enabling
-	// ACME after startup requires a restart (the domain set is fixed here).
-	acmeMgr, err := server.NewACMEManager(cfg.Servers, metrics.ObserveCertExpiry)
-	if err != nil {
-		log.Error("failed to initialize ACME", "error", err)
-		return 1
-	}
-
-	// HTTP/3 support is a build-time choice (the "http3" tag). Fail fast at
-	// startup when the configuration enables HTTP/3 but this binary cannot serve
-	// it, mirroring the ACME/tracing build-tag checks, instead of silently
-	// serving only TCP. It is a no-op in http3-enabled builds.
-	if err := server.CheckHTTP3(cfg.Servers); err != nil {
-		log.Error("failed to initialize HTTP/3", "error", err)
-		return 1
-	}
-
-	// L4 stream proxying ([[stream]]) is a build-time choice (the "stream" tag).
-	// Fail fast when the configuration declares a stream but this binary cannot
-	// serve it, mirroring the HTTP/3 check. It is a no-op in stream-enabled
-	// builds or when no stream is configured.
-	if err := stream.Check(cfg.Streams); err != nil {
-		log.Error("failed to initialize stream proxy", "error", err)
-		return 1
-	}
-
-	// The web application firewall ([waf]) is a build-time choice (the "waf"
-	// tag). Fail fast when the configuration enables it but this binary cannot
-	// enforce rules, mirroring the stream/HTTP3 checks. It is a no-op in
-	// WAF-enabled builds or when no WAF is configured.
-	if err := waf.Check(cfg); err != nil {
-		log.Error("failed to initialize WAF", "error", err)
-		return 1
-	}
 
 	// The rate-limiter store persists across reloads (its janitor is bound to
 	// baseCtx) so token buckets and their accumulated state survive config
@@ -267,58 +228,21 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	}
 	defer func() { _ = pluginMgr.Close() }()
 
-	// The L4 stream proxy persists across reloads so its listeners (and any
-	// in-flight relayed connections) survive config edits: a reload diffs the
-	// desired stream set against the running one. In a lean build (no "stream"
-	// tag) the server is a no-op and Reload rejects any configured stream. The
-	// initial set is applied below before serving; subsequent reloads are driven
-	// by the server's OnReloaded hook.
-	streamSrv := stream.NewServer(stream.Options{
-		Logger: log,
-		Hooks: stream.Hooks{
-			OnConnDelta:          metrics.StreamConnDelta,
-			OnBytes:              metrics.ObserveStreamBytes,
-			OnUDPSessionEvicted:  metrics.StreamUDPEvicted,
-			OnUDPSessionRejected: metrics.StreamUDPRejected,
-		},
-	})
-	defer func() { _ = streamSrv.Close() }()
-	if err := streamSrv.Reload(cfg.Streams, app.IndexUpstreams(cfg.Upstreams)); err != nil {
-		log.Error("failed to start stream proxy", "error", err)
-		return 1
-	}
-	// lastStreamReload publishes the outcome of the most recent stream-proxy
-	// reload for the console Overview. The stream listener set is reloaded
-	// asynchronously after the HTTP reload swap (OnReloaded), so its success or
-	// failure cannot be reported in the synchronous apply response; the console
-	// surfaces it by polling. Empty means no stream is configured (nothing to
-	// report); "ok" means the running stream set matches the applied config; a
-	// "failed: ..." value means the last reload was rejected and the previously
-	// bound listeners are still serving the prior set.
-	var lastStreamReload atomic.Pointer[string]
-	{
-		initial := ""
-		if len(cfg.Streams) > 0 {
-			initial = "ok"
-		}
-		lastStreamReload.Store(&initial)
-	}
-
-	// liveHandlerClosers holds closers for handlers in the currently serving
-	// configuration that own resources needing explicit teardown on reload —
-	// gRPC-transcoding backend connections, WASM plugin runtimes, and static
-	// file directory handles. A successful reload adopts the new generation's
-	// closers here and hands the previous generation's closers to the server as a
-	// retire callback, which runs only after that generation's in-flight requests
-	// drain; a failed reload closes only the rejected generation's staged
-	// closers. The deferred close on shutdown tears down the final generation
-	// still serving.
-	var liveHandlerClosers []io.Closer
-	defer func() {
-		for _, c := range liveHandlerClosers {
-			_ = c.Close()
-		}
-	}()
+	// genRes owns the generational teardown lifecycle of the handler tree: the
+	// upstream pool registry's Begin..Commit/Abort staging span and the io.Closer
+	// set of the currently serving generation (gRPC-transcoding backend
+	// connections, WASM plugin runtimes, and static-file directory handles). Each
+	// build opens a generation, stages its closers, and finishes with Commit
+	// (promote the staged generation, retire the previous one after it drains) or
+	// Abort (discard the staged generation). A committing build adopts the new
+	// generation's closers as the live set and hands the previous generation's
+	// closers to the server as a retire callback that runs only after that
+	// generation's in-flight requests drain; a preflight (commit=false) build's
+	// staged closers are released by the deferred Abort. CloseLive tears down the
+	// final serving generation on shutdown. Extracting this out of serve() makes
+	// the teardown semantics unit-testable (ADR-0007).
+	genRes := app.NewGenerationResources(poolReg)
+	defer genRes.CloseLive()
 
 	// buildMu serializes every handler-tree build (startup, reload, and admin
 	// preflight) so the generational pool registry's Begin..Commit span is never
@@ -346,28 +270,16 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 		upstreams := app.IndexUpstreams(c.Upstreams)
 
-		// Reconcile the upstream pool set for this build: Begin stages a new
-		// generation, each proxy location's resolvePool stages or reuses its
-		// pool through poolReg, and Commit (on success) promotes them and closes
-		// pools that were removed or reshaped. Abort on any failure closes
-		// freshly created staged pools so a rejected reload leaks no goroutines
-		// while the previous pools keep serving.
-		poolReg.Begin()
-		committed := false
-		// stagedHandlerClosers collects closers for handlers built in THIS
-		// generation. On success they become the live set and the previous live
-		// set is returned as a retire callback (closed after it drains); on
-		// failure they are closed here so a rejected reload leaks no backend
-		// connections.
-		var stagedHandlerClosers []io.Closer
-		defer func() {
-			if !committed {
-				poolReg.Abort()
-				for _, c := range stagedHandlerClosers {
-					_ = c.Close()
-				}
-			}
-		}()
+		// Open a staging generation for this build: genRes.Begin stages a new
+		// upstream-pool generation, each proxy location's resolvePool stages or
+		// reuses its pool through poolReg, and gen.Commit (on success) promotes
+		// them and closes pools that were removed or reshaped. The deferred
+		// gen.Abort closes freshly created staged pools and any staged handler
+		// closers on any non-committing return (preflight or failure) so a rejected
+		// reload leaks no goroutines while the previous pools keep serving; it is a
+		// no-op once gen.Commit has promoted the generation.
+		gen := genRes.Begin()
+		defer gen.Abort()
 
 		// Build this generation's WASM plugin set. A lean build (or a malformed
 		// module) fails here, rejecting the reload. The set owns per-plugin wazero
@@ -377,7 +289,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		if err != nil {
 			return nil, nil, fmt.Errorf("plugins: %w", err)
 		}
-		stagedHandlerClosers = append(stagedHandlerClosers, pluginSet)
+		gen.Stage(pluginSet)
 
 		withCache := func(loc config.LocationConfig, h http.Handler) http.Handler {
 			if loc.Cache && responseCache != nil {
@@ -405,7 +317,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				// previous generation's root is closed when this config is
 				// replaced (otherwise the FD leaks until GC finalizes it).
 				if c, ok := h.(io.Closer); ok {
-					stagedHandlerClosers = append(stagedHandlerClosers, c)
+					gen.Stage(c)
 				}
 				return h, nil
 			},
@@ -437,7 +349,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				// The transcoder owns a gRPC client connection; register it for
 				// teardown when this configuration is replaced.
 				if c, ok := h.(io.Closer); ok {
-					stagedHandlerClosers = append(stagedHandlerClosers, c)
+					gen.Stage(c)
 				}
 				return h, nil
 			},
@@ -598,7 +510,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 		}
 
-		rt, err := router.New(c, builders, nil, locModifier, log)
+		rtr, err := router.New(c, builders, nil, locModifier, log)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -644,7 +556,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			// the router via LocationModifier, closer to the handler.
 			mws := []middleware.Middleware{
 				middleware.RequestID(),
-				tracer.Middleware,
+				rt.Tracer.Middleware,
 				metrics.Middleware,
 				middleware.AccessLog(accessSinks...),
 				middleware.Recover(log),
@@ -652,38 +564,30 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if compress != nil {
 				mws = append(mws, compress)
 			}
-			h := middleware.Chain(rt.For(addr), mws...)
+			h := middleware.Chain(rtr.For(addr), mws...)
 			// On plain HTTP listeners, answer ACME HTTP-01 challenges outermost so
 			// certificate issuance/renewal works even when the listener otherwise
 			// redirects to HTTPS. Non-challenge requests fall through to h.
-			if acmeMgr != nil && !app.AddrServesTLS(c.Servers, addr) {
-				h = acmeMgr.ChallengeHandler(h)
+			if rt.ACME != nil && !app.AddrServesTLS(c.Servers, addr) {
+				h = rt.ACME.ChallengeHandler(h)
 			}
 			handlers[addr] = h
 		}
 
 		// The build succeeded. A committing build promotes the staged pools and
 		// closes any pools the previous generation no longer needs (the deferred
-		// Abort becomes a no-op), then adopts this generation's handler closers as
-		// the live set and returns a retire callback that closes the PREVIOUS
+		// gen.Abort becomes a no-op), then adopts this generation's handler closers
+		// as the live set and returns a retire callback that closes the PREVIOUS
 		// generation's closers. The server invokes that callback only after the
 		// previous generation has drained, so gRPC backend connections, WASM plugin
 		// runtimes, and static-file directory handles are never closed while an
 		// in-flight request is still served by the old handlers. A preflight build
-		// (commit == false) leaves committed false, so the deferred Abort releases
-		// the staged pools and closers and the live generation is untouched; the
-		// returned handlers and nil retire are discarded.
+		// (commit == false) never calls gen.Commit, so the deferred gen.Abort
+		// releases the staged pools and closers and the live generation is
+		// untouched; the returned handlers and nil retire are discarded.
 		var retirePrev func()
 		if commit {
-			poolReg.Commit()
-			prevClosers := liveHandlerClosers
-			liveHandlerClosers = stagedHandlerClosers
-			committed = true
-			retirePrev = func() {
-				for _, c := range prevClosers {
-					_ = c.Close()
-				}
-			}
+			retirePrev = gen.Commit()
 		}
 		return handlers, retirePrev, nil
 	}
@@ -729,7 +633,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		PluginsCompiled:  plugins.Compiled,
 		StreamCompiled:   stream.Compiled,
 		WAFCompiled:      waf.Compiled,
-		LastStreamReload: &lastStreamReload,
+		LastStreamReload: &rt.LastStreamReload,
 	}
 	deps := app.BuildAdminDeps(productName, version, src, subsystems)
 	deps.Reload = triggerReload
@@ -749,7 +653,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// keeps serving while audit/history have already recorded success.
 	preflight := app.Preflight{
 		BuildHandlers: buildHandlers,
-		Stream:        streamSrv,
+		Stream:        rt.Stream,
 	}
 	if ts, ok := src.(*config.TOMLSource); ok {
 		path := ts.Path
@@ -810,7 +714,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	srv := server.New(cfg, log, factory, src, validateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
-	srv.ACME = acmeMgr
+	srv.ACME = rt.ACME
 	deps.LastReload = func() *admin.ReloadSnapshot {
 		if li := srv.LastReload(); li != nil {
 			return &admin.ReloadSnapshot{
@@ -829,17 +733,17 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// listeners. Stream binding errors are logged and do not roll back the HTTP
 	// reload (the listener sets are independent).
 	srv.OnReloaded = func(c *config.Config) {
-		if err := streamSrv.Reload(c.Streams, app.IndexUpstreams(c.Upstreams)); err != nil {
+		if err := rt.Stream.Reload(c.Streams, app.IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)
 			msg := "failed: " + err.Error()
-			lastStreamReload.Store(&msg)
+			rt.LastStreamReload.Store(&msg)
 			return
 		}
 		ok := ""
 		if len(c.Streams) > 0 {
 			ok = "ok"
 		}
-		lastStreamReload.Store(&ok)
+		rt.LastStreamReload.Store(&ok)
 	}
 	if err := srv.Run(ctx, reload); err != nil {
 		log.Error("server exited with error", "error", err)
