@@ -24,6 +24,36 @@ technical merit aligned with the project's vision.
    make ci-full          # full feature set — matches CI exactly
    ```
 
+### Git hooks (optional local gate parity)
+
+Repo-managed Git hooks mirror the CI **fast** gates so common failures surface
+before you push. Install them in one command (safe to re-run):
+
+```bash
+make hooks                 # or: sh scripts/install-hooks.sh
+# Windows (PowerShell):    pwsh scripts/install-hooks.ps1
+# Any platform, directly:  git config core.hooksPath .githooks
+```
+
+What they check:
+
+| Hook | Checks | Mirrors |
+|------|--------|---------|
+| `pre-commit` | `gofmt` on staged Go files | CI `gofmt` gate |
+| `pre-push` | `gofmt`, `go vet`, `go build`, `go test` (lean) — plus `golangci-lint` and the console frontend checks **when installed** | `make ci-fast` |
+
+The hooks are **non-destructive** (they only check, never rewrite files) and easy
+to bypass on purpose: pass `--no-verify` to a single `git commit`/`git push`, or
+set `JUL_SKIP_HOOKS=1` to disable them entirely. Uninstall with
+`git config --unset core.hooksPath`.
+
+**Parity and limits.** The hooks are a fast subset, not the whole pipeline. They
+do **not** run the full build-tag profile, the race detector (needs a CGO
+toolchain), the coverage floors, `govulncheck`, or the bench/fuzz/soak smoke
+jobs — those still run in CI, and you should run `make ci-full` /
+`make vulncheck-full` before a release-sensitive change. A green pre-push is a
+good signal, not a guarantee the full CI will pass.
+
 ### Dependency vulnerability scanning
 
 Before opening a PR, check for known vulnerabilities in the dependency tree

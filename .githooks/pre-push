@@ -1,0 +1,110 @@
+#!/bin/sh
+# Jul.IA pre-push hook — local parity with the CI *fast* gates (SEQ-08 / HP-04).
+#
+# Mirrors `make ci-fast` using the underlying tools directly (no make dependency,
+# so it works the same on Windows/macOS/Linux): gofmt, go vet, go build, and
+# go test on the lean profile — plus golangci-lint and the console frontend
+# checks when those toolchains are present. Go's build/test cache keeps repeat
+# runs quick.
+#
+# This is a FAST subset, not the whole pipeline. It does NOT run: the full
+# build-tag profile, the race detector (needs a CGO toolchain), coverage floors,
+# vulncheck, or the bench/fuzz/soak smoke jobs. Run those with `make ci-full` /
+# `make vulncheck-full` before a release-sensitive change. See CONTRIBUTING.md.
+#
+# Non-destructive: it only checks, never rewrites files.
+# Bypass one push with `git push --no-verify`.
+# Disable all repo hooks with JUL_SKIP_HOOKS=1.
+set -u
+
+if [ "${JUL_SKIP_HOOKS:-}" = "1" ]; then
+	echo "pre-push: skipped (JUL_SKIP_HOOKS=1)"
+	exit 0
+fi
+
+fail=0
+step() { printf '\n== %s ==\n' "$1"; }
+
+# gofmt is checked against each file's *committed* (LF-normalized) content, so a
+# CRLF working tree on Windows does not false-positive the way `gofmt -l .` does.
+gofmt_blob_clean() {
+	orig=$(git show "$1" 2>/dev/null) || return 0
+	fmtd=$(printf '%s' "$orig" | gofmt 2>/dev/null)
+	[ $? -ne 0 ] && return 0
+	[ "$orig" = "$fmtd" ]
+}
+
+# 1. gofmt — the Go files changed in this push (vs the upstream base).
+step "gofmt (changed Go files)"
+base=""
+if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+	base="origin/main"
+elif git rev-parse --verify -q '@{upstream}' >/dev/null 2>&1; then
+	base="@{upstream}"
+fi
+if [ -n "$base" ]; then
+	changed_go=$(git diff --name-only "$base...HEAD" -- '*.go' \
+		| grep -v '^examples/grpc-gateway/gen_descriptor.go$' || true)
+else
+	# No upstream to diff against: fall back to every tracked Go file.
+	changed_go=$(git ls-files -- '*.go' \
+		| grep -v '^examples/grpc-gateway/gen_descriptor.go$' || true)
+fi
+bad=""
+for f in $changed_go; do
+	gofmt_blob_clean "HEAD:$f" || bad="$bad $f"
+done
+if [ -n "$bad" ]; then
+	echo "FAIL: gofmt needed on:"
+	for f in $bad; do echo "  $f"; done
+	echo "Fix with: make format"
+	fail=1
+else
+	echo "OK"
+fi
+
+# 2. go vet (lean profile).
+step "go vet ./... (lean)"
+if go vet ./...; then echo "OK"; else fail=1; fi
+
+# 3. go build (lean profile).
+step "go build ./... (lean)"
+if go build ./...; then echo "OK"; else fail=1; fi
+
+# 4. go test (lean profile).
+step "go test ./... (lean)"
+if go test ./...; then echo "OK"; else fail=1; fi
+
+# 5. golangci-lint — only when installed (CI pins a version; this is best-effort).
+step "golangci-lint"
+if command -v golangci-lint >/dev/null 2>&1; then
+	if golangci-lint run; then echo "OK"; else fail=1; fi
+else
+	echo "skipped (golangci-lint not installed)"
+fi
+
+# 6. Console frontend — only when the UI changed and pnpm is available.
+step "console frontend"
+ui_dir="internal/admin/ui"
+changed=$(git diff --name-only "origin/main...HEAD" -- "$ui_dir" 2>/dev/null \
+	|| git diff --name-only HEAD -- "$ui_dir" 2>/dev/null || true)
+if [ -n "$changed" ] && command -v pnpm >/dev/null 2>&1; then
+	if ( cd "$ui_dir" && pnpm run typecheck && pnpm run lint && pnpm run test ); then
+		echo "OK"
+	else
+		fail=1
+	fi
+elif [ -n "$changed" ]; then
+	echo "skipped (frontend changed but pnpm not installed)"
+else
+	echo "skipped (no frontend changes)"
+fi
+
+if [ "$fail" -ne 0 ]; then
+	printf '\npre-push: one or more local gates failed.\n'
+	printf 'Bypass intentionally with: git push --no-verify\n'
+	exit 1
+fi
+
+printf '\npre-push: all local fast gates passed.\n'
+exit 0

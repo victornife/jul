@@ -1,5 +1,6 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
-        console-dev console-build console-check build-console build-full license-check
+        console-dev console-build console-check build-console build-full license-check \
+        hooks
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
@@ -47,6 +48,12 @@ vulncheck-full:
 ci-fast: format-check lint test build license-check
 
 ci-full: format-check lint-full test-full vulncheck-full build-full license-check
+
+# Install the repo-managed Git hooks (local CI gate parity, SEQ-08). One command;
+# safe to re-run. Uninstall with `git config --unset core.hooksPath`.
+hooks:
+	git config core.hooksPath .githooks
+	@echo "Installed Git hooks (core.hooksPath -> .githooks). Bypass with --no-verify; disable with JUL_SKIP_HOOKS=1."
 
 clean:
 	go clean

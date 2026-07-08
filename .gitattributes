@@ -5,3 +5,7 @@
 # Golden fixtures are byte-compared by tests; keep LF so the snapshot matches on
 # every platform.
 *.golden text eol=lf
+
+# Git hooks run under /bin/sh (Git for Windows' bundled sh included) and must
+# keep LF endings on every platform, regardless of core.autocrlf.
+.githooks/* text eol=lf
