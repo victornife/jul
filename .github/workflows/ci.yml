@@ -149,6 +149,56 @@ jobs:
             echo "ERROR: coverage ${total}% is below the ${COVERAGE_FLOOR}% floor."
             exit 1
           fi
+      - name: enforce per-package coverage floors
+        shell: bash
+        env:
+          # Per-package statement-coverage floors for critical packages.
+          # Baseline (2026-07-08): config=85.4, server=81.3, auth=90.0, admin=78.1
+          # Floors set ~3pp below baseline: catches real regressions while
+          # tolerating minor test churn. Raise each floor as coverage grows.
+          FLOOR_CONFIG: "82"
+          FLOOR_SERVER: "78"
+          FLOOR_AUTH:   "87"
+          FLOOR_ADMIN:  "75"
+        run: |
+          set -euo pipefail
+          failed=0
+
+          check_pkg() {
+            local label="$1" pkg_prefix="$2" floor="$3"
+            # cover.out line: pkg/path/file.go:start,end  numStmts  hitCount
+            # Trailing slash on prefix prevents partial-name false matches
+            # (e.g. internal/config must not match internal/config_extra/).
+            local cov
+            cov=$(awk -v p="${pkg_prefix}/" '
+              NR > 1 && index($1, p) == 1 {
+                stmts += $2
+                if ($3 > 0) hit += $2
+              }
+              END { if (stmts > 0) printf "%.1f", hit*100/stmts; else print "0.0" }
+            ' cover.out)
+            echo "${label}: ${cov}%  (floor: ${floor}%)"
+            if ! awk -v t="$cov" -v f="$floor" 'BEGIN { exit (t >= f) ? 0 : 1 }'; then
+              echo "  FAIL: below floor"
+              return 1
+            fi
+            echo "  PASS"
+          }
+
+          check_pkg "internal/config" "jul/internal/config" "$FLOOR_CONFIG" || failed=1
+          check_pkg "internal/server" "jul/internal/server" "$FLOOR_SERVER" || failed=1
+          check_pkg "internal/auth"   "jul/internal/auth"   "$FLOOR_AUTH"   || failed=1
+          check_pkg "internal/admin"  "jul/internal/admin"  "$FLOOR_ADMIN"  || failed=1
+
+          if [ "$failed" -ne 0 ]; then
+            echo ""
+            echo "ERROR: one or more critical packages are below their per-package floors."
+            echo "Investigate: go test -tags \"\$FULL_TAGS\" -coverprofile=cover.out ./internal/<pkg>/... && go tool cover -func cover.out"
+            exit 1
+          fi
+          echo ""
+          echo "All critical package floors passed."
+
       - name: upload coverage profile
         if: always()
         uses: actions/upload-artifact@v7
