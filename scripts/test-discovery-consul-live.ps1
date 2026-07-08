@@ -1,5 +1,13 @@
 # Live integration validation for service discovery (Consul lane)
-# Usage: .\scripts\test-discovery-consul-live.ps1
+# Usage: .\scripts\test-discovery-consul-live.ps1 [-CI]
+#
+# The Consul lane needs only a running Docker daemon and the Go toolchain, so it
+# is the lane wired into CI (.github/workflows/discovery-live.yml). Pass -CI to
+# skip the developer-only Kubernetes-context probe (there is no cluster on the
+# CI runner) and to emit a machine-readable CI marker alongside the evidence.
+param(
+    [switch]$CI
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -25,10 +33,19 @@ Invoke-Step "Building jul.exe with consul+kubernetes tags" {
 
 Invoke-Step "Preflight checks" {
     docker version | Out-Null
-    $ctx = (kubectl config current-context)
+    # The Consul lane does not use Kubernetes; the context probe is developer
+    # convenience only. Skip it under -CI (no cluster on the runner) and keep it
+    # best-effort locally so a machine without a kube context can still run it.
+    $ctx = "skipped-ci"
+    if (-not $CI) {
+        try { $ctx = (kubectl config current-context) } catch { $ctx = "unavailable" }
+    }
     "k8s-context=$ctx" | Set-Content -Encoding ascii -Path (Join-Path $artifacts "k8s-context.txt")
     docker version | Out-File -FilePath (Join-Path $artifacts "docker-version.txt") -Encoding ascii
     go version | Out-File -FilePath (Join-Path $artifacts "go-version.txt") -Encoding ascii
+    if ($CI) {
+        "ci_mode=1" | Set-Content -Encoding ascii -Path (Join-Path $artifacts "consul-ci-mode.txt")
+    }
 }
 
 Invoke-Step "Starting backends and Consul" {
@@ -248,6 +265,13 @@ try {
 finally {
     if ($proc -and -not $proc.HasExited) {
         Stop-Process -Id $proc.Id -Force
+    }
+    # Capture container logs as evidence BEFORE teardown so a CI failure has
+    # actionable diagnostics (the containers are removed on the next line).
+    foreach ($c in @("issue24-consul", "issue24-be1", "issue24-be2")) {
+        try {
+            docker logs $c 2>&1 | Set-Content -Encoding ascii -Path (Join-Path $artifacts "docker-$c.log")
+        } catch {}
     }
     docker rm -f issue24-consul issue24-be1 issue24-be2 2>$null | Out-Null
 }

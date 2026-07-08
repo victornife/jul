@@ -1,0 +1,104 @@
+name: discovery-live
+
+# Live service-discovery integration lane (AUX-03 / #46, automating the #24
+# local runbook). Reuses the #24 Consul lane script unchanged in spirit
+# (scripts/test-discovery-consul-live.ps1 -CI): it stands up real Consul +
+# backend containers, points a real jul build at them, deregisters an instance,
+# and asserts the pool converges live. The Consul lane is Docker-only, so it runs
+# directly on an ubuntu runner; the Kubernetes lane stays a local runbook (it
+# depends on Windows-only host-networking cmdlets — see docs/service-discovery.md).
+#
+# This lane is intentionally NOT on the every-push critical path (it pulls images
+# and runs a multi-second convergence loop). It runs:
+#   - on demand (workflow_dispatch),
+#   - nightly (schedule), and
+#   - on pull requests/pushes that touch discovery code, the lane script, or this
+#     workflow, so a discovery change cannot regress the live convergence path
+#     without this lane running.
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly at 04:17 UTC. Off the hour to avoid the scheduler thundering herd.
+    - cron: "17 4 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "internal/upstream/**"
+      - "scripts/test-discovery-consul-live.ps1"
+      - "scripts/test-discovery-live.ps1"
+      - ".github/workflows/discovery-live.yml"
+      - "docs/service-discovery.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - "internal/upstream/**"
+      - "scripts/test-discovery-consul-live.ps1"
+      - "scripts/test-discovery-live.ps1"
+      - ".github/workflows/discovery-live.yml"
+      - "docs/service-discovery.md"
+
+concurrency:
+  group: discovery-live-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  consul-live:
+    name: consul live convergence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The runner ships a Docker daemon and PowerShell (pwsh); the lane script
+      # builds jul with the consul+kubernetes tags and drives the whole scenario.
+      - name: run Consul live discovery lane
+        shell: pwsh
+        run: ./scripts/test-discovery-consul-live.ps1 -CI
+
+      # On failure, surface the evidence the script already captured (jul logs,
+      # the pre/post response windows, the container logs collected before
+      # teardown, and the machine-readable summary) directly in the job log so a
+      # flake is actionable without downloading the artifact bundle.
+      - name: failure diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $dir = "tmp/issue24"
+          Write-Host "=== Discovery lane failed. Dumping captured evidence from $dir ==="
+          $files = @(
+            "consul-summary.txt",
+            "consul-before.txt",
+            "consul-after.txt",
+            "consul-jul.err.log",
+            "consul-jul.out.log",
+            "docker-issue24-consul.log",
+            "docker-issue24-be1.log",
+            "docker-issue24-be2.log"
+          )
+          foreach ($f in $files) {
+            $p = Join-Path $dir $f
+            Write-Host ""
+            Write-Host "----- $f -----"
+            if (Test-Path $p) {
+              Get-Content -Path $p | ForEach-Object { Write-Host $_ }
+            } else {
+              Write-Host "(not produced)"
+            }
+          }
+
+      # Always publish the full evidence bundle so both green and red runs carry
+      # the same #24-style artifact set for triage / closure records.
+      - name: upload discovery evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: discovery-live-consul-evidence
+          path: tmp/issue24/**
+          if-no-files-found: warn

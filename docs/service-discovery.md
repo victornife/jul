@@ -249,6 +249,9 @@ Consul lane artifacts:
 - `tmp/issue24/consul-jul.out.log`
 - `tmp/issue24/consul-jul.err.log`
 - `tmp/issue24/consul-summary.txt`
+- `tmp/issue24/docker-issue24-consul.log`
+- `tmp/issue24/docker-issue24-be1.log`
+- `tmp/issue24/docker-issue24-be2.log`
 
 Kubernetes lane artifacts:
 
@@ -289,6 +292,62 @@ Acceptance mapping for issue #24:
   `k8s-summary.txt` reports `k8s_lane=PASS`.
 
 If both are PASS, close issue #24 as completed.
+
+## CI automation for live discovery (issue #46)
+
+The local Consul lane above is also run **in CI** by the
+[`discovery-live`](../.github/workflows/discovery-live.yml) workflow, so the live
+convergence path is continuously enforced and not only proven on a developer
+machine. The workflow reuses the exact #24 lane script — no separate test
+framework — invoking it in a non-interactive CI mode:
+
+```powershell
+.\scripts\test-discovery-consul-live.ps1 -CI
+```
+
+### Which lane runs in CI, and why
+
+Only the **Consul lane** is automated in CI. It needs nothing beyond a Docker
+daemon and the Go toolchain, both of which a standard `ubuntu-latest` runner
+provides, so it runs deterministically without a cluster. The **Kubernetes lane**
+stays a **local runbook**: its script depends on Windows-only host-networking
+cmdlets (`Get-NetRoute`, `Get-NetIPAddress`, `Get-NetTCPConnection`) and a
+host-routable EndpointSlice address, which do not translate to a Linux runner
+without rewriting the script into a different framework (an explicit non-goal of
+#46). Running one reproducible live lane in CI is the agreed minimum; the K8s
+lane remains covered by the unit/integration tests under
+`internal/upstream/` plus the documented local runbook.
+
+The `-CI` switch only skips the developer-convenience Kubernetes-context probe
+(there is no kube context on the runner) and drops a `consul-ci-mode.txt` marker;
+the backends, Consul registration, deregistration, and the **core convergence
+assertions are identical** to a local run, so there is no drift between local and
+CI expectations.
+
+### When it runs
+
+- **On demand** — `workflow_dispatch` from the Actions tab.
+- **Nightly** — a scheduled run (04:17 UTC) catches environmental drift.
+- **On change** — pull requests and pushes that touch `internal/upstream/**`, the
+  lane script, or the workflow, so a discovery change cannot merge without the
+  live lane running against it.
+
+### CI evidence and failure diagnostics
+
+Every run — green or red — uploads the full `tmp/issue24/` evidence bundle as the
+`discovery-live-consul-evidence` artifact, mirroring the local evidence style.
+The lane script additionally captures each container's `docker logs` into
+`tmp/issue24/docker-issue24-*.log` **before** teardown, and on failure the
+workflow prints the summary, the pre/post response windows, the jul logs, and
+those container logs straight into the job log so a flake is actionable without
+downloading the bundle.
+
+To reproduce a **controlled failure** (verifying that failures surface with
+actionable artifacts), break the convergence precondition — for example stop one
+backend before the deregistration step (`docker stop issue24-be1`) or point the
+config at a Consul address that is not serving: the lane throws on the missed
+assertion, exits non-zero, and still emits `consul-summary.txt` with
+`consul_lane=FAIL` plus the captured logs.
 
 ## Behaviour matrix
 

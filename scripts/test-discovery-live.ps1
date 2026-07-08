@@ -106,7 +106,7 @@ $($k8sSummary -join "`n")
 
 1. This validates local live integrations on docker-desktop.
 2. Kubernetes lane evidence is the live EndpointSlice API transition (`port: 18081` before patch, `port: 18082` after patch).
-3. CI automation is still a follow-up task.
+3. The Consul lane is additionally automated in CI (.github/workflows/discovery-live.yml, issue #46); the Kubernetes lane remains a local runbook.
 "@ | Set-Content -Encoding ascii -Path $summaryPath
 
 Write-Host "=== Discovery live validation completed ==="
