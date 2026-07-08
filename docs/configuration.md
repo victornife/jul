@@ -677,6 +677,12 @@ cardinality. Enable `host_label` only when the set of hosts is bounded. The
 setting is read once at boot; a reload keeps the running value — restart to
 apply a change.
 
+Every other metric label is bounded by construction — the request `method` is
+folded to a fixed set (unknown tokens become `other`), and no request path,
+query, client IP, or user-agent is ever a label. See the full
+[label-cardinality policy and relabel cookbook](core-http.md#metrics) for the
+authoritative inventory and scale guidance.
+
 ---
 
 ## `[observability.access_log]`

@@ -151,30 +151,43 @@ external identity stays Y3-02.
 
 **Objective.** Keep Prometheus cardinality predictable as deployments scale.
 
-**Already delivered.** The `host` label on `jul_http_requests_total` is **opt-in**
-(`[observability.metrics] host_label`, default off) with relabel guidance — see
-[core-http.md](../core-http.md#metrics). This removed the largest unbounded-label
-risk.
+**Status (2026 — delivered).** A documented, enforced label-cardinality policy now
+ships, closing this item:
 
-**Remaining.** A documented, enforced strategy rather than per-label fixes:
+- **Full label inventory** with a per-label cardinality-bound classification
+  (fixed / config-topology-bounded / client-derived) is published in
+  [core-http.md](../core-http.md#metrics) as an authoritative policy table.
+- **The last unbounded client-derived label is capped by construction.** The HTTP
+  request `method` label on `jul_http_requests_total` /
+  `jul_http_request_duration_seconds` — previously the raw, client-controlled
+  `r.Method` (HTTP allows arbitrary method tokens) — is folded to the fixed set of
+  standard methods, with everything else collapsing to `other`. Together with the
+  already-opt-in `host` label, **every client-derived label is now bounded by
+  design**, requiring no operator action.
+- **Regression enforcement.** `TestMetricLabelPolicy`
+  (`internal/observability/cardinality_test.go`) exercises every metric hook and
+  asserts each exported `jul_*` family carries exactly the documented label names,
+  so adding a new metric or label — especially a request-derived one — fails the
+  build until the policy is consciously updated. `TestHTTPMethodLabelBounded`
+  proves novel method tokens fold to a single `other` series.
+- **Operator playbook.** A [relabel cookbook](../core-http.md#operator-playbook-keeping-cardinality-bounded)
+  covers dropping noisy topology labels (`backend` on large pools, `domain` on
+  on-demand ACME), a series budget, and a `sample_limit` backstop.
 
-- Inventory every metric's label set and its cardinality driver (route, upstream,
-  status class, method).
-- Bounded label sets: collapse high-cardinality dimensions (e.g. raw path) to
-  bounded ones (route id / status **class**), with explicit opt-in for finer
-  labels behind the same pattern as `host_label`.
-- Ship a recommended `metric_relabel_configs` snippet and document a soft
-  series-count budget per scrape.
+Design choice: rather than adding per-metric opt-in toggles for the
+config/topology labels (`pool`/`backend`/`plugin`/`domain`/`rule`), those are left
+verbatim (they are bounded by *configuration*, not client input) and managed at
+scrape time via the documented relabel rules — the raw label stays available for
+operators who want it, and the cookbook shows how to trim it. This keeps the code
+surface minimal while making cardinality a reviewed, tested property.
 
-**Tasks.** label inventory in [core-http.md](../core-http.md) +
-[stream-proxy.md](../stream-proxy.md); apply the opt-in pattern to any remaining
-unbounded label; relabel cookbook.
+**Tests.** `TestMetricLabelPolicy` (label-set policy), `TestHTTPMethodLabelBounded`
++ `TestMethodLabelKnownSet` (method folding), plus the pre-existing
+`TestMetricsHostLabelOptIn`.
 
-**Tests.** assert default label sets are bounded (no raw path/query in default
-labels); opt-in toggles add exactly the documented label.
-
-**DoD.** every default label is bounded by construction; cardinality cookbook
-published; no dashboard breakage (additive, opt-in).
+**DoD.** ✅ every default label is bounded by construction; ✅ cardinality policy +
+cookbook published; ✅ enforced by a regression test; additive and opt-in, so no
+dashboard breakage.
 
 ---
 
@@ -400,6 +413,7 @@ already covered when the register was actioned (see notes).
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.3 | 2026 | HP-03 delivered: the request `method` label is folded to a fixed set (unknown → `other`) so every client-derived metric label is now bounded by construction; published the full label-cardinality policy table + operator relabel cookbook in [core-http.md](../core-http.md#metrics); enforced by `TestMetricLabelPolicy` / `TestHTTPMethodLabelBounded` in `internal/observability/cardinality_test.go`. |
 | 1.2 | 2026 | HP-06 Phase 1 delivered: six structured entity-CRUD patch-ops close the create/delete parity gap for servers, routes, and upstream pools (`server_add`/`server_remove`, `location_add`/`location_remove`, `upstream_add`/`upstream_remove`) in `internal/admin/patch.go`, with round-trip + guard tests in `patch_crud_test.go`. Global-table structured ops (`global_set`/`cache_set`/`compression_set`/`rate_limit_global_set`/`admin_set`/`access_log_set`) are deferred to Phase 2 — their guided TOML-upsert editors already provide a diff-reviewed structured path, so the remaining gap degrades gracefully. Console create/delete forms (`client.ts`) still to follow. |
 | 1.1 | 2026-06-28 | Shipped the HP-m* micro-fixes register: HP-m1 configurable redaction floor (`[global] redact_min_secret_length`), HP-m2 upfront Content-Length 413, HP-m4 proxy retry surfaces the upstream error, HP-m5 HTTP/3 drain tracks `shutdown_timeout`, HP-m7 Console surfaces `Retry-After` on 429. HP-m3 (redirect-code validation) and HP-m6 (audit CSV export control) were already covered and are documented as such. Strategic items HP-01..HP-07 remain design-ahead. |
 | 1.0 | 2026-06-28 | Initial backlog spec. Captures the strategic items and deferred work parked out of the pre-1.0 hardening pass (Console v2 robustness Phases 1–4): HP-01 unified reload transaction + `reload_timeout`, HP-02 Console RBAC, HP-03 metric-cardinality strategy, HP-04 pre-commit gate parity, HP-05 container/supervision hardening (digest pinning + health target), HP-06 structured-config parity patch-ops, HP-07 SSRF allow-list hardening, plus the HP-m* micro-fixes register. Design-ahead only — nothing here has shipped. |
