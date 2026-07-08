@@ -1,7 +1,8 @@
 # Dependabot keeps the supply chain current so the CI/release hardening
 # (govulncheck, SBOM, provenance) stays meaningful over time. It tracks three
 # ecosystems: pinned GitHub Actions, the Go module graph, and the Docker base
-# image (the sustainable alternative to hand-pinning image digests).
+# images. The Dockerfile pins each base image by tag AND @sha256 digest for
+# reproducible builds; Dependabot bumps those digests so the pins never go stale.
 version: 2
 updates:
   - package-ecosystem: github-actions

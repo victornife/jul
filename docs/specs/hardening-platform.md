@@ -234,32 +234,41 @@ checks run pre-push or in CI only.
 ship a signed SBOM + provenance. See [README deployment](../../docs/deployment.md)
 and [SECURITY.md](../../SECURITY.md#dependencies--supply-chain).
 
-**Remaining (deferred from the ops pass, with their blockers).**
+**Status (2026 — the two deferred items are now delivered).**
 
-1. **Base-image digest pinning** — pin `golang:…` and the distroless runtime by
-   `@sha256:` digest, not just tag. *Blocker resolved by Dependabot:* its docker
-   ecosystem can raise the digest bumps, so pinning becomes sustainable rather than
-   a one-off that rots. Requires fetching the current digests from the registry.
-2. **Self health target + HEALTHCHECK** — add a `jul healthcheck` subcommand (or a
-   minimal `/healthz`/`/readyz` admin endpoint) so a **shell-less distroless**
-   image can declare a `HEALTHCHECK` that execs the binary itself. *Blocker:* jul
-   currently exposes **no** self health endpoint/subcommand, so a `HEALTHCHECK`
-   today would have no valid target — the feature must exist first.
+1. **Base-image digest pinning — done.** Both stages of the [Dockerfile](../../Dockerfile)
+   now pin their base image by tag **and** `@sha256` digest (`golang:…-alpine` and
+   `gcr.io/distroless/static-debian12:nonroot`), so rebuilds are reproducible and
+   tamper-evident. Dependabot's docker ecosystem raises the digest bumps, so the
+   pins stay current without manual chasing.
+2. **Self health target + HEALTHCHECK — done.** The `jul healthcheck` subcommand
+   shipped earlier (SEQ-06/#32); the image now declares
+   `HEALTHCHECK … CMD ["/usr/local/bin/jul","healthcheck","--config","/etc/jul/server.toml","--quiet"]`
+   in exec form (no shell — the distroless image has none). To make the probe pass
+   **out of the box**, the image bakes a container-tailored config
+   ([deploy/docker/server.toml](../../deploy/docker/server.toml)) that enables the
+   admin listener on loopback and serves a placeholder site from `/var/www`, so the
+   server starts cleanly with no host mounts. (This also fixed a latent gap: the
+   previous baked config pointed its static root at a non-existent `/srv/www/example`,
+   so the server could not start unmounted — the health requirement surfaced it.)
 
 **Design.** `jul healthcheck` dials the configured admin/health listener and exits
 0/1 (no shell needed); `HEALTHCHECK CMD ["/usr/local/bin/jul","healthcheck"]`.
 `/readyz` returns ready only after the first successful config load + listener
 bind (ties to HP-01's reload result).
 
-**Tasks.** `cmd/jul` `healthcheck` subcommand; optional `/healthz`/`/readyz`
-handlers; Dockerfile digest pins + `HEALTHCHECK`; README/Dockerfile docs.
+**Tasks.** ✅ `cmd/jul` `healthcheck` subcommand (#32); ✅ `/healthz`/`/readyz`
+admin handlers; ✅ Dockerfile digest pins + `HEALTHCHECK` + self-consistent baked
+config; ✅ README/Dockerfile/deployment docs.
 
 **Tests.** `healthcheck` returns 0 when serving, non-zero when down; `/readyz`
 flips only after a successful bind; Dockerfile builds (CI, where Docker is
-available) and the healthcheck passes.
+available) and the healthcheck passes. The exact container health command
+(`jul healthcheck --config /etc/jul/server.toml --quiet`) is validated against a
+running server as part of delivery (liveness + readiness both exit 0).
 
-**DoD.** distroless image self-reports health; base images digest-pinned and
-Dependabot-maintained.
+**DoD.** ✅ distroless image self-reports health and starts cleanly unmounted;
+✅ base images digest-pinned and Dependabot-maintained.
 
 **Risks.** a health endpoint widens the admin surface — keep it unauthenticated
 only on a loopback/dedicated port, documented in [SECURITY.md](../../SECURITY.md).
@@ -413,6 +422,7 @@ already covered when the register was actioned (see notes).
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.4 | 2026 | HP-05 completed: both deferred container items delivered. The [Dockerfile](../../Dockerfile) pins both base images by tag + `@sha256` digest (Dependabot-maintained) and declares a shell-less `HEALTHCHECK` running `jul healthcheck`. The image bakes a self-consistent container config ([deploy/docker/server.toml](../../deploy/docker/server.toml) + placeholder `/var/www` site) that enables the admin listener on loopback, so the server starts unmounted and the probe passes out of the box (also fixing the latent non-existent `/srv/www/example` root). |
 | 1.3 | 2026 | HP-03 delivered: the request `method` label is folded to a fixed set (unknown → `other`) so every client-derived metric label is now bounded by construction; published the full label-cardinality policy table + operator relabel cookbook in [core-http.md](../core-http.md#metrics); enforced by `TestMetricLabelPolicy` / `TestHTTPMethodLabelBounded` in `internal/observability/cardinality_test.go`. |
 | 1.2 | 2026 | HP-06 Phase 1 delivered: six structured entity-CRUD patch-ops close the create/delete parity gap for servers, routes, and upstream pools (`server_add`/`server_remove`, `location_add`/`location_remove`, `upstream_add`/`upstream_remove`) in `internal/admin/patch.go`, with round-trip + guard tests in `patch_crud_test.go`. Global-table structured ops (`global_set`/`cache_set`/`compression_set`/`rate_limit_global_set`/`admin_set`/`access_log_set`) are deferred to Phase 2 — their guided TOML-upsert editors already provide a diff-reviewed structured path, so the remaining gap degrades gracefully. Console create/delete forms (`client.ts`) still to follow. |
 | 1.1 | 2026-06-28 | Shipped the HP-m* micro-fixes register: HP-m1 configurable redaction floor (`[global] redact_min_secret_length`), HP-m2 upfront Content-Length 413, HP-m4 proxy retry surfaces the upstream error, HP-m5 HTTP/3 drain tracks `shutdown_timeout`, HP-m7 Console surfaces `Retry-After` on 429. HP-m3 (redirect-code validation) and HP-m6 (audit CSV export control) were already covered and are documented as such. Strategic items HP-01..HP-07 remain design-ahead. |

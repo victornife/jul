@@ -156,9 +156,11 @@ permanent regression seed.
   and fuzz smoke jobs.
 - A statement-coverage floor is enforced in CI (the `coverage gate` job) so test
   erosion fails the build rather than going unnoticed.
-- [Dependabot](.github/dependabot.yml) tracks GitHub Actions, Go modules, and the
-  Docker base image weekly, keeping pinned versions current without manual digest
-  chasing.
+- The [container image](Dockerfile) pins both base images (the Go build stage and
+  the distroless runtime) by tag **and** `@sha256` digest, so a rebuild is
+  reproducible and tamper-evident. [Dependabot](.github/dependabot.yml) tracks
+  GitHub Actions, Go modules, and those Docker base-image digests weekly, keeping
+  the pins current without manual digest chasing.
 - Tagged releases ([`release.yml`](.github/workflows/release.yml)) ship with a
   signed software bill of materials and build provenance: an SPDX SBOM is
   generated for the release binary, and both the binary and its SBOM are attested

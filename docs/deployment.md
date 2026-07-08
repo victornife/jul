@@ -128,13 +128,29 @@ docker run --rm \
   ghcr.io/victornife/jul:latest
 ```
 
+- **Reproducible base images.** Both build stages pin their base image by tag
+  **and** `@sha256` digest, so a rebuild always resolves the same bytes;
+  Dependabot (the `docker` ecosystem in
+  [.github/dependabot.yml](../.github/dependabot.yml)) bumps the digests on a
+  schedule so the pins stay current without manual toil.
+- **Runs out of the box.** The image bakes a container-tailored config
+  ([deploy/docker/server.toml](../deploy/docker/server.toml)): it enables the
+  admin listener on loopback (so the built-in `HEALTHCHECK` works — see
+  [Health checks](#health-checks)) and serves a placeholder page from `/var/www`
+  so the server starts cleanly with no host mounts.
 - **Named volumes** are seeded from the image on first use, so the baked
   `/etc/jul/server.toml` survives; edit it through the console (editable shape).
 - For a **read-only** config, bind-mount your config file read-only:
   `-v /host/server.toml:/etc/jul/server.toml:ro` and skip the `jul-config`
-  volume.
+  volume. Your file must enable `[admin]` for the `HEALTHCHECK` to pass, or
+  override the healthcheck.
+- Serve your own site by mounting content over the placeholder root:
+  `-v /host/site:/var/www:ro`, or edit the route to `proxy_pass` to a backend.
 - The ACME cache lives under `/var/cache/jul`; keep that volume to avoid
   re-issuing certificates (and hitting CA rate limits) on every restart.
+- Set an `[admin] token` (and only then map `-p 9090:9090`) before exposing the
+  admin API beyond the container; by default it binds to `127.0.0.1` and is
+  reachable only by the container's own health probe.
 
 ## Windows service
 
@@ -183,12 +199,18 @@ shell or `curl`** (the distroless image ships neither):
 By default it discovers the address from `[admin] listen` in the config; `-addr`
 or `-url` override it, and `-ready` probes `/readyz` instead of `/healthz`.
 
-**Docker** — add a `HEALTHCHECK` that execs the binary (exec form, no shell):
+**Docker** — the image already declares this `HEALTHCHECK` (exec form, no shell),
+and its baked config enables the admin listener on loopback so the probe passes
+out of the box:
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD ["/usr/local/bin/jul", "healthcheck", "--config", "/etc/jul/server.toml", "--quiet"]
 ```
+
+`docker inspect --format '{{.State.Health.Status}}' <container>` then reports
+`healthy` once the server is up. If you bind-mount your own config, keep `[admin]`
+enabled (or override the healthcheck) so the probe can reach a health endpoint.
 
 **systemd** — confirm the admin endpoint is live after start:
 
