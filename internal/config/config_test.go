@@ -118,6 +118,34 @@ func TestValidateRejectsNegativeReloadTimeout(t *testing.T) {
 	}
 }
 
+func TestValidateEgress(t *testing.T) {
+	withEgress := func(e EgressConfig) *Config {
+		return &Config{Servers: []ServerConfig{{Listen: "127.0.0.1:80"}}, Egress: e}
+	}
+	hasEgressErr := func(err error) bool { return err != nil && strings.Contains(err.Error(), "egress") }
+
+	// Enabled but no allow entries is rejected.
+	if err := Validate(withEgress(EgressConfig{Enabled: true})); !hasEgressErr(err) {
+		t.Errorf("empty allow: expected an egress error, got %v", err)
+	}
+	// A URL is not a valid entry.
+	if err := Validate(withEgress(EgressConfig{Enabled: true, Allow: []string{"https://idp.example.com"}})); !hasEgressErr(err) {
+		t.Errorf("url entry: expected an egress error, got %v", err)
+	}
+	// A malformed entry (embedded space) is rejected.
+	if err := Validate(withEgress(EgressConfig{Enabled: true, Allow: []string{"bad host"}})); !hasEgressErr(err) {
+		t.Errorf("space entry: expected an egress error, got %v", err)
+	}
+	// A mix of valid host, suffix, CIDR, and bare IP entries is accepted.
+	if err := Validate(withEgress(EgressConfig{Enabled: true, Allow: []string{"idp.example.com", ".internal.corp", "10.0.0.0/8", "203.0.113.7"}})); hasEgressErr(err) {
+		t.Errorf("valid entries produced an egress error: %v", err)
+	}
+	// A disabled block is ignored entirely, even with garbage entries.
+	if err := Validate(withEgress(EgressConfig{Enabled: false, Allow: []string{"https://x", "bad host"}})); hasEgressErr(err) {
+		t.Errorf("disabled egress should be ignored: %v", err)
+	}
+}
+
 func TestValidateStreams(t *testing.T) {
 	base := func() *Config {
 		return &Config{

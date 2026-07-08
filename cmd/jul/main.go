@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -42,6 +43,7 @@ import (
 	"jul/internal/auth"
 	"jul/internal/cache"
 	"jul/internal/config"
+	"jul/internal/egress"
 	"jul/internal/handler"
 	"jul/internal/middleware"
 	"jul/internal/observability"
@@ -198,6 +200,18 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// edits. Reloads update each bucket's rate/burst in place via a stable scope.
 	rlStore := middleware.NewRateLimiterStore(baseCtx, 0, 0)
 
+	// The optional egress allow-list guards the server's config-driven auxiliary
+	// fetches (JWKS, forward-auth, Consul/Kubernetes discovery). It is built once
+	// from the startup config; changing [egress] takes effect after a restart.
+	// A disabled policy is the nil policy, so egressDial is the plain dialer and
+	// adds no behaviour.
+	egressPolicy, err := egress.New(cfg.Egress)
+	if err != nil {
+		log.Error("failed to build egress allow-list", "error", err)
+		return 1
+	}
+	egressDial := egressPolicy.DialContext(&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second})
+
 	// The upstream pool registry persists across reloads so named-upstream pools
 	// (and their active health-check goroutines) have a defined lifetime: pools
 	// are reused and updated in place when unchanged, and closed when removed or
@@ -208,6 +222,7 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		OnProbe:          metrics.ObserveProbe,
 		OnBackends:       metrics.ObserveUpstreamBackends,
 		OnDiscoveryError: metrics.ObserveDiscoveryError,
+		DialContext:      egressDial,
 	})
 	defer poolReg.CloseAll()
 
@@ -395,8 +410,9 @@ func serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				}
 				key := app.AuthScope(c.Servers[i], loc)
 				a, err := auth.New(*loc.Auth, auth.Options{
-					Logger:     log,
-					OnDecision: metrics.ObserveAuthDecision,
+					Logger:      log,
+					OnDecision:  metrics.ObserveAuthDecision,
+					DialContext: egressDial,
 				})
 				if err != nil {
 					return nil, nil, fmt.Errorf("location %s: %w", key, err)

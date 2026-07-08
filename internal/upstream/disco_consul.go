@@ -29,7 +29,7 @@ type consulDiscoverer struct {
 	describe string
 }
 
-func newConsulDiscoverer(cfg config.DiscoveryConfig) (Discoverer, error) {
+func newConsulDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer, error) {
 	c := cfg.Consul
 	if c == nil || strings.TrimSpace(c.Service) == "" {
 		return nil, fmt.Errorf("consul discovery requires consul.service")
@@ -59,8 +59,15 @@ func newConsulDiscoverer(cfg config.DiscoveryConfig) (Discoverer, error) {
 	}
 	base.RawQuery = q.Encode()
 
+	client := &http.Client{Timeout: 10 * time.Second}
+	if dial != nil {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.DialContext = dial
+		client.Transport = t
+	}
+
 	return &consulDiscoverer{
-		client:   &http.Client{Timeout: 10 * time.Second},
+		client:   client,
 		endpoint: base.String(),
 		token:    strings.TrimSpace(c.Token),
 		describe: "consul:" + c.Service,

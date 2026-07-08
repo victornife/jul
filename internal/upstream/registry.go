@@ -48,6 +48,10 @@ type RegistryOptions struct {
 	OnBackends func(pool string, n int)
 	// OnDiscoveryError reports a failed or empty discovery resolve -> counter.
 	OnDiscoveryError func(pool string)
+	// DialContext, when non-nil, guards the outbound connections made by the
+	// Consul and Kubernetes discoverers against the [egress] allow-list. DNS
+	// discovery uses the system resolver and is unaffected.
+	DialContext DialFunc
 }
 
 // poolEntry pairs a live pool with the upstream shape it was built from, so a
@@ -159,7 +163,7 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 	}
 	disco := discoveryEnabled(up.Discovery)
 	if disco {
-		d, err := newDiscoverer(*up.Discovery)
+		d, err := newDiscoverer(*up.Discovery, r.opts.DialContext)
 		if err != nil {
 			// Stop any health checker already started on this fresh pool so the
 			// rejected build leaks no goroutine, then fail the build.

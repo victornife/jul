@@ -40,7 +40,7 @@ type k8sDiscoverer struct {
 	describe string
 }
 
-func newKubernetesDiscoverer(cfg config.DiscoveryConfig) (Discoverer, error) {
+func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer, error) {
 	k := cfg.Kubernetes
 	if k == nil || strings.TrimSpace(k.Service) == "" || strings.TrimSpace(k.Namespace) == "" {
 		return nil, fmt.Errorf("kubernetes discovery requires kubernetes.namespace and kubernetes.service")
@@ -83,10 +83,15 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig) (Discoverer, error) {
 	endpoint := fmt.Sprintf("%s/apis/discovery.k8s.io/v1/namespaces/%s/endpointslices?labelSelector=%s",
 		base, url.PathEscape(k.Namespace), url.QueryEscape("kubernetes.io/service-name="+k.Service))
 
+	transport := &http.Transport{TLSClientConfig: tlsConf}
+	if dial != nil {
+		transport.DialContext = dial
+	}
+
 	return &k8sDiscoverer{
 		client: &http.Client{
 			Timeout:   10 * time.Second,
-			Transport: &http.Transport{TLSClientConfig: tlsConf},
+			Transport: transport,
 		},
 		url:      endpoint,
 		token:    token,

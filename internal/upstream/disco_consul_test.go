@@ -7,6 +7,8 @@ package upstream
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,7 +45,7 @@ func TestConsulDiscovererResolve(t *testing.T) {
 			Token:       "secret",
 			PassingOnly: &passing,
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("newConsulDiscoverer: %v", err)
 	}
@@ -80,7 +82,30 @@ func TestConsulDiscovererResolve(t *testing.T) {
 }
 
 func TestConsulDiscovererRequiresService(t *testing.T) {
-	if _, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{}}); err == nil {
+	if _, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{}}, nil); err == nil {
 		t.Fatal("expected error: consul without service")
+	}
+}
+
+// TestConsulDiscovererEgressBlocked proves the discovery client honours the
+// egress guard: a dial that refuses the destination fails the resolve rather
+// than reaching an unapproved Consul endpoint.
+func TestConsulDiscovererEgressBlocked(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer srv.Close()
+	block := func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("egress: blocked in test")
+	}
+	d, err := newConsulDiscoverer(config.DiscoveryConfig{
+		Type:   "consul",
+		Consul: &config.ConsulDiscovery{Address: srv.URL, Service: "web"},
+	}, block)
+	if err != nil {
+		t.Fatalf("newConsulDiscoverer: %v", err)
+	}
+	if _, err := d.Resolve(context.Background()); err == nil {
+		t.Error("expected Resolve to fail when the egress dial is blocked")
 	}
 }

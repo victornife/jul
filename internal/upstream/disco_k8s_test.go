@@ -49,7 +49,7 @@ func TestK8sDiscovererResolve(t *testing.T) {
 			Token:                 "tok",
 			InsecureSkipTLSVerify: true,
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("newKubernetesDiscoverer: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestK8sSelectPort(t *testing.T) {
 }
 
 func TestK8sRequiresNamespaceAndService(t *testing.T) {
-	if _, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{Service: "web", APIServer: "https://x"}}); err == nil {
+	if _, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{Service: "web", APIServer: "https://x"}}, nil); err == nil {
 		t.Fatal("expected error: kubernetes without namespace")
 	}
 }

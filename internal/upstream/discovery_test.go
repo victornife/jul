@@ -185,7 +185,7 @@ func TestDiscoveryEnabled(t *testing.T) {
 }
 
 func TestNewDiscovererDNS(t *testing.T) {
-	d, err := newDiscoverer(config.DiscoveryConfig{Type: "dns", Target: "svc.local:8080"})
+	d, err := newDiscoverer(config.DiscoveryConfig{Type: "dns", Target: "svc.local:8080"}, nil)
 	if err != nil {
 		t.Fatalf("newDiscoverer dns: %v", err)
 	}
@@ -193,11 +193,11 @@ func TestNewDiscovererDNS(t *testing.T) {
 		t.Fatalf("Describe = %q", d.Describe())
 	}
 
-	if _, err := newDiscoverer(config.DiscoveryConfig{Type: "dns", Target: "no-port"}); err == nil {
+	if _, err := newDiscoverer(config.DiscoveryConfig{Type: "dns", Target: "no-port"}, nil); err == nil {
 		t.Fatal("dns target without port should error")
 	}
 
-	s, err := newDiscoverer(config.DiscoveryConfig{Type: "dns_srv", Target: "_grpc._tcp.svc.local"})
+	s, err := newDiscoverer(config.DiscoveryConfig{Type: "dns_srv", Target: "_grpc._tcp.svc.local"}, nil)
 	if err != nil {
 		t.Fatalf("newDiscoverer dns_srv: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestNewDiscovererDNS(t *testing.T) {
 		t.Fatalf("Describe = %q", s.Describe())
 	}
 
-	if _, err := newDiscoverer(config.DiscoveryConfig{Type: "bogus"}); err == nil {
+	if _, err := newDiscoverer(config.DiscoveryConfig{Type: "bogus"}, nil); err == nil {
 		t.Fatal("unknown discovery type should error")
 	}
 }

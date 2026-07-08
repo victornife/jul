@@ -131,7 +131,7 @@ type jwksCache struct {
 
 func newJWKSCache(url string, client *http.Client) *jwksCache {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = jwksHTTPClient(nil)
 	}
 	return &jwksCache{
 		url:          url,
@@ -140,6 +140,16 @@ func newJWKSCache(url string, client *http.Client) *jwksCache {
 		staleGrace:   1 * time.Hour,
 		minRefresh:   30 * time.Second,
 	}
+}
+
+// jwksHTTPClient builds the default JWKS HTTP client. When dial is non-nil its
+// transport enforces the egress allow-list at connect time.
+func jwksHTTPClient(dial DialFunc) *http.Client {
+	c := &http.Client{Timeout: 10 * time.Second}
+	if dial != nil {
+		c.Transport = guardedTransport(dial)
+	}
+	return c
 }
 
 // keyByID returns the public key for the given key id, refreshing the cache when

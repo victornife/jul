@@ -4,20 +4,32 @@
 package auth
 
 import (
+	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 
 	"jul/internal/config"
 	"jul/internal/middleware"
 )
 
+// DialFunc matches net.Dialer.DialContext. When set on Options.DialContext it is
+// installed on the transport of the default JWKS and forward-auth clients so an
+// egress allow-list is enforced at connect time. It is an alias so a value from
+// internal/egress passes through without this package importing it.
+type DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error)
+
 // Options configures an Authenticator. All fields are optional: a nil HTTPClient
 // uses sensible per-method defaults, a nil Logger silences diagnostics, and a nil
 // OnDecision disables metrics accounting.
 type Options struct {
-	// HTTPClient is used for JWKS fetches and forward-auth subrequests.
+	// HTTPClient is used for JWKS fetches and forward-auth subrequests. When set
+	// it takes precedence over DialContext (the caller owns the whole client).
 	HTTPClient *http.Client
+	// DialContext, when non-nil and HTTPClient is nil, guards the default JWKS and
+	// forward-auth clients' outbound connections (the [egress] allow-list).
+	DialContext DialFunc
 	// Logger records non-fatal diagnostics (for example, a forward-auth service
 	// that is unreachable).
 	Logger *slog.Logger
@@ -57,9 +69,17 @@ func New(cfg config.AuthConfig, opts Options) (*Authenticator, error) {
 		}
 		a.basic = b
 	case cfg.JWT != nil:
-		a.jwt = newJWTAuth(cfg.JWT.JWKSURL, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.Algorithms, opts.HTTPClient)
+		client := opts.HTTPClient
+		if client == nil {
+			client = jwksHTTPClient(opts.DialContext)
+		}
+		a.jwt = newJWTAuth(cfg.JWT.JWKSURL, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.Algorithms, client)
 	case cfg.ForwardAuth != nil:
-		a.forward = newForwardAuth(cfg.ForwardAuth.URL, cfg.ForwardAuth.AuthResponseHeaders, opts.HTTPClient)
+		client := opts.HTTPClient
+		if client == nil {
+			client = forwardHTTPClient(opts.DialContext)
+		}
+		a.forward = newForwardAuth(cfg.ForwardAuth.URL, cfg.ForwardAuth.AuthResponseHeaders, client)
 	}
 	return a, nil
 }
@@ -167,4 +187,12 @@ func writeForwardDenied(w http.ResponseWriter, res forwardResult) {
 // response body from an auth service.
 func readLimited(r io.Reader, max int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(r, max))
+}
+
+// guardedTransport clones the default transport and installs dial, so egress is
+// enforced at connect time while proxy, idle-pool, and TLS defaults are kept.
+func guardedTransport(dial DialFunc) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = dial
+	return t
 }

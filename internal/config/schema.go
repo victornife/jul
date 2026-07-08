@@ -22,6 +22,13 @@ type Config struct {
 	RateLimit     RateLimitConfig     `toml:"rate_limit"`
 	Observability ObservabilityConfig `toml:"observability"`
 
+	// Egress is the optional outbound-destination allow-list ([egress]). When
+	// enabled it constrains the server's config-driven auxiliary fetches (JWKS,
+	// forward-auth, service discovery) to an approved set of hosts/CIDRs,
+	// reducing the blast radius of a misconfigured or compromised config. It is
+	// disabled by default and core (no build tag). See internal/egress.
+	Egress EgressConfig `toml:"egress"`
+
 	// WAF is the global web-application-firewall policy ([waf]). It applies to
 	// every location unless a location sets its own [servers.locations.waf]
 	// override. It is enforced only in builds with the "waf" tag; a lean build
@@ -809,6 +816,25 @@ type AdminConfig struct {
 // to true when unset and honors an explicit false. The `console` build tag
 // still governs whether the console UI is compiled in.
 func (a AdminConfig) ConsoleEnabled() bool { return a.Console == nil || *a.Console }
+
+// EgressConfig is the optional outbound-destination allow-list ([egress]). When
+// Enabled, the server's config-driven auxiliary fetches (JWKS, forward-auth,
+// service discovery) may only connect to destinations matching an Allow entry;
+// every other destination is refused at dial time. When disabled (the default)
+// no restriction is applied, so the block is fully backward-compatible.
+type EgressConfig struct {
+	// Enabled turns the allow-list on. Off by default.
+	Enabled bool `toml:"enabled"`
+	// Allow lists the permitted destinations. Each entry is one of:
+	//   - a CIDR, e.g. "10.0.0.0/8" or "2001:db8::/32" (matches an IP)
+	//   - a bare IP, e.g. "203.0.113.10" (treated as /32 or /128)
+	//   - an exact hostname, e.g. "idp.example.com"
+	//   - a leading-dot suffix, e.g. ".internal.corp" (matches any subdomain)
+	// A hostname listed by name is trusted and resolved normally; a hostname not
+	// listed by name is permitted only when every resolved IP is inside an
+	// allowed CIDR.
+	Allow []string `toml:"allow"`
+}
 
 // ObservabilityConfig groups distributed-tracing, metrics, and access-log sink
 // settings under the [observability] table.
