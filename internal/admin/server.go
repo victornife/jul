@@ -612,6 +612,9 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 
 // handleConfigRaw persists raw configuration text (advanced editor). It
 // validates before writing so an invalid edit never causes downtime.
+// NOTE: This is a legacy endpoint; prefer /api/config/apply. This handler now
+// uses the same applyMu lock and optimistic-version contract as v2 apply to
+// close the read-modify-write race with concurrent writes (P2-12).
 func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		w.Header().Set("Allow", "POST, PUT")
@@ -627,17 +630,54 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// Serialize with the apply path so concurrent writes cannot interleave (P2-12).
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	// Optimistic concurrency: reject stale writes. An empty base_version skips
+	// the check (explicit force-apply). The version basis matches /api/config/apply
+	// so both editors can interoperate.
+	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" && s.deps.LoadConfig != nil {
+		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
+			if marshaled, merr := config.Marshal(cur); merr == nil {
+				if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
+					s.recordAudit("config.raw", "config", "failure", "rejected: base version stale (concurrent change)", adminClientIP(r))
+					writeJSON(w, http.StatusConflict, conflictResponse{
+						OK:             false,
+						Conflict:       true,
+						Message:        "The configuration changed since this edit was prepared; reload and try again.",
+						CurrentVersion: currentVersion,
+					})
+					return
+				}
+			}
+		}
+	}
+
 	prev := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(body); err != nil {
+		s.recordAudit("config.raw", "config", "failure", "rejected: invalid configuration", adminClientIP(r))
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	s.recordHistory(prev)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	s.recordAudit("config.raw", "config", "success", "configuration validated and saved; live runtime reloading", adminClientIP(r))
+	var version string
+	if s.deps.LoadConfig != nil {
+		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
+			if marshaled, merr := config.Marshal(cfg); merr == nil {
+				version = configVersion(marshaled)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": version})
 }
 
 // handleConfigSettings applies the curated settings subset (simple form),
 // re-serializing the whole configuration to TOML.
+// NOTE: This is a legacy endpoint; prefer /api/config/patch + /api/config/patch/apply.
+// This handler now uses the same applyMu lock and optimistic-version contract as v2 apply
+// to close the read-modify-write race with concurrent writes (P2-12).
 func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		w.Header().Set("Allow", "POST, PUT")
@@ -653,22 +693,58 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// Serialize with the apply path so concurrent writes cannot interleave (P2-12).
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	// Load the current config inside the lock so the read-modify-write is atomic.
 	cfg, err := s.deps.LoadConfig()
 	if err != nil {
+		s.recordAudit("config.settings", "config", "failure", "cannot load current config: "+err.Error(), adminClientIP(r))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+
+	// Optimistic concurrency: reject stale writes. An empty base_version skips
+	// the check (explicit force-apply). The version basis matches /api/config/patch
+	// so both editors can interoperate.
+	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
+		if marshaled, merr := config.Marshal(cfg); merr == nil {
+			if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
+				s.recordAudit("config.settings", "config", "failure", "rejected: base version stale (concurrent change)", adminClientIP(r))
+				writeJSON(w, http.StatusConflict, conflictResponse{
+					OK:             false,
+					Conflict:       true,
+					Message:        "The configuration changed since this edit was prepared; reload and try again.",
+					CurrentVersion: currentVersion,
+				})
+				return
+			}
+		}
+	}
+
 	if err := applySettings(cfg, in); err != nil {
+		s.recordAudit("config.settings", "config", "failure", "rejected: invalid settings", adminClientIP(r))
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	prev := s.currentRaw()
 	if err := s.deps.SaveConfig(cfg); err != nil {
+		s.recordAudit("config.settings", "config", "failure", "rejected: cannot save config", adminClientIP(r))
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	s.recordHistory(prev)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	s.recordAudit("config.settings", "config", "success", "settings applied and saved; live runtime reloading", adminClientIP(r))
+	var version string
+	if s.deps.LoadConfig != nil {
+		if cfg2, err := s.deps.LoadConfig(); err == nil && cfg2 != nil {
+			if marshaled, merr := config.Marshal(cfg2); merr == nil {
+				version = configVersion(marshaled)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": version})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
