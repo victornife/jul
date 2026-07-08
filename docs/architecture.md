@@ -60,11 +60,50 @@ live in `internal/app/`:
 | `wiring.go` | Scope keys, upstream indexing, reload channel fan-in, `ValidateRuntimeConfig` | Yes (`*_test.go`) |
 | `admin_deps.go` | Build `admin.Deps` from initialised subsystems (`BuildAdminDeps`, adapters) | Yes (`*_test.go`) |
 | `preflight.go` | Admin write preflight gates (`Preflight.Apply` with `StreamPreflighter` iface) | Yes (`*_test.go`) |
+| `runtime.go` | Process-lifetime subsystems behind their build-tag gates (`RuntimeBuilder`/`Runtime`: tracing, ACME, HTTP/3, stream server) | Yes (`*_test.go`) |
+| `generation.go` | Generational handler teardown (`GenerationResources`: live closers + `poolReg` Begin/Commit/Abort staging) | Yes (`*_test.go`) |
 
-These helpers are **additive** — `main.go` calls them, but they do not own
-lifecycles, do not change initialization order, and do not replace the
-`buildHandlers` closure or generational resource teardown.
+Most of these helpers are **additive** — `main.go` calls them, they do not
+change initialization order, and they do not replace the `buildHandlers`
+closure.  `runtime.go` and `generation.go` (extracted under ADR-0007 / #30) are
+the exception: they intentionally **own** the process-lifetime and generational
+lifecycles respectively, which is what let `serve()` shed that bookkeeping.
 
 When the ADR-0007 trigger fires (a cross-cutting change touching 3+ sections
 of `serve()`, or a reload/preflight bug), new helpers should continue to
 reside in `internal/app/` rather than being added inline.
+
+## Large-file decomposition (`internal/admin/`)
+
+Large first-party production files are decomposed into cohesive, same-package
+files split by **seam** rather than by line budget (AUX-05 / #49, continuing
+the #20 and #30 tranches). Same-package moves preserve every public and
+package-internal API shape, so the decomposition is compiler-verified and
+behaviour-preserving; no import graph or call site changes.
+
+The admin configuration-patch surface is the worked example:
+
+| File | Holds |
+|------|-------|
+| `patch.go` | `applyPatch` operation dispatch + apply logic (the behaviour) |
+| `patch_types.go` | The JSON wire/DTO envelope and per-operation payload structs |
+| `patch_builders.go` | Pure DTO→config builders and audit-summary formatters (unit-tested in `patch_builders_test.go`) |
+| `server.go` | `Server` type, `New`, `Run`, auth, and the config/settings handlers |
+| `routes.go` | The admin mux registration table (`routes()`) |
+
+**Reproducible method** for the next target file:
+
+1. Map the file's declarations and group them by seam (DTOs / builders /
+   validators / routing / handlers / apply logic).
+2. Extract the purest, least-coupled group first (types, then stateless
+   helpers) into a new same-package file with a focused header comment.
+3. Add characterization tests for any extracted logic that lacked direct
+   coverage, so the seam is pinned before and after the move.
+4. Verify both CI profiles (lean and the full build-tag set) build and pass —
+   `consoleV2Compiled` and other tags gate admin behaviour, so both matter.
+
+**Staged program.** Tier 1 (`cmd/jul/main.go` — via #30's `RuntimeBuilder`/
+`GenerationResources`; `internal/admin/server.go`; `internal/admin/patch.go`)
+is the first executed wave. Tiers 2–3 (`config/schema.go`, `admin/projections.go`,
+`admin/diff_helpers.go`, and the remaining large files) follow the same method
+in later tranches.
