@@ -10,6 +10,7 @@ import {
   applyConfig,
   applyPatchBatch,
   diffConfig,
+  fetchOverview,
   fetchRawConfig,
   validateConfig,
   ConfigRejectedError,
@@ -20,11 +21,13 @@ import {
   type ConfigDiff,
 } from "@/api/client.ts";
 import type { PendingDraft } from "@/lib/configDraftHandoff.ts";
+import { deriveApplyOutcome, type ApplyOutcome } from "@/lib/applyOutcome.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, Spinner } from "@/components/ui.tsx";
+import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 
 const CodeEditor = lazy(() =>
@@ -50,19 +53,6 @@ function ValidationPill({ state }: { readonly state: "idle" | "checking" | "vali
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{label}</span>;
 }
 
-function AppliedSummary({ status }: { readonly status: FeatureStatus[] }) {
-  const active = status.filter((s) => s.active).length;
-  return (
-    <div className="rounded-md border border-jul-success/40 bg-jul-success/10 p-3 text-sm text-jul-text">
-      <p className="font-medium text-jul-success">Configuration validated and saved.</p>
-      <p className="text-xs text-jul-muted">
-        The live runtime is reloading to apply it. {active} of {status.length} capabilities are
-        active in the saved configuration.
-      </p>
-    </div>
-  );
-}
-
 export function ConfigPanel() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -75,7 +65,14 @@ export function ConfigPanel() {
   const [draft, setDraft] = useState<string | null>(null);
   const [baseline, setBaseline] = useState("");
   const [confirming, setConfirming] = useState(false);
-  const [applied, setApplied] = useState<FeatureStatus[] | null>(null);
+  // applied holds the accepted-apply result: the post-apply capability status
+  // and the server's pending_reload flag. The live outcome (fully live, still
+  // reloading, or a partial subsystem failure) is derived from this plus the
+  // post-apply runtime snapshot below, so the operator sees an explicit outcome
+  // rather than an unconditional "saved" (AUX-02).
+  const [applied, setApplied] = useState<{ status: FeatureStatus[]; pendingReload: boolean } | null>(
+    null,
+  );
 
   // Patch draft state: when a structured patch is handed off, the editor shows
   // the candidate read-only and the diff is pre-computed; applying uses the
@@ -149,7 +146,7 @@ export function ConfigPanel() {
     mutationFn: (confirmAdmin: boolean) => applyConfig(current, baseVersion, confirmAdmin),
     onSuccess: (res) => {
       setBaseline(current);
-      setApplied(res.status);
+      setApplied({ status: res.status, pendingReload: res.pending_reload ?? true });
       setConfirming(false);
       // Advance the token to the freshly-applied version so a follow-up edit
       // does not trip a spurious conflict.
@@ -180,7 +177,7 @@ export function ConfigPanel() {
       setBaseline(candidate);
       setDraft(candidate);
       setBaseVersion(res.version ?? undefined);
-      setApplied(res.status ?? []);
+      setApplied({ status: res.status ?? [], pendingReload: res.pending_reload ?? true });
       setConfirming(false);
       setConflictVersion(undefined);
       void qc.invalidateQueries();
@@ -198,6 +195,53 @@ export function ConfigPanel() {
   // rejected with a 409 the first time; the same confirm modal then re-applies
   // with confirm_admin=true. Derived from the error so no extra state is needed.
   const adminChangeError = applyError instanceof ConfigAdminChangeError ? applyError : null;
+  const restartError =
+    applyError instanceof ConfigRestartRequiredError ? applyError : null;
+
+  // After an accepted apply, poll the runtime overview a few times so the
+  // asynchronous stream (L4) reload has a chance to report its outcome. A
+  // rejected stream reload flips the outcome banner from "reloading" to a
+  // partial-reload warning; a clean snapshot settles it to fully live. The poll
+  // is bounded (it stops after a few snapshots) so it does not run forever.
+  const postApply = useQuery({
+    queryKey: ["config-apply-overview"],
+    queryFn: fetchOverview,
+    enabled: applied !== null,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      applied !== null && query.state.dataUpdateCount < 3 ? 1500 : false,
+  });
+
+  // Fold the raw apply signals into one explicit, severity-tagged outcome so the
+  // operator can tell a fully-live apply from one that still needs a restart or
+  // that only partially reloaded (AUX-02). Restart-required is an accepted=false
+  // outcome routed through the same renderer for consistent wording.
+  const outcome: ApplyOutcome | null = useMemo(() => {
+    if (restartError) {
+      return deriveApplyOutcome({
+        accepted: false,
+        pendingReload: false,
+        runtimeObserved: false,
+        restartMessage: restartError.message,
+      });
+    }
+    if (applied) {
+      const streamStatus = postApply.data?.stream_status;
+      return deriveApplyOutcome({
+        accepted: true,
+        pendingReload: applied.pendingReload,
+        runtimeObserved: postApply.isSuccess,
+        ...(streamStatus !== undefined ? { streamStatus } : {}),
+      });
+    }
+    return null;
+  }, [restartError, applied, postApply.isSuccess, postApply.data]);
+
+  const appliedCapabilities = applied
+    ? { active: applied.status.filter((s) => s.active).length, total: applied.status.length }
+    : undefined;
 
   if (isLoading) return <Loading label="Loading configuration…" />;
   if (isError || !data)
@@ -301,25 +345,22 @@ export function ConfigPanel() {
         </div>
 
         <div className="min-h-0 space-y-4 overflow-auto">
-          {applied && <AppliedSummary status={applied} />}
+          {outcome && (
+            <ApplyOutcomeBanner
+              outcome={outcome}
+              {...(appliedCapabilities ? { capabilities: appliedCapabilities } : {})}
+            />
+          )}
 
-          {applyError && !adminChangeError && (
+          {applyError && !adminChangeError && !restartError && (
             <div className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm">
               <p className="font-medium text-jul-danger">
                 {applyError instanceof ConfigRejectedError
                   ? applyError.message
-                  : applyError instanceof ConfigRestartRequiredError
-                    ? applyError.message
-                    : applyError instanceof ConfigConflictError
-                      ? "Conflict — another change was applied while you were editing."
-                      : "Apply failed."}
+                  : applyError instanceof ConfigConflictError
+                    ? "Conflict — another change was applied while you were editing."
+                    : "Apply failed."}
               </p>
-              {applyError instanceof ConfigRestartRequiredError && (
-                <p className="mt-1 text-xs text-jul-muted">
-                  Nothing was saved. Update the configuration file and restart the
-                  server for this change to take effect.
-                </p>
-              )}
               {applyError instanceof ConfigRejectedError &&
                 applyError.issues.map((iss, i) => (
                   <p key={`ae-${String(i)}`} className="mt-1 text-xs text-jul-muted">
@@ -400,7 +441,7 @@ export function ConfigPanel() {
             </div>
           )}
 
-          {!dirty && !applied && (
+          {!dirty && !outcome && (
             <p className="text-xs text-jul-muted">
               Edit the configuration to preview a validated diff before applying.
             </p>

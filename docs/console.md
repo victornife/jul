@@ -247,6 +247,38 @@ listener swaps to static certificates on the next reload). See
 [tls-acme.md](tls-acme.md#restart-required-acme-changes) and
 [reload-semantics.md](reload-semantics.md).
 
+### Apply outcomes
+
+An apply is never just "success" or "error": the reload model has an
+*applied vs. serving* gap (see [reload semantics](reload-semantics.md)), and the
+L4 stream reload is asynchronous, so the console folds the raw apply signals —
+whether the write was accepted, whether a reload is still pending, the polled
+stream-reload status, and any restart-required rejection — into **one explicit,
+severity-tagged outcome banner**. Every apply resolves to exactly one of four
+outcomes so an operator never has to infer what actually happened:
+
+- **Applied and live** *(success)* — the write was accepted and the running
+  server has been observed serving the new configuration. Nothing further is
+  required.
+- **Applied — runtime reloading** *(info)* — the write was accepted and saved,
+  but the hot reload has not yet been confirmed live. The banner clears itself
+  to *Applied and live* once a runtime snapshot confirms the change; this is the
+  normal transient state immediately after an apply.
+- **Applied with a degraded subsystem** *(warning)* — the HTTP configuration was
+  accepted, but an **asynchronous subsystem reload failed** — most commonly the
+  L4 stream (`[[stream]]`) proxy, whose reload runs after the response is sent.
+  The banner names the failed subsystem and its error so the operator can act,
+  rather than the failure being buried in the overview.
+- **Restart required — not applied** *(blocked)* — the change touches a
+  startup-bound setting (see *Restart-required changes* above); **nothing was
+  saved** and the operator must edit the file and restart. This is the only
+  outcome that is blocking, and it is styled distinctly from the others.
+
+The banner reports success and info outcomes with a capabilities tally (how many
+feature groups are active) and, for the two non-live outcomes, surfaces the
+actionable detail inline. See [reload-semantics.md](reload-semantics.md) for the
+underlying *applied vs. serving* model that motivates the distinction.
+
 ### Listener changes
 
 Adding or removing a `listen` address **is** hot-applied: the reload binds new
