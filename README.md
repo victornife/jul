@@ -187,6 +187,8 @@ Print the version:
 ```text
 jul [flags]                                   run the server (default)
 jul check [-config f] [-json] [-quiet]        full runtime preflight check
+jul healthcheck [-config f] [-addr h:p | -url u] [-ready] [-timeout d] [-json] [-quiet]
+                                              probe a running server's health endpoint
 jul lint [-config f] [-strict] [-json] [-quiet]
                                               validate + best-practice checks
 jul fmt  [-config f] [-w]                     rewrite the config in canonical TOML
@@ -218,6 +220,28 @@ jul check -config server.toml -json   # machine-readable output
 Exit codes: `0` ok, `1` validation or runtime error.  The legacy `--check` flag
 on the default command (`jul -check`) is equivalent but `jul check` is the
 canonical subcommand.
+
+### `jul healthcheck`
+
+Probes a **running** server's admin health endpoint and exits with a
+deterministic status, so it can drive container, systemd, and Kubernetes
+liveness/readiness checks — including from a shell-less distroless image where
+`curl`/`wget` are unavailable. It reads the `[admin] listen` address from the
+config (or takes `-addr`/`-url`) and GETs `/healthz` (liveness) or, with
+`-ready`, `/readyz` (readiness). The admin listener must be enabled.
+
+```bash
+jul healthcheck                                       # discover [admin] listen from server.toml
+jul healthcheck -config /etc/jul/server.toml -ready   # readiness probe
+jul healthcheck -addr 127.0.0.1:9090 -quiet           # exit code only, no output
+jul healthcheck -url http://127.0.0.1:9090/healthz -json
+```
+
+Exit codes: `0` healthy (endpoint returned `2xx`), `1` unhealthy (non-`2xx`, or
+the server was unreachable / timed out), `2` usage or config error (bad flags,
+unreadable config, or the admin listener is disabled). The health verdict is
+strictly `0`/`1`, so the command is safe to use directly in a Docker
+`HEALTHCHECK` — see [deployment.md](docs/deployment.md#health-checks).
 
 ### `jul lint`
 

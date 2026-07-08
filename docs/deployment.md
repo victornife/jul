@@ -13,6 +13,7 @@
 - [systemd (Linux)](#systemd-linux)
 - [Docker](#docker)
 - [Windows service](#windows-service)
+- [Health checks](#health-checks)
 - [What writes where](#what-writes-where)
 
 ## The two shapes
@@ -155,6 +156,58 @@ It creates `C:\ProgramData\jul\{history,cache,logs}` and grants the service
 account **modify** there and **read** on the config; ordinary users get neither.
 Point `servers.tls.acme.cache_dir`, the disk cache, the access-log file sink, and
 `history_dir` at the matching subdirectories.
+
+## Health checks
+
+The admin listener serves two unauthenticated probe endpoints — `GET /healthz`
+(process **liveness**) and `GET /readyz` (**readiness**; returns `503` until the
+server can serve traffic, for example while a certificate is expired). Enable the
+admin listener to expose them:
+
+```toml
+[admin]
+enabled = true
+listen  = "127.0.0.1:9090"
+```
+
+The `jul healthcheck` subcommand polls these endpoints and maps the result to a
+deterministic exit code, so an orchestrator can probe the server **without a
+shell or `curl`** (the distroless image ships neither):
+
+| Exit | Meaning |
+| --- | --- |
+| `0` | healthy — the endpoint returned `2xx` |
+| `1` | unhealthy — non-`2xx`, unreachable, or the timeout elapsed |
+| `2` | usage/config error — bad flags, unreadable config, or admin disabled |
+
+By default it discovers the address from `[admin] listen` in the config; `-addr`
+or `-url` override it, and `-ready` probes `/readyz` instead of `/healthz`.
+
+**Docker** — add a `HEALTHCHECK` that execs the binary (exec form, no shell):
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["/usr/local/bin/jul", "healthcheck", "--config", "/etc/jul/server.toml", "--quiet"]
+```
+
+**systemd** — confirm the admin endpoint is live after start:
+
+```ini
+ExecStartPost=/usr/local/bin/jul healthcheck --config /etc/jul/server.toml --ready --quiet
+```
+
+**Kubernetes** — use it as an exec probe (no `curl` needed in the image):
+
+```yaml
+livenessProbe:
+  exec:
+    command: ["jul", "healthcheck", "--config", "/etc/jul/server.toml", "--quiet"]
+  periodSeconds: 30
+readinessProbe:
+  exec:
+    command: ["jul", "healthcheck", "--config", "/etc/jul/server.toml", "--ready", "--quiet"]
+  periodSeconds: 10
+```
 
 ## What writes where
 

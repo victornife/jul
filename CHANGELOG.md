@@ -10,6 +10,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **`jul healthcheck` subcommand** (`cmd/jul/cli.go`): a shell-free liveness/readiness probe for containers, systemd, and Kubernetes. It discovers the `[admin] listen` address from the config (or takes `-addr`/`-url`) and GETs the admin `/healthz` (liveness) or, with `-ready`, `/readyz` (readiness). Deterministic exit codes — `0` healthy, `1` unhealthy (non-2xx, unreachable, or timeout), `2` usage/config error — with `-json` and `-quiet` output modes. The health verdict is strictly `0`/`1`, so it is safe in a Docker `HEALTHCHECK` from the distroless image (which ships no `curl`/`wget`). Documented in the README and [deployment.md](docs/deployment.md#health-checks) with Docker/systemd/Kubernetes examples (SEQ-06 / HP-05, #32).
 - **Auth reload-churn leak validation** (`internal/auth/reload_churn_test.go`): `TestReloadChurnNoLeak` proves that rebuilding authenticators on every configuration reload — Basic, JWT, forward-auth, and a mixed all-methods permutation — leaks neither goroutines nor heap. It runs in the default CI lane (300 reload cycles per permutation) and is env-tunable via `AUTH_CHURN_ITERS` for a dedicated soak lane; a 3,000-cycle run holds goroutine counts exactly flat with only KB-scale post-GC heap movement (SEQ-05, #31).
 
 ## [1.31.0] – 2026-07-06
