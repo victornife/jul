@@ -620,6 +620,110 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		loc.RequireClientCert = *req.Enabled
 		return fmt.Sprintf("route %s%s require client certificate %s", req.Listen, loc.Match.Path, onOff(*req.Enabled)), nil
 
+	case "server_add":
+		listen := strings.TrimSpace(req.Listen)
+		if listen == "" {
+			return "", fmt.Errorf("server_add: listen is required")
+		}
+		names := trimNonEmpty(req.ServerNames)
+		// Two server blocks on the same listen with the same host-names set are
+		// indistinguishable, so refuse a create that would duplicate one.
+		if serverNamesTaken(c, listen, names, nil) {
+			return "", fmt.Errorf("server_add: a server block on %s already serves %s", listen, namesLabel(names))
+		}
+		c.Servers = append(c.Servers, config.ServerConfig{Listen: listen, ServerNames: names})
+		return fmt.Sprintf("server %s added (%s)", listen, namesLabel(names)), nil
+
+	case "server_remove":
+		idx, err := findServerIndex(c, req.Listen, req.ServerNames)
+		if err != nil {
+			return "", err
+		}
+		if len(c.Servers) == 1 {
+			return "", fmt.Errorf("server_remove: cannot remove the only server block; at least one [[servers]] block is required")
+		}
+		srv := c.Servers[idx]
+		c.Servers = append(c.Servers[:idx], c.Servers[idx+1:]...)
+		return fmt.Sprintf("server %s removed (%s)", srv.Listen, namesLabel(srv.ServerNames)), nil
+
+	case "location_add":
+		srv, err := findServerByNames(c, req.Listen, req.ServerNames)
+		if err != nil {
+			return "", err
+		}
+		if req.Match == nil {
+			return "", fmt.Errorf("location_add: match_set (type + path) is required")
+		}
+		if req.Action == nil {
+			return "", fmt.Errorf("location_add: action is required")
+		}
+		matchType := normMatchType(req.Match.Type)
+		path := strings.TrimSpace(req.Match.Path)
+		if path == "" {
+			return "", fmt.Errorf("location_add: match path is required")
+		}
+		if locationMatchTaken(c, req.Listen, req.ServerNames, matchType, path, nil) {
+			return "", fmt.Errorf("location_add: a route with match %s %q already exists on server %s", matchType, path, req.Listen)
+		}
+		loc := config.LocationConfig{Match: config.MatchConfig{Type: matchType, Path: path}}
+		label, err := setLocationAction(&loc, *req.Action)
+		if err != nil {
+			return "", err
+		}
+		srv.Locations = append(srv.Locations, loc)
+		return fmt.Sprintf("route %s %q (%s) added on server %s", matchType, path, label, req.Listen), nil
+
+	case "location_remove":
+		srvIdx, locIdx, err := findLocationIndex(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		srv := &c.Servers[srvIdx]
+		loc := srv.Locations[locIdx]
+		srv.Locations = append(srv.Locations[:locIdx], srv.Locations[locIdx+1:]...)
+		return fmt.Sprintf("route %s %q removed from server %s", normMatchType(loc.Match.Type), loc.Match.Path, req.Listen), nil
+
+	case "upstream_add":
+		name := strings.TrimSpace(req.Upstream)
+		if name == "" {
+			return "", fmt.Errorf("upstream_add: upstream name is required")
+		}
+		if _, err := findUpstream(c, name); err == nil {
+			return "", fmt.Errorf("upstream_add: an upstream named %q already exists", name)
+		}
+		addr := strings.TrimSpace(req.Address)
+		if addr == "" {
+			return "", fmt.Errorf("upstream_add: address (first backend) is required")
+		}
+		weight := req.Weight
+		if weight < 1 {
+			weight = 1
+		}
+		strat := strings.TrimSpace(req.Strategy)
+		switch strat {
+		case "", "round_robin", "weighted_round_robin", "least_conn":
+		default:
+			return "", fmt.Errorf("upstream_add: invalid strategy %q (want round_robin|weighted_round_robin|least_conn)", strat)
+		}
+		c.Upstreams = append(c.Upstreams, config.UpstreamConfig{
+			Name:     name,
+			Strategy: strat,
+			Servers:  []config.UpstreamServer{{Address: addr, Weight: weight}},
+		})
+		return fmt.Sprintf("upstream %s added with backend %s (weight %d)", name, addr, weight), nil
+
+	case "upstream_remove":
+		idx, err := findUpstreamIndex(c, req.Upstream)
+		if err != nil {
+			return "", err
+		}
+		name := c.Upstreams[idx].Name
+		if refs := upstreamReferences(c, name); len(refs) > 0 {
+			return "", fmt.Errorf("upstream_remove: upstream %q is still referenced by %s; repoint or remove those routes first", name, strings.Join(refs, ", "))
+		}
+		c.Upstreams = append(c.Upstreams[:idx], c.Upstreams[idx+1:]...)
+		return fmt.Sprintf("upstream %s removed", name), nil
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}
@@ -727,6 +831,31 @@ func findServerByNames(c *config.Config, listen string, serverNames []string) (*
 	}
 }
 
+// findServerIndex resolves the same unique listen + ServerNames coordinates as
+// findServerByNames but returns the slice index, which server_remove needs to
+// delete the block. Ambiguous or missing targets are rejected rather than
+// guessed, matching the finder used by in-place edits.
+func findServerIndex(c *config.Config, listen string, serverNames []string) (int, error) {
+	if strings.TrimSpace(listen) == "" {
+		return -1, fmt.Errorf("server target requires a listen address")
+	}
+	idx, matches := -1, 0
+	for i := range c.Servers {
+		if c.Servers[i].Listen == listen && stringSetsEqual(c.Servers[i].ServerNames, serverNames) {
+			idx = i
+			matches++
+		}
+	}
+	switch {
+	case matches == 0:
+		return -1, fmt.Errorf("no server found for listen %q names %v", listen, serverNames)
+	case matches > 1:
+		return -1, fmt.Errorf("server target is ambiguous: %d blocks match listen %q names %v", matches, listen, serverNames)
+	default:
+		return idx, nil
+	}
+}
+
 // serverNamesTaken reports whether a server block other than self on the same
 // listen already serves the given host-names set, so a rename never produces
 // two indistinguishable virtual hosts.
@@ -790,6 +919,36 @@ func findLocation(c *config.Config, listen string, serverNames []string, matchTy
 		return nil, fmt.Errorf("route target is ambiguous: %d locations match listen %q names %v match %q path %q", matches, listen, serverNames, matchType, path)
 	default:
 		return found, nil
+	}
+}
+
+// findLocationIndex resolves the same unique route coordinates as findLocation
+// but returns the enclosing server index and the location index, which
+// location_remove needs to splice the location out of its server's slice.
+func findLocationIndex(c *config.Config, listen string, serverNames []string, matchType, path string) (int, int, error) {
+	if strings.TrimSpace(listen) == "" || strings.TrimSpace(path) == "" {
+		return -1, -1, fmt.Errorf("route target requires both listen and path")
+	}
+	srvIdx, locIdx, matches := -1, -1, 0
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		if srv.Listen != listen || !stringSetsEqual(srv.ServerNames, serverNames) {
+			continue
+		}
+		for j := range srv.Locations {
+			if srv.Locations[j].Match.Path == path && srv.Locations[j].Match.Type == matchType {
+				srvIdx, locIdx = i, j
+				matches++
+			}
+		}
+	}
+	switch {
+	case matches == 0:
+		return -1, -1, fmt.Errorf("no route found for listen %q names %v match %q path %q", listen, serverNames, matchType, path)
+	case matches > 1:
+		return -1, -1, fmt.Errorf("route target is ambiguous: %d locations match listen %q names %v match %q path %q", matches, listen, serverNames, matchType, path)
+	default:
+		return srvIdx, locIdx, nil
 	}
 }
 
@@ -916,6 +1075,42 @@ func findUpstream(c *config.Config, name string) (*config.UpstreamConfig, error)
 		}
 	}
 	return nil, fmt.Errorf("no upstream named %q", name)
+}
+
+// findUpstreamIndex resolves an upstream pool by name and returns its slice
+// index, which upstream_remove needs to delete the pool.
+func findUpstreamIndex(c *config.Config, name string) (int, error) {
+	if strings.TrimSpace(name) == "" {
+		return -1, fmt.Errorf("upstream name is required")
+	}
+	for i := range c.Upstreams {
+		if c.Upstreams[i].Name == name {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("no upstream named %q", name)
+}
+
+// upstreamReferences returns the "listen path" labels of every route whose
+// proxy_pass targets the named upstream (bare name or http(s):// prefixed), so
+// upstream_remove can refuse a deletion that would leave a dangling reference
+// with an actionable pointer instead of a generic downstream validation error.
+func upstreamReferences(c *config.Config, name string) []string {
+	targets := map[string]bool{
+		name:              true,
+		"http://" + name:  true,
+		"https://" + name: true,
+	}
+	var refs []string
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		for j := range srv.Locations {
+			if targets[strings.TrimSpace(srv.Locations[j].ProxyPass)] {
+				refs = append(refs, fmt.Sprintf("%s %s", srv.Listen, srv.Locations[j].Match.Path))
+			}
+		}
+	}
+	return refs
 }
 
 // handleConfigPatch applies a single structured edit to the running config and

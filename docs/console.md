@@ -326,6 +326,22 @@ global `[plugins.NAME]` — module path, type, host capabilities and limits,
 config — and attach or detach middleware plugins per route; handler and
 server-level plugins stay raw-only) |
 
+Whole **servers, routes, and upstream pools** can now also be **created and
+deleted** through structured patch-ops — `server_add` / `server_remove`,
+`location_add` / `location_remove`, and `upstream_add` / `upstream_remove` —
+each previewed as a diff and applied through the same validated pipeline. This
+closes the last create/delete gap that previously forced a raw TOML-fragment
+hand-off. The ops guard their targets: a create errors if it would duplicate an
+existing server/route/pool, a delete errors if the target is missing,
+`upstream_remove` refuses a pool a route's `proxy_pass` still references, and
+`server_remove` refuses the final server block (at least one is required).
+Guided console *forms* for these ops are landing incrementally; the
+structured-patch API and the raw editor both cover them today. (Global-table
+edits — `[global]`, `[cache]`, `[compression]`, global `[rate_limit]` — keep
+their guided validated-TOML-upsert editors, which already give a diff-reviewed
+structured path; dedicated `*_set` patch-ops for those tables are a documented
+follow-on.)
+
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,
 default backend (`proxy_pass`), SNI routing table (TCP — enables SNI inspection
