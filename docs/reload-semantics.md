@@ -97,6 +97,18 @@ closed connection. A **rejected** reload never reaches step 1's swap: its
 freshly built (staged) resources are closed immediately and the live generation
 is untouched.
 
+### Stateless per-reload components
+
+Not every reloaded component owns teardown-sensitive resources. Per-location
+**authenticators** (CIDR / Basic / JWT / forward-auth) are rebuilt fresh on each
+reload and the previous set is simply dropped for the garbage collector: an
+authenticator holds no background worker, timer, or long-lived socket — its JWKS
+cache refreshes lazily on the request path, never from a goroutine — so there is
+nothing to close and no retire callback to schedule. This is validated at runtime
+by `internal/auth`'s `TestReloadChurnNoLeak`, which drives sustained
+build/exercise/drop churn across every auth permutation and asserts the goroutine
+count and post-GC heap return to their pre-churn baseline.
+
 ## Reload timeout (`[global].reload_timeout`)
 
 A reload measures its own duration against `[global].reload_timeout` (default 10s; zero or omitted defaults to 10s).

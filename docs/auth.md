@@ -132,6 +132,23 @@ onto the upstream request (client-supplied copies are stripped first). Any other
 status is relayed to the client (non-error statuses normalized to 403; body
 capped at 64 KiB); redirects from the auth service are passed through.
 
+## Reload & resource lifecycle
+
+Authenticators are **rebuilt from scratch on every reload**: the server
+reconstructs one `*Authenticator` per location, atomically swaps in the new set,
+and drops the previous generation. No explicit teardown is required because an
+authenticator owns **no background worker, timer, or long-lived socket** — the
+CIDR gate and htpasswd set are pure in-memory state, and the JWKS cache refreshes
+**lazily on the request path** (throttled to ≤1 fetch / 30s), never from a
+background goroutine. Superseded authenticators are therefore simply
+garbage-collected.
+
+This rebuild-and-drop model is validated at runtime by `TestReloadChurnNoLeak`
+(`internal/auth/reload_churn_test.go`), which drives sustained reload churn
+across all permutations and asserts the goroutine count and post-GC heap return
+to their pre-churn baseline. A 3,000-cycle run holds the goroutine count exactly
+flat for every method (env-tunable via `AUTH_CHURN_ITERS`).
+
 ## Metrics
 
 | Metric | Labels |

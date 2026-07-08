@@ -9,6 +9,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+- **Auth reload-churn leak validation** (`internal/auth/reload_churn_test.go`): `TestReloadChurnNoLeak` proves that rebuilding authenticators on every configuration reload — Basic, JWT, forward-auth, and a mixed all-methods permutation — leaks neither goroutines nor heap. It runs in the default CI lane (300 reload cycles per permutation) and is env-tunable via `AUTH_CHURN_ITERS` for a dedicated soak lane; a 3,000-cycle run holds goroutine counts exactly flat with only KB-scale post-GC heap movement (SEQ-05, #31).
+
 ## [1.31.0] – 2026-07-06
 
 ### Fixed
