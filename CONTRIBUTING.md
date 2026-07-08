@@ -24,6 +24,22 @@ technical merit aligned with the project's vision.
    make ci-full          # full feature set — matches CI exactly
    ```
 
+### Dependency vulnerability scanning
+
+Before opening a PR, check for known vulnerabilities in the dependency tree
+using `govulncheck`:
+
+```bash
+go install golang.org/x/vuln/cmd/govulncheck@latest
+govulncheck ./...                                      # lean build tags
+govulncheck -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" ./...
+```
+
+The CI `vulncheck` job will fail the build if any vulnerable dependencies are
+detected. If a finding is known (e.g., a transitive dependency with a disclosed
+but non-reachable vulnerability in your configuration), document the exception
+in an issue comment and link the issue in your PR description.
+
 ## Coding standards
 
 - Go style follows `gofmt` and `golangci-lint`.
