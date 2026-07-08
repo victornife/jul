@@ -259,7 +259,7 @@ function CertTable({ certs }: { readonly certs: CertProjection[] }) {
             <th className="px-4 py-2 text-left font-semibold">Source</th>
             <th className="px-4 py-2 text-left font-semibold">Issuer</th>
             <th className="px-4 py-2 text-left font-semibold">Expires</th>
-            <th className="px-4 py-2 text-left font-semibold cursor-pointer select-none" onClick={() => toggle("days_left")}>
+            <th className="px-4 py-2 text-left font-semibold cursor-pointer select-none" onClick={() => { toggle("days_left"); }}>
               Days left {sortBy === "days_left" ? (sortDir === "asc" ? "↑" : "↓") : ""}
             </th>
             <th className="px-4 py-2 text-left font-semibold">Status</th>
@@ -323,14 +323,14 @@ export function TLSPanel() {
             <div className="flex rounded-md border border-jul-border overflow-hidden">
               <button
                 type="button"
-                onClick={() => setViewMode("cards")}
+                onClick={() => { setViewMode("cards"); }}
                 className={`px-3 py-1 text-xs ${viewMode === "cards" ? "bg-jul-accent text-white" : "bg-jul-surface text-jul-text hover:bg-jul-border"}`}
               >
                 Cards
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode("table")}
+                onClick={() => { setViewMode("table"); }}
                 className={`px-3 py-1 text-xs ${viewMode === "table" ? "bg-jul-accent text-white" : "bg-jul-surface text-jul-text hover:bg-jul-border"}`}
               >
                 Table

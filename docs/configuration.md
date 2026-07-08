@@ -2,8 +2,8 @@
 
 Jul.IA is configured by a single TOML document. The top-level tables are
 `[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, `[admin]`,
-`[compression]`, `[rate_limit]`, `[observability]`, `[waf]`, `[plugins.<name>]`, and
-`[[stream]]`. Several tables are only honoured when the matching build tag is
+`[compression]`, `[rate_limit]`, `[egress]`, `[observability]`, `[waf]`,
+`[plugins.<name>]`, and `[[stream]]`. Several tables are only honoured when the matching build tag is
 present (for example `[waf]` requires the `waf` tag, `[[stream]]` the `stream`
 tag, and `[plugins.<name>]` the `wasmplugins` tag); absent tags are rejected at
 preflight rather than silently ignored.
@@ -529,6 +529,34 @@ max_conns = 1000
 | `rate` | int | Sustained requests/second allowed per key |
 | `burst` | int | Maximum momentary burst above `rate` (defaults to `rate`) |
 | `max_conns` | int | Concurrent connections per listener; `0` = unlimited. Active only when the block is `enabled`; listener-global, so it is ignored on per-location overrides |
+
+---
+
+## `[egress]`
+
+An optional outbound-destination **allow-list** that constrains the
+config-driven auxiliary fetches the server makes on its own — JWKS retrieval
+(`jwks_url`), forward-auth subrequests (`url`), and Consul/Kubernetes service
+discovery (`address`/`api_server`). When enabled, those fetches may only reach a
+destination that matches an `allow` entry; every other destination is refused at
+dial time, before any bytes are sent. This bounds the SSRF blast radius of a
+mistyped or maliciously edited config value.
+
+It is **disabled by default** and compiled into every build — no build tag
+required — so the block is fully backward-compatible. Upstream proxying, active
+health checks, and ACME are intentionally out of scope. See [egress.md](egress.md)
+for the full trust model and examples.
+
+```toml
+[egress]
+enabled = true
+allow = ["idp.example.com", ".internal.corp", "10.0.0.0/8", "203.0.113.7"]
+```
+
+| Key | Type | Description |
+| --- | ---- | ----------- |
+| `enabled` | bool | Master switch (default `false`). When off, no restriction is applied |
+| `allow` | list | Permitted destinations. Each entry is a CIDR (`10.0.0.0/8`, `2001:db8::/32`), a bare IP (`203.0.113.10`, treated as `/32` or `/128`), an exact hostname (`idp.example.com`), or a leading-dot suffix (`.internal.corp`, matching any subdomain). A host listed by name is resolved normally; a host not listed by name is permitted only when every resolved IP falls inside an allowed CIDR. Required (non-empty) when `enabled` |
 
 ---
 
