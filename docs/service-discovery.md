@@ -195,6 +195,101 @@ These complement the existing `jul_upstream_healthy` gauge and
 can show both how many backends discovery currently sees and how many of them are
 passing their probes.
 
+## Local live integration runbook (issue #24)
+
+Use this runbook to validate service discovery against live providers on a
+developer machine (Docker Desktop + Kubernetes enabled). It executes two lanes:
+
+1. **Consul lane:** Jul reads real Consul service-health entries and updates
+  backends when an instance is deregistered.
+2. **Kubernetes lane:** Jul reads real EndpointSlices from the Kubernetes API and
+  updates backends when the EndpointSlice port is patched.
+
+### Prerequisites
+
+- Docker daemon running.
+- Kubernetes context available (for example `docker-desktop`).
+- Go toolchain present.
+
+### One-command execution
+
+From the repository root:
+
+```powershell
+.\scripts\test-discovery-live.ps1
+```
+
+The orchestrator runs both lanes and writes artifacts under `tmp/issue24/`.
+
+### Lane scripts (individual)
+
+Run only the Consul lane:
+
+```powershell
+.\scripts\test-discovery-consul-live.ps1
+```
+
+Run only the Kubernetes lane:
+
+```powershell
+.\scripts\test-discovery-k8s-live.ps1
+```
+
+### Expected evidence artifacts
+
+Primary summary:
+
+- `tmp/issue24/issue-24-evidence.md`
+
+Consul lane artifacts:
+
+- `tmp/issue24/consul-live.toml`
+- `tmp/issue24/consul-before.txt`
+- `tmp/issue24/consul-after.txt`
+- `tmp/issue24/consul-jul.out.log`
+- `tmp/issue24/consul-jul.err.log`
+- `tmp/issue24/consul-summary.txt`
+
+Kubernetes lane artifacts:
+
+- `tmp/issue24/k8s-live.toml`
+- `tmp/issue24/k8s-live-manifests.yaml`
+- `tmp/issue24/k8s-before.txt`
+- `tmp/issue24/k8s-after.txt`
+- `tmp/issue24/k8s-jul.out.log`
+- `tmp/issue24/k8s-jul.err.log`
+- `tmp/issue24/k8s-api.txt`
+- `tmp/issue24/kubectl-proxy.out.log`
+- `tmp/issue24/kubectl-proxy.err.log`
+- `tmp/issue24/k8s-summary.txt`
+
+### Pass criteria
+
+Consul lane passes when:
+
+1. `consul-before.txt` contains both `be1` and `be2`.
+2. `consul-after.txt` contains only `be1` after Consul deregisters `web2`.
+
+Kubernetes lane passes when:
+
+1. `k8s-before.txt` (live API snapshot) contains EndpointSlice port `18081`.
+2. `k8s-after.txt` (live API snapshot) contains EndpointSlice port `18082`
+  after patch.
+3. `k8s-summary.txt` reports `k8s_lane=PASS`.
+
+### Issue closure format
+
+Use `tmp/issue24/issue-24-evidence.md` as the source for the issue comment.
+
+Acceptance mapping for issue #24:
+
+1. Live Consul integration test exists and passes locally: **PASS** when
+  `consul-summary.txt` reports `consul_lane=PASS`.
+2. Live Kubernetes integration test exists and passes locally: **PASS** when
+  `k8s-summary.txt` reports `k8s_lane=PASS`.
+
+If both are PASS, close issue #24 as completed.
+
 ## Behaviour matrix
 
 The matrix below enumerates every supported capability for each discovery
