@@ -431,7 +431,8 @@ overview (`GET /api/runtime/overview`), which the Console renders as a banner â€
 rather than silently dropping the trail. Durability favors immediate writes over
 per-event `fsync`: events are written as they happen but not flushed to stable
 storage on every record, an explicit trade-off. Actor identity is currently the
-shared-token `"operator"`; per-user attribution arrives with RBAC/SSO.
+shared-token `"operator"`; per-user attribution arrives with RBAC (designed in
+[docs/specs/console-rbac.md](specs/console-rbac.md), [ADR 0010](adr/0010-console-rbac.md)).
 
 ## Capability matrix
 
@@ -568,7 +569,11 @@ commitments, keyboard-shortcut map, and verification live in
 
 - No RBAC/SSO or multi-node management (single-token, single-node). All
   Console users share the same `[admin].token`; there is no per-user
-  authentication, authorization scopes, or session isolation. Token rotation
+  authentication, authorization scopes, or session isolation. The scoped
+  multi-principal model (predefined + custom roles, revocable tokens, per-principal
+  audit attribution) is designed in
+  [docs/specs/console-rbac.md](specs/console-rbac.md) ([ADR 0010](adr/0010-console-rbac.md))
+  and slated for HP-02. Token rotation
   requires editing the configuration file and reloading the server (or applying
   the change through the Console, which is itself gated by the current token).
 - The in-console **Operations â†’ Logs** tail is a bounded, privacy-preserving view

@@ -83,7 +83,11 @@ JWKS fetching, and ACME are SSRF-safe by design rather than by filtering.
 - **Lock down the admin console.** Always set `[admin].token` (constant-time
   compare; strict CSP, `X-Frame-Options: DENY`, same-origin `/api`). There is
   only a single shared token — no per-user keys, scopes, or audit attribution —
-  so treat it as a shared secret and rotate it promptly on team changes.
+  so treat it as a shared secret and rotate it promptly on team changes. The
+  scoped multi-principal replacement (predefined + custom roles, revocable
+  tokens, per-principal audit) is designed in
+  [docs/specs/console-rbac.md](docs/specs/console-rbac.md)
+  ([ADR 0010](docs/adr/0010-console-rbac.md)).
   Edits that change admin reachability (disabling admin, moving its listen
   address, rotating its token, or disabling the web console) are held for
   explicit confirmation so a single apply cannot silently lock you out. See the

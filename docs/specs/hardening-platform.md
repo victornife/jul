@@ -98,6 +98,10 @@ with operator override mitigates.
 
 ## HP-02 — Console RBAC + multi-user
 
+> **Full design:** [console-rbac.md](console-rbac.md) (exhaustive permission
+> matrix + phased plan), recorded in [ADR 0010](../adr/0010-console-rbac.md).
+> The sketch below is the backlog summary.
+
 **Objective.** Replace the single shared admin bearer token with named principals,
 roles, and scoped tokens, so multiple operators can use the console under
 least-privilege with attributable audit entries.
