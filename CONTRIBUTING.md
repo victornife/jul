@@ -81,6 +81,18 @@ in an issue comment and link the issue in your PR description.
 - Panics are contained: `middleware/recover.go` catches them; re-panic only
   `http.ErrAbortHandler`.
 
+### Error handling and sentinel errors
+
+Preserve error context with wrapping instead of discarding it. When a lower-level
+error is relevant, wrap it with `%w` so callers can still use `errors.Is` and
+`errors.As` to inspect the failure. For expected, reusable failure modes, prefer
+small package-level sentinel errors over ad hoc strings or boolean flags; export
+those sentinels when other packages need to match them. The repository's current
+sentinel set includes `ErrNoAvailableBackend`, `ErrRestartRequired`,
+`errFetchBlocked`, `errBodyTooLarge`, and `egress.ErrBlocked`. For
+lifecycle/cleanup code, prefer `io.Closer` and make teardown deterministic so
+resources are released even when a later step fails.
+
 ## Documentation conventions
 
 Every feature change must include docs. The rule is simple: **if a user could
