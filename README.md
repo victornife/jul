@@ -19,7 +19,7 @@ interface — all in a single static, dependency-free binary.
 
 - **Binary / module / service name:** `jul`
 - **Product name:** `Jul.IA`
-- **Language:** Go 1.26
+- **Language:** Go 1.26.5
 - **License:** AGPL-3.0
 
 > Where this is headed: see the [vision](docs/vision/) and the

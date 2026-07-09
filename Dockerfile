@@ -7,7 +7,7 @@
 # by hand: `docker buildx imagetools inspect <image>:<tag>` and copy the digest.
 
 # --- build stage ------------------------------------------------------------
-FROM golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS build
+FROM golang:1.26.5-alpine@sha256:111d79159b2326f7e80c4a4706e1ba166acb0e2611df853955f3621828cd49e8 AS build
 
 WORKDIR /src
 

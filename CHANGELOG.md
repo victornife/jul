@@ -9,6 +9,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Security
+- Bumped the Go toolchain from 1.26.4 to 1.26.5 in the main module, example plugin module, and container build image to clear the newly disclosed stdlib CVEs in `crypto/tls` and `os`.
+
 ## [1.32.0] – 2026-07-09
 
 ### Fixed
