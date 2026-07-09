@@ -1,6 +1,6 @@
 # ADR 0008 — `gofast` / `x/tools` dependency pin (technical debt)
 
-- **Status:** Deferred — recorded as technical-debt
+- **Status:** Resolved (vendored gofast)
 - **Date:** 2026-06-30
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** `go.mod` replace directive, FastCGI handler, supply chain
@@ -25,7 +25,17 @@ configuration, not the core proxy path.
 
 ## Decision
 
-**No immediate action.** The pin is low-risk for a runtime server because:
+The dependency pin is no longer needed. The repository vendors `gofast` under
+`third_party/gofast` and uses a local `replace` directive in `go.mod`, so the
+FastCGI/uWSGI client now lives in-tree and the prior `x/tools` pin is no longer
+required for the build. The decision is therefore **resolved**.
+
+The vendored copy is derived from upstream `github.com/yookoala/gofast` at
+version `v0.8.0` (commit `b9e83d1b95620b6d780d2b02e2482cff1d10d1db`), and
+changes to the vendored tree should be reviewed and re-scanned with
+`govulncheck` like any other third-party dependency.
+
+The prior pin was low-risk for a runtime server because:
 
 1. The affected code path is only exercised when a location uses
    `fastcgi_pass` or `uwsgi_pass`.
