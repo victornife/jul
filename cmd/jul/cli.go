@@ -50,6 +50,10 @@ func dispatchSubcommand(args []string) (handled bool, code int) {
 		return true, cmdHealthcheck(args[1:])
 	case "import":
 		return true, cmdImport(args[1:])
+	case "version":
+		return true, cmdVersion(args[1:])
+	case "completion":
+		return true, cmdCompletion(args[1:])
 	default:
 		return false, 0
 	}
@@ -73,6 +77,9 @@ Usage:
                                        run a zero-config server (no file needed)
   jul import nginx [-o out.toml] [-strict] <nginx.conf>
                                        translate an NGINX config (needs -tags importer)
+  jul version [-json]                  print version and build metadata
+  jul completion <bash|zsh|fish|powershell>
+                                       print a shell completion script
 
 Flags:
 `)

@@ -199,6 +199,8 @@ jul run  --serve <dir> | --proxy <target> [--listen addr]
                                               run a zero-config server (no file)
 jul import nginx [-o out.toml] [-strict] <nginx.conf>
                                               translate an NGINX config (importer tag)
+jul version [-json]                           print version and build metadata
+jul completion <bash|zsh|fish|powershell>     print a shell completion script
 
 Legacy flags (default command, still supported):
   --config string   path to the TOML configuration file (default "server.toml")
@@ -291,11 +293,41 @@ The generated config is re-parsed and validated before it is emitted. Exit
 codes: `0` ok, `1` parse/translate error or invalid output, `2` warnings under
 `-strict`.
 
-The version string can be stamped at build time:
+### `jul version`
+
+Prints the version and build metadata. Human-readable by default; `-json` emits
+a stable machine object (keys: `product`, `version`, `commit`, `build_date`,
+`dirty`, `go_version`, `os`, `arch`) for scripts and CI.
+
+```bash
+jul version           # human-readable
+jul version -json     # machine-readable object
+```
+
+The `version` string is stamped by the release pipeline (and `make build`); the
+commit, build date, and dirty flag are read from the Go build info the toolchain
+embeds automatically, so they populate for any `go build` from the repository and
+degrade to `unknown` when VCS metadata is absent. To stamp a custom version:
 
 ```bash
 go build -ldflags "-X main.version=1.2.3" -o jul ./cmd/jul
 ```
+
+### `jul completion`
+
+Generates a shell completion script for `bash`, `zsh`, `fish`, or `powershell`
+(`pwsh`). Source it for the current session, or install it into the shell's
+completion directory:
+
+```bash
+source <(jul completion bash)                                # bash, current session
+jul completion zsh  > "${fpath[1]}/_jul"                     # zsh, installed
+jul completion fish > ~/.config/fish/completions/jul.fish    # fish
+jul completion powershell | Out-String | Invoke-Expression   # PowerShell
+```
+
+Completion covers the subcommand verbs and the arguments of `completion` and
+`version`; file paths complete elsewhere.
 
 ### CLI troubleshooting
 

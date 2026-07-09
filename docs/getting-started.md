@@ -168,6 +168,24 @@ To rewrite a config into canonical TOML:
 This reorders keys, normalizes values, and removes comments. Review the output
 before committing.
 
+## Version and shell completion
+
+Check what you are running — human-readable, or `-json` for scripts and CI
+(keys: `product`, `version`, `commit`, `build_date`, `dirty`, `go_version`,
+`os`, `arch`):
+
+```bash
+./jul version
+./jul version -json
+```
+
+Enable tab-completion for your shell (`bash`, `zsh`, `fish`, or `powershell`):
+
+```bash
+source <(jul completion bash)                                # current session
+jul completion fish > ~/.config/fish/completions/jul.fish    # installed
+```
+
 ---
 
 ## Next steps
