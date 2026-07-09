@@ -22,14 +22,26 @@ type forwardAuth struct {
 
 func newForwardAuth(url string, responseHeaders []string, client *http.Client) *forwardAuth {
 	if client == nil {
-		client = &http.Client{
-			Timeout: 10 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
+		client = forwardHTTPClient(nil)
 	}
 	return &forwardAuth{url: url, headers: responseHeaders, client: client}
+}
+
+// forwardHTTPClient builds the default forward-auth HTTP client. It does not
+// follow redirects (the auth service's redirect response is relayed to the
+// client). When dial is non-nil its transport enforces the egress allow-list at
+// connect time.
+func forwardHTTPClient(dial DialFunc) *http.Client {
+	c := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	if dial != nil {
+		c.Transport = guardedTransport(dial)
+	}
+	return c
 }
 
 // forwardResult carries the outcome of a forward-auth subrequest.

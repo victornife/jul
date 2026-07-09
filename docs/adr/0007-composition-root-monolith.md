@@ -1,7 +1,8 @@
 # ADR 0007 — Composition-root monolith (`cmd/jul/main.go`)
 
-- **Status:** Partial — helpers extracted in Q3 2026, structural extraction still deferred
-- **Date:** 2026-06-30 (updated 2026-07-02)
+- **Status:** Accepted — helper *and* structural extraction complete
+  (`RuntimeBuilder` and `GenerationResources` extracted 2026-07 under SEQ-04)
+- **Date:** 2026-06-30 (updated 2026-07-08)
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** `cmd/jul/main.go`, runtime-initialization architecture
 - **Source:** Post-audit review — external audit recommendation A-1
@@ -50,7 +51,14 @@ condition is met:
 > generational cleanup, metrics hooks), **or** a reload/preflight bug occurs
 > that would have been prevented by better isolation.
 
-Until then, the debt is documented and monitored.
+**Update (2026-07-08, SEQ-04):** The audit execution plan (#26) scheduled this
+extraction as issue #30. `RuntimeBuilder` (`internal/app/runtime.go`) and
+`GenerationResources` (`internal/app/generation.go`) are now extracted, with
+characterization tests, preserving the `server.HandlerFactory` contract and the
+reload/generation teardown semantics. The remaining `buildHandlers` factory
+closure stays inline: it is the per-reload assembly of the middleware chain and
+action builders, and its generational lifetime is now owned by
+`GenerationResources`.
 
 ## Recommendations for future extraction
 
@@ -62,8 +70,8 @@ already in `internal/app/`, preserving the existing public contract with
 |-----------|---------------|-----------------------|
 | `BuildAdminDeps` | ✅ Extracted (`internal/app/admin_deps.go`) | Already extracted; keep stable |
 | `Preflight.Apply` | ✅ Extracted (`internal/app/preflight.go`) | Already extracted; keep stable |
-| `RuntimeBuilder` | ❌ Deferred | Feature-flag checks, ACME init, tracing init, HTTP/3 setup, stream server wiring |
-| `GenerationResources` | ❌ Deferred | Manage `liveHandlerClosers`, `poolReg.Begin/Commit/Abort`, plugin-manager lifecycle |
+| `RuntimeBuilder` | ✅ Extracted (`internal/app/runtime.go`) | Feature-flag checks, ACME init, tracing init, HTTP/3 setup, stream server wiring |
+| `GenerationResources` | ✅ Extracted (`internal/app/generation.go`) | Owns the live handler closers and the `poolReg.Begin/Commit/Abort` staging span; plugin sets are staged as generation closers |
 
 The existing `server.HandlerFactory` contract must remain unchanged — the server
 package must not import the new runtime package.
@@ -85,5 +93,7 @@ package must not import the new runtime package.
 - `internal/app/admin_deps.go` — extracted admin `Deps` builder
 - `internal/app/preflight.go` — extracted preflight 6-gate runner
 - `internal/app/wiring.go` — scope keys, upstream indexing, reload fan-in, etc.
-- ADR 0003 — maturity model; this debt is explicitly classified as **Beta**
-  architecture until `RuntimeBuilder` and `GenerationResources` are extracted.
+- `internal/app/runtime.go` — extracted process-lifetime runtime builder (SEQ-04)
+- `internal/app/generation.go` — extracted generational teardown lifecycle (SEQ-04)
+- ADR 0003 — maturity model; the composition-root debt this ADR tracked is now
+  resolved (`RuntimeBuilder` and `GenerationResources` extracted, SEQ-04).

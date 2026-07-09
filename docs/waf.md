@@ -286,6 +286,11 @@ the original, uncompressed request and response bodies.
 - **Reload-safe.** The WAF policy is compiled on startup and on every reload. A
   rule that fails to compile fails the reload with an error, so a bad rule never
   silently disables protection — the previous good configuration keeps serving.
+  Each reload compiles a fresh Coraza engine and drops the previous one; that
+  build-drop cycle is proven **leak-free** (flat goroutines, bounded heap) under
+  sustained reconfiguration churn by the `TestWAFReloadChurnNoLeak` lane — see the
+  [reload-churn evidence](soak-evidence.md#2026-07-09--waf-reload-churn-leakstability-validation-local-windows-aux-06-50)
+  and rerun locally with `make waf-churn`.
 - **Embedded CRS, no external assets.** With `crs_enabled` the rule set is
   compiled into the binary; there is nothing to ship or mount alongside it. The
   CRS version is whatever the build pinned (see `go.mod`).

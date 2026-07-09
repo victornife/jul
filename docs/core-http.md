@@ -186,13 +186,75 @@ failures a backend is parked for `fail_timeout` (default 10s). There is **no**
 
 ## Metrics
 
-| Metric | Labels |
-| --- | --- |
-| `jul_http_requests_total` | `method`, `host`, `code` |
-| `jul_http_request_duration_seconds` | `method`, `host` |
-| `jul_http_requests_in_flight` | — |
-| `jul_upstream_healthy` | `pool`, `backend` |
-| `jul_upstream_backends` | `pool` |
+jul exposes Prometheus metrics on the admin `/metrics` endpoint from a private
+registry (only `jul_*` series plus the standard Go/process collectors). Every
+label is **bounded by construction** — the label set below is a policy, enforced
+by a regression test (`internal/observability/cardinality_test.go`,
+`TestMetricLabelPolicy`) that fails if a metric gains an unexpected label. This
+keeps Prometheus series counts predictable as the feature set grows.
+
+### Label cardinality policy
+
+Labels fall into three classes by what bounds them:
+
+- **Fixed** — a small, closed enum fixed in the code (e.g. `code`, `state`,
+  `result`, `action`, `proto`, `direction`, `reason`, `encoding`, `key`). These
+  cannot grow with traffic or config.
+- **Config/topology-bounded** — one series per configured or discovered object
+  (`pool`, `backend`, `plugin`, `domain`, `rule`, and the gRPC `method` full
+  name). These grow only with your configuration, not with client input; on very
+  large or highly dynamic pools/domain sets they are the labels to watch (see the
+  [operator playbook](#operator-playbook-keeping-cardinality-bounded)).
+- **Client-derived** — values a client can influence. There are exactly two, and
+  both are capped by design: the HTTP request `method` (folded to a fixed set,
+  see below) and `host` (opt-in, empty by default, see below).
+
+| Metric | Labels | Bound |
+| --- | --- | --- |
+| `jul_http_requests_total` | `method`, `host`, `code` | method folded to a fixed set · host opt-in · code = status |
+| `jul_http_request_duration_seconds` | `method`, `host` | as above (buckets fixed) |
+| `jul_http_requests_in_flight` | — | single series |
+| `jul_cache_events_total` | `state` | fixed (`HIT`/`MISS`/`STALE`/`BYPASS`) |
+| `jul_http_response_compressed_total` | `encoding` | fixed content codings |
+| `jul_http_ratelimited_total` | `key` | fixed (`ip`/`header`/`jwt`) |
+| `jul_auth_decisions_total` | `method`, `result` | fixed gate × `allow`/`deny` |
+| `jul_waf_events_total` | `action`, `rule` | `block`/`detect` × loaded rule IDs |
+| `jul_upstream_healthy` | `pool`, `backend` | pool membership |
+| `jul_upstream_backends` | `pool` | configured pools |
+| `jul_discovery_errors_total` | `pool` | configured pools |
+| `jul_upstream_probes_total` | `pool`, `result` | pools × `success`/`failure` |
+| `jul_upstream_probe_duration_seconds` | `pool` | configured pools |
+| `jul_grpc_transcode_requests_total` | `method`, `code` | proto methods × status |
+| `jul_grpc_transcode_stream_msgs_total` | `method`, `direction` | proto methods × `sent`/`recv` |
+| `jul_grpc_proxy_streams_total` | — | single series |
+| `jul_plugin_invocations_total` | `plugin`, `result` | configured plugins × `continue`/`stop`/`error` |
+| `jul_plugin_duration_seconds` | `plugin` | configured plugins |
+| `jul_plugin_panics_total` | `plugin` | configured plugins |
+| `jul_listener_conns` | — | single series |
+| `jul_http3_connections` | — | single series |
+| `jul_stream_active_conns` | `proto` | `tcp`/`udp` |
+| `jul_stream_bytes_total` | `proto`, `direction` | `tcp`/`udp` × `up`/`down` |
+| `jul_stream_udp_sessions_evicted_total` | `reason` | `idle`/`lru` |
+| `jul_stream_udp_sessions_rejected_total` | — | single series |
+| `jul_tls_cert_expiry_seconds` | `domain` | configured/served domains |
+| `jul_acme_renewals_total` | — | single series |
+| `jul_mtls_handshakes_total` | `result` | `verified`/`rejected` |
+
+Notably absent from every label set — deliberately — are the request **path**,
+**query string**, **client IP**, **user-agent**, and raw **Host**: those are
+unbounded, client-controlled dimensions. Per-path and per-host detail is instead
+exposed through the bounded, in-memory Console projections (Top Failing Routes,
+Request Samples, Traffic Sources), never as Prometheus labels.
+
+### The request `method` label is folded to a fixed set
+
+HTTP permits arbitrary request-method tokens, and the method is client-controlled,
+so a hostile or buggy client could otherwise mint one `jul_http_requests_total`
+series per novel method (times host, times code). jul therefore records only the
+standard methods verbatim — `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`,
+`CONNECT`, `OPTIONS`, `TRACE` — and folds every other value to a single `other`
+series. The `method` label is thus bounded to at most ten values by construction;
+no configuration is required.
 
 ### The `host` label is opt-in
 
@@ -222,6 +284,54 @@ metric_relabel_configs:
     regex: (app\.example\.com|api\.example\.com)
     action: keep
 ```
+
+### Operator playbook: keeping cardinality bounded
+
+The client-derived labels are safe by default (method is capped; host is
+opt-in). The dimension to plan for at scale is the **config/topology-bounded**
+group — chiefly `backend` on large or rapidly-churning discovery pools, and
+`domain` when serving on-demand ACME certificates for many hostnames. A working
+budget: total series ≈ Σ(per-metric label-value products); the request metrics
+dominate at roughly `methods (≤10) × hosts (1 unless opted-in) × status codes`.
+
+Guidance:
+
+1. **Leave `host_label` off** on any edge exposed to arbitrary Host headers; rely
+   on the Console Traffic Sources panel for per-host visibility instead.
+2. **Scrape-drop noisy topology labels** you do not alert on. For example, to keep
+   the per-pool health rollup but drop the per-`backend` fan-out on a large pool:
+
+   ```yaml
+   metric_relabel_configs:
+     - source_labels: [__name__, backend]
+       regex: jul_upstream_healthy;.+
+       action: drop
+   ```
+
+3. **Bound on-demand TLS** `domain` growth by dropping the expiry gauge for
+   hostnames you do not track, or by keeping only your apex/wildcard domains:
+
+   ```yaml
+   metric_relabel_configs:
+     - source_labels: [__name__, domain]
+       regex: jul_tls_cert_expiry_seconds;(.+\.)?example\.com
+       action: keep
+   ```
+
+4. **Set a per-target sample limit** as a backstop so a mistaken config cannot
+   overwhelm the TSDB:
+
+   ```yaml
+   scrape_configs:
+     - job_name: jul
+       sample_limit: 5000
+       static_configs: [{ targets: ["jul.internal:9090"] }]
+   ```
+
+The `jul_*` label names are part of the compatibility surface
+([compatibility.md](compatibility.md)); a change to the policy table above is a
+documented, tested change, so your relabel rules stay stable across upgrades.
+
 
 ## Benchmarks
 

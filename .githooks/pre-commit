@@ -1,0 +1,50 @@
+#!/bin/sh
+# Jul.IA pre-commit hook — fast local gate parity (SEQ-08 / HP-04).
+#
+# Keeps the commit-time feedback loop tight by catching the single most common CI
+# failure — unformatted Go — before it reaches the pipeline. It is intentionally
+# minimal so it stays fast on every commit; the heavier gates run in pre-push.
+#
+# Non-destructive: it only checks, never rewrites files.
+# Bypass one commit with `git commit --no-verify`.
+# Disable all repo hooks with JUL_SKIP_HOOKS=1.
+set -u
+
+if [ "${JUL_SKIP_HOOKS:-}" = "1" ]; then
+	echo "pre-commit: skipped (JUL_SKIP_HOOKS=1)"
+	exit 0
+fi
+
+# gofmt the staged Go files (mirrors the CI `gofmt` gate). The generated
+# descriptor is intentionally not gofmt-clean and is excluded, matching CI.
+#
+# The check reads each file's *staged* (index) content, which Git has already
+# normalized to LF, so it is correct even when the working tree uses CRLF on
+# Windows — a plain `gofmt -l` on CRLF files reports false positives.
+gofmt_blob_clean() {
+	orig=$(git show "$1" 2>/dev/null) || return 0
+	fmtd=$(printf '%s' "$orig" | gofmt 2>/dev/null)
+	# If gofmt could not parse it (syntax error), don't flag formatting; the
+	# build/test gates will catch a syntax error.
+	[ $? -ne 0 ] && return 0
+	[ "$orig" = "$fmtd" ]
+}
+
+staged_go=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' \
+	| grep -v '^examples/grpc-gateway/gen_descriptor.go$' || true)
+
+bad=""
+for f in $staged_go; do
+	gofmt_blob_clean ":$f" || bad="$bad $f"
+done
+
+if [ -n "$bad" ]; then
+	echo "pre-commit: these staged Go files need gofmt:"
+	for f in $bad; do echo "  $f"; done
+	echo "Fix with: gofmt -w <files>   (or: make format)"
+	echo "Bypass with: git commit --no-verify"
+	exit 1
+fi
+
+echo "pre-commit: gofmt OK"
+exit 0

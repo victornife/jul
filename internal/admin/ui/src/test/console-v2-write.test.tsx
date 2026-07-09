@@ -86,6 +86,11 @@ function installRouter(): Counters {
         json({ ok: true, status: [{ group: "Traffic", name: "TLS", active: true }] }),
       );
     }
+    if (url === "/api/runtime/overview") {
+      // The panel polls the overview after an accepted apply to observe the
+      // async stream-reload outcome; a clean snapshot settles it to fully live.
+      return Promise.resolve(json({ product: "jul", version: "1", status: [] }));
+    }
     if (url === "/api/config/history") {
       return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
     }
@@ -180,12 +185,12 @@ describe("ConfigPanel apply flow", () => {
     expect(await screen.findByText("Apply configuration?")).toBeInTheDocument();
     expect(counters.apply).toBe(0);
 
-    // Confirm → apply happens, summary shown.
+    // Confirm → apply happens, outcome banner shown.
     fireEvent.click(screen.getByRole("button", { name: "Apply now" }));
     await waitFor(() => {
       expect(counters.apply).toBe(1);
     });
-    expect(await screen.findByText("Configuration validated and saved.")).toBeInTheDocument();
+    expect(await screen.findByText("Applied and live")).toBeInTheDocument();
   });
 
   it("shows an apply-progress spinner while the apply request is in flight", async () => {
@@ -213,6 +218,11 @@ describe("ConfigPanel apply flow", () => {
         applied += 1;
         return applyInFlight;
       }
+      if (url === "/api/runtime/overview") {
+        // The panel polls the overview after an accepted apply to learn the
+        // async stream-reload outcome; a clean snapshot settles it to fully live.
+        return Promise.resolve(json({ product: "jul", version: "1", status: [] }));
+      }
       throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
@@ -239,7 +249,7 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(applied).toBe(1);
     });
-    await screen.findByText("Configuration validated and saved.");
+    await screen.findByText("Applied and live");
   });
 
   it("renders structured validation issues with their config path", async () => {

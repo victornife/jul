@@ -247,6 +247,38 @@ listener swaps to static certificates on the next reload). See
 [tls-acme.md](tls-acme.md#restart-required-acme-changes) and
 [reload-semantics.md](reload-semantics.md).
 
+### Apply outcomes
+
+An apply is never just "success" or "error": the reload model has an
+*applied vs. serving* gap (see [reload semantics](reload-semantics.md)), and the
+L4 stream reload is asynchronous, so the console folds the raw apply signals —
+whether the write was accepted, whether a reload is still pending, the polled
+stream-reload status, and any restart-required rejection — into **one explicit,
+severity-tagged outcome banner**. Every apply resolves to exactly one of four
+outcomes so an operator never has to infer what actually happened:
+
+- **Applied and live** *(success)* — the write was accepted and the running
+  server has been observed serving the new configuration. Nothing further is
+  required.
+- **Applied — runtime reloading** *(info)* — the write was accepted and saved,
+  but the hot reload has not yet been confirmed live. The banner clears itself
+  to *Applied and live* once a runtime snapshot confirms the change; this is the
+  normal transient state immediately after an apply.
+- **Applied with a degraded subsystem** *(warning)* — the HTTP configuration was
+  accepted, but an **asynchronous subsystem reload failed** — most commonly the
+  L4 stream (`[[stream]]`) proxy, whose reload runs after the response is sent.
+  The banner names the failed subsystem and its error so the operator can act,
+  rather than the failure being buried in the overview.
+- **Restart required — not applied** *(blocked)* — the change touches a
+  startup-bound setting (see *Restart-required changes* above); **nothing was
+  saved** and the operator must edit the file and restart. This is the only
+  outcome that is blocking, and it is styled distinctly from the others.
+
+The banner reports success and info outcomes with a capabilities tally (how many
+feature groups are active) and, for the two non-live outcomes, surfaces the
+actionable detail inline. See [reload-semantics.md](reload-semantics.md) for the
+underlying *applied vs. serving* model that motivates the distinction.
+
 ### Listener changes
 
 Adding or removing a `listen` address **is** hot-applied: the reload binds new
@@ -325,6 +357,22 @@ transport security), and **WASM plugins** (the **Plugins** panel: declare a
 global `[plugins.NAME]` — module path, type, host capabilities and limits,
 config — and attach or detach middleware plugins per route; handler and
 server-level plugins stay raw-only) |
+
+Whole **servers, routes, and upstream pools** can now also be **created and
+deleted** through structured patch-ops — `server_add` / `server_remove`,
+`location_add` / `location_remove`, and `upstream_add` / `upstream_remove` —
+each previewed as a diff and applied through the same validated pipeline. This
+closes the last create/delete gap that previously forced a raw TOML-fragment
+hand-off. The ops guard their targets: a create errors if it would duplicate an
+existing server/route/pool, a delete errors if the target is missing,
+`upstream_remove` refuses a pool a route's `proxy_pass` still references, and
+`server_remove` refuses the final server block (at least one is required).
+Guided console *forms* for these ops are landing incrementally; the
+structured-patch API and the raw editor both cover them today. (Global-table
+edits — `[global]`, `[cache]`, `[compression]`, global `[rate_limit]` — keep
+their guided validated-TOML-upsert editors, which already give a diff-reviewed
+structured path; dedicated `*_set` patch-ops for those tables are a documented
+follow-on.)
 
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,
@@ -431,7 +479,8 @@ overview (`GET /api/runtime/overview`), which the Console renders as a banner �
 rather than silently dropping the trail. Durability favors immediate writes over
 per-event `fsync`: events are written as they happen but not flushed to stable
 storage on every record, an explicit trade-off. Actor identity is currently the
-shared-token `"operator"`; per-user attribution arrives with RBAC/SSO.
+shared-token `"operator"`; per-user attribution arrives with RBAC (designed in
+[docs/specs/console-rbac.md](specs/console-rbac.md), [ADR 0010](adr/0010-console-rbac.md)).
 
 ## Capability matrix
 
@@ -568,7 +617,11 @@ commitments, keyboard-shortcut map, and verification live in
 
 - No RBAC/SSO or multi-node management (single-token, single-node). All
   Console users share the same `[admin].token`; there is no per-user
-  authentication, authorization scopes, or session isolation. Token rotation
+  authentication, authorization scopes, or session isolation. The scoped
+  multi-principal model (predefined + custom roles, revocable tokens, per-principal
+  audit attribution) is designed in
+  [docs/specs/console-rbac.md](specs/console-rbac.md) ([ADR 0010](adr/0010-console-rbac.md))
+  and slated for HP-02. Token rotation
   requires editing the configuration file and reloading the server (or applying
   the change through the Console, which is itself gated by the current token).
 - The in-console **Operations → Logs** tail is a bounded, privacy-preserving view

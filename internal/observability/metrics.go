@@ -297,8 +297,14 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 			// empty series so per-host cardinality cannot grow unbounded.
 			host = ""
 		}
-		m.requests.WithLabelValues(r.Method, host, strconv.Itoa(rw.Status())).Inc()
-		m.duration.WithLabelValues(r.Method, host).Observe(time.Since(start).Seconds())
+		// The request method is client-controlled — HTTP permits arbitrary
+		// method tokens — so it is normalized to a fixed set before it becomes a
+		// label; anything unrecognized collapses to "other" so a flood of bogus
+		// methods cannot explode cardinality (see the metric label policy in
+		// docs/core-http.md).
+		method := methodLabel(r.Method)
+		m.requests.WithLabelValues(method, host, strconv.Itoa(rw.Status())).Inc()
+		m.duration.WithLabelValues(method, host).Observe(time.Since(start).Seconds())
 		if state := rw.Header().Get("X-Cache"); state != "" {
 			m.cacheEvents.WithLabelValues(state).Inc()
 		}
@@ -561,4 +567,31 @@ func hostLabel(host string) string {
 		}
 	}
 	return host
+}
+
+// knownMethods is the fixed allow-list of HTTP request methods recorded verbatim
+// on the request metrics. HTTP permits arbitrary method tokens and the method is
+// client-controlled, so any value outside this set collapses to "other" (see
+// methodLabel). This bounds the "method" label to at most len(knownMethods)+1
+// series per host/code combination by construction.
+var knownMethods = map[string]struct{}{
+	http.MethodGet:     {},
+	http.MethodHead:    {},
+	http.MethodPost:    {},
+	http.MethodPut:     {},
+	http.MethodPatch:   {},
+	http.MethodDelete:  {},
+	http.MethodConnect: {},
+	http.MethodOptions: {},
+	http.MethodTrace:   {},
+}
+
+// methodLabel maps a request method to a bounded metric label value: a
+// recognized method is returned unchanged, anything else becomes "other" so a
+// client cannot drive unbounded cardinality with novel method tokens.
+func methodLabel(method string) string {
+	if _, ok := knownMethods[method]; ok {
+		return method
+	}
+	return "other"
 }

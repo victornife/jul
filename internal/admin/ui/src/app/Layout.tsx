@@ -376,16 +376,16 @@ function CertAlertBanner({ certRisk }: { readonly certRisk: CertRisk | undefined
 	let text: string;
 	let tone = "";
 	if (certRisk.expired > 0) {
-		text = `${certRisk.expired} certificate${certRisk.expired > 1 ? "s" : ""} expired`;
+		text = `${String(certRisk.expired)} certificate${certRisk.expired > 1 ? "s" : ""} expired`;
 		if (certRisk.expiring_soon > 0) {
-			text += `, ${certRisk.expiring_soon} expiring ≤ 7d`;
+			text += `, ${String(certRisk.expiring_soon)} expiring ≤ 7d`;
 		}
 		tone = "bg-jul-danger/15 text-jul-danger border-jul-danger/40";
 	} else if (certRisk.expiring_soon > 0) {
-		text = `${certRisk.expiring_soon} certificate${certRisk.expiring_soon > 1 ? "s" : ""} expiring within 7d`;
+		text = `${String(certRisk.expiring_soon)} certificate${certRisk.expiring_soon > 1 ? "s" : ""} expiring within 7d`;
 		tone = "bg-jul-warning/15 text-jul-warning border-jul-warning/40";
 	} else if (certRisk.errors > 0) {
-		text = `${certRisk.errors} certificate${certRisk.errors > 1 ? "s" : ""} with no live data`;
+		text = `${String(certRisk.errors)} certificate${certRisk.errors > 1 ? "s" : ""} with no live data`;
 		tone = "bg-jul-warning/15 text-jul-warning border-jul-warning/40";
 	} else {
 		return null;
@@ -394,9 +394,9 @@ function CertAlertBanner({ certRisk }: { readonly certRisk: CertRisk | undefined
 	return (
 		<div className={`border-b ${tone} px-6 py-2 text-xs font-medium flex items-center justify-between`} role="alert">
 			<span>
-				{text}. <button className="underline" onClick={() => navigate("/tls")}>Review →</button>
+				{text}. <button className="underline" onClick={() => { void navigate("/tls"); }}>Review →</button>
 			</span>
-			<button type="button" onClick={() => setDismissed(true)} className="text-xs opacity-60 hover:opacity-100" aria-label="Dismiss alert">
+			<button type="button" onClick={() => { setDismissed(true); }} className="text-xs opacity-60 hover:opacity-100" aria-label="Dismiss alert">
 				✕
 			</button>
 		</div>

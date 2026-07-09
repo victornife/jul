@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.31 · Updated 2026-07-07
+> Version 1.32 · Updated 2026-07-09
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -101,11 +101,11 @@ the HP-m\* micro-fixes register). Nothing here has shipped.
 | ID | Item | Description | Impact / what it unlocks | Effort |
 | --- | --- | --- | --- | --- |
 | HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | Add context-deadline to reload + structured per-subsystem result in apply response | Better operator visibility when reload stalls or partial-fails | M |
-| HP-02 | Console RBAC + multi-user | Named principals, roles (viewer/operator/admin), scoped revocable tokens; authz at the API boundary; per-principal audit attribution. Precursor to [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core). | Multiple operators under least-privilege with attributable audit | L |
-| HP-03 | Metric-cardinality & relabel strategy | Bounded label sets by construction + a relabel cookbook + series budget (the `host` label is already opt-in). | Predictable Prometheus cardinality at scale | M |
+| HP-02 | Console RBAC + multi-user | Named principals, roles (viewer/operator/admin), scoped revocable tokens; authz at the API boundary; per-principal audit attribution. **Design:** [console-rbac.md](../specs/console-rbac.md) + [ADR 0010](../adr/0010-console-rbac.md). Precursor to [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core). | Multiple operators under least-privilege with attributable audit | L |
+| HP-03 | Metric-cardinality & relabel strategy | **Shipped:** full label-cardinality policy table + operator relabel cookbook ([core-http.md](../core-http.md#metrics)); the client-derived `method` label is folded to a fixed set (unknown → `other`) so every client-derived label is bounded by construction (`host` was already opt-in); enforced by `TestMetricLabelPolicy`. | Predictable Prometheus cardinality at scale | M |
 | HP-04 | Pre-commit hooks / local gate parity | A repo-managed hook running the CI gate's fast path locally (fmt/vet/changed-pkg test + console lint/typecheck), full test + drift/size on push. | Red builds caught before they reach `main` | M |
-| HP-05 | Container & process-supervision hardening | Base-image digest pinning (Dependabot-maintained) + a `jul healthcheck` self target so a shell-less distroless image can declare a `HEALTHCHECK` (systemd resource/crash-loop limits already landed). | Self-healing containers + reproducible images | M |
-| HP-06 | Structured-config parity patch-ops | Create-ops for servers/routes/upstream pools + structured global-table ops (`[global]`/`[cache]`/`[compression]`/global `[rate_limit]`/`[admin]`/access-log), so the console need not drop to raw TOML (the raw editor stays the universal fallback). | Full structured editing parity with the raw editor | L |
+| HP-05 | Container & process-supervision hardening | **Shipped:** base images pinned by tag + `@sha256` digest (Dependabot-maintained); shell-less `HEALTHCHECK` running `jul healthcheck`; image bakes a self-consistent config (admin on loopback + placeholder `/var/www`) so it starts unmounted and the probe passes. (systemd resource/crash-loop limits landed earlier.) | Self-healing containers + reproducible images | M |
+| HP-06 | Structured-config parity patch-ops | **Phase 1 shipped:** create/delete ops for servers/routes/upstream pools (`server_add`/`server_remove`, `location_add`/`location_remove`, `upstream_add`/`upstream_remove`) close the entity CRUD gap. **Phase 2 (deferred):** structured global-table ops (`[global]`/`[cache]`/`[compression]`/global `[rate_limit]`/`[admin]`/access-log) — their guided validated-TOML-upsert editors already give a diff-reviewed path, so the console need not drop to raw TOML (the raw editor stays the universal fallback). | Full structured editing parity with the raw editor | L |
 | HP-07 | SSRF allow-list hardening | Optional, default-off egress allow-list (host/CIDR) for config-driven JWKS/forward-auth/ACME/discovery fetches. Defense-in-depth — config is trusted per [SECURITY.md](../../SECURITY.md), so this bounds operator-error blast radius, not a request-driven hole. | Limits outbound reach even with a mistaken/compromised config | M |
 
 ---

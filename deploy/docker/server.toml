@@ -1,0 +1,50 @@
+# Jul container configuration — baked into the Docker image at
+# /etc/jul/server.toml. This is the editable starting point for the image: the
+# admin console "Apply" and history/rollback write here, so mount a volume at
+# /etc/jul to persist edits across restarts.
+#
+# It differs from the repository sample (../../server.toml) in the ways that make
+# it self-consistent *inside the container*:
+#   * the admin listener is ENABLED on loopback so the image HEALTHCHECK works
+#     out of the box (`jul healthcheck` -> GET /healthz). 127.0.0.1:9090 is
+#     reachable only from the container's own probe, never exposed externally —
+#     set a token below before you map that port out;
+#   * the static root points at /var/www, which the image seeds with a
+#     placeholder index.html, so the server starts cleanly with no host mounts;
+#   * config-history snapshots are written under the /var/lib/jul volume.
+#
+# See docs/deployment.md#docker for the full container story and
+# docs/configuration.md for every option.
+
+[global]
+worker_threads = "auto"
+log_level = "info"
+log_format = "text"
+shutdown_timeout = "30s"
+
+[[servers]]
+listen = "0.0.0.0:8080"
+server_names = ["localhost"]
+client_max_body_size = "1m"
+max_header_bytes = "1m"
+read_header_timeout = "10s"
+idle_timeout = "60s"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  # Placeholder site seeded into the image. Mount your own content over /var/www
+  # (e.g. -v /host/site:/var/www:ro), or edit this block through the console to
+  # proxy_pass to a backend instead.
+  root = "/var/www"
+  index = ["index.html"]
+
+[admin]
+# Enabled on loopback so the container HEALTHCHECK can probe /healthz and /readyz
+# without a shell or curl (the distroless image ships neither). The console UI is
+# present in the default image (built with -tags console).
+enabled = true
+listen = "127.0.0.1:9090"
+# token = "change-me"            # require `Authorization: Bearer <token>` before
+                                 # exposing the admin port beyond the container.
+history_dir = "/var/lib/jul/config-history"
+history_keep = 50

@@ -196,6 +196,17 @@ listen = "127.0.0.1:9090"
 #                                # history/rollback panel (default shown).
 # history_keep = 50              # max snapshots to retain; older are pruned.
 
+# [egress]
+# Optional outbound allow-list (hardening). When enabled, the server's
+# config-driven auxiliary fetches — JWKS retrieval, forward-auth subrequests,
+# and Consul/Kubernetes discovery — may only connect to the destinations listed
+# in `allow`; every other destination is refused at connect time. This bounds
+# the blast radius of a misconfigured or compromised config (an SSRF-shaped
+# risk). Disabled by default; upstream proxying and ACME are unaffected. Each
+# allow entry is a hostname, a leading-dot suffix, a bare IP, or a CIDR.
+# enabled = true
+# allow = ["idp.example.com", ".discovery.internal", "10.0.0.0/8"]
+
 # [observability.tracing]
 # OpenTelemetry distributed tracing — requires a binary built with `-tags otel`
 # (an enabled block in a binary without that tag is rejected at startup).

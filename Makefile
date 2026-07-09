@@ -1,5 +1,6 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
-        console-dev console-build console-check build-console build-full license-check
+        console-dev console-build console-check build-console build-full license-check \
+        hooks waf-churn
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
@@ -21,6 +22,13 @@ fuzz:
 # release-style run, e.g. `SOAK_DURATION=5m SOAK_WORKERS=32 make soak`.
 soak:
 	scripts/soak.sh
+
+# WAF reload-churn leak/stability gate (AUX-06). Rebuilds the Coraza/CRS engine
+# on a sustained reload churn and asserts flat goroutines + bounded heap. Runs in
+# the default `waf`-tagged test lane at 30 cycles; override for a longer soak,
+# e.g. `WAF_CHURN_ITERS=500 make waf-churn`.
+waf-churn:
+	go test -tags waf -run '^TestWAFReloadChurnNoLeak$$' -count=1 -v ./internal/waf/
 
 format:
 	gofmt -w .
@@ -47,6 +55,12 @@ vulncheck-full:
 ci-fast: format-check lint test build license-check
 
 ci-full: format-check lint-full test-full vulncheck-full build-full license-check
+
+# Install the repo-managed Git hooks (local CI gate parity, SEQ-08). One command;
+# safe to re-run. Uninstall with `git config --unset core.hooksPath`.
+hooks:
+	git config core.hooksPath .githooks
+	@echo "Installed Git hooks (core.hooksPath -> .githooks). Bypass with --no-verify; disable with JUL_SKIP_HOOKS=1."
 
 clean:
 	go clean

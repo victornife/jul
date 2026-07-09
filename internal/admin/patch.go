@@ -16,252 +16,6 @@ import (
 	"jul/internal/config"
 )
 
-// patchRequest is a structured, comment-free edit to the running configuration
-// (Wave B). Rather than rewriting raw TOML (which risks mangling comments and
-// formatting), each operation mutates the PARSED config model; the result is
-// re-serialized and routed through the same validated SaveConfig path as the
-// settings form, and the operator reviews the full generated diff before it is
-// applied. This trades raw-comment preservation for safe, structured edits of
-// the most common fields, exactly the P1-4 recommendation.
-//
-// Targets address an existing object:
-//   - a route location by its server Listen + ServerNames set and the location's
-//     Match type + Path (all four, so a patch is never silently applied to the
-//     wrong vhost when listens repeat or the wrong location when paths repeat)
-//   - an upstream pool by Name
-//
-// Exactly one operation is performed per request.
-type patchRequest struct {
-	Op string `json:"op"`
-
-	// Route-location target (route_* ops). A location is addressed by its
-	// server's Listen + ServerNames set and the location's Match type + Path.
-	// ServerNames disambiguates name-based virtual hosts that share a listen;
-	// MatchType disambiguates locations that share a path under different match
-	// types (prefix/exact/regex). The console sends all of them from the route
-	// projection so the target resolves to exactly one location.
-	Listen      string   `json:"listen,omitempty"`
-	ServerNames []string `json:"server_names,omitempty"`
-	MatchType   string   `json:"match_type,omitempty"`
-	Path        string   `json:"path,omitempty"`
-
-	// Upstream target (upstream_* ops).
-	Upstream string `json:"upstream,omitempty"`
-
-	// Operation payloads (only the field relevant to Op is read).
-	Target    string          `json:"target,omitempty"`     // route_set_target: new proxy_pass
-	Enabled   *bool           `json:"enabled,omitempty"`    // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c / location_toggle_require_client_cert
-	RateLimit *rateLimitPatch `json:"rate_limit,omitempty"` // route_set_rate_limit
-	Address   string          `json:"address,omitempty"`    // upstream_add_backend / upstream_remove_backend
-	Weight    int             `json:"weight,omitempty"`     // upstream_add_backend (defaults to 1)
-	Strategy  string          `json:"strategy,omitempty"`   // upstream_set_strategy
-
-	// server_set_limits payload. Each field is an optional string-typed size or
-	// duration (e.g. "10m", "30s"); only non-empty fields are applied, so the
-	// edit is sparse. An empty string leaves the existing value untouched.
-	Limits *serverLimits `json:"limits,omitempty"`
-
-	// location_waf_set payload: the per-location [waf] override knobs the guided
-	// editor controls. location_waf_clear ignores it.
-	WAF *locationWAF `json:"waf,omitempty"`
-
-	// location_set_auth payload: the per-location access-control rule the guided
-	// auth editor controls. location_clear_auth ignores it.
-	Auth *locationAuth `json:"auth,omitempty"`
-
-	// upstream_set_health_check payload: the pool's active health-check block.
-	// nil/disabled removes the block (passive health only).
-	HealthCheck *upstreamHealthCheck `json:"health_check,omitempty"`
-
-	// upstream_set_discovery payload: the pool's dynamic discovery block. Type
-	// "static"/"" removes it (the static Servers list is used instead).
-	Discovery *upstreamDiscovery `json:"discovery,omitempty"`
-
-	// route_rename payload: the server block's new host names (server_names).
-	// An empty list renames the block to the catch-all (any host).
-	NewServerNames []string `json:"new_server_names,omitempty"`
-
-	// location_set_match payload: the route's new match (type + path). Changing
-	// the match changes the route's identity, so the diff lists the old route
-	// removed and the renamed route added.
-	Match *locationMatch `json:"match_set,omitempty"`
-
-	// location_set_action payload: the route's new action (proxy/static/
-	// redirect/return/deny). The op clears every other action field first.
-	Action *locationActionPayload `json:"action,omitempty"`
-
-	// location_set_transcode payload: the route's grpc_transcode settings.
-	// Only relevant when Op == "location_set_transcode".
-	Transcode *transcodePatch `json:"transcode,omitempty"`
-
-	// Plugin target. PluginName is the [plugins.NAME] key for plugin_set /
-	// plugin_remove, and the plugin to attach/detach for
-	// location_attach_plugin / location_detach_plugin (the location is
-	// addressed by the route coordinates above).
-	PluginName string `json:"plugin_name,omitempty"`
-
-	// plugin_set payload: the plugin declaration to add or replace.
-	PluginDef *pluginDef `json:"plugin,omitempty"`
-
-	// Stream target (stream_set / stream_remove). A [[stream]] block is
-	// addressed by its listen (reusing Listen above) and protocol; the protocol
-	// defaults to tcp. stream_add has no target.
-	StreamProtocol string `json:"stream_protocol,omitempty"`
-
-	// stream_add / stream_set payload: the L4 listener to add or replace.
-	Stream *streamDef `json:"stream,omitempty"`
-
-	// server_set_client_auth payload: the server block's mutual-TLS (client
-	// certificate) settings. A "none"/empty mode disables it. The server is
-	// addressed by Listen + ServerNames above.
-	ClientAuth *clientAuthDef `json:"client_auth,omitempty"`
-}
-
-// locationMatch is the new match (type + path) for location_set_match. It
-// replaces the location's Match in place — effectively renaming the route's
-// matching pattern. Type is one of exact/prefix/regex (empty defaults to
-// prefix); the validated re-parse rejects an invalid regex.
-type locationMatch struct {
-	Type string `json:"type,omitempty"`
-	Path string `json:"path"`
-}
-
-// locationActionPayload is the new action for location_set_action. Kind selects
-// which action the location performs; the op clears every other action field so
-// exactly one remains, then sets the chosen one. It covers the tag-free actions
-// the console edits structurally (proxy / static / redirect / return / deny);
-// richer actions (gRPC, transcode, FastCGI/uWSGI, handler plugin) stay raw and
-// the editor leaves them read-only.
-type locationActionPayload struct {
-	Kind   string `json:"kind"`             // proxy | static | redirect | return | deny
-	Target string `json:"target,omitempty"` // proxy_pass / root / redirect URL
-	Status int    `json:"status,omitempty"` // return status, or optional redirect code
-}
-
-// transcodePatch carries the grpc_transcode fields the two-tier editor mutates
-// in-place (location_set_transcode). It does NOT carry the full descriptor —
-// that is uploaded separately — only the configuration knobs that the
-// RouteDetail quick-edit form and the designer both surface.
-type transcodePatch struct {
-	Target         string `json:"target,omitempty"`
-	DescriptorPath string `json:"descriptor_path,omitempty"`
-	UseReflection  bool   `json:"use_reflection,omitempty"`
-	TLS            bool   `json:"tls,omitempty"`
-	PreserveNames  bool   `json:"preserve_names,omitempty"`
-	Streaming      bool   `json:"streaming,omitempty"`
-	StreamMode     string `json:"stream_mode,omitempty"`
-	MaxMessageSize string `json:"max_message_size,omitempty"` // size string, e.g. "4m"
-}
-
-// locationWAF carries the per-location WAF override fields the guided editor
-// exposes. As of Phase 4e the editor surfaces the full override — the three
-// basic knobs (enabled, mode, CRS) plus the advanced SecLang fields (block
-// status, paranoia, request-body limit, response-body inspection, rule files,
-// and inline rules). location_waf_set therefore REPLACES the override from this
-// payload wholesale; the editor seeds every field from the security projection
-// first, so a round-trip is faithful rather than clobbering unshown rules.
-type locationWAF struct {
-	Enabled           bool     `json:"enabled"`
-	Mode              string   `json:"mode,omitempty"`        // "block" (default) or "detect"
-	CRSEnabled        bool     `json:"crs_enabled,omitempty"` // load the embedded OWASP CRS
-	BlockStatus       int      `json:"block_status,omitempty"`
-	Paranoia          int      `json:"paranoia,omitempty"`
-	RequestBodyLimit  string   `json:"request_body_limit,omitempty"` // size string, e.g. "128k"
-	ResponseBodyCheck bool     `json:"response_body_check,omitempty"`
-	DirectivesFiles   []string `json:"directives_files,omitempty"`
-	InlineRules       string   `json:"inline_rules,omitempty"`
-}
-
-// rateLimitPatch carries the per-location rate-limit fields the guided editor
-// controls. The patch replaces the location's rate_limit wholesale (it does not
-// merge), which matches how the WAF override works.
-type rateLimitPatch struct {
-	Enabled bool   `json:"enabled"`
-	Rate    int    `json:"rate,omitempty"`
-	Burst   int    `json:"burst,omitempty"`
-	Key     string `json:"key,omitempty"`
-}
-
-// locationAuth carries the per-location access-control fields the guided auth
-// editor controls. Like the route-creation form, exactly one Method is chosen:
-// "cidr" (IP allow/deny), "basic" (htpasswd), "jwt" (JWKS), or "forward"
-// (forward-auth). location_set_auth builds a fresh *config.AuthConfig from the
-// method's fields and replaces the location's auth wholesale; the editor warns
-// before discarding a combination it cannot represent (e.g. IP rules plus a
-// credential method on the same location).
-type locationAuth struct {
-	Method      string   `json:"method"` // cidr | basic | jwt | forward
-	Allow       []string `json:"allow,omitempty"`
-	Deny        []string `json:"deny,omitempty"`
-	BasicFile   string   `json:"basic_file,omitempty"`
-	BasicRealm  string   `json:"basic_realm,omitempty"`
-	JWTJWKSURL  string   `json:"jwt_jwks_url,omitempty"`
-	JWTIssuer   string   `json:"jwt_issuer,omitempty"`
-	JWTAudience string   `json:"jwt_audience,omitempty"`
-	ForwardURL  string   `json:"forward_url,omitempty"`
-}
-
-// serverLimits carries the per-server limit/timeout fields the editor can set.
-type serverLimits struct {
-	ClientMaxBodySize string `json:"client_max_body_size,omitempty"`
-	ReadHeaderTimeout string `json:"read_header_timeout,omitempty"`
-	ReadTimeout       string `json:"read_timeout,omitempty"`
-	WriteTimeout      string `json:"write_timeout,omitempty"`
-	IdleTimeout       string `json:"idle_timeout,omitempty"`
-	MaxHeaderBytes    string `json:"max_header_bytes,omitempty"`
-}
-
-// upstreamHealthCheck carries the active health-check fields the guided Apps
-// editor controls. It maps 1:1 to config.HealthCheckConfig; durations are
-// strings (e.g. "5s") parsed on apply. Empty/zero fields are left for the
-// re-parse defaulting (interval 5s, timeout 2s, thresholds 2/3, expect [200]),
-// and the validated SaveConfig path rejects an inconsistent combination (e.g.
-// timeout >= interval, or http with no path).
-type upstreamHealthCheck struct {
-	Enabled            bool   `json:"enabled"`
-	Type               string `json:"type,omitempty"` // "http" (default) or "tcp"
-	Path               string `json:"path,omitempty"`
-	Interval           string `json:"interval,omitempty"`
-	Timeout            string `json:"timeout,omitempty"`
-	HealthyThreshold   int    `json:"healthy_threshold,omitempty"`
-	UnhealthyThreshold int    `json:"unhealthy_threshold,omitempty"`
-	ExpectStatus       []int  `json:"expect_status,omitempty"`
-	ExpectBody         string `json:"expect_body,omitempty"`
-}
-
-// upstreamDiscovery carries the dynamic-discovery fields the guided Apps editor
-// controls. Secret tokens are intentionally NOT carried on the wire: when the
-// edit keeps the same provider type, upstream_set_discovery preserves the
-// existing Consul/Kubernetes token rather than clobbering it.
-type upstreamDiscovery struct {
-	Type       string                 `json:"type"` // static | dns | dns_srv | consul | kubernetes
-	Target     string                 `json:"target,omitempty"`
-	Refresh    string                 `json:"refresh,omitempty"`
-	Consul     *consulDiscoveryFields `json:"consul,omitempty"`
-	Kubernetes *k8sDiscoveryFields    `json:"kubernetes,omitempty"`
-}
-
-// consulDiscoveryFields are the non-secret Consul discovery knobs (the ACL
-// token is preserved server-side, never sent to or from the console).
-type consulDiscoveryFields struct {
-	Address     string `json:"address,omitempty"`
-	Service     string `json:"service,omitempty"`
-	Tag         string `json:"tag,omitempty"`
-	Datacenter  string `json:"datacenter,omitempty"`
-	PassingOnly *bool  `json:"passing_only,omitempty"`
-}
-
-// k8sDiscoveryFields are the non-secret Kubernetes discovery knobs (the bearer
-// token is preserved server-side, never sent to or from the console).
-type k8sDiscoveryFields struct {
-	Namespace             string `json:"namespace,omitempty"`
-	Service               string `json:"service,omitempty"`
-	Port                  string `json:"port,omitempty"`
-	APIServer             string `json:"api_server,omitempty"`
-	CAFile                string `json:"ca_file,omitempty"`
-	InsecureSkipTLSVerify bool   `json:"insecure_skip_tls_verify,omitempty"`
-}
-
 // applyPatch mutates c in place according to req, returning a human-readable
 // description of the change for the audit log, or an error when the target is
 // not found or the operation is unknown.
@@ -866,6 +620,110 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		loc.RequireClientCert = *req.Enabled
 		return fmt.Sprintf("route %s%s require client certificate %s", req.Listen, loc.Match.Path, onOff(*req.Enabled)), nil
 
+	case "server_add":
+		listen := strings.TrimSpace(req.Listen)
+		if listen == "" {
+			return "", fmt.Errorf("server_add: listen is required")
+		}
+		names := trimNonEmpty(req.ServerNames)
+		// Two server blocks on the same listen with the same host-names set are
+		// indistinguishable, so refuse a create that would duplicate one.
+		if serverNamesTaken(c, listen, names, nil) {
+			return "", fmt.Errorf("server_add: a server block on %s already serves %s", listen, namesLabel(names))
+		}
+		c.Servers = append(c.Servers, config.ServerConfig{Listen: listen, ServerNames: names})
+		return fmt.Sprintf("server %s added (%s)", listen, namesLabel(names)), nil
+
+	case "server_remove":
+		idx, err := findServerIndex(c, req.Listen, req.ServerNames)
+		if err != nil {
+			return "", err
+		}
+		if len(c.Servers) == 1 {
+			return "", fmt.Errorf("server_remove: cannot remove the only server block; at least one [[servers]] block is required")
+		}
+		srv := c.Servers[idx]
+		c.Servers = append(c.Servers[:idx], c.Servers[idx+1:]...)
+		return fmt.Sprintf("server %s removed (%s)", srv.Listen, namesLabel(srv.ServerNames)), nil
+
+	case "location_add":
+		srv, err := findServerByNames(c, req.Listen, req.ServerNames)
+		if err != nil {
+			return "", err
+		}
+		if req.Match == nil {
+			return "", fmt.Errorf("location_add: match_set (type + path) is required")
+		}
+		if req.Action == nil {
+			return "", fmt.Errorf("location_add: action is required")
+		}
+		matchType := normMatchType(req.Match.Type)
+		path := strings.TrimSpace(req.Match.Path)
+		if path == "" {
+			return "", fmt.Errorf("location_add: match path is required")
+		}
+		if locationMatchTaken(c, req.Listen, req.ServerNames, matchType, path, nil) {
+			return "", fmt.Errorf("location_add: a route with match %s %q already exists on server %s", matchType, path, req.Listen)
+		}
+		loc := config.LocationConfig{Match: config.MatchConfig{Type: matchType, Path: path}}
+		label, err := setLocationAction(&loc, *req.Action)
+		if err != nil {
+			return "", err
+		}
+		srv.Locations = append(srv.Locations, loc)
+		return fmt.Sprintf("route %s %q (%s) added on server %s", matchType, path, label, req.Listen), nil
+
+	case "location_remove":
+		srvIdx, locIdx, err := findLocationIndex(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		if err != nil {
+			return "", err
+		}
+		srv := &c.Servers[srvIdx]
+		loc := srv.Locations[locIdx]
+		srv.Locations = append(srv.Locations[:locIdx], srv.Locations[locIdx+1:]...)
+		return fmt.Sprintf("route %s %q removed from server %s", normMatchType(loc.Match.Type), loc.Match.Path, req.Listen), nil
+
+	case "upstream_add":
+		name := strings.TrimSpace(req.Upstream)
+		if name == "" {
+			return "", fmt.Errorf("upstream_add: upstream name is required")
+		}
+		if _, err := findUpstream(c, name); err == nil {
+			return "", fmt.Errorf("upstream_add: an upstream named %q already exists", name)
+		}
+		addr := strings.TrimSpace(req.Address)
+		if addr == "" {
+			return "", fmt.Errorf("upstream_add: address (first backend) is required")
+		}
+		weight := req.Weight
+		if weight < 1 {
+			weight = 1
+		}
+		strat := strings.TrimSpace(req.Strategy)
+		switch strat {
+		case "", "round_robin", "weighted_round_robin", "least_conn":
+		default:
+			return "", fmt.Errorf("upstream_add: invalid strategy %q (want round_robin|weighted_round_robin|least_conn)", strat)
+		}
+		c.Upstreams = append(c.Upstreams, config.UpstreamConfig{
+			Name:     name,
+			Strategy: strat,
+			Servers:  []config.UpstreamServer{{Address: addr, Weight: weight}},
+		})
+		return fmt.Sprintf("upstream %s added with backend %s (weight %d)", name, addr, weight), nil
+
+	case "upstream_remove":
+		idx, err := findUpstreamIndex(c, req.Upstream)
+		if err != nil {
+			return "", err
+		}
+		name := c.Upstreams[idx].Name
+		if refs := upstreamReferences(c, name); len(refs) > 0 {
+			return "", fmt.Errorf("upstream_remove: upstream %q is still referenced by %s; repoint or remove those routes first", name, strings.Join(refs, ", "))
+		}
+		c.Upstreams = append(c.Upstreams[:idx], c.Upstreams[idx+1:]...)
+		return fmt.Sprintf("upstream %s removed", name), nil
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}
@@ -973,6 +831,31 @@ func findServerByNames(c *config.Config, listen string, serverNames []string) (*
 	}
 }
 
+// findServerIndex resolves the same unique listen + ServerNames coordinates as
+// findServerByNames but returns the slice index, which server_remove needs to
+// delete the block. Ambiguous or missing targets are rejected rather than
+// guessed, matching the finder used by in-place edits.
+func findServerIndex(c *config.Config, listen string, serverNames []string) (int, error) {
+	if strings.TrimSpace(listen) == "" {
+		return -1, fmt.Errorf("server target requires a listen address")
+	}
+	idx, matches := -1, 0
+	for i := range c.Servers {
+		if c.Servers[i].Listen == listen && stringSetsEqual(c.Servers[i].ServerNames, serverNames) {
+			idx = i
+			matches++
+		}
+	}
+	switch {
+	case matches == 0:
+		return -1, fmt.Errorf("no server found for listen %q names %v", listen, serverNames)
+	case matches > 1:
+		return -1, fmt.Errorf("server target is ambiguous: %d blocks match listen %q names %v", matches, listen, serverNames)
+	default:
+		return idx, nil
+	}
+}
+
 // serverNamesTaken reports whether a server block other than self on the same
 // listen already serves the given host-names set, so a rename never produces
 // two indistinguishable virtual hosts.
@@ -1002,193 +885,6 @@ func namesLabel(names []string) string {
 // for exactly one method, mirroring the route-creation form. It returns a short
 // human label for the audit summary, and rejects a method whose required fields
 // are missing rather than persisting an inert auth block.
-func buildLocationAuth(a locationAuth) (*config.AuthConfig, string, error) {
-	switch strings.TrimSpace(a.Method) {
-	case "cidr":
-		allow := trimNonEmpty(a.Allow)
-		deny := trimNonEmpty(a.Deny)
-		if len(allow) == 0 && len(deny) == 0 {
-			return nil, "", fmt.Errorf("location_set_auth: the cidr method needs at least one allow or deny entry")
-		}
-		return &config.AuthConfig{Allow: allow, Deny: deny}, "IP allow/deny", nil
-	case "basic":
-		if strings.TrimSpace(a.BasicFile) == "" {
-			return nil, "", fmt.Errorf("location_set_auth: the basic method needs an htpasswd file")
-		}
-		return &config.AuthConfig{Basic: &config.BasicAuthConfig{
-			File:  strings.TrimSpace(a.BasicFile),
-			Realm: strings.TrimSpace(a.BasicRealm),
-		}}, "HTTP Basic", nil
-	case "jwt":
-		if strings.TrimSpace(a.JWTJWKSURL) == "" {
-			return nil, "", fmt.Errorf("location_set_auth: the jwt method needs a jwks_url")
-		}
-		return &config.AuthConfig{JWT: &config.JWTAuthConfig{
-			JWKSURL:  strings.TrimSpace(a.JWTJWKSURL),
-			Issuer:   strings.TrimSpace(a.JWTIssuer),
-			Audience: strings.TrimSpace(a.JWTAudience),
-		}}, "JWT", nil
-	case "forward":
-		if strings.TrimSpace(a.ForwardURL) == "" {
-			return nil, "", fmt.Errorf("location_set_auth: the forward method needs a url")
-		}
-		return &config.AuthConfig{ForwardAuth: &config.ForwardAuthConfig{
-			URL: strings.TrimSpace(a.ForwardURL),
-		}}, "forward-auth", nil
-	default:
-		return nil, "", fmt.Errorf("location_set_auth: unknown method %q (want cidr, basic, jwt, or forward)", a.Method)
-	}
-}
-
-// trimNonEmpty returns the non-blank, space-trimmed entries of in.
-func trimNonEmpty(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if t := strings.TrimSpace(s); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-func onOff(b bool) string {
-	if b {
-		return "enabled"
-	}
-	return "disabled"
-}
-
-// orDefault returns s, or def when s is empty — used to echo the effective value
-// (after re-parse defaulting) in an audit summary.
-func orDefault(s, def string) string {
-	if strings.TrimSpace(s) == "" {
-		return def
-	}
-	return s
-}
-
-// buildHealthCheck turns the editor payload into a *config.HealthCheckConfig.
-// A disabled payload returns nil so the serialized pool drops the [health_check]
-// block entirely (passive health only). Durations are parsed here; everything
-// else (defaulting, timeout < interval, http-needs-path) is enforced by the
-// validated SaveConfig re-parse, so the structured edit never bypasses it.
-func buildHealthCheck(in upstreamHealthCheck) (*config.HealthCheckConfig, string, error) {
-	if !in.Enabled {
-		return nil, "disabled", nil
-	}
-	typ := strings.TrimSpace(in.Type)
-	if typ == "" {
-		typ = "http"
-	}
-	if typ != "http" && typ != "tcp" {
-		return nil, "", fmt.Errorf("upstream_set_health_check: type must be %q or %q", "http", "tcp")
-	}
-	hc := &config.HealthCheckConfig{
-		Enabled:            true,
-		Type:               typ,
-		Path:               strings.TrimSpace(in.Path),
-		HealthyThreshold:   in.HealthyThreshold,
-		UnhealthyThreshold: in.UnhealthyThreshold,
-		ExpectBody:         strings.TrimSpace(in.ExpectBody),
-	}
-	if typ == "http" && hc.Path == "" {
-		return nil, "", fmt.Errorf("upstream_set_health_check: path is required for http probes")
-	}
-	if err := parseDurInto(in.Interval, &hc.Interval, "interval"); err != nil {
-		return nil, "", fmt.Errorf("upstream_set_health_check: %w", err)
-	}
-	if err := parseDurInto(in.Timeout, &hc.Timeout, "timeout"); err != nil {
-		return nil, "", fmt.Errorf("upstream_set_health_check: %w", err)
-	}
-	if len(in.ExpectStatus) > 0 {
-		hc.ExpectStatus = append([]int(nil), in.ExpectStatus...)
-	}
-	note := typ
-	if typ == "http" && hc.Path != "" {
-		note = typ + " " + hc.Path
-	}
-	return hc, "enabled (" + note + ")", nil
-}
-
-// buildDiscovery turns the editor payload into a *config.DiscoveryConfig. A
-// static/empty type returns nil so the pool falls back to its static Servers
-// list. Secret tokens are never carried on the wire: when the provider type is
-// unchanged, the existing Consul/Kubernetes token is preserved from prev rather
-// than wiped. Per-provider required fields and refresh range are enforced by the
-// validated SaveConfig re-parse.
-func buildDiscovery(in upstreamDiscovery, prev *config.DiscoveryConfig) (*config.DiscoveryConfig, string, error) {
-	typ := strings.ToLower(strings.TrimSpace(in.Type))
-	switch typ {
-	case "", "static":
-		return nil, "disabled (static backends)", nil
-	case "dns", "dns_srv", "consul", "kubernetes":
-	default:
-		return nil, "", fmt.Errorf("upstream_set_discovery: invalid type %q (want static|dns|dns_srv|consul|kubernetes)", in.Type)
-	}
-	d := &config.DiscoveryConfig{Type: typ, Target: strings.TrimSpace(in.Target)}
-	if err := parseDurInto(in.Refresh, &d.Refresh, "refresh"); err != nil {
-		return nil, "", fmt.Errorf("upstream_set_discovery: %w", err)
-	}
-	sameType := prev != nil && strings.EqualFold(strings.TrimSpace(prev.Type), typ)
-	if typ == "consul" {
-		cd := &config.ConsulDiscovery{}
-		if in.Consul != nil {
-			cd.Address = strings.TrimSpace(in.Consul.Address)
-			cd.Service = strings.TrimSpace(in.Consul.Service)
-			cd.Tag = strings.TrimSpace(in.Consul.Tag)
-			cd.Datacenter = strings.TrimSpace(in.Consul.Datacenter)
-			cd.PassingOnly = in.Consul.PassingOnly
-		}
-		if sameType && prev.Consul != nil {
-			cd.Token = prev.Consul.Token // preserve the secret ACL token
-		}
-		d.Consul = cd
-	}
-	if typ == "kubernetes" {
-		kd := &config.KubernetesDiscovery{}
-		if in.Kubernetes != nil {
-			kd.Namespace = strings.TrimSpace(in.Kubernetes.Namespace)
-			kd.Service = strings.TrimSpace(in.Kubernetes.Service)
-			kd.Port = strings.TrimSpace(in.Kubernetes.Port)
-			kd.APIServer = strings.TrimSpace(in.Kubernetes.APIServer)
-			kd.CAFile = strings.TrimSpace(in.Kubernetes.CAFile)
-			kd.InsecureSkipTLSVerify = in.Kubernetes.InsecureSkipTLSVerify
-		}
-		if sameType && prev.Kubernetes != nil {
-			kd.Token = prev.Kubernetes.Token // preserve the secret bearer token
-		}
-		d.Kubernetes = kd
-	}
-	return d, "set to " + typ, nil
-}
-
-// parseDurInto parses an optional duration string (e.g. "5s") into dst. An empty
-// string leaves dst at its zero value so the re-parse defaulting applies.
-func parseDurInto(val string, dst *config.Duration, name string) error {
-	if strings.TrimSpace(val) == "" {
-		return nil
-	}
-	var d config.Duration
-	if err := d.UnmarshalText([]byte(val)); err != nil {
-		return fmt.Errorf("%s: %w", name, err)
-	}
-	*dst = d
-	return nil
-}
-
-// wafModeNote renders the mode/CRS suffix for a location_waf_set audit summary,
-// e.g. " — block, CRS". It is empty when the override is disabled, since mode
-// and CRS do not apply to a switched-off firewall.
-func wafModeNote(enabled bool, mode string, crs bool) string {
-	if !enabled {
-		return ""
-	}
-	if crs {
-		return fmt.Sprintf(" — %s, CRS", mode)
-	}
-	return fmt.Sprintf(" — %s", mode)
-}
-
 // findLocation returns a pointer to the single location uniquely identified by
 // its server's listen address and ServerNames set plus the location's match
 // type and path, so a mutation updates exactly the intended route in place.
@@ -1223,6 +919,36 @@ func findLocation(c *config.Config, listen string, serverNames []string, matchTy
 		return nil, fmt.Errorf("route target is ambiguous: %d locations match listen %q names %v match %q path %q", matches, listen, serverNames, matchType, path)
 	default:
 		return found, nil
+	}
+}
+
+// findLocationIndex resolves the same unique route coordinates as findLocation
+// but returns the enclosing server index and the location index, which
+// location_remove needs to splice the location out of its server's slice.
+func findLocationIndex(c *config.Config, listen string, serverNames []string, matchType, path string) (int, int, error) {
+	if strings.TrimSpace(listen) == "" || strings.TrimSpace(path) == "" {
+		return -1, -1, fmt.Errorf("route target requires both listen and path")
+	}
+	srvIdx, locIdx, matches := -1, -1, 0
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		if srv.Listen != listen || !stringSetsEqual(srv.ServerNames, serverNames) {
+			continue
+		}
+		for j := range srv.Locations {
+			if srv.Locations[j].Match.Path == path && srv.Locations[j].Match.Type == matchType {
+				srvIdx, locIdx = i, j
+				matches++
+			}
+		}
+	}
+	switch {
+	case matches == 0:
+		return -1, -1, fmt.Errorf("no route found for listen %q names %v match %q path %q", listen, serverNames, matchType, path)
+	case matches > 1:
+		return -1, -1, fmt.Errorf("route target is ambiguous: %d locations match listen %q names %v match %q path %q", matches, listen, serverNames, matchType, path)
+	default:
+		return srvIdx, locIdx, nil
 	}
 }
 
@@ -1349,6 +1075,42 @@ func findUpstream(c *config.Config, name string) (*config.UpstreamConfig, error)
 		}
 	}
 	return nil, fmt.Errorf("no upstream named %q", name)
+}
+
+// findUpstreamIndex resolves an upstream pool by name and returns its slice
+// index, which upstream_remove needs to delete the pool.
+func findUpstreamIndex(c *config.Config, name string) (int, error) {
+	if strings.TrimSpace(name) == "" {
+		return -1, fmt.Errorf("upstream name is required")
+	}
+	for i := range c.Upstreams {
+		if c.Upstreams[i].Name == name {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("no upstream named %q", name)
+}
+
+// upstreamReferences returns the "listen path" labels of every route whose
+// proxy_pass targets the named upstream (bare name or http(s):// prefixed), so
+// upstream_remove can refuse a deletion that would leave a dangling reference
+// with an actionable pointer instead of a generic downstream validation error.
+func upstreamReferences(c *config.Config, name string) []string {
+	targets := map[string]bool{
+		name:              true,
+		"http://" + name:  true,
+		"https://" + name: true,
+	}
+	var refs []string
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		for j := range srv.Locations {
+			if targets[strings.TrimSpace(srv.Locations[j].ProxyPass)] {
+				refs = append(refs, fmt.Sprintf("%s %s", srv.Listen, srv.Locations[j].Match.Path))
+			}
+		}
+	}
+	return refs
 }
 
 // handleConfigPatch applies a single structured edit to the running config and

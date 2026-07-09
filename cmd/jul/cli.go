@@ -10,7 +10,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
+	"time"
 
 	"jul/internal/atomicfile"
 	"jul/internal/config"
@@ -43,8 +46,14 @@ func dispatchSubcommand(args []string) (handled bool, code int) {
 		return true, cmdRun(args[1:])
 	case "check":
 		return true, cmdCheck(args[1:])
+	case "healthcheck":
+		return true, cmdHealthcheck(args[1:])
 	case "import":
 		return true, cmdImport(args[1:])
+	case "version":
+		return true, cmdVersion(args[1:])
+	case "completion":
+		return true, cmdCompletion(args[1:])
 	default:
 		return false, 0
 	}
@@ -59,6 +68,8 @@ Usage:
   jul [flags]                          run the server (default)
   jul check [-config f] [-json] [-quiet]
                                        full runtime preflight check
+  jul healthcheck [-config f] [-addr host:port | -url u] [-ready] [-timeout d]
+                                       probe the admin health endpoint (exit 0 healthy, 1 unhealthy)
   jul lint [-config f] [-strict] [-json] [-quiet]
                                        validate and report best-practice warnings
   jul fmt  [-config f] [-w]            rewrite the config in canonical TOML
@@ -66,6 +77,9 @@ Usage:
                                        run a zero-config server (no file needed)
   jul import nginx [-o out.toml] [-strict] <nginx.conf>
                                        translate an NGINX config (needs -tags importer)
+  jul version [-json]                  print version and build metadata
+  jul completion <bash|zsh|fish|powershell>
+                                       print a shell completion script
 
 Flags:
 `)
@@ -351,4 +365,123 @@ func cmdCheck(args []string) int {
 	return 0
 }
 
-// cmdFmt rewrites a config into canonical TOML.
+// healthcheckOutput is the shape written by cmdHealthcheck when -json is used.
+type healthcheckOutput struct {
+	Target string `json:"target,omitempty"`
+	OK     bool   `json:"ok"`
+	Status int    `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// cmdHealthcheck probes a running server's admin health endpoint and reports a
+// deterministic exit status suited to container, systemd, and Kubernetes
+// liveness/readiness checks. The admin listener serves the unauthenticated
+// /healthz (liveness) and /readyz (readiness) endpoints; this command is the
+// shell-free way to poll them from a distroless image.
+//
+// Exit codes:
+//
+//	0  healthy    — the endpoint returned HTTP 2xx.
+//	1  unhealthy  — the endpoint returned a non-2xx status, or was unreachable
+//	                (connection refused, DNS failure, or the timeout elapsed).
+//	2  usage/config error — invalid flags, the config file could not be read, or
+//	                the admin listener is disabled / has no address to probe.
+//
+// The health verdict is strictly 0 or 1, so the command is safe to use directly
+// in a Docker HEALTHCHECK: exit code 2 is reserved by Docker and only occurs
+// here on a misconfigured invocation, which surfaces at deploy time rather than
+// as a steady-state health result.
+func cmdHealthcheck(args []string) int {
+	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "server.toml", "config file used to discover the admin listen address")
+	urlFlag := fs.String("url", "", "probe this full URL instead of discovering it from the config")
+	addr := fs.String("addr", "", "override the admin host:port to probe (keeps the endpoint path)")
+	ready := fs.Bool("ready", false, "probe readiness (/readyz) instead of liveness (/healthz)")
+	timeout := fs.Duration("timeout", 3*time.Second, "overall request timeout")
+	jsonOut := fs.Bool("json", false, "emit the result as JSON")
+	quiet := fs.Bool("quiet", false, "suppress output; report only via the exit code")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	target, err := healthcheckTarget(*urlFlag, *addr, *ready, *configPath)
+	if err != nil {
+		return healthcheckFail(2, *jsonOut, *quiet, "", 0, err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return healthcheckFail(2, *jsonOut, *quiet, target, 0, err)
+	}
+	resp, err := (&http.Client{Timeout: *timeout}).Do(req)
+	if err != nil {
+		return healthcheckFail(1, *jsonOut, *quiet, target, 0, fmt.Errorf("unreachable: %w", err))
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return healthcheckFail(1, *jsonOut, *quiet, target, resp.StatusCode, fmt.Errorf("unhealthy: HTTP %d", resp.StatusCode))
+	}
+
+	if *jsonOut {
+		_ = json.NewEncoder(stdout).Encode(healthcheckOutput{Target: target, OK: true, Status: resp.StatusCode})
+	} else if !*quiet {
+		fmt.Fprintf(stdout, "healthy: %s %d\n", target, resp.StatusCode)
+	}
+	return 0
+}
+
+// healthcheckFail reports a failed probe on the requested output channel and
+// returns the given exit code, so every failure path stays consistent.
+func healthcheckFail(code int, jsonOut, quiet bool, target string, status int, err error) int {
+	if jsonOut {
+		_ = json.NewEncoder(stdout).Encode(healthcheckOutput{Target: target, OK: false, Status: status, Error: err.Error()})
+	} else if !quiet {
+		fmt.Fprintf(stderr, "%v\n", err)
+	}
+	return code
+}
+
+// healthcheckTarget resolves the URL to probe. Precedence: an explicit -url is
+// used verbatim; otherwise -addr, or the [admin] listen address from the config
+// file, supplies the host:port, and -ready selects /readyz over /healthz.
+func healthcheckTarget(urlFlag, addr string, ready bool, configPath string) (string, error) {
+	if urlFlag != "" {
+		return urlFlag, nil
+	}
+	hostPort := addr
+	if hostPort == "" {
+		cfg, err := config.NewTOMLSource(configPath).Load()
+		if err != nil {
+			return "", fmt.Errorf("load config: %w", err)
+		}
+		if !cfg.Admin.Enabled || cfg.Admin.Listen == "" {
+			return "", fmt.Errorf("admin listener is not enabled in %s; pass -addr host:port or -url to probe a specific endpoint", configPath)
+		}
+		hostPort = cfg.Admin.Listen
+	}
+	path := "/healthz"
+	if ready {
+		path = "/readyz"
+	}
+	return "http://" + probeHostPort(hostPort) + path, nil
+}
+
+// probeHostPort rewrites an unspecified bind host (empty, 0.0.0.0, or ::) to a
+// loopback address so the probe can actually connect; other addresses are
+// returned unchanged.
+func probeHostPort(hostPort string) string {
+	host, port, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return hostPort // not host:port shaped; let the request surface any error
+	}
+	switch host {
+	case "", "0.0.0.0":
+		host = "127.0.0.1"
+	case "::":
+		host = "::1"
+	}
+	return net.JoinHostPort(host, port)
+}

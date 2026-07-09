@@ -7,11 +7,18 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"time"
 
 	"jul/internal/config"
 )
+
+// DialFunc matches net.Dialer.DialContext. When non-nil it guards the outbound
+// connections of the HTTP-based discoverers (Consul, Kubernetes) against the
+// [egress] allow-list. It is an alias so a value from internal/egress passes
+// through without this package importing it.
+type DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // discoveryTimeout bounds a single resolve call so a hung provider cannot stall
 // the refresher.
@@ -61,17 +68,18 @@ func discoveryEnabled(d *config.DiscoveryConfig) bool {
 // newDiscoverer builds the Discoverer for a discovery config. The "consul" and
 // "kubernetes" providers are compiled only into builds with the matching build
 // tag; other builds return a clear error here, failing the startup or reload
-// that referenced them — the same model as other gated features.
-func newDiscoverer(cfg config.DiscoveryConfig) (Discoverer, error) {
+// that referenced them — the same model as other gated features. A non-nil dial
+// guards the Consul/Kubernetes HTTP clients with the egress allow-list.
+func newDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.Type)) {
 	case "dns":
 		return newDNSDiscoverer(cfg)
 	case "dns_srv":
 		return newDNSSRVDiscoverer(cfg)
 	case "consul":
-		return newConsulDiscoverer(cfg)
+		return newConsulDiscoverer(cfg, dial)
 	case "kubernetes":
-		return newKubernetesDiscoverer(cfg)
+		return newKubernetesDiscoverer(cfg, dial)
 	default:
 		return nil, fmt.Errorf("unknown discovery type %q", cfg.Type)
 	}

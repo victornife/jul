@@ -257,8 +257,8 @@ export function OverviewPanel() {
       label: "Backends",
       value: anyInactive ? "attention" : "healthy",
       tone: anyInactive ? "warn" : "ok",
-      tooltip: `${healthyCount} healthy / ${unhealthyCount} unhealthy`,
-      onClick: () => navigate("/apps"),
+      tooltip: `${String(healthyCount)} healthy / ${String(unhealthyCount)} unhealthy`,
+      onClick: () => { void navigate("/apps"); },
     });
   }
   // Certificate risk from the real cert health data returned by the overview.
@@ -270,15 +270,15 @@ export function OverviewPanel() {
     if (cr.expired > 0) {
       value = "expired";
       tone = "down";
-      detailText = `${cr.expired} expired, ${cr.expiring_soon} expiring ≤ 7d`;
+      detailText = `${String(cr.expired)} expired, ${String(cr.expiring_soon)} expiring ≤ 7d`;
     } else if (cr.expiring_soon > 0) {
       value = "renew soon";
       tone = "warn";
-      detailText = `${cr.expiring_soon} expiring ≤ 7d`;
+      detailText = `${String(cr.expiring_soon)} expiring ≤ 7d`;
     } else if (cr.errors > 0) {
       value = "unknown";
       tone = "warn";
-      detailText = `${cr.errors} with no live expiry data`;
+      detailText = `${String(cr.errors)} with no live expiry data`;
     } else {
       value = "ok";
       tone = "ok";
@@ -288,8 +288,8 @@ export function OverviewPanel() {
       label: "Certificates",
       value,
       tone,
-      tooltip: `${cr.count} certs — ${detailText}`,
-      onClick: () => navigate("/tls"),
+      tooltip: `${String(cr.count)} certs — ${detailText}`,
+      onClick: () => { void navigate("/tls"); },
     });
   }
 
@@ -489,7 +489,7 @@ export function OverviewPanel() {
                   className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
                   role="button"
                   title="Open request rate detail"
-                  onClick={() => setActiveMetric({ name: "Request Rate", data: history.requestsPerSec, color: "rgb(34, 197, 94)" })}
+                  onClick={() => { setActiveMetric({ name: "Request Rate", data: history.requestsPerSec, color: "rgb(34, 197, 94)" }); }}
                 >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Request Rate Trend
@@ -512,7 +512,7 @@ export function OverviewPanel() {
                   className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
                   role="button"
                   title="Open error rate detail"
-                  onClick={() => setActiveMetric({ name: "Error Rate", data: history.errorRate, color: "rgb(239, 68, 68)" })}
+                  onClick={() => { setActiveMetric({ name: "Error Rate", data: history.errorRate, color: "rgb(239, 68, 68)" }); }}
                 >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Error Rate Trend
@@ -535,7 +535,7 @@ export function OverviewPanel() {
                   className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
                   role="button"
                   title="Open P95 latency detail"
-                  onClick={() => setActiveMetric({ name: "P95 Latency", data: history.latencyP95, color: "rgb(59, 130, 246)" })}
+                  onClick={() => { setActiveMetric({ name: "P95 Latency", data: history.latencyP95, color: "rgb(59, 130, 246)" }); }}
                 >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     P95 Latency Trend
@@ -558,7 +558,7 @@ export function OverviewPanel() {
                   className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
                   role="button"
                   title="Open in-flight detail"
-                  onClick={() => setActiveMetric({ name: "In-flight Requests", data: history.inFlight, color: "rgb(234, 179, 8)" })}
+                  onClick={() => { setActiveMetric({ name: "In-flight Requests", data: history.inFlight, color: "rgb(234, 179, 8)" }); }}
                 >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     In-flight Trend
@@ -581,7 +581,7 @@ export function OverviewPanel() {
                   className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
                   role="button"
                   title="Open average latency detail"
-                  onClick={() => setActiveMetric({ name: "Avg Latency", data: history.latencyAvg, color: "rgb(14, 165, 233)" })}
+                  onClick={() => { setActiveMetric({ name: "Avg Latency", data: history.latencyAvg, color: "rgb(14, 165, 233)" }); }}
                 >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Avg Latency Trend
@@ -604,7 +604,7 @@ export function OverviewPanel() {
                   className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
                   role="button"
                   title="Open cache hit ratio detail"
-                  onClick={() => setActiveMetric({ name: "Cache Hit Ratio", data: history.cacheHitRatio, color: "rgb(168, 85, 247)" })}
+                  onClick={() => { setActiveMetric({ name: "Cache Hit Ratio", data: history.cacheHitRatio, color: "rgb(168, 85, 247)" }); }}
                 >
                   <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                     Cache Hit Ratio Trend
@@ -646,7 +646,7 @@ export function OverviewPanel() {
       )}
 
       {activeMetric && (
-        <Modal title={activeMetric.name} onClose={() => setActiveMetric(null)}>
+        <Modal title={activeMetric.name} onClose={() => { setActiveMetric(null); }}>
           <div className="h-64 w-full">
             <Sparkline
               data={activeMetric.data}

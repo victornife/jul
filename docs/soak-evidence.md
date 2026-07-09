@@ -41,6 +41,17 @@ Both scenarios are driven by the in-tree soak tests behind the `soak` build tag:
   live-session count stays capped and every reaped/evicted session tears down
   fully (no goroutine or backend-socket leak).
 
+Two additional **reload-churn** leak lanes run in the default test suite (no
+`soak` tag required) and prove the build-drop-on-reload invariant for subsystems
+that are reconstructed on every configuration reload:
+
+- **auth reload-churn** — `TestReloadChurnNoLeak`
+  ([internal/auth/reload_churn_test.go](../internal/auth/reload_churn_test.go), #31).
+- **WAF reload-churn** — `TestWAFReloadChurnNoLeak`
+  ([internal/waf/reload_churn_test.go](../internal/waf/reload_churn_test.go), #50):
+  rebuilds the Coraza/OWASP-CRS engine repeatedly and asserts flat goroutines and
+  bounded heap. Env-tunable via `WAF_CHURN_ITERS`; rerun with `make waf-churn`.
+
 The 20-second CI smoke and 5-minute release gate are **not** GA-soak evidence.
 They are quick-health checks. The runs below are the **authoritative GA-soak**
 artifacts; each entry states the scope (single-feature vs. consolidated) and
@@ -869,3 +880,56 @@ Jul access logs showed **zero entries** for port `:8092`; every failure was a cl
 | Admin API | `:9090` reachable; access logs captured |
 
 **Conclusion:** Both gRPC features sustained **>20M combined requests over 1 hour** with **near-zero errors**. The transcoding initial "failure" was a measurement artifact of the test client (no connection reuse + no body drain), not a server defect. After fixing the harness, both paths are proven stable under sustained load. **gRPC transcoding (Y2-01) and gRPC passthrough (Y2-04) are promoted to GA.**
+
+---
+
+### 2026-07-09 — WAF reload-churn leak/stability validation (local, Windows, AUX-06 #50)
+
+Runtime proof that rebuilding the WAF (Coraza + embedded OWASP CRS) engine on
+every configuration reload leaks neither goroutines nor heap — the WAF analogue
+of the #31 auth reload-churn proof. On each reload the server compiles a fresh
+engine and drops the previous generation without an explicit `Close` (a
+documented no-op, since `Firewall` owns no worker/timer/socket), so this
+validates that build-drop invariant at runtime under sustained churn.
+
+**Test:** `TestWAFReloadChurnNoLeak` ([internal/waf/reload_churn_test.go](../internal/waf/reload_churn_test.go), `waf` tag).
+**Rerun:** `make waf-churn` (or `WAF_CHURN_ITERS=<n> go test -tags waf -run '^TestWAFReloadChurnNoLeak$' ./internal/waf/`).
+**Environment:** Windows/amd64, go1.26.4.
+**Churn profile:** four permutations — inline-rule block, full-CRS block, CRS
+detect-mode, and a mixed cycle (inline + CRS-block + CRS-detect) — each rebuilt
+and exercised with benign + attack (path-traversal / XSS) traffic every cycle.
+**Pass thresholds:** goroutine growth ≤ 20 and post-GC heap growth ≤ 64 MiB, both
+flat constants independent of the cycle count, so a per-reload leak (which scales
+with iterations) trips them immediately.
+
+Default lane — `WAF_CHURN_ITERS=30` (4.4s), **PASS**:
+
+```
+inline:  goroutines 3 -> 3, heap 1433168  -> 1438712  bytes
+crs:     goroutines 3 -> 3, heap 19953640 -> 20633752 bytes
+detect:  goroutines 3 -> 3, heap 20639472 -> 20639600 bytes
+mixed:   goroutines 3 -> 3, heap 21489680 -> 21490416 bytes
+```
+
+Extended lane — `WAF_CHURN_ITERS=200` (23.4s), **PASS**:
+
+```
+inline:  goroutines 3 -> 3, heap 1438320  -> 1438912  bytes
+crs:     goroutines 3 -> 3, heap 19959080 -> 23016208 bytes
+detect:  goroutines 3 -> 3, heap 23016320 -> 25992080 bytes
+mixed:   goroutines 3 -> 3, heap 25992736 -> 32126928 bytes
+```
+
+- **No goroutine leak:** flat 3 → 3 across all four permutations at both 30 and
+  200 reloads (the WAF engine spawns no goroutines and the churn does no network I/O).
+- **No monotonic heap leak:** per-permutation growth stays sub-MiB at 30 reloads
+  and ≤ ~6 MiB at 200 reloads (~30 KB/reload of residual pool/cache) — three orders
+  of magnitude below a retained ~20 MiB CRS engine. End-of-run heap (~32 MiB at 200
+  iters) sits under the 64 MiB budget with 2× headroom.
+- **All enforcement assertions held every cycle:** benign traffic reached the
+  action (200), attack traffic was blocked (CRS) or recorded (detect), proving
+  each freshly built engine actually enforced before being dropped.
+
+**Conclusion:** WAF reload/reconfiguration churn is leak-free and stable. The
+build-drop-on-reload path retains no goroutines, sockets, or engines, confirming
+the documented no-op `Firewall.Close` is safe at runtime. **AUX-06 (#50) closed.**

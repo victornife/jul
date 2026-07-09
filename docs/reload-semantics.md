@@ -3,7 +3,10 @@
 > Canonical reference for how Jul.IA applies a configuration change and what
 > "applied" actually guarantees. It consolidates the reload behaviour that is
 > also described, per feature, in [core-http.md](core-http.md),
-> [stream-proxy.md](stream-proxy.md), and [console.md](console.md).
+> [stream-proxy.md](stream-proxy.md), and [console.md](console.md). For operator
+> symptoms and fixes — a change that did not apply, a `restart_required`
+> rejection, a degraded-subsystem apply — see
+> [troubleshooting.md](troubleshooting.md#reloads).
 
 Jul.IA reloads configuration **without dropping connections**. A reload can be
 triggered three ways, all of which converge on the same validated path:
@@ -96,6 +99,18 @@ zero count and closes resources, any racing request is guaranteed to see
 closed connection. A **rejected** reload never reaches step 1's swap: its
 freshly built (staged) resources are closed immediately and the live generation
 is untouched.
+
+### Stateless per-reload components
+
+Not every reloaded component owns teardown-sensitive resources. Per-location
+**authenticators** (CIDR / Basic / JWT / forward-auth) are rebuilt fresh on each
+reload and the previous set is simply dropped for the garbage collector: an
+authenticator holds no background worker, timer, or long-lived socket — its JWKS
+cache refreshes lazily on the request path, never from a goroutine — so there is
+nothing to close and no retire callback to schedule. This is validated at runtime
+by `internal/auth`'s `TestReloadChurnNoLeak`, which drives sustained
+build/exercise/drop churn across every auth permutation and asserts the goroutine
+count and post-GC heap return to their pre-churn baseline.
 
 ## Reload timeout (`[global].reload_timeout`)
 

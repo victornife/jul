@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -33,6 +34,8 @@ func Validate(c *Config) error {
 	if c.Global.ReloadTimeout < 0 {
 		errs = append(errs, errors.New("global: reload_timeout must be >= 0"))
 	}
+
+	errs = append(errs, validateEgress(c.Egress)...)
 
 	// Index upstream names for proxy_pass reference checks and detect dups.
 	upstreamNames := map[string]int{}
@@ -553,6 +556,46 @@ func validateClientAuth(ca *ClientAuthConfig, where string) []error {
 		} else if fi.IsDir() {
 			errs = append(errs, fmt.Errorf("%s: crl_file %q is a directory, want a PEM/DER file", where, f))
 		}
+	}
+	return errs
+}
+
+// validateEgress checks the optional [egress] outbound allow-list. When enabled
+// it must list at least one destination, and every entry must be a CIDR, a bare
+// IP, an exact hostname, or a leading-dot suffix (".example.com"). When disabled
+// the block is ignored entirely.
+func validateEgress(e EgressConfig) []error {
+	if !e.Enabled {
+		return nil
+	}
+	var errs []error
+	var n int
+	for i, raw := range e.Allow {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		n++
+		if strings.Contains(entry, "://") {
+			errs = append(errs, fmt.Errorf("egress.allow[%d]: %q must be a host, IP, or CIDR, not a URL", i, entry))
+			continue
+		}
+		if _, _, err := net.ParseCIDR(entry); err == nil {
+			continue
+		}
+		if net.ParseIP(entry) != nil {
+			continue
+		}
+		if strings.ContainsAny(entry, "/ \t") {
+			errs = append(errs, fmt.Errorf("egress.allow[%d]: invalid entry %q (want a host, IP, or CIDR)", i, entry))
+			continue
+		}
+		if host := strings.TrimPrefix(entry, "."); host == "" || strings.HasPrefix(host, ".") {
+			errs = append(errs, fmt.Errorf("egress.allow[%d]: invalid host %q", i, entry))
+		}
+	}
+	if n == 0 {
+		errs = append(errs, errors.New("egress: enabled but 'allow' is empty; add at least one host, IP, or CIDR (or set enabled = false)"))
 	}
 	return errs
 }

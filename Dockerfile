@@ -1,7 +1,13 @@
 # syntax=docker/dockerfile:1
 
+# Base images are pinned by tag AND digest for reproducible, tamper-evident
+# builds: the tag stays human-readable while the @sha256 digest fixes the exact
+# multi-arch manifest. Dependabot (`docker` ecosystem in .github/dependabot.yml)
+# bumps both on a schedule, so pins stay current without manual toil. To refresh
+# by hand: `docker buildx imagetools inspect <image>:<tag>` and copy the digest.
+
 # --- build stage ------------------------------------------------------------
-FROM golang:1.26.4-alpine AS build
+FROM golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS build
 
 WORKDIR /src
 
@@ -28,7 +34,7 @@ RUN mkdir -p /seed/etc/jul /seed/var/lib/jul /seed/var/cache/jul /seed/var/log/j
 
 # --- runtime stage ----------------------------------------------------------
 # distroless provides CA certificates and a nonroot user, with no shell.
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
 
 COPY --from=build /out/jul /usr/local/bin/jul
 
@@ -46,11 +52,21 @@ COPY --from=build /out/jul /usr/local/bin/jul
 # Copy the staged tree as directory entities (not contents) in one chowned COPY
 # so each created directory is owned by nonroot.
 COPY --from=build --chown=nonroot:nonroot /seed/ /
-COPY --chown=nonroot:nonroot server.toml /etc/jul/server.toml
+# Container-tailored default config (admin enabled on loopback for the
+# HEALTHCHECK; static root at /var/www) plus the placeholder site it serves, so
+# the image starts cleanly and its health probe passes with no host mounts.
+COPY --chown=nonroot:nonroot deploy/docker/server.toml /etc/jul/server.toml
+COPY --chown=nonroot:nonroot deploy/docker/index.html /var/www/index.html
 VOLUME ["/etc/jul", "/var/lib/jul", "/var/cache/jul", "/var/log/jul"]
 
 # Document the default traffic and admin ports (adjust to your config).
 EXPOSE 8080 8443 9090
+
+# Liveness probe without a shell or curl (distroless ships neither): the binary
+# probes its own admin /healthz and maps the result to an exit code. Uses the
+# exec form (no shell) and --quiet so only the exit status is reported.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/jul", "healthcheck", "--config", "/etc/jul/server.toml", "--quiet"]
 
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/jul"]

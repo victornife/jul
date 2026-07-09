@@ -83,7 +83,11 @@ JWKS fetching, and ACME are SSRF-safe by design rather than by filtering.
 - **Lock down the admin console.** Always set `[admin].token` (constant-time
   compare; strict CSP, `X-Frame-Options: DENY`, same-origin `/api`). There is
   only a single shared token — no per-user keys, scopes, or audit attribution —
-  so treat it as a shared secret and rotate it promptly on team changes.
+  so treat it as a shared secret and rotate it promptly on team changes. The
+  scoped multi-principal replacement (predefined + custom roles, revocable
+  tokens, per-principal audit) is designed in
+  [docs/specs/console-rbac.md](docs/specs/console-rbac.md)
+  ([ADR 0010](docs/adr/0010-console-rbac.md)).
   Edits that change admin reachability (disabling admin, moving its listen
   address, rotating its token, or disabling the web console) are held for
   explicit confirmation so a single apply cannot silently lock you out. See the
@@ -152,9 +156,11 @@ permanent regression seed.
   and fuzz smoke jobs.
 - A statement-coverage floor is enforced in CI (the `coverage gate` job) so test
   erosion fails the build rather than going unnoticed.
-- [Dependabot](.github/dependabot.yml) tracks GitHub Actions, Go modules, and the
-  Docker base image weekly, keeping pinned versions current without manual digest
-  chasing.
+- The [container image](Dockerfile) pins both base images (the Go build stage and
+  the distroless runtime) by tag **and** `@sha256` digest, so a rebuild is
+  reproducible and tamper-evident. [Dependabot](.github/dependabot.yml) tracks
+  GitHub Actions, Go modules, and those Docker base-image digests weekly, keeping
+  the pins current without manual digest chasing.
 - Tagged releases ([`release.yml`](.github/workflows/release.yml)) ship with a
   signed software bill of materials and build provenance: an SPDX SBOM is
   generated for the release binary, and both the binary and its SBOM are attested

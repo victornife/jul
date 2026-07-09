@@ -98,6 +98,10 @@ with operator override mitigates.
 
 ## HP-02 — Console RBAC + multi-user
 
+> **Full design:** [console-rbac.md](console-rbac.md) (exhaustive permission
+> matrix + phased plan), recorded in [ADR 0010](../adr/0010-console-rbac.md).
+> The sketch below is the backlog summary.
+
 **Objective.** Replace the single shared admin bearer token with named principals,
 roles, and scoped tokens, so multiple operators can use the console under
 least-privilege with attributable audit entries.
@@ -147,30 +151,43 @@ external identity stays Y3-02.
 
 **Objective.** Keep Prometheus cardinality predictable as deployments scale.
 
-**Already delivered.** The `host` label on `jul_http_requests_total` is **opt-in**
-(`[observability.metrics] host_label`, default off) with relabel guidance — see
-[core-http.md](../core-http.md#metrics). This removed the largest unbounded-label
-risk.
+**Status (2026 — delivered).** A documented, enforced label-cardinality policy now
+ships, closing this item:
 
-**Remaining.** A documented, enforced strategy rather than per-label fixes:
+- **Full label inventory** with a per-label cardinality-bound classification
+  (fixed / config-topology-bounded / client-derived) is published in
+  [core-http.md](../core-http.md#metrics) as an authoritative policy table.
+- **The last unbounded client-derived label is capped by construction.** The HTTP
+  request `method` label on `jul_http_requests_total` /
+  `jul_http_request_duration_seconds` — previously the raw, client-controlled
+  `r.Method` (HTTP allows arbitrary method tokens) — is folded to the fixed set of
+  standard methods, with everything else collapsing to `other`. Together with the
+  already-opt-in `host` label, **every client-derived label is now bounded by
+  design**, requiring no operator action.
+- **Regression enforcement.** `TestMetricLabelPolicy`
+  (`internal/observability/cardinality_test.go`) exercises every metric hook and
+  asserts each exported `jul_*` family carries exactly the documented label names,
+  so adding a new metric or label — especially a request-derived one — fails the
+  build until the policy is consciously updated. `TestHTTPMethodLabelBounded`
+  proves novel method tokens fold to a single `other` series.
+- **Operator playbook.** A [relabel cookbook](../core-http.md#operator-playbook-keeping-cardinality-bounded)
+  covers dropping noisy topology labels (`backend` on large pools, `domain` on
+  on-demand ACME), a series budget, and a `sample_limit` backstop.
 
-- Inventory every metric's label set and its cardinality driver (route, upstream,
-  status class, method).
-- Bounded label sets: collapse high-cardinality dimensions (e.g. raw path) to
-  bounded ones (route id / status **class**), with explicit opt-in for finer
-  labels behind the same pattern as `host_label`.
-- Ship a recommended `metric_relabel_configs` snippet and document a soft
-  series-count budget per scrape.
+Design choice: rather than adding per-metric opt-in toggles for the
+config/topology labels (`pool`/`backend`/`plugin`/`domain`/`rule`), those are left
+verbatim (they are bounded by *configuration*, not client input) and managed at
+scrape time via the documented relabel rules — the raw label stays available for
+operators who want it, and the cookbook shows how to trim it. This keeps the code
+surface minimal while making cardinality a reviewed, tested property.
 
-**Tasks.** label inventory in [core-http.md](../core-http.md) +
-[stream-proxy.md](../stream-proxy.md); apply the opt-in pattern to any remaining
-unbounded label; relabel cookbook.
+**Tests.** `TestMetricLabelPolicy` (label-set policy), `TestHTTPMethodLabelBounded`
++ `TestMethodLabelKnownSet` (method folding), plus the pre-existing
+`TestMetricsHostLabelOptIn`.
 
-**Tests.** assert default label sets are bounded (no raw path/query in default
-labels); opt-in toggles add exactly the documented label.
-
-**DoD.** every default label is bounded by construction; cardinality cookbook
-published; no dashboard breakage (additive, opt-in).
+**DoD.** ✅ every default label is bounded by construction; ✅ cardinality policy +
+cookbook published; ✅ enforced by a regression test; additive and opt-in, so no
+dashboard breakage.
 
 ---
 
@@ -217,32 +234,41 @@ checks run pre-push or in CI only.
 ship a signed SBOM + provenance. See [README deployment](../../docs/deployment.md)
 and [SECURITY.md](../../SECURITY.md#dependencies--supply-chain).
 
-**Remaining (deferred from the ops pass, with their blockers).**
+**Status (2026 — the two deferred items are now delivered).**
 
-1. **Base-image digest pinning** — pin `golang:…` and the distroless runtime by
-   `@sha256:` digest, not just tag. *Blocker resolved by Dependabot:* its docker
-   ecosystem can raise the digest bumps, so pinning becomes sustainable rather than
-   a one-off that rots. Requires fetching the current digests from the registry.
-2. **Self health target + HEALTHCHECK** — add a `jul healthcheck` subcommand (or a
-   minimal `/healthz`/`/readyz` admin endpoint) so a **shell-less distroless**
-   image can declare a `HEALTHCHECK` that execs the binary itself. *Blocker:* jul
-   currently exposes **no** self health endpoint/subcommand, so a `HEALTHCHECK`
-   today would have no valid target — the feature must exist first.
+1. **Base-image digest pinning — done.** Both stages of the [Dockerfile](../../Dockerfile)
+   now pin their base image by tag **and** `@sha256` digest (`golang:…-alpine` and
+   `gcr.io/distroless/static-debian12:nonroot`), so rebuilds are reproducible and
+   tamper-evident. Dependabot's docker ecosystem raises the digest bumps, so the
+   pins stay current without manual chasing.
+2. **Self health target + HEALTHCHECK — done.** The `jul healthcheck` subcommand
+   shipped earlier (SEQ-06/#32); the image now declares
+   `HEALTHCHECK … CMD ["/usr/local/bin/jul","healthcheck","--config","/etc/jul/server.toml","--quiet"]`
+   in exec form (no shell — the distroless image has none). To make the probe pass
+   **out of the box**, the image bakes a container-tailored config
+   ([deploy/docker/server.toml](../../deploy/docker/server.toml)) that enables the
+   admin listener on loopback and serves a placeholder site from `/var/www`, so the
+   server starts cleanly with no host mounts. (This also fixed a latent gap: the
+   previous baked config pointed its static root at a non-existent `/srv/www/example`,
+   so the server could not start unmounted — the health requirement surfaced it.)
 
 **Design.** `jul healthcheck` dials the configured admin/health listener and exits
 0/1 (no shell needed); `HEALTHCHECK CMD ["/usr/local/bin/jul","healthcheck"]`.
 `/readyz` returns ready only after the first successful config load + listener
 bind (ties to HP-01's reload result).
 
-**Tasks.** `cmd/jul` `healthcheck` subcommand; optional `/healthz`/`/readyz`
-handlers; Dockerfile digest pins + `HEALTHCHECK`; README/Dockerfile docs.
+**Tasks.** ✅ `cmd/jul` `healthcheck` subcommand (#32); ✅ `/healthz`/`/readyz`
+admin handlers; ✅ Dockerfile digest pins + `HEALTHCHECK` + self-consistent baked
+config; ✅ README/Dockerfile/deployment docs.
 
 **Tests.** `healthcheck` returns 0 when serving, non-zero when down; `/readyz`
 flips only after a successful bind; Dockerfile builds (CI, where Docker is
-available) and the healthcheck passes.
+available) and the healthcheck passes. The exact container health command
+(`jul healthcheck --config /etc/jul/server.toml --quiet`) is validated against a
+running server as part of delivery (liveness + readiness both exit 0).
 
-**DoD.** distroless image self-reports health; base images digest-pinned and
-Dependabot-maintained.
+**DoD.** ✅ distroless image self-reports health and starts cleanly unmounted;
+✅ base images digest-pinned and Dependabot-maintained.
 
 **Risks.** a health endpoint widens the admin surface — keep it unauthenticated
 only on a loopback/dedicated port, documented in [SECURITY.md](../../SECURITY.md).
@@ -255,22 +281,44 @@ only on a loopback/dedicated port, documented in [SECURITY.md](../../SECURITY.md
 global tables through structured patch-ops, instead of falling back to the raw
 TOML editor for those operations.
 
-**Current state.** The raw TOML editor has **full** parity (validate → diff → apply
-→ reload, optimistic concurrency, history/rollback). The structured patch-op layer
-(`internal/admin/patch.go`, `client.ts` `ConfigPatch`) is a curated **edit-existing**
-subset: it can retarget routes, toggle cache/rate-limit/WAF, edit locations and
-upstream backends, etc., but it has **no create op** for a server/route/upstream
-pool (creation is a TOML-fragment hand-off to the raw editor) and **no structured
-op** for global tables (`[global]`, `[cache]`, `[compression]`, global
-`[rate_limit]`, `[admin]`, `[observability.access_log]`).
+**Status (2026 — Phase 1 delivered).** The **entity create/delete** gap is closed:
+six structured ops now cover the full lifecycle of servers, routes, and upstream
+pools (`server_add` / `server_remove`, `location_add` / `location_remove`,
+`upstream_add` / `upstream_remove`) — the operations that previously *had no
+structured path at all* and forced a raw TOML-fragment hand-off. They reuse the
+existing finders/builders and inherit the batch, optimistic-concurrency
+(`base_version`), validated-preflight, history, and audit machinery unchanged, so a
+create/delete previews as a diff and applies exactly like every edit-existing op.
+The **global-table** ops (`global_set` / `cache_set` / `compression_set` /
+`rate_limit_global_set` / `admin_set` / `access_log_set`) are **deferred to a
+follow-on**: those tables already have guided console editors that upsert a
+validated TOML table (a structured-enough path with diff review), whereas
+entity creation was genuinely raw-only — so this phase spends its budget on the
+higher-value gap and lets the global-table parity degrade gracefully per the risk
+note below.
 
-**Design — new patch-op shapes.** Reuse existing config structs; error if the
-target already exists; the admin op stays guarded (ties to the self-lockout guard).
+**Prior state.** The raw TOML editor has **full** parity (validate → diff → apply
+→ reload, optimistic concurrency, history/rollback). The structured patch-op layer
+(`internal/admin/patch.go`, `client.ts` `ConfigPatch`) was a curated **edit-existing**
+subset: it could retarget routes, toggle cache/rate-limit/WAF, edit locations and
+upstream backends, etc., but had **no create op** for a server/route/upstream pool
+(creation was a TOML-fragment hand-off to the raw editor) and **no structured op**
+for global tables.
+
+**Design — new patch-op shapes.** Reuse existing config structs; error if a create
+would duplicate an existing target and if a delete/target is missing; refuse an
+`upstream_remove` that would leave a dangling `proxy_pass` reference.
 
 ```
-upstream_add          {op, upstream, address, weight?, strategy?}
-server_add            {op, listen, server_names, tls?}
-location_add          {op, listen, server_names, match_set, action}
+# Delivered (Phase 1) — entity CRUD for servers / routes / upstream pools
+server_add            {op, listen, server_names?}                     // bare block; lint-warns until a route is added
+server_remove         {op, listen, server_names?}                     // refuses the last remaining server block
+location_add          {op, listen, server_names?, match_set, action}  // action via setLocationAction (proxy/static/redirect/return/deny)
+location_remove       {op, listen, server_names?, match_type, path}
+upstream_add          {op, upstream, address, weight?, strategy?}      // one static backend; strategy round_robin|weighted_round_robin|least_conn
+upstream_remove       {op, upstream}                                   // refuses if a route's proxy_pass still references it
+
+# Deferred (Phase 2) — global-table structured ops (guided TOML-upsert editors cover these today)
 global_set            {op, global:{worker_threads?,log_level?,log_format?,access_log?,error_log?,shutdown_timeout?}}   // sparse
 cache_set             {op, cache:{enabled,max_size?,max_object_size?,default_ttl?,...}}
 compression_set       {op, compression:{enabled,encoders?,level?,min_size?,types?}}
@@ -279,21 +327,26 @@ admin_set             {op, admin:{...}, confirm:true}   // GUARDED — ties to t
 access_log_set        {op, access_log:{file?/syslog?/rotation?}}
 ```
 
-**Tasks.** extend `patchRequest`/`applyPatch` (`patch.go`) with the create + global
-ops; mirror the `ConfigPatch` union + Zod schema (`client.ts`); structured Console
-forms for create + global tables; route `admin_set` through the existing
-`confirm_admin` guard.
+**Tasks.** ✅ extended `patchRequest`/`applyPatch` (`patch.go`) with the six entity
+CRUD ops (no new DTO fields — all reuse existing `patchRequest` fields); ◻ mirror the
+`ConfigPatch` union + Zod schema (`client.ts`) and add structured Console create/delete
+forms; ◻ Phase 2 global-table ops (route `admin_set` through the existing
+`confirm_admin` guard).
 
-**Tests.** Go: each new op round-trips (apply → re-parse → assert), and duplicate
-targets error; `admin_set` without `confirm` is rejected. UI: each form emits the
-documented shape; create-then-edit flows.
+**Tests.** ✅ Go: each entity op round-trips (apply → re-marshal → re-parse →
+`Validate`), duplicate-target creates error, missing-target deletes error, empty
+required fields error, `upstream_remove` refuses a referenced pool, `server_remove`
+refuses the last block (`internal/admin/patch_crud_test.go`). ◻ UI: each form emits
+the documented shape; create-then-edit flows.
 
-**DoD.** the console can configure everything structurally that the raw editor can,
-without dropping to TOML; the raw editor remains the escape hatch. Documented in
-[console.md](../console.md).
+**DoD.** ✅ *for entity CRUD* — the console can create and delete servers, routes, and
+upstream pools structurally (previewed as a diff, applied through the validated path)
+without dropping to TOML; the raw editor remains the escape hatch. ◻ global-table ops
+remain Phase 2. Documented in [console.md](../console.md).
 
-**Risks.** patch-op surface growth — keep ops minimal and reuse config structs;
-the raw editor stays the universal fallback so parity gaps degrade gracefully.
+**Risks.** patch-op surface growth — kept ops minimal and reused config structs; the
+raw editor and the guided global-table editors stay the universal fallback so the
+deferred global-table parity gap degrades gracefully.
 
 ---
 
@@ -369,5 +422,8 @@ already covered when the register was actioned (see notes).
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.4 | 2026 | HP-05 completed: both deferred container items delivered. The [Dockerfile](../../Dockerfile) pins both base images by tag + `@sha256` digest (Dependabot-maintained) and declares a shell-less `HEALTHCHECK` running `jul healthcheck`. The image bakes a self-consistent container config ([deploy/docker/server.toml](../../deploy/docker/server.toml) + placeholder `/var/www` site) that enables the admin listener on loopback, so the server starts unmounted and the probe passes out of the box (also fixing the latent non-existent `/srv/www/example` root). |
+| 1.3 | 2026 | HP-03 delivered: the request `method` label is folded to a fixed set (unknown → `other`) so every client-derived metric label is now bounded by construction; published the full label-cardinality policy table + operator relabel cookbook in [core-http.md](../core-http.md#metrics); enforced by `TestMetricLabelPolicy` / `TestHTTPMethodLabelBounded` in `internal/observability/cardinality_test.go`. |
+| 1.2 | 2026 | HP-06 Phase 1 delivered: six structured entity-CRUD patch-ops close the create/delete parity gap for servers, routes, and upstream pools (`server_add`/`server_remove`, `location_add`/`location_remove`, `upstream_add`/`upstream_remove`) in `internal/admin/patch.go`, with round-trip + guard tests in `patch_crud_test.go`. Global-table structured ops (`global_set`/`cache_set`/`compression_set`/`rate_limit_global_set`/`admin_set`/`access_log_set`) are deferred to Phase 2 — their guided TOML-upsert editors already provide a diff-reviewed structured path, so the remaining gap degrades gracefully. Console create/delete forms (`client.ts`) still to follow. |
 | 1.1 | 2026-06-28 | Shipped the HP-m* micro-fixes register: HP-m1 configurable redaction floor (`[global] redact_min_secret_length`), HP-m2 upfront Content-Length 413, HP-m4 proxy retry surfaces the upstream error, HP-m5 HTTP/3 drain tracks `shutdown_timeout`, HP-m7 Console surfaces `Retry-After` on 429. HP-m3 (redirect-code validation) and HP-m6 (audit CSV export control) were already covered and are documented as such. Strategic items HP-01..HP-07 remain design-ahead. |
 | 1.0 | 2026-06-28 | Initial backlog spec. Captures the strategic items and deferred work parked out of the pre-1.0 hardening pass (Console v2 robustness Phases 1–4): HP-01 unified reload transaction + `reload_timeout`, HP-02 Console RBAC, HP-03 metric-cardinality strategy, HP-04 pre-commit gate parity, HP-05 container/supervision hardening (digest pinning + health target), HP-06 structured-config parity patch-ops, HP-07 SSRF allow-list hardening, plus the HP-m* micro-fixes register. Design-ahead only — nothing here has shipped. |
