@@ -234,6 +234,44 @@ func TestKVDeniedWithoutCapability(t *testing.T) {
 	}
 }
 
+func TestCapabilityGrantsAreRevalidatedOnActivation(t *testing.T) {
+	m := testManager(t)
+
+	withKV := map[string]config.PluginConfig{
+		"kv": pcfg("kv-counter", func(pc *config.PluginConfig) { pc.KV = true }),
+	}
+	s1, err := m.Build(withKV)
+	if err != nil {
+		t.Fatalf("Build with KV: %v", err)
+	}
+	t.Cleanup(func() { _ = s1.Close() })
+
+	for want := 1; want <= 2; want++ {
+		next, _ := okNext()
+		h := s1.Middleware("kv")(next)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		if got := rec.Header().Get("X-Count"); got != itoa(want) {
+			t.Fatalf("request %d: X-Count = %q, want %d", want, got, want)
+		}
+	}
+
+	withoutKV := map[string]config.PluginConfig{"kv": pcfg("kv-counter")}
+	s2, err := m.Build(withoutKV)
+	if err != nil {
+		t.Fatalf("Build without KV: %v", err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+
+	next, _ := okNext()
+	h := s2.Middleware("kv")(next)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := rec.Header().Get("X-Count"); got != "1" {
+		t.Fatalf("X-Count after reactivation = %q, want 1 (capability must be rechecked and denied)", got)
+	}
+}
+
 func TestReloadReusesManager(t *testing.T) {
 	m := testManager(t)
 	cfg := map[string]config.PluginConfig{"hi": pcfg("header-inject")}

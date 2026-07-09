@@ -232,6 +232,11 @@ the guest grows it and calls again. The SDK helpers (`readInto`, `KVGet`,
     (SSRF guard), re-checks the allow-list on every redirect, and caps the
     response at `max_fetch_response` within `fetch_timeout`.
 
+  Capability grants are evaluated on every activation/build of a plugin. A new
+  generation re-checks the current config's capability policy instead of carrying
+  forward the grants from an earlier generation, so a plugin that loses `kv` or
+  `fetch` in a later activation is denied those host functions immediately.
+
 ## Observability
 
 Every invocation updates Prometheus metrics:
