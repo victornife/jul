@@ -1,6 +1,6 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
         console-dev console-build console-check build-console build-full license-check \
-        hooks
+        hooks waf-churn
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
@@ -22,6 +22,13 @@ fuzz:
 # release-style run, e.g. `SOAK_DURATION=5m SOAK_WORKERS=32 make soak`.
 soak:
 	scripts/soak.sh
+
+# WAF reload-churn leak/stability gate (AUX-06). Rebuilds the Coraza/CRS engine
+# on a sustained reload churn and asserts flat goroutines + bounded heap. Runs in
+# the default `waf`-tagged test lane at 30 cycles; override for a longer soak,
+# e.g. `WAF_CHURN_ITERS=500 make waf-churn`.
+waf-churn:
+	go test -tags waf -run '^TestWAFReloadChurnNoLeak$$' -count=1 -v ./internal/waf/
 
 format:
 	gofmt -w .
