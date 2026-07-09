@@ -9,6 +9,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+## [1.32.0] – 2026-07-09
+
 ### Fixed
 - **Restored two CI gates to green** (repo hygiene): documented the top-level **`[egress]`** allow-list block in [configuration.md](docs/configuration.md#egress) — its `enabled`/`allow` keys and entry formats (CIDR, bare IP, exact hostname, leading-dot suffix) — which the `docs-check` schema-drift gate requires for every `toml`-tagged field on the root `Config` struct (the block was added in #33 but never mirrored into the config reference). Also cleared the pre-existing **console-frontend `lint`** failures (25 errors across `app/Layout.tsx`, `features/overview/OverviewPanel.tsx`, and `features/tls/TLSPanel.tsx`): wrapped numeric template-literal interpolations in `String(...)` (`restrict-template-expressions`), routed promise-returning `navigate(...)` handlers through `void` (`no-misused-promises`), and braced void-returning arrow shorthands (`no-confusing-void-expression`). Behaviour-preserving; embedded console dist rebuilt.
 
