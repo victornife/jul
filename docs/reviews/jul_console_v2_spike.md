@@ -1,7 +1,7 @@
 # Jul Console v2 Spike: Self-Explanatory Operations and Configuration UI
 
 > **See also (2026-07-01).** Current repository state is tracked in the consolidated
-> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07.md) (single
+> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07-09.md) (single
 > source of truth). This document remains a valid historical strategy input.
 
 > **Reviewed — 2026-06-23 ✅** · Status: **Adopted.** This internal spike was
@@ -15,7 +15,7 @@
 > have shipped (the console is **GA — soak pending**). The five design rules and
 > the information architecture in this spike remain the authoritative product
 > standard against which new panels are judged; live delivery tracking now lives
-> in the [recovery action plan](jul_console_v2_recovery_action_plan.md#console-cockpit--remaining-work-phase-4-backlog)
+> in the [recovery action plan](previous_reviews/jul_console_v2_recovery_action_plan.md#console-cockpit--remaining-work-phase-4-backlog)
 > and the [roadmap](../roadmap/README.md).
 
 ---

@@ -1,7 +1,7 @@
 # Jul.IA Protocol Adapters: Product Strategy and Roadmap Recommendation
 
 > **See also (2026-07-01).** Current repository state is tracked in the consolidated
-> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07.md) (single
+> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07-09.md) (single
 > source of truth). This document remains a valid historical strategy input.
 
 > **Reviewed — 2026-06-21 ✅** · Status: **Adopted (with scoping).** This external

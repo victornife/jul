@@ -1,8 +1,10 @@
 # Jul.IA — Full Repository Audit (2026-07)
 
-> **Status: AUTHORITATIVE — Single Source of Truth.** Version 1.2 · Audited 2026-07-01 · **Reaudited 2026-07-02** · Repo state: `main`, release line v1.27.0, Go 1.26.4.
+> **SUPERSEDED (historical archive) — 2026-07-09.** The current authoritative repository audit is the [Full Repository Audit (2026-07-09)](../jul_full_repository_audit_2026-07-09.md). This document is retained under `previous_reviews/` for history and is **no longer maintained**; its findings reflect the repository as of 2026-07-02.
 >
-> This document consolidates and supersedes the earlier point reviews under `docs/reviews/` for the purpose of *current repository state*. Those documents remain valid as historical decision inputs; where they overlap with this audit, this file wins. See [`README.md`](README.md) for the decision-log index.
+> _Original status (historical):_ **AUTHORITATIVE — Single Source of Truth.** Version 1.2 · Audited 2026-07-01 · **Reaudited 2026-07-02** · Repo state: `main`, release line v1.27.0, Go 1.26.4.
+>
+> This document consolidates and supersedes the earlier point reviews under `docs/reviews/` for the purpose of *current repository state*. Those documents remain valid as historical decision inputs; where they overlap with this audit, this file wins. See [`README.md`](../README.md) for the decision-log index.
 
 **Audit method.** Evidence-based review of the repository plus **targeted local verification** on Windows/amd64 (go1.26.4): lean + full builds, `go test` across critical and tag-gated packages, `jul` CLI exercises, `govulncheck` (full tags), and the Console `typecheck`/`eslint`/`vitest` suite. Findings separate **Fact** (directly supported), **Inference** (reasoned interpretation), and **Recommendation**. Non-trivial findings use the standard finding block. What could not be verified is listed in §16.
 
@@ -34,8 +36,8 @@ Jul.IA is materially more mature and more *disciplined* than the typical solo/ed
 
 **Strongest areas (Fact-backed).**
 - **Governance & honesty.** `docs/status.md` splits 7 "GA — soak pending" vs 13 Beta features with per-feature GA gaps; ADR-0003/0005 define the bar; docs are dated and current. This is better maturity hygiene than most OSS servers.
-- **Security posture by design.** `SECURITY.md` trust model (request input never selects upstream/JWKS/cert/FastCGI root); plugin egress guards with loopback-always-blocked + DNS-rebinding checks ([`internal/plugins/plugins_hardening_test.go`](../../internal/plugins/plugins_hardening_test.go)); `govulncheck` full-tags = **no vulnerabilities**.
-- **Reload safety.** Generational handler swap with in-flight drain ([`internal/server/server.go`](../../internal/server/server.go)); admin apply is validate→preflight→diff→snapshot→write→reload→rollback, serialized by `applyMu`.
+- **Security posture by design.** `SECURITY.md` trust model (request input never selects upstream/JWKS/cert/FastCGI root); plugin egress guards with loopback-always-blocked + DNS-rebinding checks ([`internal/plugins/plugins_hardening_test.go`](../../../internal/plugins/plugins_hardening_test.go)); `govulncheck` full-tags = **no vulnerabilities**.
+- **Reload safety.** Generational handler swap with in-flight drain ([`internal/server/server.go`](../../../internal/server/server.go)); admin apply is validate→preflight→diff→snapshot→write→reload→rollback, serialized by `applyMu`.
 - **Console completeness.** 14+ feature panels, review-before-apply, verified locally: typecheck + eslint clean, **347 vitest tests pass**.
 
 **Riskiest areas (Fact-backed, 2026-07-02).** The four risks that dominated v1.0 are now **resolved**: the `internal/server` flaky hang (CQ-1, goleak + keep-alive-free clients), unpublished soak evidence (DOC-1, `docs/soak-evidence.md` + CI artifacts), the CLI JSON contract (UX-1), and the composition-root/admin-API god files (CQ-2 substantially, CQ-3 fully — `main.go` 1087→~858, `admin/api.go` 1214→502, `config/validate.go` 1005→561, all split under 600 LOC). What remains:
@@ -77,17 +79,17 @@ Jul.IA is materially more mature and more *disciplined* than the typical solo/ed
 
 ## 3. Architecture assessment
 
-**Entry points / composition root (Fact).** [`cmd/jul/main.go`](../../cmd/jul/main.go) `run()` dispatches CLI subcommands ([`cmd/jul/cli.go`](../../cmd/jul/cli.go)) or falls through to `serve()`, the composition root, which wires logging, cache, metrics, tracer, ACME manager, stream server, WAF, the handler factory, and the admin server, then calls `server.New()`/`Run()`. Windows service integration is split via build-tagged `service_windows.go` / `service_other.go`.
+**Entry points / composition root (Fact).** [`cmd/jul/main.go`](../../../cmd/jul/main.go) `run()` dispatches CLI subcommands ([`cmd/jul/cli.go`](../../../cmd/jul/cli.go)) or falls through to `serve()`, the composition root, which wires logging, cache, metrics, tracer, ACME manager, stream server, WAF, the handler factory, and the admin server, then calls `server.New()`/`Run()`. Windows service integration is split via build-tagged `service_windows.go` / `service_other.go`.
 
 **Package/domain map (Fact).** Cleanly separated `internal/` packages: `config`, `server`, `router`, `handler`, `upstream`, `middleware`, `cache`, `auth`, `transcode`, `stream`, `plugins`, `waf`, `observability`, `tracing`, `redact`, `atomicfile`, `admin` (+ `admin/ui`). Feature packages are gated by build tags with `*_stub.go` fallbacks so lean builds compile and reject unsupported config at startup.
 
-**Config lifecycle (Fact).** Parse → Defaults → Validate → Preflight → Apply → Persist. Parse/defaults in [`internal/config/parser.go`](../../internal/config/parser.go); `Validate()` + ~20 helpers in [`internal/config/validate.go`](../../internal/config/validate.go) (561 lines after the 2026-07-02 split; location/backend validators moved to `validate_location.go`/`validate_backends.go`); `PreflightClone()` dry-runs the full composition (secret expansion, WAF compile, auth init, pool build) without applying; persistence via [`internal/atomicfile`](../../internal/atomicfile/atomicfile.go) (temp→sync→chmod 0600→rename).
+**Config lifecycle (Fact).** Parse → Defaults → Validate → Preflight → Apply → Persist. Parse/defaults in [`internal/config/parser.go`](../../../internal/config/parser.go); `Validate()` + ~20 helpers in [`internal/config/validate.go`](../../../internal/config/validate.go) (561 lines after the 2026-07-02 split; location/backend validators moved to `validate_location.go`/`validate_backends.go`); `PreflightClone()` dry-runs the full composition (secret expansion, WAF compile, auth init, pool build) without applying; persistence via [`internal/atomicfile`](../../../internal/atomicfile/atomicfile.go) (temp→sync→chmod 0600→rename).
 
-**Runtime/reload model (Fact).** [`internal/server/server.go`](../../internal/server/server.go) uses generational handlers: `dynamicHandler` acquires the current generation per request, `doReload()` builds a new generation via the factory and swaps atomically, old generations retire after in-flight drain or grace timeout. Cache/metrics/tracer/log-sinks persist across reloads; pools/handlers rebuild. Bad edits keep the running config (no downtime).
+**Runtime/reload model (Fact).** [`internal/server/server.go`](../../../internal/server/server.go) uses generational handlers: `dynamicHandler` acquires the current generation per request, `doReload()` builds a new generation via the factory and swaps atomically, old generations retire after in-flight drain or grace timeout. Cache/metrics/tracer/log-sinks persist across reloads; pools/handlers rebuild. Bad edits keep the running config (no downtime).
 
-**Admin/control-plane architecture (Fact).** [`internal/admin`](../../internal/admin) exposes a loopback-bound API (bearer-token auth, constant-time compare) with read projections and a write path: `validate` (side-effect-free) → `diff` → `apply` (snapshot→WriteConfigRaw→reload) → `rollback`, all serialized by `applyMu` with optimistic-concurrency `base_version` tokens. Console data is decoupled via [`internal/admin/projections.go`](../../internal/admin/projections.go).
+**Admin/control-plane architecture (Fact).** [`internal/admin`](../../../internal/admin) exposes a loopback-bound API (bearer-token auth, constant-time compare) with read projections and a write path: `validate` (side-effect-free) → `diff` → `apply` (snapshot→WriteConfigRaw→reload) → `rollback`, all serialized by `applyMu` with optimistic-concurrency `base_version` tokens. Console data is decoupled via [`internal/admin/projections.go`](../../../internal/admin/projections.go).
 
-**Extensibility points (Fact).** Router `Builder` registry (static/proxy/fastcgi/grpc/transcode/plugin actions); per-location `LocationModifier` middleware; WASM plugin ABI ([`internal/plugins/abi.go`](../../internal/plugins/abi.go)); pluggable cache store, access-log sinks, discovery backends.
+**Extensibility points (Fact).** Router `Builder` registry (static/proxy/fastcgi/grpc/transcode/plugin actions); per-location `LocationModifier` middleware; WASM plugin ABI ([`internal/plugins/abi.go`](../../../internal/plugins/abi.go)); pluggable cache store, access-log sinks, discovery backends.
 
 **Intentional vs accidental (Inference).** Overwhelmingly *intentional*: the generational reload, preflight isolation, stub/tag strategy, and projection layer are deliberate patterns applied consistently. The *accidental* drift is concentrated in size — the composition root and admin API grew into large single files.
 
@@ -99,10 +101,10 @@ Jul.IA is materially more mature and more *disciplined* than the typical solo/ed
 
 ### Finding CQ-1: Intermittent hang/timeout in `internal/server` tests under parallel execution
 
-- **Status (2026-07-02): ✅ Resolved.** Root cause confirmed as the `fetch`/`reachable` test helpers pooling keep-alive connections via `http.DefaultTransport` (leaked `persistConn` readLoop goroutines). Fix: a shared keep-alive-free client + `goleak.VerifyTestMain` in [`internal/server/main_test.go`](../../internal/server/main_test.go); `go.uber.org/goleak` promoted to a direct dependency; a Windows CI lane added (P1-4). Validated ≥15 lean + full-tag repeats, no hang.
+- **Status (2026-07-02): ✅ Resolved.** Root cause confirmed as the `fetch`/`reachable` test helpers pooling keep-alive connections via `http.DefaultTransport` (leaked `persistConn` readLoop goroutines). Fix: a shared keep-alive-free client + `goleak.VerifyTestMain` in [`internal/server/main_test.go`](../../../internal/server/main_test.go); `go.uber.org/goleak` promoted to a direct dependency; a Windows CI lane added (P1-4). Validated ≥15 lean + full-tag repeats, no hang.
 - **Severity:** high
 - **Area:** `internal/server` test suite / server request or reload lifecycle
-- **Evidence:** Combined critical run `go test ./internal/config/... ./internal/server/... ./internal/admin/... …` → `FAIL jul/internal/server 601.297s` with a panic dump showing a client `persistConn.readLoop` in "IO wait, 9 minutes" and the server stack at [`internal/server/server.go`](../../internal/server/server.go) `dynamicHandler`→`ServeHTTP`. Isolated re-run `go test -v -timeout 150s ./internal/server/` → `ok … 2.229s`.
+- **Evidence:** Combined critical run `go test ./internal/config/... ./internal/server/... ./internal/admin/... …` → `FAIL jul/internal/server 601.297s` with a panic dump showing a client `persistConn.readLoop` in "IO wait, 9 minutes" and the server stack at [`internal/server/server.go`](../../../internal/server/server.go) `dynamicHandler`→`ServeHTTP`. Isolated re-run `go test -v -timeout 150s ./internal/server/` → `ok … 2.229s`.
 - **Fact:** The package deterministically passes in isolation but hung to the 10-minute Go panic-timeout at least once when run in parallel with other listener-binding packages.
 - **Inference:** A test leaves an HTTP client/keep-alive connection open (or a drain/reload path blocks) and, under parallel package execution / port pressure, occasionally deadlocks. It is a *test-harness or lifecycle* leak, most likely a proxy/streaming/reload test that doesn't close its client or a drain that waits on a never-closing connection.
 - **Why it matters:** A flaky 10-minute hang destroys CI signal, can wedge local runs, and — if it reflects a real drain/keep-alive leak in `dynamicHandler`/`retireGen` — could manifest as stuck connections in production during reload.
@@ -113,9 +115,9 @@ Jul.IA is materially more mature and more *disciplined* than the typical solo/ed
 
 ### Finding CQ-2: Composition root is a 1087-line untestable monolith
 
-- **Status (2026-07-02): ◐ Partially addressed (severity downgraded high→low).** `cmd/jul/main.go` is now **~858 LOC** (from 1087) and a real [`internal/app`](../../internal/app) package holds the extracted, unit-tested wiring: `wiring.go` (scope/index/reload helpers + `ValidateRuntimeConfig`), `admin_deps.go` (`BuildAdminDeps` + adapters), and `preflight.go` (the admin write-preflight gate sequence), with `wiring_test.go`/`preflight_test.go`/`characterization_test.go`. **Remaining:** extract the `buildHandlers`/`serve()` body to trim `main.go` toward the `<250` target; ADR-0007 is already updated to *Partial* and should be finalized when that lands.
+- **Status (2026-07-02): ◐ Partially addressed (severity downgraded high→low).** `cmd/jul/main.go` is now **~858 LOC** (from 1087) and a real [`internal/app`](../../../internal/app) package holds the extracted, unit-tested wiring: `wiring.go` (scope/index/reload helpers + `ValidateRuntimeConfig`), `admin_deps.go` (`BuildAdminDeps` + adapters), and `preflight.go` (the admin write-preflight gate sequence), with `wiring_test.go`/`preflight_test.go`/`characterization_test.go`. **Remaining:** extract the `buildHandlers`/`serve()` body to trim `main.go` toward the `<250` target; ADR-0007 is already updated to *Partial* and should be finalized when that lands.
 - **Severity:** medium
-- **Area:** [`cmd/jul/main.go`](../../cmd/jul/main.go)
+- **Area:** [`cmd/jul/main.go`](../../../cmd/jul/main.go)
 - **Evidence:** `main.go` = 1087 lines; imports all feature packages; ADR-0007 "Composition-root monolith" marked **Deferred (technical debt recorded)".
 - **Fact:** Wiring, handler factory, stream lifecycle, and preflight all live in one `package main` file with no unit tests.
 - **Inference:** Bugs in wiring (e.g., CQ-1-class lifecycle issues) can only be caught by end-to-end tests, which the repo has few of for the composition layer.
@@ -127,9 +129,9 @@ Jul.IA is materially more mature and more *disciplined* than the typical solo/ed
 
 ### Finding CQ-3: Admin API and validate in oversized single files
 
-- **Status (2026-07-02): ✅ Resolved.** Both god-files were split by concern within their packages: [`internal/admin/api.go`](../../internal/admin/api.go) 1214→**502** LOC (extracted `api_status.go` 349, `api_history.go` 192, `api_wizard.go` 221) and [`internal/config/validate.go`](../../internal/config/validate.go) 1005→**561** LOC (extracted `validate_location.go` and `validate_backends.go`). No admin/config file now exceeds ~560 LOC; behavior unchanged (full lean + tagged tests green). *Note: v1.0's counts (1125 / 941) had grown to 1214 / 1005 with the v2 endpoints before this split (was net-new Finding NEW-3).* 
+- **Status (2026-07-02): ✅ Resolved.** Both god-files were split by concern within their packages: [`internal/admin/api.go`](../../../internal/admin/api.go) 1214→**502** LOC (extracted `api_status.go` 349, `api_history.go` 192, `api_wizard.go` 221) and [`internal/config/validate.go`](../../../internal/config/validate.go) 1005→**561** LOC (extracted `validate_location.go` and `validate_backends.go`). No admin/config file now exceeds ~560 LOC; behavior unchanged (full lean + tagged tests green). *Note: v1.0's counts (1125 / 941) had grown to 1214 / 1005 with the v2 endpoints before this split (was net-new Finding NEW-3).* 
 - **Severity:** low
-- **Area:** [`internal/admin/api.go`](../../internal/admin/api.go) (1125 LOC), [`internal/config/validate.go`](../../internal/config/validate.go) (941 LOC)
+- **Area:** [`internal/admin/api.go`](../../../internal/admin/api.go) (1125 LOC), [`internal/config/validate.go`](../../../internal/config/validate.go) (941 LOC)
 - **Fact:** Both are large single files; exploration confirms they are internally well-factored (per-concern helpers).
 - **Inference:** Not a correctness risk today, but they trend toward "god file" and slow navigation/review.
 - **Why it matters:** Maintainability and onboarding.
@@ -142,7 +144,7 @@ Jul.IA is materially more mature and more *disciplined* than the typical solo/ed
 
 - **Status (2026-07-02): Open (deferred by design, unchanged).** Pin still present in `go.mod`; ADR-0008 records the monitored-trigger decision. No CVE affects the pinned surface today.
 - **Severity:** medium
-- **Area:** [`go.mod`](../../go.mod) replace/pin; ADR-0008
+- **Area:** [`go.mod`](../../../go.mod) replace/pin; ADR-0008
 - **Evidence:** `go.mod` TODO(ADR-0008): `gofast` imports removed `golang.org/x/tools/godoc/vfs`, forcing a pin to the last version shipping `vfs`. `govulncheck` (full tags) currently reports **no vulnerabilities**.
 - **Fact:** The pin is documented and deferred; no CVE affects the pinned surface *today*.
 - **Inference:** A future CVE in `x/tools ≤ v0.6.0` would create a forced-upgrade-vs-break-build dilemma with no in-repo escape hatch.
@@ -166,8 +168,8 @@ Jul.IA is materially more mature and more *disciplined* than the typical solo/ed
 - **Status (2026-07-02): ✅ Resolved (this reaudit).**
 - **Severity:** medium-high (concurrency correctness on the primary operator write path)
 - **Priority:** P0 (fixed)
-- **Area:** [`internal/admin/api.go`](../../internal/admin/api.go) rollback handlers; [`internal/admin/api_history.go`](../../internal/admin/api_history.go)
-- **Evidence:** The v1.1 P1-2 remediation added `applyMu` to `handleHistoryRollback` (`POST /api/history/rollback`). But a **second** rollback handler, `handleConfigRollback` (`POST /api/config/rollback`), performed the same `currentRaw()→WriteConfigRaw()→recordHistory()` read-modify-write **without holding `applyMu`** — and the Console's client calls the *v2* endpoint ([`internal/admin/ui/src/api/client.ts`](../../internal/admin/ui/src/api/client.ts) `rollback()` → `/config/rollback`). The concurrency test (`TestConfigApplyRollbackConcurrent`) exercised only the *fixed-but-unused* v1 path, so CI was green while the operator-facing rollback stayed racy.
+- **Area:** [`internal/admin/api.go`](../../../internal/admin/api.go) rollback handlers; [`internal/admin/api_history.go`](../../../internal/admin/api_history.go)
+- **Evidence:** The v1.1 P1-2 remediation added `applyMu` to `handleHistoryRollback` (`POST /api/history/rollback`). But a **second** rollback handler, `handleConfigRollback` (`POST /api/config/rollback`), performed the same `currentRaw()→WriteConfigRaw()→recordHistory()` read-modify-write **without holding `applyMu`** — and the Console's client calls the *v2* endpoint ([`internal/admin/ui/src/api/client.ts`](../../../internal/admin/ui/src/api/client.ts) `rollback()` → `/config/rollback`). The concurrency test (`TestConfigApplyRollbackConcurrent`) exercised only the *fixed-but-unused* v1 path, so CI was green while the operator-facing rollback stayed racy.
 - **Fact:** Two routed rollback endpoints existed; only the one the Console does not use was serialized.
 - **Inference:** A rollback concurrent with an apply (or another rollback) could interleave snapshot-and-write, defeating the optimistic-concurrency `base_version` guard and corrupting the history chain.
 - **Why it matters:** It is a textbook "the test proves the wrong thing" gap on the highest-consequence admin write, and it directly contradicts the v1.1 claim that rollback was serialized.
@@ -178,7 +180,7 @@ Jul.IA is materially more mature and more *disciplined* than the typical solo/ed
 
 ### Finding NEW-2 (net-new, 2026-07-02): Example configs drifted from `jul fmt` output — ✅ Resolved
 
-- **Severity:** low · **Area:** [`examples/migrate/jul.toml`](../../examples/migrate/jul.toml), [`server.full.apps.toml`](../../server.full.apps.toml)
+- **Severity:** low · **Area:** [`examples/migrate/jul.toml`](../../../examples/migrate/jul.toml), [`server.full.apps.toml`](../../../server.full.apps.toml)
 - **Evidence/Fact:** After UX-2 added `,omitempty`, `jul fmt` no longer emits `stream = []` / `mail = []`, but both checked-in example configs still carried those lines — the "canonical" examples no longer matched tool output.
 - **Recommendation (implemented):** Removed the stale empty-table lines (kept the import-provenance comments in `examples/migrate/jul.toml`, which `jul fmt` would have stripped). Docs-check green (866/0).
 - **Effort:** S (done)
@@ -229,9 +231,9 @@ Legend: **Repo claim** from `docs/status.md`; **My verdict** = Agree / Agree-wit
 
 ### Finding UX-1: `jul lint -json` output is not a stable, self-describing contract
 
-- **Status (2026-07-02): ✅ Resolved.** `config.Diagnostic` has lowercase json tags and `Severity.MarshalJSON` emits the string form; golden test `TestCmdLintJSONSchema`; schema documented in [`configuration.md`](../configuration.md#cli-json-output).
+- **Status (2026-07-02): ✅ Resolved.** `config.Diagnostic` has lowercase json tags and `Severity.MarshalJSON` emits the string form; golden test `TestCmdLintJSONSchema`; schema documented in [`configuration.md`](../../configuration.md#cli-json-output).
 - **Severity:** medium
-- **Area:** [`cmd/jul/cli.go`](../../cmd/jul/cli.go) `lintOutput` → [`internal/config/lint.go`](../../internal/config/lint.go) `Diagnostic`
+- **Area:** [`cmd/jul/cli.go`](../../../cmd/jul/cli.go) `lintOutput` → [`internal/config/lint.go`](../../../internal/config/lint.go) `Diagnostic`
 - **Evidence (verified):** `jul lint -config testdata/waf.toml -json` →
   `{"source":"…","warnings":[{"Severity":0,"Field":"[compression]","Message":"…","Hint":"…"}]}`. `lintOutput` has json tags (`source/errors/warnings`) but `config.Diagnostic` (lint.go:35) has **none**, so its fields serialize PascalCase and `Severity` emits the raw int `0` even though `Severity.String()` returns `"warning"`/`"error"`.
 - **Fact:** The JSON mixes lower-case and PascalCase keys and uses a numeric enum with no documented meaning.
@@ -246,7 +248,7 @@ Legend: **Repo claim** from `docs/status.md`; **My verdict** = Agree / Agree-wit
 
 - **Status (2026-07-02): ✅ Resolved.** `,omitempty` on `Config.Upstreams/Streams/Plugins/Mail`; golden test `TestCmdFmtOmitsReservedAndEmptyTables`. Stale example files reconciled (Finding NEW-2).
 - **Severity:** low
-- **Area:** [`cmd/jul`](../../cmd/jul) fmt path / TOML serialization
+- **Area:** [`cmd/jul`](../../../cmd/jul) fmt path / TOML serialization
 - **Evidence (verified):** `jul fmt -config testdata/static.toml` begins with `upstreams = []`, `stream = []`, `mail = []`, then `[global]`. `[[mail]]` is documented as parsed-but-rejected in v1.
 - **Fact:** Canonical output surfaces an unsupported (`mail`) and two empty (`stream`, `upstreams`) tables at the top of the file.
 - **Inference:** Confusing to operators ("is mail supported?") and noisy in diffs/review.
@@ -277,7 +279,7 @@ Legend: **Repo claim** from `docs/status.md`; **My verdict** = Agree / Agree-wit
 
 ### Finding UI-1: No verified backend↔frontend end-to-end test
 
-- **Status (2026-07-02): ◐ Partially addressed.** An over-the-wire Go e2e ([`internal/admin/console_e2e_test.go`](../../internal/admin/console_e2e_test.go) `TestConsoleApplyRollbackFlowE2E`) drives load→apply→history→rollback against the live admin router via a real HTTP client. **Remaining:** a browser-level (Playwright) smoke against the built SPA is still absent.
+- **Status (2026-07-02): ◐ Partially addressed.** An over-the-wire Go e2e ([`internal/admin/console_e2e_test.go`](../../../internal/admin/console_e2e_test.go) `TestConsoleApplyRollbackFlowE2E`) drives load→apply→history→rollback against the live admin router via a real HTTP client. **Remaining:** a browser-level (Playwright) smoke against the built SPA is still absent.
 - **Severity:** medium
 - **Area:** `internal/admin/ui` + `internal/admin` API
 - **Evidence:** 347 vitest tests exercise TOML mapping/patch/validation *client-side*; Go admin tests exercise the API server-side. No test drives the built SPA against a live admin server.
@@ -303,7 +305,7 @@ Legend: **Repo claim** from `docs/status.md`; **My verdict** = Agree / Agree-wit
 
 ### Finding DOC-1: "Soak pending" is stated everywhere but no soak *evidence* is published
 
-- **Status (2026-07-02): ✅ Resolved (publication mechanism); follow-through open.** [`docs/soak-evidence.md`](../soak-evidence.md) publishes dated runs; CI + release soak jobs upload a `soak-results` artifact; linked from `status.md`/`index.md`. **Follow-through:** flip each `☐ pending` row to a dated `☑` only once the 5-minute release-gate artifact exists (see Top-5 #1).
+- **Status (2026-07-02): ✅ Resolved (publication mechanism); follow-through open.** [`docs/soak-evidence.md`](../../soak-evidence.md) publishes dated runs; CI + release soak jobs upload a `soak-results` artifact; linked from `status.md`/`index.md`. **Follow-through:** flip each `☐ pending` row to a dated `☑` only once the 5-minute release-gate artifact exists (see Top-5 #1).
 - **Severity:** high (governance/trust)
 - **Area:** `docs/status.md`, `docs/ga-push.md`, `docs/release.md`
 - **Evidence:** 7 features carry "GA — soak pending" and a `☐ pending` soak checkbox; `release.yml` runs a blocking 5-minute soak; but no dated soak *report/artifact* is linked from the docs.
@@ -388,9 +390,9 @@ Legend: **Repo claim** from `docs/status.md`; **My verdict** = Agree / Agree-wit
 
 ### Finding SEC-1: Plugin `.wasm` upload endpoint is a privileged write surface — confirm defense-in-depth
 
-- **Status (2026-07-02): ✅ Resolved (upload hardening); capability-revalidation note open.** `validPluginFilename` enforces a `<name>.wasm` safe-charset name with no separators/`..`, plus a dest-inside-dir containment check; negative tests in `plugin_upload_test.go`; threat note in [`plugins.md`](../plugins.md#uploading-modules-console-api). **Remaining (low):** an explicit capability-re-validation-on-activation test, as originally recommended.
+- **Status (2026-07-02): ✅ Resolved (upload hardening); capability-revalidation note open.** `validPluginFilename` enforces a `<name>.wasm` safe-charset name with no separators/`..`, plus a dest-inside-dir containment check; negative tests in `plugin_upload_test.go`; threat note in [`plugins.md`](../../plugins.md#uploading-modules-console-api). **Remaining (low):** an explicit capability-re-validation-on-activation test, as originally recommended.
 - **Severity:** medium
-- **Area:** [`internal/admin`](../../internal/admin) `POST /api/plugins/upload`, `plugin_upload_dir`, `plugin_upload_max_size`
+- **Area:** [`internal/admin`](../../../internal/admin) `POST /api/plugins/upload`, `plugin_upload_dir`, `plugin_upload_max_size`
 - **Evidence:** CHANGELOG (Unreleased) + admin API expose `.wasm` upload with atomic writes and a size cap; plugins run in a wazero sandbox with capability gating.
 - **Fact:** Upload is bearer-auth'd + size-capped + atomic; execution is sandboxed with egress guards.
 - **Inference:** The residual risk is (a) filename/path handling on upload and (b) whether an uploaded module's declared capabilities are re-validated against policy before activation.
@@ -449,23 +451,23 @@ Legend: **Repo claim** from `docs/status.md`; **My verdict** = Agree / Agree-wit
 >   `fetch`/`reachable` test helpers pooling keep-alive connections via
 >   `http.DefaultTransport`; now a keep-alive-free client plus a
 >   `goleak.VerifyTestMain` guard (`internal/server/main_test.go`).
-> - **P0-2 ✅** Soak evidence published — [`docs/soak-evidence.md`](../soak-evidence.md)
+> - **P0-2 ✅** Soak evidence published — [`docs/soak-evidence.md`](../../soak-evidence.md)
 >   with dated runs; CI + release soak jobs now upload a `soak-results` artifact.
 > - **P1-1 ✅** `jul lint -json` schema stabilized — lowercase keys + string
 >   severity (`config.Diagnostic` tags + `Severity.MarshalJSON`), golden test,
->   documented in [`configuration.md`](../configuration.md#cli-json-output).
+>   documented in [`configuration.md`](../../configuration.md#cli-json-output).
 > - **P1-2 ✅** Concurrency/negative tests added — transcode reflection-negative,
 >   plugin reload-under-load, admin concurrent apply/rollback + Console e2e.
 >   Rollback serialization: v1.1 fixed only `handleHistoryRollback`; the
 >   **2026-07-02 reaudit found and fixed the second, Console-facing endpoint**
 >   `handleConfigRollback` — both now share one `applyMu`-guarded helper (Finding REG-1).
 > - **P1-3 ✅** Plugin upload hardening — strict `<name>.wasm` filename validation
->   + containment check + threat note in [`plugins.md`](../plugins.md#uploading-modules-console-api).
+>   + containment check + threat note in [`plugins.md`](../../plugins.md#uploading-modules-console-api).
 > - **P1-4 ✅** Windows CI test lane added (lean + full matrix).
-> - **P2-2 ✅** GA-evidence burndown table added to [`status.md`](../status.md#ga-evidence-burndown-beta).
+> - **P2-2 ✅** GA-evidence burndown table added to [`status.md`](../../status.md#ga-evidence-burndown-beta).
 > - **P2-3 ✅** Backend↔Console apply/rollback e2e smoke added.
 > - **P2-4 ✅** `jul fmt` no longer emits reserved/empty tables (`omitempty`).
-> - **P2-5 ✅** First-run no-config hint + [`troubleshooting.md`](../troubleshooting.md).
+> - **P2-5 ✅** First-run no-config hint + [`troubleshooting.md`](../../troubleshooting.md).
 > - **P2-1 ◐** `internal/app` factory package seam created with unit-tested wiring
 >   helpers; the full `main.go` reduction to <250 LOC remains staged (ADR-0007).
 > - **P2-6 ⏸** Beta evidence bundles remain demand-gated; the burndown above is

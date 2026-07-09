@@ -1,5 +1,7 @@
 # Jul.IA — Immediate Action Plan (Merged Audit Report)
 
+> **COMPLETED (historical archive) — 2026-07-09.** The P0/P1 tasks in this plan were implemented and folded into the 2026-07-02 audit remediation. Retained under `previous_reviews/` for history; superseded by the current [Full Repository Audit (2026-07-09)](../jul_full_repository_audit_2026-07-09.md).
+
 **Date:** 2026-07-03
 **Origin:** Baseline audit (Principal Engineer) merged with updated re-audit and cross-validated against code/docs/CI.
 **Repository:** victornife/jul (main = 8ff80115)

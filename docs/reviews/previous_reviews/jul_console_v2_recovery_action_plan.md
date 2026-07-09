@@ -1,14 +1,16 @@
 # Jul Console v2 Recovery and Excellence Plan
 
+> **COMPLETED (historical archive) — 2026-07-09.** Console v2 reached GA; the recovery/excellence work in this plan is done. Retained under `previous_reviews/` for history; superseded by the current [Full Repository Audit (2026-07-09)](../jul_full_repository_audit_2026-07-09.md).
+
 > **See also (2026-07-01).** Current repository state is tracked in the consolidated
-> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07.md) (single
+> [Full Repository Audit (2026-07)](../jul_full_repository_audit_2026-07-09.md) (single
 > source of truth). This document remains a valid historical strategy input.
 
 > **Reviewed — 2026-06-23 ✅** · Status: **Approved.** This recovery and excellence plan was
 > evaluated and approved; it outlines the strategic roadmap for transforming Console v2 from a
 > technical substrate into a production-ready operations cockpit. The plan is adopted as the
 > authoritative guide for Console v2 implementation across all phases. See the
-> [reviews & decision log](README.md) for the full status mapping.
+> [reviews & decision log](../README.md) for the full status mapping.
 
 ---
 
@@ -23,7 +25,7 @@ Resolution status:
 | **Wizard beyond serve/proxy (P0)** | ✅ Done | Added an **app** mode (`mode:"app"`) that builds a load-balanced upstream pool + proxy route with framework presets (Express/Apollo/FastAPI/Django/Flask/Go/gRPC/generic) and optional health checks. Backend `wizardAppConfig` + `wizard_app_test.go`; UI exposes it in `WizardPanel`. |
 | **Search endpoint (P0)** | ✅ Done | Implemented `GET /api/search?q=&type=` with server-side ranking and route↔app relationships (`search.go`, `search_test.go`); `SearchPanel` now consumes it. |
 | **Route/App edit = append-as-draft (P0)** | ✅ Documented | Scope made explicit in `docs/console.md`: guided **creation** generates a validated draft block; in-place replace/rename is intentionally not auto-performed (browser TOML rewriting risks comment/format loss) and is tracked as a follow-up. |
-| **TLS/ACME/auth/mTLS editors (P1)** | ✅ Mostly done | Guided **TLS** creation shipped (`TLSEditor`: static or ACME staging/production + optional mutual TLS); route creation includes guided **auth** (CIDR/Basic/JWT/forward-auth), and editing **auth on an existing location** now ships as a structured patch (`AuthEditor` + `location_set_auth`/`location_clear_auth`, Phase 4a ✅); **WAF** has guided global + per-location editors. Remaining: editing **mTLS** on an *existing* server (raw-only today — now scoped as **Phase 4j**). See the [capability matrix](../console.md#capability-matrix). |
+| **TLS/ACME/auth/mTLS editors (P1)** | ✅ Mostly done | Guided **TLS** creation shipped (`TLSEditor`: static or ACME staging/production + optional mutual TLS); route creation includes guided **auth** (CIDR/Basic/JWT/forward-auth), and editing **auth on an existing location** now ships as a structured patch (`AuthEditor` + `location_set_auth`/`location_clear_auth`, Phase 4a ✅); **WAF** has guided global + per-location editors. Remaining: editing **mTLS** on an *existing* server (raw-only today — now scoped as **Phase 4j**). See the [capability matrix](../../console.md#capability-matrix). |
 | **Nav collapsed mode** | ✅ Done | Sidebar layout gains a persisted collapsed icon-rail mode with a toggle in the View menu and inline collapse button (`Layout.tsx`). |
 | **Overview sparklines (p95, in-flight)** | ✅ Done | `useMetricsHistory` now tracks p95 latency and in-flight alongside request rate, error rate, avg latency, and cache-hit ratio; `OverviewPanel` renders the full trend set. |
 
@@ -160,13 +162,13 @@ items point to the Phase 4 backlog.
 | Request samples | ✅ Done (`/api/observability/requests`) |
 | Collapsed navigation | ✅ Done (persisted icon-rail) |
 | Live log tail | ✅ Done (Phase 4g — `GET /api/observability/logs[/stream]` + Operations → Logs tab) |
-| Self-explanatory UX copy | ◑ Ongoing per [ADR 0004](../adr/0004-console-ui-invariants.md) |
+| Self-explanatory UX copy | ◑ Ongoing per [ADR 0004](../../adr/0004-console-ui-invariants.md) |
 
 ## Console cockpit — remaining work (Phase 4 backlog)
 
 > Tracking home for the post-cutover guided-editor backlog (2026-06-27). Each
 > item ships code + Go/vitest tests + docs together and flips its row in the
-> [capability matrix](../console.md#capability-matrix). Sequence:
+> [capability matrix](../../console.md#capability-matrix). Sequence:
 > 4a → 4c → 4d → 4b → 4e → 4f → 4g → 4h → 4i → 4j.
 >
 > 4j (guided **edit-existing mTLS**) was added 2026-06-28 to close the last

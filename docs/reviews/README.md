@@ -1,9 +1,9 @@
 # Reviews & decision log
 
-> Version 1.2 · Updated 2026-07-01
+> Version 1.3 · Updated 2026-07-09
 
 > **📌 Single source of truth for current repository state:**
-> [**Full Repository Audit (2026-07)**](jul_full_repository_audit_2026-07.md).
+> [**Full Repository Audit (2026-07-09)**](jul_full_repository_audit_2026-07-09.md).
 > It consolidates and, for *present-state* purposes, supersedes the point reviews
 > below. The documents below remain the authoritative record of *past decisions*
 > (what was adopted / reframed / deferred / rejected); the consolidated audit is
@@ -23,11 +23,23 @@ durable, promoted to an [ADR](../adr/).
 
 | Date reviewed | Document | Disposition |
 | --- | --- | --- |
-| 2026-07-01 | [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07.md) | **Authoritative — current-state single source of truth** |
+| 2026-07-09 | [Full Repository Audit (2026-07-09)](jul_full_repository_audit_2026-07-09.md) | **Authoritative — current-state single source of truth** |
+| 2026-07-02 | [Full Repository Audit (2026-07)](previous_reviews/jul_full_repository_audit_2026-07.md) | Superseded (historical — see `previous_reviews/`) |
 | 2026-06-21 | [Protocol Adapters — Product Strategy](jul_protocol_adapters_product_strategy.md) | Adopted (with scoping) |
 | 2026-06-21 | [Roadmap, Vision & Specs — Critical Product Review](jul_roadmap_vision_specs_critical_review.md) | Adopted / Reframed |
 | 2026-06-23 | [Console v2 — Self-explanatory operations & configuration UI spike](jul_console_v2_spike.md) | Adopted |
 | 2026-06-23 | [Console v2 — Frontend stack recommendation](jul_console_tech_stack_recommendation.md) | Adopted |
+
+## Superseded / archived (`previous_reviews/`)
+
+These point-in-time artifacts are retained for history but are **no longer current**;
+each carries a dated status banner and lives under [`previous_reviews/`](previous_reviews/):
+
+| Archived | Document | Why archived |
+| --- | --- | --- |
+| 2026-07-09 | [Full Repository Audit (2026-07-02)](previous_reviews/jul_full_repository_audit_2026-07.md) | Superseded by the 2026-07-09 audit |
+| 2026-07-09 | [Immediate Action Plan (2026-07)](previous_reviews/jul_immediate_action_plan_2026-07.md) | Completed — tasks folded into the 2026-07-02 remediation |
+| 2026-07-09 | [Console v2 Recovery & Excellence Plan](previous_reviews/jul_console_v2_recovery_action_plan.md) | Completed — Console v2 reached GA |
 
 ## Decisions promoted to ADRs
 

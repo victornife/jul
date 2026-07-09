@@ -2,7 +2,7 @@
 
 > **⚠️ Superseded (2026-07-01).** For *current repository state*, this critical
 > review is superseded by the consolidated
-> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07.md) — the
+> [Full Repository Audit (2026-07)](jul_full_repository_audit_2026-07-09.md) — the
 > authoritative single source of truth. Preserved below as a historical decision input.
 
 > **Reviewed — 2026-06-21 ✅** · Status: **Adopted / Reframed.** This critique was
