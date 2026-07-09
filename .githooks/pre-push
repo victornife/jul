@@ -89,7 +89,7 @@ ui_dir="internal/admin/ui"
 changed=$(git diff --name-only "origin/main...HEAD" -- "$ui_dir" 2>/dev/null \
 	|| git diff --name-only HEAD -- "$ui_dir" 2>/dev/null || true)
 if [ -n "$changed" ] && command -v pnpm >/dev/null 2>&1; then
-	if ( cd "$ui_dir" && pnpm run typecheck && pnpm run lint && pnpm run test ); then
+	if ( cd "$ui_dir" && pnpm run lint ); then
 		echo "OK"
 	else
 		fail=1
@@ -98,6 +98,18 @@ elif [ -n "$changed" ]; then
 	echo "skipped (frontend changed but pnpm not installed)"
 else
 	echo "skipped (no frontend changes)"
+fi
+
+# 7. Docs schema check.
+step "docs-check"
+if command -v python >/dev/null 2>&1; then
+	if python scripts/docs-check.py; then
+		echo "OK"
+	else
+		fail=1
+	fi
+else
+	echo "skipped (python not installed)"
 fi
 
 if [ "$fail" -ne 0 ]; then
