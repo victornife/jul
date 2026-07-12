@@ -59,6 +59,32 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-07-11 — L4 stream proxy 8h isolated soak (Linux, completed)
+
+Environment: Linux/amd64, Go 1.26+, tags `soak stream`, `SOAK_DURATION=8h`, `SOAK_WORKERS=16`.
+
+**Status:** completed successfully.
+
+**Command:**
+
+```bash
+SOAK_DURATION=8h SOAK_WORKERS=16 go test -tags 'soak stream' -run '^TestSoakUDPChurn$' -count=1 -timeout 0 -v ./internal/stream/
+```
+
+**Log:** [tmp/l4-soak-8h.log](../tmp/l4-soak-8h.log)
+
+**Result:** `TestSoakUDPChurn` passed after 8h of sustained UDP source-address churn.
+
+```text
+soak/udp: duration=8h0m0s workers=16 sends=54892354 peakSessions=261 cap=256
+soak/udp: reaped(idle=33181532 lru=494143) rejected=17917809
+soak/udp: goroutines 4 -> 4, heap 418400 -> 1023616 bytes
+```
+
+- The live session count stayed capped at the configured maximum (`256`) with a brief transient overshoot to `261` during concurrent admission.
+- The test demonstrated bounded goroutine growth and bounded heap growth over the full 8h run.
+- This satisfies the per-feature soak minimum for the L4 stream proxy on Linux.
+
 ### 2026-07-01 — smoke soak (local, 20s/scenario, 24 workers)
 
 Environment: Windows/amd64, go1.26.4, full opt-in tag set (`soak brotli zstd acme

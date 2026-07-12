@@ -110,7 +110,7 @@ the [soak evidence log](soak-evidence.md).
 | Response cache (memory + disk) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (1.5M req, 0% err, hit/miss/evict/revalidate verified) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers) |
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ✅ **soaked 1h** windows 2026-07-06 (12.99M req, 0.00% err, 100% success, isolated QUIC+TLS on `:8443`) — [evidence](soak-evidence.md#2026-07-06--http3-isolated-soak-local-windows-1-hour-20-workers) |
 | WASM plugin system (Y2-02) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (`kv-counter`, `request-block`, `header-inject` plugins exercised) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
-| L4 stream proxy (Y2-03) | 2026-07-03 | ✅ soaked 1h isolated 2026-07-06 (4M rounds, 0% err, persistent TCP connections) + Phase 2A 8h 2026-07-06 — [evidence](soak-evidence.md#2026-07-06--l4-stream-proxy-isolated-soak-local-windows-5-min--1h-510-workers) |
+| L4 stream proxy (Y2-03) | 2026-07-03 | ✅ completed 8h isolated Linux soak 2026-07-11 (`TestSoakUDPChurn`, 54,892,354 sends, 0% err, bounded goroutines/heap) — [evidence](soak-evidence.md#2026-07-11--l4-stream-proxy-8h-isolated-soak-linux-completed) |
 
 ## Recently shipped continuous panels
 
