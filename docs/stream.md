@@ -155,7 +155,7 @@ Run: `go test -tags stream -fuzz='FuzzReadProxyHeader|FuzzPeekSNI' -fuzztime=15s
 | ② Benchmarks | **Met** | 4 benchmarks in `internal/stream/bench_test.go` + `internal/stream/udp_bench_test.go` |
 | ③ Known limitations | **Met** | 5-item list above |
 | ④ Compatibility policy | **Met** | Stream config additive within TOML schema; documented in [configuration.md](configuration.md) |
-| ⑤ Soak test | **Met** | soaked 1h isolated 2026-07-06 (4M rounds, 0% err) + Phase 2A 8h — [evidence](soak-evidence.md#2026-07-06--l4-stream-proxy-isolated-soak-local-windows-5-min--1h-510-workers) |
+| ⑤ Soak test | **Met** | 8h Linux isolated soak 2026-07-11 (`TestSoakUDPChurn`, 54,892,354 sends, 0% err, bounded goroutines/heap) plus 1h isolated Windows evidence 2026-07-06 — [evidence](soak-evidence.md#2026-07-11--l4-stream-proxy-8h-isolated-soak-linux-completed) |
 | ⑥ Feature documentation | **Met** | This document + [configuration.md](configuration.md) + [testdata/stream.toml](../testdata/stream.toml) |
 | ⑦ Threat model | **Met** | 6-row threat table above |
 | ⑧ Parser/input fuzzing | **Met** | `FuzzReadProxyHeader`, `FuzzPeekSNI` in `internal/stream/fuzz_test.go` |

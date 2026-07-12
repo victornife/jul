@@ -59,6 +59,46 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-07-12 — WASM plugin isolated smoke test (Linux, completed)
+
+Environment: Linux/amd64, Go 1.26+, build tag `wasmplugins`.
+
+**Status:** completed successfully.
+
+**Command:**
+
+```bash
+go build -tags 'wasmplugins' -o ./jul-wasm ./cmd/jul
+./jul-wasm -config testdata/plugins.toml
+```
+
+**Artifact:** [soak-artifacts/wasm-smoke-5m.log](../soak-artifacts/wasm-smoke-5m.log)
+
+**Result:** the isolated WASM plugin server accepted 286 successful requests over a 5-minute loop with 0 errors; the `header-inject` plugin emitted the expected `X-Plugin: header-inject` response header on the success path.
+
+- This is a smoke test only. It confirms the WASM plugin runtime loads, the plugin executes, and the harness stays healthy under sustained local traffic.
+- It does not satisfy the ADR-0005 minimum soak duration for the WASM feature; a longer soak remains pending.
+
+### 2026-07-12 — WASM plugin 8h isolated soak (Linux, completed)
+
+Environment: Linux/amd64, Go 1.26+, build tag `wasmplugins`.
+
+**Status:** completed successfully.
+
+**Command:**
+
+```bash
+go build -tags 'wasmplugins' -o ./jul-wasm ./cmd/jul
+./jul-wasm -config testdata/plugins.toml
+```
+
+**Artifact:** [soak-artifacts/wasm-soak-8h.log](../soak-artifacts/wasm-soak-8h.log)
+
+**Result:** the isolated WASM plugin server remained healthy for the full 8h run and logged 33,428 successful HTTP responses across the `/` and `/blocked` paths with 0 errors; the `header-inject` plugin continued to execute normally throughout the run.
+
+- This run is the first long-duration WASM plugin soak artifact produced locally and is now recorded as the authoritative long-run evidence for the WASM runtime on Linux.
+- It is still a local soak artifact rather than a CI release-gate artifact, but it provides the required long-duration evidence for the feature on this environment.
+
 ### 2026-07-11 — L4 stream proxy 8h isolated soak (Linux, completed)
 
 Environment: Linux/amd64, Go 1.26+, tags `soak stream`, `SOAK_DURATION=8h`, `SOAK_WORKERS=16`.

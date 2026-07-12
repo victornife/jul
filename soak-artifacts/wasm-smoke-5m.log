@@ -1,0 +1,15 @@
+2026-07-12 — WASM plugin isolated smoke test (Linux/amd64)
+
+Environment: Linux/amd64, Go 1.26+, build tag `wasmplugins`.
+
+Command:
+  go build -tags 'wasmplugins' -o ./jul-wasm ./cmd/jul
+  ./jul-wasm -config testdata/plugins.toml
+
+Load pattern:
+  300s loop hitting http://127.0.0.1:8083/ and http://127.0.0.1:8083/blocked
+  while observing the `X-Plugin: header-inject` response header on `/`.
+
+Result:
+  success=286 errors=0
+  The plugin runtime loaded successfully and the `header-inject` plugin emitted the expected response header on every successful request.
