@@ -1,0 +1,7 @@
+=== RUN   TestSoakUDPChurn
+    soak_test.go:169: soak/udp: duration=8h0m0s workers=16 sends=54892354 peakSessions=261 cap=256
+    soak_test.go:171: soak/udp: reaped(idle=33181532 lru=494143) rejected=17917809
+    soak_test.go:172: soak/udp: goroutines 4 -> 4, heap 418400 -> 1023616 bytes
+--- PASS: TestSoakUDPChurn (28800.55s)
+PASS
+ok  	jul/internal/stream	28800.572s

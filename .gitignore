@@ -22,6 +22,7 @@ coverage.txt
 # Local runtime data (config-history snapshots, access logs, ...)
 /jul-data/
 /tmp/
+!tmp/l4-soak-8h.log
 *.pid
 *.log
 
