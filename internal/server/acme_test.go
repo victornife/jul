@@ -5,8 +5,10 @@ package server
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"reflect"
+	"sync"
 	"testing"
 
 	"jul/internal/config"
@@ -149,5 +151,97 @@ func TestListenerNextProtosPlainWhenNoACME(t *testing.T) {
 	s = &Server{cfg: cfg, ACME: &fakeACME{}}
 	if got, want := s.listenerNextProtos(":443"), []string{"h2", "http/1.1"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("non-acme-addr NextProtos = %v, want %v", got, want)
+	}
+}
+
+// TestACMERotationUnderConcurrentHandshakes exercises the cert-rotation
+// invariant: swapping the provider in a dynamicCertProvider (the hot path
+// during an ACME renewal or a config reload) must never cause a concurrent
+// GetCertificate call to return an error or a nil certificate. The test is
+// especially valuable under -race because the underlying atomic.Pointer swap
+// is the correctness guarantee.
+func TestACMERotationUnderConcurrentHandshakes(t *testing.T) {
+	dir := t.TempDir()
+
+	// Two distinct self-signed certs represent the "old" and "new" certificate
+	// that would be returned by consecutive ACME renewals.
+	certPathA, keyPathA := writeSelfSigned(t, dir, "alpha", "a.example.com")
+	certPathB, keyPathB := writeSelfSigned(t, dir, "beta", "b.example.com")
+
+	tlsCertA, err := tls.LoadX509KeyPair(certPathA, keyPathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsCertB, err := tls.LoadX509KeyPair(certPathB, keyPathB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	providerA := certProviderFunc(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return &tlsCertA, nil
+	})
+	providerB := certProviderFunc(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return &tlsCertB, nil
+	})
+
+	dyn := &dynamicCertProvider{}
+	dyn.set(providerA)
+
+	const handshakeGoroutines = 50
+	const handshakesPerGoroutine = 200
+
+	errs := make(chan error, handshakeGoroutines*handshakesPerGoroutine)
+	hello := &tls.ClientHelloInfo{ServerName: "a.example.com"}
+
+	// Start concurrent "handshake" goroutines that call GetCertificate in a
+	// tight loop. Each must receive a non-nil certificate with no error even
+	// while the provider is being swapped underneath them.
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < handshakeGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				cert, err := dyn.GetCertificate(hello)
+				if err != nil {
+					errs <- err
+					return
+				}
+				if cert == nil {
+					errs <- fmt.Errorf("GetCertificate returned nil certificate during rotation")
+					return
+				}
+			}
+		}()
+	}
+
+	// Rotate the provider repeatedly while the handshake goroutines run.
+	providers := []CertProvider{providerA, providerB}
+	for i := 0; i < 500; i++ {
+		dyn.set(providers[i%2])
+	}
+
+	// Signal workers to stop, wait for them, then drain the error channel.
+	close(done)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("GetCertificate error during concurrent rotation: %v", err)
+	}
+
+	// After rotation, the provider must still serve a valid cert.
+	cert, err := dyn.GetCertificate(hello)
+	if err != nil {
+		t.Fatalf("GetCertificate after rotation: %v", err)
+	}
+	if cert == nil {
+		t.Error("expected a non-nil certificate after rotation")
 	}
 }
