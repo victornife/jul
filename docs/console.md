@@ -535,6 +535,32 @@ never silently dropped.
 | Web application firewall (`waf`) | Security | Banner in the panel; apply diff warns; preflight rejects an enabled WAF |
 | Distributed tracing (`otel`) | Traffic Controls | Apply diff warns that spans only export from an `otel` build (config is accepted; tracing is a no-op otherwise) |
 
+## Testing the console
+
+The console has three complementary test layers:
+
+| Layer | Command | What it covers |
+| --- | --- | --- |
+| Vitest unit (361 tests) | `pnpm test` | Pure component logic, Zod schema parsing, lib helpers, React-Query mutations |
+| Go over-the-wire e2e | `go test ./internal/admin/` | Real HTTP against the admin router; request/response contract |
+| Playwright browser smoke | `pnpm e2e` | Built SPA rendered in Chromium; overview → edit route → diff → apply → rollback |
+
+### Playwright browser smoke (`e2e/smoke.spec.ts`)
+
+The smoke test mounts the **built SPA** via `vite preview` and intercepts every
+`/api/*` call with `page.route()` — no Go server is needed. This catches a
+class of bugs that pass the other two layers: schema drift between the Zod
+schemas in `client.ts` and the mock fixtures causes a `ZodError` inside the SPA
+which surfaces as a panel-error boundary, failing the assertion. Run it after
+`pnpm build`:
+
+```bash
+pnpm build          # produces internal/admin/assets/dist/
+pnpm e2e            # starts vite preview + drives Chromium headlessly
+```
+
+In CI the `console-e2e` job runs the same suite with `pnpm e2e:ci`.
+
 ## API endpoint to panel map
 
 The console SPA is driven entirely by same-origin `/api` endpoints. Each panel
