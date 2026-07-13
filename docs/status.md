@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.32 · Updated 2026-07-09
+> Version 1.32 · Updated 2026-07-13
 
 The single, canonical at-a-glance view of **every shipped feature**, its
 **maturity**, and how it stands against the nine-criteria GA bar
@@ -157,3 +157,6 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | 2026-06-29 | 1.26 | **gRPC transcoding upstream pools + plugin fetch truncation + re-audit residuals:** upstream pool support for `grpc_transcode` targets; plugin fetch response truncation guard; documentation and validation fixes from external audit round. | [status.md](status.md) |
 | 2026-07-05 | 1.30 | **Phase 2A soak completed + mass promotion to GA.** Consolidated 10-feature 8h burn-in finished (2.12M req, 0% err, 100% success) → mass-closes soak for TLS, mTLS, and OTel tracing in status + ga-push. All promoted rows now ✅. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [ga-push.md](ga-push.md) |
 | 2026-07-07 | 1.31 | **gRPC soak completed + promotion to GA.** Isolated 1h soak for transcoding (14.2M req, 0.000007% err) and passthrough (6.8M req, 0.0002% err) on Windows/amd64. Fixed `scripts/grpc-load.go` connection-pooling + body-drain to eliminate Windows ephemeral-port exhaustion on the test client (not a server bug). Both features promoted from GA — soak pending → GA. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
+| 2026-07-11 | 1.32 | **L4 stream proxy soak completed + promotion to GA.** Isolated 8h Linux soak (`TestSoakUDPChurn`) completed with 54,892,354 sends and 0 errors; goroutine/heap growth stayed bounded. Evidence logged in the soak log and status table. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [stream.md](stream.md) |
+| 2026-07-12 | 1.32 | **WASM plugin soak completed + promotion to GA.** Isolated Linux smoke and 8h soak completed with 286/33,428 successful requests and 0 errors; plugin execution remained healthy throughout. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [plugins.md](plugins.md) |
+| 2026-07-13 | 1.32 | **HTTP/3 soak completed + promotion to GA.** Isolated 8h Linux soak completed with 55,302,486 successful requests and 0 failures over QUIC/TLS on `:8443`. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [http3.md](http3.md), [ga-push.md](ga-push.md) |
