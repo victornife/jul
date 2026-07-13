@@ -70,17 +70,18 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | NGINX config importer (Y1-09) | **GA** | none — [nginx-importer.md](nginx-importer.md) doc + full directive-support matrix (top-level, http, server, location, upstream, modifiers) + 2 benchmarks (`BenchmarkParse` ~45 μs, `BenchmarkTranslate` ~6.5 μs) + `FuzzTranslate` fuzz target for parse+translate+marshal round-trip, 9-item known-limitations list, and 6-row threat note (craft-conf crash, path traversal, credential leak, info disclosure, translation misconfig, dependency trust). Evidence bundle closes remaining gaps ①②③⑥⑦⑧. Added to soak-tracking table. | M | ✅ |
 | Response cache (memory + disk) | **GA** | none — soaked 1h 2026-07-04 (1.5M req, 0% err, hit/miss/evict/revalidate verified) + Phase 2A — all criteria met ✅ | M | ✅ |
 | OTel tracing + access-log sinks (Y1-10) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, traceparent observed) — all criteria met ✅ | M | ✅ |
-| HTTP/3 over QUIC (Y1-11) | **GA** | none — soaked 1h isolated 2026-07-06 (12.99M req, 0.00% err, 100% success, QUIC+TLS on `:8443`) — all criteria met ✅ | M | ✅ |
+| HTTP/3 over QUIC (Y1-11) | **GA** | none — 8h isolated Linux soak 2026-07-13 (55,302,486 req, 0% err, 100% success, QUIC+TLS on `:8443`) — all criteria met ✅ | M | ✅ |
 | WASM plugin system (Y2-02) | **GA** | none — [plugins.md](plugins.md) doc + 19-row behaviour matrix (ABI boundary, guest containment, reload, fetch/KV guards, KV quotas), 5 benchmarks (middleware ~16.5 μs, handler ~20 μs, KV ~23 μs, parallel ~3.4 μs amortised), 5-item limitation list (request-phase only, no shared state, no streaming, one ABI, build-tag required), 7-row threat note (memory escape, CPU exhaustion, SSRF, KV DoS, upload, info leak, ABI breakage), `FuzzPluginInvoke` and `FuzzHostAllowed` fuzz targets. Evidence bundle closes remaining gaps ①②③⑥⑦⑧. Local Linux evidence: 5m smoke 2026-07-12 (286 successes, 0 errors) and 8h soak 2026-07-12 (33,428 successful requests, 0 errors). | M | ✅ |
 | L4 stream proxy (Y2-03) | **GA** | none — [stream.md](stream.md) doc + 23-row behaviour matrix (TCP/UDP relay, SNI routing, PROXY protocol, reload, preflight, UDP sessions), 4 benchmarks (`BenchmarkTCPPassthrough` ~3.2 ms, `BenchmarkTCPParallel` ~3.3 ms, `BenchmarkUDPRelay` ~33 μs, `BenchmarkUDPAdmitAtCap` up to 254 μs for 10k sessions), 5-item limitation list, 6-row threat note, fuzz targets `FuzzReadProxyHeader` and `FuzzPeekSNI`. Local Linux evidence: 8h isolated soak 2026-07-11 (`TestSoakUDPChurn`, 54,892,354 sends, 0% err, bounded goroutines/heap). | M | ✅ |
 
 > - **20 shipped features are GA with completed soak evidence. 0 remain GA — soak pending.**
 >
-> **Phase 2 soaks (2026-07-06 / 2026-07-07):**
+> **Phase 2 soaks (2026-07-06 / 2026-07-07 / 2026-07-13):**
 > - **gRPC transcoding (Y2-01)**: 1h isolated soak (14.2M req, 0.000007% err, REST/JSON → gRPC) — promoted to GA
 > - **gRPC passthrough (Y2-04)**: 1h isolated soak (6.8M req, 0.0002% err, native gRPC/h2c) — promoted to GA
-> - **HTTP/3 over QUIC (Y1-11)**: 1h isolated soak (12.99M req, 0% err, QUIC+TLS) — promoted to GA
-> - **L4 stream proxy (Y2-03)**: 1h isolated soak (4M rounds, 0% err, persistent TCP) — promoted to GA
+> - **HTTP/3 over QUIC (Y1-11)**: 8h isolated Linux soak (55,302,486 req, 0% err, QUIC+TLS) — promoted to GA
+> - **L4 stream proxy (Y2-03)**: 8h isolated Linux soak (54,892,354 sends, 0% err, UDP churn) — promoted to GA
+> - **WASM plugins (Y2-02)**: 8h isolated Linux soak (33,428 successful requests, 0% err, plugin execution preserved) — promoted to GA
 >
 > **Phase 2A consolidated soak (2026-07-06):**
 > - **8 hours, 5.05M requests, 0% errors** — proxy + auth + cache + rate-limit +

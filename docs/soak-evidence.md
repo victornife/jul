@@ -99,6 +99,46 @@ go build -tags 'wasmplugins' -o ./jul-wasm ./cmd/jul
 - This run is the first long-duration WASM plugin soak artifact produced locally and is now recorded as the authoritative long-run evidence for the WASM runtime on Linux.
 - It is still a local soak artifact rather than a CI release-gate artifact, but it provides the required long-duration evidence for the feature on this environment.
 
+### 2026-07-12 — HTTP/3 over QUIC isolated smoke test (Linux, completed)
+
+Environment: Linux/amd64, Go 1.26+, build tag `http3`.
+
+**Status:** completed successfully.
+
+**Command:**
+
+```bash
+go build -tags 'http3' -o ./jul-http3 ./cmd/jul
+./jul-http3 -config testdata/http3.toml
+```
+
+**Artifact:** [soak-artifacts/http3-smoke-5m.log](../soak-artifacts/http3-smoke-5m.log)
+
+**Result:** the isolated HTTP/3 server accepted 453,298 successful requests over a 5-minute QUIC loop with 0 failures; both the `/` and `/health` paths responded successfully over HTTP/3.
+
+- This is a smoke test only. It confirms the HTTP/3 listener accepts QUIC traffic and the harness stays healthy under sustained local traffic.
+- The longer 8h soak also completed successfully and is recorded below.
+
+### 2026-07-13 — HTTP/3 over QUIC 8h isolated soak (Linux, completed)
+
+Environment: Linux/amd64, Go 1.26+, build tag `http3`.
+
+**Status:** completed successfully.
+
+**Command:**
+
+```bash
+go build -tags 'http3' -o ./jul-http3 ./cmd/jul
+./jul-http3 -config testdata/http3.toml
+```
+
+**Artifact:** [soak-artifacts/http3-soak-8h.log](../soak-artifacts/http3-soak-8h.log)
+
+**Result:** the isolated HTTP/3 server remained healthy for the full 8h run and logged 55,302,486 successful HTTP responses across the `/` and `/health` paths with 0 failures; the QUIC listener continued to accept traffic normally throughout the run.
+
+- This run is the first long-duration HTTP/3 soak artifact produced locally and is now recorded as the authoritative long-run evidence for the QUIC listener on Linux.
+- It satisfies the ADR-0005 minimum soak duration for the single-feature HTTP/3 path on this environment.
+
 ### 2026-07-11 — L4 stream proxy 8h isolated soak (Linux, completed)
 
 Environment: Linux/amd64, Go 1.26+, tags `soak stream`, `SOAK_DURATION=8h`, `SOAK_WORKERS=16`.
