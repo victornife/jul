@@ -233,13 +233,14 @@ function ActionableStatusGroup({
               {target !== undefined && (
                 <button
                   type="button"
-                  className="ml-2 flex-shrink-0 rounded px-2 py-1 text-xs text-jul-accent hover:bg-jul-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
+                  className="ml-2 flex-shrink-0 rounded p-1 text-jul-muted hover:text-jul-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
                   aria-label={`${target.label} — ${row.name}`}
+                  title={target.label}
                   onClick={() => {
                     void navigate(target.route);
                   }}
                 >
-                  {target.label} →
+                  →
                 </button>
               )}
             </li>
