@@ -73,22 +73,105 @@ refetches in place; re-authentication, permission, and availability errors do
 not, because retrying the identical request cannot succeed. A 401 from any panel
 also raises the console-wide token prompt described above.
 
-### Dashboard
+### Overview
 
-Polls `GET /api/stats` every two seconds and shows requests/sec, in-flight
-requests, error rate, cache-hit ratio, connection count, latency (avg/p50/p95/
-p99), a requests/sec sparkline, and a status-class breakdown.
+The landing page of the console and the primary monitoring surface. Answers
+"is anything wrong?" at a glance and provides a direct path to the relevant
+configuration panel when something needs attention. Backed by
+`GET /api/overview`, polled every two seconds.
+
+#### Health band
+
+A row of chips at the top of the page gives a coarse health signal before
+scrolling into the detail below. Each chip shows a label, current value, and a
+tone (green / yellow / red):
+
+| Chip | OK | Warn | Down |
+| --- | --- | --- | --- |
+| **Traffic** | > 0 req/s | — | 0 req/s (idle) |
+| **Errors (5xx)** | 0% | > 0% | ≥ 5% |
+| **Latency p95** | < 250 ms | 250–999 ms | ≥ 1 000 ms |
+| **Backends** | all healthy | any unhealthy | — |
+| **Certificates** | all valid | any expiring ≤ 7 d | any expired |
+
+The **Backends** and **Certificates** chips are clickable and navigate to the
+Apps and TLS panels respectively.
+
+#### Live Traffic
+
+Numeric metric cards show the current snapshot: uptime, req/s, in-flight
+requests, connections, latency (avg/p50/p95/p99), error rate, status-class
+counts (2xx / 3xx / 4xx / 5xx), cache hit ratio, cache events, and HTTP method
+breakdown. All values are point-in-time from the most recent poll.
+
+**2-Minute Trends** shows six sparkline cards — one per tracked metric —
+covering the last 60 samples (~2 minutes at 2 s polling). Each card is
+keyboard-reachable and can be expanded.
+
+#### Expanded chart view
+
+Click or press Enter on any sparkline card to open the expanded chart:
+
+- **Metric description** — one sentence explaining what the metric measures and
+  why it matters operationally.
+- **Axis labels** — X: Time; Y: metric name and unit (e.g. "P95 latency (ms)").
+- **Time range** — exact start and end wall-clock timestamps and sample count.
+- **Interactive chart** — hover or use ← / → arrow keys to see the precise
+  timestamp and formatted value at each point. A hairline and circle marker
+  track the active point. Warn/critical threshold lines are drawn as dashed
+  horizontal rules where applicable. Escape closes the chart and returns focus
+  to the trigger.
+- **Summary** — current value, change versus the start of the window, trend
+  direction (▲ Rising / ▼ Falling / → Stable), volatility (low / medium /
+  high), distribution (min / avg / median / p95 / max), spike and drop counts
+  (values beyond ±2 σ), and a health status (● Healthy / ● Degraded /
+  ● Critical / ○ Unknown). When fewer than ten samples are available, trend and
+  volatility claims are suppressed and the panel states "Insufficient data for
+  trend analysis" to avoid misleading conclusions from noise.
+- **Export CSV** — copies `timestamp_ms,timestamp_local,value` rows to the
+  clipboard.
+- **Configure →** — where the metric has a direct configuration destination
+  (for example, Cache Hit Ratio links to /traffic), a footer action navigates
+  there.
+
+#### Capabilities & Configuration
+
+Shows which features are active in the running configuration, grouped into
+Traffic, Security, Protocols, Upstreams, Observability, and Extensibility. Each
+row shows a dual-encoded status indicator (coloured dot **and** the words
+"active" / "inactive"), the feature name, any available detail (counts or kinds
+— never tokens or credentials), and for features with a known configuration
+destination, a visible action button that navigates directly to the relevant
+panel:
+
+| Feature (name or group) | Navigates to |
+| --- | --- |
+| Response cache, Rate limiting, Compression | `/traffic` |
+| Access control (auth), Web application firewall | `/security` |
+| TLS, Automatic HTTPS (ACME), Mutual TLS | `/tls` |
+| Upstream pools, Active health checks, Service discovery | `/apps` |
+| WASM plugins | `/plugins` |
+| L4 stream proxy | `/streams` |
+| gRPC transcoding | `/transcode` |
+| Observability group | `/operations` |
+
+Features not in this list render as informational rows with no action button.
+
+#### Traffic Sources
+
+When traffic-sources data is available, also shows a CORS summary (preflight,
+same-origin, cross-origin counts) and top-8 tables for client hosts, origins,
+and referer hosts.
 
 ### Status
 
-A read-only overview of which shipped capabilities are active in the **running**
-configuration, grouped into Traffic, Security, Protocols, Upstreams,
-Observability, and Extensibility. Each row reports the capability, its state
-(active/off), and a short detail (counts and kinds only — never tokens, paths,
-or backend addresses). It lets an operator confirm at a glance what the running
-build is actually doing without reading the raw TOML. Backed by
-`GET /api/status`, derived from the parsed configuration; when the config is
-unavailable it renders an empty state.
+The capability status grid (Traffic, Security, Protocols, Upstreams,
+Observability, Extensibility) is now embedded in the **Overview** panel's
+*Capabilities & Configuration* section, where each row also carries a direct
+navigation action to the relevant configuration panel. See
+[Overview → Capabilities & Configuration](#capabilities--configuration) above.
+The underlying data is derived from the parsed running configuration and backed
+by `GET /api/overview`.
 
 ### Upstreams
 

@@ -8,9 +8,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { fetchOverview, type FeatureStatus, type TrafficSources } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
+import { ChartDetailPanel } from "@/components/ChartDetailPanel";
 import { PanelError } from "@/components/PanelError.tsx";
-import { Loading, Modal } from "@/components/ui.tsx";
+import { Loading } from "@/components/ui.tsx";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
+import { METRIC_META_LIST, type MetricKey } from "@/lib/metricMeta";
+import { resolveFeatureRoute } from "@/lib/featureRoutes";
 
 // Compact a large number into human-readable SI form (e.g., 1,234,567 → 1.2 M).
 function compactNumber(n: number): string {
@@ -35,10 +38,18 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
 function StatusBadge({ active }: { readonly active: boolean }) {
   return (
     <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
         active ? "bg-jul-success/15 text-jul-success" : "bg-jul-border text-jul-muted"
       }`}
     >
+      {/* Filled dot for active, empty ring for inactive — dual encoding so
+          status is not conveyed by colour alone. */}
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          active ? "bg-jul-success" : "border border-jul-muted"
+        }`}
+        aria-hidden="true"
+      />
       {active ? "active" : "inactive"}
     </span>
   );
@@ -69,12 +80,27 @@ function HealthChip({
   readonly tooltip?: string;
   readonly onClick?: (() => void) | undefined;
 }) {
+  const interactive = onClick !== undefined;
   return (
     <div
-      className={`rounded-lg border px-4 py-3 ${TONE_CLASS[tone]} ${onClick ? "cursor-pointer" : ""}`}
+      className={`rounded-lg border px-4 py-3 ${TONE_CLASS[tone]} ${interactive ? "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent" : ""}`}
       title={tooltip}
       onClick={onClick}
-      role={onClick ? "button" : undefined}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={
+        interactive ? `${label}: ${value}${tooltip ? `. ${tooltip}` : ""}` : undefined
+      }
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
     >
       <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{label}</div>
       <div className="mt-1 text-sm font-semibold">{value}</div>
@@ -174,7 +200,14 @@ function TrafficSourcesPanel({ sources }: { readonly sources: TrafficSources }) 
   );
 }
 
-function StatusGroup({ name, rows }: { readonly name: string; readonly rows: FeatureStatus[] }) {
+function ActionableStatusGroup({
+  name,
+  rows,
+}: {
+  readonly name: string;
+  readonly rows: FeatureStatus[];
+}) {
+  const navigate = useNavigate();
   return (
     <div className="rounded-lg border border-jul-border bg-jul-surface">
       <div className="border-b border-jul-border px-4 py-2">
@@ -183,18 +216,35 @@ function StatusGroup({ name, rows }: { readonly name: string; readonly rows: Fea
         </span>
       </div>
       <ul>
-        {rows.map((row) => (
-          <li
-            key={row.name}
-            className="flex items-center gap-3 border-b border-jul-border px-4 py-3 last:border-b-0"
-          >
-            <StatusBadge active={row.active} />
-            <span className="flex-1 text-sm text-jul-text">{row.name}</span>
-            {row.detail !== undefined && (
-              <span className="text-xs text-jul-muted">{row.detail}</span>
-            )}
-          </li>
-        ))}
+        {rows.map((row) => {
+          const target = resolveFeatureRoute(name, row.name);
+          return (
+            <li
+              key={row.name}
+              className="flex items-center gap-3 border-b border-jul-border px-4 py-3 last:border-b-0"
+            >
+              <StatusBadge active={row.active} />
+              <span className="flex-1 text-sm text-jul-text">{row.name}</span>
+              {row.detail !== undefined && (
+                <span className="max-w-[12rem] truncate text-xs text-jul-muted" title={row.detail}>
+                  {row.detail}
+                </span>
+              )}
+              {target !== undefined && (
+                <button
+                  type="button"
+                  className="ml-2 flex-shrink-0 rounded px-2 py-1 text-xs text-jul-accent hover:bg-jul-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
+                  aria-label={`${target.label} — ${row.name}`}
+                  onClick={() => {
+                    void navigate(target.route);
+                  }}
+                >
+                  {target.label} →
+                </button>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -210,7 +260,11 @@ export function OverviewPanel() {
 
   const history = useMetricsHistory(data?.stats);
 
-  const [activeMetric, setActiveMetric] = useState<{ name: string; data: number[]; color: string } | null>(null);
+  const [activeMetric, setActiveMetric] = useState<{
+    key: MetricKey;
+    data: number[];
+    timestamps: number[];
+  } | null>(null);
 
   if (isLoading) {
     return <Loading label="Loading overview…" />;
@@ -485,143 +539,41 @@ export function OverviewPanel() {
                 2-Minute Trends (click for detail)
               </h3>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div
-                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
-                  role="button"
-                  title="Open request rate detail"
-                  onClick={() => { setActiveMetric({ name: "Request Rate", data: history.requestsPerSec, color: "rgb(34, 197, 94)" }); }}
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                    Request Rate Trend
-                  </div>
-                  <div className="mt-2 h-12">
-                    <Sparkline
-                      data={history.requestsPerSec}
-                      height={48}
-                      width={100}
-                      color="rgb(34, 197, 94)"
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-jul-muted">
-                    {history.requestsPerSec.length} samples
-                  </div>
-                </div>
-
-                <div
-                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
-                  role="button"
-                  title="Open error rate detail"
-                  onClick={() => { setActiveMetric({ name: "Error Rate", data: history.errorRate, color: "rgb(239, 68, 68)" }); }}
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                    Error Rate Trend
-                  </div>
-                  <div className="mt-2 h-12">
-                    <Sparkline
-                      data={history.errorRate}
-                      height={48}
-                      width={100}
-                      color="rgb(239, 68, 68)"
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-jul-muted">
-                    {history.errorRate.length} samples
-                  </div>
-                </div>
-
-                <div
-                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
-                  role="button"
-                  title="Open P95 latency detail"
-                  onClick={() => { setActiveMetric({ name: "P95 Latency", data: history.latencyP95, color: "rgb(59, 130, 246)" }); }}
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                    P95 Latency Trend
-                  </div>
-                  <div className="mt-2 h-12">
-                    <Sparkline
-                      data={history.latencyP95}
-                      height={48}
-                      width={100}
-                      color="rgb(59, 130, 246)"
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-jul-muted">
-                    {history.latencyP95.length} samples
-                  </div>
-                </div>
-
-                <div
-                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
-                  role="button"
-                  title="Open in-flight detail"
-                  onClick={() => { setActiveMetric({ name: "In-flight Requests", data: history.inFlight, color: "rgb(234, 179, 8)" }); }}
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                    In-flight Trend
-                  </div>
-                  <div className="mt-2 h-12">
-                    <Sparkline
-                      data={history.inFlight}
-                      height={48}
-                      width={100}
-                      color="rgb(234, 179, 8)"
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-jul-muted">
-                    {history.inFlight.length} samples
-                  </div>
-                </div>
-
-                <div
-                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
-                  role="button"
-                  title="Open average latency detail"
-                  onClick={() => { setActiveMetric({ name: "Avg Latency", data: history.latencyAvg, color: "rgb(14, 165, 233)" }); }}
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                    Avg Latency Trend
-                  </div>
-                  <div className="mt-2 h-12">
-                    <Sparkline
-                      data={history.latencyAvg}
-                      height={48}
-                      width={100}
-                      color="rgb(14, 165, 233)"
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-jul-muted">
-                    {history.latencyAvg.length} samples
-                  </div>
-                </div>
-
-                <div
-                  className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4"
-                  role="button"
-                  title="Open cache hit ratio detail"
-                  onClick={() => { setActiveMetric({ name: "Cache Hit Ratio", data: history.cacheHitRatio, color: "rgb(168, 85, 247)" }); }}
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                    Cache Hit Ratio Trend
-                  </div>
-                  <div className="mt-2 h-12">
-                    <Sparkline
-                      data={history.cacheHitRatio}
-                      height={48}
-                      width={100}
-                      color="rgb(168, 85, 247)"
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-jul-muted">
-                    {history.cacheHitRatio.length} samples
-                  </div>
-                </div>
+                {METRIC_META_LIST.map((meta) => {
+                  const metricData = history[meta.key];
+                  return (
+                    <button
+                      key={meta.key}
+                      type="button"
+                      className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4 text-left hover:border-jul-accent/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
+                      aria-label={`${meta.name} trend. ${String(metricData.length)} samples. Click to expand.`}
+                      onClick={() => {
+                        setActiveMetric({
+                          key: meta.key,
+                          data: metricData,
+                          timestamps: history.timestamps,
+                        });
+                      }}
+                    >
+                      <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                        {meta.name} Trend
+                      </div>
+                      <div className="mt-2 h-12">
+                        <Sparkline
+                          data={metricData}
+                          height={48}
+                          width={100}
+                          color={meta.color}
+                          className="w-full"
+                          ariaLabel={`${meta.name} sparkline`}
+                        />
+                      </div>
+                      <div className="mt-1 text-xs text-jul-muted">
+                        {String(metricData.length)} samples
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -639,29 +591,21 @@ export function OverviewPanel() {
           <h2 className="text-sm font-semibold text-jul-muted">Capabilities & Configuration</h2>
           <div className="grid gap-4 lg:grid-cols-2">
             {Array.from(groups.entries()).map(([group, rows]) => (
-              <StatusGroup key={group} name={group} rows={rows} />
+              <ActionableStatusGroup key={group} name={group} rows={rows} />
             ))}
           </div>
         </div>
       )}
 
-      {activeMetric && (
-        <Modal title={activeMetric.name} onClose={() => { setActiveMetric(null); }}>
-          <div className="h-64 w-full">
-            <Sparkline
-              data={activeMetric.data}
-              height={256}
-              width={600}
-              color={activeMetric.color}
-              className="w-full"
-            />
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-jul-muted">
-            <div>Min: {Math.min(...activeMetric.data).toFixed(2)}</div>
-            <div>Avg: {(activeMetric.data.reduce((a, b) => a + b, 0) / activeMetric.data.length).toFixed(2)}</div>
-            <div>Max: {Math.max(...activeMetric.data).toFixed(2)}</div>
-          </div>
-        </Modal>
+      {activeMetric !== null && (
+        <ChartDetailPanel
+          metricKey={activeMetric.key}
+          data={activeMetric.data}
+          timestamps={activeMetric.timestamps}
+          onClose={() => {
+            setActiveMetric(null);
+          }}
+        />
       )}
     </div>
   );

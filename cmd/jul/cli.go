@@ -244,6 +244,15 @@ func cmdRun(args []string) int {
 		return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version)
 }
 
+// serve starts the composition root with the given context, reload signal,
+// configuration source, and initial configuration. It returns an exit code
+// suitable for os.Exit. It exists as a separate entry point so tests can
+// exercise the full boot → serve → shutdown lifecycle without going through
+// the CLI flag parser.
+func serve(ctx context.Context, reload <-chan struct{}, src config.Source, cfg *config.Config) int {
+	return app.Serve(ctx, reload, src, cfg, productName, version)
+}
+
 // memorySource adapts a synthesized Config to the config.Source interface for
 // the zero-config run path. Reloads re-serve the same in-memory config; file
 // watching is skipped because there is no file (see serve).

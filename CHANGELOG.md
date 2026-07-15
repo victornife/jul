@@ -12,6 +12,15 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ### Security
 - Bumped the Go toolchain from 1.26.4 to 1.26.5 in the main module, example plugin module, and container build image to clear the newly disclosed stdlib CVEs in `crypto/tls` and `os`.
 
+### Changed
+- **Console Overview panel — interactive charts, metric context, and actionable capabilities** (`internal/admin/ui/`): the Overview screen is now a genuine monitoring surface and entry point to configuration rather than a static snapshot.
+
+  **Charts**: clicking any 2-minute trend sparkline opens a `ChartDetailPanel` (replacing the bare min/avg/max modal) with a one-sentence metric description, labelled X/Y axes with units, the exact start–end wall-clock timestamp of the window, an interactive chart with hover and keyboard (← →) readout showing the precise timestamp and formatted value at each data point, warn/critical threshold lines, and a Summary section reporting current value and change versus the start of the window, trend direction (rising/falling/stable), volatility (low/medium/high), spike/drop counts, statistical distribution (min/avg/median/p95/max), and a health status derived from the same thresholds used by the health band. When fewer than ten samples are available, trend and volatility claims are suppressed rather than computed from noise. An **Export CSV** action copies `timestamp_ms,timestamp_local,value` rows to the clipboard. All six charts share one reusable `ChartDetailPanel` component and a single metric metadata record (`src/lib/metricMeta.ts`) — name, description, unit, axis labels, value formatter, thresholds, and optional configure destination — so per-metric strings are defined once and never scattered across component files.
+
+  **Capabilities & Configuration**: every row in the capabilities grid that has a known configuration destination now renders a visible action button ("Configure Cache →", "Configure WAF →", "Manage Apps →", etc.) that navigates directly to the relevant panel. Rows with no known destination remain informational and render no interactive affordance. The route map (`src/lib/featureRoutes.ts`) uses the exact group and feature-name strings returned by the Go backend (`api_status.go`), with name-level lookup taking priority over group-level so that TLS-related features in the Security group correctly navigate to `/tls` rather than `/security`.
+
+  **Accessibility**: all interactive elements — HealthChips, sparkline cards, and Capabilities row actions — are keyboard-reachable (`tabIndex`, `onKeyDown` Enter/Space); the chart SVG carries `role="img"` and `aria-label`; an `aria-live` region announces hovered data-point values to screen readers; `StatusBadge` uses a coloured dot plus the word "active"/"inactive" so status is not conveyed by colour alone; the Modal inner content scrolls independently of its header and footer. Covered by 29 new unit tests in `src/test/computeMetricSummary.test.ts` (stable, rising, falling, spike/drop detection, health status for standard and inverted-scale metrics, all-identical values, NaN filtering, and the insufficient-data guard).
+
 ## [1.32.0] – 2026-07-09
 
 ### Fixed

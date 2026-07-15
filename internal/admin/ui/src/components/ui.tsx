@@ -446,9 +446,9 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative z-50 h-3/4 w-full max-w-4xl space-y-4 rounded-lg border border-jul-border bg-jul-surface p-5 shadow-xl outline-none"
+        className="relative z-50 flex h-3/4 w-full max-w-4xl flex-col rounded-lg border border-jul-border bg-jul-surface p-5 shadow-xl outline-none"
       >
-        <div className="flex items-center justify-between">
+        <div className="flex flex-shrink-0 items-center justify-between">
           <h2 className="text-base font-semibold text-jul-text">{title}</h2>
           <button
             type="button"
@@ -459,8 +459,8 @@ export function Modal({
             ✕
           </button>
         </div>
-        <div>{children}</div>
-        {footer && <div className="flex justify-end gap-2">{footer}</div>}
+        <div className="flex-1 overflow-y-auto py-2">{children}</div>
+        {footer && <div className="flex flex-shrink-0 justify-end gap-2 pt-2">{footer}</div>}
       </div>
     </div>
   );
