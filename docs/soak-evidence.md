@@ -1000,7 +1000,7 @@ Jul access logs showed **zero entries** for port `:8092`; every failure was a cl
 **Backend:** `go run scripts/grpc-echo-server.go -port 50051` (gRPC echo service on `:50051`)  
 **Config:** `burn-in-grpc.toml` — transcoding on `:8092`, passthrough on `:8095`  
 **Load generator:** `go run scripts/grpc-load.go -mode <transcoding|passthrough> -duration 8h -workers 20`  
-**Artifact:** `/tmp/soak-transcoding.log`, `/tmp/soak-passthrough.log` (607 progress lines each, all `err=0`)
+**Artifact:** [soak-artifacts/grpc-transcode-soak-8h.log](../soak-artifacts/grpc-transcode-soak-8h.log), [soak-artifacts/grpc-passthrough-soak-8h.log](../soak-artifacts/grpc-passthrough-soak-8h.log) (607 progress lines each, all `err=0`)
 
 Both modes were run simultaneously for 8 hours on Linux/amd64.
 
