@@ -219,6 +219,12 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 		switch n {
 		case 1:
 			h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// /ready is a non-blocking probe path so the test can wait for the
+				// server to be HTTP-ready without consuming the blocking slot.
+				if r.URL.Path == "/ready" {
+					_, _ = io.WriteString(w, "ready")
+					return
+				}
 				enterOnce.Do(func() { close(entered) })
 				<-release
 				_, _ = io.WriteString(w, "v1")
@@ -250,7 +256,12 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 	reload := make(chan struct{}, 1)
 	done := make(chan error, 1)
 	go func() { done <- srv.Run(ctx, reload) }()
-	waitDialable(t, addr)
+
+	// Wait until the server is actually serving HTTP responses, not just TCP
+	// connections. Under the race detector the HTTP stack initialises slowly, so
+	// a bare TCP-dial check is not sufficient. We probe /ready, which responds
+	// immediately, rather than / which blocks in the gen-1 handler.
+	waitForServe(t, "http://"+addr+"/ready", "ready")
 
 	// Start a request that blocks inside the gen-1 handler, then wait until it
 	// is actually executing so the reload genuinely races an in-flight request.
@@ -261,7 +272,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 	}()
 	select {
 	case <-entered:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("gen-1 request never entered the handler")
 	}
 
