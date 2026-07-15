@@ -107,3 +107,6 @@ Rationale for the minimums:
   fix; do not silently retract GA.
 - Soak infrastructure becomes cheap/continuous enough to fold back in pre-GA →
   revisit whether criterion 5 returns to a blocker.
+- A new feature enters `GA — soak pending` → surface that state to operators in
+  the Console Status panel and README feature table until the soak closes.
+  Implementation tracked in [#55](https://github.com/victornife/jul/issues/55).
