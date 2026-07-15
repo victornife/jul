@@ -233,7 +233,7 @@ function ActionableStatusGroup({
               {target !== undefined && (
                 <button
                   type="button"
-                  className="ml-2 flex-shrink-0 rounded p-1 text-jul-muted hover:text-jul-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
+                  className="ml-2 flex-shrink-0 cursor-pointer rounded p-1 text-jul-muted hover:text-jul-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
                   aria-label={`${target.label} — ${row.name}`}
                   title={target.label}
                   onClick={() => {
