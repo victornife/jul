@@ -37,6 +37,9 @@ const FEATURE_NAME_ROUTES: Record<string, FeatureRoute> = {
   "WASM plugins": { route: "/plugins", label: "Manage Plugins" },
   "L4 stream proxy": { route: "/streams", label: "Manage Streams" },
   "gRPC transcoding": { route: "/transcode", label: "Configure Transcoding" },
+  "gRPC passthrough": { route: "/routes", label: "Manage Routes" },
+  "HTTP/3 (QUIC)": { route: "/tls", label: "View TLS" },
+  "Cleartext HTTP/2 (h2c)": { route: "/config", label: "Edit Config" },
 };
 
 /**
