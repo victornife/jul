@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -91,6 +92,23 @@ func main() {
 	defer cancel()
 
 	var wg sync.WaitGroup
+	var finishOnce sync.Once
+	finish := func() {
+		finishOnce.Do(func() {
+			cancel()
+			doneCh := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(doneCh)
+			}()
+			select {
+			case <-doneCh:
+			case <-time.After(2 * time.Second):
+			}
+			printSummary(st, dur)
+			os.Exit(0)
+		})
+	}
 	for i := 0; i < *workers; i++ {
 		wg.Add(1)
 		go worker(ctx, st, i)
@@ -105,23 +123,30 @@ func main() {
 		close(done)
 	}()
 
+	go func() {
+		<-time.After(dur)
+		finish()
+	}()
+
 	for {
 		select {
 		case <-done:
-			goto finish
+			finish()
+			return
 		case <-stop:
 			cancel()
-			goto finish
+			finish()
+			return
+		case <-ctx.Done():
+			cancel()
+			finish()
+			return
 		case <-ticker.C:
 			if !*quiet {
 				printProgress(st)
 			}
 		}
 	}
-
-finish:
-	wg.Wait()
-	printSummary(st, dur)
 }
 
 func targetAddr() string {
@@ -180,6 +205,9 @@ func worker(ctx context.Context, st *stats, id int) {
 		}
 
 		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return
+			}
 			st.errors.Add(1)
 			if s, ok := status.FromError(err); ok {
 				// gRPC status error (Not found, etc.)

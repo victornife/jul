@@ -215,7 +215,7 @@ translation tax is serialization, not dispatch.
 ## GA status
 
 Per ADR [0003](adr/0003-maturity-and-ga.md), transcoding is **GA**.
-The soak test (criterion 5) was completed on 2026-07-07 and is tracked in
+The soak test (criterion 5) was completed on 2026-07-15 (8 h isolated, Linux) and is tracked in
 [soak-evidence.md](soak-evidence.md) and [ga-push.md](ga-push.md).
 
 | # | GA criterion | Status |
@@ -224,7 +224,7 @@ The soak test (criterion 5) was completed on 2026-07-07 and is tracked in
 | 2 | Published benchmark numbers | ✅ this document + `bench_test.go` |
 | 3 | Documented known-limitations | ✅ this document |
 | 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
-| 5 | Long-running soak test passed | ✅ 14.2 M req, 0.000007 % err (1 h, 2026-07-07) — [soak-evidence.md](soak-evidence.md) |
+| 5 | Long-running soak test passed | ✅ 59.1 M req, 0 % err (8 h Linux, 2026-07-15) — [soak-evidence.md](soak-evidence.md) |
 | 6 | Runnable example + docs | ✅ [examples/grpc-gateway](../examples/grpc-gateway) + this doc |
 | 7 | Security / threat note | ✅ this document |
 | 8 | Fuzzing where parsing is involved | ✅ `FuzzParseTemplate` |

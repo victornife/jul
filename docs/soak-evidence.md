@@ -239,7 +239,10 @@ Tag `v1.29.0` pushed at 2026-07-03; the release workflow triggered the full
 both the **proxy** and **udp-churn** scenarios. This run exercises all features
 including the three newly queued ones: **HTTP/3 over QUIC (Y1-11)**, **WASM
 plugins (Y2-02)**, and **L4 stream proxy (Y2-03)** (UDP-churn scenario directly
-covers the L4 stream data path).
+covers the L4 stream data path). They were later completed during the 2026-07-11
+through 2026-07-13 Linux evidence pass for the 1.32 release-track documentation,
+so the historical queue entry should be read as "queued initially, completed
+later" rather than "still pending".
 
 **Local Windows runs** (2026-07-03, 2026-07-04): proxy soak fails at 32 workers
 and 16 workers — Windows ephemeral port exhaustion is a persistent client-side
@@ -265,9 +268,9 @@ GA-soak evidence is the **Linux CI release-gate artifact** (see below).
 | gRPC passthrough | ✅ soaked v1.28.0 |
 | mTLS | ✅ soaked v1.28.0 |
 | Console | ✅ soaked v1.28.0 |
-| HTTP/3 over QUIC (Y1-11) | ☐ soak pending (queued on v1.29.0) |
-| WASM plugins (Y2-02) | ☐ soak pending (queued on v1.29.0) |
-| L4 stream proxy (Y2-03) | ☐ soak pending (queued on v1.29.0, covered by udp-churn) |
+| HTTP/3 over QUIC (Y1-11) | ✅ completed later on 2026-07-13 (8h Linux soak, 55,302,486 req, 0 errors) |
+| WASM plugins (Y2-02) | ✅ completed later on 2026-07-12 (5m smoke + 8h Linux soak, 33,428 successful req, 0 errors) |
+| L4 stream proxy (Y2-03) | ✅ completed later on 2026-07-11 (8h Linux soak, 54,892,354 sends, 0 errors) |
 
 Result artifact: `soak-results` uploaded by the release workflow (see
 `.github/workflows/release.yml`).
@@ -986,6 +989,44 @@ Jul access logs showed **zero entries** for port `:8092`; every failure was a cl
 | Admin API | `:9090` reachable; access logs captured |
 
 **Conclusion:** Both gRPC features sustained **>20M combined requests over 1 hour** with **near-zero errors**. The transcoding initial "failure" was a measurement artifact of the test client (no connection reuse + no body drain), not a server defect. After fixing the harness, both paths are proven stable under sustained load. **gRPC transcoding (Y2-01) and gRPC passthrough (Y2-04) are promoted to GA.**
+
+---
+
+### 2026-07-15 — gRPC transcoding + passthrough isolated soak (Linux, 8 hours, 20 workers)
+
+**Date:** 2026-07-15  
+**Platform:** Linux/amd64  
+**Build tags:** `grpc`  
+**Backend:** `go run scripts/grpc-echo-server.go -port 50051` (gRPC echo service on `:50051`)  
+**Config:** `burn-in-grpc.toml` — transcoding on `:8092`, passthrough on `:8095`  
+**Load generator:** `go run scripts/grpc-load.go -mode <transcoding|passthrough> -duration 8h -workers 20`  
+**Artifact:** `/tmp/soak-transcoding.log`, `/tmp/soak-passthrough.log` (607 progress lines each, all `err=0`)
+
+Both modes were run simultaneously for 8 hours on Linux/amd64.
+
+**Transcoding results (REST/JSON → gRPC `:8092`):**
+
+| Metric | Value |
+| --- | --- |
+| Requests | 59,092,546 |
+| Errors | **0 (0.000%)** |
+| gRPC errors | 0 |
+| Avg latency | 6,086 µs |
+| Workers | 20 |
+| Duration | 8 h |
+
+**Passthrough results (native gRPC/h2c `:8095`):**
+
+| Metric | Value |
+| --- | --- |
+| Requests | 51,394,067 |
+| Errors | **0 (0.000%)** |
+| gRPC errors | 0 |
+| Avg latency | 6,998 µs |
+| Workers | 20 |
+| Duration | 8 h |
+
+**Conclusion:** Both gRPC features sustained over **110M combined requests over 8 hours** with **zero errors**. gRPC transcoding (Y2-01) and gRPC passthrough (Y2-04) 8-hour isolated soak gate is **CLOSED**.
 
 ---
 

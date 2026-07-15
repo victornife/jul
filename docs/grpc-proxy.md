@@ -182,7 +182,7 @@ re-originating the HTTP/2 stream.
 ## GA status
 
 Per ADR [0003](adr/0003-maturity-and-ga.md), native passthrough is **GA**.
-The soak test (criterion 5) was completed on 2026-07-07 and is tracked in
+The soak test (criterion 5) was completed on 2026-07-15 (8 h isolated, Linux) and is tracked in
 [soak-evidence.md](soak-evidence.md) and [ga-push.md](ga-push.md).
 
 | # | GA criterion | Status |
@@ -191,7 +191,7 @@ The soak test (criterion 5) was completed on 2026-07-07 and is tracked in
 | 2 | Published benchmark numbers | ✅ above + `grpcproxy_bench_test.go` |
 | 3 | Documented known-limitations | ✅ above |
 | 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
-| 5 | Long-running soak test passed | ✅ 6.8 M req, 0.0002 % err (1 h, 2026-07-07) — [soak-evidence.md](soak-evidence.md) |
+| 5 | Long-running soak test passed | ✅ 51.4 M req, 0 % err (8 h Linux, 2026-07-15) — [soak-evidence.md](soak-evidence.md) |
 | 6 | Runnable example + docs | ✅ [examples/grpc-proxy](../examples/grpc-proxy) + this doc |
 | 7 | Security / threat note | ✅ keep the listener on loopback / front with TLS; payload never inspected |
 | 8 | Fuzzing where parsing is involved | n/a — passthrough parses no payloads (opaque forward) |
