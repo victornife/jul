@@ -15,6 +15,7 @@ import (
 	"os"
 	"time"
 
+	"jul/internal/app"
 	"jul/internal/atomicfile"
 	"jul/internal/config"
 	"jul/internal/signals"
@@ -240,7 +241,7 @@ func cmdRun(args []string) int {
 
 	ctx, reloadSig, stop := signals.Listen(context.Background())
 	defer stop()
-	return serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg)
+		return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version)
 }
 
 // memorySource adapts a synthesized Config to the config.Source interface for
@@ -348,7 +349,7 @@ func cmdCheck(args []string) int {
 		}
 		return 1
 	} else {
-		if err := validateRuntimeConfig(cfg); err != nil {
+			if err := app.ValidateRuntimeConfig(cfg); err != nil {
 			if *jsonOut {
 				_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
 			} else {
