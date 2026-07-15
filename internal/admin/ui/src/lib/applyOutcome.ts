@@ -30,6 +30,10 @@ export type ApplyOutcomeKind =
   // config and is still serving the previous one — a degraded, not failed,
   // apply that needs operator attention.
   | "partial-reload"
+  // Accepted, swap completed, but the reload exceeded the operator-configured
+  // reload_timeout. The new config is serving; the timeout is advisory and
+  // a slow reload should be investigated.
+  | "reload-timed-out"
   // Valid but NOT applied: the change is fixed at process start, so nothing was
   // saved and a restart is required for it to take effect.
   | "restart-required";
@@ -62,6 +66,14 @@ export interface ApplyOutcomeInput {
   readonly streamStatus?: string;
   /** Operator-facing message for a restart-required (not accepted) apply. */
   readonly restartMessage?: string;
+  /**
+   * True when the server's previous_reload.timed_out flag was set: the swap
+   * completed but exceeded the configured reload_timeout. The new config is
+   * serving; the slow reload should be investigated and the timeout raised if
+   * the config has grown. Distinct from restart-required (config not saved)
+   * and partial-reload (subsystem failed to activate).
+   */
+  readonly reloadTimedOut?: boolean;
 }
 
 /**
@@ -94,6 +106,23 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
         msg && msg.length > 0
           ? msg
           : "This change is valid but cannot be applied while the server is running. Nothing was saved; update the configuration file and restart the server for it to take effect.",
+      failures: [],
+    };
+  }
+
+  // A timed-out reload: the config was saved and the swap completed, but it
+  // exceeded the configured reload_timeout. The new config is serving. Surface
+  // this as a warning so the operator investigates slow reload paths or raises
+  // the timeout. Takes precedence over partial-reload and reload-pending.
+  if (input.reloadTimedOut) {
+    return {
+      kind: "reload-timed-out",
+      severity: "warning",
+      blocking: false,
+      title: "Applied — reload exceeded the configured timeout",
+      message:
+        "The configuration was saved and is now serving, but the reload took longer than the configured reload_timeout. " +
+        "Investigate slow reload paths (WAF rule compilation, WASM plugin loading) or increase reload_timeout in [global].",
       failures: [],
     };
   }

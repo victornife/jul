@@ -103,6 +103,33 @@ jobs:
       - name: go test
         run: go test -tags "${{ matrix.tags }}" ./...
 
+  test-macos:
+    name: test-macos (${{ matrix.profile }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: lean
+            tags: ""
+          - profile: full
+            tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # A macOS lane catches Darwin-specific socket and process lifecycle bugs:
+      # kqueue vs epoll differences, file-descriptor limits, and any path logic
+      # that diverges on macOS. Race is not run here; it is covered on the Linux
+      # `race` job. The release workflow already builds Darwin binaries; this job
+      # ensures they are test-validated before publication.
+      - name: go build
+        run: go build -tags "${{ matrix.tags }}" ./...
+      - name: go test
+        run: go test -tags "${{ matrix.tags }}" ./...
+
   race:
     name: test -race
     runs-on: ubuntu-latest

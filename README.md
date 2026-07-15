@@ -23,7 +23,7 @@ interface — all in a single static, dependency-free binary.
 - **License:** AGPL-3.0
 
 > Where this is headed: see the [vision](docs/vision/) and the
-> [roadmap](docs/roadmap/) (Years 1–5), with detailed per-feature
+> [roadmap](docs/roadmap/), with detailed per-feature
 > [engineering specs](docs/specs/). Durable technical decisions are
 > recorded as [ADRs](docs/adr/), and how the direction evolves is tracked in
 > the [reviews & decision log](docs/reviews/).
@@ -31,6 +31,27 @@ interface — all in a single static, dependency-free binary.
 > New to HTTP, proxies, TLS, caching, or observability? The
 > [concepts appendix](docs/vision/appendix.md) walks through how a request
 > travels through modern edge infrastructure, from first principles.
+
+---
+
+## Who is Jul.IA for?
+
+**Jul.IA is for:** solo operators and small infrastructure teams who want
+NGINX-grade routing and reverse proxying — plus protocol gateway capabilities
+(gRPC transcoding, L4 TCP/UDP proxying) — in a single binary, configured in
+TOML, without NGINX's operational complexity. Operators who want a built-in
+observability console without standing up a separate tool. Teams migrating from
+NGINX who want a gentler on-ramp.
+
+**Jul.IA is not the right tool if you need:**
+- **Fleet or multi-node management** — Jul.IA runs on one node; fleet
+  control planes are a demand-gated future milestone.
+- **Kubernetes Ingress or Gateway API** — no K8s controller ships today;
+  use NGINX Ingress, Envoy Gateway, or Traefik.
+- **Full service mesh or xDS** — use Envoy, Istio, or Linkerd.
+- **Multi-tenant edge / SaaS CDN** — Jul.IA has no tenant isolation layer.
+- **Envoy-level extensibility or ecosystem** — Jul.IA's plugin system is
+  WASM-based and purpose-fit, not a general xDS/filter chain.
 
 ---
 
@@ -44,16 +65,14 @@ glance:
 | **GA** | Core HTTP, TLS & ACME, Authentication, mTLS, Console, Active health checks, WAF, Rate limiting, Compression, OTel tracing, Response cache, Zero-config + `jul lint`, NGINX importer, HTTP/3, gRPC transcoding + passthrough, Service discovery, Secrets references, WASM plugins, L4 stream proxy |
 | **GA — soak pending** | *(none — all shipped features are GA)* |
 
-> **All shipped features are now GA**, including the post-GA soak gate per
+> **All shipped features meet Jul.IA's nine-criteria GA bar** (conformance
+> matrix, benchmarks, docs, examples, security threat note, fuzzing where
+> applicable, stable config/API contract, and Console surface), including the
+> post-GA soak gate per
 > [ADR 0005](docs/adr/0005-soak-post-ga-gate.md). See
-> [`docs/status.md`](docs/status.md) for the full nine-criteria matrix and
-> per-feature soak-evidence links, and [`docs/ga-push.md`](docs/ga-push.md) for
-> the push log. The final promotions were a consolidated **Phase 2A** ~8-hour
-> soak (2026-07-06, 5.05M req, 0% err, 13 features simultaneously) covering
-> service discovery, secrets, WASM plugins, and the L4 stream proxy, and a
-> dedicated **gRPC soak** (2026-07-07, 14.2M transcoding + 6.8M passthrough req,
-> ~0% err). A soak failure on a GA feature is a release-blocking regression, not
-> a reason to retract the label.
+> [`docs/status.md`](docs/status.md) for the full matrix and per-feature
+> soak-evidence links. A soak failure on a GA feature is a release-blocking
+> regression, not a reason to retract the label.
 
 Many features require an opt-in **build tag** (e.g. `grpc`, `acme`,
 `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default
@@ -189,12 +208,13 @@ Print the version:
 
 ```text
 jul [flags]                                   run the server (default)
+jul serve [-config f]                         run the server (explicit form)
 jul check [-config f] [-json] [-quiet]        full runtime preflight check
 jul healthcheck [-config f] [-addr h:p | -url u] [-ready] [-timeout d] [-json] [-quiet]
                                               probe a running server's health endpoint
 jul lint [-config f] [-strict] [-json] [-quiet]
                                               validate + best-practice checks
-jul fmt  [-config f] [-w]                     rewrite the config in canonical TOML
+jul fmt  [-config f] [-w] [-diff]             rewrite the config in canonical TOML
 jul run  --serve <dir> | --proxy <target> [--listen addr]
                                               run a zero-config server (no file)
 jul import nginx [-o out.toml] [-strict] <nginx.conf>
@@ -202,10 +222,10 @@ jul import nginx [-o out.toml] [-strict] <nginx.conf>
 jul version [-json]                           print version and build metadata
 jul completion <bash|zsh|fish|powershell>     print a shell completion script
 
-Legacy flags (default command, still supported):
+Legacy flags (default command, still supported; deprecated — prefer the subcommands above):
   --config string   path to the TOML configuration file (default "server.toml")
   --check           validate the configuration and exit  (prefer "jul check")
-  --version         print version and exit
+  --version         print version and exit               (prefer "jul version")
 ```
 
 ### `jul check`
@@ -261,8 +281,10 @@ under `-strict`. Parse errors point at the offending line and column.
 ### `jul fmt`
 
 Rewrites the configuration into canonical TOML. By default it prints to stdout;
-`-w` writes the result back to the file. Comments and original formatting are
-not preserved.
+`-w` writes the result back to the file. `-diff` shows a unified diff of the
+changes without writing: exits 0 when nothing would change, 1 when changes are
+needed (useful for CI enforcement). Comments and original formatting are not
+preserved.
 
 ### `jul run` (zero-config)
 

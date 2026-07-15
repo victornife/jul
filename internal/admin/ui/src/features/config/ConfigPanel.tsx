@@ -65,12 +65,14 @@ export function ConfigPanel() {
   const [draft, setDraft] = useState<string | null>(null);
   const [baseline, setBaseline] = useState("");
   const [confirming, setConfirming] = useState(false);
-  // applied holds the accepted-apply result: the post-apply capability status
-  // and the server's pending_reload flag. The live outcome (fully live, still
-  // reloading, or a partial subsystem failure) is derived from this plus the
-  // post-apply runtime snapshot below, so the operator sees an explicit outcome
-  // rather than an unconditional "saved" (AUX-02).
-  const [applied, setApplied] = useState<{ status: FeatureStatus[]; pendingReload: boolean } | null>(
+  // applied holds the accepted-apply result: the post-apply capability status,
+  // the server's pending_reload flag, and whether the previous reload exceeded
+  // the configured reload_timeout (surfaced via previous_reload.timed_out). The
+  // live outcome (fully live, still reloading, partial subsystem failure, or a
+  // timed-out reload) is derived from these signals plus the post-apply runtime
+  // snapshot below, so the operator sees an explicit outcome rather than an
+  // unconditional "saved" (AUX-02).
+  const [applied, setApplied] = useState<{ status: FeatureStatus[]; pendingReload: boolean; reloadTimedOut: boolean } | null>(
     null,
   );
 
@@ -146,7 +148,7 @@ export function ConfigPanel() {
     mutationFn: (confirmAdmin: boolean) => applyConfig(current, baseVersion, confirmAdmin),
     onSuccess: (res) => {
       setBaseline(current);
-      setApplied({ status: res.status, pendingReload: res.pending_reload ?? true });
+      setApplied({ status: res.status, pendingReload: res.pending_reload ?? true, reloadTimedOut: res.previous_reload?.timed_out ?? false });
       setConfirming(false);
       // Advance the token to the freshly-applied version so a follow-up edit
       // does not trip a spurious conflict.
@@ -177,7 +179,7 @@ export function ConfigPanel() {
       setBaseline(candidate);
       setDraft(candidate);
       setBaseVersion(res.version ?? undefined);
-      setApplied({ status: res.status ?? [], pendingReload: res.pending_reload ?? true });
+      setApplied({ status: res.status ?? [], pendingReload: res.pending_reload ?? true, reloadTimedOut: res.previous_reload?.timed_out ?? false });
       setConfirming(false);
       setConflictVersion(undefined);
       void qc.invalidateQueries();
@@ -233,6 +235,7 @@ export function ConfigPanel() {
         accepted: true,
         pendingReload: applied.pendingReload,
         runtimeObserved: postApply.isSuccess,
+        reloadTimedOut: applied.reloadTimedOut,
         ...(streamStatus !== undefined ? { streamStatus } : {}),
       });
     }

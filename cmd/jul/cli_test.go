@@ -77,8 +77,8 @@ listen = ":8080"
 
 func TestDispatchSubcommand(t *testing.T) {
 	cases := map[string]bool{
-		"lint": true, "fmt": true, "run": true, "import": true,
-		"-config": false, "serve": false, "": false,
+		"lint": true, "fmt": true, "run": true, "serve": true, "import": true,
+		"-config": false, "": false,
 	}
 	for arg, wantHandled := range cases {
 		var args []string
@@ -87,7 +87,7 @@ func TestDispatchSubcommand(t *testing.T) {
 		}
 		// Only check the routing decision, not execution, for recognized verbs by
 		// using an unknown flag that makes each handler return quickly.
-		if arg == "lint" || arg == "fmt" || arg == "run" || arg == "import" {
+		if arg == "lint" || arg == "fmt" || arg == "run" || arg == "import" || arg == "serve" {
 			capture(t, func() int {
 				handled, _ := dispatchSubcommand(args)
 				if !handled {

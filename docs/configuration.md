@@ -91,7 +91,7 @@ redact_min_secret_length = 4
 | `log_format` | string | `text` (human-readable) or `json` |
 | `access_log` / `error_log` | string | Log destinations |
 | `shutdown_timeout` | duration | Grace period to drain in-flight requests on shutdown (also bounds the HTTP/3 drain) |
-| `reload_timeout` | duration | Maximum duration for a configuration reload before it is reported as `timed_out`. Zero or omitted defaults to 10s. The timeout is advisory: the swap still completes, but a warning is logged. See [reload-semantics.md](reload-semantics.md) |
+| `reload_timeout` | duration | Maximum duration for a configuration reload before it is reported as `timed_out`. Zero or omitted defaults to 10s. The timeout is advisory: the swap still completes, but a warning is logged and the apply response includes `previous_reload.timed_out: true`. The Console surfaces this as a distinct "Applied — reload exceeded the configured timeout" warning so the operator knows to investigate slow reload paths (WAF rule compilation, WASM plugin loading, large config) or raise this value. See [reload-semantics.md](reload-semantics.md) |
 | `redact_min_secret_length` | int | Shortest resolved secret value masked from logs; `0` uses the default (4). Lower it (down to 1) for short secrets, accepting possible masking of incidental log text |
 
 Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`, `512m`, etc.

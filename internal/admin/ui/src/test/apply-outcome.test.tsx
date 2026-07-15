@@ -128,6 +128,33 @@ describe("deriveApplyOutcome", () => {
     expect(o.kind).toBe("restart-required");
     expect(o.message).toMatch(/restart the server/i);
   });
+
+  it("reload-timed-out: accepted but previous reload exceeded timeout", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: true,
+      runtimeObserved: true,
+      streamStatus: "ok",
+      reloadTimedOut: true,
+    });
+    expect(o.kind).toBe("reload-timed-out");
+    expect(o.severity).toBe("warning");
+    expect(o.blocking).toBe(false);
+    expect(o.failures).toHaveLength(0);
+    expect(o.message).toMatch(/reload_timeout/i);
+  });
+
+  it("reload-timed-out outranks partial-reload and reload-pending", () => {
+    // A timed-out reload takes precedence over stream failure and pending state.
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: true,
+      runtimeObserved: false,
+      streamStatus: "failed: bind error",
+      reloadTimedOut: true,
+    });
+    expect(o.kind).toBe("reload-timed-out");
+  });
 });
 
 describe("ApplyOutcomeBanner", () => {
@@ -177,6 +204,23 @@ describe("ApplyOutcomeBanner", () => {
     const el = screen.getByRole("alert");
     expect(el).toHaveAttribute("data-outcome", "restart-required");
     expect(el).toHaveTextContent("Restart required");
+  });
+
+  it("renders a reload-timed-out apply as a warning alert", () => {
+    render(
+      <ApplyOutcomeBanner
+        outcome={bannerFor({
+          accepted: true,
+          pendingReload: true,
+          runtimeObserved: true,
+          streamStatus: "ok",
+          reloadTimedOut: true,
+        })}
+      />,
+    );
+    const el = screen.getByRole("alert");
+    expect(el).toHaveAttribute("data-outcome", "reload-timed-out");
+    expect(el).toHaveTextContent("reload exceeded");
   });
 
   it("shows the capability tally only for a non-blocking outcome", () => {

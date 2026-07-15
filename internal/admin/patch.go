@@ -1347,5 +1347,14 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		"diff":           diffConfigs(beforeCfg, cfg),
 		"status":         status,
 		"message":        "Structured patch validated and saved. The live runtime is reloading to apply it.",
+		// previous_reload mirrors the /api/config/apply response: carries
+		// timed_out=true when the prior reload exceeded the configured
+		// reload_timeout so the Console can surface a slow-reload warning.
+		"previous_reload": func() interface{} {
+			if s.deps.LastReload == nil {
+				return nil
+			}
+			return s.deps.LastReload()
+		}(),
 	})
 }

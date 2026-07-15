@@ -41,6 +41,7 @@ binary.
 ### Extending and contributing
 - **[Project layout](architecture.md)** — How the repository is organized.
 - **[ADRs](adr/)** — Architecture Decision Records for durable design choices.
+- **[Reviews & decision log](reviews/)** — Dated architecture reviews, product direction changes, and audit findings that shaped the current design.
 - **[Engineering specs](specs/)** — Year-by-year execution plans and detailed feature specs.
 - **[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Where the project is headed.
 - **[Release process](release.md)** — How releases are cut, versioned, and signed.

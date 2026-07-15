@@ -1132,6 +1132,19 @@ export class ConfigRejectedError extends Error {
   }
 }
 
+// ReloadSnapshotSchema mirrors the Go admin.ReloadSnapshot: the outcome and
+// timing of the most recent configuration reload. The server includes it in
+// the apply response as previous_reload so the Console can surface a slow
+// reload (timed_out) as a distinct, operator-legible outcome.
+export const ReloadSnapshotSchema = z.object({
+  ok: z.boolean(),
+  timed_out: z.boolean().optional(),
+  duration: z.number().optional(),
+  at: z.string().optional(),
+  error: z.string().optional(),
+});
+export type ReloadSnapshot = z.infer<typeof ReloadSnapshotSchema>;
+
 export const ApplyResultSchema = z.object({
   ok: z.literal(true),
   // pending_reload reflects the server's truthfulness contract: the config has
@@ -1145,6 +1158,10 @@ export const ApplyResultSchema = z.object({
   version: z.string().optional(),
   message: z.string().optional(),
   status: z.array(FeatureStatusSchema),
+  // previous_reload is the outcome of the most recent reload before this apply.
+  // When timed_out is true the prior reload exceeded reload_timeout; the new
+  // config is serving but the slow path should be investigated.
+  previous_reload: ReloadSnapshotSchema.optional(),
 });
 export type ApplyResult = z.infer<typeof ApplyResultSchema>;
 
@@ -1275,6 +1292,8 @@ export const PatchApplyResultSchema = z.object({
   // status is the post-apply runtime delta derived from the persisted config.
   status: z.array(FeatureStatusSchema).optional(),
   message: z.string().optional(),
+  // previous_reload: see ApplyResultSchema for semantics.
+  previous_reload: ReloadSnapshotSchema.optional(),
 });
 export type PatchApplyResult = z.infer<typeof PatchApplyResultSchema>;
 

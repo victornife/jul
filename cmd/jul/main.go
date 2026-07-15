@@ -54,6 +54,8 @@ func run() int {
 	flag.Parse()
 
 	if showVersion {
+		// Legacy flag: prefer `jul version` (see usage).
+		fmt.Fprintln(os.Stderr, "Deprecation notice: `jul --version` is kept for compatibility; prefer `jul version`.")
 		fmt.Printf("%s %s\n", productName, version)
 		return 0
 	}
@@ -80,6 +82,8 @@ func run() int {
 		return 1
 	}
 	if checkOnly {
+		// Legacy flag: prefer `jul check` (see usage).
+		fmt.Fprintln(os.Stderr, "Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.")
 		fmt.Printf("configuration %s is valid\n", src.Name())
 		return 0
 	}

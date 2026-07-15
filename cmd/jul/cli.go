@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"jul/internal/app"
@@ -45,6 +46,8 @@ func dispatchSubcommand(args []string) (handled bool, code int) {
 		return true, cmdFmt(args[1:])
 	case "run":
 		return true, cmdRun(args[1:])
+	case "serve":
+		return true, cmdServe(args[1:])
 	case "check":
 		return true, cmdCheck(args[1:])
 	case "healthcheck":
@@ -67,13 +70,14 @@ func usage() {
 
 Usage:
   jul [flags]                          run the server (default)
+  jul serve [-config f]                run the server (explicit form)
   jul check [-config f] [-json] [-quiet]
                                        full runtime preflight check
   jul healthcheck [-config f] [-addr host:port | -url u] [-ready] [-timeout d]
                                        probe the admin health endpoint (exit 0 healthy, 1 unhealthy)
   jul lint [-config f] [-strict] [-json] [-quiet]
                                        validate and report best-practice warnings
-  jul fmt  [-config f] [-w]            rewrite the config in canonical TOML
+  jul fmt  [-config f] [-w] [-diff]    rewrite the config in canonical TOML
   jul run  --serve <dir> | --proxy <target> [--listen addr]
                                        run a zero-config server (no file needed)
   jul import nginx [-o out.toml] [-strict] <nginx.conf>
@@ -166,6 +170,7 @@ func cmdFmt(args []string) int {
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
 	write := fs.Bool("w", false, "write the result back to the file instead of stdout")
+	diff := fs.Bool("diff", false, "show a diff of the changes without writing; exits 1 when changes would be made")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -186,6 +191,19 @@ func cmdFmt(args []string) int {
 		return 1
 	}
 
+	if *diff {
+		// Print a simple line-level unified diff to stdout.
+		// Exit 0 when no changes would be made, 1 when there are changes.
+		if bytes.Equal(orig, out) {
+			return 0
+		}
+		fmt.Fprintf(stdout, "--- %s (original)\n+++ %s (formatted)\n", *configPath, *configPath)
+		origLines := splitLines(string(orig))
+		outLines := splitLines(string(out))
+		writeUnifiedDiff(stdout, origLines, outLines)
+		return 1
+	}
+
 	if !*write {
 		_, _ = stdout.Write(out)
 		return 0
@@ -199,6 +217,56 @@ func cmdFmt(args []string) int {
 	}
 	fmt.Fprintf(stderr, "formatted %s\n", *configPath)
 	return 0
+}
+
+// splitLines splits s into lines, preserving whether each line ends with \n.
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	// strings.Split on a trailing newline produces an empty final element;
+	// drop it so we do not emit a spurious empty line in the diff.
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// writeUnifiedDiff writes a minimal unified diff (no context lines) of two
+// line slices to w. It is intentionally simple: it outputs changed blocks
+// with hunk headers so operators can see what fmt would change.
+func writeUnifiedDiff(w io.Writer, a, b []string) {
+	// Build a simple LCS-free diff: scan both slices and emit changed regions.
+	// This is not a full Myers diff, but it is correct and readable for
+	// configuration files where entire blocks change between canonical forms.
+	i, j := 0, 0
+	for i < len(a) || j < len(b) {
+		if i < len(a) && j < len(b) && a[i] == b[j] {
+			i++
+			j++
+			continue
+		}
+		// Find the end of the changed region in both slices.
+		ai, bj := i, j
+		for i < len(a) && (j >= len(b) || a[i] != b[j]) {
+			i++
+		}
+		for j < len(b) && (i >= len(a) || a[i] != b[j]) {
+			j++
+		}
+		// Emit the hunk.
+		fmt.Fprintf(w, "@@ -%d,%d +%d,%d @@\n",
+			ai+1, i-ai,
+			bj+1, j-bj,
+		)
+		for k := ai; k < i; k++ {
+			fmt.Fprintf(w, "-%s\n", a[k])
+		}
+		for k := bj; k < j; k++ {
+			fmt.Fprintf(w, "+%s\n", b[k])
+		}
+	}
 }
 
 // cmdRun starts the server from a synthesized zero-config profile: --serve runs
@@ -316,6 +384,39 @@ func wantColor(w io.Writer) bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// cmdServe starts the server from a configuration file. It is the explicit,
+// discoverable form of the default bare `jul` invocation — `jul serve` and
+// `jul` are equivalent — provided so tab-completion and help text surface the
+// command grammar naturally. Exit codes: 0 clean shutdown, 1 error.
+func cmdServe(args []string) int {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	src := config.NewTOMLSource(*configPath)
+	cfg, err := src.Load()
+	if err != nil {
+		if _, statErr := os.Stat(*configPath); os.IsNotExist(statErr) {
+			fmt.Fprintf(stderr, "error: no configuration file at %q\n\n", *configPath)
+			fmt.Fprintln(stderr, "Start without a config file using zero-config mode:")
+			fmt.Fprintln(stderr, "  jul run --serve .              # serve the current directory")
+			fmt.Fprintln(stderr, "  jul run --proxy http://:3000   # reverse-proxy a local app")
+			return 1
+		}
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	if err := app.ValidateRuntimeConfig(cfg); err != nil {
+		fmt.Fprintf(stderr, "invalid configuration in %s:\n%v\n", src.Name(), err)
+		return 1
+	}
+	ctx, reloadSig, stop := signals.Listen(context.Background())
+	defer stop()
+	return app.Serve(ctx, reloadSig, src, cfg, productName, version)
 }
 
 // cmdCheck performs a full runtime preflight of the configuration. It validates
