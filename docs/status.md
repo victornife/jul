@@ -8,7 +8,7 @@ The single, canonical at-a-glance view of **every shipped feature**, its
 
 > For a critical, evidence-based assessment of the repository — including scrutiny of
 > the maturity and soak claims on this page — see the current
-> [Full Repository Audit (2026-07-09)](reviews/jul_full_repository_audit_2026-07-09.md).
+> [Full Repository Audit (2026-07-09, v1.1 updated 2026-07-16)](reviews/jul_full_repository_audit_2026-07-09.md).
 
 **Keep this current.** When a feature's maturity or any GA criterion changes,
 update this file — it is step 2 of the roadmap

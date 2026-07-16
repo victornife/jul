@@ -1,13 +1,18 @@
 # Reviews & decision log
 
-> Version 1.3 · Updated 2026-07-09
+> Version 1.4 · Updated 2026-07-16
 
 > **📌 Single source of truth for current repository state:**
-> [**Full Repository Audit (2026-07-09)**](jul_full_repository_audit_2026-07-09.md).
+> [**Full Repository Audit (2026-07-09) — v1.1 updated 2026-07-16**](jul_full_repository_audit_2026-07-09.md).
 > It consolidates and, for *present-state* purposes, supersedes the point reviews
 > below. The documents below remain the authoritative record of *past decisions*
 > (what was adopted / reframed / deferred / rejected); the consolidated audit is
 > the authoritative record of *where the code and product stand now*.
+>
+> **v1.1 update (2026-07-16):** § 0.1 reconciliation added — all P0/P1 July-9 findings resolved
+> (go1.26.5, four RG-1 isolated 8h Linux soaks, composition-root extraction complete). Primary
+> open item: Console RBAC Phase 1 (N-4, design-complete, not yet implemented). See the reconciliation
+> table in § 0.1 for the full current status of every finding.
 
 This folder is the **decision log** for Jul.IA: external/internal reviews that have
 been evaluated, plus the explicit record of *what we adopted, reframed, deferred,
@@ -23,7 +28,8 @@ durable, promoted to an [ADR](../adr/).
 
 | Date reviewed | Document | Disposition |
 | --- | --- | --- |
-| 2026-07-09 | [Full Repository Audit (2026-07-09)](jul_full_repository_audit_2026-07-09.md) | **Authoritative — current-state single source of truth** |
+| 2026-07-16 | [Full Repository Audit (2026-07-09) — v1.1](jul_full_repository_audit_2026-07-09.md) | **Authoritative — current-state single source of truth** · v1.1 reconciliation adds § 0.1 tracking all findings against Wave A/B work and RG-1 soak closure |
+| 2026-07-09 | [Full Repository Audit (2026-07-09)](jul_full_repository_audit_2026-07-09.md) | v1.0 (original) — see v1.1 for updated status |
 | 2026-07-02 | [Full Repository Audit (2026-07)](previous_reviews/jul_full_repository_audit_2026-07.md) | Superseded (historical — see `previous_reviews/`) |
 | 2026-06-21 | [Protocol Adapters — Product Strategy](jul_protocol_adapters_product_strategy.md) | Adopted (with scoping) |
 | 2026-06-21 | [Roadmap, Vision & Specs — Critical Product Review](jul_roadmap_vision_specs_critical_review.md) | Adopted / Reframed |
@@ -48,6 +54,8 @@ each carries a dated status banner and lives under [`previous_reviews/`](previou
 - [ADR 0003 — Maturity model, GA bar, and evidence gates](../adr/0003-maturity-and-ga.md).
 - [ADR 0004 — Console-first / UI invariants (Operable by design)](../adr/0004-console-ui-invariants.md).
 - [ADR 0006 — Console v2: build-time SPA substrate (single-binary preserved)](../adr/0006-console-v2-stack.md).
+- [ADR 0007 — Composition-root extraction](../adr/0007-composition-root-monolith.md) — **closed 2026-07-15** (`main.go` < 100 LOC; all composition helpers in `internal/app/`).
+- [ADR 0010 — Console RBAC design](../adr/0010-console-rbac.md) — design accepted; implementation pending (backlog D1).
 
 ## Synthesis
 
