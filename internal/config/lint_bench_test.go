@@ -17,7 +17,7 @@ func BenchmarkLintCleanConfig(b *testing.B) {
 			TLS:       &TLSConfig{Enabled: true, Cert: "c", Key: "k", MinVersion: "1.3"},
 			Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}},
 		}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "${env:T}"},
 	}
 	b.ResetTimer()

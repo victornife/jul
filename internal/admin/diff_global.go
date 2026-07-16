@@ -48,15 +48,15 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 // diffGlobalCompression compares the [compression] block.
 func diffGlobalCompression(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Compression, after.Compression
-	if b.Enabled != a.Enabled {
+	if b.IsEnabled() != a.IsEnabled() {
 		action := "Enable"
-		if !a.Enabled {
+		if !a.IsEnabled() {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "compression", Name: "global", Detail: action + " response compression"}, "compression")
 		return
 	}
-	if !a.Enabled {
+	if !a.IsEnabled() {
 		return
 	}
 	if strings.Join(b.Encoders, ",") != strings.Join(a.Encoders, ",") {

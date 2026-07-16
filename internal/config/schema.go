@@ -623,8 +623,17 @@ type HTTP3Config struct {
 // middleware selects the best encoder from the request's Accept-Encoding header.
 // gzip is always available; brotli ("br") and zstd require their build tags and
 // are reported as "not compiled in this build" at startup otherwise.
+//
+// Enabled semantics (auto-detect):
+//   - nil (key absent): enabled when any other setting is non-zero; an empty
+//     [compression] block or an absent block resolves to disabled.
+//   - explicit true: always enabled regardless of other settings.
+//   - explicit false: always disabled regardless of other settings.
+//
+// After config.Parse Enabled is always non-nil; callers should prefer
+// IsEnabled() over dereferencing the pointer directly.
 type CompressionConfig struct {
-	Enabled bool `toml:"enabled"`
+	Enabled *bool `toml:"enabled"`
 	// Encoders lists allowed content codings in server-preference order, each
 	// one of "gzip", "br", or "zstd". Defaults to ["gzip"] when enabled.
 	Encoders []string `toml:"encoders"`
@@ -642,11 +651,20 @@ type CompressionConfig struct {
 	Precompressed bool `toml:"precompressed"`
 }
 
+// IsEnabled reports whether compression is active. It honours explicit true/false
+// values and returns false for a nil pointer (the zero value before Parse).
+// Prefer this over dereferencing Enabled directly.
+func (c CompressionConfig) IsEnabled() bool { return c.Enabled != nil && *c.Enabled }
+
+// Bool returns a pointer to b. It is a convenience helper for constructing
+// *bool config fields in struct literals and tests.
+func Bool(b bool) *bool { return &b }
+
 // RateLimitConfig configures request rate limiting (token bucket) plus a
 // per-listener concurrent-connection cap. It applies globally and can be
 // overridden per location (rate/burst/key only). Disabled by default.
 type RateLimitConfig struct {
-	Enabled bool `tomm:"enabled"`
+	Enabled bool `toml:"enabled"`
 	// Key selects the bucket identity: "ip" (client address, the default),
 	// "header:<Name>" (a request header value), or "jwt:<claim>" (a validated
 	// JWT claim once auth is configured). Untrusted X-Forwarded-For is never
@@ -806,9 +824,9 @@ type AdminConfig struct {
 	// Defaults to 32 when admin is enabled and upload is enabled.
 	PluginUploadMaxSize int `toml:"plugin_upload_max_size"`
 	// PluginUploadEnabled controls whether the admin console allows uploading
-	// .wasm plugin modules. When nil (default) and admin is enabled, upload is
-	// enabled. An explicit false disables the upload endpoint regardless of
-	// PluginUploadMaxSize.
+	// .wasm plugin modules. The parser always sets this to an explicit false when
+	// the admin block is enabled and the key is absent, so upload is disabled by
+	// default. An explicit true is required to allow uploads.
 	PluginUploadEnabled *bool `toml:"plugin_upload_enabled"`
 }
 

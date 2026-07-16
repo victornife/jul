@@ -50,7 +50,7 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				Auth:              loc.Auth != nil,
 				Cache:             loc.Cache,
 				RateLimit:         loc.RateLimit != nil && loc.RateLimit.Enabled,
-				Compression:       c.Compression.Enabled,
+				Compression:       c.Compression.IsEnabled(),
 				Secure:            srv.TLS != nil && srv.TLS.Enabled,
 				RequireClientCert: loc.RequireClientCert,
 			}
@@ -546,7 +546,7 @@ func wafDistribution(c *config.Config) wafDist {
 
 func projectTrafficControls(c *config.Config) TrafficControlsProjection {
 	tcp := TrafficControlsProjection{}
-	if c.Compression.Enabled {
+	if c.Compression.IsEnabled() {
 		tcp.Compression = &CompressionProjection{}
 		tcp.Compression.Enabled = true
 		tcp.Compression.Encoders = c.Compression.Encoders

@@ -204,30 +204,29 @@ func (c *Config) applyDefaults() {
 		}
 	}
 
-	if c.Compression.Enabled {
-		// Auto-enable compression if the block is present with configuration but
-		// the user didn't explicitly set enabled = true. Writing a [compression]
-		// block with settings implies intent.
-		if !c.Compression.Enabled {
-			hasSettings := len(c.Compression.Encoders) > 0 ||
-				len(c.Compression.Types) > 0 ||
-				c.Compression.MinSize > 0 ||
-				c.Compression.Level != 0
-			if hasSettings {
-				c.Compression.Enabled = true
-			}
+	// Resolve compression enabled state:
+	//   - Explicit enabled=true  → always active.
+	//   - Explicit enabled=false → always inactive, even when other settings are
+	//     present (operator explicitly opted out).
+	//   - Omitted (nil)          → auto-detect: active when the block carries any
+	//     non-zero encoder, type, size, or level setting; an empty [compression]
+	//     block or an absent block has no settings and resolves to disabled.
+	if c.Compression.Enabled == nil {
+		hasSettings := len(c.Compression.Encoders) > 0 ||
+			len(c.Compression.Types) > 0 ||
+			c.Compression.MinSize > 0 ||
+			c.Compression.Level != 0
+		c.Compression.Enabled = Bool(hasSettings)
+	}
+	if *c.Compression.Enabled {
+		if len(c.Compression.Encoders) == 0 {
+			c.Compression.Encoders = []string{"gzip"}
 		}
-
-		if c.Compression.Enabled {
-			if len(c.Compression.Encoders) == 0 {
-				c.Compression.Encoders = []string{"gzip"}
-			}
-			if c.Compression.MinSize == 0 {
-				c.Compression.MinSize = Size(1 << 10) // 1 KiB
-			}
-			if len(c.Compression.Types) == 0 {
-				c.Compression.Types = defaultCompressionTypes()
-			}
+		if c.Compression.MinSize == 0 {
+			c.Compression.MinSize = Size(1 << 10) // 1 KiB
+		}
+		if len(c.Compression.Types) == 0 {
+			c.Compression.Types = defaultCompressionTypes()
 		}
 	}
 

@@ -193,7 +193,7 @@ func Validate(c *Config) error {
 // "zstd" are actually compiled in is reported at middleware construction with a
 // "not compiled in this build" error, since that depends on build tags.
 func validateCompression(c CompressionConfig) []error {
-	if !c.Enabled {
+	if !c.IsEnabled() {
 		return nil
 	}
 	var errs []error

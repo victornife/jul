@@ -202,7 +202,7 @@ func wizardAppConfig(in wizardInput) (*config.Config, string) {
 		}},
 		Upstreams: []config.UpstreamConfig{up},
 		Compression: config.CompressionConfig{
-			Enabled:  true,
+			Enabled:  config.Bool(true),
 			Encoders: []string{"gzip"},
 			MinSize:  config.Size(1 << 10),
 			Types: []string{

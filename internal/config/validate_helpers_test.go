@@ -329,13 +329,13 @@ func TestValidateCompressionEmpty(t *testing.T) {
 		}
 	}
 	t.Run("enabled no encoders", func(t *testing.T) {
-		err := Validate(base(CompressionConfig{Enabled: true, Types: []string{"text/*"}}))
+		err := Validate(base(CompressionConfig{Enabled: Bool(true), Types: []string{"text/*"}}))
 		if err == nil || !strings.Contains(err.Error(), "no encoders") {
 			t.Fatalf("expected no encoders error, got %v", err)
 		}
 	})
 	t.Run("enabled no types", func(t *testing.T) {
-		err := Validate(base(CompressionConfig{Enabled: true, Encoders: []string{"gzip"}}))
+		err := Validate(base(CompressionConfig{Enabled: Bool(true), Encoders: []string{"gzip"}}))
 		if err == nil || !strings.Contains(err.Error(), "no MIME types") {
 			t.Fatalf("expected no types error, got %v", err)
 		}

@@ -194,7 +194,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	}
 
 	comprDetail := ""
-	if c.Compression.Enabled {
+	if c.Compression.IsEnabled() {
 		enc := c.Compression.Encoders
 		if len(enc) == 0 {
 			enc = []string{"gzip"}
@@ -295,7 +295,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Traffic", Name: "Reverse proxy", Active: proxyLocs > 0, Detail: countDetailIf(proxyLocs, "location")},
 		{Group: "Traffic", Name: "FastCGI / uWSGI", Active: fastcgiLocs > 0, Detail: countDetailIf(fastcgiLocs, "location")},
 		{Group: "Traffic", Name: "Response cache", Active: c.Cache.Enabled, Detail: cacheDetail},
-		{Group: "Traffic", Name: "Compression", Active: c.Compression.Enabled, Detail: comprDetail},
+		{Group: "Traffic", Name: "Compression", Active: c.Compression.IsEnabled(), Detail: comprDetail},
 		{Group: "Traffic", Name: "Rate limiting", Active: c.RateLimit.Enabled, Detail: rlDetail},
 
 		{Group: "Security", Name: "TLS", Active: tlsServers > 0, Detail: countDetailIf(tlsServers, "server block")},

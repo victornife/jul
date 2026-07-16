@@ -553,7 +553,7 @@ func TestSecurityProjectionWAFDistributionAndGlobal(t *testing.T) {
 
 func TestTrafficControlsProjection(t *testing.T) {
 	cfg := &config.Config{
-		Compression: config.CompressionConfig{Enabled: true, Encoders: []string{"gzip", "br"}},
+		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100, Key: "ip"},
 		Observability: config.ObservabilityConfig{
 			Tracing: config.TracingConfig{

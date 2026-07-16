@@ -531,6 +531,35 @@ func TestCompressionDefaultsSkippedWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestCompressionAutoDetect(t *testing.T) {
+	// A block with settings but no enabled key must auto-enable.
+	cfg, err := Parse([]byte("[compression]\nmin_size = \"512b\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !cfg.Compression.IsEnabled() {
+		t.Error("auto-detect: want enabled=true when settings are present and key is absent")
+	}
+
+	// An empty block (no settings, no enabled key) must remain disabled.
+	cfg2, err := Parse([]byte("[compression]\n"))
+	if err != nil {
+		t.Fatalf("parse empty block: %v", err)
+	}
+	if cfg2.Compression.IsEnabled() {
+		t.Error("auto-detect: want enabled=false for an empty [compression] block")
+	}
+
+	// Explicit enabled=false must disable even when settings are present.
+	cfg3, err := Parse([]byte("[compression]\nenabled = false\nmin_size = \"512b\"\n"))
+	if err != nil {
+		t.Fatalf("parse explicit false: %v", err)
+	}
+	if cfg3.Compression.IsEnabled() {
+		t.Error("explicit false: want disabled even when settings are present")
+	}
+}
+
 func TestAdminConsoleDefaultsEnabled(t *testing.T) {
 	cfg, err := Parse([]byte("[admin]\nenabled = true\n"))
 	if err != nil {
@@ -606,16 +635,16 @@ func TestValidateCompression(t *testing.T) {
 			Compression: c,
 		}
 	}
-	if err := Validate(base(CompressionConfig{Enabled: true, Encoders: []string{"gzip", "br"}, Types: []string{"text/*"}})); err != nil {
+	if err := Validate(base(CompressionConfig{Enabled: Bool(true), Encoders: []string{"gzip", "br"}, Types: []string{"text/*"}})); err != nil {
 		t.Fatalf("valid compression rejected: %v", err)
 	}
-	if err := Validate(base(CompressionConfig{Enabled: true, Encoders: []string{"snappy"}, Types: []string{"text/*"}})); err == nil {
+	if err := Validate(base(CompressionConfig{Enabled: Bool(true), Encoders: []string{"snappy"}, Types: []string{"text/*"}})); err == nil {
 		t.Error("expected error for invalid encoder")
 	}
-	if err := Validate(base(CompressionConfig{Enabled: true, Encoders: []string{"gzip"}, Level: 99, Types: []string{"text/*"}})); err == nil {
+	if err := Validate(base(CompressionConfig{Enabled: Bool(true), Encoders: []string{"gzip"}, Level: 99, Types: []string{"text/*"}})); err == nil {
 		t.Error("expected error for out-of-range level")
 	}
-	if err := Validate(base(CompressionConfig{Enabled: false, Encoders: []string{"snappy"}})); err != nil {
+	if err := Validate(base(CompressionConfig{Enabled: Bool(false), Encoders: []string{"snappy"}})); err != nil {
 		t.Errorf("disabled compression must not be validated: %v", err)
 	}
 }

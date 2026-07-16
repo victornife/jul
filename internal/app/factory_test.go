@@ -135,7 +135,7 @@ func TestHandlerFactoryBuildInvalidCompressionFails(t *testing.T) {
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
 	// Enable compression with an encoder name that is not compiled into this
 	// binary — the build should fail with a clear error, not silently skip it.
-	cfg.Compression.Enabled = true
+	cfg.Compression.Enabled = config.Bool(true)
 	cfg.Compression.Encoders = []string{"notarealencoder"}
 
 	_, _, err := f.Build(cfg, false)

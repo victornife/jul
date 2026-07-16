@@ -99,7 +99,7 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	// Static locations may serve precompressed .br/.gz sidecars when the
 	// compression feature has precompressed enabled.
 	var staticOpts handler.StaticOptions
-	if c.Compression.Enabled && c.Compression.Precompressed {
+	if c.Compression.IsEnabled() && c.Compression.Precompressed {
 		staticOpts.Precompressed = true
 		staticOpts.Encoders = c.Compression.Encoders
 	}
@@ -320,7 +320,7 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	// bytes actually sent on the wire. A configured encoder that is not
 	// compiled into this build fails the reload with a clear error.
 	var compress middleware.Middleware
-	if c.Compression.Enabled {
+	if c.Compression.IsEnabled() {
 		cm, err := middleware.NewCompression(middleware.CompressionOptions{
 			Encoders:   c.Compression.Encoders,
 			Level:      c.Compression.Level,

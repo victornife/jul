@@ -245,7 +245,16 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
-			if err := pf.Apply(c, nil); err != nil {
+			// Load the current on-disk config as prev so that Preflight.Apply runs
+			// all restart-required checks (ACME, listener rebind, tracing, access
+			// log) on the structured-patch write path, matching WriteConfigRaw.
+			var prevCfg *config.Config
+			if prevData, rerr := os.ReadFile(path); rerr == nil {
+				if prev, perr := config.Parse(prevData); perr == nil {
+					prevCfg = prev
+				}
+			}
+			if err := pf.Apply(c, prevCfg); err != nil {
 				return err
 			}
 			data, err := config.Marshal(c)
@@ -260,16 +269,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 	}
 
-	if adminSrv := admin.New(cfg.Admin, log, deps); adminSrv != nil {
-		go func() {
-			if err := adminSrv.Run(ctx); err != nil {
-				log.Error("admin listener failed", "error", err)
-			}
-		}()
-	}
-
-	readyFlag.Set(true)
-
+	// Construct the server and wire LastReload into deps BEFORE creating the
+	// admin server. admin.New copies deps by value, so any callback assigned
+	// after that call is invisible to the admin server's apply handlers.
 	srv := server.New(cfg, log, factory, src, ValidateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = rt.ACME
@@ -285,6 +287,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 		return nil
 	}
+
+	if adminSrv := admin.New(cfg.Admin, log, deps); adminSrv != nil {
+		go func() {
+			if err := adminSrv.Run(ctx); err != nil {
+				log.Error("admin listener failed", "error", err)
+			}
+		}()
+	}
+
+	readyFlag.Set(true)
+
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
 	srv.MTLSResultHook = metrics.ObserveMTLSHandshake
 	// Drive L4 stream-proxy reloads from the same validated config as the HTTP

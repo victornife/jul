@@ -272,12 +272,12 @@ func TestDiffUpstreamHealthAndDiscovery(t *testing.T) {
 func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 	before := &config.Config{
 		Cache:       config.CacheConfig{Enabled: true, DefaultTTL: config.Duration(0)},
-		Compression: config.CompressionConfig{Enabled: true, Encoders: []string{"gzip"}},
+			Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip"}},
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100, Burst: 100},
 	}
 	after := &config.Config{
 		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache"},
-		Compression: config.CompressionConfig{Enabled: true, Encoders: []string{"gzip", "br"}},
+			Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: false},
 	}
 	d := diffConfigs(before, after)

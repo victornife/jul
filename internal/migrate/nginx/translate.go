@@ -62,7 +62,7 @@ func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 			t.translateUpstream(c, out)
 		case "gzip":
 			if isOn(paramValues(c)) {
-				out.Compression.Enabled = true
+				out.Compression.Enabled = config.Bool(true)
 			}
 		case "include":
 			t.report.skip(c, "include not followed; import each included file separately")

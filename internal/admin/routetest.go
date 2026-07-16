@@ -124,7 +124,7 @@ func projectLocation(c *config.Config, srv *config.ServerConfig, loc *config.Loc
 		Auth:        loc.Auth != nil,
 		Cache:       loc.Cache,
 		RateLimit:   loc.RateLimit != nil && loc.RateLimit.Enabled,
-		Compression: c.Compression.Enabled,
+		Compression: c.Compression.IsEnabled(),
 		Secure:      srv.TLS != nil && srv.TLS.Enabled,
 	}
 	switch {

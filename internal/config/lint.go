@@ -153,7 +153,7 @@ func Lint(c *Config) []Diagnostic {
 	}
 
 	// Compression is a cheap, broadly beneficial default.
-	if !c.Compression.Enabled {
+	if !c.Compression.IsEnabled() {
 		diags = append(diags, Diagnostic{
 			Severity: SeverityWarning,
 			Field:    "[compression]",

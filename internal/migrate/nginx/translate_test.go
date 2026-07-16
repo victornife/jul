@@ -302,7 +302,7 @@ http {
   gzip on;
   server { listen 80; location / { return 200; } }
 }`)
-	if !cfg.Compression.Enabled {
+	if !cfg.Compression.IsEnabled() {
 		t.Error("expected compression to be enabled by `gzip on`")
 	}
 }

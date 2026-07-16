@@ -27,7 +27,7 @@ func ServeDir(dir, listen string) *Config {
 				Index: []string{"index.html"},
 			}},
 		}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 	}
 	c.applyDefaults()
 	return c
@@ -49,7 +49,7 @@ func ProxyTarget(target, listen string) *Config {
 				ProxyPass: normalizeProxyTarget(target),
 			}},
 		}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 	}
 	c.applyDefaults()
 	return c

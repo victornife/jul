@@ -167,7 +167,7 @@ func ValidateRuntimeConfig(c *config.Config) error {
 		// preflight here, before the config file is written, instead of only at
 		// the asynchronous reload — keeping admin "apply" truthful: a rejected
 		// build never reports success. Mirrors the WAF/auth dry-runs above.
-		if clone.Compression.Enabled {
+		if clone.Compression.IsEnabled() {
 			if _, err := middleware.NewCompression(middleware.CompressionOptions{
 				Encoders: clone.Compression.Encoders,
 				Level:    clone.Compression.Level,

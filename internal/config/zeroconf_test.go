@@ -23,7 +23,7 @@ func TestServeDirValidates(t *testing.T) {
 	if len(loc.Index) == 0 || loc.Index[0] != "index.html" {
 		t.Errorf("expected index.html default, got %v", loc.Index)
 	}
-	if !c.Compression.Enabled {
+	if !c.Compression.IsEnabled() {
 		t.Error("expected compression enabled in zero-config defaults")
 	}
 }

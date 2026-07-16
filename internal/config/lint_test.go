@@ -33,7 +33,7 @@ func hasWarning(diags []Diagnostic, substr string) bool {
 func TestLintEmptyServerWarns(t *testing.T) {
 	c := &Config{
 		Servers:     []ServerConfig{{Listen: ":80"}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 	}
 	if !hasWarning(Lint(c), "no locations") {
 		t.Errorf("expected a no-locations warning, got:\n%s", lintMessages(Lint(c)))
@@ -43,7 +43,7 @@ func TestLintEmptyServerWarns(t *testing.T) {
 func TestLintEmptyServerWithRedirectIsClean(t *testing.T) {
 	c := &Config{
 		Servers:     []ServerConfig{{Listen: ":80", RedirectHTTPS: 308}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 	}
 	if hasWarning(Lint(c), "no locations") {
 		t.Errorf("HTTPS redirector should not warn about missing locations:\n%s", lintMessages(Lint(c)))
@@ -59,7 +59,7 @@ func TestLintDuplicateLocation(t *testing.T) {
 				{Match: MatchConfig{Type: "prefix", Path: "/api"}, Root: "/b"},
 			},
 		}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 	}
 	if !hasWarning(Lint(c), "unreachable") {
 		t.Errorf("expected an unreachable-location warning, got:\n%s", lintMessages(Lint(c)))
@@ -72,7 +72,7 @@ func TestLintDirectoryListing(t *testing.T) {
 			Listen:    ":80",
 			Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv", DirectoryListing: true}},
 		}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 	}
 	if !hasWarning(Lint(c), "directory_listing") {
 		t.Errorf("expected a directory_listing warning, got:\n%s", lintMessages(Lint(c)))
@@ -87,7 +87,7 @@ func TestLintTLSMinVersion(t *testing.T) {
 				TLS:       &TLSConfig{Enabled: true, Cert: "c", Key: "k", MinVersion: min},
 				Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}},
 			}},
-			Compression: CompressionConfig{Enabled: true},
+			Compression: CompressionConfig{Enabled: Bool(true)},
 		}
 	}
 	if !hasWarning(Lint(withTLS("")), "min_version") {
@@ -102,7 +102,7 @@ func TestLintAdminExposed(t *testing.T) {
 	base := func(listen, token string) *Config {
 		return &Config{
 			Servers:     []ServerConfig{{Listen: ":80", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}},
-			Compression: CompressionConfig{Enabled: true},
+			Compression: CompressionConfig{Enabled: Bool(true)},
 			Admin:       AdminConfig{Enabled: true, Listen: listen, Token: token},
 		}
 	}
@@ -131,7 +131,7 @@ func TestLintCleanConfigHasNoWarnings(t *testing.T) {
 			TLS:       &TLSConfig{Enabled: true, Cert: "c", Key: "k", MinVersion: "1.3"},
 			Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}},
 		}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "${env:JUL_ADMIN_TOKEN}"},
 	}
 	if diags := Lint(c); len(diags) != 0 {
@@ -142,7 +142,7 @@ func TestLintCleanConfigHasNoWarnings(t *testing.T) {
 func TestLintLiteralSecret(t *testing.T) {
 	literal := &Config{
 		Servers:     []ServerConfig{{Listen: ":80", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "literal-token"},
 	}
 	if !hasWarning(Lint(literal), "literal value") {
@@ -150,7 +150,7 @@ func TestLintLiteralSecret(t *testing.T) {
 	}
 	ref := &Config{
 		Servers:     []ServerConfig{{Listen: ":80", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}},
-		Compression: CompressionConfig{Enabled: true},
+		Compression: CompressionConfig{Enabled: Bool(true)},
 		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "${env:JUL_ADMIN_TOKEN}"},
 	}
 	if hasWarning(Lint(ref), "literal value") {

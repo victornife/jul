@@ -141,7 +141,7 @@ func TestStatusAPI(t *testing.T) {
 			HealthCheck: &config.HealthCheckConfig{Enabled: true},
 			Discovery:   &config.DiscoveryConfig{Type: "dns"},
 		}},
-		Compression: config.CompressionConfig{Enabled: true, Encoders: []string{"gzip", "br"}},
+		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100},
 		Cache:       config.CacheConfig{Enabled: true},
 	}
