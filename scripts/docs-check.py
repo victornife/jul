@@ -322,6 +322,10 @@ def check_feature_status_manifest():
                 ok(f"feature-status.yaml: doc {doc} exists")
 
     # Cross-check: every feature in the manifest must appear in docs/status.md.
+    # Two levels of verification:
+    # 1. Feature name (key substring) present in status.md.
+    # 2. Feature ID (e.g. "Y1-01") present in status.md — more precise; catches
+    #    missing rows and ID mismatches between the manifest and the table.
     status_doc = DOCS / "status.md"
     if not status_doc.exists():
         error(manifest, 0, "docs/status.md is missing for cross-check")
@@ -329,8 +333,8 @@ def check_feature_status_manifest():
     status_text = status_doc.read_text(encoding="utf-8")
     for entry in data.get("features", []):
         name = entry.get("name", "?")
-        # Use a key substring of the feature name for matching; strip parens/tags.
-        # e.g. "TLS + automatic HTTPS (ACME)" → search for "TLS"
+        feat_id = entry.get("id", "")
+        # Level 1: name substring
         search_term = re.split(r"[\(\+]", name)[0].strip()
         if search_term and search_term not in status_text:
             error(manifest, 0,
@@ -338,6 +342,14 @@ def check_feature_status_manifest():
                   f"keep both in sync")
         else:
             ok(f"feature-status.yaml: '{search_term}' appears in status.md")
+        # Level 2: ID present (catches rows missing from status.md or ID mismatches)
+        if feat_id:
+            if feat_id not in status_text:
+                error(manifest, 0,
+                      f"feature ID '{feat_id}' ({name}) not found in docs/status.md — "
+                      f"table row may be missing or ID mismatch")
+            else:
+                ok(f"feature-status.yaml: ID '{feat_id}' present in status.md")
 
 
 def check_lifecycle_manifest():

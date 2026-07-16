@@ -771,9 +771,7 @@ func TestDoReloadReplacementAddressBindFailureKeepsOld(t *testing.T) {
 // TestDoReloadNewListenerUsesNewConfig verifies the R3-01 fix: when a reload
 // adds a new listen address, the bind uses the candidate config settings
 // (not the startup config). We test this by verifying that a new address
-// with a custom idleTimeout setting from newCfg is successfully bound and
-// serves requests — if it were bound from the old config (which has no entry
-// for the new address), serverFor would return nil and defaults would be used.
+// with a custom IdleTimeout is successfully bound with that exact timeout value.
 func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 	addr1 := freePort(t)
 	addr2 := freePort(t)
@@ -792,8 +790,10 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 	go func() { done <- srv.Run(ctx, reload) }()
 	waitForServe(t, "http://"+addr1+"/", "v1")
 
-	// New config adds addr2 with a distinctive idle timeout so we can distinguish
-	// it from the default. The value just needs to be parseable by the server.
+	// New config adds addr2 with a distinctive idle timeout so we can verify the
+	// bind-time setting was actually applied from newCfg (not from s.cfg which
+	// has no entry for addr2).
+	const wantIdleTimeout = 45 * time.Second
 	v2 := "v2"
 	tag.Store(&v2)
 	newCfg := &config.Config{
@@ -802,7 +802,7 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 			{Listen: addr1, Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}}},
 			{
 				Listen:      addr2,
-				IdleTimeout: config.Duration(45 * time.Second), // distinctive non-default
+				IdleTimeout: config.Duration(wantIdleTimeout),
 				Locations:   []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
 			},
 		},
@@ -810,17 +810,39 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 	src.set(newCfg, nil)
 	reload <- struct{}{}
 
-	// addr2 must become reachable: the bind used newCfg's server block for addr2.
-	waitDialable(t, addr2)
-
-	// addr1 must still serve (now with v2 handler).
-	if !eventually(t, "http://"+addr1+"/", "v2") {
-		t.Error("addr1 should serve new handler after reload")
+	// Wait for the reload to complete and addr2 to be serving.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if li := srv.LastReload(); li != nil && li.OK {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-
 	li := srv.LastReload()
 	if li == nil || !li.OK {
-		t.Errorf("LastReload = %+v; want OK=true", li)
+		t.Fatalf("LastReload = %+v; want OK=true after reload", li)
+	}
+
+	// addr2 must be reachable: the bind succeeded using newCfg.
+	waitDialable(t, addr2)
+
+	// Verify that addr2's http.Server.IdleTimeout was set to the value from
+	// newCfg, not the zero-value default from the old config. This is the
+	// concrete proof that bindFrom used newCfg, not s.cfg (which had no
+	// server block for addr2 and would produce a zero idle timeout).
+	srv.mu.Lock()
+	entry := srv.listeners[addr2]
+	srv.mu.Unlock()
+	if entry == nil {
+		t.Fatal("expected listener entry for addr2 after reload")
+	}
+	if got := entry.httpd.IdleTimeout; got != wantIdleTimeout {
+		t.Errorf("addr2 http.Server.IdleTimeout = %v, want %v (from newCfg)", got, wantIdleTimeout)
+	}
+
+	// addr1 must still serve the new handler.
+	if !eventually(t, "http://"+addr1+"/", "v2") {
+		t.Error("addr1 should serve new handler after reload")
 	}
 
 	cancel()

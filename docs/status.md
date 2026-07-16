@@ -54,7 +54,7 @@ release-blocking regression, not a reason to retract the label.
 | Web application firewall (WAF) | Y2-06 | `waf` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
 | Rate + connection limiting | Y1-03 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [ratelimit.md](ratelimit.md) |
 | OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
-| Response cache (memory + disk) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
+| Response cache (memory + disk) | core-cache | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
 | Core HTTP (static/proxy/FastCGI/vhosts/routing) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
