@@ -53,11 +53,21 @@ func TestReloadTimeout(t *testing.T) {
 	go func() { done <- srv.Run(ctx, reload) }()
 	waitDialable(t, addr)
 
-	// Trigger a reload that exceeds the timeout threshold.
+	// Trigger a reload that exceeds the timeout threshold. Poll for the result
+	// rather than sleeping a fixed duration: the factory takes 200 ms, plus
+	// goroutine scheduling and coverage-instrumentation overhead on a loaded
+	// machine can push the total past a tight fixed sleep, making the test
+	// intermittently flaky.
 	reload <- struct{}{}
-	time.Sleep(350 * time.Millisecond)
-
-	li := srv.LastReload()
+	var li *lastReloadInfo
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		li = srv.LastReload()
+		if li != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if li == nil {
 		t.Fatal("expected LastReload to be set after slow reload")
 	}

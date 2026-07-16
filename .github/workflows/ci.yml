@@ -180,13 +180,13 @@ jobs:
         shell: bash
         env:
           # Per-package statement-coverage floors for critical packages.
-          # Baseline (2026-07-08): config=85.4, server=81.3, auth=90.0, admin=78.1
+          # Baseline (2026-07-16): config=85.6, server=81.9, auth=91.9, admin=78.6
           # Floors set ~3pp below baseline: catches real regressions while
           # tolerating minor test churn. Raise each floor as coverage grows.
           FLOOR_CONFIG: "82"
           FLOOR_SERVER: "78"
           FLOOR_AUTH:   "87"
-          FLOOR_ADMIN:  "75"
+          FLOOR_ADMIN:  "76"
         run: |
           set -euo pipefail
           failed=0

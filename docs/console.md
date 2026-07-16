@@ -34,10 +34,7 @@ go build -tags console -o jul ./cmd/jul
 When `[admin].token` is set, the console shows a token prompt the first time an
 API call is rejected with 401; paste the token there. It is kept in
 sessionStorage (cleared when the tab closes) and sent as `Authorization: Bearer
-…` — never in the URL. A `?token=<secret>` query parameter is still accepted for
-local-dev convenience but is discouraged: the bootstrap path stores it, strips
-it from the visible URL, and logs a console warning, because URL tokens leak
-into access logs, browser history, and the Referer header.
+…` — never in the URL.
 
 Binaries built **without** `-tags console` serve the basic configuration page at
 the root instead; the JSON APIs below that do not require the tag (for example

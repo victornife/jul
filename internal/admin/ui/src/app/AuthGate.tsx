@@ -92,7 +92,7 @@ export function AuthGate() {
 
         <p className="rounded-md border border-jul-border bg-jul-bg p-2 text-xs text-jul-muted">
           The token is the value of <span className="font-mono">admin.token</span> in your Jul
-          configuration. Avoid the <span className="font-mono">?token=</span> URL parameter outside
+          configuration.
           local development — it leaks into logs, history, and referrers.
         </p>
 

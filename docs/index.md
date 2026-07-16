@@ -15,10 +15,12 @@ binary.
 
 ### Evaluating or operating?
 - **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means.
+- **[Known limitations](known-limitations.md)** — Every feature's documented gaps in one place: what Jul.IA does not do today.
 - **[Deployment guide](deployment.md)** — systemd, Windows service, Docker, and log rotation.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
 - **[Reload semantics](reload-semantics.md)** — What reloads safely, what needs a restart, and how zero-downtime reload works.
 - **[Security model](../SECURITY.md)** — Threat model, hardening defaults, and per-feature security notes.
+- **[Security posture](security-posture.md)** — Admin auth model, current limits, RBAC roadmap, and production hardening checklist.
 - **[Troubleshooting](troubleshooting.md)** — Common issues and how to resolve them.
 
 ### Feature deep-dives
