@@ -151,6 +151,21 @@ docker run --rm \
 - Set an `[admin] token` (and only then map `-p 9090:9090`) before exposing the
   admin API beyond the container; by default it binds to `127.0.0.1` and is
   reachable only by the container's own health probe.
+- **Access logs at high throughput.** The default config writes access logs to
+  `stdout` (Docker's log driver). At ≥10,000 req/s this generates several MB/s
+  of log output; if Docker's log driver buffers to disk it can fill container
+  storage quickly. For production deployments at volume, redirect access logs to
+  the named volume instead of stdout:
+  ```toml
+  [observability.access_log]
+  sinks = ["file"]
+  file  = "/var/log/jul/access.log"
+  ```
+  Or suppress access logs entirely for a soak or benchmark run:
+  ```toml
+  [observability.access_log]
+  sinks = []
+  ```
 
 ## Windows service
 

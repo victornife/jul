@@ -48,3 +48,18 @@ listen = "127.0.0.1:9090"
                                  # exposing the admin port beyond the container.
 history_dir = "/var/lib/jul/config-history"
 history_keep = 50
+
+# Access-log configuration.
+# By default jul writes one access-log line per request to stdout (the Docker log
+# driver). At high request rates (≥10,000 req/s) this generates several MB/s of
+# output; if your log driver buffers to disk it can fill container storage quickly.
+# For production deployments at volume, direct logs to the named volume instead:
+#
+# [observability.access_log]
+# sinks = ["file"]
+# file  = "/var/log/jul/access.log"
+#
+# To suppress access logs entirely (e.g. during a soak or benchmark run):
+#
+# [observability.access_log]
+# sinks = []
