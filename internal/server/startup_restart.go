@@ -1,7 +1,7 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-package app
+package server
 
 import (
 	"slices"
@@ -36,16 +36,16 @@ func CacheRestartRequired(old, next *config.Config) (string, bool) {
 // rejects such a change with restart_required so the operator can trust that a
 // saved egress policy is the one being enforced.
 func EgressRestartRequired(old, next *config.Config) (string, bool) {
-	if egressEqual(old.Egress, next.Egress) {
+	if egressConfigEqual(old.Egress, next.Egress) {
 		return "", false
 	}
 	return "egress allow-list changed; the outbound dial policy is built once at startup and takes effect on restart", true
 }
 
-// egressEqual reports whether two EgressConfig values are identical. Allow is a
-// slice, so it is compared element-wise with slices.Equal; the Enabled flag uses
-// direct equality.
-func egressEqual(a, b config.EgressConfig) bool {
+// egressConfigEqual reports whether two EgressConfig values are identical.
+// Allow is a slice, so it is compared element-wise with slices.Equal; the
+// Enabled flag uses direct equality.
+func egressConfigEqual(a, b config.EgressConfig) bool {
 	return a.Enabled == b.Enabled && slices.Equal(a.Allow, b.Allow)
 }
 
@@ -59,16 +59,16 @@ func egressEqual(a, b config.EgressConfig) bool {
 // the process so the new token takes effect, rather than believing the rotation
 // is live while the old token still grants access.
 func AdminRestartRequired(old, next *config.Config) (string, bool) {
-	if adminEqual(old.Admin, next.Admin) {
+	if adminConfigEqual(old.Admin, next.Admin) {
 		return "", false
 	}
 	return "admin server settings changed (listen address, token, rate limits, history, plugin upload, or audit log); the admin listener is built once at startup and takes effect on restart", true
 }
 
-// adminEqual reports whether two AdminConfig values are identical. Pointer
-// fields (Console, PluginUploadEnabled) are compared by value, not pointer
-// identity, using boolPtrEq.
-func adminEqual(a, b config.AdminConfig) bool {
+// adminConfigEqual reports whether two AdminConfig values are identical.
+// Pointer fields (Console, PluginUploadEnabled) are compared by value, not
+// pointer identity, using boolPtrEq.
+func adminConfigEqual(a, b config.AdminConfig) bool {
 	return a.Enabled == b.Enabled &&
 		a.Listen == b.Listen &&
 		a.Token == b.Token &&

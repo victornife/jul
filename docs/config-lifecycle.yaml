@@ -25,7 +25,7 @@ version: 1
 
 restart_required:
   - subsystem: cache
-    gated_by: "internal/app.CacheRestartRequired"
+    gated_by: "internal/server.CacheRestartRequired"
     reason: >
       cache.New builds the LRU+disk tiers once at startup; in-memory state
       and counters persist across reloads to avoid counter resets on edits.
@@ -39,7 +39,7 @@ restart_required:
       - "[cache].stale_if_error"
 
   - subsystem: egress
-    gated_by: "internal/app.EgressRestartRequired"
+    gated_by: "internal/server.EgressRestartRequired"
     reason: >
       egress.New compiles the outbound dial allow-list once at startup. A
       tightened allow-list saved via the Console would appear active in
@@ -49,7 +49,7 @@ restart_required:
       - "[egress].allow"
 
   - subsystem: admin
-    gated_by: "internal/app.AdminRestartRequired"
+    gated_by: "internal/server.AdminRestartRequired"
     reason: >
       admin.New copies AdminConfig by value. Changes to the bearer token, listen
       address, rate limits, history dir, plugin upload policy, or audit log path
@@ -74,7 +74,7 @@ restart_required:
       - "[admin].plugin_upload_enabled"
 
   - subsystem: metrics
-    gated_by: "internal/app.MetricsRestartRequired"
+    gated_by: "internal/server.MetricsRestartRequired"
     reason: >
       observability.NewMetrics sets the host_label once when it creates the
       Prometheus registry at startup.
@@ -139,7 +139,7 @@ new_listener_only:
       - "[[servers]].tls.enabled"
       - "[[servers]].tls.min_version"
       - "[[servers]].tls.client_auth.*"
-      - "[[servers]].rate_limit.max_conns"
+      - "[rate_limit].max_conns"
 
 hot_reload:
   note: >

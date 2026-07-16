@@ -70,6 +70,13 @@ func diffGlobalCompression(before, after *config.Config, d *ConfigDiff) {
 	if strings.Join(b.Types, ",") != strings.Join(a.Types, ",") {
 		d.mod(DiffEntry{Kind: "compression", Name: "global", Detail: "Change compression content types"}, "compression types")
 	}
+	if b.Precompressed != a.Precompressed {
+		action := "Enable"
+		if !a.Precompressed {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "compression", Name: "global", Detail: action + " precompressed sidecar serving"}, "compression precompressed")
+	}
 }
 
 // diffGlobalRateLimit compares the global [rate_limit] block.

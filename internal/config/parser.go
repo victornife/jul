@@ -215,7 +215,8 @@ func (c *Config) applyDefaults() {
 		hasSettings := len(c.Compression.Encoders) > 0 ||
 			len(c.Compression.Types) > 0 ||
 			c.Compression.MinSize > 0 ||
-			c.Compression.Level != 0
+			c.Compression.Level != 0 ||
+			c.Compression.Precompressed
 		c.Compression.Enabled = Bool(hasSettings)
 	}
 	if *c.Compression.Enabled {

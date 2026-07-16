@@ -76,16 +76,16 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
 		if reason, need := server.AccessLogRestartRequired(prev, c); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
-		if reason, need := CacheRestartRequired(prev, c); need {
+		if reason, need := server.CacheRestartRequired(prev, c); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
-		if reason, need := EgressRestartRequired(prev, c); need {
+		if reason, need := server.EgressRestartRequired(prev, c); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
-		if reason, need := AdminRestartRequired(prev, c); need {
+		if reason, need := server.AdminRestartRequired(prev, c); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
-		if reason, need := MetricsRestartRequired(prev, c); need {
+		if reason, need := server.MetricsRestartRequired(prev, c); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 	}

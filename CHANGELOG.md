@@ -10,6 +10,28 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **`jul capabilities [-json]`** (`cmd/jul/capabilities.go`): new subcommand that reports which optional features are compiled into this binary (`waf`, `stream_proxy`, `wasm_plugins`) and the canonical exit-code contract. Outputs human-readable text or JSON. Compiles in both lean and full builds (false/true via existing stubs).
+- **`make ci-pr` local gate** (`Makefile`): adds `go vet` and `docs-check.py` on top of `ci-full`, giving the closest local approximation to the merge gate. CONTRIBUTING.md updated to accurately describe what `ci-full` and `ci-pr` do and do not cover.
+- **Startup-bound restart-required gates** (`internal/app/startup_restart.go`, `internal/app/preflight.go`): `Preflight.Apply` now rejects changes to `[cache]`, `[egress]`, `[admin]`, and `[observability.metrics]` on admin write paths with `restart_required` (HTTP 409). Previously these fields could be saved without taking effect in the running process.
+- **`SaveConfig` loads previous on-disk config** (`internal/app/serve.go`): the structured-patch write path now passes the current file as `prev` to `Preflight.Apply`, enabling all existing restart-required checks (ACME, listener, tracing, access-log) on the structured API path. Previously these checks were skipped.
+- **Pending-restart Console banner** (`internal/admin/ui/src/app/Layout.tsx`): persistent amber `RestartRequiredBanner` appears on every page when `overview.pending_restart` lists subsystems that have changed on disk since the server started. Backed by `PendingRestartCheck` in `internal/app/serve.go`.
+- **gRPC Transcode designer in nav** (`internal/admin/ui/src/app/Layout.tsx`): `/transcode` added to the Configure nav group; automatically included in the command palette.
+- **`docs/config-lifecycle.yaml`**: machine-readable lifecycle classification of all config fields (restart-required, new-listener-only, hot-reload).
+- **`docs/feature-status.yaml`**: machine-readable manifest of all 20 shipped features with GA criteria status.
+- **Semantic docs-check gates** (`scripts/docs-check.py`): `check_lifecycle_manifest()` and `check_feature_status_manifest()` validate YAML and cross-check reload-semantics.md; `check_finding_uniqueness()` catches conflicting resolved/open status markers in audit docs.
+
+### Fixed
+- **Compression `*bool` tri-state semantics** (`internal/config/schema.go`, `internal/config/parser.go`): `CompressionConfig.Enabled` is now `*bool` with three distinct states — explicit true, explicit false, and omitted/nil (auto-detect). Auto-detect enables compression when any non-zero setting is present, including `precompressed = true` (RA-04). The previously unreachable auto-enable branch is replaced with correct logic.
+- **`LastReload` wired before `admin.New`** (`internal/app/serve.go`): `server.New` and `deps.LastReload` are now constructed before `admin.New`. The admin server's apply handlers now see the previous reload snapshot in `previous_reload`.
+- **`RateLimitConfig.Enabled` TOML tag typo** (`internal/config/schema.go`): corrected `tomm:"enabled"` → `toml:"enabled"`.
+- **Plugin upload default comment** (`internal/config/schema.go`): comment corrected to state default is disabled (secure by default), matching parser behavior.
+- **GitHub Actions pinned to immutable SHAs** (`.github/workflows/`): all external actions now use full commit SHAs with version comments.
+- **Architecture doc** (`docs/architecture.md`): updated to accurately describe `internal/app.Serve` as the composition root; stale `buildHandlers` reference removed.
+
+### Changed
+- **`bench-compare.sh` is advisory-only** (`scripts/bench-compare.sh`): the script no longer claims to gate CI, no longer auto-creates a baseline, and always exits 0. It remains useful for manual comparison on dedicated hardware. See script comments for establishing a real regression gate.
+
+### Added
 - **`jul serve` subcommand** (`cmd/jul/`): explicit, discoverable form of the default bare `jul` invocation — `jul serve [-config f]` and `jul` are equivalent. Tab-completion, `--help`, and the usage block all surface it. Documented in [getting-started.md](docs/getting-started.md) and [README.md](README.md).
 - **`jul fmt --diff`** (`cmd/jul/`): new flag on `jul fmt` that emits a unified diff of the formatting changes without rewriting the file, then exits 0 (no changes needed) or 1 (changes would be made). Useful as a CI formatting gate without in-place rewrites. Documented in [getting-started.md](docs/getting-started.md), [zeroconf.md](docs/zeroconf.md), and [README.md](README.md).
 - **`jul serve` and `jul fmt --diff` documented** in [docs/getting-started.md](docs/getting-started.md): new "Starting the server with a config file" section and expanded `jul fmt` section with `-diff` CI usage.

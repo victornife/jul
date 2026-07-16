@@ -1,7 +1,7 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-package app
+package server
 
 import (
 	"testing"
@@ -197,13 +197,11 @@ func TestAdminRestartRequired(t *testing.T) {
 	})
 
 	t.Run("nil vs explicit bool pointer detected correctly", func(t *testing.T) {
-		// both nil → equal (no restart)
 		a := &config.Config{}
 		b := &config.Config{}
 		if _, need := AdminRestartRequired(a, b); need {
 			t.Fatal("two zero-value admin configs must not require a restart")
 		}
-		// nil vs &false → different
 		b.Admin.PluginUploadEnabled = config.Bool(false)
 		if _, need := AdminRestartRequired(a, b); !need {
 			t.Fatal("nil vs explicit false must require a restart")

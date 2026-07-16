@@ -29,7 +29,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: install addlicense
-        run: go install github.com/google/addlicense@latest
+        run: go install github.com/google/addlicense@v1.2.0
       - name: check license headers
         run: make license-check
 
@@ -480,8 +480,8 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
-      - name: install tomli (Python < 3.11 compat)
-        run: pip install tomli
+      - name: install Python dependencies
+        run: pip install tomli pyyaml
       - name: validate docs
         run: python scripts/docs-check.py
 
@@ -506,7 +506,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
       - name: govulncheck
         run: govulncheck -tags "${{ env.FULL_TAGS }}" ./...
 

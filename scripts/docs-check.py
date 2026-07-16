@@ -291,7 +291,9 @@ def check_feature_status_manifest():
     try:
         import yaml
     except ModuleNotFoundError:
-        return  # pyyaml not installed; skip gracefully
+        error(ROOT / "docs" / "feature-status.yaml", 0,
+              "pyyaml is required for YAML manifest checks — install with: pip install pyyaml")
+        return
 
     manifest = ROOT / "docs" / "feature-status.yaml"
     if not manifest.exists():
@@ -329,10 +331,10 @@ def check_lifecycle_manifest():
        docs/reload-semantics.md, so the two sources of truth stay in sync.
     """
     try:
-        import yaml  # pyyaml; optional — skip gracefully if absent
+        import yaml
     except ModuleNotFoundError:
-        # PyYAML is not installed in this environment; skip the YAML checks
-        # but do not fail the build (it is an optional semantic gate).
+        error(ROOT / "docs" / "config-lifecycle.yaml", 0,
+              "pyyaml is required for YAML manifest checks — install with: pip install pyyaml")
         return
 
     manifest = ROOT / "docs" / "config-lifecycle.yaml"

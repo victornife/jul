@@ -1,31 +1,27 @@
 #!/usr/bin/env bash
 #
-# Benchmark comparison gate.
+# Advisory benchmark reporting tool.
 #
-# Runs the benchmark harness and compares results against a stored baseline
-# using `benchstat`. Exits non-zero when any benchmark regresses beyond the
-# configured threshold, so performance regressions fail CI just like test
-# failures.
+# Runs the benchmark harness and, when benchstat is installed and a baseline
+# file is present, prints a comparison for human review. This is ADVISORY
+# ONLY: it never blocks CI and never auto-creates a baseline.
 #
 # Usage:
-#   scripts/bench-compare.sh                      # compare vs stored baseline
-#   scripts/bench-compare.sh --update-baseline    # update the baseline file
+#   scripts/bench-compare.sh                   # run + compare if baseline present
+#   scripts/bench-compare.sh --update-baseline # run and save as new baseline
 #
-# The baseline file is docs/benchmarks-baseline.txt. Committing it pins the
-# expected performance level; Dependabot/renovate does not touch it.
-# Re-generate it on a quiet, representative machine (not a shared CI runner)
-# after intentional performance improvements.
+# To establish a meaningful baseline, run on dedicated (not shared-CI) hardware
+# with COUNT>=3, then commit docs/benchmarks-baseline.txt. Shared CI runners
+# vary ±15–30% per run, making numeric regression gating unreliable there.
 #
 # Environment overrides (same as bench.sh):
-#   BENCH_TAGS   build tags (default: full opt-in set)
-#   BENCHTIME    -benchtime value for the comparison run (default: 2s)
-#   COUNT        -count value — must be >=2 for benchstat to compute variance
-#   THRESHOLD    benchstat -delta-test threshold (default: 0.05, i.e. 5%)
+#   BENCH_TAGS  build tags (default: full opt-in set)
+#   BENCHTIME   -benchtime value (default: 2s)
+#   COUNT       -count value (default: 1; use 3+ for a baseline update)
 #
 set -euo pipefail
 
 BASELINE="${BASH_SOURCE[0]%/*}/../docs/benchmarks-baseline.txt"
-THRESHOLD="${THRESHOLD:-0.05}"
 
 UPDATE_BASELINE=0
 for arg in "$@"; do
@@ -34,51 +30,38 @@ for arg in "$@"; do
   fi
 done
 
-# benchstat must be installed: go install golang.org/x/perf/cmd/benchstat@latest
-if ! command -v benchstat &>/dev/null; then
-  echo "benchstat not found — install with: go install golang.org/x/perf/cmd/benchstat@latest"
-  echo "Falling back to smoke-only mode (no comparison)."
-  exec "$(dirname "$0")/bench.sh"
-fi
-
 CURRENT=$(mktemp)
 trap 'rm -f "$CURRENT"' EXIT
 
-# Run with count>=2 so benchstat has variance data.
-COUNT="${COUNT:-3}" BENCHTIME="${BENCHTIME:-2s}" "$(dirname "$0")/bench.sh" > "$CURRENT"
+# Run the benchmark harness (smoke gate: every Benchmark* compiles and runs).
+COUNT="${COUNT:-1}" BENCHTIME="${BENCHTIME:-2s}" "$(dirname "$0")/bench.sh" | tee "$CURRENT"
 
 if [ "$UPDATE_BASELINE" -eq 1 ]; then
   cp "$CURRENT" "$BASELINE"
   echo ""
   echo "Baseline updated: $BASELINE"
-  echo "Commit this file to pin the new expected performance level."
+  echo "Commit this file to record the new reference point."
+  echo "Re-generate with COUNT=3 on dedicated hardware for statistical stability."
   exit 0
 fi
 
 if [ ! -f "$BASELINE" ]; then
-  echo "No baseline file at $BASELINE. Run with --update-baseline first."
-  echo "Treating this run as the initial baseline (no comparison)."
-  cp "$CURRENT" "$BASELINE"
+  echo ""
+  echo "No baseline at $BASELINE — comparison skipped."
+  echo "Run with --update-baseline on dedicated hardware to establish one."
+  exit 0
+fi
+
+if ! command -v benchstat &>/dev/null; then
+  echo ""
+  echo "benchstat not installed — comparison skipped."
+  echo "Install with: go install golang.org/x/perf/cmd/benchstat@latest"
   exit 0
 fi
 
 echo ""
-echo "== benchstat comparison (threshold: ${THRESHOLD})"
-benchstat -delta-test none "$BASELINE" "$CURRENT"
-
-echo ""
-echo "== regressions check (>${THRESHOLD} slower)"
-# benchstat exits 0 regardless; parse its output to detect regressions.
-REGRESSIONS=$(benchstat "$BASELINE" "$CURRENT" 2>&1 | grep -E '^\w.*\+[0-9]' | \
-  awk -v threshold="$THRESHOLD" '
-    match($0, /\+([0-9]+(\.[0-9]+)?)%/, m) {
-      if (m[1]/100 > threshold) print
-    }
-  ' || true)
-
-if [ -n "$REGRESSIONS" ]; then
-  echo "FAIL: the following benchmarks regressed beyond ${THRESHOLD}:"
-  echo "$REGRESSIONS"
-  exit 1
-fi
-echo "PASS: no regressions beyond ${THRESHOLD} threshold."
+echo "== benchstat comparison (advisory — not a CI regression gate)"
+benchstat "$BASELINE" "$CURRENT"
+# Always exit 0: shared runners are too noisy for reliable thresholds.
+# Review the comparison manually; use a self-hosted runner for real gating.
+exit 0

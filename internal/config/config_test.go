@@ -560,6 +560,21 @@ func TestCompressionAutoDetect(t *testing.T) {
 	}
 }
 
+func TestCompressionPrecompressedAutoEnable(t *testing.T) {
+	// precompressed=true is a non-zero setting that expresses intent; the
+	// server should treat it as auto-enabling compression (RA-04).
+	cfg, err := Parse([]byte("[compression]\nprecompressed = true\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !cfg.Compression.IsEnabled() {
+		t.Error("precompressed=true alone must auto-enable compression")
+	}
+	if !cfg.Compression.Precompressed {
+		t.Error("Precompressed must be true after parsing precompressed = true")
+	}
+}
+
 func TestAdminConsoleDefaultsEnabled(t *testing.T) {
 	cfg, err := Parse([]byte("[admin]\nenabled = true\n"))
 	if err != nil {

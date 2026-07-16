@@ -290,16 +290,16 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				return nil
 			}
 			var pending []string
-			if _, need := CacheRestartRequired(startupCfg, current); need {
+			if _, need := server.CacheRestartRequired(startupCfg, current); need {
 				pending = append(pending, "cache")
 			}
-			if _, need := EgressRestartRequired(startupCfg, current); need {
+			if _, need := server.EgressRestartRequired(startupCfg, current); need {
 				pending = append(pending, "egress")
 			}
-			if _, need := AdminRestartRequired(startupCfg, current); need {
+			if _, need := server.AdminRestartRequired(startupCfg, current); need {
 				pending = append(pending, "admin")
 			}
-			if _, need := MetricsRestartRequired(startupCfg, current); need {
+			if _, need := server.MetricsRestartRequired(startupCfg, current); need {
 				pending = append(pending, "metrics")
 			}
 			return pending
