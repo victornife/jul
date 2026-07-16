@@ -1,18 +1,16 @@
 # Reviews & decision log
 
-> Version 1.4 · Updated 2026-07-16
+> Version 1.5 · Updated 2026-07-16
 
 > **📌 Single source of truth for current repository state:**
-> [**Full Repository Audit (2026-07-09) — v1.1 updated 2026-07-16**](jul_full_repository_audit_2026-07-09.md).
+> [**Full Repository Audit (2026-07-09) — v1.2, final state**](jul_full_repository_audit_2026-07-09.md).
 > It consolidates and, for *present-state* purposes, supersedes the point reviews
-> below. The documents below remain the authoritative record of *past decisions*
-> (what was adopted / reframed / deferred / rejected); the consolidated audit is
-> the authoritative record of *where the code and product stand now*.
+> below.
 >
-> **v1.1 update (2026-07-16):** § 0.1 reconciliation added — all P0/P1 July-9 findings resolved
-> (go1.26.5, four RG-1 isolated 8h Linux soaks, composition-root extraction complete). Primary
-> open item: Console RBAC Phase 1 (N-4, design-complete, not yet implemented). See the reconciliation
-> table in § 0.1 for the full current status of every finding.
+> **v1.2 (2026-07-16 — final):** All audit findings resolved except N-4 (RBAC Phase 1,
+> design-complete, runtime not implemented). Sprint 1–3 items all landed. Every CI gate
+> green. Only open work: D1 (RBAC Phase 1, L effort, Critical impact) and demand-gated
+> strategic bets (E1–E5). See § 0.1 of the audit for the complete status table.
 
 This folder is the **decision log** for Jul.IA: external/internal reviews that have
 been evaluated, plus the explicit record of *what we adopted, reframed, deferred,
