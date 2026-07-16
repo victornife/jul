@@ -1,0 +1,25 @@
+# Minimal server config for the Playwright real-server E2E test (C2).
+# Starts a static-file server on loopback + an admin listener with a known token
+# so real-server.spec.ts can exercise the admin API and verify JSON shapes match
+# the Zod schemas in client.ts without any mocking.
+#
+# The admin token is intentionally fixed and short — this config is for CI tests
+# only and never runs with real data.
+
+[global]
+log_level = "warn"
+
+[[servers]]
+listen = "127.0.0.1:9292"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9291"
+token = "jul-e2e-test-token"
+console = true

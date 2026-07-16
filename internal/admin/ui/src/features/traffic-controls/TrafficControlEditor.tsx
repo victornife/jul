@@ -31,117 +31,9 @@ import {
   type RateLimitDraft,
   type LimitsDraft,
 } from "@/lib/trafficToml.ts";
+import { TextField, NumberField, Toggle, CheckboxGroup, AffectedRoutes } from "./TrafficFormFields.tsx";
 
 export type TrafficEditorKind = "compression" | "cache" | "rate_limit" | "limits";
-
-function TextField({
-  label,
-  hint,
-  value,
-  placeholder,
-  onChange,
-}: {
-  readonly label: string;
-  readonly hint?: string;
-  readonly value: string;
-  readonly placeholder?: string;
-  readonly onChange: (v: string) => void;
-}) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-sm font-medium text-jul-text">{label}</span>
-      <input
-        type="text"
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => {
-          onChange(e.target.value);
-        }}
-        className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
-      />
-      {hint && <span className="text-xs text-jul-muted">{hint}</span>}
-    </label>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-}: {
-  readonly label: string;
-  readonly value: number;
-  readonly onChange: (v: number) => void;
-}) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-sm font-medium text-jul-text">{label}</span>
-      <input
-        type="number"
-        min={0}
-        value={value}
-        onChange={(e) => {
-          onChange(Math.max(0, Number(e.target.value) || 0));
-        }}
-        className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
-      />
-    </label>
-  );
-}
-
-function Toggle({
-  label,
-  checked,
-  onChange,
-}: {
-  readonly label: string;
-  readonly checked: boolean;
-  readonly onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex items-center gap-2 text-sm text-jul-text">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => {
-          onChange(e.target.checked);
-        }}
-        className="h-4 w-4 rounded border-jul-border bg-jul-surface accent-jul-accent"
-      />
-      {label}
-    </label>
-  );
-}
-
-function CheckboxGroup({
-  label,
-  options,
-  selected,
-  onToggle,
-}: {
-  readonly label: string;
-  readonly options: string[];
-  readonly selected: string[];
-  readonly onToggle: (value: string, on: boolean) => void;
-}) {
-  return (
-    <div className="space-y-1">
-      <span className="text-sm font-medium text-jul-text">{label}</span>
-      <div className="flex flex-wrap gap-3">
-        {options.map((o) => (
-          <Toggle
-            key={o}
-            label={o}
-            checked={selected.includes(o)}
-            onChange={(on) => {
-              onToggle(o, on);
-            }}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 const TITLES: Record<TrafficEditorKind, { title: string; subtitle: string }> = {
   compression: {
@@ -174,37 +66,6 @@ const DEFAULT_COMPRESSION_TYPES = [
   "image/svg+xml",
 ];
 
-// AffectedRoutes lists the route paths that opt into a given edge feature, so an
-// operator can preview which routes a global change touches (Milestones 3.1–3.3).
-function AffectedRoutes({
-  title,
-  paths,
-  emptyHint,
-}: {
-  readonly title: string;
-  readonly paths: string[];
-  readonly emptyHint: string;
-}) {
-  return (
-    <div className="space-y-1 rounded-md border border-jul-border bg-jul-surface p-3">
-      <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">{title}</span>
-      {paths.length === 0 ? (
-        <p className="text-xs text-jul-muted">{emptyHint}</p>
-      ) : (
-        <ul className="flex flex-wrap gap-1.5">
-          {paths.map((p) => (
-            <li
-              key={p}
-              className="rounded-full bg-jul-accent/15 px-2 py-0.5 font-mono text-xs text-jul-accent"
-            >
-              {p}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
 
 export interface TrafficControlEditorProps {
   readonly kind: TrafficEditorKind;

@@ -595,3 +595,47 @@ jobs:
           name: playwright-report
           path: internal/admin/ui/playwright-report/
           if-no-files-found: ignore
+
+  console-e2e-real-server:
+    name: console e2e (real server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CONSOLE_UI: internal/admin/ui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Build the console-enabled binary that the real-server Playwright project
+      # starts as a webServer. Placed in the repo root so the playwright.config.ts
+      # webServer command path (../../../../jul) resolves correctly from ui/.
+      - name: build jul (console tag)
+        run: go build -tags "console" -o jul ./cmd/jul
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ${{ env.CONSOLE_UI }}/package.json
+          cache: pnpm
+          cache-dependency-path: ${{ env.CONSOLE_UI }}/pnpm-lock.yaml
+      - name: install dependencies
+        run: pnpm --dir ${{ env.CONSOLE_UI }} install --frozen-lockfile
+      - name: build SPA
+        run: pnpm --dir ${{ env.CONSOLE_UI }} run build
+      - name: install Playwright browsers
+        run: pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install chromium --with-deps
+      # Run only the real-server project — the mocked smoke runs in console-e2e
+      # already. The real-server project verifies Go admin API response shapes
+      # match the Zod schemas in client.ts (schema-drift detection).
+      - name: run real-server e2e
+        run: pnpm --dir ${{ env.CONSOLE_UI }} exec playwright test --project=real-server
+      - name: upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-real-server
+          path: internal/admin/ui/playwright-report/
+          if-no-files-found: ignore
