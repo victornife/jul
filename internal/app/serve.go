@@ -189,10 +189,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		RT:          rt,
 	}
 
-	// factory adapts HandlerFactory.Build to the server reload hook: a live
-	// reload always commits the new generation.
-	factory := func(c *config.Config) (map[string]http.Handler, func(), error) {
-		return f.Build(c, true)
+	// factory adapts HandlerFactory.Prepare to the server reload hook: the
+	// three-phase prepare/commit/abort pattern keeps the generation uncommitted
+	// until listener staging succeeds (R4-01).
+	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
+		return f.Prepare(c)
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -320,22 +321,44 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				pending = append(pending, "admin")
 			} else if current.Admin.Enabled {
 				// AdminRestartRequired compared unexpanded reference strings.
-				// Also detect file-backed token content rotation: clone, expand,
-				// hash and compare to the startup resolved value.
+				// Also detect file-backed token content rotation: clone and
+				// expand in a snapshot/restore pair so the read path does not
+				// permanently mutate the global redaction registry (R4-05).
 				if expanded, cerr := current.Clone(); cerr == nil {
+					snap := redact.Snapshot()
 					if xerr := config.ExpandSecrets(expanded); xerr == nil {
-						if sha256.Sum256([]byte(expanded.Admin.Token)) != startupAdminTokenHash {
+						hash := sha256.Sum256([]byte(expanded.Admin.Token))
+						redact.Restore(snap)
+						if hash != startupAdminTokenHash {
 							pending = append(pending, "admin")
 						}
+					} else {
+						redact.Restore(snap)
 					}
 				}
 			}
 			if _, need := server.MetricsRestartRequired(startupCfg, current); need {
 				pending = append(pending, "metrics")
 			}
+			if _, need := server.LogFormatRestartRequired(startupCfg, current); need {
+				pending = append(pending, "log_format")
+			}
+			if _, need := server.TracingRestartRequired(startupCfg, current); need {
+				pending = append(pending, "tracing")
+			}
+			if _, need := server.AccessLogRestartRequired(startupCfg, current); need {
+				pending = append(pending, "access_log")
+			}
+			if _, need := server.ACMERestartRequired(startupCfg.Servers, current.Servers); need {
+				pending = append(pending, "acme")
+			}
+			if _, need := server.ListenerRebindRequired(startupCfg, current); need {
+				pending = append(pending, "listener")
+			}
 			return pending
 		}
 	}
+
 
 	// Construct the server and wire LastReload into deps BEFORE creating the
 	// admin server. admin.New copies deps by value, so any callback assigned
@@ -369,30 +392,30 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
 	srv.MTLSResultHook = metrics.ObserveMTLSHandshake
 	// Drive L4 stream-proxy reloads from the same validated config as the HTTP
-	// listeners. Stream binding errors are logged and do not roll back the HTTP
-	// reload (the listener sets are independent).
-	srv.OnReloaded = func(c *config.Config) {
+	// listeners. Stream binding errors are reported as a degraded reload result
+	// but do not roll back the HTTP swap (the listener sets are independent).
+	srv.OnReloaded = func(c *config.Config) error {
 		// Hot-reload log level without rebuilding the handler. Log format changes
 		// are restart-required and blocked by reloadRestartRequired before here.
 		setLogLevel(c.Global.LogLevel)
 		// Apply worker_threads on reload. When set to a positive integer, cap
-		// GOMAXPROCS; when "auto" or empty, restore the Go runtime default (NumCPU).
+		// GOMAXPROCS; when "auto" or empty, skip the call and let the Go runtime
+		// manage GOMAXPROCS automatically (container-aware, R3-08).
 		if n := parseWorkerThreads(c.Global.WorkerThreads); n > 0 {
 			runtime.GOMAXPROCS(n)
-		} else {
-			runtime.GOMAXPROCS(runtime.NumCPU())
 		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)
 			msg := "failed: " + err.Error()
 			rt.LastStreamReload.Store(&msg)
-			return
+			return err
 		}
 		ok := ""
 		if len(c.Streams) > 0 {
 			ok = "ok"
 		}
 		rt.LastStreamReload.Store(&ok)
+		return nil
 	}
 	if err := srv.Run(ctx, reload); err != nil {
 		log.Error("server exited with error", "error", err)

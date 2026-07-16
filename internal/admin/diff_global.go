@@ -491,12 +491,15 @@ func diffGlobalEgress(before, after *config.Config, d *ConfigDiff) {
 func diffGlobalAdmin(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Admin, after.Admin
 	if b.Enabled == a.Enabled && b.Listen == a.Listen && b.Token == a.Token &&
+		boolPtrEqDiff(b.Console, a.Console) &&
 		b.HistoryKeep == a.HistoryKeep && b.HistoryDir == a.HistoryDir &&
 		b.RateLimitReadPerMin == a.RateLimitReadPerMin &&
 		b.RateLimitWritePerMin == a.RateLimitWritePerMin &&
 		b.RateLimitApplyPerMin == a.RateLimitApplyPerMin &&
 		b.MaxEventConns == a.MaxEventConns &&
 		b.AuditLogFile == a.AuditLogFile &&
+		b.AuditLogRotateMaxMB == a.AuditLogRotateMaxMB &&
+		b.AuditLogRotateKeep == a.AuditLogRotateKeep &&
 		b.PluginUploadDir == a.PluginUploadDir &&
 		b.PluginUploadMaxSize == a.PluginUploadMaxSize &&
 		boolPtrEqDiff(b.PluginUploadEnabled, a.PluginUploadEnabled) {
@@ -519,16 +522,19 @@ func diffGlobalAdmin(before, after *config.Config, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "admin", Name: "global", Detail: action + " admin server — restart required"}, "admin enabled")
 	}
 	// Summarise remaining admin-block changes without exposing values.
-	if b.HistoryKeep != a.HistoryKeep || b.HistoryDir != a.HistoryDir ||
+	if !boolPtrEqDiff(b.Console, a.Console) ||
+		b.HistoryKeep != a.HistoryKeep || b.HistoryDir != a.HistoryDir ||
 		b.RateLimitReadPerMin != a.RateLimitReadPerMin ||
 		b.RateLimitWritePerMin != a.RateLimitWritePerMin ||
 		b.RateLimitApplyPerMin != a.RateLimitApplyPerMin ||
 		b.MaxEventConns != a.MaxEventConns ||
 		b.AuditLogFile != a.AuditLogFile ||
+		b.AuditLogRotateMaxMB != a.AuditLogRotateMaxMB ||
+		b.AuditLogRotateKeep != a.AuditLogRotateKeep ||
 		b.PluginUploadDir != a.PluginUploadDir ||
 		b.PluginUploadMaxSize != a.PluginUploadMaxSize ||
 		!boolPtrEqDiff(b.PluginUploadEnabled, a.PluginUploadEnabled) {
-		d.mod(DiffEntry{Kind: "admin", Name: "global", Detail: "Change admin server settings (history, rate limits, audit log, plugin upload) — restart required"}, "admin settings")
+		d.mod(DiffEntry{Kind: "admin", Name: "global", Detail: "Change admin server settings (console, history, rate limits, audit log, plugin upload) — restart required"}, "admin settings")
 	}
 }
 

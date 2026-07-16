@@ -23,17 +23,15 @@ import (
 	"jul/internal/config"
 )
 
-// HandlerFactory builds the request handler for each unique listen address from
-// a configuration. It is supplied by the composition root (main) so routing and
-// content-handler construction live outside this package. Returning fresh
-// handlers lets reload swap behavior atomically. The second result is a retire
-// callback that closes the resources owned by the generation this build
-// replaces (gRPC backend connections, WASM plugin runtimes, static-file
-// directory handles); the server invokes it only after that previous generation
-// has drained, so a reload never closes resources an in-flight request is still
-// using. It is nil when there is nothing to retire (for example the first build
-// at startup).
-type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, retirePrev func(), err error)
+// HandlerFactory prepares a new handler generation for cfg without committing
+// it. The returned commitFn promotes staged resources (upstream pools, closers)
+// to live and returns a retire callback for the previous generation. The
+// returned abortFn discards staged resources, leaving the live generation
+// untouched. Exactly one must be called; both release any lock held during the
+// build so concurrent builds are serialised without holding a lock across the
+// bind-attempt window. When commit or abort is nil (e.g. in tests), the caller
+// may skip the call safely.
+type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, commit func() func(), abort func(), err error)
 
 // Server runs one http.Server per unique listen address and coordinates
 // graceful shutdown and configuration reload.
@@ -68,11 +66,12 @@ type Server struct {
 	// reported here.
 	MTLSResultHook func(result string)
 
-	// OnReloaded, when set, is invoked after the new configuration has validated
-	// and handlers have been built, but before the HTTP handler swap and listener
-	// diff are finalized. It must be idempotent and must not assume the HTTP
-	// generation is already live.
-	OnReloaded func(*config.Config)
+	// OnReloaded, when set, is invoked after the new HTTP handlers are live
+	// (handler swap and listener changes committed). It applies side-effects that
+	// must not run on an aborted reload: log-level changes, GOMAXPROCS, and the
+	// stream-proxy config update. Errors are reported as a degraded reload result
+	// but do not roll back the handler swap.
+	OnReloaded func(*config.Config) error
 
 	lastReload atomic.Pointer[lastReloadInfo]
 
@@ -150,11 +149,12 @@ func (g *handlerGen) doRetire() {
 
 // listenerEntry tracks a bound listener and its hot-reloadable TLS provider.
 type listenerEntry struct {
-	addr     string
-	httpd    *http.Server
-	ln       net.Listener
-	provider *dynamicCertProvider // nil for plain HTTP
-	h3       h3Listener           // nil unless HTTP/3 is enabled and compiled in
+	addr             string
+	httpd            *http.Server
+	ln               net.Listener
+	provider         *dynamicCertProvider // nil for plain HTTP
+	h3               h3Listener           // nil unless HTTP/3 is enabled and compiled in
+	boundFingerprint string               // listenerBindFingerprint at bind time, for rotation detection
 }
 
 // New creates a Server. source and validate may be nil to disable reload.
@@ -179,10 +179,21 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, log *slog.Logger, fac
 // receive from the reload channel, then drains in-flight requests within the
 // configured shutdown timeout.
 func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
-	handlers, _, err := s.factory(s.cfg)
+	// Use the raw (pre-expansion) startup config for the initial factory call so
+	// that ExpandSecrets runs on the original secret-reference strings and
+	// registers the resolved values in the redaction registry (R3-04). If rawCfg
+	// is nil (tests with literal values), fall back to s.cfg.
+	buildCfg := s.cfg
+	if s.rawCfg != nil {
+		if clone, cerr := s.rawCfg.Clone(); cerr == nil {
+			buildCfg = clone
+		}
+	}
+	handlers, commit, _, err := s.factory(buildCfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
 	}
+	commit() // promote the initial generation; retirePrev is nil at startup
 	s.handlers.Store(newHandlerGen(handlers))
 
 	addrs := uniqueListenAddrs(s.cfg.Servers)
@@ -216,13 +227,25 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
 // bind starts serving on addr using the current config (s.cfg) for timeouts and TLS.
 func (s *Server) bind(addr string) error { return s.bindFrom(addr, s.cfg) }
 
-// bindFrom starts serving on addr using the provided cfg for all bind-time
-// settings: TLS, mTLS, h2c, HTTP/3, timeouts, header limits, and connection cap.
-// Using cfg instead of s.cfg ensures that new addresses added during a direct
-// reload are bound with the candidate configuration, not the old startup config.
-// This follows the same pattern as listenerBindFingerprint, which constructs a
-// temporary Server{cfg: cfg} to resolve bind settings from an explicit config.
+// bindFrom builds and immediately starts serving on addr. Used at startup and
+// for existing-address operations; for a staged reload, use buildListenerEntry
+// followed by startServing after the generation commit.
 func (s *Server) bindFrom(addr string, cfg *config.Config) error {
+	entry, err := s.buildListenerEntry(addr, cfg)
+	if err != nil {
+		return err
+	}
+	s.startServing(entry)
+	return nil
+}
+
+// buildListenerEntry creates a listenerEntry for addr using cfg for all
+// bind-time settings: TLS, mTLS, h2c, HTTP/3, timeouts, header limits, and
+// connection cap. The entry is NOT yet registered in s.listeners and httpd.Serve
+// is NOT yet started — connections queue in the kernel backlog until startServing
+// is called. This separation lets doReload stage binds before committing the
+// generation, so no 503 responses are served on a new address during an abort.
+func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerEntry, error) {
 	// cv is a configuration view for this bind: a lightweight Server value whose
 	// only purpose is to let the config-reading helper methods (readHeaderTimeout,
 	// h2cEnabledForAddr, http3EnabledForAddr, etc.) resolve from cfg rather than
@@ -231,7 +254,7 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("listen %s: %w", addr, err)
+		return nil, fmt.Errorf("listen %s: %w", addr, err)
 	}
 
 	// Cap concurrent connections per listener before the optional TLS wrap so
@@ -254,7 +277,7 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 		provider, err := cv.certProviderFor(addr, bindings)
 		if err != nil {
 			_ = ln.Close()
-			return fmt.Errorf("tls config for %s: %w", addr, err)
+			return nil, fmt.Errorf("tls config for %s: %w", addr, err)
 		}
 		dyn := &dynamicCertProvider{}
 		dyn.set(provider)
@@ -272,7 +295,7 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 		ca, err := clientAuthForAddr(cfg.Servers, addr, s.MTLSResultHook)
 		if err != nil {
 			_ = ln.Close()
-			return fmt.Errorf("client auth for %s: %w", addr, err)
+			return nil, fmt.Errorf("client auth for %s: %w", addr, err)
 		}
 		if ca != nil {
 			tlsConf.ClientAuth = ca.mode
@@ -289,7 +312,7 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 			h3, err := startHTTP3(addr, dyn.GetCertificate, s.dynamicHandler(addr), s.HTTP3ConnHook, s.log)
 			if err != nil {
 				_ = ln.Close()
-				return fmt.Errorf("http3 %s: %w", addr, err)
+				return nil, fmt.Errorf("http3 %s: %w", addr, err)
 			}
 			entry.h3 = h3
 			altSvc = altSvcValue(addr, cv.http3MaxAgeForAddr(addr))
@@ -316,25 +339,60 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 	}
 	entry.httpd = httpd
 	entry.ln = ln
+	// Capture the bind fingerprint at entry-creation time so that future
+	// listenerBoundRebindRequired calls can detect in-place CA/CRL rotation
+	// (same path, changed file contents) without re-reading the current file.
+	entry.boundFingerprint = listenerBindFingerprint(cfg, addr)
+	return entry, nil
+}
 
+// startServing registers entry in s.listeners and starts httpd.Serve in a
+// goroutine. Call only after the handler generation that covers entry.addr has
+// been committed so in-flight connections see the correct handlers immediately.
+func (s *Server) startServing(entry *listenerEntry) {
 	s.mu.Lock()
-	s.listeners[addr] = entry
+	s.listeners[entry.addr] = entry
 	s.mu.Unlock()
 
-	s.log.Info("listening", "addr", addr, "tls", tlsOK, "http3", entry.h3 != nil)
+	s.log.Info("listening", "addr", entry.addr, "tls", entry.provider != nil, "http3", entry.h3 != nil)
 
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if err := httpd.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := entry.httpd.Serve(entry.ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			select {
-			case s.serveErr <- fmt.Errorf("serve %s: %w", addr, err):
+			case s.serveErr <- fmt.Errorf("serve %s: %w", entry.addr, err):
 			default:
 			}
 		}
 	}()
-	return nil
 }
+
+// listenerBoundRebindRequired reports whether any listener that is kept across
+// the reload has bind-time properties that differ between the bound state and
+// the candidate config. Unlike ListenerRebindRequired (which compares two config
+// objects and may miss in-place file rotation because both sides read the same
+// current file), this method uses the fingerprint captured at bind time for the
+// old side, so a CA or CRL file rotated in place without changing its configured
+// path is correctly detected.
+func (s *Server) listenerBoundRebindRequired(next *config.Config) (string, bool) {
+	for _, addr := range uniqueListenAddrs(next.Servers) {
+		s.mu.Lock()
+		entry := s.listeners[addr]
+		s.mu.Unlock()
+		if entry == nil {
+			continue // newly added address: will be bound fresh
+		}
+		if entry.boundFingerprint != listenerBindFingerprint(next, addr) {
+			return fmt.Sprintf(
+				"listener %s has bind-time settings (timeouts, header limits, h2c, HTTP/3, TLS, mutual TLS, or connection cap) that changed; these are fixed when the listener binds and take effect on restart",
+				addr,
+			), true
+		}
+	}
+	return "", false
+}
+
 
 // acquireGen registers an in-flight request against the current generation and
 // returns it. If the generation it loaded is already being retired (its
@@ -414,14 +472,11 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 }
 
 // reloadRestartRequired aggregates all startup-bound restart checks for the
-// direct-reload path. Returns the first reason and true when any check fires.
-// A positive result means the reload must not proceed: the old configuration
-// remains authoritative and the operator must restart the process.
+// direct-reload path, excluding listener rebind which is handled separately
+// by listenerBoundRebindRequired (to detect in-place CA/CRL file rotation).
+// Returns the first reason and true when any check fires.
 func reloadRestartRequired(old, next *config.Config) (string, bool) {
 	if reason, need := ACMERestartRequired(old.Servers, next.Servers); need {
-		return reason, true
-	}
-	if reason, need := ListenerRebindRequired(old, next); need {
 		return reason, true
 	}
 	if reason, need := TracingRestartRequired(old, next); need {
@@ -450,6 +505,21 @@ func reloadRestartRequired(old, next *config.Config) (string, bool) {
 
 // doReload loads, validates, and applies a new configuration. On any failure it
 // logs and keeps the running configuration so a bad edit never causes downtime.
+//
+// Transaction order (R4-01 fix):
+//  1. Restart-required checks (all, including bound-fingerprint listener check)
+//  2. Validation
+//  3. factory.Prepare — expands secrets, builds handlers, stages generation
+//     (no commit yet; abortFn is deferred so any early return cleans up)
+//  4. Stage listener binds (port claimed, httpd NOT yet serving)
+//  5. If any bind failed: abortFn fires via defer, staged entries closed
+//  6. commitFn — promotes staged generation (pools, closers)
+//  7. startServing for each staged listener entry
+//  8. Handler swap (s.handlers.Store) + retire previous generation
+//  9. s.cfg, s.rawCfg updated
+// 10. Old listeners removed
+// 11. TLS cert refresh (degraded on error)
+// 12. OnReloaded (log level, GOMAXPROCS, stream reload) — error → degraded
 func (s *Server) doReload() {
 	if s.source == nil {
 		return
@@ -463,18 +533,25 @@ func (s *Server) doReload() {
 		return
 	}
 
-	// Time-bound the reload using the configured timeout. Zero means unbounded.
 	start := time.Now()
 	info := &lastReloadInfo{At: start}
 
+	// Clone newCfg for the factory so that ExpandSecrets runs on the clone and
+	// newCfg stays unexpanded. newCfg is stored as rawCfg on success (R4-02);
+	// the clone (buildCfg) becomes the new s.cfg after expansion.
+	// Clone applies parser defaults: in production this is identical to what
+	// Parse would produce; in tests with directly-constructed configs the clone
+	// may gain default values, but those are only in s.cfg (not rawCfg), so
+	// subsequent reload comparisons still use the consistent unexpanded values.
+	buildCfg := newCfg
+	if clone, cerr := newCfg.Clone(); cerr == nil {
+		buildCfg = clone
+	}
+
 	// Use the raw (pre-expansion) startup config for restart-required comparison
 	// so that secret references (${env:...}) do not produce false restart signals.
-	// s.cfg holds the expanded effective config; comparing it against an unexpanded
-	// reload candidate treats every secret reference as a change.
 	oldForRestart := s.rawCfg
 	if oldForRestart == nil {
-		// No raw startup config (tests with literal values). Fall back to s.cfg;
-		// this is safe for literal tokens but may false-positive for secret refs.
 		oldForRestart = s.cfg
 	}
 	if reason, need := reloadRestartRequired(oldForRestart, newCfg); need {
@@ -482,18 +559,23 @@ func (s *Server) doReload() {
 		info.OK = false
 		info.Error = "restart_required: " + reason
 		s.log.Warn("reload blocked: change requires a process restart",
-			"reason", reason,
-			"source", s.source.Name(),
-		)
+			"reason", reason, "source", s.source.Name())
+		s.lastReload.Store(info)
+		return
+	}
+	// Check bound-fingerprint listener restart: detects in-place CA/CRL rotation
+	// (same path, changed file contents) that static config comparison misses.
+	if reason, need := s.listenerBoundRebindRequired(newCfg); need {
+		info.Duration = time.Since(start)
+		info.OK = false
+		info.Error = "restart_required: " + reason
+		s.log.Warn("reload blocked: listener bind-time property changed",
+			"reason", reason, "source", s.source.Name())
 		s.lastReload.Store(info)
 		return
 	}
 
-	// Run validation, factory, and OnReloaded synchronously. A timeout is
-	// advisory (duration reporting and warning) rather than a hard cancellation,
-	// because the factory is side-effectful and cannot be safely interrupted
-	// mid-flight. The preflight already eliminates build and bind failures on
-	// the admin write path; on a direct reload, validation is the first gate.
+	// Validation is the first gate on the direct-reload path.
 	if s.validate != nil {
 		if err := s.validate(newCfg); err != nil {
 			info.Duration = time.Since(start)
@@ -504,7 +586,12 @@ func (s *Server) doReload() {
 			return
 		}
 	}
-	newHandlers, retirePrev, err := s.factory(newCfg)
+
+	// Prepare the new handler generation without committing it (R4-01).
+	// The factory expands buildCfg in-place (the clone, not the original newCfg).
+	// abortFn is deferred so any subsequent early return cleans up staged
+	// resources automatically.
+	newHandlers, commitFn, abortFn, err := s.factory(buildCfg)
 	if err != nil {
 		info.Duration = time.Since(start)
 		info.OK = false
@@ -513,51 +600,39 @@ func (s *Server) doReload() {
 		s.lastReload.Store(info)
 		return
 	}
-	// OnReloaded may do network I/O (stream rebind); it is the only potentially
-	// long-running step after the build.
-	if s.OnReloaded != nil {
-		s.OnReloaded(newCfg)
-	}
-	info.Duration = time.Since(start)
+	defer abortFn() // no-op after commitFn is called
 
-	// Advisory timeout check: if the reload took longer than the configured
-	// threshold, record TimedOut=true and warn, but the swap still completes.
-	threshold := newCfg.Global.ReloadTimeout.Std()
-	if threshold > 0 && info.Duration > threshold {
-		info.TimedOut = true
-		s.log.Warn("reload exceeded timeout threshold", "duration", info.Duration, "threshold", threshold)
-	}
-
-	// Compute listener diff before any mutations so the address sets are stable.
+	// Compute listener diff before any mutations.
 	oldAddrs := setOf(uniqueListenAddrs(s.cfg.Servers))
-	newAddrs := setOf(uniqueListenAddrs(newCfg.Servers))
+	newAddrs := setOf(uniqueListenAddrs(buildCfg.Servers))
 
-	// Stage every new listener bind using newCfg so the listener starts with the
-	// correct TLS, h2c, HTTP/3, timeout, and connection-cap settings from the
-	// candidate config (not from the old s.cfg). Staging happens before any
-	// runtime mutation: if any bind fails, all staged binds are rolled back and
-	// the reload is aborted — handlers, s.cfg, and old listeners are untouched.
-	stagedAddrs := make(map[string]struct{})
+	// Stage new listener binds: bind the port and build the entry but do NOT
+	// start httpd.Serve yet (R4-04). Connections queue in the kernel backlog
+	// without receiving responses until startServing is called after commit.
+	staged := make(map[string]*listenerEntry)
 	var bindErrs []string
 	for addr := range newAddrs {
-		if _, existed := oldAddrs[addr]; !existed {
-			if err := s.bindFrom(addr, newCfg); err != nil {
-				bindErrs = append(bindErrs, addr+": "+err.Error())
-				s.log.Error("reload: failed to stage new listener", "addr", addr, "error", err)
-			} else {
-				stagedAddrs[addr] = struct{}{}
-				s.log.Info("reload: staged new listener", "addr", addr)
-			}
+		if _, existed := oldAddrs[addr]; existed {
+			continue
+		}
+			entry, err := s.buildListenerEntry(addr, buildCfg)
+		if err != nil {
+			bindErrs = append(bindErrs, addr+": "+err.Error())
+			s.log.Error("reload: failed to stage new listener", "addr", addr, "error", err)
+		} else {
+			staged[addr] = entry
+			s.log.Debug("reload: staged new listener (not yet serving)", "addr", addr)
 		}
 	}
 
-	// If any staged bind failed, roll back every successfully staged listener and
-	// abort without touching handlers, s.cfg, or existing listeners. This prevents
-	// the replacement-address outage: if A is replaced by B and B fails to bind,
-	// A continues serving unchanged.
+	// If any staged bind failed, close successfully staged entries and abort
+	// the generation. The deferred abortFn handles pool/resource cleanup.
 	if len(bindErrs) > 0 {
-		for addr := range stagedAddrs {
-			s.removeListener(addr)
+		for _, entry := range staged {
+			_ = entry.ln.Close()
+			if entry.h3 != nil {
+				_ = entry.h3.Close(context.Background())
+			}
 		}
 		info.Duration = time.Since(start)
 		info.OK = false
@@ -568,13 +643,25 @@ func (s *Server) doReload() {
 		return
 	}
 
-	// All staged binds succeeded. Commit atomically:
-	// swap request handlers, update s.cfg, refresh TLS, then remove old addresses.
+	// All binds succeeded. Commit the generation (R4-01): promote staged pools
+	// and closers to live, returning a retire callback for the previous generation.
+	retirePrev := commitFn()
+
+	// Activate staged listeners AFTER the generation commit so that connections
+	// draining from the backlog see the correct live handlers immediately (R4-04).
+	for _, entry := range staged {
+		s.startServing(entry)
+	}
+
+	// Atomically swap the request handlers and schedule retirement of the
+	// previous generation's resources after its in-flight requests drain.
 	prevGen := s.handlers.Load()
 	s.handlers.Store(newHandlerGen(newHandlers))
 	s.retireGen(prevGen, retirePrev)
 
-	s.cfg = newCfg
+	// Advance the effective and raw configs (R4-02).
+	s.cfg = buildCfg  // expanded clone
+	s.rawCfg = newCfg // unexpanded original from source
 
 	// Remove listeners that are no longer in the config.
 	for addr := range oldAddrs {
@@ -584,18 +671,46 @@ func (s *Server) doReload() {
 		}
 	}
 
-	// Refresh TLS certificates. Errors degrade the result (old certs remain
-	// active on affected listeners) but do not roll back the config/handler swap.
-	if certErrs := s.reloadCertificates(); len(certErrs) > 0 {
+	// Refresh TLS certificates. Errors degrade the result but do not roll back.
+	certErrs := s.reloadCertificates()
+
+	// OnReloaded runs AFTER the handler swap so it only fires on a committed
+	// reload (R4-03, R4-01). A stream-reload error is reported as degraded.
+	var onReloadErr error
+	if s.OnReloaded != nil {
+		onReloadErr = s.OnReloaded(buildCfg)
+	}
+
+	info.Duration = time.Since(start)
+	// Advisory timeout check: warn but do not fail the reload.
+	threshold := buildCfg.Global.ReloadTimeout.Std()
+	if threshold > 0 && info.Duration > threshold {
+		info.TimedOut = true
+		s.log.Warn("reload exceeded timeout threshold", "duration", info.Duration, "threshold", threshold)
+	}
+
+	switch {
+	case len(certErrs) > 0 && onReloadErr != nil:
+		info.OK = false
+		info.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") +
+			"; stream reload: " + onReloadErr.Error()
+		s.log.Warn("reload completed with errors", "cert_errors", strings.Join(certErrs, "; "),
+			"stream_error", onReloadErr)
+	case len(certErrs) > 0:
 		info.OK = false
 		info.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") + "; old certificate(s) remain active"
 		s.log.Warn("reload completed with certificate errors", "errors", strings.Join(certErrs, "; "))
-	} else {
+	case onReloadErr != nil:
+		info.OK = false
+		info.Error = "degraded: stream reload: " + onReloadErr.Error()
+		s.log.Warn("reload completed with stream error", "error", onReloadErr)
+	default:
 		info.OK = true
 		s.log.Info("configuration reloaded", "duration", info.Duration)
 	}
 	s.lastReload.Store(info)
 }
+
 
 // reloadCertificates rebuilds and swaps the cert provider for each currently
 // TLS-enabled listener that is still TLS-enabled in the new config.

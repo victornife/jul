@@ -165,3 +165,55 @@ func TestHandlerFactoryBuildErrorAbortsGeneration(t *testing.T) {
 		t.Errorf("Build after aborted generation failed: %v", err)
 	}
 }
+
+func TestHandlerFactoryPrepareCommit(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
+	handlers, commitFn, abortFn, err := f.Prepare(cfg)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if len(handlers) == 0 {
+		t.Fatal("Prepare returned empty handler map")
+	}
+	if commitFn == nil {
+		t.Fatal("Prepare returned nil commitFn")
+	}
+	if abortFn == nil {
+		t.Fatal("Prepare returned nil abortFn")
+	}
+	retirePrev := commitFn()
+	// retirePrev is nil on the first commit (no previous generation).
+	if retirePrev != nil {
+		retirePrev()
+	}
+	// After commit, abortFn must be a safe no-op.
+	abortFn()
+	// A subsequent Build must succeed, proving the mutex was released by commitFn.
+	good := config.ProxyTarget("127.0.0.1:9001", ":0")
+	_, _, err = f.Build(good, false)
+	if err != nil {
+		t.Errorf("Build after Prepare+commit failed: %v", err)
+	}
+}
+
+func TestHandlerFactoryPrepareAbort(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
+	_, _, abortFn, err := f.Prepare(cfg)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	abortFn()
+	// After abort, commitFn must be a safe no-op (but we don't have it; verify
+	// the mutex was released by successfully starting another build).
+	good := config.ProxyTarget("127.0.0.1:9001", ":0")
+	_, _, err = f.Build(good, false)
+	if err != nil {
+		t.Errorf("Build after Prepare+abort failed: %v", err)
+	}
+}

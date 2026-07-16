@@ -47,37 +47,84 @@ type HandlerFactory struct {
 	mu sync.Mutex // serialises every build (startup, reload, preflight)
 }
 
-// Build rebuilds the per-listen-address handler tree from c. It is invoked at
-// startup and on every reload so all routing state (router, upstream pools,
-// content handlers) is reconstructed atomically.
-//
-// When commit is true the freshly built generation is promoted (staged pools
-// committed, the previous generation's handler closers torn down after drain).
-// When false the build is a throwaway preflight: staged pools and closers are
-// released by the deferred abort, leaving the live serving state untouched.
+// Build rebuilds the per-listen-address handler tree from c. It is used for
+// preflight (dry-run) validation by Preflight.Apply. When commit is false the
+// staged generation is aborted before returning and the live serving state is
+// unchanged. When commit is true the generation is committed inline (legacy
+// live path). For the three-phase live-reload path use Prepare instead.
 func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.Handler, func(), error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Resolve secret references (${env:NAME}, ${file:/path}) in place before
-	// the runtime reads any credential. Resolved values register with redact
-	// for log masking. The admin/on-disk views keep the unresolved references,
-	// so secrets never reach the console or the config file (SEC-1).
 	if err := config.ExpandSecrets(c); err != nil {
 		return nil, nil, fmt.Errorf("secrets: %w", err)
 	}
 	upstreams := IndexUpstreams(c.Upstreams)
-
-	// Open a staging generation for this build: genRes.Begin stages a new
-	// upstream-pool generation, each proxy location's resolvePool stages or
-	// reuses its pool through poolReg, and gen.Commit (on success) promotes
-	// them and closes pools that were removed or reshaped. The deferred
-	// gen.Abort closes freshly created staged pools and any staged handler
-	// closers on any non-committing return (preflight or failure) so a rejected
-	// reload leaks no goroutines while the previous pools keep serving; it is a
-	// no-op once gen.Commit has promoted the generation.
 	gen := f.GenRes.Begin()
 	defer gen.Abort()
+
+	handlers, err := f.buildHandlers(c, gen, upstreams)
+	if err != nil {
+		return nil, nil, err
+	}
+	var retirePrev func()
+	if commit {
+		retirePrev = gen.Commit()
+	}
+	return handlers, retirePrev, nil
+}
+
+// Prepare stages a new handler generation for cfg without committing it. The
+// returned commitFn promotes the staged resources (upstream pools, closers) to
+// live and returns a retire callback for the previous generation. The returned
+// abortFn discards staged resources, leaving the live generation untouched.
+// Exactly one of commitFn or abortFn must be called; both release the factory
+// mutex so no concurrent build can start while a staged generation is pending.
+func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
+	f.mu.Lock()
+	// Mutex is NOT deferred here: it is released by commitFn or abortFn.
+
+	if err := config.ExpandSecrets(c); err != nil {
+		f.mu.Unlock()
+		return nil, nil, nil, fmt.Errorf("secrets: %w", err)
+	}
+	upstreams := IndexUpstreams(c.Upstreams)
+	gen := f.GenRes.Begin()
+	// No deferred gen.Abort: lifecycle is caller-controlled via commitFn/abortFn.
+
+	handlers, err := f.buildHandlers(c, gen, upstreams)
+	if err != nil {
+		gen.Abort()
+		f.mu.Unlock()
+		return nil, nil, nil, err
+	}
+
+	committed := false
+	commitFn := func() func() {
+		if committed {
+			return func() {}
+		}
+		committed = true
+		ret := gen.Commit()
+		f.mu.Unlock()
+		return ret
+	}
+	abortFn := func() {
+		if committed {
+			return
+		}
+		committed = true
+		gen.Abort()
+		f.mu.Unlock()
+	}
+	return handlers, commitFn, abortFn, nil
+}
+
+// buildHandlers constructs the per-listen-address handler tree from c, staging
+// all closeable resources (plugin runtimes, static-file roots, gRPC connections)
+// into gen. It neither commits nor aborts gen; resource lifecycle is the
+// caller's responsibility. upstreams must be IndexUpstreams(c.Upstreams).
+func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, error) {
 
 	// Build this generation's WASM plugin set. A lean build (or a malformed
 	// module) fails here, rejecting the reload. The set owns per-plugin wazero
@@ -85,7 +132,7 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	// closed only after the new handlers are live.
 	pluginSet, err := f.PluginMgr.Build(c.Plugins)
 	if err != nil {
-		return nil, nil, fmt.Errorf("plugins: %w", err)
+		return nil, fmt.Errorf("plugins: %w", err)
 	}
 	gen.Stage(pluginSet)
 
@@ -199,7 +246,7 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 				DialContext: f.EgressDial,
 			})
 			if err != nil {
-				return nil, nil, fmt.Errorf("location %s: %w", key, err)
+				return nil, fmt.Errorf("location %s: %w", key, err)
 			}
 			authByScope[key] = a
 		}
@@ -234,7 +281,7 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 				Hooks:  waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
 			})
 			if err != nil {
-				return nil, nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
+				return nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
 			}
 			wafByScope[WAFScope(c.Servers[i], loc)] = fw
 		}
@@ -312,7 +359,7 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 
 	rtr, err := router.New(c, builders, nil, locModifier, f.Log)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Compression is built once per reload and shared across listeners. It
@@ -329,7 +376,7 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 			OnCompress: f.Metrics.ObserveCompression,
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		compress = cm
 	}
@@ -374,20 +421,5 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 		handlers[addr] = h
 	}
 
-	// The build succeeded. A committing build promotes the staged pools and
-	// closes any pools the previous generation no longer needs (the deferred
-	// gen.Abort becomes a no-op), then adopts this generation's handler closers
-	// as the live set and returns a retire callback that closes the PREVIOUS
-	// generation's closers. The server invokes that callback only after the
-	// previous generation has drained, so gRPC backend connections, WASM plugin
-	// runtimes, and static-file directory handles are never closed while an
-	// in-flight request is still served by the old handlers. A preflight build
-	// (commit == false) never calls gen.Commit, so the deferred gen.Abort
-	// releases the staged pools and closers and the live generation is
-	// untouched; the returned handlers and nil retire are discarded.
-	var retirePrev func()
-	if commit {
-		retirePrev = gen.Commit()
-	}
-	return handlers, retirePrev, nil
+	return handlers, nil
 }

@@ -39,9 +39,11 @@ func TestReloadTimeout(t *testing.T) {
 	src.set(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil)
 
 	// Factory that sleeps longer than the reload timeout.
-	slowFactory := func(c *config.Config) (map[string]http.Handler, func(), error) {
+	slowFactory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
 		time.Sleep(200 * time.Millisecond)
-		return factoryFor(c, "v1"), nil, nil
+		commitFn := func() func() { return nil }
+		abortFn := func() {}
+		return factoryFor(c, "v1"), commitFn, abortFn, nil
 	}
 
 	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, quietLogger(), slowFactory, src, func(*config.Config) error { return nil })

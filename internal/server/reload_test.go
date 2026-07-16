@@ -57,7 +57,7 @@ func cfgWith(addr string) *config.Config {
 }
 
 func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
-	return func(c *config.Config) (map[string]http.Handler, func(), error) {
+	return func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
 		current := *tag.Load()
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, current)
@@ -66,7 +66,18 @@ func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
 		for _, srv := range c.Servers {
 			m[srv.Listen] = h
 		}
-		return m, nil, nil
+		// No staged resources in test factory; commit and abort are no-ops.
+		committed := false
+		commitFn := func() func() {
+			committed = true
+			return nil
+		}
+		abortFn := func() {
+			if !committed {
+				// nothing to discard
+			}
+		}
+		return m, commitFn, abortFn, nil
 	}
 }
 
@@ -214,7 +225,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 	var enterOnce, retireOnce sync.Once
 	var builds atomic.Int32
 
-	factory := func(c *config.Config) (map[string]http.Handler, func(), error) {
+	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
 		n := builds.Add(1)
 		var h http.Handler
 		switch n {
@@ -246,7 +257,17 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 		if n == 2 {
 			retire = func() { retireOnce.Do(func() { close(retired) }) }
 		}
-		return m, retire, nil
+		committed := false
+		commitFn := func() func() {
+			committed = true
+			return retire
+		}
+		abortFn := func() {
+			if !committed {
+				// nothing to discard
+			}
+		}
+		return m, commitFn, abortFn, nil
 	}
 
 	src := &stubSource{}
@@ -326,7 +347,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 func TestReloadNoGoroutineLeak(t *testing.T) {
 	addr := freePort(t)
 
-	factory := func(c *config.Config) (map[string]http.Handler, func(), error) {
+	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, "ok")
 		})
@@ -335,7 +356,9 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 			m[srv.Listen] = h
 		}
 		// Non-nil retire so every reload exercises the retire path.
-		return m, func() {}, nil
+		commitFn := func() func() { return func() {} }
+		abortFn := func() {}
+		return m, commitFn, abortFn, nil
 	}
 
 	src := &stubSource{}

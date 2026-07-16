@@ -81,18 +81,19 @@ Only after all five pass is the file written and the reload triggered.
 ## Transactional swap
 
 The reload follows an all-or-nothing staged commit for listener changes: every
-new listen address is bound before any runtime mutation; if any bind fails all
-staged binds are rolled back and the reload is aborted without touching handlers,
-`s.cfg`, or existing listeners.
+new listen address is bound (port claimed, kernel backlog fills) before any
+runtime state changes; if any bind fails all staged entries are closed and the
+reload is aborted without touching handlers, `s.cfg`, or existing listeners.
 
-For the handler swap: the new generation is built before the listener set is
-altered; existing connections finish on their original handlers until the
+For the handler swap: the new generation is committed only after all listener
+binds succeed; existing connections finish on their original handlers until the
 previous generation drains.
 
-Certificate refresh (for kept TLS listeners) and stream-proxy reload happen
-after the handler swap. A failure in either produces a **degraded** result
+Certificate refresh (for kept TLS listeners), stream-proxy reload, log-level
+changes, and GOMAXPROCS updates happen **after** the handler swap. A failure
+in certificate refresh or stream reload produces a **degraded** result
 (`LastReload.OK=false`) but does not roll back the handler swap — the new
-config and handlers are serving while the cert/stream error is flagged.
+config and handlers are serving while the error is flagged.
 
 - **Stream** — routes and pools are built and newly added listeners bound
   **before** any running state changes; a bind failure rolls back to the
