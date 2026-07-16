@@ -309,7 +309,7 @@ func cmdRun(args []string) int {
 
 	ctx, reloadSig, stop := signals.Listen(context.Background())
 	defer stop()
-		return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version)
+	return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version)
 }
 
 // serve starts the composition root with the given context, reload signal,
@@ -460,7 +460,7 @@ func cmdCheck(args []string) int {
 		}
 		return 1
 	} else {
-			if err := app.ValidateRuntimeConfig(cfg); err != nil {
+		if err := app.ValidateRuntimeConfig(cfg); err != nil {
 			if *jsonOut {
 				_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
 			} else {

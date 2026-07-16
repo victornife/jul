@@ -21,8 +21,20 @@ technical merit aligned with the project's vision.
    as `grpc`, `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`,
    `acme`, `console`, `otel`, `importer`, `brotli`, or `zstd`), also run:
    ```bash
-   make ci-full          # full feature set — matches CI exactly
+   make ci-full          # full-tag Go build, lint, test, vulncheck, license
    ```
+   For the closest local approximation of the full merge gate, run:
+   ```bash
+   make ci-pr            # ci-full + go vet + docs-check
+   ```
+
+   **What `ci-pr` does not cover** (still requires a CI push):
+   - race detector (needs a CGO C toolchain)
+   - coverage floor enforcement
+   - Windows / macOS platform lanes
+   - frontend typecheck/lint/unit tests (run `make console-check` separately)
+   - Playwright E2E
+   - benchmark / fuzz / soak smoke
 
 ### Git hooks (optional local gate parity)
 

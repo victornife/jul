@@ -54,7 +54,17 @@ vulncheck-full:
 
 ci-fast: format-check lint test build license-check
 
+# Full-tag Go gates (build, lint, test, vulncheck, license).
+# Closest local equivalent to the merge gate; does not cover race, coverage
+# floors, platform lanes, frontend, or E2E (those run only in CI).
 ci-full: format-check lint-full test-full vulncheck-full build-full license-check
+
+# Extended local gate: ci-full + go vet + docs structural check.
+# Covers the most common CI-only failures without requiring CGO, pnpm, or
+# external services. See CONTRIBUTING.md for the full exclusion list.
+ci-pr: ci-full
+	go vet -tags "$(FULL_TAGS)" ./...
+	python3 scripts/docs-check.py
 
 # Install the repo-managed Git hooks (local CI gate parity, SEQ-08). One command;
 # safe to re-run. Uninstall with `git config --unset core.hooksPath`.

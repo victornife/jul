@@ -50,28 +50,46 @@ docs/adr/              # Architecture Decision Records
 
 ## Composition-root helpers (`internal/app/`)
 
-`cmd/jul/main.go` is the composition root — it initialises every subsystem,
-wires dependencies, and coordinates reload.  To keep the root readable and
-unit-testable, pure wiring helpers that depend only on lightweight packages
-live in `internal/app/`:
+The composition root — where every subsystem is initialised, dependencies are
+wired, and reload is orchestrated — lives in `internal/app/serve.go` via
+`app.Serve`. `cmd/jul/main.go` is a thin CLI dispatcher (≈90 LOC): it parses
+flags and subcommands, loads the config source, and delegates to `app.Serve`.
+This split was completed under ADR-0007 / #54 so the composition root can be
+unit-tested independently of a full process boot.
+
+`app.Serve` runs in four phases:
+
+1. **Init** — logging, secrets, cache, metrics, and the process-lifetime
+   runtime subsystems (tracing, ACME, stream server, build-tag feature gates)
+   built once.
+2. **HandlerFactory** — `HandlerFactory` holds the process-lifetime dependencies
+   and rebuilds the per-listen-address HTTP handler tree on every reload.
+   Generational teardown (`GenerationResources`) keeps old gRPC connections,
+   plugin runtimes, and static handles alive until in-flight requests drain.
+3. **Preflight** — `Preflight.Apply` is the admin-write validation gate:
+   validate → TLS → handler dry-run → stream dry-run → bind probes →
+   restart-required checks (ACME, listeners, tracing, access-log, cache,
+   egress, admin, metrics).
+4. **Admin deps** — `BuildAdminDeps` wires the Console and admin API, then
+   `admin.New` starts the admin listener.
+
+Supporting helpers in `internal/app/`:
 
 | File | Responsibility | Tests |
 |------|---------------|-------|
+| `serve.go` | Composition root: four-phase startup, reload loop, process/generation lifetime | Yes (`*_test.go`) |
+| `factory.go` | `HandlerFactory` — per-reload HTTP handler tree construction | Yes (`*_test.go`) |
 | `wiring.go` | Scope keys, upstream indexing, reload channel fan-in, `ValidateRuntimeConfig` | Yes (`*_test.go`) |
 | `admin_deps.go` | Build `admin.Deps` from initialised subsystems (`BuildAdminDeps`, adapters) | Yes (`*_test.go`) |
 | `preflight.go` | Admin write preflight gates (`Preflight.Apply` with `StreamPreflighter` iface) | Yes (`*_test.go`) |
 | `runtime.go` | Process-lifetime subsystems behind their build-tag gates (`RuntimeBuilder`/`Runtime`: tracing, ACME, HTTP/3, stream server) | Yes (`*_test.go`) |
 | `generation.go` | Generational handler teardown (`GenerationResources`: live closers + `poolReg` Begin/Commit/Abort staging) | Yes (`*_test.go`) |
+| `startup_restart.go` | Startup-bound subsystem restart checks (cache, egress, admin, metrics) | Yes (`*_test.go`) |
 
-Most of these helpers are **additive** — `main.go` calls them, they do not
-change initialization order, and they do not replace the `buildHandlers`
-closure.  `runtime.go` and `generation.go` (extracted under ADR-0007 / #30) are
-the exception: they intentionally **own** the process-lifetime and generational
-lifecycles respectively, which is what let `serve()` shed that bookkeeping.
-
-When the ADR-0007 trigger fires (a cross-cutting change touching 3+ sections
-of `serve()`, or a reload/preflight bug), new helpers should continue to
-reside in `internal/app/` rather than being added inline.
+Each helper is independently testable and owns a well-defined lifecycle
+responsibility. `serve.go` is the only file that assembles the full runtime;
+the helpers keep it readable by extracting each phase into a focused,
+testable unit.
 
 ## Large-file decomposition (`internal/admin/`)
 

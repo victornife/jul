@@ -1,7 +1,6 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-
 package admin
 
 // This file holds the global-config, plugin, and stream diff functions.

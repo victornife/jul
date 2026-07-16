@@ -19,8 +19,8 @@ jobs:
     name: release gate (build + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -35,8 +35,8 @@ jobs:
     name: soak gate (ADR 0005)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -52,7 +52,7 @@ jobs:
       # evidence artifact (see docs/soak-evidence.md).
       - name: upload soak results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: soak-results
           path: soak-results.txt
@@ -76,8 +76,8 @@ jobs:
         # tags) and `full` (the complete opt-in feature set, env.FULL_TAGS).
         profile: [lean, full]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -121,7 +121,7 @@ jobs:
             ./cmd/jul
       # Generate a per-artifact SBOM (SPDX JSON) for the exact binary that ships.
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0
         with:
           file: stage/${{ steps.prof.outputs.name }}/jul${{ steps.prof.outputs.ext }}
           format: spdx-json
@@ -150,17 +150,17 @@ jobs:
       # Keyless build provenance: cryptographically links this binary to the
       # workflow run/commit that produced it (SLSA-style attestation via Sigstore).
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4
         with:
           subject-path: stage/${{ steps.prof.outputs.name }}/jul${{ steps.prof.outputs.ext }}
       # Sign the SBOM the same way so its integrity can be verified offline.
       - name: Attest SBOM
-        uses: actions/attest-sbom@v4
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e  # v4
         with:
           subject-path: stage/${{ steps.prof.outputs.name }}/jul${{ steps.prof.outputs.ext }}
           sbom-path: stage/${{ steps.prof.outputs.name }}/jul.spdx.json
       - name: Upload build artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ${{ steps.prof.outputs.name }}
           path: dist/${{ steps.prof.outputs.name }}.*
@@ -175,7 +175,7 @@ jobs:
     steps:
       # Collect every matrix build's archive + checksum into a single dir.
       - name: Download all build artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
         with:
           path: artifacts
           merge-multiple: true
@@ -189,7 +189,7 @@ jobs:
           cat SHA256SUMS
       # Publish a DRAFT release so a human reviews assets before going public.
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           draft: true
           generate_release_notes: true

@@ -400,4 +400,3 @@ func upstreamReferences(c *config.Config, name string) []string {
 	}
 	return refs
 }
-

@@ -160,7 +160,6 @@ func TestConfigClone(t *testing.T) {
 	}
 }
 
-
 func TestParseReloadTimeoutZeroDefaultsToTenSeconds(t *testing.T) {
 	// Explicit zero in TOML must still default to 10s (unbounded reload is
 	// intentionally not supported to prevent accidental production stalls).

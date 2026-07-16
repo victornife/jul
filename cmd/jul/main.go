@@ -92,4 +92,3 @@ func run() int {
 	defer stop()
 	return app.Serve(ctx, reloadSig, src, cfg, productName, version)
 }
-

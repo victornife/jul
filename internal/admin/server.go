@@ -201,6 +201,15 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	s.log.Info("admin listener started", "addr", s.cfg.Listen, "auth", s.cfg.Token != "")
+	// The admin API grants full read/write control of the running server and
+	// uses a single shared bearer token with no RBAC. It is designed for
+	// single-operator, loopback-bound use. Binding to a routable address
+	// without an external firewall, VPN, or mTLS layer is unsafe.
+	if !adminIsLoopback(s.cfg.Listen) {
+		s.log.Warn("admin listener bound to a non-loopback address — restrict access with firewall rules or a private network",
+			"addr", s.cfg.Listen,
+			"security", "single shared bearer token; no RBAC; full read/write access")
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -729,4 +738,20 @@ func newStyleNonce() string {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(b[:])
+}
+
+// adminIsLoopback reports whether addr (host:port or bare host) resolves to a
+// loopback address. It is used to warn when the admin listener is bound to a
+// routable address, since the admin API uses a single shared bearer token with
+// no RBAC and is designed for local single-operator use.
+func adminIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

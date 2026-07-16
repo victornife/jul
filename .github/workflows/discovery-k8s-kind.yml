@@ -51,9 +51,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -64,7 +64,7 @@ jobs:
       # kind: Kubernetes in Docker — spins up a single-node K8s cluster using
       # the Docker daemon that ships on ubuntu-latest runners. No Docker Desktop
       # or Windows cmdlets required.
-      - uses: helm/kind-action@v1
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc  # v1
         with:
           cluster_name: jul-discovery-test
           # Single-node cluster; we only need the API server + RBAC.
@@ -100,7 +100,7 @@ jobs:
 
       - name: upload evidence bundle
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: k8s-discovery-evidence
           path: tmp/issue24-k8s/

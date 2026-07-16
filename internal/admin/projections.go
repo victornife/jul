@@ -1,13 +1,11 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-
 package admin
 
 // This file contains the Console v2 projection builder functions that transform
 // the in-memory config and runtime state into the typed JSON shapes defined in
 // projection_types.go. Types live there; logic lives here.
-
 
 import (
 	"fmt"
@@ -17,6 +15,7 @@ import (
 	"strings"
 	"time"
 )
+
 // ── Projection helpers ──────────────────────────────────────────────────────
 
 func projectRoutes(c *config.Config) []RouteProjection {

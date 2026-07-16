@@ -732,4 +732,3 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}
 }
-

@@ -1,7 +1,6 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-
 package admin
 
 // This file holds all the Go struct types that form the Console v2 JSON API
@@ -10,7 +9,6 @@ package admin
 // "builder functions" file that is easier to navigate.
 //
 // Do not add projection logic here. Add types only.
-
 
 // ── Projection types (v2 API contract) ──────────────────────────────────────
 
@@ -343,4 +341,3 @@ type RuntimeOverview struct {
 	// configuration presence. Omitted when no TLS server blocks are configured.
 	CertRisk *CertRiskProjection `json:"cert_risk,omitempty"`
 }
-

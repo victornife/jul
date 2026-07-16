@@ -96,7 +96,8 @@ Cross-cutting robustness work parked out of the pre-1.0 hardening pass (the Cons
 v2 robustness phases) so it is tracked, not lost. These are **not** demand-gated
 vision items; they are near-term durability/parity work. The design source-of-truth
 is the [Hardening & platform spec](../specs/hardening-platform.md) (HP-01..HP-07 +
-the HP-m\* micro-fixes register). Nothing here has shipped.
+the HP-m\* micro-fixes register). Items marked **Shipped** are complete; the
+remaining rows are the active backlog.
 
 | ID | Item | Description | Impact / what it unlocks | Effort |
 | --- | --- | --- | --- | --- |

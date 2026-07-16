@@ -28,9 +28,9 @@ jobs:
     name: sync labels
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
       - name: Sync labels
-        uses: crazy-max/ghaction-github-labeler@v6
+        uses: crazy-max/ghaction-github-labeler@548a7c3603594ec17c819e1239f281a3b801ab4d  # v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           yaml-file: .github/labels.yml

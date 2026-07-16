@@ -23,8 +23,8 @@ jobs:
     name: license-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -45,8 +45,8 @@ jobs:
           - profile: full
             tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -67,8 +67,8 @@ jobs:
           - profile: full
             tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -87,8 +87,8 @@ jobs:
           - profile: full
             tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -115,8 +115,8 @@ jobs:
           - profile: full
             tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -135,8 +135,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -156,8 +156,8 @@ jobs:
       # regressions, not against every fractional dip. Raise it as coverage grows.
       COVERAGE_FLOOR: "65"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -228,12 +228,12 @@ jobs:
 
       - name: upload coverage profile
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: coverage-profile
           path: cover.out
       - name: upload to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5
         with:
           files: ./cover.out
           fail_ci_if_error: false
@@ -243,8 +243,8 @@ jobs:
     name: benchmarks (smoke)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -261,7 +261,7 @@ jobs:
         run: scripts/bench.sh | tee bench-results.txt
       - name: upload benchmark results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: benchmark-results
           path: bench-results.txt
@@ -270,8 +270,8 @@ jobs:
     name: fuzz (smoke)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -287,7 +287,7 @@ jobs:
       # input is reproducible and can be committed as a permanent regression seed.
       - name: upload fuzz crashers
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: fuzz-crashers
           path: '**/testdata/fuzz/**'
@@ -297,8 +297,8 @@ jobs:
     name: soak (smoke)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -316,7 +316,7 @@ jobs:
       # (see docs/soak-evidence.md), not an unbacked assertion.
       - name: upload soak results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: soak-results
           path: soak-results.txt
@@ -325,8 +325,8 @@ jobs:
     name: gofmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -346,13 +346,13 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9
         with:
           version: v2.12.2
 
@@ -370,8 +370,8 @@ jobs:
           - profile: source
           - profile: released
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -379,10 +379,10 @@ jobs:
       # the store path. Dependencies are installed in a dedicated step after
       # setup-node so the install runs under the pinned Node and reuses the
       # restored pnpm cache.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6
         with:
           version: 11.8.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version-file: ${{ env.CONSOLE_UI }}/package.json
           cache: pnpm
@@ -466,7 +466,7 @@ jobs:
 
       - name: upload build log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: console-build-log-${{ matrix.profile }}
           path: build.log
@@ -476,8 +476,8 @@ jobs:
     name: docs-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
       - name: install tomli (Python < 3.11 compat)
@@ -489,8 +489,8 @@ jobs:
     name: full-tags-sync
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
       - name: verify Makefile and ci.yml FULL_TAGS are in sync
@@ -500,8 +500,8 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -520,11 +520,11 @@ jobs:
     env:
       COVERAGE_FLOOR: "70"
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6
         with:
           version: 11.8.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version-file: internal/admin/ui/package.json
           cache: pnpm
@@ -557,7 +557,7 @@ jobs:
           fi
       - name: upload coverage output
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: console-coverage-output
           path: internal/admin/ui/coverage-output.txt
@@ -571,11 +571,11 @@ jobs:
       CONSOLE_UI: internal/admin/ui
       CONSOLE_DIST: internal/admin/assets/dist
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6
         with:
           version: 11.8.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version-file: internal/admin/ui/package.json
           cache: pnpm
@@ -590,7 +590,7 @@ jobs:
         run: pnpm --dir ${{ env.CONSOLE_UI }} run e2e:ci
       - name: upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: playwright-report
           path: internal/admin/ui/playwright-report/
@@ -603,8 +603,8 @@ jobs:
     env:
       CONSOLE_UI: internal/admin/ui
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -613,10 +613,10 @@ jobs:
       # webServer command path (../../../../jul) resolves correctly from ui/.
       - name: build jul (console tag)
         run: go build -tags "console" -o jul ./cmd/jul
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6
         with:
           version: 11.8.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version-file: ${{ env.CONSOLE_UI }}/package.json
           cache: pnpm
@@ -634,7 +634,7 @@ jobs:
         run: pnpm --dir ${{ env.CONSOLE_UI }} exec playwright test --project=real-server
       - name: upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: playwright-report-real-server
           path: internal/admin/ui/playwright-report/
