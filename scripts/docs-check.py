@@ -286,6 +286,40 @@ def check_denylist(path: Path, text: str):
             error(path, line, f"denylist match: {pattern}")
 
 
+def check_feature_status_manifest():
+    """Validate docs/feature-status.yaml: parseable YAML, each doc file exists."""
+    try:
+        import yaml
+    except ModuleNotFoundError:
+        return  # pyyaml not installed; skip gracefully
+
+    manifest = ROOT / "docs" / "feature-status.yaml"
+    if not manifest.exists():
+        error(manifest, 0, "feature-status.yaml is missing from docs/")
+        return
+
+    try:
+        data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        error(manifest, 0, f"feature-status.yaml is not valid YAML: {exc}")
+        return
+    ok("feature-status.yaml parses as valid YAML")
+
+    if not isinstance(data, dict) or "features" not in data:
+        error(manifest, 0, "feature-status.yaml missing required 'features' key")
+        return
+
+    for entry in data.get("features", []):
+        name = entry.get("name", "?")
+        doc = entry.get("doc", "")
+        if doc:
+            doc_path = DOCS / doc
+            if not doc_path.exists():
+                error(manifest, 0, f"feature '{name}' references missing doc: {doc}")
+            else:
+                ok(f"feature-status.yaml: doc {doc} exists")
+
+
 def check_lifecycle_manifest():
     """Validate docs/config-lifecycle.yaml and cross-check reload-semantics.md.
 
@@ -408,6 +442,7 @@ def main():
 
     check_version_consistency(md_files)
     check_schema_doc_drift()
+    check_feature_status_manifest()
     check_lifecycle_manifest()
     check_finding_uniqueness()
 

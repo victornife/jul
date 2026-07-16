@@ -62,6 +62,10 @@ const NAV_GROUPS: readonly NavGroup[] = [
       { to: "/plugins", label: "Plugins", glyph: "🧩" },
       { to: "/streams", label: "Streams", glyph: "🔌" },
       { to: "/tls", label: "TLS", glyph: "🔒" },
+      // gRPC Transcode designer: absent from nav previously; adding it here
+      // makes it reachable without requiring a contextual link from an existing
+      // grpc_transcode route, and auto-includes it in the command palette.
+      { to: "/transcode", label: "gRPC Transcode", glyph: "⇌" },
     ],
   },
   {
@@ -403,6 +407,38 @@ function CertAlertBanner({ certRisk }: { readonly certRisk: CertRisk | undefined
 	);
 }
 
+// RestartRequiredBanner shows a persistent amber notice at the top of every
+// page when startup-bound subsystems (cache, egress, admin, metrics) have
+// changed on disk since the server started. The saved config is not yet live
+// until the process restarts. It is dismissible per session.
+function RestartRequiredBanner({ subsystems }: { readonly subsystems: readonly string[] | undefined }) {
+	const [dismissed, setDismissed] = useState(false);
+
+	if (dismissed || !subsystems || subsystems.length === 0) return null;
+
+	const names = subsystems.join(", ");
+	return (
+		<div
+			className="border-b border-jul-warning/40 bg-jul-warning/10 px-6 py-2 text-xs font-medium flex items-center justify-between"
+			role="alert"
+			aria-label="Restart required"
+		>
+			<span>
+				<span className="font-semibold text-jul-warning">Restart required</span>
+				<span className="text-jul-text">{" "}— {names} settings saved but not yet live. Restart the server to apply.</span>
+			</span>
+			<button
+				type="button"
+				onClick={() => { setDismissed(true); }}
+				className="ml-4 text-xs opacity-60 hover:opacity-100"
+				aria-label="Dismiss restart notice"
+			>
+				✕
+			</button>
+		</div>
+	);
+}
+
 export function Layout() {
   const loc = useLocation();
   const [layout, setLayout] = usePersistentState<NavLayout>("nav_layout", "top", isNavLayout);
@@ -416,6 +452,7 @@ export function Layout() {
   const product = overview?.product ?? "Jul.IA Console";
   const version = overview?.version ?? "";
   const certRisk = overview?.cert_risk;
+  const pendingRestart = overview?.pending_restart;
 
   const controlsTop = (
     <div className="flex items-center gap-2">
@@ -483,6 +520,7 @@ export function Layout() {
         </aside>
         <main className="flex-1 p-6">
           <CertAlertBanner certRisk={certRisk} />
+          <RestartRequiredBanner subsystems={pendingRestart} />
           <Outlet />
         </main>
         <footer className="px-6 py-2 text-[10px] text-jul-muted">
@@ -504,6 +542,7 @@ export function Layout() {
         </div>
       </header>
       <CertAlertBanner certRisk={certRisk} />
+      <RestartRequiredBanner subsystems={pendingRestart} />
       <main className="flex-1 overflow-auto p-6">
         <Outlet />
       </main>

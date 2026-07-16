@@ -1,0 +1,166 @@
+# docs/feature-status.yaml
+#
+# Machine-readable feature-status manifest for Jul.IA.
+# This is the canonical source of truth for docs/status.md.
+# docs-check.py validates this file and cross-checks that every doc reference exists.
+#
+# GA criteria (from ADR 0003):
+#   1  conformance / behaviour matrix
+#   2  published benchmark numbers
+#   3  known-limitations list
+#   4  semver-guarded config/API contract
+#   5  long-running soak test (post-GA gate per ADR 0005)
+#   6  runnable example + documentation
+#   7  security / threat note
+#   8  fuzzing where parsing is involved (n/a when no custom parser)
+#   9  self-explanatory Console surface
+#
+# maturity: GA | GA-soak-pending | Beta | Alpha | Deprecated
+#
+# NOTE: Keep in sync with docs/status.md. When a feature's maturity or any
+# criterion changes, update both files. docs-check.py validates this file
+# automatically on every CI run.
+
+version: 1
+
+features:
+  - id: Y1-01
+    name: "TLS + automatic HTTPS (ACME)"
+    tags: ["core", "acme"]
+    maturity: GA
+    doc: tls-acme.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y1-02
+    name: "Compression (gzip / Brotli / Zstd)"
+    tags: ["brotli", "zstd"]
+    maturity: GA
+    doc: compression.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y1-03
+    name: "Rate + connection limiting"
+    tags: ["core"]
+    maturity: GA
+    doc: ratelimit.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y1-04
+    name: "Authentication (CIDR / Basic / JWT / forward-auth)"
+    tags: ["core"]
+    maturity: GA
+    doc: auth.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}
+
+  - id: Y1-05
+    name: "Active health checks (HTTP / TCP probes)"
+    tags: ["core"]
+    maturity: GA
+    doc: health.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y1-07
+    name: "Console (operations cockpit)"
+    tags: ["console"]
+    maturity: GA
+    doc: console.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+    notes: "Single-operator GA. RBAC Phase 1 (named principals, scoped tokens) not yet shipped."
+
+  - id: Y1-08
+    name: "Zero-config + jul lint"
+    tags: ["core"]
+    maturity: GA
+    doc: zeroconf.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}
+
+  - id: Y1-09
+    name: "NGINX config importer"
+    tags: ["importer"]
+    maturity: GA
+    doc: nginx-importer.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y1-10
+    name: "OTel tracing + access-log sinks"
+    tags: ["otel"]
+    maturity: GA
+    doc: otel.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: null}
+
+  - id: Y1-11
+    name: "HTTP/3 over QUIC"
+    tags: ["http3"]
+    maturity: GA
+    doc: http3.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y2-01
+    name: "gRPC ↔ JSON transcoding"
+    tags: ["grpc"]
+    maturity: GA
+    doc: grpc-transcoding.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}
+
+  - id: Y2-02
+    name: "WASM plugin system"
+    tags: ["wasmplugins"]
+    maturity: GA
+    doc: plugins.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}
+
+  - id: Y2-03
+    name: "L4 stream proxy"
+    tags: ["stream"]
+    maturity: GA
+    doc: stream.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}
+
+  - id: Y2-04
+    name: "Native gRPC passthrough + h2c"
+    tags: ["grpc"]
+    maturity: GA
+    doc: grpc-proxy.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y2-05
+    name: "Service discovery / dynamic upstreams"
+    tags: ["consul", "kubernetes"]
+    maturity: GA
+    doc: service-discovery.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y2-06
+    name: "Web application firewall (WAF)"
+    tags: ["waf"]
+    maturity: GA
+    doc: waf.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: Y2-07
+    name: "mTLS client auth"
+    tags: ["core"]
+    maturity: GA
+    doc: mtls.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: SEC-1
+    name: "Secrets references + log redaction"
+    tags: ["core"]
+    maturity: GA
+    doc: secrets.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: core-cache
+    name: "Response cache (memory + disk)"
+    tags: ["core"]
+    maturity: GA
+    doc: cache.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+
+  - id: core-http
+    name: "Core HTTP (static / proxy / FastCGI / vhosts / routing)"
+    tags: ["core"]
+    maturity: GA
+    doc: core-http.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}

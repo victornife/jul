@@ -56,6 +56,8 @@ func dispatchSubcommand(args []string) (handled bool, code int) {
 		return true, cmdImport(args[1:])
 	case "version":
 		return true, cmdVersion(args[1:])
+	case "capabilities":
+		return true, cmdCapabilities(args[1:])
 	case "completion":
 		return true, cmdCompletion(args[1:])
 	default:
@@ -83,8 +85,14 @@ Usage:
   jul import nginx [-o out.toml] [-strict] <nginx.conf>
                                        translate an NGINX config (needs -tags importer)
   jul version [-json]                  print version and build metadata
+  jul capabilities [-json]             report compiled features and exit-code contract
   jul completion <bash|zsh|fish|powershell>
                                        print a shell completion script
+
+Exit codes:
+  0  success / clean shutdown / healthy probe
+  1  error / validation failed / unhealthy probe / fmt would change the file
+  2  usage or config error (bad flags, missing required argument)
 
 Flags:
 `)
