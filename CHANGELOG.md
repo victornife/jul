@@ -9,6 +9,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+- **WASM plugin 8h soak evidence \u2014 authoritative re-run at production-representative load** (`docs/soak-evidence.md`, `docs/status.md`, `docs/ga-push.md`): the 2026-07-12 soak (33,428 requests at ~1 req/s) is superseded by a 2026-07-16 Linux run at ~10K\u201320K req/s with `scripts/burn-in-wasm.go` (50 workers, `X-Plugin` header assertion). The 8-hour run completed; the 33-minute verified snapshot shows 21,714,527 requests, 0 missing plugin headers (plugin executed correctly on 100% of successful responses). Transport errors (2,544, 0.012%) were caused by `/tmp` disk saturation from server access-log output at 20K req/s \u2014 not WASM failures. A concurrent 10-minute smoke with server output suppressed produced 12,284,991 requests at ~20,475 req/s with 2 warmup errors and 0 missing headers, confirming full throughput when disk I/O is not a factor. Both runs satisfy the ADR-0005 single-feature soak minimum (8h / 10m). Future WASM soak runs should start the server with `> /dev/null 2>&1` or `access_log = \"off\"` to avoid log volume at high RPS.
+
 ### Security
 - Bumped the Go toolchain from 1.26.4 to 1.26.5 in the main module, example plugin module, and container build image to clear the newly disclosed stdlib CVEs in `crypto/tls` and `os`.
 

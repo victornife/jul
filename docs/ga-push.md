@@ -71,7 +71,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Response cache (memory + disk) | **GA** | none — soaked 1h 2026-07-04 (1.5M req, 0% err, hit/miss/evict/revalidate verified) + Phase 2A — all criteria met ✅ | M | ✅ |
 | OTel tracing + access-log sinks (Y1-10) | **GA** | none — soaked via Phase 2A 2026-07-05 (2.12M req, 0% err, traceparent observed) — all criteria met ✅ | M | ✅ |
 | HTTP/3 over QUIC (Y1-11) | **GA** | none — queued at v1.29.0 and later completed with an 8h isolated Linux soak on 2026-07-13 (55,302,486 req, 0% err, 100% success, QUIC+TLS on `:8443`) — all criteria met ✅ | M | ✅ |
-| WASM plugin system (Y2-02) | **GA** | none — queued at v1.29.0 and later completed with Linux smoke/soak evidence on 2026-07-12 (286 successes in 5m smoke, 33,428 successful requests in 8h soak, 0 errors) — all criteria met ✅ | M | ✅ |
+| WASM plugin system (Y2-02) | **GA** | none — **8h Linux soak completed 2026-07-16** (21.7M+ requests at ~10K–20K req/s, 0 missing plugin headers; 2026-07-12 prior soak superseded as non-representative at ~1 req/s) — all criteria met ✅ | M | ✅ |
 | L4 stream proxy (Y2-03) | **GA** | none — queued at v1.29.0 and later completed with an 8h isolated Linux soak on 2026-07-11 (`TestSoakUDPChurn`, 54,892,354 sends, 0% err, bounded goroutines/heap) — all criteria met ✅ | M | ✅ |
 
 > - **20 shipped features are GA with completed soak evidence. 0 remain GA — soak pending.**

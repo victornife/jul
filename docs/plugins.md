@@ -400,7 +400,7 @@ Run: `go test -tags wasmplugins -fuzz='FuzzPluginInvoke|FuzzHostAllowed' -fuzzti
 | ② Benchmarks | **Met** | 5 benchmarks in `internal/plugins/bench_test.go` |
 | ③ Known limitations | **Met** | 5-item list above |
 | ④ Compatibility policy | **Met** | Additive-only ABI policy, golden-pinned surface, prebuilt-guest tested; documented in [abi.md](abi.md) |
-| ⑤ Soak test | **Met** | 5m Linux smoke test 2026-07-12 (286 successes, 0 errors; `header-inject` plugin exercised) plus Phase 2A 8h Windows evidence 2026-07-06 — [evidence](soak-evidence.md#2026-07-12--wasm-plugin-isolated-smoke-test-linux-completed) |
+| ⑤ Soak test | **Met** | 8h Linux soak 2026-07-16 (21.7M+ requests at ~10K–20K req/s, 0 missing plugin headers, plugin executed correctly on 100% of successful responses) — [evidence](soak-evidence.md#2026-07-16--wasm-plugin-8h-isolated-soak-linux--authoritative-run) |
 | ⑥ Feature documentation | **Met** | This document + [abi.md](abi.md) +
 [configuration.md](configuration.md) |
 | ⑦ Threat model | **Met** | 7-row threat table above |
