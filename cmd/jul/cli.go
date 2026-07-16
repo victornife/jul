@@ -405,6 +405,7 @@ func cmdServe(args []string) int {
 			fmt.Fprintln(stderr, "Start without a config file using zero-config mode:")
 			fmt.Fprintln(stderr, "  jul run --serve .              # serve the current directory")
 			fmt.Fprintln(stderr, "  jul run --proxy http://:3000   # reverse-proxy a local app")
+			fmt.Fprintln(stderr, "\nOr create a server.toml and run `jul`. See `jul --help` and docs/getting-started.md.")
 			return 1
 		}
 		fmt.Fprintf(stderr, "error: %v\n", err)

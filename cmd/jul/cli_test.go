@@ -254,6 +254,55 @@ func TestCmdFmtWriteIdempotent(t *testing.T) {
 	}
 }
 
+// TestCmdFmtDiffNoChange verifies that -diff exits 0 and produces no output
+// when the file is already in canonical form.
+func TestCmdFmtDiffNoChange(t *testing.T) {
+	// Write a file in canonical form by first formatting it with -w, then
+	// diff-ing it: a second -diff pass must exit 0 (no changes).
+	path := writeTemp(t, validConfig)
+	capture(t, func() int { return cmdFmt([]string{"-config", path, "-w"}) })
+	code, out, _ := capture(t, func() int { return cmdFmt([]string{"-config", path, "-diff"}) })
+	if code != 0 {
+		t.Errorf("-diff exit code = %d on already-canonical file, want 0; stdout:\n%s", code, out)
+	}
+	if out != "" {
+		t.Errorf("-diff produced output on already-canonical file, want empty:\n%s", out)
+	}
+}
+
+// TestCmdFmtDiffChanges verifies that -diff exits 1 and emits a unified diff
+// when the file differs from its canonical form.
+func TestCmdFmtDiffChanges(t *testing.T) {
+	// Write a non-canonical config (extra whitespace / ordering that fmt will
+	// normalise) — the raw validConfig fixture has comments/ordering that
+	// canonical marshal will change.
+	path := writeTemp(t, validConfig)
+	code, out, _ := capture(t, func() int { return cmdFmt([]string{"-config", path, "-diff"}) })
+	if code != 1 {
+		t.Fatalf("-diff exit code = %d on non-canonical file, want 1", code)
+	}
+	if !strings.Contains(out, "---") || !strings.Contains(out, "+++") || !strings.Contains(out, "@@") {
+		t.Errorf("-diff output does not look like a unified diff:\n%s", out)
+	}
+}
+
+// TestCmdServeMissingConfig verifies that `jul serve` exits 1 with an actionable
+// message when the config file does not exist.
+func TestCmdServeMissingConfig(t *testing.T) {
+	code, _, errOut := capture(t, func() int {
+		return cmdServe([]string{"-config", "/nonexistent/path/server.toml"})
+	})
+	if code != 1 {
+		t.Errorf("cmdServe missing config exit = %d, want 1", code)
+	}
+	if !strings.Contains(errOut, "no configuration file") {
+		t.Errorf("missing-config error missing 'no configuration file': %q", errOut)
+	}
+	if !strings.Contains(errOut, "jul run") {
+		t.Errorf("missing-config error should suggest 'jul run': %q", errOut)
+	}
+}
+
 func TestCmdRunRequiresTarget(t *testing.T) {
 	if code, _, _ := capture(t, func() int { return cmdRun(nil) }); code != 2 {
 		t.Errorf("cmdRun() with no target exit = %d, want 2", code)

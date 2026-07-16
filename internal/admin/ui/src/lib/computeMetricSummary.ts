@@ -36,8 +36,8 @@ function sortedPercentile(sorted: number[], p: number): number {
   const idx = (p / 100) * (sorted.length - 1);
   const lo = Math.floor(idx);
   const hi = Math.ceil(idx);
-  if (lo === hi) return sorted[lo]!;
-  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (idx - lo);
+  if (lo === hi) return sorted[lo] ?? 0;
+  return (sorted[lo] ?? 0) + ((sorted[hi] ?? 0) - (sorted[lo] ?? 0)) * (idx - lo);
 }
 
 /**
@@ -75,8 +75,8 @@ export function computeMetricSummary(
 
   const insufficientData = valid.length < 10;
 
-  const current = valid[valid.length - 1]!;
-  const previous = valid[0]!;
+  const current = valid[valid.length - 1] ?? 0;
+  const previous = valid[0] ?? 0;
   const delta = current - previous;
   const deltaPercent =
     previous !== 0 ? (delta / Math.abs(previous)) * 100 : null;

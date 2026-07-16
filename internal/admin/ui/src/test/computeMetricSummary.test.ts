@@ -113,7 +113,7 @@ describe("computeMetricSummary — trend", () => {
   });
 
   it("identifies a stable trend for flat data", () => {
-    const s = computeMetricSummary(Array(30).fill(50), makeMeta());
+    const s = computeMetricSummary(Array<number>(30).fill(50), makeMeta());
     expect(s.trend).toBe("stable");
   });
 
@@ -131,7 +131,7 @@ describe("computeMetricSummary — trend", () => {
 
 describe("computeMetricSummary — volatility", () => {
   it("reports low volatility for flat data", () => {
-    const s = computeMetricSummary(Array(30).fill(100), makeMeta());
+    const s = computeMetricSummary(Array<number>(30).fill(100), makeMeta());
     expect(s.volatility).toBe("low");
   });
 
@@ -173,7 +173,7 @@ describe("computeMetricSummary — statistics", () => {
 describe("computeMetricSummary — spike and drop detection", () => {
   it("detects a spike that is clearly above avg + 2σ", () => {
     // 29 samples at 10, one sample at 200.
-    const data = [...Array(29).fill(10), 200];
+    const data = [...Array<number>(29).fill(10), 200];
     const s = computeMetricSummary(data, makeMeta());
     expect(s.spikes.length).toBeGreaterThan(0);
     expect(s.spikes).toContain(29); // index of the spike
@@ -181,13 +181,13 @@ describe("computeMetricSummary — spike and drop detection", () => {
 
   it("detects a drop that is clearly below avg − 2σ", () => {
     // 29 samples at 100, one sample at 1.
-    const data = [...Array(29).fill(100), 1];
+    const data = [...Array<number>(29).fill(100), 1];
     const s = computeMetricSummary(data, makeMeta());
     expect(s.drops.length).toBeGreaterThan(0);
   });
 
   it("reports no spikes or drops for flat data", () => {
-    const s = computeMetricSummary(Array(30).fill(50), makeMeta());
+    const s = computeMetricSummary(Array<number>(30).fill(50), makeMeta());
     expect(s.spikes).toHaveLength(0);
     expect(s.drops).toHaveLength(0);
   });
@@ -201,25 +201,25 @@ describe("computeMetricSummary — health status (standard scale)", () => {
   });
 
   it("reports healthy when current is below the warn threshold", () => {
-    const data = Array(15).fill(5);
+    const data = Array<number>(15).fill(5);
     const s = computeMetricSummary(data, meta);
     expect(s.healthStatus).toBe("healthy");
   });
 
   it("reports degraded when current is at or above warn but below danger", () => {
-    const data = [...Array(14).fill(5), 15];
+    const data = [...Array<number>(14).fill(5), 15];
     const s = computeMetricSummary(data, meta);
     expect(s.healthStatus).toBe("degraded");
   });
 
   it("reports critical when current is at or above the danger threshold", () => {
-    const data = [...Array(14).fill(5), 60];
+    const data = [...Array<number>(14).fill(5), 60];
     const s = computeMetricSummary(data, meta);
     expect(s.healthStatus).toBe("critical");
   });
 
   it("reports healthy when no thresholds are defined", () => {
-    const data = Array(15).fill(999);
+    const data = Array<number>(15).fill(999);
     const s = computeMetricSummary(data, makeMeta());
     expect(s.healthStatus).toBe("healthy");
   });
@@ -234,19 +234,19 @@ describe("computeMetricSummary — health status (inverted scale)", () => {
   });
 
   it("reports healthy when current is above the warn threshold", () => {
-    const data = Array(15).fill(0.8);
+    const data = Array<number>(15).fill(0.8);
     const s = computeMetricSummary(data, meta);
     expect(s.healthStatus).toBe("healthy");
   });
 
   it("reports degraded when current is below warn but above danger", () => {
-    const data = [...Array(14).fill(0.8), 0.35];
+    const data = [...Array<number>(14).fill(0.8), 0.35];
     const s = computeMetricSummary(data, meta);
     expect(s.healthStatus).toBe("degraded");
   });
 
   it("reports critical when current is below the danger threshold", () => {
-    const data = [...Array(14).fill(0.8), 0.1];
+    const data = [...Array<number>(14).fill(0.8), 0.1];
     const s = computeMetricSummary(data, meta);
     expect(s.healthStatus).toBe("critical");
   });
@@ -256,7 +256,7 @@ describe("computeMetricSummary — health status (inverted scale)", () => {
 
 describe("computeMetricSummary — all-identical values", () => {
   it("reports stable trend, low volatility, and no anomalies", () => {
-    const s = computeMetricSummary(Array(30).fill(42), makeMeta());
+    const s = computeMetricSummary(Array<number>(30).fill(42), makeMeta());
     expect(s.trend).toBe("stable");
     expect(s.volatility).toBe("low");
     expect(s.spikes).toHaveLength(0);

@@ -75,8 +75,8 @@ export function ChartDetailPanel({
   const timeRange =
     timestamps.length > 0
       ? {
-          start: formatTimestamp(timestamps[0]!),
-          end: formatTimestamp(timestamps[timestamps.length - 1]!),
+          start: formatTimestamp(timestamps[0] ?? 0),
+          end: formatTimestamp(timestamps[timestamps.length - 1] ?? 0),
         }
       : null;
 
@@ -100,11 +100,11 @@ export function ChartDetailPanel({
     for (let i = 0; i < data.length; i++) {
       const ts = timestamps[i];
       lines.push(
-        `${ts ?? ""},${ts !== undefined ? new Date(ts).toISOString() : ""},${String(data[i]!)}`,
+        `${ts !== undefined ? String(ts) : ""},${ts !== undefined ? new Date(ts).toISOString() : ""},${String(data[i] ?? 0)}`,
       );
     }
     const csv = lines.join("\n");
-    void navigator.clipboard?.writeText(csv).then(() => {
+    void navigator.clipboard.writeText(csv).then(() => {
       setCopied(true);
       setTimeout(() => {
         setCopied(false);
@@ -119,7 +119,8 @@ export function ChartDetailPanel({
           type="button"
           className="rounded-md px-3 py-1.5 text-sm text-jul-accent hover:bg-jul-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
           onClick={() => {
-            void navigate(meta.configRoute!);
+            const route = meta.configRoute;
+            if (route !== undefined) void navigate(route);
           }}
         >
           Configure →
@@ -185,7 +186,7 @@ export function ChartDetailPanel({
             >
               {hoverInfo !== null &&
               timestamps[hoverInfo.idx] !== undefined
-                ? `${formatTimestamp(timestamps[hoverInfo.idx]!)} · ${meta.formatValue(hoverInfo.value)}`
+                ? `${formatTimestamp(timestamps[hoverInfo.idx] ?? 0)} · ${meta.formatValue(hoverInfo.value)}`
                 : "Hover or use arrow keys to inspect values"}
             </div>
           </div>
@@ -235,7 +236,7 @@ export function ChartDetailPanel({
                 <div>
                   <div className="text-xs text-jul-muted">Status</div>
                   <div
-                    className={`font-semibold ${HEALTH_CLASS[summary.healthStatus]}`}
+                    className={`font-semibold ${HEALTH_CLASS[summary.healthStatus] ?? ""}`}
                   >
                     {HEALTH_TEXT[summary.healthStatus]}
                   </div>

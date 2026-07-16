@@ -39,6 +39,21 @@ config when you need more control.
 
 ---
 
+## Starting the server with a config file
+
+Once you have a `server.toml`, start the server with:
+
+```bash
+jul serve                         # uses ./server.toml by default
+jul serve -config /etc/jul/server.toml  # explicit path
+```
+
+`jul serve` is the explicit, discoverable form of the default bare `jul`
+invocation — both are equivalent. Tab-completion, `--help`, and the usage
+block all surface it.
+
+---
+
 ## Your first config file
 
 Create a file named `server.toml`:
@@ -162,11 +177,14 @@ Exit codes: `0` = clean, `1` = errors, `2` = warnings (with `-strict`).
 To rewrite a config into canonical TOML:
 
 ```bash
-./jul fmt -config server.toml -w
+./jul fmt -config server.toml -w    # rewrite in place
+./jul fmt -config server.toml       # print to stdout, don't write
+./jul fmt -config server.toml -diff # show what would change (exit 1 if changes needed)
 ```
 
-This reorders keys, normalizes values, and removes comments. Review the output
-before committing.
+The `-diff` mode is useful in CI to enforce canonical formatting without
+modifying files — it exits 0 when nothing would change, 1 when changes are
+needed. Comments and original formatting are not preserved.
 
 ## Version and shell completion
 

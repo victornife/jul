@@ -106,7 +106,7 @@ export const METRIC_META: Record<MetricKey, MetricMeta> = {
     unit: "requests",
     xAxisLabel: "Time",
     yAxisLabel: "In-flight requests",
-    formatValue: (v) => `${Math.round(v)} req`,
+    formatValue: (v) => `${String(Math.round(v))} req`,
     formatYAxis: (v) => Math.round(v).toString(),
     color: "rgb(234, 179, 8)",
   },

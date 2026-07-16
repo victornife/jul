@@ -138,7 +138,7 @@ export function Sparkline({
   }
 
   const hoverX = activeIdx !== null ? toX(activeIdx) : null;
-  const hoverY = activeIdx !== null ? toY(data[activeIdx]!) : null;
+  const hoverY = activeIdx !== null ? toY(data[activeIdx] ?? 0) : null;
 
   return (
     <svg
