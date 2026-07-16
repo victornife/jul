@@ -1,0 +1,107 @@
+name: discovery-k8s-kind
+
+# Kubernetes EndpointSlice live discovery convergence lane (C3 — Sprint 3).
+#
+# Analogous to the Consul lane in discovery-live.yml but uses a kind (Kubernetes
+# in Docker) cluster on ubuntu-latest instead of requiring Docker Desktop or
+# Windows-only networking cmdlets. This closes the gap where K8s discovery
+# regressions could merge undetected: the Consul lane is CI-gated; K8s was not.
+#
+# What it proves:
+#   1. Jul discovers endpoints via the Kubernetes EndpointSlice API.
+#   2. When an EndpointSlice port is patched (18081 → 18082), the K8s API
+#      reflects the change AND jul's admin upstream pool converges live
+#      within the refresh window.
+#
+# Trigger policy (mirrors discovery-live.yml):
+#   - On demand (workflow_dispatch).
+#   - Nightly (schedule) — off-the-hour to avoid scheduler thundering herd.
+#   - On PRs/pushes touching discovery code, the lane script, or this workflow,
+#     so a K8s discovery change cannot merge without this lane running.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "43 4 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "internal/upstream/**"
+      - "scripts/test-discovery-k8s-live.sh"
+      - ".github/workflows/discovery-k8s-kind.yml"
+      - "docs/service-discovery.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - "internal/upstream/**"
+      - "scripts/test-discovery-k8s-live.sh"
+      - ".github/workflows/discovery-k8s-kind.yml"
+      - "docs/service-discovery.md"
+
+concurrency:
+  group: discovery-k8s-kind-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  k8s-kind-live:
+    name: k8s kind live convergence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build jul (consul + kubernetes tags)
+        run: go build -tags "consul kubernetes" -o jul ./cmd/jul
+
+      # kind: Kubernetes in Docker — spins up a single-node K8s cluster using
+      # the Docker daemon that ships on ubuntu-latest runners. No Docker Desktop
+      # or Windows cmdlets required.
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: jul-discovery-test
+          # Single-node cluster; we only need the API server + RBAC.
+          config: |
+            kind: Cluster
+            apiVersion: kind.x-k8s.io/v1alpha4
+            nodes:
+            - role: control-plane
+
+      - name: verify kind cluster is ready
+        run: |
+          kubectl cluster-info --context kind-jul-discovery-test
+          kubectl get nodes
+
+      - name: run K8s live convergence lane
+        env:
+          JUL_BIN: ./jul
+          ARTIFACTS: tmp/issue24-k8s
+        run: bash scripts/test-discovery-k8s-live.sh
+
+      # Failure diagnostics: surface the evidence bundle directly in the job log
+      # so a flake is actionable without downloading the artifact.
+      - name: failure diagnostics
+        if: failure()
+        run: |
+          dir="tmp/issue24-k8s"
+          echo "=== K8s lane failed. Dumping captured evidence from $dir ==="
+          for f in k8s-summary.txt k8s-before.txt k8s-after.txt k8s-jul.out.log k8s-jul.err.log kubectl-proxy.out.log; do
+            echo ""
+            echo "----- $f -----"
+            [ -f "$dir/$f" ] && cat "$dir/$f" || echo "(not produced)"
+          done
+
+      - name: upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: k8s-discovery-evidence
+          path: tmp/issue24-k8s/
+          if-no-files-found: ignore

@@ -311,30 +311,28 @@ framework — invoking it in a non-interactive CI mode:
 
 ### Which lane runs in CI, and why
 
-Only the **Consul lane** is automated in CI. It needs nothing beyond a Docker
-daemon and the Go toolchain, both of which a standard `ubuntu-latest` runner
-provides, so it runs deterministically without a cluster. The **Kubernetes lane**
-stays a **local runbook**: its script depends on Windows-only host-networking
-cmdlets (`Get-NetRoute`, `Get-NetIPAddress`, `Get-NetTCPConnection`) and a
-host-routable EndpointSlice address, which do not translate to a Linux runner
-without rewriting the script into a different framework (an explicit non-goal of
-#46). Running one reproducible live lane in CI is the agreed minimum; the K8s
-lane remains covered by the unit/integration tests under
-`internal/upstream/` plus the documented local runbook.
+Both the **Consul lane** and the **Kubernetes lane** are now automated in CI:
 
-The `-CI` switch only skips the developer-convenience Kubernetes-context probe
-(there is no kube context on the runner) and drops a `consul-ci-mode.txt` marker;
-the backends, Consul registration, deregistration, and the **core convergence
-assertions are identical** to a local run, so there is no drift between local and
-CI expectations.
+- **Consul lane** — [`discovery-live.yml`](../.github/workflows/discovery-live.yml):
+  needs Docker + Go toolchain only; runs on `ubuntu-latest`. The PS1 script is
+  invoked via `pwsh -CI`.
 
-### When it runs
+- **Kubernetes lane** — [`discovery-k8s-kind.yml`](../.github/workflows/discovery-k8s-kind.yml)
+  *(new, Sprint 3)*: uses [kind](https://kind.sigs.k8s.io/) (Kubernetes in Docker) on
+  `ubuntu-latest`, with `helm/kind-action` to spin up a single-node cluster. The
+  script `scripts/test-discovery-k8s-live.sh` mirrors the PS1 lane: applies an
+  EndpointSlice to the kind cluster, starts jul with K8s discovery pointing at
+  a local `kubectl proxy`, patches the EndpointSlice port 18081 → 18082, and
+  asserts both the K8s API and **jul's admin upstream pool** converge. The
+  `helm/kind-action` approach eliminates the Windows-only networking cmdlet
+  dependency and the need for Docker Desktop.
 
-- **On demand** — `workflow_dispatch` from the Actions tab.
-- **Nightly** — a scheduled run (04:17 UTC) catches environmental drift.
-- **On change** — pull requests and pushes that touch `internal/upstream/**`, the
-  lane script, or the workflow, so a discovery change cannot merge without the
-  live lane running against it.
+### When the Kubernetes lane runs
+
+- **On demand** — `workflow_dispatch`.
+- **Nightly** — scheduled at 04:43 UTC.
+- **On change** — pull requests and pushes touching `internal/upstream/**`,
+  `scripts/test-discovery-k8s-live.sh`, or the workflow.
 
 ### CI evidence and failure diagnostics
 
