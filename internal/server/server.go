@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -389,6 +390,38 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 	})
 }
 
+// reloadRestartRequired aggregates all startup-bound restart checks for the
+// direct-reload path. Returns the first reason and true when any check fires.
+// A positive result means the reload must not proceed: the old configuration
+// remains authoritative and the operator must restart the process.
+func reloadRestartRequired(old, next *config.Config) (string, bool) {
+	if reason, need := ACMERestartRequired(old.Servers, next.Servers); need {
+		return reason, true
+	}
+	if reason, need := ListenerRebindRequired(old, next); need {
+		return reason, true
+	}
+	if reason, need := TracingRestartRequired(old, next); need {
+		return reason, true
+	}
+	if reason, need := AccessLogRestartRequired(old, next); need {
+		return reason, true
+	}
+	if reason, need := CacheRestartRequired(old, next); need {
+		return reason, true
+	}
+	if reason, need := EgressRestartRequired(old, next); need {
+		return reason, true
+	}
+	if reason, need := AdminRestartRequired(old, next); need {
+		return reason, true
+	}
+	if reason, need := MetricsRestartRequired(old, next); need {
+		return reason, true
+	}
+	return "", false
+}
+
 // doReload loads, validates, and applies a new configuration. On any failure it
 // logs and keeps the running configuration so a bad edit never causes downtime.
 func (s *Server) doReload() {
@@ -408,10 +441,28 @@ func (s *Server) doReload() {
 	start := time.Now()
 	info := &lastReloadInfo{At: start}
 
+	// Restart-required check: changes to startup-bound subsystems cannot be
+	// applied via a live reload. The process-lifetime components (cache, egress,
+	// admin server, metrics, tracing, access-log, ACME, TLS/mTLS, listener bind
+	// settings) keep their startup-time values even after s.cfg is updated.
+	// Aborting here keeps the old config authoritative and avoids mixed state.
+	if reason, need := reloadRestartRequired(s.cfg, newCfg); need {
+		info.Duration = time.Since(start)
+		info.OK = false
+		info.Error = "restart_required: " + reason
+		s.log.Warn("reload blocked: change requires a process restart",
+			"reason", reason,
+			"source", s.source.Name(),
+		)
+		s.lastReload.Store(info)
+		return
+	}
+
 	// Run validation, factory, and OnReloaded synchronously. A timeout is
 	// advisory (duration reporting and warning) rather than a hard cancellation,
 	// because the factory is side-effectful and cannot be safely interrupted
-	// mid-flight. The preflight already eliminates build and bind failures.
+	// mid-flight. The preflight already eliminates build and bind failures on
+	// the admin write path; on a direct reload, validation is the first gate.
 	if s.validate != nil {
 		if err := s.validate(newCfg); err != nil {
 			info.Duration = time.Since(start)
@@ -446,39 +497,40 @@ func (s *Server) doReload() {
 		s.log.Warn("reload exceeded timeout threshold", "duration", info.Duration, "threshold", threshold)
 	}
 
+	// Compute listener diff before any mutations so the set is stable.
+	oldAddrs := setOf(uniqueListenAddrs(s.cfg.Servers))
+	newAddrs := setOf(uniqueListenAddrs(newCfg.Servers))
+
+	// Bind new listeners BEFORE swapping handlers and updating s.cfg. A bind
+	// failure is recorded as a degraded reload (OK=false) — existing listeners
+	// continue serving the new handlers, but the new address is not available.
+	// Binding before the swap means new listeners briefly serve 503 (the address
+	// is not in the old handler generation) for the sub-millisecond window
+	// between bind and the atomic handler store below; that is acceptable.
+	var bindErrs []string
+	for addr := range newAddrs {
+		if _, existed := oldAddrs[addr]; !existed {
+			if err := s.bind(addr); err != nil {
+				bindErrs = append(bindErrs, addr+": "+err.Error())
+				s.log.Error("reload: failed to bind new listener", "addr", addr, "error", err)
+			} else {
+				s.log.Info("reload: bound new listener", "addr", addr)
+			}
+		}
+	}
+
 	// Swap request handlers atomically, then retire the previous generation once
 	// its in-flight requests drain.
 	prevGen := s.handlers.Load()
 	s.handlers.Store(newHandlerGen(newHandlers))
 	s.retireGen(prevGen, retirePrev)
 
-	oldCfg := s.cfg
 	s.cfg = newCfg
 
-	// Tracing / access-log change warnings.
-	if oldCfg.Observability.Tracing != newCfg.Observability.Tracing {
-		s.log.Warn("tracing settings changed; restart required to apply (running tracer kept)")
-	}
-	if !accessLogEqual(oldCfg.Observability.AccessLog, newCfg.Observability.AccessLog) {
-		s.log.Warn("access-log settings changed; restart required to apply (running sinks kept)")
-	}
-
-	// Refresh TLS certificates.
+	// Refresh TLS certificates on kept listeners.
 	s.reloadCertificates()
 
-	// Diff listen addresses.
-	oldAddrs := setOf(uniqueListenAddrs(oldCfg.Servers))
-	newAddrs := setOf(uniqueListenAddrs(newCfg.Servers))
-
-	for addr := range newAddrs {
-		if _, existed := oldAddrs[addr]; !existed {
-			if err := s.bind(addr); err != nil {
-				s.log.Error("reload: failed to bind new listener", "addr", addr, "error", err)
-			} else {
-				s.log.Info("reload: added listener", "addr", addr)
-			}
-		}
-	}
+	// Remove listeners that are no longer in the config.
 	for addr := range oldAddrs {
 		if _, kept := newAddrs[addr]; !kept {
 			s.removeListener(addr)
@@ -486,9 +538,16 @@ func (s *Server) doReload() {
 		}
 	}
 
-	info.OK = true
+	if len(bindErrs) > 0 {
+		info.OK = false
+		info.Error = "degraded: new listener(s) failed to bind: " + strings.Join(bindErrs, "; ")
+		s.log.Warn("reload completed with bind errors; existing listeners serving new config",
+			"errors", strings.Join(bindErrs, "; "))
+	} else {
+		info.OK = true
+		s.log.Info("configuration reloaded", "duration", info.Duration)
+	}
 	s.lastReload.Store(info)
-	s.log.Info("configuration reloaded", "duration", info.Duration)
 }
 
 // reloadCertificates rebuilds and swaps the cert provider for each currently

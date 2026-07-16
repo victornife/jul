@@ -9,12 +9,38 @@
 > [troubleshooting.md](troubleshooting.md#reloads).
 
 Jul.IA reloads configuration **without dropping connections**. A reload can be
-triggered three ways, all of which converge on the same validated path:
+triggered three ways:
 
-- **SIGHUP** (Unix) — operator sends the signal.
-- **Config file-watch** — the on-disk config file changed.
-- **Admin apply** — `POST /api/config/apply` (the console "Apply changes"
-  button) writes a new config and triggers a reload.
+- **Admin apply** — `POST /api/config/apply` (the Console "Apply changes"
+  button) writes a new config and triggers a reload. This path runs the full
+  preflight gate described below before writing anything to disk.
+- **SIGHUP** (Unix) — operator sends the signal after editing the file directly.
+- **Config file-watch** — the on-disk config file changed and the watcher fired.
+
+**These three paths have different safety guarantees:**
+
+The admin write path runs the full preflight (parse, dry-run, bind-probe, and
+all restart-required checks) *before* the file is written. Nothing is saved
+unless the config is guaranteed to build and apply.
+
+SIGHUP and file-watch trigger the same live runtime swap, but they run restart-
+required checks *at swap time* rather than before the file is written. This
+means:
+
+- Changes to hot-reloadable fields (routes, handlers, upstreams, compression,
+  rate limiting, etc.) apply exactly as they do through the Console.
+- Changes to restart-required fields (cache, egress, admin, tracing, access-log,
+  ACME, listener bind settings) are **rejected at swap time** — the swap is
+  aborted, `LastReload.OK=false` is recorded with the reason, and the old config
+  remains authoritative. The file on disk may contain the new value, but the
+  running process ignores it until a restart.
+- A new listen address that fails to bind records a degraded reload (`OK=false`);
+  existing listeners continue serving the new handler generation.
+
+For the strongest guarantees, use the Console or admin API for configuration
+changes. Direct file edits followed by SIGHUP are safe for hot-reloadable
+changes; for restart-required changes they produce a clearly recorded failed
+reload rather than silent mixed state.
 
 ## Two states: *applied* vs *serving*
 

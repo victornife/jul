@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -534,4 +535,132 @@ func TestPreflightListeners(t *testing.T) {
 			t.Fatalf("removing an address introduces nothing to probe: %v", err)
 		}
 	})
+}
+
+// TestDoReloadBlocksOnRestartRequired verifies that a direct reload (SIGHUP /
+// file-watch) containing a startup-bound field change is blocked: the old config
+// remains authoritative, last reload is OK=false, and the reason contains
+// "restart_required".
+func TestDoReloadBlocksOnRestartRequired(t *testing.T) {
+	addr := freePort(t)
+	base := cfgWith(addr)
+
+	// Build a new config that enables the cache — a startup-bound change that
+	// Preflight.Apply would reject on the admin write path.
+	withCache := cfgWith(addr)
+	withCache.Cache = config.CacheConfig{Enabled: true, MemoryMaxSize: config.Size(64 << 20)}
+
+	src := &stubSource{}
+	src.set(base, nil)
+
+	tag := &atomic.Pointer[string]{}
+	initial := "v1"
+	tag.Store(&initial)
+	srv := New(base, quietLogger(), bodyHandlerFactory(tag), src,
+		func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }()
+	waitDialable(t, addr)
+
+	// Push a restart-required change via the direct reload path.
+	src.set(withCache, nil)
+	reload <- struct{}{}
+
+	// Wait for the reload to be processed.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if li := srv.LastReload(); li != nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	li := srv.LastReload()
+	if li == nil {
+		t.Fatal("LastReload is nil after reload attempt")
+	}
+	if li.OK {
+		t.Error("LastReload.OK = true; want false for a restart-required change")
+	}
+	if !strings.Contains(li.Error, "restart_required") {
+		t.Errorf("LastReload.Error = %q; want it to contain 'restart_required'", li.Error)
+	}
+
+	cancel()
+	<-done
+}
+
+// TestDoReloadDegradedOnBindFailure verifies that when a direct reload adds a
+// new listen address that is already occupied, the reload is recorded as
+// degraded (OK=false with a bind error), while existing listeners continue to
+// serve the new handler generation.
+func TestDoReloadDegradedOnBindFailure(t *testing.T) {
+	addr := freePort(t)
+	tag := &atomic.Pointer[string]{}
+	v1 := "v1"
+	tag.Store(&v1)
+
+	src := &stubSource{}
+	src.set(cfgWith(addr), nil)
+	srv := New(cfgWith(addr), quietLogger(), bodyHandlerFactory(tag), src,
+		func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }()
+	waitForServe(t, "http://"+addr+"/", "v1")
+
+	// Occupy a second port so the reload's bind will fail.
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = busy.Close() })
+	busyAddr := busy.Addr().String()
+
+	// New config adds the busy port — and changes the handler body.
+	v2 := "v2"
+	tag.Store(&v2)
+	newCfg := &config.Config{
+		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Servers: []config.ServerConfig{
+			{Listen: addr, Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}}},
+			{Listen: busyAddr, Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}}},
+		},
+	}
+	src.set(newCfg, nil)
+	reload <- struct{}{}
+
+	// Wait for the reload result.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if li := srv.LastReload(); li != nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	li := srv.LastReload()
+	if li == nil {
+		t.Fatal("LastReload is nil after reload attempt")
+	}
+	if li.OK {
+		t.Error("LastReload.OK = true; want false when a new listener failed to bind")
+	}
+	if !strings.Contains(li.Error, "degraded") {
+		t.Errorf("LastReload.Error = %q; want it to contain 'degraded'", li.Error)
+	}
+
+	// The existing listener must still serve (with the new handler — the swap
+	// completes for the addresses that did bind).
+	if !eventually(t, "http://"+addr+"/", "v2") {
+		t.Error("existing listener should serve new handler even after degraded reload")
+	}
+
+	cancel()
+	<-done
 }
