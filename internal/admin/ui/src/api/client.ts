@@ -297,6 +297,11 @@ export const OverviewSchema = z.object({
   // Overview "Certificates" card is truthful rather than just reporting TLS
   // configuration presence. Absent when no TLS server blocks are configured.
   cert_risk: CertRiskSchema.optional(),
+  // pending_restart lists startup-bound subsystems that have changed on disk
+  // since the running process was built (e.g. ["cache", "admin"]). Absent when
+  // no restart is needed. The Console surfaces this as a persistent banner so
+  // operators know the saved config is not fully live until restart.
+  pending_restart: z.array(z.string()).optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 

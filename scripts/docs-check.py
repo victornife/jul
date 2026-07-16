@@ -286,6 +286,107 @@ def check_denylist(path: Path, text: str):
             error(path, line, f"denylist match: {pattern}")
 
 
+def check_lifecycle_manifest():
+    """Validate docs/config-lifecycle.yaml and cross-check reload-semantics.md.
+
+    Two checks:
+    1. The manifest file parses as valid YAML.
+    2. Every restart-required subsystem named in the manifest appears in
+       docs/reload-semantics.md, so the two sources of truth stay in sync.
+    """
+    try:
+        import yaml  # pyyaml; optional — skip gracefully if absent
+    except ModuleNotFoundError:
+        # PyYAML is not installed in this environment; skip the YAML checks
+        # but do not fail the build (it is an optional semantic gate).
+        return
+
+    manifest = ROOT / "docs" / "config-lifecycle.yaml"
+    if not manifest.exists():
+        error(manifest, 0, "config-lifecycle.yaml is missing from docs/")
+        return
+
+    try:
+        data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        error(manifest, 0, f"config-lifecycle.yaml is not valid YAML: {exc}")
+        return
+    ok("config-lifecycle.yaml parses as valid YAML")
+
+    if not isinstance(data, dict) or "restart_required" not in data:
+        error(manifest, 0, "config-lifecycle.yaml missing required 'restart_required' key")
+        return
+
+    # Cross-check: each subsystem in the manifest must appear in reload-semantics.md.
+    reload_doc = ROOT / "docs" / "reload-semantics.md"
+    if not reload_doc.exists():
+        error(reload_doc, 0, "docs/reload-semantics.md is missing")
+        return
+
+    reload_text = reload_doc.read_text(encoding="utf-8").lower()
+    for entry in data.get("restart_required", []):
+        subsystem = entry.get("subsystem", "")
+        if not subsystem:
+            continue
+        # Use the first keyword from the subsystem name as the search term.
+        keyword = subsystem.split("_")[0]
+        if keyword not in reload_text:
+            error(
+                reload_doc,
+                0,
+                f"restart-required subsystem '{subsystem}' from config-lifecycle.yaml "
+                f"not mentioned in reload-semantics.md — keep both in sync",
+            )
+        else:
+            ok(f"reload-semantics.md covers restart-required subsystem '{subsystem}'")
+
+
+def check_finding_uniqueness():
+    """Verify that no finding ID appears in the current audit doc with two
+    conflicting status values (one resolved, one open) in the same table.
+
+    This catches the append-and-preserve editing pattern that previously
+    resulted in UI-1 being marked both Resolved and Still-open in the same
+    document.
+    """
+    current_audit = ROOT / "docs" / "reviews" / "jul_full_repository_audit_2026-07-09.md"
+    if not current_audit.exists():
+        return  # no current audit to check
+
+    text = current_audit.read_text(encoding="utf-8")
+    # Extract all table rows that look like finding status rows:
+    # | **ID** | ... | ✅ Resolved | or | ... | ⏳ Still open |
+    resolved_ids: set[str] = set()
+    open_ids: set[str] = set()
+
+    for line_no, line in enumerate(text.splitlines(), 1):
+        # Only inspect pipe-delimited table rows (lines starting with |) to
+        # avoid false positives from narrative text that mentions a finding ID
+        # and the word "open" in an unrelated clause.
+        if not line.startswith("|"):
+            continue
+        id_match = re.search(r"\*\*([A-Z]+-\d+[a-z]?)\*\*", line)
+        if not id_match:
+            continue
+        finding_id = id_match.group(1)
+        low = line.lower()
+        if "✅" in line or "resolved" in low:
+            resolved_ids.add(finding_id)
+        if "⏳" in line or "still open" in low or "open —" in low:
+            open_ids.add(finding_id)
+
+    conflicts = resolved_ids & open_ids
+    for fid in sorted(conflicts):
+        error(
+            current_audit,
+            0,
+            f"finding {fid} appears as both Resolved and Open in "
+            f"{current_audit.name} — remove or archive the stale entry",
+        )
+    if not conflicts:
+        ok(f"no conflicting finding statuses in {current_audit.name}")
+
+
 def main():
     SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews"}
     md_files = [
@@ -307,6 +408,8 @@ def main():
 
     check_version_consistency(md_files)
     check_schema_doc_drift()
+    check_lifecycle_manifest()
+    check_finding_uniqueness()
 
     print()
     print(f"Results: {OK} passed, {FAIL} failed")
@@ -315,3 +418,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

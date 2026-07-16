@@ -1,0 +1,150 @@
+# config-lifecycle.yaml
+#
+# Machine-readable lifecycle classification for Jul.IA configuration fields.
+# This is the canonical source-of-truth for docs/reload-semantics.md and the
+# docs-check.py semantic validator.
+#
+# Lifecycle classes:
+#   hot-reload        Changes take effect on the next successful config reload;
+#                     no process restart required.
+#   restart-required  Changes take effect only after a process restart. The
+#                     admin apply path rejects these with HTTP 409
+#                     restart_required so they are never silently saved-but-unset.
+#   new-listener-only For changes to an existing listen address: the socket is
+#                     bound once and reused, so timeouts / TLS / h2c / HTTP3 on
+#                     a *kept* address require restart. A *new* address is bound
+#                     fresh on reload (no restart needed).
+#
+# gated_by: the Go function in the codebase that enforces the restart check.
+# fields:   TOML key paths; "*" means the entire sub-table.
+#
+# NOTE: This file is checked by scripts/docs-check.py. Changes here must be
+# reflected in docs/reload-semantics.md and vice versa.
+
+version: 1
+
+restart_required:
+  - subsystem: cache
+    gated_by: "internal/app.CacheRestartRequired"
+    reason: >
+      cache.New builds the LRU+disk tiers once at startup; in-memory state
+      and counters persist across reloads to avoid counter resets on edits.
+    fields:
+      - "[cache].enabled"
+      - "[cache].memory_max_size"
+      - "[cache].disk_path"
+      - "[cache].disk_max_size"
+      - "[cache].default_ttl"
+      - "[cache].stale_while_revalidate"
+      - "[cache].stale_if_error"
+
+  - subsystem: egress
+    gated_by: "internal/app.EgressRestartRequired"
+    reason: >
+      egress.New compiles the outbound dial allow-list once at startup. A
+      tightened allow-list saved via the Console would appear active in
+      projections while the running process uses the startup-time policy.
+    fields:
+      - "[egress].enabled"
+      - "[egress].allow"
+
+  - subsystem: admin
+    gated_by: "internal/app.AdminRestartRequired"
+    reason: >
+      admin.New copies AdminConfig by value. Changes to the bearer token, listen
+      address, rate limits, history dir, plugin upload policy, or audit log path
+      require a restart. Token rotation in particular: the old token remains
+      valid until restart.
+    fields:
+      - "[admin].enabled"
+      - "[admin].listen"
+      - "[admin].token"
+      - "[admin].console"
+      - "[admin].history_dir"
+      - "[admin].history_keep"
+      - "[admin].rate_limit_read_per_min"
+      - "[admin].rate_limit_write_per_min"
+      - "[admin].rate_limit_apply_per_min"
+      - "[admin].max_event_conns"
+      - "[admin].audit_log_file"
+      - "[admin].audit_log_rotate_max_mb"
+      - "[admin].audit_log_rotate_keep"
+      - "[admin].plugin_upload_dir"
+      - "[admin].plugin_upload_max_size"
+      - "[admin].plugin_upload_enabled"
+
+  - subsystem: metrics
+    gated_by: "internal/app.MetricsRestartRequired"
+    reason: >
+      observability.NewMetrics sets the host_label once when it creates the
+      Prometheus registry at startup.
+    fields:
+      - "[observability.metrics].host_label"
+
+  - subsystem: tracing
+    gated_by: "internal/server.TracingRestartRequired"
+    reason: >
+      The OpenTelemetry exporter pipeline is wired once at startup. Enabling,
+      disabling, or reconfiguring tracing takes effect on restart.
+    fields:
+      - "[observability.tracing].enabled"
+      - "[observability.tracing].exporter"
+      - "[observability.tracing].endpoint"
+      - "[observability.tracing].sample_ratio"
+      - "[observability.tracing].service_name"
+      - "[observability.tracing].insecure"
+
+  - subsystem: access_log
+    gated_by: "internal/server.AccessLogRestartRequired"
+    reason: >
+      The file and syslog sinks are opened once at startup; the file sink owns a
+      rotating handle and the syslog sink a system-log connection.
+    fields:
+      - "[observability.access_log].sinks"
+      - "[observability.access_log].file"
+      - "[observability.access_log].format"
+      - "[observability.access_log].rotate_max_mb"
+      - "[observability.access_log].rotate_keep"
+
+  - subsystem: acme
+    gated_by: "internal/server.ACMERestartRequired"
+    reason: >
+      The autocert manager is built at startup with a fixed issued-domain set
+      and issuer. Changing domains or the CA requires restart.
+    fields:
+      - "[[servers]].tls.acme.enabled"
+      - "[[servers]].tls.acme.email"
+      - "[[servers]].tls.acme.ca"
+      - "[[servers]].tls.acme.domains"
+      - "[[servers]].tls.acme.challenge"
+      - "[[servers]].tls.acme.cache_dir"
+
+new_listener_only:
+  - subsystem: listener_bind
+    gated_by: "internal/server.ListenerRebindRequired"
+    reason: >
+      The TCP socket is bound once per listen address; these properties are
+      baked into the net.Listener and http.Server at bind time. They apply
+      immediately to a brand-new listen address; for an address the server is
+      already serving they require a restart.
+    fields:
+      - "[[servers]].read_header_timeout"
+      - "[[servers]].read_timeout"
+      - "[[servers]].write_timeout"
+      - "[[servers]].idle_timeout"
+      - "[[servers]].max_header_bytes"
+      - "[[servers]].h2c"
+      - "[[servers]].http3.enabled"
+      - "[[servers]].http3.alt_svc_max_age"
+      - "[[servers]].tls.enabled"
+      - "[[servers]].tls.min_version"
+      - "[[servers]].tls.client_auth.*"
+      - "[[servers]].rate_limit.max_conns"
+
+hot_reload:
+  note: >
+    All fields not listed above take effect on the next successful hot reload.
+    This includes: server_names, locations.*, upstreams.*, compression.*,
+    rate_limit.rate/burst/key, waf.*, plugins.*, stream routes (not stream.listen),
+    global.log_level, global.log_format, global.shutdown_timeout,
+    global.reload_timeout, and all other [global].* fields.

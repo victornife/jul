@@ -33,6 +33,11 @@ import {
   RouteProjectionSchema,
   AppProjectionSchema,
   CertProjectionSchema,
+  RawConfigSchema,
+  ApplyResultSchema,
+  HistoryEntrySchema,
+  PluginsProjectionSchema,
+  ValidationResultSchema,
 } from "../src/api/client.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -126,4 +131,112 @@ test("GET /healthz returns {status: ok}", async ({ request }) => {
   expect(resp.status()).toBe(200);
   const body: unknown = await resp.json();
   expect(body).toMatchObject({ status: "ok" });
+});
+
+// ── Raw config read-write path (mutation flows) ───────────────────────────────
+
+test("GET /api/config matches RawConfigSchema and carries base_version", async ({ request }) => {
+  const resp = await request.get("/api/config");
+  expect(resp.status()).toBe(200);
+  const data: unknown = await resp.json();
+  const cfg = assertShape(RawConfigSchema, data, "/api/config");
+  // base_version fingerprints the live config for optimistic concurrency.
+  expect(typeof cfg.base_version).toBe("string");
+  expect((cfg.base_version ?? "").length).toBeGreaterThan(0);
+  // raw contains valid TOML starting with the global or server block.
+  expect(typeof cfg.raw).toBe("string");
+  expect(cfg.raw).toContain("servers");
+});
+
+test("POST /api/config/validate with current config returns ok=true", async ({ request }) => {
+  // First read the current config.
+  const cfgResp = await request.get("/api/config");
+  expect(cfgResp.status()).toBe(200);
+  const cfgData: unknown = await cfgResp.json();
+  const cfg = RawConfigSchema.parse(cfgData);
+  expect(cfg.raw).toBeTruthy();
+
+  // Validate it — must be side-effect-free.
+  const validateResp = await request.post("/api/config/validate", {
+    headers: { "Content-Type": "application/toml" },
+    data: cfg.raw,
+  });
+  expect(validateResp.status()).toBe(200);
+  const vData: unknown = await validateResp.json();
+  const result = assertShape(ValidationResultSchema, vData, "/api/config/validate");
+  expect(result.ok).toBe(true);
+});
+
+test("POST /api/config/apply with stale base_version returns 409 conflict", async ({ request }) => {
+  // Read the current raw config.
+  const cfgResp = await request.get("/api/config");
+  expect(cfgResp.status()).toBe(200);
+  const cfgData: unknown = await cfgResp.json();
+  const cfg = RawConfigSchema.parse(cfgData);
+
+  // Apply with an obviously wrong base_version — server must reject with 409.
+  const applyResp = await request.post("/api/config/apply?base_version=stale-intentionally-wrong", {
+    headers: { "Content-Type": "application/toml" },
+    data: cfg.raw,
+  });
+  expect(applyResp.status()).toBe(409);
+  const body: unknown = await applyResp.json();
+  // The 409 body carries restart_required or admin_change or a conflict message.
+  expect(body).toBeTruthy();
+});
+
+test(
+  "POST /api/config/apply adding [cache] block returns 409 restart_required",
+  async ({ request }) => {
+    // Read the current config — e2e config has no [cache] section.
+    const cfgResp = await request.get("/api/config");
+    expect(cfgResp.status()).toBe(200);
+    const cfgData: unknown = await cfgResp.json();
+    const cfg = RawConfigSchema.parse(cfgData);
+    const baseVersion = cfg.base_version ?? "";
+
+    // Append a cache block — this crosses CacheRestartRequired and should be
+    // rejected without writing anything.
+    const candidate = `${cfg.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MiB"\n`;
+
+    const applyResp = await request.post(
+      `${baseVersion ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}` : "/api/config/apply"}`,
+      {
+        headers: { "Content-Type": "application/toml" },
+        data: candidate,
+      },
+    );
+    // The preflight must reject this with 409 restart_required.
+    expect(applyResp.status()).toBe(409);
+    const body = (await applyResp.json()) as Record<string, unknown>;
+    expect(body.restart_required).toBe(true);
+  },
+);
+
+test("GET /api/config/history returns HistoryEntrySchema[]", async ({ request }) => {
+  const resp = await request.get("/api/config/history");
+  expect(resp.status()).toBe(200);
+  const data: unknown = await resp.json();
+  // History may be empty on a fresh server start — that is valid.
+  const result = z.array(HistoryEntrySchema).safeParse(data);
+  if (!result.success) {
+    throw new Error(
+      `Schema drift on /api/config/history:\n${result.error.toString()}\n\nRaw:\n${JSON.stringify(data, null, 2)}`,
+    );
+  }
+  // Each entry, if present, must carry an id and a time string.
+  for (const entry of result.data) {
+    expect(typeof entry.id).toBe("string");
+    expect(typeof entry.time).toBe("string");
+  }
+});
+
+test("GET /api/plugins shows upload_enabled=false for e2e config", async ({ request }) => {
+  const resp = await request.get("/api/plugins");
+  expect(resp.status()).toBe(200);
+  const data: unknown = await resp.json();
+  const plugins = assertShape(PluginsProjectionSchema, data, "/api/plugins");
+  // The e2e config does not set plugin_upload_enabled = true, so the
+  // secure-by-default parser sets it to false and the projection confirms it.
+  expect(plugins.upload_enabled).toBe(false);
 });

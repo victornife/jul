@@ -50,6 +50,15 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	log := observability.NewLogger(redact.Writer(os.Stderr), cfg.Global.LogLevel, cfg.Global.LogFormat)
 	log.Info("starting "+productName, "version", version, "config", src.Name())
 
+	// Clone the raw startup config before secret expansion so PendingRestartCheck
+	// can compare effective startup-time values against the current on-disk config.
+	// Both use the same unexpanded references for structural fields (cache, egress,
+	// admin) so secret-ref changes do not mask real structural differences.
+	var startupCfg *config.Config
+	if clone, cerr := cfg.Clone(); cerr == nil {
+		startupCfg = clone
+	}
+
 	// Resolve secret references (${env:NAME}, ${file:/path}) once, up front,
 	// so every one-time consumer below (admin token, ACME account, tracing)
 	// reads resolved credentials. The handler factory re-resolves on each
@@ -266,6 +275,34 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 			triggerReload()
 			return nil
+		}
+	}
+
+	// Wire PendingRestartCheck using the startup config snapshot. It reports
+	// which startup-bound subsystems differ between what we were built from
+	// and what is currently on disk, so the Console can show a persistent
+	// "restart required" banner when saved changes are not yet active.
+	if startupCfg != nil && deps.LoadConfig != nil {
+		loadFn := deps.LoadConfig
+		deps.PendingRestartCheck = func() []string {
+			current, err := loadFn()
+			if err != nil || current == nil {
+				return nil
+			}
+			var pending []string
+			if _, need := CacheRestartRequired(startupCfg, current); need {
+				pending = append(pending, "cache")
+			}
+			if _, need := EgressRestartRequired(startupCfg, current); need {
+				pending = append(pending, "egress")
+			}
+			if _, need := AdminRestartRequired(startupCfg, current); need {
+				pending = append(pending, "admin")
+			}
+			if _, need := MetricsRestartRequired(startupCfg, current); need {
+				pending = append(pending, "metrics")
+			}
+			return pending
 		}
 	}
 

@@ -15,6 +15,12 @@ test-full:
 bench:
 	scripts/bench.sh
 
+# Compare benchmark results against docs/benchmarks-baseline.txt using benchstat.
+# Install benchstat: go install golang.org/x/perf/cmd/benchstat@latest
+# Update the baseline: make bench-compare ARGS=--update-baseline
+bench-compare:
+	scripts/bench-compare.sh $(ARGS)
+
 fuzz:
 	scripts/fuzz.sh
 

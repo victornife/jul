@@ -340,4 +340,10 @@ type RuntimeOverview struct {
 	// Overview "Certificates" card is truthful rather than just reporting TLS
 	// configuration presence. Omitted when no TLS server blocks are configured.
 	CertRisk *CertRiskProjection `json:"cert_risk,omitempty"`
+	// PendingRestart lists the names of startup-bound subsystems that have
+	// changed on disk since the running process was built. Each entry is a
+	// short lowercase subsystem name ("cache", "egress", "admin", "metrics").
+	// Absent when no restart is needed. The Console surfaces this as a
+	// persistent banner so operators know the saved config is not fully live.
+	PendingRestart []string `json:"pending_restart,omitempty"`
 }

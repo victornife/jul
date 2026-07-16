@@ -137,7 +137,12 @@ type Deps struct {
 	// reload. Nil when no reload has been attempted yet. Used by the apply
 	// handler to include the previous reload snapshot in the apply response.
 	LastReload func() *ReloadSnapshot
-}
+	// PendingRestartCheck reports which startup-bound subsystems have changed
+	// on disk relative to the values the running process was built from,
+	// meaning they require a process restart to take effect. Returns an empty
+	// slice (or nil) when no restart is pending. Used by the Overview to show
+	// a persistent indicator when saved changes are not yet live.
+	PendingRestartCheck func() []string}
 
 // ReloadSnapshot is the admin-package view of the most recent reload outcome.
 type ReloadSnapshot struct {

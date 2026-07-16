@@ -104,6 +104,11 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 		Status:   status,
 		CertRisk: certRisk,
 	}
+	if s.deps.PendingRestartCheck != nil {
+		if subsystems := s.deps.PendingRestartCheck(); len(subsystems) > 0 {
+			out.PendingRestart = subsystems
+		}
+	}
 	if s.deps.Stats != nil {
 		out.Stats = s.deps.Stats()
 	}
