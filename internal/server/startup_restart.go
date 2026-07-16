@@ -111,3 +111,15 @@ func MetricsRestartRequired(old, next *config.Config) (string, bool) {
 	}
 	return "metrics settings changed; the Prometheus registry is built once at startup and takes effect on restart", true
 }
+
+// LogFormatRestartRequired reports whether moving from old to next changes the
+// log output format. The logger handler (text vs JSON) is built once at startup
+// by observability.NewDynamicLogger; changing the format requires rebuilding it,
+// which cannot be done without a process restart. Log level changes are
+// hot-reloadable via the level var and are NOT restart-required.
+func LogFormatRestartRequired(old, next *config.Config) (string, bool) {
+	if old.Global.LogFormat == next.Global.LogFormat {
+		return "", false
+	}
+	return "log format changed (text ↔ json); the logger handler is built once at startup and takes effect on restart", true
+}

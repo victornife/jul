@@ -13,14 +13,23 @@ import (
 
 // NewLogger builds a slog.Logger from a level ("debug"|"info"|"warn"|"error")
 // and a format ("text"|"json"). Output goes to w; pass os.Stderr for the
-// default error log destination.
+// default error log destination. For hot-reload support use NewDynamicLogger.
 func NewLogger(w io.Writer, level, format string) *slog.Logger {
+	l, _ := NewDynamicLogger(w, level, format)
+	return l
+}
+
+// NewDynamicLogger builds a slog.Logger backed by a mutable level var. The
+// returned set function atomically updates the log level without rebuilding
+// the handler, enabling hot-reload of [global].log_level. Format changes
+// (text ↔ json) require a restart because they change the handler type.
+func NewDynamicLogger(w io.Writer, level, format string) (*slog.Logger, func(string)) {
 	if w == nil {
 		w = os.Stderr
 	}
-
-	opts := &slog.HandlerOptions{Level: parseLevel(level)}
-
+	lv := &slog.LevelVar{}
+	lv.Set(parseLevel(level))
+	opts := &slog.HandlerOptions{Level: lv}
 	var h slog.Handler
 	switch strings.ToLower(format) {
 	case "json":
@@ -28,7 +37,7 @@ func NewLogger(w io.Writer, level, format string) *slog.Logger {
 	default:
 		h = slog.NewTextHandler(w, opts)
 	}
-	return slog.New(h)
+	return slog.New(h), func(l string) { lv.Set(parseLevel(l)) }
 }
 
 func parseLevel(level string) slog.Level {

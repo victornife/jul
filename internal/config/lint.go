@@ -162,6 +162,25 @@ func Lint(c *Config) []Diagnostic {
 		})
 	}
 
+	// Legacy [global] log-destination fields are not consumed by the current
+	// runtime; the [observability.access_log] block is the correct path.
+	if c.Global.AccessLog != "" {
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Field:    "[global].access_log",
+			Message:  "this field is not consumed; use [observability.access_log] instead",
+			Hint:     "set sinks = [\"file\"] and file = \"<path>\" under [observability.access_log]",
+		})
+	}
+	if c.Global.ErrorLog != "" {
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Field:    "[global].error_log",
+			Message:  "this field is not consumed; the structured logger writes to stderr via [global].log_format",
+			Hint:     "remove error_log; redirect stderr in your process supervisor instead",
+		})
+	}
+
 	return diags
 }
 

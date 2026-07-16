@@ -24,6 +24,16 @@
 version: 1
 
 restart_required:
+  - subsystem: log_format
+    gated_by: "internal/server.LogFormatRestartRequired"
+    reason: >
+      The logger handler (text vs JSON) is built once at startup by
+      observability.NewDynamicLogger. Changing the format requires rebuilding
+      the handler, which needs a restart. Log level is hot-reloadable (see
+      hot_reload section).
+    fields:
+      - "[global].log_format"
+
   - subsystem: cache
     gated_by: "internal/server.CacheRestartRequired"
     reason: >
@@ -146,5 +156,17 @@ hot_reload:
     All fields not listed above take effect on the next successful hot reload.
     This includes: server_names, locations.*, upstreams.*, compression.*,
     rate_limit.rate/burst/key, waf.*, plugins.*, stream routes (not stream.listen),
-    global.log_level, global.log_format, global.shutdown_timeout,
-    global.reload_timeout, and all other [global].* fields.
+    global.log_level (level var updated atomically without handler rebuild),
+    global.worker_threads (GOMAXPROCS updated on reload),
+    global.shutdown_timeout, global.reload_timeout, and all other [global].* fields
+    except log_format (restart-required, above).
+
+  deprecated:
+    - field: "[global].access_log"
+      note: >
+        Not consumed at runtime. Use [observability.access_log] instead.
+        Lint emits a warning when this field is set.
+    - field: "[global].error_log"
+      note: >
+        Not consumed at runtime. The structured logger writes to stderr.
+        Lint emits a warning when this field is set.

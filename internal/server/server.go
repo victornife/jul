@@ -419,6 +419,9 @@ func reloadRestartRequired(old, next *config.Config) (string, bool) {
 	if reason, need := MetricsRestartRequired(old, next); need {
 		return reason, true
 	}
+	if reason, need := LogFormatRestartRequired(old, next); need {
+		return reason, true
+	}
 	return "", false
 }
 

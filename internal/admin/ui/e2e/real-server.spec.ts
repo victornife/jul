@@ -240,3 +240,58 @@ test("GET /api/plugins shows upload_enabled=false for e2e config", async ({ requ
   // secure-by-default parser sets it to false and the projection confirms it.
   expect(plugins.upload_enabled).toBe(false);
 });
+
+// ── Full apply → history → rollback flow (RA-10) ─────────────────────────────
+
+test(
+  "apply a hot-reloadable change, verify history entry, then rollback",
+  async ({ request }) => {
+    // 1. Read the current config and its version token.
+    const cfgResp = await request.get("/api/config");
+    expect(cfgResp.status()).toBe(200);
+    const cfgData: unknown = await cfgResp.json();
+    const original = RawConfigSchema.parse(cfgData);
+    expect(original.raw).toBeTruthy();
+    const baseVersion = original.base_version ?? "";
+
+    // 2. Append a harmless server_name alias — hot-reloadable, not restart-required.
+    const modified = `${original.raw ?? ""}\n# e2e-test-marker\n`;
+    const applyUrl = baseVersion
+      ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
+      : "/api/config/apply";
+
+    const applyResp = await request.post(applyUrl, {
+      headers: { "Content-Type": "application/toml" },
+      data: modified,
+    });
+    // A hot-reloadable change must be accepted (200).
+    expect(applyResp.status()).toBe(200);
+    const applyData: unknown = await applyResp.json();
+    const applyResult = assertShape(ApplyResultSchema, applyData, "/api/config/apply");
+    expect(applyResult.ok).toBe(true);
+
+    // 3. A history entry must exist (the apply snapshots the previous config).
+    const histResp = await request.get("/api/config/history");
+    expect(histResp.status()).toBe(200);
+    const histData: unknown = await histResp.json();
+    const history = z.array(HistoryEntrySchema).parse(histData);
+    expect(history.length).toBeGreaterThan(0);
+    const latestId = history[0].id;
+
+    // 4. Roll back to the snapshot the apply created.
+    const rollbackResp = await request.post("/api/config/rollback", {
+      headers: { "Content-Type": "application/json" },
+      data: JSON.stringify({ id: latestId }),
+    });
+    // Rollback must succeed (200 or 204).
+    expect([200, 204]).toContain(rollbackResp.status());
+
+    // 5. Verify the config is back to (functionally) the original.
+    const afterResp = await request.get("/api/config");
+    expect(afterResp.status()).toBe(200);
+    const afterData: unknown = await afterResp.json();
+    const after = RawConfigSchema.parse(afterData);
+    // The raw config after rollback must not contain the e2e marker we added.
+    expect(after.raw ?? "").not.toContain("e2e-test-marker");
+  },
+);

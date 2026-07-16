@@ -5,10 +5,14 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"jul/internal/admin"
@@ -47,8 +51,19 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	//
 	// Wrap the log sink so any secret value resolved from a ${env:}/${file:}
 	// reference (SEC-1) is masked even if a message or attribute interpolates it.
-	log := observability.NewLogger(redact.Writer(os.Stderr), cfg.Global.LogLevel, cfg.Global.LogFormat)
+	// NewDynamicLogger returns a set-level function for hot-reload of log_level
+	// without rebuilding the handler. Log format (text vs json) is restart-bound.
+	log, setLogLevel := observability.NewDynamicLogger(redact.Writer(os.Stderr), cfg.Global.LogLevel, cfg.Global.LogFormat)
 	log.Info("starting "+productName, "version", version, "config", src.Name())
+
+	// Apply worker_threads at startup. "auto" or empty leaves the Go runtime
+	// free to set GOMAXPROCS based on available CPUs (the typical best choice).
+	// A positive integer caps parallelism — useful in container environments with
+	// fractional CPU allocation.
+	if n := parseWorkerThreads(cfg.Global.WorkerThreads); n > 0 {
+		runtime.GOMAXPROCS(n)
+		log.Info("set worker threads", "gomaxprocs", n)
+	}
 
 	// Clone the raw startup config before secret expansion so PendingRestartCheck
 	// can compare effective startup-time values against the current on-disk config.
@@ -67,6 +82,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		log.Error("failed to resolve secret references", "error", err)
 		return 1
 	}
+
+	// Store a digest of the resolved admin token so PendingRestartCheck can
+	// detect content rotation (file-backed secret whose path is unchanged but
+	// whose content changed). Never log or expose this value.
+	startupAdminTokenHash := sha256.Sum256([]byte(cfg.Admin.Token))
 
 	// The response cache persists across reloads so counters and LRU state
 	// survive config edits. Created once and captured by the handler factory.
@@ -298,6 +318,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 			if _, need := server.AdminRestartRequired(startupCfg, current); need {
 				pending = append(pending, "admin")
+			} else if current.Admin.Enabled {
+				// AdminRestartRequired compared unexpanded reference strings.
+				// Also detect file-backed token content rotation: clone, expand,
+				// hash and compare to the startup resolved value.
+				if expanded, cerr := current.Clone(); cerr == nil {
+					if xerr := config.ExpandSecrets(expanded); xerr == nil {
+						if sha256.Sum256([]byte(expanded.Admin.Token)) != startupAdminTokenHash {
+							pending = append(pending, "admin")
+						}
+					}
+				}
 			}
 			if _, need := server.MetricsRestartRequired(startupCfg, current); need {
 				pending = append(pending, "metrics")
@@ -341,6 +372,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// listeners. Stream binding errors are logged and do not roll back the HTTP
 	// reload (the listener sets are independent).
 	srv.OnReloaded = func(c *config.Config) {
+		// Hot-reload log level without rebuilding the handler. Log format changes
+		// are restart-required and blocked by reloadRestartRequired before here.
+		setLogLevel(c.Global.LogLevel)
+		// Apply worker_threads changes on reload (GOMAXPROCS is safe to update live).
+		if n := parseWorkerThreads(c.Global.WorkerThreads); n > 0 {
+			runtime.GOMAXPROCS(n)
+		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)
 			msg := "failed: " + err.Error()
@@ -369,4 +407,18 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan stru
 		return nil
 	}
 	return ch
+}
+
+// parseWorkerThreads converts a [global].worker_threads value to a GOMAXPROCS
+// argument. "auto", "", or any non-numeric value returns 0 (do not set).
+func parseWorkerThreads(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "auto") {
+		return 0
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
