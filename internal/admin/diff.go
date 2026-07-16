@@ -48,6 +48,25 @@ func (d *ConfigDiff) mod(e DiffEntry, a string) {
 }
 func (d *ConfigDiff) warn(f string, a ...any) { d.Warnings = append(d.Warnings, fmt.Sprintf(f, a...)) }
 
+// canonicalTOML normalizes a config through a marshal→parse→marshal cycle so
+// that default values (e.g. protocol="" vs "tcp") are applied before string
+// comparison. Returns "" on any error so callers can skip the comparison.
+func canonicalTOML(c *config.Config) string {
+	raw, err := config.Marshal(c)
+	if err != nil {
+		return ""
+	}
+	normalized, err := config.Parse(raw)
+	if err != nil {
+		return string(raw)
+	}
+	out, err := config.Marshal(normalized)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
+}
+
 // diffConfigs produces a human-auditable diff between the current running
 // configuration and a draft candidate, explaining operational consequences
 // across servers, locations/routes (action, target, auth, cache, compression,
@@ -69,6 +88,24 @@ func diffConfigs(before, after *config.Config) ConfigDiff {
 	diffGlobalPlugins(before, after, &d)
 	diffStreams(before, after, &d)
 	diffSecretRefs(before, after, &d)
+	diffGlobalEgress(before, after, &d)
+	diffGlobalAdmin(before, after, &d)
+	diffGlobalMetrics(before, after, &d)
+
+	// Canonical fallback: if the configs differ in ways not yet modelled by the
+	// structured comparators, emit a raw-change marker rather than claiming
+	// "No structural changes." Both configs are normalized through a
+	// marshal→parse→marshal round-trip to apply defaults before comparing, so
+	// semantically equivalent values (e.g. empty string vs "tcp" default) do
+	// not produce spurious fallback entries.
+	if len(d.Affected) == 0 {
+		bNorm := canonicalTOML(before)
+		aNorm := canonicalTOML(after)
+		if bNorm != "" && aNorm != "" && bNorm != aNorm {
+			d.mod(DiffEntry{Kind: "raw", Name: "config", Detail: "Configuration changed (not yet modelled by the structured diff)"}, "raw_change")
+		}
+	}
+
 	if len(d.Affected) == 0 {
 		d.Summary = "No structural changes detected between the current configuration and the draft."
 	} else {

@@ -69,7 +69,7 @@ const bashCompletion = `# jul bash completion. Load with:  source <(jul completi
 _jul() {
     local cur subcmds
     cur="${COMP_WORDS[COMP_CWORD]}"
-    subcmds="check lint fmt run healthcheck import version completion"
+    subcmds="serve check lint fmt run healthcheck import version capabilities completion"
     if [ "${COMP_CWORD}" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "${subcmds} -config -check -version -help" -- "${cur}") )
         return 0
@@ -78,7 +78,7 @@ _jul() {
         completion)
             COMPREPLY=( $(compgen -W "bash zsh fish powershell" -- "${cur}") )
             ;;
-        version)
+        version|capabilities)
             COMPREPLY=( $(compgen -W "-json" -- "${cur}") )
             ;;
         *)
@@ -93,15 +93,15 @@ const zshCompletion = `#compdef jul
 # jul zsh completion. Load with:  source <(jul completion zsh)
 _jul() {
     local -a subcmds
-    subcmds=(check lint fmt run healthcheck import version completion)
+    subcmds=(serve check lint fmt run healthcheck import version capabilities completion)
     if (( CURRENT == 2 )); then
         _describe -t commands 'jul command' subcmds
         return
     fi
     case ${words[2]} in
-        completion) compadd bash zsh fish powershell ;;
-        version)    compadd -- -json ;;
-        *)          _files ;;
+        completion)           compadd bash zsh fish powershell ;;
+        version|capabilities) compadd -- -json ;;
+        *)                    _files ;;
     esac
 }
 compdef _jul jul
@@ -109,6 +109,7 @@ compdef _jul jul
 
 const fishCompletion = `# jul fish completion. Load with:  jul completion fish | source
 complete -c jul -f
+complete -c jul -n __fish_use_subcommand -a serve        -d 'Run the server (explicit form)'
 complete -c jul -n __fish_use_subcommand -a check       -d 'Full runtime preflight check'
 complete -c jul -n __fish_use_subcommand -a lint        -d 'Validate and report best-practice warnings'
 complete -c jul -n __fish_use_subcommand -a fmt         -d 'Rewrite the config in canonical TOML'
@@ -116,15 +117,16 @@ complete -c jul -n __fish_use_subcommand -a run         -d 'Run a zero-config se
 complete -c jul -n __fish_use_subcommand -a healthcheck -d 'Probe the admin health endpoint'
 complete -c jul -n __fish_use_subcommand -a import      -d 'Translate an NGINX config'
 complete -c jul -n __fish_use_subcommand -a version     -d 'Print version and build metadata'
+complete -c jul -n __fish_use_subcommand -a capabilities -d 'Report compiled features and exit-code contract'
 complete -c jul -n __fish_use_subcommand -a completion  -d 'Generate a shell completion script'
 complete -c jul -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish powershell'
-complete -c jul -n '__fish_seen_subcommand_from version' -l json -d 'Emit JSON'
+complete -c jul -n '__fish_seen_subcommand_from version capabilities' -l json -d 'Emit JSON'
 `
 
 const powershellCompletion = `# jul PowerShell completion. Load with:  jul completion powershell | Out-String | Invoke-Expression
 Register-ArgumentCompleter -Native -CommandName jul -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
-    $verbs = @('check','lint','fmt','run','healthcheck','import','version','completion')
+    $verbs = @('serve','check','lint','fmt','run','healthcheck','import','version','capabilities','completion')
     $elements = $commandAst.CommandElements
     if ($elements.Count -le 2) {
         $verbs | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
@@ -134,8 +136,8 @@ Register-ArgumentCompleter -Native -CommandName jul -ScriptBlock {
     }
     $sub = $elements[1].Value
     $candidates = switch ($sub) {
-        'completion' { @('bash','zsh','fish','powershell') }
-        'version'    { @('-json') }
+        'completion'              { @('bash','zsh','fish','powershell') }
+        'version'|'capabilities' { @('-json') }
         default      { @() }
     }
     $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {

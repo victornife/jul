@@ -383,6 +383,13 @@ func wantColor(w io.Writer) bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}
+	return isTTY(w)
+}
+
+// isTTY reports whether w is connected to a character device (terminal),
+// regardless of the NO_COLOR preference. Use this for auto-detecting whether
+// output should be machine-readable (JSON/structured) vs human-readable.
+func isTTY(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {
 		return false

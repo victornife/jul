@@ -2,9 +2,13 @@
 
 > Version 1.32 · Updated 2026-07-13
 
-The single, canonical at-a-glance view of **every shipped feature**, its
-**maturity**, and how it stands against the nine-criteria GA bar
-([ADR 0003](adr/0003-maturity-and-ga.md)).
+> **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
+> single editable manifest. This page is the human-readable rendering of that
+> data. When maturity or any GA criterion changes, update `feature-status.yaml`
+> first, then keep this table in sync.
+
+The at-a-glance view of **every shipped feature**, its **maturity**, and how
+it stands against the nine-criteria GA bar ([ADR 0003](adr/0003-maturity-and-ga.md)).
 
 > For a critical, evidence-based assessment of the repository — including scrutiny of
 > the maturity and soak claims on this page — see the current

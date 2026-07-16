@@ -78,7 +78,7 @@ func cmdCapabilities(args []string) int {
 		ExitCodes: exitCodes,
 	}
 
-	if *jsonOut || !wantColor(stdout) {
+	if *jsonOut || !isTTY(stdout) {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(out)

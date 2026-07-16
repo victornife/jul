@@ -396,3 +396,108 @@ func diffStreamFields(key string, b, a config.StreamServer, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "stream", Name: key, Before: durStr(b.IdleTimeout), After: durStr(a.IdleTimeout), Detail: "Change idle timeout for stream " + key}, "stream "+key+" idle_timeout")
 	}
 }
+
+// diffGlobalEgress compares the [egress] allow-list. Changes are restart-required
+// (the dial policy is built once at startup) and are surfaced in the diff so
+// the operator can review what changed before the 409 rejection.
+func diffGlobalEgress(before, after *config.Config, d *ConfigDiff) {
+	b, a := before.Egress, after.Egress
+	if b.Enabled == a.Enabled && strings.Join(b.Allow, ",") == strings.Join(a.Allow, ",") {
+		return
+	}
+	if b.Enabled != a.Enabled {
+		action := "Enable"
+		if !a.Enabled {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "egress", Name: "global", Detail: action + " egress allow-list — restart required to apply"}, "egress")
+	}
+	if strings.Join(b.Allow, ",") != strings.Join(a.Allow, ",") {
+		d.mod(DiffEntry{Kind: "egress", Name: "global",
+			Before: fmt.Sprintf("%d entries", len(b.Allow)),
+			After:  fmt.Sprintf("%d entries", len(a.Allow)),
+			Detail: "Change egress allow-list — restart required to apply",
+		}, "egress allow")
+		if len(a.Allow) < len(b.Allow) {
+			d.warn("Tightening the egress allow-list restricts the server's outbound fetches (JWKS, forward-auth, discovery). The new policy takes effect on restart.")
+		}
+	}
+}
+
+// diffGlobalAdmin compares the [admin] block. All changes are restart-required
+// (the admin listener is built once at startup). The token value is never
+// included in the diff output.
+func diffGlobalAdmin(before, after *config.Config, d *ConfigDiff) {
+	b, a := before.Admin, after.Admin
+	if b.Enabled == a.Enabled && b.Listen == a.Listen && b.Token == a.Token &&
+		b.HistoryKeep == a.HistoryKeep && b.HistoryDir == a.HistoryDir &&
+		b.RateLimitReadPerMin == a.RateLimitReadPerMin &&
+		b.RateLimitWritePerMin == a.RateLimitWritePerMin &&
+		b.RateLimitApplyPerMin == a.RateLimitApplyPerMin &&
+		b.MaxEventConns == a.MaxEventConns &&
+		b.AuditLogFile == a.AuditLogFile &&
+		b.PluginUploadDir == a.PluginUploadDir &&
+		b.PluginUploadMaxSize == a.PluginUploadMaxSize &&
+		boolPtrEqDiff(b.PluginUploadEnabled, a.PluginUploadEnabled) {
+		return
+	}
+	if b.Token != a.Token {
+		d.mod(DiffEntry{Kind: "admin", Name: "global",
+			Detail: "Rotate admin bearer token — restart required to apply (the new token takes effect on restart)",
+		}, "admin token")
+		d.warn("The admin token change is saved but takes effect only after restart; the old token remains valid until then.")
+	}
+	if b.Listen != a.Listen {
+		d.mod(DiffEntry{Kind: "admin", Name: "global", Before: b.Listen, After: a.Listen, Detail: "Change admin listen address — restart required"}, "admin listen")
+	}
+	if b.Enabled != a.Enabled {
+		action := "Enable"
+		if !a.Enabled {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "admin", Name: "global", Detail: action + " admin server — restart required"}, "admin enabled")
+	}
+	// Summarise remaining admin-block changes without exposing values.
+	if b.HistoryKeep != a.HistoryKeep || b.HistoryDir != a.HistoryDir ||
+		b.RateLimitReadPerMin != a.RateLimitReadPerMin ||
+		b.RateLimitWritePerMin != a.RateLimitWritePerMin ||
+		b.RateLimitApplyPerMin != a.RateLimitApplyPerMin ||
+		b.MaxEventConns != a.MaxEventConns ||
+		b.AuditLogFile != a.AuditLogFile ||
+		b.PluginUploadDir != a.PluginUploadDir ||
+		b.PluginUploadMaxSize != a.PluginUploadMaxSize ||
+		!boolPtrEqDiff(b.PluginUploadEnabled, a.PluginUploadEnabled) {
+		d.mod(DiffEntry{Kind: "admin", Name: "global", Detail: "Change admin server settings (history, rate limits, audit log, plugin upload) — restart required"}, "admin settings")
+	}
+}
+
+// boolPtrEqDiff reports whether two *bool values are semantically equal for
+// diff purposes (mirrors the restart-check helper without the server-package dep).
+func boolPtrEqDiff(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// diffGlobalMetrics compares the [observability.metrics] block. Changes are
+// restart-required (the Prometheus registry is built once at startup).
+func diffGlobalMetrics(before, after *config.Config, d *ConfigDiff) {
+	b, a := before.Observability.Metrics, after.Observability.Metrics
+	if b == a {
+		return
+	}
+	if b.HostLabel != a.HostLabel {
+		action := "Enable"
+		if !a.HostLabel {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "metrics", Name: "global", Detail: fmt.Sprintf("%s host_label on metrics — restart required to apply", action)}, "metrics host_label")
+		if a.HostLabel {
+			d.warn("Enabling host_label adds the request Host as a Prometheus label; unbounded host cardinality can exhaust memory — only enable when the host set is bounded.")
+		}
+	}
+}
