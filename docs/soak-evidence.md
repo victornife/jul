@@ -112,7 +112,9 @@ errors and 0 missing headers**, confirming the full ~20K req/s throughput when
 disk I/O is not a factor.
 
 - This run **satisfies the ADR-0005 minimum soak duration** (8h, single-feature).
-- The transport errors are infrastructure noise, not WASM runtime failures; plugin execution was 100% correct.
+  The **wall-clock proof** is the 8h run (plugin executed correctly throughout).
+  The **throughput proof** is the concurrent 10-minute smoke below (~20K req/s, 0 missing headers).
+  These are complementary: the 8h run proves long-duration stability; the 10m smoke proves production-representative load.
 - Future re-runs of this soak should start the server with `> /dev/null 2>&1` or set `access_log = "off"` in the soak config to avoid log volume.
 
 ### 2026-07-15 — WASM plugin 10-minute smoke soak (Linux)

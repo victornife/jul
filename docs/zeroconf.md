@@ -90,6 +90,24 @@ duplicates, no directory listing) produces **zero diagnostics**.
 
 ## Benchmarks
 
+> **Related tool: `jul fmt`**
+>
+> `jul fmt [-config <file>] [-w] [-diff]` rewrites a config in canonical TOML.
+> Use it alongside `jul lint` in your workflow:
+>
+> ```bash
+> jul fmt -config server.toml -w     # format in place
+> jul fmt -config server.toml -diff  # show diff, exit 1 if changes needed (CI mode)
+> ```
+>
+> `-diff` is useful as a CI gate: it exits 0 when the file is already canonical
+> and 1 when `fmt -w` would change it, so you can enforce formatting in
+> pre-commit or PR checks without modifying files. See
+> [docs/getting-started.md](getting-started.md#validate-and-format-configs) for
+> a full walkthrough.
+
+## Benchmarks
+
 From `go test ./internal/config/ -bench=. -benchmem` on a modest VM:
 
 | Benchmark | ops/sec | time/op | allocs/op |
