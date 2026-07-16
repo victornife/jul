@@ -159,6 +159,21 @@ silently accepted:
   file path, format, and rotation are built once at startup; the file sink owns
   a rotating handle and the syslog sink a system-log connection, both kept across
   reloads. Any change to `[observability.access_log]` is held for a restart.
+- **Response cache** — the cache instance (LRU/disk tiers, counters) is built
+  once at startup so its state survives config edits. Any change to `[cache]`
+  — capacity, disk path, default TTL, stale policies, or enabling/disabling —
+  takes effect on restart.
+- **Egress allow-list** — the outbound dial policy is built once at startup.
+  Tightening or loosening `[egress]` (including rotating the allow-list to block
+  a compromised endpoint) takes effect on restart. Saving a stricter egress policy
+  without restarting would leave the running process using the old, broader policy.
+- **Admin server** — the admin listener, bearer token, rate-limit settings,
+  history directory, plugin-upload policy, and audit-log path are all baked into
+  the admin server at startup. Token rotation in particular must be followed by a
+  restart to take effect: a saved new token does not revoke the old one until the
+  process restarts. Any change to `[admin]` is held for a restart.
+- **Metrics host label** — `[observability.metrics].host_label` is set when the
+  Prometheus registry is built at startup. Any change takes effect on restart.
 
 Adding a brand-new `listen` address (or a new server block on one) is *not*
 restart-required — the reload binds it fresh. Only changes to an address the

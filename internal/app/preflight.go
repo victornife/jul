@@ -39,11 +39,12 @@ type Preflight struct {
 //  3. Full HTTP handler dry-run via BuildHandlers (commit=false).
 //  4. Stream config dry-run via Stream.PreflightBuild.
 //
-// When prev is non-nil, four additional gates run:
+// When prev is non-nil, eight additional gates run:
 //
 //  5. HTTP bind probe for newly introduced listen addresses.
 //  6. Stream bind probe for newly introduced L4 listeners.
 //  7. Restart-required checks (ACME, listener-rebind, tracing, access-log).
+//  8. Startup-bound subsystem checks (cache, egress, admin, metrics).
 //
 // Any error aborts the write; the caller must not persist the config.
 func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
@@ -73,6 +74,18 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 		if reason, need := server.AccessLogRestartRequired(prev, c); need {
+			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		}
+		if reason, need := CacheRestartRequired(prev, c); need {
+			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		}
+		if reason, need := EgressRestartRequired(prev, c); need {
+			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		}
+		if reason, need := AdminRestartRequired(prev, c); need {
+			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		}
+		if reason, need := MetricsRestartRequired(prev, c); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 	}
