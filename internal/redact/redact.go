@@ -116,3 +116,30 @@ func Replace(newSecrets map[string]struct{}) {
 	defer mu.Unlock()
 	secrets = newSecrets
 }
+
+// Snapshot returns a shallow copy of the current secret registry. Use it
+// together with Restore to ensure a rejected validation or preflight candidate
+// cannot permanently update the registry with its secrets when the serving
+// config's secrets should remain authoritative.
+func Snapshot() map[string]struct{} {
+	mu.RLock()
+	defer mu.RUnlock()
+	snap := make(map[string]struct{}, len(secrets))
+	for k := range secrets {
+		snap[k] = struct{}{}
+	}
+	return snap
+}
+
+// Restore replaces the registry with a previously captured snapshot. It is
+// equivalent to Replace but signals intent: this is a rollback, not a forward
+// update. Pass the result of Snapshot; passing nil clears the registry.
+func Restore(snapshot map[string]struct{}) {
+	mu.Lock()
+	defer mu.Unlock()
+	if snapshot == nil {
+		secrets = map[string]struct{}{}
+	} else {
+		secrets = snapshot
+	}
+}

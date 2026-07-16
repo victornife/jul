@@ -88,6 +88,7 @@ func diffConfigs(before, after *config.Config) ConfigDiff {
 	diffGlobalPlugins(before, after, &d)
 	diffStreams(before, after, &d)
 	diffSecretRefs(before, after, &d)
+	diffGlobalSettings(before, after, &d)
 	diffGlobalEgress(before, after, &d)
 	diffGlobalAdmin(before, after, &d)
 	diffGlobalMetrics(before, after, &d)

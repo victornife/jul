@@ -15,11 +15,9 @@ it stands against the nine-criteria GA bar ([ADR 0003](adr/0003-maturity-and-ga.
 > [Full Repository Audit (2026-07-09, v1.1 updated 2026-07-16)](reviews/jul_full_repository_audit_2026-07-09.md).
 
 **Keep this current.** When a feature's maturity or any GA criterion changes,
-update this file — it is step 2 of the roadmap
-[Maintenance](roadmap/README.md#maintenance) checklist. Other documents point
-here as the source of truth, so the per-doc tables cannot drift apart (the
-condition that left Y2-07 mTLS listed as "remaining" after it had already
-shipped).
+update [`docs/feature-status.yaml`](feature-status.yaml) first — that is the
+single editable source. Then update the table below to match. The `docs-check`
+CI gate validates that every feature name in the manifest appears here.
 
 Maturity ladder: **Alpha · Beta · GA — soak pending · GA · Deprecated**. Per
 [ADR 0005](adr/0005-soak-post-ga-gate.md) the long-running soak test (criterion 5)

@@ -321,6 +321,24 @@ def check_feature_status_manifest():
             else:
                 ok(f"feature-status.yaml: doc {doc} exists")
 
+    # Cross-check: every feature in the manifest must appear in docs/status.md.
+    status_doc = DOCS / "status.md"
+    if not status_doc.exists():
+        error(manifest, 0, "docs/status.md is missing for cross-check")
+        return
+    status_text = status_doc.read_text(encoding="utf-8")
+    for entry in data.get("features", []):
+        name = entry.get("name", "?")
+        # Use a key substring of the feature name for matching; strip parens/tags.
+        # e.g. "TLS + automatic HTTPS (ACME)" → search for "TLS"
+        search_term = re.split(r"[\(\+]", name)[0].strip()
+        if search_term and search_term not in status_text:
+            error(manifest, 0,
+                  f"feature '{name}' from feature-status.yaml not found in docs/status.md — "
+                  f"keep both in sync")
+        else:
+            ok(f"feature-status.yaml: '{search_term}' appears in status.md")
+
 
 def check_lifecycle_manifest():
     """Validate docs/config-lifecycle.yaml and cross-check reload-semantics.md.

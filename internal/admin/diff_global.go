@@ -14,6 +14,30 @@ import (
 	"jul/internal/config"
 )
 
+// diffGlobalSettings compares the [global] block. All fields are hot-reloadable
+// except log_format which is restart-required (gated before diff is shown).
+func diffGlobalSettings(before, after *config.Config, d *ConfigDiff) {
+	b, a := before.Global, after.Global
+	if b.LogLevel != a.LogLevel {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(b.LogLevel), After: orNone(a.LogLevel), Detail: "Change log level (hot-reloadable)"}, "global log_level")
+	}
+	if b.LogFormat != a.LogFormat {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(b.LogFormat), After: orNone(a.LogFormat), Detail: "Change log format — restart required to apply"}, "global log_format")
+	}
+	if b.WorkerThreads != a.WorkerThreads {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(b.WorkerThreads), After: orNone(a.WorkerThreads), Detail: "Change worker threads / GOMAXPROCS (hot-reloadable)"}, "global worker_threads")
+	}
+	if b.ShutdownTimeout != a.ShutdownTimeout {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: durStr(b.ShutdownTimeout), After: durStr(a.ShutdownTimeout), Detail: "Change graceful shutdown timeout"}, "global shutdown_timeout")
+	}
+	if b.ReloadTimeout != a.ReloadTimeout {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: durStr(b.ReloadTimeout), After: durStr(a.ReloadTimeout), Detail: "Change reload timeout threshold"}, "global reload_timeout")
+	}
+	if b.RedactMinSecretLength != a.RedactMinSecretLength {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: fmt.Sprintf("%d", b.RedactMinSecretLength), After: fmt.Sprintf("%d", a.RedactMinSecretLength), Detail: "Change secret redaction minimum length"}, "global redact_min")
+	}
+}
+
 func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Cache, after.Cache
 	if b.Enabled != a.Enabled {
@@ -32,6 +56,9 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	}
 	if b.DiskPath != a.DiskPath {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: orNone(b.DiskPath), After: orNone(a.DiskPath), Detail: "Change cache disk path"}, "cache disk")
+	}
+	if b.DiskMaxSize != a.DiskMaxSize {
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: sizeStr(b.DiskMaxSize), After: sizeStr(a.DiskMaxSize), Detail: "Change cache disk size"}, "cache disk size")
 	}
 	if b.DefaultTTL != a.DefaultTTL {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.DefaultTTL), After: durStr(a.DefaultTTL), Detail: "Change cache default TTL"}, "cache ttl")
@@ -154,6 +181,19 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 			d.warn("Removing the global WAF request body limit allows arbitrarily large uploads to be inspected.")
 		}
 	}
+	if b.ResponseBodyCheck != a.ResponseBodyCheck {
+		action := "Enable"
+		if !a.ResponseBodyCheck {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: action + " global WAF response body inspection"}, "waf global response_body_check")
+	}
+	if strings.Join(b.DirectivesFiles, ",") != strings.Join(a.DirectivesFiles, ",") {
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: "Change global WAF directives files"}, "waf global directives_files")
+	}
+	if b.InlineRules != a.InlineRules {
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: "Change global WAF inline rules"}, "waf global inline_rules")
+	}
 }
 
 func diffSecretRefs(before, after *config.Config, d *ConfigDiff) {
@@ -268,6 +308,24 @@ func diffPluginFields(name string, b, a config.PluginConfig, d *ConfigDiff) {
 	}
 	if b.Timeout != a.Timeout {
 		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: durStr(b.Timeout), After: durStr(a.Timeout), Detail: "Change plugin timeout for " + name}, "plugin "+name+" timeout")
+	}
+	if b.MaxRequestBody != a.MaxRequestBody {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: sizeStr(b.MaxRequestBody), After: sizeStr(a.MaxRequestBody), Detail: "Change plugin max request body for " + name}, "plugin "+name+" max_request_body")
+	}
+	if b.MaxResponseBody != a.MaxResponseBody {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: sizeStr(b.MaxResponseBody), After: sizeStr(a.MaxResponseBody), Detail: "Change plugin max response body for " + name}, "plugin "+name+" max_response_body")
+	}
+	if b.FetchTimeout != a.FetchTimeout {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: durStr(b.FetchTimeout), After: durStr(a.FetchTimeout), Detail: "Change plugin fetch timeout for " + name}, "plugin "+name+" fetch_timeout")
+	}
+	if b.MaxFetchResponse != a.MaxFetchResponse {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: sizeStr(b.MaxFetchResponse), After: sizeStr(a.MaxFetchResponse), Detail: "Change plugin max fetch response for " + name}, "plugin "+name+" max_fetch_response")
+	}
+	if b.KVMaxEntries != a.KVMaxEntries {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: fmt.Sprintf("%d", b.KVMaxEntries), After: fmt.Sprintf("%d", a.KVMaxEntries), Detail: "Change plugin KV max entries for " + name}, "plugin "+name+" kv_max_entries")
+	}
+	if b.KVMaxBytes != a.KVMaxBytes {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: sizeStr(b.KVMaxBytes), After: sizeStr(a.KVMaxBytes), Detail: "Change plugin KV max bytes for " + name}, "plugin "+name+" kv_max_bytes")
 	}
 }
 
@@ -394,6 +452,9 @@ func diffStreamFields(key string, b, a config.StreamServer, d *ConfigDiff) {
 	}
 	if b.IdleTimeout != a.IdleTimeout {
 		d.mod(DiffEntry{Kind: "stream", Name: key, Before: durStr(b.IdleTimeout), After: durStr(a.IdleTimeout), Detail: "Change idle timeout for stream " + key}, "stream "+key+" idle_timeout")
+	}
+	if b.MaxUDPSessions != a.MaxUDPSessions {
+		d.mod(DiffEntry{Kind: "stream", Name: key, Before: fmt.Sprintf("%d", b.MaxUDPSessions), After: fmt.Sprintf("%d", a.MaxUDPSessions), Detail: "Change max UDP sessions for stream " + key}, "stream "+key+" max_udp_sessions")
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"jul/internal/auth"
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/redact"
 	"jul/internal/waf"
 )
 
@@ -126,7 +127,14 @@ func MergeReload(ctx context.Context, sources ...<-chan struct{}) <-chan struct{
 // build-tag-gated subsystems (WAF, auth, compression) so an edit that a lean
 // build cannot serve — or that a compiled build would reject — fails here,
 // before anything is written, keeping admin "apply" truthful.
+//
+// The redaction registry is saved before validation and restored on failure.
+// config.PreflightClone expands secrets in a clone, which calls redact.Replace
+// as a global side-effect. Without save/restore, a rejected candidate would
+// replace the serving config's secrets with its own, temporarily unmasking the
+// serving config's credential values from log output (R3-04).
 func ValidateRuntimeConfig(c *config.Config) error {
+	savedRedact := redact.Snapshot()
 	wafExtra := func(clone *config.Config) error {
 		if err := waf.Check(clone); err != nil {
 			return err
@@ -179,5 +187,9 @@ func ValidateRuntimeConfig(c *config.Config) error {
 		}
 		return nil
 	}
-	return config.PreflightClone(c, wafExtra)
+	if err := config.PreflightClone(c, wafExtra); err != nil {
+		redact.Restore(savedRedact)
+		return err
+	}
+	return nil
 }
