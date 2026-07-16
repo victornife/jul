@@ -214,8 +214,25 @@ func TestHealthCheckTCP(t *testing.T) {
 		t.Error("tcp probe should pass while the listener accepts")
 	}
 	_ = ln.Close()
+	// On Linux the kernel's TCP stack can complete a queued connection at zero
+	// latency after close() — the SYN/SYN-ACK exchange for a queued backlog
+	// entry may already be in-flight. Poll until the port is actually refused
+	// (observed within 1–5 ms) rather than sleeping a fixed duration, so the
+	// test is fast on idle machines and robust on loaded ones.
+	portRefused := false
+	for i := 0; i < 50; i++ {
+		if !hc.probe(b) {
+			portRefused = true
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if !portRefused {
+		t.Fatal("tcp probe never failed after the listener was closed (port still accepting after 100 ms)")
+	}
+	// Verify refusal is stable (not a one-shot race window).
 	if hc.probe(b) {
-		t.Error("tcp probe should fail after the listener is closed")
+		t.Error("tcp probe should fail after the listener is closed (unstable — probe passed after port was already refused)")
 	}
 }
 
