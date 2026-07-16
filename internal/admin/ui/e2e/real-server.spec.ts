@@ -254,8 +254,13 @@ test(
     expect(original.raw).toBeTruthy();
     const baseVersion = original.base_version ?? "";
 
-    // 2. Append a harmless server_name alias — hot-reloadable, not restart-required.
-    const modified = `${original.raw ?? ""}\n# e2e-test-marker\n`;
+    // 2. Change log_level from "warn" to "debug" — a real semantic change
+    //    that is hot-reloadable (not restart-required).
+    const originalRaw = original.raw ?? "";
+    const modified = originalRaw.replace(/log_level\s*=\s*"\w+"/, 'log_level = "debug"');
+    // Sanity: the substitution changed something.
+    expect(modified).not.toBe(originalRaw);
+
     const applyUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
       : "/api/config/apply";
@@ -270,7 +275,14 @@ test(
     const applyResult = assertShape(ApplyResultSchema, applyData, "/api/config/apply");
     expect(applyResult.ok).toBe(true);
 
-    // 3. A history entry must exist (the apply snapshots the previous config).
+    // 3. Verify the on-disk config now has debug log level.
+    const afterApplyCfgResp = await request.get("/api/config");
+    expect(afterApplyCfgResp.status()).toBe(200);
+    const afterApplyCfgData: unknown = await afterApplyCfgResp.json();
+    const afterApplyCfg = RawConfigSchema.parse(afterApplyCfgData);
+    expect(afterApplyCfg.raw ?? "").toContain('log_level = "debug"');
+
+    // 4. A history entry must exist (the apply snapshots the previous config).
     const histResp = await request.get("/api/config/history");
     expect(histResp.status()).toBe(200);
     const histData: unknown = await histResp.json();
@@ -278,20 +290,19 @@ test(
     expect(history.length).toBeGreaterThan(0);
     const latestId = history[0].id;
 
-    // 4. Roll back to the snapshot the apply created.
+    // 5. Roll back to the snapshot that captured the original config.
     const rollbackResp = await request.post("/api/config/rollback", {
       headers: { "Content-Type": "application/json" },
       data: JSON.stringify({ id: latestId }),
     });
-    // Rollback must succeed (200 or 204).
     expect([200, 204]).toContain(rollbackResp.status());
 
-    // 5. Verify the config is back to (functionally) the original.
+    // 6. Verify the rollback restored the original log_level ("warn").
     const afterResp = await request.get("/api/config");
     expect(afterResp.status()).toBe(200);
     const afterData: unknown = await afterResp.json();
     const after = RawConfigSchema.parse(afterData);
-    // The raw config after rollback must not contain the e2e marker we added.
-    expect(after.raw ?? "").not.toContain("e2e-test-marker");
+    expect(after.raw ?? "").not.toContain('log_level = "debug"');
+    expect(after.raw ?? "").toContain('log_level = "warn"');
   },
 );

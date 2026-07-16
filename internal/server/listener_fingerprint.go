@@ -4,7 +4,10 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -136,8 +139,34 @@ func mtlsConfigFingerprint(servers []config.ServerConfig, addr string) string {
 	sort.Strings(caFiles)
 	sort.Strings(sans)
 	sort.Strings(crlFiles)
+	// Include file content hashes so that same-path CA/CRL rotation (rotating
+	// the file contents without changing the configured path) is detected.
+	// Without content hashing, rotating a CRL in place would not trigger a
+	// restart check, leaving the old trust material active indefinitely.
+	caHashes := make([]string, len(caFiles))
+	for i, f := range caFiles {
+		caHashes[i] = f + ":" + hashFileContent(f)
+	}
+	crlHashes := make([]string, len(crlFiles))
+	for i, f := range crlFiles {
+		crlHashes[i] = f + ":" + hashFileContent(f)
+	}
 	return fmt.Sprintf("mode=%d,ca=%s,san=%s,crl=%s", strongest,
-		strings.Join(caFiles, "+"), strings.Join(sans, "+"), strings.Join(crlFiles, "+"))
+		strings.Join(caHashes, "+"), strings.Join(sans, "+"), strings.Join(crlHashes, "+"))
+}
+
+// hashFileContent returns a hex-encoded 8-byte SHA-256 prefix of the file
+// contents for use in fingerprints. Returns an error marker when the file
+// cannot be read so a non-readable file looks different from any readable one.
+func hashFileContent(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// Unreadable: return a marker that changes if the path changes, so a
+		// later successful read of the same path still looks different.
+		return "err:" + path
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
 }
 
 // mtlsModeRank ranks client-auth modes the way clientAuthMode + authStrength do,

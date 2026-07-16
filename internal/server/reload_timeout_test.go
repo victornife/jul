@@ -44,7 +44,7 @@ func TestReloadTimeout(t *testing.T) {
 		return factoryFor(c, "v1"), nil, nil
 	}
 
-	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -96,7 +96,7 @@ func TestReloadRecordsSuccessAndDuration(t *testing.T) {
 	v1 := "v1"
 	tag.Store(&v1)
 
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

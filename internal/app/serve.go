@@ -340,7 +340,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Construct the server and wire LastReload into deps BEFORE creating the
 	// admin server. admin.New copies deps by value, so any callback assigned
 	// after that call is invisible to the admin server's apply handlers.
-	srv := server.New(cfg, log, factory, src, ValidateRuntimeConfig)
+	srv := server.New(cfg, startupCfg, log, factory, src, ValidateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = rt.ACME
 	deps.LastReload = func() *admin.ReloadSnapshot {
@@ -375,9 +375,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// Hot-reload log level without rebuilding the handler. Log format changes
 		// are restart-required and blocked by reloadRestartRequired before here.
 		setLogLevel(c.Global.LogLevel)
-		// Apply worker_threads changes on reload (GOMAXPROCS is safe to update live).
+		// Apply worker_threads on reload. When set to a positive integer, cap
+		// GOMAXPROCS; when "auto" or empty, restore the Go runtime default (NumCPU).
 		if n := parseWorkerThreads(c.Global.WorkerThreads); n > 0 {
 			runtime.GOMAXPROCS(n)
+		} else {
+			runtime.GOMAXPROCS(runtime.NumCPU())
 		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)

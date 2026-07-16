@@ -136,8 +136,9 @@ Register-ArgumentCompleter -Native -CommandName jul -ScriptBlock {
     }
     $sub = $elements[1].Value
     $candidates = switch ($sub) {
-        'completion'              { @('bash','zsh','fish','powershell') }
-        'version'|'capabilities' { @('-json') }
+        'completion'   { @('bash','zsh','fish','powershell') }
+        'version'      { @('-json') }
+        'capabilities' { @('-json') }
         default      { @() }
     }
     $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {

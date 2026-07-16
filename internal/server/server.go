@@ -78,6 +78,11 @@ type Server struct {
 
 	mu        sync.Mutex
 	cfg       *config.Config
+	// rawCfg is the pre-expansion startup config used for restart-required
+	// comparisons in doReload. It is never nil after construction when set
+	// from serve.go; nil is accepted for tests that use literal (non-secret)
+	// configs and don't need the raw-vs-raw comparison guarantee.
+	rawCfg    *config.Config
 	listeners map[string]*listenerEntry // keyed by listen address
 	handlers  atomic.Pointer[handlerGen]
 
@@ -153,13 +158,18 @@ type listenerEntry struct {
 }
 
 // New creates a Server. source and validate may be nil to disable reload.
-func New(cfg *config.Config, log *slog.Logger, factory HandlerFactory, source config.Source, validate func(*config.Config) error) *Server {
+// rawStartupCfg is the pre-expansion configuration at process startup; when
+// non-nil it is used by doReload for restart-required comparison so that
+// secret references (${env:...}) do not produce false restart signals. Pass
+// nil from tests that use literal configuration values.
+func New(cfg *config.Config, rawStartupCfg *config.Config, log *slog.Logger, factory HandlerFactory, source config.Source, validate func(*config.Config) error) *Server {
 	return &Server{
 		log:       log,
 		source:    source,
 		validate:  validate,
 		factory:   factory,
 		cfg:       cfg,
+		rawCfg:    rawStartupCfg,
 		listeners: map[string]*listenerEntry{},
 		serveErr:  make(chan error, 8),
 	}
@@ -203,9 +213,22 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
 	}
 }
 
-// bind starts serving on addr using the current config (s.cfg) for timeouts and
-// TLS.
-func (s *Server) bind(addr string) error {
+// bind starts serving on addr using the current config (s.cfg) for timeouts and TLS.
+func (s *Server) bind(addr string) error { return s.bindFrom(addr, s.cfg) }
+
+// bindFrom starts serving on addr using the provided cfg for all bind-time
+// settings: TLS, mTLS, h2c, HTTP/3, timeouts, header limits, and connection cap.
+// Using cfg instead of s.cfg ensures that new addresses added during a direct
+// reload are bound with the candidate configuration, not the old startup config.
+// This follows the same pattern as listenerBindFingerprint, which constructs a
+// temporary Server{cfg: cfg} to resolve bind settings from an explicit config.
+func (s *Server) bindFrom(addr string, cfg *config.Config) error {
+	// cv is a configuration view for this bind: a lightweight Server value whose
+	// only purpose is to let the config-reading helper methods (readHeaderTimeout,
+	// h2cEnabledForAddr, http3EnabledForAddr, etc.) resolve from cfg rather than
+	// s.cfg. Hooks and wg/listeners/serveErr are not needed on cv.
+	cv := &Server{cfg: cfg, ACME: s.ACME, MTLSResultHook: s.MTLSResultHook, HTTP3ConnHook: s.HTTP3ConnHook}
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
@@ -215,7 +238,7 @@ func (s *Server) bind(addr string) error {
 	// the limit counts raw accepts and TLS handshakes happen only for admitted
 	// connections. Gated by the [rate_limit] master switch; the cap is fixed at
 	// bind time, so changing max_conns applies to newly bound listeners.
-	if rl := s.cfg.RateLimit; rl.Enabled && rl.MaxConns > 0 {
+	if rl := cfg.RateLimit; rl.Enabled && rl.MaxConns > 0 {
 		ln = netutil.LimitListener(ln, rl.MaxConns)
 	}
 
@@ -226,9 +249,9 @@ func (s *Server) bind(addr string) error {
 	// clients to upgrade to h3 on a subsequent request.
 	var altSvc string
 
-	bindings, minVer, tlsOK := tlsBindingsForAddr(s.cfg.Servers, addr)
+	bindings, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
 	if tlsOK {
-		provider, err := s.certProviderFor(addr, bindings)
+		provider, err := cv.certProviderFor(addr, bindings)
 		if err != nil {
 			_ = ln.Close()
 			return fmt.Errorf("tls config for %s: %w", addr, err)
@@ -239,14 +262,14 @@ func (s *Server) bind(addr string) error {
 		tlsConf := &tls.Config{
 			GetCertificate: dyn.GetCertificate,
 			MinVersion:     minVer,
-			NextProtos:     s.listenerNextProtos(addr),
+			NextProtos:     cv.listenerNextProtos(addr),
 		}
 
 		// Mutual TLS is bound at listener creation, like MinVersion: the CA
 		// bundle, mode, and verifier are read from the config once and apply to
 		// connections accepted on this listener. Changing tls.client_auth takes
 		// effect on restart, not on hot reload.
-		ca, err := clientAuthForAddr(s.cfg.Servers, addr, s.MTLSResultHook)
+		ca, err := clientAuthForAddr(cfg.Servers, addr, s.MTLSResultHook)
 		if err != nil {
 			_ = ln.Close()
 			return fmt.Errorf("client auth for %s: %w", addr, err)
@@ -262,30 +285,30 @@ func (s *Server) bind(addr string) error {
 		// enabled. It shares dyn.GetCertificate, so ACME/static cert reloads via
 		// reloadCertificates apply to h3 automatically (the provider is swapped
 		// atomically inside dyn, which h3 holds by method value).
-		if s.http3EnabledForAddr(addr) {
+		if cv.http3EnabledForAddr(addr) {
 			h3, err := startHTTP3(addr, dyn.GetCertificate, s.dynamicHandler(addr), s.HTTP3ConnHook, s.log)
 			if err != nil {
 				_ = ln.Close()
 				return fmt.Errorf("http3 %s: %w", addr, err)
 			}
 			entry.h3 = h3
-			altSvc = altSvcValue(addr, s.http3MaxAgeForAddr(addr))
+			altSvc = altSvcValue(addr, cv.http3MaxAgeForAddr(addr))
 		}
 	}
 
 	httpd := &http.Server{
 		Addr:              addr,
 		Handler:           s.handlerForAddr(addr, altSvc),
-		ReadHeaderTimeout: s.readHeaderTimeout(addr),
-		ReadTimeout:       s.readTimeout(addr),
-		WriteTimeout:      s.writeTimeout(addr),
-		IdleTimeout:       s.idleTimeout(addr),
-		MaxHeaderBytes:    s.maxHeaderBytes(addr),
+		ReadHeaderTimeout: cv.readHeaderTimeout(addr),
+		ReadTimeout:       cv.readTimeout(addr),
+		WriteTimeout:      cv.writeTimeout(addr),
+		IdleTimeout:       cv.idleTimeout(addr),
+		MaxHeaderBytes:    cv.maxHeaderBytes(addr),
 	}
 	// On a plaintext listener, optionally accept cleartext HTTP/2 (h2c) so
 	// native gRPC clients can connect without TLS. TLS listeners already
 	// negotiate HTTP/2 via ALPN, so this only applies when !tlsOK.
-	if !tlsOK && s.h2cEnabledForAddr(addr) {
+	if !tlsOK && cv.h2cEnabledForAddr(addr) {
 		enableH2C(httpd)
 	}
 	if s.ConnStateHook != nil {
@@ -444,12 +467,17 @@ func (s *Server) doReload() {
 	start := time.Now()
 	info := &lastReloadInfo{At: start}
 
-	// Restart-required check: changes to startup-bound subsystems cannot be
-	// applied via a live reload. The process-lifetime components (cache, egress,
-	// admin server, metrics, tracing, access-log, ACME, TLS/mTLS, listener bind
-	// settings) keep their startup-time values even after s.cfg is updated.
-	// Aborting here keeps the old config authoritative and avoids mixed state.
-	if reason, need := reloadRestartRequired(s.cfg, newCfg); need {
+	// Use the raw (pre-expansion) startup config for restart-required comparison
+	// so that secret references (${env:...}) do not produce false restart signals.
+	// s.cfg holds the expanded effective config; comparing it against an unexpanded
+	// reload candidate treats every secret reference as a change.
+	oldForRestart := s.rawCfg
+	if oldForRestart == nil {
+		// No raw startup config (tests with literal values). Fall back to s.cfg;
+		// this is safe for literal tokens but may false-positive for secret refs.
+		oldForRestart = s.cfg
+	}
+	if reason, need := reloadRestartRequired(oldForRestart, newCfg); need {
 		info.Duration = time.Since(start)
 		info.OK = false
 		info.Error = "restart_required: " + reason
@@ -500,38 +528,53 @@ func (s *Server) doReload() {
 		s.log.Warn("reload exceeded timeout threshold", "duration", info.Duration, "threshold", threshold)
 	}
 
-	// Compute listener diff before any mutations so the set is stable.
+	// Compute listener diff before any mutations so the address sets are stable.
 	oldAddrs := setOf(uniqueListenAddrs(s.cfg.Servers))
 	newAddrs := setOf(uniqueListenAddrs(newCfg.Servers))
 
-	// Bind new listeners BEFORE swapping handlers and updating s.cfg. A bind
-	// failure is recorded as a degraded reload (OK=false) — existing listeners
-	// continue serving the new handlers, but the new address is not available.
-	// Binding before the swap means new listeners briefly serve 503 (the address
-	// is not in the old handler generation) for the sub-millisecond window
-	// between bind and the atomic handler store below; that is acceptable.
+	// Stage every new listener bind using newCfg so the listener starts with the
+	// correct TLS, h2c, HTTP/3, timeout, and connection-cap settings from the
+	// candidate config (not from the old s.cfg). Staging happens before any
+	// runtime mutation: if any bind fails, all staged binds are rolled back and
+	// the reload is aborted — handlers, s.cfg, and old listeners are untouched.
+	stagedAddrs := make(map[string]struct{})
 	var bindErrs []string
 	for addr := range newAddrs {
 		if _, existed := oldAddrs[addr]; !existed {
-			if err := s.bind(addr); err != nil {
+			if err := s.bindFrom(addr, newCfg); err != nil {
 				bindErrs = append(bindErrs, addr+": "+err.Error())
-				s.log.Error("reload: failed to bind new listener", "addr", addr, "error", err)
+				s.log.Error("reload: failed to stage new listener", "addr", addr, "error", err)
 			} else {
-				s.log.Info("reload: bound new listener", "addr", addr)
+				stagedAddrs[addr] = struct{}{}
+				s.log.Info("reload: staged new listener", "addr", addr)
 			}
 		}
 	}
 
-	// Swap request handlers atomically, then retire the previous generation once
-	// its in-flight requests drain.
+	// If any staged bind failed, roll back every successfully staged listener and
+	// abort without touching handlers, s.cfg, or existing listeners. This prevents
+	// the replacement-address outage: if A is replaced by B and B fails to bind,
+	// A continues serving unchanged.
+	if len(bindErrs) > 0 {
+		for addr := range stagedAddrs {
+			s.removeListener(addr)
+		}
+		info.Duration = time.Since(start)
+		info.OK = false
+		info.Error = "reload aborted: new listener(s) failed to bind (no changes applied): " + strings.Join(bindErrs, "; ")
+		s.log.Error("reload aborted: staged listeners closed; old configuration remains serving",
+			"errors", strings.Join(bindErrs, "; "))
+		s.lastReload.Store(info)
+		return
+	}
+
+	// All staged binds succeeded. Commit atomically:
+	// swap request handlers, update s.cfg, refresh TLS, then remove old addresses.
 	prevGen := s.handlers.Load()
 	s.handlers.Store(newHandlerGen(newHandlers))
 	s.retireGen(prevGen, retirePrev)
 
 	s.cfg = newCfg
-
-	// Refresh TLS certificates on kept listeners.
-	s.reloadCertificates()
 
 	// Remove listeners that are no longer in the config.
 	for addr := range oldAddrs {
@@ -541,11 +584,12 @@ func (s *Server) doReload() {
 		}
 	}
 
-	if len(bindErrs) > 0 {
+	// Refresh TLS certificates. Errors degrade the result (old certs remain
+	// active on affected listeners) but do not roll back the config/handler swap.
+	if certErrs := s.reloadCertificates(); len(certErrs) > 0 {
 		info.OK = false
-		info.Error = "degraded: new listener(s) failed to bind: " + strings.Join(bindErrs, "; ")
-		s.log.Warn("reload completed with bind errors; existing listeners serving new config",
-			"errors", strings.Join(bindErrs, "; "))
+		info.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") + "; old certificate(s) remain active"
+		s.log.Warn("reload completed with certificate errors", "errors", strings.Join(certErrs, "; "))
 	} else {
 		info.OK = true
 		s.log.Info("configuration reloaded", "duration", info.Duration)
@@ -555,9 +599,14 @@ func (s *Server) doReload() {
 
 // reloadCertificates rebuilds and swaps the cert provider for each currently
 // TLS-enabled listener that is still TLS-enabled in the new config.
-func (s *Server) reloadCertificates() {
+// reloadCertificates rebuilds and swaps the cert provider for each currently
+// TLS-enabled listener that is still TLS-enabled in the new config.
+// Returns a slice of error strings for addresses that failed to refresh;
+// the old provider remains active on those listeners.
+func (s *Server) reloadCertificates() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var errs []string
 	for addr, entry := range s.listeners {
 		if entry.provider == nil {
 			continue
@@ -569,11 +618,13 @@ func (s *Server) reloadCertificates() {
 		provider, err := s.certProviderFor(addr, bindings)
 		if err != nil {
 			s.log.Error("reload: certificate reload failed", "addr", addr, "error", err)
+			errs = append(errs, addr+": "+err.Error())
 			continue
 		}
 		entry.provider.set(provider)
 		s.log.Info("reload: certificates refreshed", "addr", addr)
 	}
+	return errs
 }
 
 // removeListener gracefully shuts down and forgets a listener.

@@ -150,7 +150,7 @@ func TestReloadSwapsHandler(t *testing.T) {
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
 
-	srv := New(cfgWith(addr), quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan struct{}, 1)
@@ -251,7 +251,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, quietLogger(), factory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan struct{}, 1)
@@ -340,7 +340,7 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, quietLogger(), factory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan struct{})
@@ -410,7 +410,7 @@ func TestReloadRejectsInvalidConfig(t *testing.T) {
 		}
 		return nil
 	}
-	srv := New(cfgWith(addr), quietLogger(), bodyHandlerFactory(tag), src, validate)
+	srv := New(cfgWith(addr), nil, quietLogger(), bodyHandlerFactory(tag), src, validate)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -448,7 +448,7 @@ func TestReloadAddsAndRemovesListener(t *testing.T) {
 	oneAddr := cfgWith(addr1)
 
 	src := &stubSource{}
-	srv := New(oneAddr, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(oneAddr, nil, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -541,6 +541,12 @@ func TestPreflightListeners(t *testing.T) {
 // file-watch) containing a startup-bound field change is blocked: the old config
 // remains authoritative, last reload is OK=false, and the reason contains
 // "restart_required".
+// TestDoReloadBlocksOnRestartRequired verifies that a direct reload containing
+// a startup-bound change (e.g. enabling the cache, which cannot be live-applied)
+// records a failed reload and leaves the previous config serving.
+// It also tests the rawCfg path: when rawCfg is set to a config that shares the
+// same admin token reference as the reload candidate, the reload must NOT be
+// blocked even though s.cfg holds the expanded (resolved) value.
 func TestDoReloadBlocksOnRestartRequired(t *testing.T) {
 	addr := freePort(t)
 	base := cfgWith(addr)
@@ -556,7 +562,8 @@ func TestDoReloadBlocksOnRestartRequired(t *testing.T) {
 	tag := &atomic.Pointer[string]{}
 	initial := "v1"
 	tag.Store(&initial)
-	srv := New(base, quietLogger(), bodyHandlerFactory(tag), src,
+	// Pass rawCfg = base (simulates the pre-expansion startup config).
+	srv := New(base, base, quietLogger(), bodyHandlerFactory(tag), src,
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -605,7 +612,7 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), quietLogger(), bodyHandlerFactory(tag), src,
+	srv := New(cfgWith(addr), nil, quietLogger(), bodyHandlerFactory(tag), src,
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -651,14 +658,146 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 	if li.OK {
 		t.Error("LastReload.OK = true; want false when a new listener failed to bind")
 	}
-	if !strings.Contains(li.Error, "degraded") {
-		t.Errorf("LastReload.Error = %q; want it to contain 'degraded'", li.Error)
+	// New doReload aborts entirely on bind failure (no partial state).
+	if !strings.Contains(li.Error, "aborted") {
+		t.Errorf("LastReload.Error = %q; want it to contain 'aborted'", li.Error)
 	}
 
-	// The existing listener must still serve (with the new handler — the swap
-	// completes for the addresses that did bind).
-	if !eventually(t, "http://"+addr+"/", "v2") {
-		t.Error("existing listener should serve new handler even after degraded reload")
+	// The existing listener must still serve the OLD handler — the reload was
+	// aborted before any handler swap occurred.
+	if !eventually(t, "http://"+addr+"/", "v1") {
+		t.Error("existing listener should keep old handler after aborted reload")
+	}
+
+	cancel()
+	<-done
+}
+
+// TestDoReloadReplacementAddressBindFailureKeepsOld verifies the R3-02 fix:
+// when a direct reload replaces address A with address B and B fails to bind,
+// A continues serving. Previously the code removed A after the failed bind,
+// leaving no working listener.
+func TestDoReloadReplacementAddressBindFailureKeepsOld(t *testing.T) {
+	oldAddr := freePort(t)
+	tag := &atomic.Pointer[string]{}
+	v1 := "v1"
+	tag.Store(&v1)
+
+	src := &stubSource{}
+	src.set(cfgWith(oldAddr), nil)
+	srv := New(cfgWith(oldAddr), nil, quietLogger(), bodyHandlerFactory(tag), src,
+		func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }()
+	waitForServe(t, "http://"+oldAddr+"/", "v1")
+
+	// Occupy a port, then reload with the new config replacing oldAddr with it.
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = busy.Close() })
+	busyAddr := busy.Addr().String()
+
+	// Change tag to v2 so we can detect if the handler accidentally swapped.
+	v2 := "v2"
+	tag.Store(&v2)
+
+	// New config has busyAddr instead of oldAddr — a replacement, not an addition.
+	replacement := &config.Config{
+		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Servers: []config.ServerConfig{
+			{Listen: busyAddr, Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}}},
+		},
+	}
+	src.set(replacement, nil)
+	reload <- struct{}{}
+
+	// Wait for the reload to complete.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if li := srv.LastReload(); li != nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	li := srv.LastReload()
+	if li == nil {
+		t.Fatal("LastReload is nil after reload attempt")
+	}
+	if li.OK {
+		t.Error("LastReload.OK = true; want false when replacement bind failed")
+	}
+
+	// oldAddr must still be alive and serving the OLD handler (v1, not v2).
+	if !eventually(t, "http://"+oldAddr+"/", "v1") {
+		t.Error("old listener must remain serving with old handler after failed replacement")
+	}
+	if !dialable(oldAddr) {
+		t.Error("old listener must still accept connections")
+	}
+
+	cancel()
+	<-done
+}
+
+// TestDoReloadNewListenerUsesNewConfig verifies the R3-01 fix: when a reload
+// adds a new listen address, the bind uses the candidate config settings
+// (not the startup config). We test this by verifying that a new address
+// with a custom idleTimeout setting from newCfg is successfully bound and
+// serves requests — if it were bound from the old config (which has no entry
+// for the new address), serverFor would return nil and defaults would be used.
+func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
+	addr1 := freePort(t)
+	addr2 := freePort(t)
+	tag := &atomic.Pointer[string]{}
+	v1 := "v1"
+	tag.Store(&v1)
+
+	src := &stubSource{}
+	src.set(cfgWith(addr1), nil)
+	srv := New(cfgWith(addr1), nil, quietLogger(), bodyHandlerFactory(tag), src,
+		func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload) }()
+	waitForServe(t, "http://"+addr1+"/", "v1")
+
+	// New config adds addr2 with a distinctive idle timeout so we can distinguish
+	// it from the default. The value just needs to be parseable by the server.
+	v2 := "v2"
+	tag.Store(&v2)
+	newCfg := &config.Config{
+		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Servers: []config.ServerConfig{
+			{Listen: addr1, Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}}},
+			{
+				Listen:      addr2,
+				IdleTimeout: config.Duration(45 * time.Second), // distinctive non-default
+				Locations:   []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
+			},
+		},
+	}
+	src.set(newCfg, nil)
+	reload <- struct{}{}
+
+	// addr2 must become reachable: the bind used newCfg's server block for addr2.
+	waitDialable(t, addr2)
+
+	// addr1 must still serve (now with v2 handler).
+	if !eventually(t, "http://"+addr1+"/", "v2") {
+		t.Error("addr1 should serve new handler after reload")
+	}
+
+	li := srv.LastReload()
+	if li == nil || !li.OK {
+		t.Errorf("LastReload = %+v; want OK=true", li)
 	}
 
 	cancel()

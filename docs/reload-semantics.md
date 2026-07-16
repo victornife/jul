@@ -80,11 +80,20 @@ Only after all five pass is the file written and the reload triggered.
 
 ## Transactional swap
 
-The reload itself is transactional per layer, so a failure never leaves a
-partial configuration serving:
+The reload follows an all-or-nothing staged commit for listener changes: every
+new listen address is bound before any runtime mutation; if any bind fails all
+staged binds are rolled back and the reload is aborted without touching handlers,
+`s.cfg`, or existing listeners.
 
-- **HTTP** — the new handler generation is built before the listener set is
-  swapped; existing connections finish on their original handler.
+For the handler swap: the new generation is built before the listener set is
+altered; existing connections finish on their original handlers until the
+previous generation drains.
+
+Certificate refresh (for kept TLS listeners) and stream-proxy reload happen
+after the handler swap. A failure in either produces a **degraded** result
+(`LastReload.OK=false`) but does not roll back the handler swap — the new
+config and handlers are serving while the cert/stream error is flagged.
+
 - **Stream** — routes and pools are built and newly added listeners bound
   **before** any running state changes; a bind failure rolls back to the
   previously serving configuration (see [stream-proxy.md](stream-proxy.md#hot-reload)).

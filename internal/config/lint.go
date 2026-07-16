@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -179,6 +181,18 @@ func Lint(c *Config) []Diagnostic {
 			Message:  "this field is not consumed; the structured logger writes to stderr via [global].log_format",
 			Hint:     "remove error_log; redirect stderr in your process supervisor instead",
 		})
+	}
+
+	// worker_threads must be "auto", empty, or a positive integer.
+	if wt := strings.TrimSpace(c.Global.WorkerThreads); wt != "" && !strings.EqualFold(wt, "auto") {
+		if n, err := strconv.Atoi(wt); err != nil || n <= 0 {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    "[global].worker_threads",
+				Message:  fmt.Sprintf("invalid value %q; use a positive integer or \"auto\"", c.Global.WorkerThreads),
+				Hint:     "set worker_threads = \"auto\" to use Go's GOMAXPROCS default (number of CPUs)",
+			})
+		}
 	}
 
 	return diags

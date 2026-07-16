@@ -35,7 +35,9 @@ type Preflight struct {
 // Apply runs the admin write preflight gates:
 //
 //  1. Structural + stateless validation (ValidateRuntimeConfig).
-//  2. TLS certificate file validation (PreflightTLS).
+//  2. TLS certificate file validation (PreflightTLS) — using a resolved clone
+//     so secret-referenced cert/key paths (${env:...}, ${file:...}) are expanded
+//     before file existence is checked.
 //  3. Full HTTP handler dry-run via BuildHandlers (commit=false).
 //  4. Stream config dry-run via Stream.PreflightBuild.
 //
@@ -51,7 +53,18 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
 	if err := ValidateRuntimeConfig(c); err != nil {
 		return err
 	}
-	if err := server.PreflightTLS(c.Servers); err != nil {
+	// Expand a resolved clone so secret-referenced cert/key paths are resolved
+	// before PreflightTLS checks file existence. If secret expansion fails,
+	// fall back to the raw config (PreflightTLS will fail with a clear error).
+	// NOTE: config.ExpandSecrets has a global redaction side-effect (R3-04);
+	// this is acceptable here because ValidateRuntimeConfig already calls it.
+	resolvedForTLS := c
+	if clone, cerr := c.Clone(); cerr == nil {
+		if err := config.ExpandSecrets(clone); err == nil {
+			resolvedForTLS = clone
+		}
+	}
+	if err := server.PreflightTLS(resolvedForTLS.Servers); err != nil {
 		return err
 	}
 	if err := p.dryRun(c); err != nil {
