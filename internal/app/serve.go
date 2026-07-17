@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"jul/internal/admin"
@@ -231,33 +233,41 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// in progress, but it preserves causal ordering: the candidate is part of
 	// the request message, not stored in a separate global slot (R9-02).
 	adminReload := make(chan server.ReloadRequest, 1)
-	var triggerReload func(*config.Candidate, []byte)
-	triggerReload = func(c *config.Candidate, raw []byte) {
-		req := server.ReloadRequest{Source: server.ReloadSourceAdmin}
+	// lastAdminDigest holds the SHA-256 digest of the most recent raw config
+	// written by an admin apply. The file watcher uses it to suppress its own
+	// echo of that write (R10-01).
+	var lastAdminDigest atomic.Pointer[[32]byte]
+	var triggerReload func(*config.Candidate, [32]byte) error
+	triggerReload = func(c *config.Candidate, rawDigest [32]byte) error {
+		req := server.ReloadRequest{Source: server.ReloadSourceAdmin, RawDigest: rawDigest}
 		if c != nil {
 			req.Candidate = c
-			// Digest the candidate's canonical raw config, not the exact bytes
-			// written to disk, so the reload-side check compares normalized TOML
-			// and tolerates serialization differences (R9-02).
-			if data, err := config.Marshal(c.Raw); err == nil {
-				req.RawDigest = sha256.Sum256(data)
-			}
 		}
+		// Record the digest before enqueueing so the file watcher can suppress
+		// the echo even if the watcher fires before the enqueue completes.
+		if rawDigest != [32]byte{} {
+			lastAdminDigest.Store(&rawDigest)
+		}
+		// Synchronous enqueue with a 5-second timeout. This guarantees the
+		// admin caller receives a definite ack instead of a silent drop when
+		// the runtime is backlogged (R10-01).
 		select {
 		case adminReload <- req:
-		default:
+			return nil
+		case <-time.After(5 * time.Second):
+			return fmt.Errorf("reload enqueue timed out after 5s")
 		}
 	}
 
 	// Only file-backed sources can be watched; zero-config (in-memory) sources
 	// have no file on disk, so file-watching is skipped for them.
-	var fileWatch <-chan struct{}
+	var fileWatch <-chan [32]byte
 	if ts, ok := src.(*config.TOMLSource); ok {
 		fileWatch = watchConfig(ctx, ts.Path, log)
 	}
 	// Merge SIGHUP (when present), config file-watch, and admin-triggered
 	// reloads into a single typed channel.
-	reload := MergeReload(ctx, sigReload, fileWatch, adminReload)
+	reload := MergeReload(ctx, sigReload, fileWatch, adminReload, &lastAdminDigest)
 
 	// ── Section 3: Preflight ───────────────────────────────────────────────
 	//
@@ -288,7 +298,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps := BuildAdminDeps(productName, version, src, subsystems)
 	// Defer the candidate-injecting reload until after the server is created.
 	// For now wire the no-candidate fallback used by the admin /reload button.
-	deps.Reload = func() { triggerReload(nil, nil) }
+	deps.Reload = func() error { return triggerReload(nil, [32]byte{}) }
 	var readyFlag admin.Readiness
 	deps.Ready = readyFlag.Ready
 	deps.LoadConfig = src.Load
@@ -312,11 +322,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil {
 				return err
 			}
+			// Digest the exact bytes that will be on disk so the watcher can
+			// suppress its own echo of this admin write (R10-01).
+			rawDigest := sha256.Sum256(data)
+			lastAdminDigest.Store(&rawDigest)
 			if err := atomicfile.Write(path, data, 0o600); err != nil {
 				return err
 			}
-			triggerReload(candidate, data)
-			return nil
+			return triggerReload(candidate, rawDigest)
 		}
 		deps.SaveConfig = func(c *config.Config) error {
 			// Load the current on-disk config as prev so that Preflight.Apply runs
@@ -336,11 +349,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil {
 				return err
 			}
+			rawDigest := sha256.Sum256(data)
+			lastAdminDigest.Store(&rawDigest)
 			if err := atomicfile.Write(path, data, 0o600); err != nil {
 				return err
 			}
-			triggerReload(candidate, data)
-			return nil
+			return triggerReload(candidate, rawDigest)
 		}
 	}
 
@@ -375,24 +389,23 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// carrying the exact preflight candidate. The candidate is part of the
 	// channel message, not a global slot, so it cannot be consumed by an
 	// unrelated SIGHUP or file-watch event (R9-02).
-	triggerReload = func(c *config.Candidate, raw []byte) {
-		req := server.ReloadRequest{Source: server.ReloadSourceAdmin}
+	triggerReload = func(c *config.Candidate, rawDigest [32]byte) error {
+		req := server.ReloadRequest{Source: server.ReloadSourceAdmin, RawDigest: rawDigest}
 		if c != nil {
 			req.Candidate = c
-			// Digest the candidate's canonical raw config, not the exact bytes
-			// written to disk, so the reload-side check compares normalized TOML
-			// and tolerates serialization differences (R9-02).
-			if data, err := config.Marshal(c.Raw); err == nil {
-				req.RawDigest = sha256.Sum256(data)
-			}
+		}
+		if rawDigest != [32]byte{} {
+			lastAdminDigest.Store(&rawDigest)
 		}
 		select {
 		case adminReload <- req:
-		default:
+			return nil
+		case <-time.After(5 * time.Second):
+			return fmt.Errorf("reload enqueue timed out after 5s")
 		}
 	}
-	deps.Reload = func() {
-		triggerReload(nil, nil)
+	deps.Reload = func() error {
+		return triggerReload(nil, [32]byte{})
 	}
 	deps.LastReload = func() *admin.ReloadSnapshot {
 		if li := srv.LastReload(); li != nil {
@@ -456,13 +469,36 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 // watchConfig starts a debounced file watcher for path, returning a reload
 // channel. On failure it logs and returns nil (file-watch disabled).
-func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan struct{} {
+func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan [32]byte {
 	ch, err := config.WatchFile(ctx, path, 300*time.Millisecond, log)
 	if err != nil {
 		log.Warn("config file watch disabled", "error", err)
 		return nil
 	}
-	return ch
+
+	out := make(chan [32]byte, 1)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-ch:
+				if !ok {
+					return
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					if log != nil {
+						log.Warn("config watcher: failed to read file for digest", "path", path, "error", err)
+					}
+					continue
+				}
+				out <- sha256.Sum256(data)
+			}
+		}
+	}()
+	return out
 }
 
 // parseWorkerThreads converts a [global].worker_threads value to a GOMAXPROCS

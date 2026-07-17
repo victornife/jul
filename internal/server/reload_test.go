@@ -426,6 +426,156 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 	}
 }
 
+// TestLiveSnapshotCoherentDuringReload exercises LiveSnapshot concurrently
+// with reloads and verifies that every observed snapshot is internally
+// coherent: the effective config, listener set, and generation all describe
+// the same logical runtime state (R10-02). Run with -race to catch data races
+// on the fields that previously were updated without synchronization.
+func TestLiveSnapshotCoherentDuringReload(t *testing.T) {
+	addr := freePort(t)
+
+	var builds atomic.Uint64
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		gen := builds.Add(1)
+		code := c.Servers[0].Locations[0].Return
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(code)
+		})
+		m := map[string]http.Handler{}
+		for _, srv := range c.Servers {
+			m[srv.Listen] = h
+		}
+		commitFn := func() (upstream.SnapshotMap, func()) { return nil, nil }
+		abortFn := func() {}
+		return m, gen, commitFn, abortFn, nil
+	}
+
+	cfg1 := cfgWithReturn(addr, 201)
+	cfg2 := cfgWithReturn(addr, 202)
+
+	cand1, err := config.NewCandidate(cfg1)
+	if err != nil {
+		t.Fatalf("candidate1: %v", err)
+	}
+	cand2, err := config.NewCandidate(cfg2)
+	if err != nil {
+		t.Fatalf("candidate2: %v", err)
+	}
+
+	src := &stubSource{}
+	src.set(cfg1, nil)
+
+	srv := New(cfg1, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Use an unbuffered reload channel so the source config is set immediately
+	// before the server receives each request; a buffered channel would let the
+	// test overwrite src.cfg while a previous reload is still queued.
+	reload := make(chan ReloadRequest)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitDialable(t, addr)
+
+	// Wait for the initial runtime state to be published. waitDialable only
+	// guarantees the TCP listener accepts; the atomic runtime snapshot is
+	// published immediately after bind registration.
+	var snap LiveSnapshot
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snap = srv.LiveSnapshot()
+		if len(snap.Listeners) == 1 && snap.Generation != 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if snap.Generation == 0 {
+		t.Fatal("initial generation not published")
+	}
+	if len(snap.Listeners) != 1 {
+		t.Fatalf("initial listener count = %d, want 1", len(snap.Listeners))
+	}
+
+	const iterations = 75
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	errs := make(chan string, iterations*2)
+	var checks atomic.Uint64
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			snap := srv.LiveSnapshot()
+			checks.Add(1)
+			if len(snap.Listeners) != 1 {
+				errs <- fmt.Sprintf("expected 1 listener, got %d", len(snap.Listeners))
+				continue
+			}
+			if _, ok := snap.Listeners[addr]; !ok {
+				errs <- fmt.Sprintf("listener %s missing from snapshot", addr)
+			}
+			if snap.EffectiveConfig == nil || len(snap.EffectiveConfig.Servers) == 0 || len(snap.EffectiveConfig.Servers[0].Locations) == 0 {
+				errs <- "effective config missing server/location"
+				continue
+			}
+			code := snap.EffectiveConfig.Servers[0].Locations[0].Return
+			// Reloads alternate cfg2 (even generations) and cfg1 (odd generations).
+			wantCode := 201
+			if snap.Generation%2 == 0 {
+				wantCode = 202
+			}
+			if code != wantCode {
+				errs <- fmt.Sprintf("gen %d expects return %d, got %d", snap.Generation, wantCode, code)
+			}
+		}
+	}()
+
+	for i := 0; i < iterations; i++ {
+		// Hand the exact candidate to the server so the config sequence is
+		// deterministic regardless of when the source is read.
+		var cand *config.Candidate
+		if i%2 == 0 {
+			cand = cand2
+		} else {
+			cand = cand1
+		}
+		select {
+		case reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: cand}:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out sending reload %d", i)
+		}
+	}
+
+	close(stop)
+	wg.Wait()
+	close(errs)
+
+	if checks.Load() == 0 {
+		t.Fatal("snapshot reader did not run")
+	}
+
+	var errList []string
+	for msg := range errs {
+		errList = append(errList, msg)
+		if len(errList) > 10 {
+			break
+		}
+	}
+	if len(errList) > 0 {
+		t.Fatalf("coherence violations: %v", errList)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
 func TestReloadRejectsInvalidConfig(t *testing.T) {
 	addr := freePort(t)
 	tag := &atomic.Pointer[string]{}

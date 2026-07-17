@@ -656,7 +656,7 @@ func TestConfigValidateNeverWritesOrReloads(t *testing.T) {
 	var writes, reloads int
 	deps := Deps{
 		WriteConfigRaw: func([]byte) error { writes++; return nil },
-		Reload:         func() { reloads++ },
+		Reload:         func() error { reloads++; return nil },
 		LoadConfig:     func() (*config.Config, error) { return &config.Config{}, nil },
 	}
 	s := newTestServer(t, config.AdminConfig{}, deps)
