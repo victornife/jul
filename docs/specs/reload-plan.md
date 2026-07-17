@@ -481,23 +481,38 @@ func (p *Preflight) Apply(raw *config.Config) (*PreflightResult, error) {
 
 ### 7.2 Diff
 
-Replace `diffConfigs` fallback with a structured, registry-driven diff:
+`lifecycle.DiffConfig` is the registry-driven completeness layer. It walks
+`lifecycle.Registry` and compares the effective value of every path between two
+resolved configs:
 
 ```go
-func Diff(old, new *config.Config) DiffResult {
-    var res DiffResult
-    for _, e := range lifecycle.Registry {
-        oldV := getPath(old, e.Path)
-        newV := getPath(new, e.Path)
-        if !reflect.DeepEqual(oldV, newV) {
-            res.Changes = append(res.Changes, Change{Entry: e, Old: oldV, New: newV})
+func DiffConfig(before, after *config.Config) []DiffEntry {
+    var out []DiffEntry
+    for _, e := range Registry {
+        bv := extractRegisteredValue(before, e.Path)
+        av := extractRegisteredValue(after, e.Path)
+        if !deepEqualValues(bv, av) {
+            out = append(out, DiffEntry{Path: e.Path, Class: e.Class, ...})
         }
     }
-    return res
+    return out
 }
 ```
 
-The diff is complete by construction and can warn/reject based on `Class`.
+`extractRegisteredValue` first delegates to the startup fingerprint extractors
+(for digest-aware, restart-required fields), then to a schema-derived extractor
+map built at init time. The extractors are generated from the config struct tags
+and the registry paths, with small overrides for canonical shapes (sorted
+server_names, weighted upstream servers, etc.). Because the map is built from
+`Registry` itself, a newly added registry path automatically gets an extractor;
+the test suite enforces that every registered path returns a non-nil value from
+a populated config.
+
+`internal/admin/diff.go` layers human-readable comparators on top of this
+registry-driven pass. The comparators call `cover(path)` for the registry paths
+they already describe, and the completeness pass emits any changed paths the
+comparators missed. The result is complete by construction with respect to the
+registry while still providing operational wording and warnings.
 
 ## 8. Docs and governance
 

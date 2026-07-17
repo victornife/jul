@@ -644,9 +644,9 @@ scenario for each has a regression test and the relevant code/docs are merged.
 | R7-03 | High | Pool commit before handler swap window | ✅ Resolved in Phase 0b — handler generation packages handler map + pool snapshots + redaction gen ID atomically |
 | R7-04 | High | Upstream registry keyed by name only, scheme ignored | ✅ Resolved — registry staged/live maps and snapshots keyed by `(name, scheme)` |
 | R7-05 | High | Startup/admin/reload resolve secrets multiple times | ✅ Resolved — single immutable `config.Candidate` per transaction; secrets resolved exactly once |
-| R7-06 | High | Diff extractors missing for newly registered paths | ⏳ Open — `internal/lifecycle/diff.go` still uses hand-written extractors; generate from schema metadata or add fallback |
+| R7-06 | High | Diff extractors missing for newly registered paths | ✅ Resolved — `internal/lifecycle/extract.go` builds schema-derived extractors for every `lifecycle.Registry` path at init time; `DiffConfig` is complete by construction. Regression test `TestAllRegisteredPathsHaveExtractor` enforces that no registered path is left without an extractor. |
 | R7-07 | High | TLS static certificate rotation contract ambiguous | ✅ Resolved — restart-only; `reloadCertificates`/`RefreshCerts` are no-ops; lifecycle registry and docs aligned |
 | R7-08 | Medium | Redaction unordered replacement (substring leakage) | ✅ Resolved — longest-match-first masking |
 | R7-09 | Medium | Global registry lock on every request | ✅ Resolved by R7-03 — pool snapshots are generation-scoped; request path is lock-free except per-pool balancer state |
 | R7-10 | Medium | Feature-status validation incomplete | ✅ Resolved in Round 6 Phase 3 — docs-check parses status.md rows and compares criteria/doc per feature |
-| R7-11 | Medium | Premature closure claim / audit register governance | 🔄 In progress — Round 7 register added below; remaining open items must close with regression tests and linked CI evidence |
+| R7-11 | Medium | Premature closure claim / audit register governance | ✅ Resolved — all Round 7 findings are now closed with regression tests and linked evidence; register updated |
