@@ -496,7 +496,7 @@ func pendingRestartCheck(startupCand *config.Candidate, startupFP lifecycle.Fing
 	}
 
 	pendingSet := make(map[string]struct{})
-	for _, path := range lifecycle.Diff(startupFP, lifecycle.ComputeFingerprint(candidate.Effective)) {
+	for _, path := range lifecycle.DiffAddressAware(startupFP, lifecycle.ComputeFingerprint(candidate.Effective)) {
 		if e := lifecycle.ByPath(path); e != nil {
 			pendingSet[e.Subsystem] = struct{}{}
 		}
