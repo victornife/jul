@@ -764,3 +764,82 @@ func TestTranscodeReflectionWithDiscoveryUpstream(t *testing.T) {
 		t.Fatalf("discovery reflection reply = %q, want discovery", got)
 	}
 }
+
+// TestTranscodeReflectionWithReusedDiscoveryUpstream (R12-01) verifies that a
+// discovery-only upstream still provides candidate backends for reflection
+// after the registry reuses the pool across a reload.
+func TestTranscodeReflectionWithReusedDiscoveryUpstream(t *testing.T) {
+	fdp := echoFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	files, err := filesFromSet(set)
+	if err != nil {
+		t.Fatalf("build descriptors: %v", err)
+	}
+	fd, err := files.FindFileByPath("echo/echo.proto")
+	if err != nil {
+		t.Fatalf("find echo file: %v", err)
+	}
+
+	addr := startEchoServer(t, fd, true)
+
+	reg := upstream.NewRegistry(upstream.RegistryOptions{
+		NewDiscoverer: func(config.DiscoveryConfig, upstream.DialFunc) (upstream.Discoverer, error) {
+			return staticDiscoverer{targets: []upstream.Target{{Address: addr, Weight: 1}}}, nil
+		},
+	})
+	up := config.UpstreamConfig{
+		Name: "echo",
+		Discovery: &config.DiscoveryConfig{
+			Type:    "dns",
+			Refresh: config.Duration(time.Minute),
+		},
+	}
+
+	// First build: pool is created and discovery seeds its backends.
+	reg.Begin()
+	pool, err := reg.For(up, "http")
+	if err != nil {
+		t.Fatalf("first registry.For: %v", err)
+	}
+	reg.Commit()
+	reg.Activate()
+
+	// Second build: the pool is reused. CandidateSnapshot must still contain
+	// the discovered backends, not the empty static servers list.
+	reg.Begin()
+	pool2, err := reg.For(up, "http")
+	if err != nil {
+		t.Fatalf("second registry.For: %v", err)
+	}
+	if pool2 != pool {
+		t.Fatal("expected pool to be reused across reload")
+	}
+	snap := reg.CandidateSnapshot("echo", "http")
+	if snap == nil {
+		t.Fatal("CandidateSnapshot for reused discovery upstream is nil")
+	}
+	if _, err := snap.Pick(); err != nil {
+		t.Fatalf("CandidateSnapshot for reused discovery upstream has no backends: %v", err)
+	}
+	reg.Commit()
+	reg.Activate()
+	t.Cleanup(reg.CloseAll)
+
+	cfg := config.GRPCTranscodeConfig{
+		Target:        "echo",
+		UseReflection: true,
+	}
+	tr, err := New(cfg, pool, snap, Options{})
+	if err != nil {
+		t.Fatalf("New transcoder with reused discovery reflection: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"reused"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("reused discovery reflection request: status = %d, body = %s", res.StatusCode, body)
+	}
+	if got := replyMessage(t, body); got != "reused" {
+		t.Fatalf("reused discovery reflection reply = %q, want reused", got)
+	}
+}
