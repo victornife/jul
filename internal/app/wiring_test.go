@@ -202,6 +202,62 @@ func TestMergeReloadSuppressesWatcherEcho(t *testing.T) {
 	}
 }
 
+// TestMergeReloadConsumesAdminDigest (R11-01) verifies that the digest used
+// to suppress a watcher echo is consumed. An admin A -> admin B -> external A
+// sequence must still reload, because the digest from the original admin A
+// write was cleared after its echo was suppressed.
+func TestMergeReloadConsumesAdminDigest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fileWatch := make(chan [32]byte, 1)
+	admin := make(chan server.ReloadRequest, 1)
+	var lastAdminDigest atomic.Pointer[[32]byte]
+	out := MergeReload(ctx, nil, fileWatch, admin, &lastAdminDigest)
+
+	recv := func(timeout time.Duration) (server.ReloadRequest, bool) {
+		select {
+		case r := <-out:
+			return r, true
+		case <-time.After(timeout):
+			return server.ReloadRequest{}, false
+		}
+	}
+
+	digestA := [32]byte{1, 2, 3}
+	digestB := [32]byte{4, 5, 6}
+
+	// Admin writes A; watcher echoes A and must be suppressed.
+	lastAdminDigest.Store(&digestA)
+	admin <- server.ReloadRequest{Source: server.ReloadSourceAdmin}
+	if r, ok := recv(time.Second); !ok || r.Source != server.ReloadSourceAdmin {
+		t.Fatalf("admin event A not forwarded: got %+v ok=%v", r, ok)
+	}
+	fileWatch <- digestA
+	if r, ok := recv(200 * time.Millisecond); ok {
+		t.Fatalf("watcher echo of A was not suppressed: %+v", r)
+	}
+
+	// Admin writes B; watcher echoes B and must be suppressed.
+	lastAdminDigest.Store(&digestB)
+	admin <- server.ReloadRequest{Source: server.ReloadSourceAdmin}
+	if r, ok := recv(time.Second); !ok || r.Source != server.ReloadSourceAdmin {
+		t.Fatalf("admin event B not forwarded: got %+v ok=%v", r, ok)
+	}
+	fileWatch <- digestB
+	if r, ok := recv(200 * time.Millisecond); ok {
+		t.Fatalf("watcher echo of B was not suppressed: %+v", r)
+	}
+
+	// A legitimate external write restores A. The old digestA was consumed,
+	// so this must be forwarded.
+	fileWatch <- digestA
+	r, ok := recv(time.Second)
+	if !ok || r.Source != server.ReloadSourceFileWatch {
+		t.Fatalf("external write restoring A not forwarded: got %+v ok=%v", r, ok)
+	}
+}
+
 func TestValidateRuntimeConfig(t *testing.T) {
 	// A well-formed proxy config passes the runtime preflight.
 	good := config.ProxyTarget("127.0.0.1:9000", ":8080")
