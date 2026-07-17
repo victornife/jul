@@ -170,6 +170,40 @@ func TestPreflightApplyUsesLiveSnapshotForRebind(t *testing.T) {
 	}
 }
 
+// TestPreflightApplyUsesLiveSnapshotWithoutPrev (R10-04) verifies that the
+// listener probe, restart-required, and ACME checks still run against the live
+// runtime snapshot when prev is nil.
+func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
+	boundAddr := freePort(t)
+	newAddr := freePort(t)
+	base := &config.Config{
+		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Servers: []config.ServerConfig{{
+			Listen:    newAddr,
+			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
+		}},
+	}
+
+	p := Preflight{
+		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			return map[string]http.Handler{}, nil, nil
+		},
+		Stream: &mockStreamPreflighter{},
+		// Live snapshot shows boundAddr is already in use. The candidate uses
+		// newAddr, so the listener probe must allow it; if the probe were
+		// skipped because prev is nil, no gate would distinguish the two.
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{
+				Listeners: map[string]server.BoundListenerInfo{boundAddr: {Addr: boundAddr}},
+			}
+		},
+	}
+
+	if _, err := p.Apply(base, nil); err != nil {
+		t.Fatalf("expected apply to succeed with live snapshot and nil prev, got: %v", err)
+	}
+}
+
 func freePort(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
