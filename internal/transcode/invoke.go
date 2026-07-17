@@ -67,6 +67,12 @@ type Transcoder struct {
 	log           *slog.Logger
 	onResult      func(method, code string)
 	onStreamMsg   func(method, direction string)
+
+	// evictStop is closed by Close to stop the stale-connection eviction
+	// goroutine. It is nil when the pool has no dynamic backend set.
+	evictStop chan struct{}
+	// evictOnce ensures evictStop is closed at most once.
+	evictOnce sync.Once
 }
 
 // New builds a Transcoder from a location's grpc_transcode config. It loads the
@@ -119,7 +125,7 @@ func New(cfg config.GRPCTranscodeConfig, pool *upstream.Pool, reflectSnap *upstr
 		}
 	}
 
-	return &Transcoder{
+	tr := &Transcoder{
 		routes:        routes,
 		pool:          pool,
 		useTLS:        cfg.TLS,
@@ -130,7 +136,50 @@ func New(cfg config.GRPCTranscodeConfig, pool *upstream.Pool, reflectSnap *upstr
 		log:           opts.Logger,
 		onResult:      opts.OnResult,
 		onStreamMsg:   opts.OnStreamMsg,
-	}, nil
+		evictStop:     make(chan struct{}),
+	}
+	go tr.evictLoop()
+	return tr, nil
+}
+
+// evictLoop periodically removes cached connections whose backend address is no
+// longer in the pool. This matters for dynamic upstreams (service discovery),
+// where a removed backend would otherwise keep a gRPC connection open until the
+// transcoder is closed on the next reload (R10-06).
+func (t *Transcoder) evictLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-t.evictStop:
+			return
+		case <-ticker.C:
+			t.evictStaleConns()
+		}
+	}
+}
+
+// evictStaleConns closes and removes any cached connection whose address is not
+// present in the current pool backend set.
+func (t *Transcoder) evictStaleConns() {
+	if t.pool == nil {
+		return
+	}
+	valid := make(map[string]struct{}, 16)
+	for _, b := range t.pool.Backends() {
+		valid[b.Address] = struct{}{}
+	}
+	t.conns.Range(func(key, value any) bool {
+		addr := key.(string)
+		if _, ok := valid[addr]; ok {
+			return true
+		}
+		if c, ok := value.(*grpc.ClientConn); ok {
+			_ = c.Close()
+		}
+		t.conns.Delete(addr)
+		return true
+	})
 }
 
 // normalizeStreamMode lower-cases the configured stream mode and defaults a
@@ -151,8 +200,14 @@ func maxMessageBytes(s config.Size) int {
 	return maxBodyBytes
 }
 
-// Close releases all cached backend connections.
+// Close stops the eviction goroutine and releases all cached backend
+// connections.
 func (t *Transcoder) Close() error {
+	t.evictOnce.Do(func() {
+		if t.evictStop != nil {
+			close(t.evictStop)
+		}
+	})
 	t.conns.Range(func(_, v any) bool {
 		if c, ok := v.(*grpc.ClientConn); ok {
 			_ = c.Close()

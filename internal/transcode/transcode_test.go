@@ -23,6 +23,7 @@ import (
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
@@ -461,5 +462,84 @@ func TestTranscodePassiveHealthMarking(t *testing.T) {
 	}
 	if !strings.Contains(body, "no available gRPC backend") {
 		t.Fatalf("expected cooldown pick failure, got body: %s", body)
+	}
+}
+
+// TestTranscoderEvictsStaleConnections (R10-06) verifies that when a backend
+// address is removed from the upstream pool, the transcoder eventually closes
+// the cached gRPC connection for that address instead of keeping it open until
+// the handler generation is replaced.
+func TestTranscoderEvictsStaleConnections(t *testing.T) {
+	fdp := echoFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	files, err := filesFromSet(set)
+	if err != nil {
+		t.Fatalf("build descriptors: %v", err)
+	}
+	fd, err := files.FindFileByPath("echo/echo.proto")
+	if err != nil {
+		t.Fatalf("find echo file: %v", err)
+	}
+
+	addr := startEchoServer(t, fd, false)
+
+	descFile := filepath.Join(t.TempDir(), "echo.pb")
+	raw, err := proto.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal set: %v", err)
+	}
+	if err := os.WriteFile(descFile, raw, 0o600); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:        "test-evict",
+		Strategy:    "round_robin",
+		Servers:     []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails:    3,
+		FailTimeout: config.Duration(time.Minute),
+	}, "http")
+	if err != nil {
+		t.Fatalf("create test pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	cfg := config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile}
+	tr, err := New(cfg, pool, nil, Options{})
+	if err != nil {
+		t.Fatalf("New transcoder: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+
+	// Warm the connection cache.
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"hi"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("warmup request: status = %d, body = %s", res.StatusCode, body)
+	}
+
+	conn, err := tr.connFor(addr)
+	if err != nil {
+		t.Fatalf("connFor after warmup: %v", err)
+	}
+	if conn.GetState() == connectivity.Shutdown {
+		t.Fatal("cached connection is already shutdown before eviction")
+	}
+
+	// Remove the backend from the pool, then trigger eviction synchronously.
+	pool.UpdateBackends(nil)
+	tr.evictStaleConns()
+
+	if state := conn.GetState(); state != connectivity.Shutdown {
+		t.Fatalf("stale connection state = %v, want Shutdown", state)
+	}
+
+	// The cached entry should also be gone: a subsequent connFor dials a new
+	// connection (the backend server is still running, so dial succeeds).
+	conn2, err := tr.connFor(addr)
+	if err != nil {
+		t.Fatalf("connFor after eviction: %v", err)
+	}
+	if conn2 == conn {
+		t.Fatal("evicted connection was reused")
 	}
 }
