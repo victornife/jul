@@ -179,6 +179,45 @@ func TestRegistryCloseAll(t *testing.T) {
 	}
 }
 
+// TestRegistryPreflightSeedsDiscoveryPool (R10-03) verifies that a freshly
+// built discovery pool performs a synchronous one-shot resolve during
+// Registry.For, so it has backends before Activate starts the periodic
+// refresher.
+func TestRegistryPreflightSeedsDiscoveryPool(t *testing.T) {
+	d := &fakeDiscoverer{}
+	d.set([]Target{{Address: "10.0.0.1:80"}, {Address: "10.0.0.2:80"}}, nil)
+
+	var backendEvents atomic.Int64
+	r := NewRegistry(RegistryOptions{
+		OnBackends: func(string, int) { backendEvents.Add(1) },
+		NewDiscoverer: func(config.DiscoveryConfig, DialFunc) (Discoverer, error) { return d, nil },
+	})
+
+	up := discoveryCfg("dns", "svc.local:80")
+	r.Begin()
+	p, err := r.For(up, "http")
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	r.Commit()
+	defer r.CloseAll()
+
+	if got := len(p.Backends()); got != 2 {
+		t.Fatalf("preflight discovery seed backends = %d, want 2", got)
+	}
+	// One call from the preflight seed in For, plus one from Commit.
+	if got := backendEvents.Load(); got != 2 {
+		t.Fatalf("OnBackends called %d times, want 2", got)
+	}
+
+	// Activate starts the periodic refresher. The pool already has backends,
+	// so the first request does not see an empty pool.
+	r.Activate()
+	if got := len(p.Backends()); got != 2 {
+		t.Fatalf("backends after Activate = %d, want 2", got)
+	}
+}
+
 func TestRegistryStartsHealthChecks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

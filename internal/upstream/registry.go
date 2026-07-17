@@ -4,6 +4,7 @@
 package upstream
 
 import (
+	"context"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -52,6 +53,10 @@ type RegistryOptions struct {
 	// Consul and Kubernetes discoverers against the [egress] allow-list. DNS
 	// discovery uses the system resolver and is unaffected.
 	DialContext DialFunc
+	// NewDiscoverer overrides discoverer construction. When nil the default
+	// provider selection is used. Tests inject this to avoid real network
+	// lookups while exercising Registry.For.
+	NewDiscoverer func(config.DiscoveryConfig, DialFunc) (Discoverer, error)
 }
 
 // poolEntry pairs a live pool with the upstream shape it was built from, so a
@@ -176,10 +181,35 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 	disco := discoveryEnabled(up.Discovery)
 	var d Discoverer
 	if disco {
-		d, err = newDiscoverer(*up.Discovery, r.opts.DialContext)
+		newDisco := r.opts.NewDiscoverer
+		if newDisco == nil {
+			newDisco = newDiscoverer
+		}
+		d, err = newDisco(*up.Discovery, r.opts.DialContext)
 		if err != nil {
 			pool.Close()
 			return nil, err
+		}
+		// One-shot discovery resolution during preflight/build so the pool
+		// has an initial backend set before it serves traffic. The periodic
+		// refresher started by Activate keeps the set converged afterwards
+		// (R10-03).
+		ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout)
+		targets, resolveErr := d.Resolve(ctx)
+		cancel()
+		if resolveErr == nil && len(targets) > 0 {
+			pool.UpdateBackends(targetsToServers(targets))
+			if r.opts.OnBackends != nil {
+				r.opts.OnBackends(up.Name, len(targets))
+			}
+		} else {
+			if r.opts.OnDiscoveryError != nil {
+				r.opts.OnDiscoveryError(up.Name)
+			}
+			if r.opts.Logger != nil {
+				r.opts.Logger.Warn("discovery initial resolve failed; starting with empty pool",
+					"upstream", up.Name, "discoverer", d.Describe(), "error", resolveErr)
+			}
 		}
 	}
 	entry := &poolEntry{
