@@ -8,6 +8,7 @@ package transcode
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -931,5 +932,100 @@ func TestTranscoderRetiredConnectionReappearsUsable(t *testing.T) {
 
 	if state := conn.GetState(); state == connectivity.Shutdown {
 		t.Fatal("promoted connection ended up in Shutdown")
+	}
+}
+
+// TestTranscoderRetiredConnectionConcurrentReappearance (R13-01) verifies that
+// when a removed backend reappears and many requests race to promote the same
+// retired connection, none of them close the shared connection. This exercises
+// the LoadOrStore race that a sequential test cannot catch.
+func TestTranscoderRetiredConnectionConcurrentReappearance(t *testing.T) {
+	setRetiredGraceForTest(t, 500*time.Millisecond)
+
+	fdp := echoFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	files, err := filesFromSet(set)
+	if err != nil {
+		t.Fatalf("build descriptors: %v", err)
+	}
+	fd, err := files.FindFileByPath("echo/echo.proto")
+	if err != nil {
+		t.Fatalf("find echo file: %v", err)
+	}
+
+	addr := startEchoServer(t, fd, false)
+
+	descFile := filepath.Join(t.TempDir(), "echo.pb")
+	raw, err := proto.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal set: %v", err)
+	}
+	if err := os.WriteFile(descFile, raw, 0o600); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:        "test-concurrent-reappear",
+		Strategy:    "round_robin",
+		Servers:     []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails:    3,
+		FailTimeout: config.Duration(time.Minute),
+	}, "http")
+	if err != nil {
+		t.Fatalf("create test pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	cfg := config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile}
+	tr, err := New(cfg, pool, nil, Options{})
+	if err != nil {
+		t.Fatalf("New transcoder: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+
+	// Warm the connection cache and capture it.
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"warm"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("warmup request: status = %d, body = %s", res.StatusCode, body)
+	}
+	conn, err := tr.connFor(addr)
+	if err != nil {
+		t.Fatalf("connFor after warmup: %v", err)
+	}
+
+	// Remove the backend, retire the connection, then re-add the backend.
+	pool.UpdateBackends(nil)
+	tr.evictStaleConns()
+	pool.UpdateBackends([]config.UpstreamServer{{Address: addr, Weight: 1}})
+
+	// Release many requests through a barrier so they race through connFor.
+	const n = 32
+	barrier := make(chan struct{})
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			<-barrier
+			res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"concurrent"}`, nil)
+			if res.StatusCode != http.StatusOK {
+				errs <- fmt.Errorf("request %d: status = %d, body = %s", i, res.StatusCode, body)
+				return
+			}
+			if got := replyMessage(t, body); got != "concurrent" {
+				errs <- fmt.Errorf("request %d: reply = %q, want concurrent", i, got)
+				return
+			}
+			errs <- nil
+		}(i)
+	}
+	close(barrier)
+
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if state := conn.GetState(); state == connectivity.Shutdown {
+		t.Fatal("shared promoted connection ended up in Shutdown")
 	}
 }
