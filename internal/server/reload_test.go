@@ -679,7 +679,7 @@ func TestPreflightListeners(t *testing.T) {
 
 	t.Run("adding a bindable address passes", func(t *testing.T) {
 		a, b := freePort(t), freePort(t)
-		if err := PreflightListeners(bound(a), servers(a, b)); err != nil {
+		if err := PreflightListeners(bound(a), nil, servers(a, b)); err != nil {
 			t.Fatalf("a free new address should pass: %v", err)
 		}
 	})
@@ -694,7 +694,7 @@ func TestPreflightListeners(t *testing.T) {
 		}
 		defer ln.Close()
 		held := ln.Addr().String()
-		if err := PreflightListeners(bound(held), servers(held)); err != nil {
+		if err := PreflightListeners(bound(held), nil, servers(held)); err != nil {
 			t.Fatalf("an unchanged bound address must not be probed: %v", err)
 		}
 	})
@@ -707,21 +707,96 @@ func TestPreflightListeners(t *testing.T) {
 		defer ln.Close()
 		busy := ln.Addr().String()
 		// busy is NEW relative to the bound set, so it is probed and the bind fails.
-		if err := PreflightListeners(bound(freePort(t)), servers(busy)); err == nil {
+		if err := PreflightListeners(bound(freePort(t)), nil, servers(busy)); err == nil {
 			t.Fatal("adding an in-use address should fail preflight")
 		}
 	})
 
 	t.Run("invalid address fails", func(t *testing.T) {
-		if err := PreflightListeners(nil, servers("127.0.0.1:999999")); err == nil {
+		if err := PreflightListeners(nil, nil, servers("127.0.0.1:999999")); err == nil {
 			t.Fatal("an invalid port should fail preflight")
 		}
 	})
 
 	t.Run("removing an address passes", func(t *testing.T) {
 		a, b := freePort(t), freePort(t)
-		if err := PreflightListeners(bound(a, b), servers(a)); err != nil {
+		if err := PreflightListeners(bound(a, b), nil, servers(a)); err != nil {
 			t.Fatalf("removing an address introduces nothing to probe: %v", err)
+		}
+	})
+}
+
+// TestPreflightListenersHTTP3UDP pins the HTTP/3 UDP side of the apply-time
+// listener probe. Enabling HTTP/3 on a server block requires the same UDP port
+// to be free; the TCP probe alone would miss a conflicting UDP listener, so
+// this gate rejects the apply before persistence (R10-07).
+func TestPreflightListenersHTTP3UDP(t *testing.T) {
+	serversH3 := func(addrs ...string) []config.ServerConfig {
+		out := make([]config.ServerConfig, 0, len(addrs))
+		for _, a := range addrs {
+			out = append(out, config.ServerConfig{
+				Listen: a,
+				TLS:    &config.TLSConfig{Enabled: true},
+				HTTP3:  &config.HTTP3Config{Enabled: true},
+			})
+		}
+		return out
+	}
+	bound := func(addrs ...string) map[string]struct{} {
+		m := make(map[string]struct{}, len(addrs))
+		for _, a := range addrs {
+			m[a] = struct{}{}
+		}
+		return m
+	}
+
+	t.Run("adding a bindable http3 address passes", func(t *testing.T) {
+		a := freePort(t)
+		if err := PreflightListeners(nil, nil, serversH3(a)); err != nil {
+			t.Fatalf("a free new http3 address should pass: %v", err)
+		}
+	})
+
+	t.Run("bound http3 address skips udp probe", func(t *testing.T) {
+		pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pc.Close()
+		held := pc.LocalAddr().String()
+		// Mark the address as bound on both TCP and HTTP/3 so neither side is
+		// re-probed, even though a UDP socket is currently open.
+		if err := PreflightListeners(bound(held), bound(held), serversH3(held)); err != nil {
+			t.Fatalf("an unchanged http3 address must not be re-probed: %v", err)
+		}
+	})
+
+	t.Run("new http3 address with udp in use fails", func(t *testing.T) {
+		pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pc.Close()
+		busy := pc.LocalAddr().String()
+		// busy is NEW relative to the http3 bound set, so UDP is probed.
+		if err := PreflightListeners(nil, nil, serversH3(busy)); err == nil {
+			t.Fatal("adding an http3 address whose udp port is in use should fail preflight")
+		}
+	})
+
+	t.Run("plain address does not probe udp", func(t *testing.T) {
+		pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pc.Close()
+		busy := pc.LocalAddr().String()
+		plain := []config.ServerConfig{{Listen: busy}}
+		// Mark TCP as bound so the test only verifies that a plain config does
+		// not trigger a UDP probe; the UDP socket itself would otherwise be
+		// irrelevant.
+		if err := PreflightListeners(bound(busy), nil, plain); err != nil {
+			t.Fatalf("plain server config must not probe udp: %v", err)
 		}
 	})
 }

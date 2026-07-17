@@ -91,8 +91,9 @@ and bind under preflight conditions:
 5. **Stream (L4) dry-run** — builds every `[[stream]]` route set from the
    candidate so a bad target is rejected too.
 6. **HTTP listener bind-probe** — every newly introduced HTTP listen address is
-   bind-probed and released, so an apply that adds an unbindable port is
-   rejected before the file is written.
+   bind-probed and released on TCP. If the server block enables HTTP/3, the
+   same address is also bind-probed on UDP, so an apply that adds an unbindable
+   TCP port or a conflicting UDP port is rejected before the file is written.
 7. **Stream listener bind-probe** — every newly introduced `[[stream]]` listen
    address (TCP and UDP) is bind-probed and released, symmetric with the HTTP
    probe.

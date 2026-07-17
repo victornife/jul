@@ -92,9 +92,10 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) (*config.Candid
 			live = p.LiveSnapshot()
 		}
 		httpBound := boundAddrs(live)
+		http3Bound := boundHTTP3Addrs(live)
 		streamBound := streamBoundKeys(p.Stream)
 
-		if err := server.PreflightListeners(httpBound, candidate.Effective.Servers); err != nil {
+		if err := server.PreflightListeners(httpBound, http3Bound, candidate.Effective.Servers); err != nil {
 			return nil, err
 		}
 		if err := p.Stream.PreflightListeners(streamBound, candidate.Effective.Streams); err != nil {
@@ -133,6 +134,16 @@ func boundAddrs(s server.LiveSnapshot) map[string]struct{} {
 	m := make(map[string]struct{}, len(s.Listeners))
 	for addr := range s.Listeners {
 		m[addr] = struct{}{}
+	}
+	return m
+}
+
+func boundHTTP3Addrs(s server.LiveSnapshot) map[string]struct{} {
+	m := make(map[string]struct{}, len(s.Listeners))
+	for addr, info := range s.Listeners {
+		if info.H3 {
+			m[addr] = struct{}{}
+		}
 	}
 	return m
 }
