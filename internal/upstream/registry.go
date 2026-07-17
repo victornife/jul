@@ -241,6 +241,24 @@ func (r *Registry) SnapshotPool(name string) *PoolSnapshot {
 	return nil
 }
 
+// SnapshotPools returns the snapshots for each named live pool. Pools not
+// currently live are omitted. It is called by HandlerFactory.Prepare to capture
+// the generation-scoped pool view.
+func (r *Registry) SnapshotPools(names []string) map[string]*PoolSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]*PoolSnapshot, len(names))
+	for _, name := range names {
+		if e, ok := r.live[name]; ok {
+			out[name] = e.pool.Snapshot()
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // CloseAll stops every live pool's goroutines. It is called once at shutdown.
 func (r *Registry) CloseAll() {
 	r.mu.Lock()

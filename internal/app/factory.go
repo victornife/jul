@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"jul/internal/auth"
 	"jul/internal/cache"
@@ -47,6 +48,11 @@ type HandlerFactory struct {
 	RT          *Runtime // Tracer.Middleware, ACME
 
 	mu sync.Mutex // serialises every build (startup, reload, preflight)
+
+	// genCounter assigns monotonically increasing IDs to handler generations.
+	// It is used to tag generation-scoped resources (redaction, pool snapshots)
+	// so the server can retire them safely.
+	genCounter atomic.Uint64
 }
 
 // Build rebuilds the per-listen-address handler tree from c. It is used for
@@ -79,37 +85,55 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	return handlers, retirePrev, nil
 }
 
+// captureSnapshots returns a map of upstream name -> pool snapshot for the
+// current live registry. It is called while the factory mutex is held during
+// Prepare so the snapshots are stable for the generation being built.
+func (f *HandlerFactory) captureSnapshots(names []string) map[string]*upstream.PoolSnapshot {
+	if f.PoolReg == nil || len(names) == 0 {
+		return nil
+	}
+	return f.PoolReg.SnapshotPools(names)
+}
+
 // Prepare stages a new handler generation for cfg without committing it. The
 // returned commitFn promotes the staged resources (upstream pools, closers) to
 // live and returns a retire callback for the previous generation. The returned
 // abortFn discards staged resources, leaving the live generation untouched.
-// The returned redact.State covers the secrets resolved during the build and
-// must be installed by the caller only at the reload publish boundary.
+// The returned snapshots map is the generation-scoped pool view that must be
+// published atomically with the handlers. The returned genID is the unique
+// identifier for this generation, used by the server to retire its redaction
+// entry. The returned redact.State covers the secrets resolved during the build
+// and must be installed by the caller only at the reload publish boundary.
 // Exactly one of commitFn or abortFn must be called; both release the factory
 // mutex so no concurrent build can start while a staged generation is pending.
-func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
+func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Handler, snapshots map[string]*upstream.PoolSnapshot, genID uint64, commitFn func() func(), abortFn func(), state redact.State, err error) {
 	f.mu.Lock()
 	// Mutex is NOT deferred here: it is released by commitFn or abortFn.
 
-	expanded, state, _, err := config.Resolve(c)
+	var expanded *config.Config
+	expanded, state, _, err = config.Resolve(c)
 	if err != nil {
 		f.mu.Unlock()
-		return nil, nil, nil, redact.State{}, fmt.Errorf("secrets: %w", err)
+		return nil, nil, 0, nil, nil, redact.State{}, fmt.Errorf("secrets: %w", err)
 	}
 	*c = *expanded
 	upstreams := IndexUpstreams(c.Upstreams)
 	gen := f.GenRes.Begin()
 	// No deferred gen.Abort: lifecycle is caller-controlled via commitFn/abortFn.
 
-	handlers, err := f.buildHandlers(c, gen, upstreams)
+	handlers, err = f.buildHandlers(c, gen, upstreams)
 	if err != nil {
 		gen.Abort()
 		f.mu.Unlock()
-		return nil, nil, nil, redact.State{}, err
+		return nil, nil, 0, nil, nil, redact.State{}, err
 	}
 
+	usedUpstreamNames := upstreamNamesUsed(c, upstreams)
+	genID = f.genCounter.Add(1)
+	snapshots = f.captureSnapshots(usedUpstreamNames)
+
 	committed := false
-	commitFn := func() func() {
+	commitFn = func() func() {
 		if committed {
 			return func() {}
 		}
@@ -118,7 +142,7 @@ func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, fun
 		f.mu.Unlock()
 		return ret
 	}
-	abortFn := func() {
+	abortFn = func() {
 		if committed {
 			return
 		}
@@ -126,18 +150,13 @@ func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, fun
 		gen.Abort()
 		f.mu.Unlock()
 	}
-	return handlers, commitFn, abortFn, state, nil
+	return handlers, snapshots, genID, commitFn, abortFn, state, nil
 }
 
 // buildHandlers constructs the per-listen-address handler tree from c, staging
 // all closeable resources (plugin runtimes, static-file roots, gRPC connections)
 // into gen. It neither commits nor aborts gen; resource lifecycle is the
 // caller's responsibility. upstreams must be IndexUpstreams(c.Upstreams).
-//
-// The returned captureSnapshots function populates the generation-scoped pool
-// snapshots used by the request-time snapshot middleware. It must be called
-// exactly once after the upstream pools have been committed (Publish boundary),
-// so the snapshots reflect the generation's live backend set.
 func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, error) {
 
 	// Build this generation's WASM plugin set. A lean build (or a malformed
@@ -150,7 +169,6 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 	}
 	gen.Stage(pluginSet)
 
-	usedUpstreamNames := upstreamNamesUsed(c, upstreams)
 	withCache := func(loc config.LocationConfig, h http.Handler) http.Handler {
 		if loc.Cache && f.Cache != nil {
 			return f.Cache.Handler(h)
@@ -418,7 +436,6 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 		// the router via LocationModifier, closer to the handler.
 		mws := []middleware.Middleware{
 			middleware.RequestID(),
-			f.poolSnapshotMiddleware(usedUpstreamNames),
 			f.RT.Tracer.Middleware,
 			f.Metrics.Middleware,
 			middleware.AccessLog(f.AccessSinks...),
@@ -472,26 +489,4 @@ func upstreamNamesUsed(c *config.Config, upstreams map[string]config.UpstreamCon
 		}
 	}
 	return names
-}
-
-// poolSnapshotMiddleware captures a fresh upstream snapshot for every request,
-// then installs it in the request context. This keeps each request stable
-// (it never observes backends added after it began) while allowing dynamic
-// discovery updates to converge on the very next request (R6-04).
-func (f *HandlerFactory) poolSnapshotMiddleware(names []string) middleware.Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if len(names) == 0 || f.PoolReg == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-			snapshots := make(map[string]*upstream.PoolSnapshot, len(names))
-			for _, name := range names {
-				if snap := f.PoolReg.SnapshotPool(name); snap != nil {
-					snapshots[name] = snap
-				}
-			}
-			next.ServeHTTP(w, r.WithContext(upstream.WithSnapshot(r.Context(), snapshots)))
-		})
-	}
 }

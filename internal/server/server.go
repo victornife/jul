@@ -23,19 +23,23 @@ import (
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/redact"
+	"jul/internal/upstream"
 )
 
 // HandlerFactory prepares a new handler generation for cfg without committing
-// it. The returned commitFn promotes staged resources (upstream pools, closers)
-// to live and returns a retire callback for the previous generation. The
-// returned abortFn discards staged resources, leaving the live generation
-// untouched. The returned redact.State covers the secrets resolved during the
-// build and must be installed by the caller only at the publish boundary.
-// Exactly one of commitFn or abortFn must be called; both release any lock held
-// during the build so concurrent builds are serialised without holding a lock
-// across the bind-attempt window. When commit or abort is nil (e.g. in tests),
-// the caller may skip the call safely.
-type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, commit func() func(), abort func(), state redact.State, err error)
+// it. The returned snapshots map is the generation-scoped pool view that must
+// be published atomically with the handlers. The returned genID uniquely
+// identifies this generation for redaction retirement. The returned commitFn
+// promotes staged resources (upstream pools, closers) to live and returns a
+// retire callback for the previous generation. The returned abortFn discards
+// staged resources, leaving the live generation untouched. The returned
+// redact.State covers the secrets resolved during the build and must be
+// installed by the caller only at the reload publish boundary. Exactly one of
+// commitFn or abortFn must be called; both release any lock held during the
+// build so concurrent builds are serialised without holding a lock across the
+// bind-attempt window. When commit or abort is nil (e.g. in tests), the caller
+// may skip the call safely.
+type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, snapshots map[string]*upstream.PoolSnapshot, genID uint64, commit func() func(), abort func(), state redact.State, err error)
 
 // Server runs one http.Server per unique listen address and coordinates
 // graceful shutdown and configuration reload.
@@ -79,19 +83,26 @@ type Server struct {
 
 	lastReload atomic.Pointer[lastReloadInfo]
 
-	mu        sync.Mutex
-	cfg       *config.Config
+	mu  sync.Mutex
+	cfg *config.Config
 	// rawCfg is the pre-expansion startup config used for restart-required
 	// comparisons in doReload. It is never nil after construction when set
 	// from serve.go; nil is accepted for tests that use literal (non-secret)
 	// configs and don't need the raw-vs-raw comparison guarantee.
-	rawCfg    *config.Config
+	rawCfg *config.Config
 	// startupFP is the effective startup fingerprint captured from the
 	// expanded config. Candidate fingerprints are compared against it to decide
 	// whether a reload requires a process restart.
 	startupFP lifecycle.Fingerprint
 	listeners map[string]*listenerEntry // keyed by listen address
 	handlers  atomic.Pointer[handlerGen]
+
+	// redactMu guards redactGens, the per-generation active redaction states.
+	// A generation is registered when its handlers are published and retired
+	// after its in-flight requests drain, so secrets are masked as long as any
+	// request of that generation may still emit them (R7-02).
+	redactMu   sync.Mutex
+	redactGens map[uint64]redact.State
 
 	wg       sync.WaitGroup
 	serveErr chan error
@@ -124,7 +135,9 @@ func (s *Server) LastReload() *lastReloadInfo {
 // resources (gRPC backend connections, WASM plugin runtimes, static-file
 // directory handles) are never closed while an old request is still executing.
 type handlerGen struct {
-	handlers map[string]http.Handler
+	handlers  map[string]http.Handler
+	snapshots map[string]*upstream.PoolSnapshot
+	genID     uint64
 
 	inflight   atomic.Int64
 	retiring   atomic.Bool
@@ -134,8 +147,8 @@ type handlerGen struct {
 	retireOnce sync.Once
 }
 
-func newHandlerGen(handlers map[string]http.Handler) *handlerGen {
-	return &handlerGen{handlers: handlers, drained: make(chan struct{})}
+func newHandlerGen(handlers map[string]http.Handler, snapshots map[string]*upstream.PoolSnapshot, genID uint64) *handlerGen {
+	return &handlerGen{handlers: handlers, snapshots: snapshots, genID: genID, drained: make(chan struct{})}
 }
 
 // release marks an in-flight request against this generation done. The request
@@ -179,15 +192,16 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 		}
 	}
 	return &Server{
-		log:       log,
-		source:    source,
-		validate:  validate,
-		factory:   factory,
-		cfg:       cfg,
-		rawCfg:    rawStartupCfg,
-		startupFP: startupFP,
-		listeners: map[string]*listenerEntry{},
-		serveErr:  make(chan error, 8),
+		log:        log,
+		source:     source,
+		validate:   validate,
+		factory:    factory,
+		cfg:        cfg,
+		rawCfg:     rawStartupCfg,
+		startupFP:  startupFP,
+		listeners:  map[string]*listenerEntry{},
+		redactGens: make(map[uint64]redact.State),
+		serveErr:   make(chan error, 8),
 	}
 }
 
@@ -205,13 +219,13 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
 			buildCfg = clone
 		}
 	}
-	handlers, commit, _, state, err := s.factory(buildCfg)
+	handlers, snapshots, genID, commit, _, state, err := s.factory(buildCfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
 	}
 	commit() // promote the initial generation; retirePrev is nil at startup
-	redact.Install(state)
-	s.handlers.Store(newHandlerGen(handlers))
+	redact.Install(s.registerRedactionGen(genID, state))
+	s.handlers.Store(newHandlerGen(handlers, snapshots, genID))
 
 	addrs := uniqueListenAddrs(s.cfg.Servers)
 	if len(addrs) == 0 {
@@ -420,7 +434,6 @@ func (s *Server) listenerBoundRebindRequired(next *config.Config) (string, bool)
 	return "", false
 }
 
-
 // acquireGen registers an in-flight request against the current generation and
 // returns it. If the generation it loaded is already being retired (its
 // resources may be closing), it releases the registration and retries against
@@ -481,6 +494,9 @@ func (s *Server) retireGen(g *handlerGen, retire func()) {
 // dynamicHandler returns a handler that dispatches to the currently-installed
 // handler for addr, so reload can swap behavior atomically while keeping the
 // previous generation's resources alive until its in-flight requests drain.
+// It also installs the generation-scoped upstream pool snapshots into the
+// request context so every request observes the backend set that was live when
+// its generation began (R7-03).
 func (s *Server) dynamicHandler(addr string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		g := s.acquireGen()
@@ -494,8 +510,48 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 			http.Error(w, "503 Service Unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		if len(g.snapshots) > 0 {
+			r = r.WithContext(upstream.WithSnapshot(r.Context(), g.snapshots))
+		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// registerRedactionGen adds genID's secrets to the active set and returns the
+// union of all active generations' redaction states. It is called on publish.
+func (s *Server) registerRedactionGen(genID uint64, state redact.State) redact.State {
+	s.redactMu.Lock()
+	defer s.redactMu.Unlock()
+	s.redactGens[genID] = state
+	return s.redactUnionLocked()
+}
+
+// retireRedactionGen removes genID's secrets and returns the union of the
+// remaining active generations. It is called once a generation has drained.
+func (s *Server) retireRedactionGen(genID uint64) redact.State {
+	s.redactMu.Lock()
+	defer s.redactMu.Unlock()
+	delete(s.redactGens, genID)
+	return s.redactUnionLocked()
+}
+
+// redactUnionLocked returns the union of all registered generation redaction
+// states. Callers must hold s.redactMu.
+func (s *Server) redactUnionLocked() redact.State {
+	if len(s.redactGens) == 0 {
+		return redact.EmptyState()
+	}
+	var merged redact.State
+	first := true
+	for _, state := range s.redactGens {
+		if first {
+			merged = state
+			first = false
+		} else {
+			merged = merged.Union(state)
+		}
+	}
+	return merged
 }
 
 // doReload loads, validates, and applies a new configuration. On any failure it
@@ -511,6 +567,7 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 //  7. Activate  — start serving on staged listeners.
 //  8. Retire    — remove listeners no longer in the config.
 //  9. Refresh   — reload TLS certificates.
+//
 // 10. PostCommit — log level, GOMAXPROCS, stream reload.
 // On any failure before Publish, plan.Abort() releases candidate resources.
 func (s *Server) doReload() {
@@ -597,7 +654,6 @@ func (s *Server) doReload() {
 	}
 	s.lastReload.Store(info)
 }
-
 
 // reloadCertificates rebuilds and swaps the cert provider for each currently
 // TLS-enabled listener that is still TLS-enabled in the new config.

@@ -13,6 +13,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/redact"
+	"jul/internal/upstream"
 )
 
 // ReloadPlan is the single transaction object for a configuration reload. It
@@ -31,6 +32,7 @@ import (
 //  7. Activate  — start serving on staged listeners.
 //  8. Retire    — remove listeners no longer in the config and retire old handler generation.
 //  9. Refresh   — reload TLS certificates.
+//
 // 10. PostCommit — apply dynamic side effects (log level, GOMAXPROCS, stream reload).
 //
 // On any failure before Publish, Abort must be called to release all candidate
@@ -65,6 +67,14 @@ type ReloadPlan struct {
 
 	// Handlers is the per-listen-address handler tree built by the factory.
 	Handlers map[string]http.Handler
+
+	// Snapshots is the generation-scoped pool snapshot map captured at Prepare.
+	// It is published atomically with Handlers by Publish.
+	Snapshots map[string]*upstream.PoolSnapshot
+
+	// GenID is the unique generation identifier for redaction registry
+	// retirement.
+	GenID uint64
 
 	handlerCommit func() func()
 	handlerAbort  func()
@@ -137,11 +147,13 @@ func (p *ReloadPlan) Lifecycle() error {
 // Prepare builds the handler tree and stages the upstream/generation resources.
 // It does not commit anything; Publish/Abort must follow.
 func (p *ReloadPlan) Prepare() error {
-	handlers, commit, abort, state, err := p.s.factory(p.EffectiveConfig)
+	handlers, snapshots, genID, commit, abort, state, err := p.s.factory(p.EffectiveConfig)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
 	p.Handlers = handlers
+	p.Snapshots = snapshots
+	p.GenID = genID
 	p.handlerCommit = commit
 	p.handlerAbort = abort
 	// The factory is authoritative for the redaction state it resolved while
@@ -182,24 +194,24 @@ func (p *ReloadPlan) StageListeners() error {
 // be invoked only after that generation has drained.
 func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	retirePrev = p.handlerCommit()
-	// Install the union of the current and new redaction states so that
-	// in-flight requests on the previous generation continue to have their
-	// secrets masked. The previous generation's retire callback will prune the
-	// old-only secrets once it has drained (R6-06).
-	merged := redact.Global().Union(p.Redaction)
-	redact.Install(merged)
+	// Register the new generation's redaction state and install the union of
+	// all active generations so in-flight requests on the previous generation
+	// continue to have their secrets masked. The previous generation's retire
+	// callback will remove its entry from the active set once it drains
+	// (R6-06, R7-02).
+	redact.Install(p.s.registerRedactionGen(p.GenID, p.Redaction))
 
 	p.s.cfg = p.EffectiveConfig
 	p.s.rawCfg = p.RawConfig
 
 	prevGen := p.s.handlers.Load()
-	p.s.handlers.Store(newHandlerGen(p.Handlers))
+	p.s.handlers.Store(newHandlerGen(p.Handlers, p.Snapshots, p.GenID))
 	if prevGen != nil {
 		p.s.retireGen(prevGen, func() {
 			if retirePrev != nil {
 				retirePrev()
 			}
-			redact.Install(p.Redaction)
+			redact.Install(p.s.retireRedactionGen(prevGen.genID))
 		})
 	} else if retirePrev != nil {
 		retirePrev()

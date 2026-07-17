@@ -17,6 +17,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/redact"
+	"jul/internal/upstream"
 )
 
 // TestServerConnectionCap verifies that RateLimit.MaxConns caps concurrent
@@ -30,7 +31,7 @@ func TestServerConnectionCap(t *testing.T) {
 	var releaseOnce sync.Once
 	doRelease := func() { releaseOnce.Do(func() { close(release) }) }
 
-	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&entered, 1)
 			<-release
@@ -40,7 +41,7 @@ func TestServerConnectionCap(t *testing.T) {
 		for _, srv := range c.Servers {
 			m[srv.Listen] = h
 		}
-		return m, func() func() { return nil }, func() {}, redact.EmptyState(), nil
+		return m, nil, 1, func() func() { return nil }, func() {}, redact.EmptyState(), nil
 	}
 
 	cfg := &config.Config{

@@ -174,7 +174,7 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	handlers, commitFn, abortFn, state, err := f.Prepare(cfg)
+	handlers, snapshots, genID, commitFn, abortFn, state, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -187,6 +187,10 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	if abortFn == nil {
 		t.Fatal("Prepare returned nil abortFn")
 	}
+	if genID == 0 {
+		t.Fatal("Prepare returned zero genID")
+	}
+	_ = snapshots
 	retirePrev := commitFn()
 	// commitFn no longer installs redaction; the caller (ReloadPlan.Publish)
 	// owns that. Verify the state is returned and non-nil.
@@ -210,7 +214,7 @@ func TestHandlerFactoryPrepareAbort(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	_, _, abortFn, _, err := f.Prepare(cfg)
+	_, _, _, _, abortFn, _, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -233,7 +237,7 @@ func TestHandlerFactoryPrepareAbortDoesNotInstallRedaction(t *testing.T) {
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
 	cfg.Admin.Token = "${env:JUL_FACTORY_ABORT_TEST}"
-	_, _, abortFn, _, err := f.Prepare(cfg)
+	_, _, _, _, abortFn, _, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -253,7 +257,7 @@ func TestHandlerFactoryPrepareReturnsRedactionState(t *testing.T) {
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
 	cfg.Admin.Token = "${env:JUL_FACTORY_COMMIT_TEST}"
-	_, commitFn, abortFn, state, err := f.Prepare(cfg)
+	_, _, _, commitFn, abortFn, state, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -270,14 +274,14 @@ func TestHandlerFactoryPrepareReturnsRedactionState(t *testing.T) {
 	commitFn()
 }
 
-func TestPoolSnapshotMiddlewareRefreshesPerRequest(t *testing.T) {
+func TestGenerationScopedPoolSnapshotsViaContext(t *testing.T) {
 	f, cleanup := minimalFactory(t)
 	defer cleanup()
 
 	up := config.UpstreamConfig{
-		Name:    "api",
+		Name:     "api",
 		Strategy: "round_robin",
-		Servers: []config.UpstreamServer{{Address: "127.0.0.1:8001"}},
+		Servers:  []config.UpstreamServer{{Address: "127.0.0.1:8001"}},
 	}
 	f.PoolReg.Begin()
 	pool, err := f.PoolReg.For(up, "http")
@@ -286,18 +290,26 @@ func TestPoolSnapshotMiddlewareRefreshesPerRequest(t *testing.T) {
 	}
 	f.PoolReg.Commit()
 
-	mw := f.poolSnapshotMiddleware([]string{"api"})
 	var counts []int
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		counts = append(counts, len(pool.BackendsCtx(r.Context())))
-	}))
+	})
 
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	snap1 := pool.Snapshot()
+	snapshots := map[string]*upstream.PoolSnapshot{"api": snap1}
+	base := httptest.NewRequest("GET", "/", nil)
+	req1 := base.WithContext(upstream.WithSnapshot(base.Context(), snapshots))
+	handler.ServeHTTP(httptest.NewRecorder(), req1)
+
+	// Simulate a later live pool update; the snapshot carried by the context
+	// keeps the request stable.
 	pool.UpdateBackends([]config.UpstreamServer{
 		{Address: "127.0.0.1:8001"},
 		{Address: "127.0.0.1:8002"},
 	})
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	base2 := httptest.NewRequest("GET", "/", nil)
+	req2 := base2.WithContext(upstream.WithSnapshot(base2.Context(), snapshots))
+	handler.ServeHTTP(httptest.NewRecorder(), req2)
 
 	if len(counts) != 2 {
 		t.Fatalf("expected 2 requests, got %d", len(counts))
@@ -305,7 +317,7 @@ func TestPoolSnapshotMiddlewareRefreshesPerRequest(t *testing.T) {
 	if counts[0] != 1 {
 		t.Errorf("first request saw %d backends, want 1", counts[0])
 	}
-	if counts[1] != 2 {
-		t.Errorf("second request saw %d backends, want 2 (discovery did not converge)", counts[1])
+	if counts[1] != 1 {
+		t.Errorf("second request saw %d backends, want 1 (context snapshot should be stable)", counts[1])
 	}
 }
