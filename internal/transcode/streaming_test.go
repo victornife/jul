@@ -216,7 +216,7 @@ func newStreamTranscoder(t *testing.T, streaming bool, mode string) *Transcoder 
 		t.Fatalf("create test pool: %v", err)
 	}
 	t.Cleanup(func() { pool.Close() })
-	tr, err := New(cfg, pool, Options{})
+	tr, err := New(cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -339,6 +339,7 @@ func TestStreamMsgCounter(t *testing.T) {
 			t.Cleanup(func() { pool.Close() })
 			return pool
 		}(),
+		nil,
 		Options{OnStreamMsg: func(_, direction string) {
 			switch direction {
 			case "sent":

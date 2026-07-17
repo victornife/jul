@@ -77,6 +77,9 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	var retirePrev func()
 	if commit {
 		retirePrev = gen.Commit()
+		// Background workers start only after Commit so the legacy Build path
+		// also respects the staged-activation lifecycle (R9-07).
+		f.PoolReg.Activate()
 	}
 	return handlers, retirePrev, nil
 }
@@ -123,6 +126,10 @@ func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Han
 		// Snapshots must be captured AFTER pools commit so the generation
 		// carries the backend view of the configuration it represents (R8-01).
 		snapshots := f.PoolReg.SnapshotPools(usedUpstreamKeys)
+		// Background workers start only after Commit so a build that aborts
+		// does not trigger discovery/health side effects for a candidate that
+		// never goes live (R9-07).
+		f.PoolReg.Activate()
 		f.mu.Unlock()
 		return snapshots, ret
 	}

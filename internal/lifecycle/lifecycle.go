@@ -180,6 +180,7 @@ var Registry = []Entry{
 	{Path: "servers.*.locations.*.proxy_connect_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
 	{Path: "servers.*.locations.*.proxy_read_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
 	{Path: "servers.*.locations.*.proxy_send_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.proxy_retries", Class: HotReloadClass, Subsystem: "proxy_retries", Reason: "handler tree is rebuilt on reload"},
 	{Path: "servers.*.locations.*.grpc", Class: HotReloadClass, Subsystem: "grpc", Reason: "handler tree is rebuilt on reload"},
 	{Path: "servers.*.locations.*.grpc_transcode", Class: HotReloadClass, Subsystem: "grpc_transcode", Reason: "handler tree is rebuilt on reload"},
 	{Path: "servers.*.locations.*.fastcgi_pass", Class: HotReloadClass, Subsystem: "fastcgi", Reason: "handler tree is rebuilt on reload"},

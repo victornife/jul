@@ -134,7 +134,7 @@ func (p *Pool) Pick() (*Backend, error) {
 // Release decrements a backend's in-flight counter.
 func (p *Pool) Release(b *Backend) {
 	if b != nil {
-		b.release()
+		b.Release()
 	}
 }
 
@@ -188,6 +188,7 @@ func (p *Pool) UpdateBackends(servers []config.UpstreamServer) {
 		next = append(next, b)
 	}
 	p.backends.Store(&next)
+	p.balancer.updateBackends(next)
 }
 
 // Close stops the pool's background goroutines. It is idempotent and safe to

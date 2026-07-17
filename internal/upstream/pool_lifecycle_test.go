@@ -89,6 +89,68 @@ func TestUpdateBackendsRemovesAndAdds(t *testing.T) {
 	}
 }
 
+func TestWeightedRRPrunesRemovedBackends(t *testing.T) {
+	p := pool(t, "weighted_round_robin",
+		config.UpstreamServer{Address: "a:80", Weight: 1},
+		config.UpstreamServer{Address: "b:80", Weight: 1},
+	)
+
+	// Exercise the balancer so entries are created.
+	for i := 0; i < 4; i++ {
+		b, err := p.Pick()
+		if err != nil {
+			t.Fatalf("pick %d: %v", i, err)
+		}
+		p.Release(b)
+	}
+
+	if len(p.balancer.(*weightedRR).weights) != 2 {
+		t.Fatalf("precondition: weights = %d, want 2", len(p.balancer.(*weightedRR).weights))
+	}
+
+	p.UpdateBackends([]config.UpstreamServer{
+		{Address: "b:80", Weight: 1},
+	})
+
+	if len(p.balancer.(*weightedRR).weights) != 1 {
+		t.Fatalf("weights after removal = %d, want 1", len(p.balancer.(*weightedRR).weights))
+	}
+	if _, ok := p.balancer.(*weightedRR).weights[findBackend(p, "a:80")]; ok {
+		t.Fatal("removed backend a still present in weights map")
+	}
+	if _, ok := p.balancer.(*weightedRR).weights[findBackend(p, "b:80")]; !ok {
+		t.Fatal("surviving backend b missing from weights map")
+	}
+}
+
+func TestWeightedRRPrunesAfterChurn(t *testing.T) {
+	p := pool(t, "weighted_round_robin",
+		config.UpstreamServer{Address: "a:80", Weight: 1},
+	)
+
+	for i := 0; i < 2; i++ {
+		b, _ := p.Pick()
+		p.Release(b)
+	}
+
+	// Remove a, then add it back (same address/weight) — UpdateBackends creates
+	// a fresh Backend pointer for the re-added address. The old pointer must be
+	// pruned so the map does not accumulate stale entries.
+	p.UpdateBackends([]config.UpstreamServer{})
+	p.UpdateBackends([]config.UpstreamServer{{Address: "a:80", Weight: 1}})
+
+	if len(p.balancer.(*weightedRR).weights) > 1 {
+		t.Fatalf("weights after churn = %d, want at most 1", len(p.balancer.(*weightedRR).weights))
+	}
+
+	// After the next pick the fresh backend pointer is the only entry.
+	b, _ := p.Pick()
+	p.Release(b)
+	if len(p.balancer.(*weightedRR).weights) != 1 {
+		t.Fatalf("weights after post-churn pick = %d, want 1", len(p.balancer.(*weightedRR).weights))
+	}
+}
+
 func TestUpdateBackendsWeightChangeReplaces(t *testing.T) {
 	p := pool(t, "weighted_round_robin",
 		config.UpstreamServer{Address: "a:80", Weight: 1},

@@ -46,7 +46,7 @@ func NewProxy(_ config.ServerConfig, loc config.LocationConfig, upstreams map[st
 	target := &url.URL{Scheme: scheme, Path: basePath}
 
 	rp := &httputil.ReverseProxy{
-		Transport: &balancingTransport{pool: pool, base: newProxyTransport(loc), log: log},
+		Transport: &balancingTransport{pool: pool, base: newProxyTransport(loc), log: log, maxRetries: loc.ProxyRetries},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			// Secure defaults: clears client-supplied X-Forwarded-* and sets
@@ -104,9 +104,10 @@ func resolvePool(loc config.LocationConfig, upstreams map[string]config.Upstream
 // balancingTransport selects a backend per request, marks passive health, and
 // retries idempotent requests against other backends on connection failures.
 type balancingTransport struct {
-	pool *upstream.Pool
-	base *http.Transport
-	log  *slog.Logger
+	pool       *upstream.Pool
+	base       *http.Transport
+	log        *slog.Logger
+	maxRetries int // 0 means try every distinct backend once
 }
 
 func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -122,9 +123,11 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	canRetry := isIdempotent(req.Method) && (req.Body == nil || req.GetBody != nil)
 
 	var lastErr error
-	tried := make(map[*upstream.Backend]struct{})
+	tried := make(map[upstream.BackendIdentity]struct{})
 	retried := false
+	attempts := 0
 	for {
+		attempts++
 		b, err := t.pool.PickExcluding(req.Context(), tried)
 		if err != nil {
 			if lastErr != nil {
@@ -133,7 +136,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			span.RecordError(err)
 			return nil, err
 		}
-		tried[b] = struct{}{}
+		tried[b.Identity()] = struct{}{}
 
 		out := req
 		if retried && req.GetBody != nil {
@@ -185,6 +188,11 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		lastErr = err
 		retried = true
 		if !canRetry {
+			break
+		}
+		// Bound retries: 0 means try every distinct backend once; a positive
+		// value caps attempts to the configured count.
+		if t.maxRetries > 0 && attempts >= t.maxRetries {
 			break
 		}
 	}

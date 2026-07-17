@@ -220,7 +220,7 @@ func newEchoTranscoder(t testing.TB, reflect bool) *Transcoder {
 	}
 	t.Cleanup(func() { pool.Close() })
 
-	tr, err := New(cfg, pool, Options{})
+	tr, err := New(cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -374,6 +374,7 @@ func TestTranscodeReflectionRejectsUnreflectiveBackend(t *testing.T) {
 	tr, err := New(
 		config.GRPCTranscodeConfig{Target: addr, UseReflection: true},
 		pool,
+		nil,
 		Options{reflectTimeout: 3 * time.Second},
 	)
 	if err == nil {
@@ -427,7 +428,7 @@ func TestTranscodePassiveHealthMarking(t *testing.T) {
 	}
 	t.Cleanup(func() { pool.Close() })
 
-	tr, err := New(cfg, pool, Options{})
+	tr, err := New(cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}

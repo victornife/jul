@@ -261,6 +261,11 @@ type LocationConfig struct {
 	ProxyConnectTimeout Duration `toml:"proxy_connect_timeout"`
 	ProxyReadTimeout    Duration `toml:"proxy_read_timeout"`
 	ProxySendTimeout    Duration `toml:"proxy_send_timeout"`
+	// ProxyRetries caps the number of retry attempts for idempotent requests
+	// against other backends on connection failure. 0 (default) means try every
+	// distinct backend at most once. A positive value limits attempts to the
+	// configured count.
+	ProxyRetries int `toml:"proxy_retries"`
 
 	// GRPC turns the proxy_pass into a native gRPC / HTTP-2 passthrough: the
 	// request is forwarded end-to-end over HTTP/2 (preserving trailers such as

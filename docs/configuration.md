@@ -200,6 +200,7 @@ proxy_read_timeout = "30s"
 | `proxy_connect_timeout` | duration | Connection establishment timeout (default 10s) |
 | `proxy_read_timeout` | duration | Per-read inactivity bound on the upstream response — the maximum gap between successive reads, covering both the headers (time-to-first-byte) and a slow-trickle body. `0` (default) leaves it unbounded. A steadily streaming response is never interrupted while data keeps flowing |
 | `proxy_send_timeout` | duration | Per-write inactivity bound on sending the request to the upstream — the maximum gap between successive writes. `0` (default) leaves it unbounded |
+| `proxy_retries` | int | Maximum retry attempts for idempotent requests on connection failure. `0` (default) tries every distinct backend at most once. A positive value caps attempts to the configured count |
 | `grpc` | bool | Proxy `proxy_pass` as **native gRPC** over end-to-end HTTP/2 (trailers preserved, no buffering); `http://` dials the backend over cleartext HTTP/2 (h2c), `https://` over HTTP/2 with TLS — requires the `grpc` build tag |
 | `headers` | table | Upstream request headers; values support `$host`, `$remote_addr`, `$scheme`, `$proxy_add_x_forwarded_for` |
 

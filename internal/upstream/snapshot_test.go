@@ -151,6 +151,40 @@ func TestPoolSnapshotBackendsCtxUsesSnapshot(t *testing.T) {
 	}
 }
 
+func TestPoolSnapshotBackendsCtxDynamic(t *testing.T) {
+	pool, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "10.0.0.1:80", Weight: 1}},
+		MaxFails: 1,
+		Discovery: &config.DiscoveryConfig{
+			Type:    "dns",
+			Target:  "svc.local:80",
+			Refresh: config.Duration(100 * time.Millisecond),
+		},
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	d := &snapshotFakeDiscoverer{targets: []Target{{Address: "10.0.0.1:80"}}}
+	pool.StartDiscovery(d, 100*time.Millisecond, DiscoveryHooks{}, nil)
+	eventually(t, func() bool { return len(pool.Backends()) == 1 })
+
+	snap := pool.Snapshot()
+	d.SetTargets([]Target{{Address: "10.0.0.2:80"}})
+	eventually(t, func() bool {
+		return len(pool.Backends()) == 1 && pool.Backends()[0].Address == "10.0.0.2:80"
+	})
+
+	ctx := WithSnapshot(context.Background(), SnapshotMap{PoolSnapshotKey{Name: "api", Scheme: "http"}: snap})
+	got := pool.BackendsCtx(ctx)
+	if len(got) != 1 || got[0].Address != "10.0.0.2:80" {
+		t.Errorf("dynamic snapshot BackendsCtx = %v, want [10.0.0.2:80]", got)
+	}
+}
+
 func TestPoolSnapshotRoundRobinAdvances(t *testing.T) {
 	pool, err := NewPool(config.UpstreamConfig{
 		Name:     "api",
@@ -174,7 +208,7 @@ func TestPoolSnapshotRoundRobinAdvances(t *testing.T) {
 			t.Fatalf("pick %d: %v", i, err)
 		}
 		counts[b.Address]++
-		b.release()
+		b.Release()
 	}
 	if counts["10.0.0.1:80"] != 50 || counts["10.0.0.2:80"] != 50 {
 		t.Errorf("round-robin distribution uneven: %v", counts)
@@ -209,7 +243,7 @@ func TestPoolSnapshotWeightedRoundRobinNoRace(t *testing.T) {
 					return
 				}
 				time.Sleep(time.Microsecond)
-				b.release()
+				b.Release()
 			}
 		}()
 	}
@@ -238,13 +272,13 @@ func TestPoolSnapshotFailoverSkipsTriedBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first pick: %v", err)
 	}
-	b1.release()
+	b1.Release()
 
 	b2, err := snap.pick()
 	if err != nil {
 		t.Fatalf("second pick: %v", err)
 	}
-	defer b2.release()
+	defer b2.Release()
 	if b2.Address == b1.Address {
 		t.Errorf("failover returned same backend %q; expected the other backend", b2.Address)
 	}
@@ -282,7 +316,7 @@ func TestSnapshotMapKeysByNameAndScheme(t *testing.T) {
 	if err != nil {
 		t.Fatalf("http pick: %v", err)
 	}
-	defer bHTTP.release()
+	defer bHTTP.Release()
 	if bHTTP.Address != "http-backend" {
 		t.Errorf("http pool selected %q, want http-backend", bHTTP.Address)
 	}
@@ -290,7 +324,7 @@ func TestSnapshotMapKeysByNameAndScheme(t *testing.T) {
 	if err != nil {
 		t.Fatalf("https pick: %v", err)
 	}
-	defer bHTTPS.release()
+	defer bHTTPS.Release()
 	if bHTTPS.Address != "https-backend" {
 		t.Errorf("https pool selected %q, want https-backend", bHTTPS.Address)
 	}
@@ -326,7 +360,7 @@ func TestWeightedRoundRobinStateIsLocalToBalancer(t *testing.T) {
 				return
 			}
 			time.Sleep(time.Microsecond)
-			b.release()
+			b.Release()
 		}
 	}
 	wg.Add(3)
@@ -355,7 +389,7 @@ func TestWeightedRoundRobinStateIsLocalToBalancer(t *testing.T) {
 				t.Fatalf("%s ratio pick: %v", name, err)
 			}
 			counts[b.Address]++
-			b.release()
+			b.Release()
 		}
 		if counts["10.0.0.1:80"] < 80 || counts["10.0.0.1:80"] > 120 {
 			t.Errorf("%s weight-1 backend count = %d, want ~100", name, counts["10.0.0.1:80"])
@@ -390,19 +424,19 @@ func TestPickExcludingReturnsErrorWhenAllAvailableExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first pick: %v", err)
 	}
-	defer b1.release()
+	defer b1.Release()
 
-	tried := map[*Backend]struct{}{b1: {}}
+	tried := map[BackendIdentity]struct{}{b1.Identity(): {}}
 	b2, err := snap.pickExcluding(tried)
 	if err != nil {
 		t.Fatalf("second pick excluding first: %v", err)
 	}
-	defer b2.release()
+	defer b2.Release()
 	if b2.Address == b1.Address {
 		t.Errorf("pickExcluding returned excluded backend %q", b2.Address)
 	}
 
-	tried[b2] = struct{}{}
+	tried[b2.Identity()] = struct{}{}
 	if _, err := snap.pickExcluding(tried); err != ErrNoAvailableBackend {
 		t.Errorf("pickExcluding with all excluded returned %v, want ErrNoAvailableBackend", err)
 	}
@@ -436,7 +470,7 @@ func TestStaticSnapshotFreezesBackends(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
-	defer b.release()
+	defer b.Release()
 	if b.Address != "10.0.0.1:80" {
 		t.Errorf("static snapshot pick = %q, want 10.0.0.1:80", b.Address)
 	}
@@ -481,7 +515,7 @@ func TestDynamicSnapshotUsesLiveBackends(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
-	defer b.release()
+	defer b.Release()
 	if b.Address != "10.0.0.2:80" {
 		t.Errorf("dynamic snapshot pick = %q, want 10.0.0.2:80", b.Address)
 	}

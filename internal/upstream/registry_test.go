@@ -203,6 +203,7 @@ func TestRegistryStartsHealthChecks(t *testing.T) {
 		t.Fatalf("For: %v", err)
 	}
 	r.Commit()
+	r.Activate()
 	defer r.CloseAll()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -227,5 +228,154 @@ func TestRegistrySnapshot(t *testing.T) {
 	}
 	if snap[0].Name != "a(http)" || snap[1].Name != "z(http)" {
 		t.Errorf("order = %v, %v", snap[0].Name, snap[1].Name)
+	}
+}
+
+func TestRegistryActivationDeferred(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	var probes atomic.Int64
+	r := NewRegistry(RegistryOptions{
+		OnProbe: func(string, bool, time.Duration) { probes.Add(1) },
+	})
+
+	up := upstreamCfg("api", "round_robin", addr)
+	up.HealthCheck = &config.HealthCheckConfig{
+		Enabled: true, Type: "http", Path: "/",
+		Interval: config.Duration(5 * time.Millisecond), Timeout: config.Duration(2 * time.Millisecond),
+		HealthyThreshold: 1, UnhealthyThreshold: 1, ExpectStatus: []int{200},
+	}
+
+	r.Begin()
+	if _, err := r.For(up, "http"); err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	r.Commit()
+
+	// No probes should have run before Activate.
+	time.Sleep(20 * time.Millisecond)
+	if probes.Load() != 0 {
+		t.Fatalf("probes before Activate = %d, want 0", probes.Load())
+	}
+
+	r.Activate()
+	defer r.CloseAll()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for probes.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("health checker did not start after Activate")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func TestRegistryAbortBeforeActivateClosesFreshPool(t *testing.T) {
+	r := NewRegistry(RegistryOptions{})
+
+	up := upstreamCfg("api", "round_robin", "10.0.0.1:80")
+	up.HealthCheck = &config.HealthCheckConfig{
+		Enabled: true, Type: "http", Path: "/",
+		Interval: config.Duration(5 * time.Millisecond), Timeout: config.Duration(2 * time.Millisecond),
+		HealthyThreshold: 1, UnhealthyThreshold: 1, ExpectStatus: []int{200},
+	}
+
+	r.Begin()
+	p, err := r.For(up, "http")
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	r.Abort()
+
+	if !closed(p.Done()) {
+		t.Fatal("fresh pool from aborted build must be closed before Activate")
+	}
+}
+
+func TestRegistryCandidateSnapshotUsesPendingServers(t *testing.T) {
+	r := NewRegistry(RegistryOptions{})
+
+	r.Begin()
+	p1, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	r.Commit()
+	r.Activate()
+	defer r.CloseAll()
+
+	// Reuse the pool but change the candidate backend list.
+	r.Begin()
+	p2, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.2:80"), "http")
+	if p1 != p2 {
+		t.Fatal("pool should be reused")
+	}
+
+	cs := r.CandidateSnapshot("api", "http")
+	if cs == nil {
+		t.Fatal("CandidateSnapshot returned nil")
+	}
+	backends := cs.Backends()
+	if len(backends) != 1 || backends[0].Address != "10.0.0.2:80" {
+		t.Fatalf("candidate snapshot backends = %v, want [10.0.0.2:80]", backends)
+	}
+
+	// Before Commit the live pool still has the old backend.
+	if got := len(p1.Backends()); got != 1 || p1.Backends()[0].Address != "10.0.0.1:80" {
+		t.Fatalf("live pool before Commit = %v, want [10.0.0.1:80]", p1.Backends())
+	}
+	r.Commit()
+}
+
+func TestRegistryActivateSkipsReusedPools(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	var probes atomic.Int64
+	r := NewRegistry(RegistryOptions{
+		OnProbe: func(string, bool, time.Duration) { probes.Add(1) },
+	})
+
+	up := upstreamCfg("api", "round_robin", addr)
+	up.HealthCheck = &config.HealthCheckConfig{
+		Enabled: true, Type: "http", Path: "/",
+		Interval: config.Duration(5 * time.Millisecond), Timeout: config.Duration(2 * time.Millisecond),
+		HealthyThreshold: 1, UnhealthyThreshold: 1, ExpectStatus: []int{200},
+	}
+
+	r.Begin()
+	if _, err := r.For(up, "http"); err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	r.Commit()
+	r.Activate()
+	defer r.CloseAll()
+
+	time.Sleep(20 * time.Millisecond)
+	first := probes.Load()
+	if first == 0 {
+		t.Fatal("health checker did not start on first build")
+	}
+
+	// Reuse the pool on a subsequent build; Activate must not start a second
+	// health checker (probe rate should stay the same).
+	r.Begin()
+	if _, err := r.For(up, "http"); err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	r.Commit()
+	r.Activate()
+
+	time.Sleep(20 * time.Millisecond)
+	second := probes.Load()
+	if second <= first {
+		t.Fatalf("probe count did not advance after reuse: %d -> %d", first, second)
+	}
+	if second > first+10 {
+		t.Fatalf("probe count jumped too much after reuse, suggesting duplicate checker: %d -> %d", first, second)
 	}
 }

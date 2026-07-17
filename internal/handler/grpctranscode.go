@@ -32,7 +32,12 @@ func NewGRPCTranscode(_ config.ServerConfig, loc config.LocationConfig, upstream
 		return nil, err
 	}
 
-	return transcode.New(*cfg, pool, transcode.Options{
+	var reflectSnap *upstream.PoolSnapshot
+	if cfg.UseReflection && reg != nil {
+		reflectSnap = reg.CandidateSnapshot(cfg.Target, "http")
+	}
+
+	return transcode.New(*cfg, pool, reflectSnap, transcode.Options{
 		Logger:      log,
 		OnResult:    onResult,
 		OnStreamMsg: onStreamMsg,

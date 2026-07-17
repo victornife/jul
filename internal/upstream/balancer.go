@@ -12,6 +12,9 @@ import (
 // Implementations must be safe for concurrent use.
 type Balancer interface {
 	pick(available []*Backend) *Backend
+	// updateBackends is called after the pool's backend set changes. It lets
+	// stateful strategies prune state for backends that are no longer present.
+	updateBackends(backends []*Backend)
 }
 
 func newBalancer(strategy string) Balancer {
@@ -38,6 +41,8 @@ func (r *roundRobin) pick(a []*Backend) *Backend {
 	return a[i%uint64(len(a))]
 }
 
+func (r *roundRobin) updateBackends([]*Backend) {}
+
 // leastConn picks the available backend with the fewest in-flight requests.
 type leastConn struct{}
 
@@ -53,6 +58,10 @@ func (l *leastConn) pick(a []*Backend) *Backend {
 	}
 	return best
 }
+
+func (l *leastConn) updateBackends([]*Backend) {}
+
+
 
 // weightedRR implements smooth weighted round-robin (the algorithm NGINX uses),
 // which distributes load proportional to weight while avoiding bursts.
@@ -89,4 +98,30 @@ func (w *weightedRR) pick(a []*Backend) *Backend {
 		w.weights[best] -= total
 	}
 	return best
+}
+
+// updateBackends removes weight state for backends that are no longer in the
+// pool. This prevents the weights map from growing without bound under endpoint
+// churn (R9-09).
+func (w *weightedRR) updateBackends(backends []*Backend) {
+	live := make(map[*Backend]struct{}, len(backends))
+	for _, b := range backends {
+		live[b] = struct{}{}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for b := range w.weights {
+		if _, ok := live[b]; !ok {
+			delete(w.weights, b)
+		}
+	}
+}
+
+// identitySet builds a set of stable backend identities from a slice.
+func identitySet(backends []*Backend) map[BackendIdentity]struct{} {
+	set := make(map[BackendIdentity]struct{}, len(backends))
+	for _, b := range backends {
+		set[b.Identity()] = struct{}{}
+	}
+	return set
 }

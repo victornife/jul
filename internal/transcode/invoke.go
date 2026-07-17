@@ -73,7 +73,12 @@ type Transcoder struct {
 // method routing table from the configured descriptor source, dials the gRPC
 // backend (h2c or TLS), and returns a handler. The caller closes the handler to
 // release the connection when the configuration is replaced.
-func New(cfg config.GRPCTranscodeConfig, pool *upstream.Pool, opts Options) (*Transcoder, error) {
+//
+// reflectSnap, when non-nil, is the candidate-generation snapshot used for
+// server reflection at build time. This ensures reflection sees the candidate
+// backend set rather than the previous generation's live backends (R9-06). When
+// nil, the pool's current snapshot is used as a fallback (test convenience).
+func New(cfg config.GRPCTranscodeConfig, pool *upstream.Pool, reflectSnap *upstream.PoolSnapshot, opts Options) (*Transcoder, error) {
 	var routes []*route
 	var err error
 
@@ -85,13 +90,18 @@ func New(cfg config.GRPCTranscodeConfig, pool *upstream.Pool, opts Options) (*Tr
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
-		// Reflection needs one connection to discover methods. Use the first
-		// available backend; fail fast so misconfiguration surfaces at build time.
-		b, berr := pool.Pick()
+		// Reflection needs one connection to discover methods. Use the candidate
+		// snapshot when provided so the build sees the new generation's backends
+		// (R9-06); fall back to the live pool snapshot for test convenience.
+		snap := reflectSnap
+		if snap == nil {
+			snap = pool.Snapshot()
+		}
+		b, berr := snap.Pick()
 		if berr != nil {
 			return nil, fmt.Errorf("grpc_transcode %s: no available backend for reflection: %w", cfg.Target, berr)
 		}
-		defer pool.Release(b)
+		defer b.Release()
 
 		conn, derr := dial(b.Address, cfg.TLS)
 		if derr != nil {

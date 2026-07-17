@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+// BackendIdentity is a stable identity for a backend that survives discovery
+// churn and config reloads. It is used by the proxy retry loop to exclude
+// already-attempted backends without depending on *Backend pointer identity
+// (R9-08).
+type BackendIdentity struct {
+	Scheme  string
+	Address string
+}
+
 // Backend is a single server within a pool, carrying its address, weight, and
 // runtime state (in-flight requests and passive health).
 type Backend struct {
@@ -27,6 +36,11 @@ type Backend struct {
 	// consecutive failed probes. Backends without active checks stay true for
 	// their whole lifetime. It composes with the passive cooldown in available.
 	activeHealthy atomic.Bool
+}
+
+// Identity returns the stable (scheme, address) identity of this backend.
+func (b *Backend) Identity() BackendIdentity {
+	return BackendIdentity{Scheme: b.URL.Scheme, Address: b.Address}
 }
 
 // available reports whether the backend may receive traffic now. It combines
@@ -46,7 +60,11 @@ func (b *Backend) available(nowNano int64) bool {
 func (b *Backend) setActiveHealthy(healthy bool) { b.activeHealthy.Store(healthy) }
 
 func (b *Backend) acquire() { b.inflight.Add(1) }
-func (b *Backend) release() { b.inflight.Add(-1) }
+
+// Release decrements the backend's in-flight counter. It is exported so build-
+// time snapshot consumers (e.g. gRPC reflection) can balance the acquire made
+// by PoolSnapshot.Pick.
+func (b *Backend) Release() { b.inflight.Add(-1) }
 
 // Inflight returns the current number of in-flight requests.
 func (b *Backend) Inflight() int64 { return b.inflight.Load() }

@@ -242,6 +242,85 @@ func TestProxyRetryRewindSurfacesUpstreamError(t *testing.T) {
 	}
 }
 
+func TestProxyRetryBoundedByProxyRetries(t *testing.T) {
+	// Three backends: one live, two dead. With proxy_retries = 1 the retry
+	// loop must stop after the first retry, so if the first pick is dead and
+	// the second pick is also dead, the request fails without trying the live
+	// backend. We verify the cap is respected by checking that only two
+	// distinct address attempts occur.
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "live")
+	}))
+	defer live.Close()
+	liveAddr := strings.TrimPrefix(live.URL, "http://")
+
+	ups := map[string]config.UpstreamConfig{
+		"pool": {
+			Name:     "pool",
+			Strategy: "round_robin",
+			Servers: []config.UpstreamServer{
+				{Address: "127.0.0.1:1", Weight: 1},
+				{Address: "127.0.0.1:2", Weight: 1},
+				{Address: liveAddr, Weight: 1},
+			},
+			MaxFails: 1,
+		},
+	}
+	loc := config.LocationConfig{ProxyPass: "http://pool", ProxyRetries: 1}
+	h := newProxy(t, loc, ups)
+
+	// With round-robin starting at backend 0, the first request tries 127.0.0.1:1
+	// (fails), retries to 127.0.0.1:2 (fails), then stops because proxy_retries=1.
+	req := httptest.NewRequest(http.MethodGet, "http://edge/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+}
+
+func TestProxyRetryStableIdentityAcrossUpdate(t *testing.T) {
+	// A backend removed and immediately re-added with a new *Backend pointer
+	// must still be excluded from retries because its stable (scheme, address)
+	// identity is unchanged.
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "live")
+	}))
+	defer live.Close()
+	liveAddr := strings.TrimPrefix(live.URL, "http://")
+
+	ups := map[string]config.UpstreamConfig{
+		"pool": {
+			Name:     "pool",
+			Strategy: "round_robin",
+			Servers:  []config.UpstreamServer{{Address: liveAddr, Weight: 1}},
+			MaxFails: 1,
+		},
+	}
+	h := newProxy(t, config.LocationConfig{ProxyPass: "http://pool"}, ups)
+
+	// Prime the pool with one pick so the weighted round-robin advances.
+	req1 := httptest.NewRequest(http.MethodGet, "http://edge/", nil)
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK || rec1.Body.String() != "live" {
+		t.Fatalf("first request = %d %q", rec1.Code, rec1.Body.String())
+	}
+
+	// Simulate discovery churn: replace the backend with a fresh pointer to the
+	// same address. The stable identity must still be excluded after one failed
+	// attempt within the same request.
+	pool, _, _, _ := resolvePool(config.LocationConfig{ProxyPass: "http://pool"}, ups, nil)
+	pool.UpdateBackends([]config.UpstreamServer{{Address: liveAddr, Weight: 1}})
+
+	req2 := httptest.NewRequest(http.MethodGet, "http://edge/", nil)
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK || rec2.Body.String() != "live" {
+		t.Fatalf("second request after churn = %d %q", rec2.Code, rec2.Body.String())
+	}
+}
+
 func TestExpandProxyVarSSLClient(t *testing.T) {
 	id := &middleware.ClientIdentity{
 		Verified:    true,

@@ -64,6 +64,13 @@ type poolEntry struct {
 	reused    bool                    // staged: reuses a live pool (vs freshly built)
 	pending   []config.UpstreamServer // staged: servers to apply at Commit when reused
 	discovery bool                    // pool's backend set is owned by a discovery refresher
+
+	// activation state is set on freshly built staged pools and consumed by
+	// Activate after Commit promotes the pool to live (R9-07).
+	needsHealth bool
+	healthCfg   config.HealthCheckConfig
+	discoverer  Discoverer
+	discoCfg    config.DiscoveryConfig
 }
 
 // upstreamMeta captures the fields that determine a pool's identity. When any of
@@ -152,12 +159,13 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 	}
 
 	meta := metaOf(up, scheme)
+	pending := up.Servers
 	if e, ok := r.live[key]; ok && e.meta.equal(meta) {
 		// Same shape: keep the running pool (and its checker/refresher). The backend
 		// set is refreshed at Commit (not here) so an aborted build leaves the live
 		// pool untouched, preserving an atomic reload. A discovery pool's backends
 		// are owned by its refresher, so its static seed is not re-applied.
-		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: up.Servers, discovery: discoveryEnabled(up.Discovery)}
+		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: discoveryEnabled(up.Discovery)}
 		return e.pool, nil
 	}
 
@@ -165,25 +173,43 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 	if err != nil {
 		return nil, err
 	}
-	if up.HealthCheck != nil && up.HealthCheck.Enabled {
-		pool.StartHealthChecks(*up.HealthCheck, r.opts.OnHealth, r.opts.OnProbe)
-	}
 	disco := discoveryEnabled(up.Discovery)
+	var d Discoverer
 	if disco {
-		d, err := newDiscoverer(*up.Discovery, r.opts.DialContext)
+		d, err = newDiscoverer(*up.Discovery, r.opts.DialContext)
 		if err != nil {
-			// Stop any health checker already started on this fresh pool so the
-			// rejected build leaks no goroutine, then fail the build.
 			pool.Close()
 			return nil, err
 		}
-		pool.StartDiscovery(d, up.Discovery.Refresh.Std(), DiscoveryHooks{
-			OnBackends: r.opts.OnBackends,
-			OnError:    r.opts.OnDiscoveryError,
-		}, r.opts.Logger)
 	}
-	r.staged[key] = &poolEntry{pool: pool, meta: meta, discovery: disco}
+	entry := &poolEntry{
+		pool:        pool,
+		meta:        meta,
+		pending:     pending,
+		discovery:   disco,
+		needsHealth: up.HealthCheck != nil && up.HealthCheck.Enabled,
+		healthCfg:   healthCfgOrZero(up.HealthCheck),
+		discoverer:  d,
+		discoCfg:    discoveryCfgOrZero(up.Discovery),
+	}
+	r.staged[key] = entry
 	return pool, nil
+}
+
+// healthCfgOrZero returns the enabled health check config or a zero value.
+func healthCfgOrZero(cfg *config.HealthCheckConfig) config.HealthCheckConfig {
+	if cfg != nil {
+		return *cfg
+	}
+	return config.HealthCheckConfig{}
+}
+
+// discoveryCfgOrZero returns the discovery config or a zero value.
+func discoveryCfgOrZero(cfg *config.DiscoveryConfig) config.DiscoveryConfig {
+	if cfg != nil {
+		return *cfg
+	}
+	return config.DiscoveryConfig{}
 }
 
 // Commit promotes the staged pools to live. It first applies the deferred
@@ -220,6 +246,32 @@ func (r *Registry) Commit() {
 	}
 }
 
+// Activate starts background workers (active health checks and discovery
+// refreshers) for every freshly built pool that was just committed. It must be
+// called after Commit and before the new configuration is considered live.
+// Reused pools already have running workers and are left untouched (R9-07).
+func (r *Registry) Activate() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.live {
+		if e.reused {
+			continue
+		}
+		if e.needsHealth {
+			e.pool.StartHealthChecks(e.healthCfg, r.opts.OnHealth, r.opts.OnProbe)
+		}
+		if e.discovery {
+			e.pool.StartDiscovery(e.discoverer, e.discoCfg.Refresh.Std(), DiscoveryHooks{
+				OnBackends: r.opts.OnBackends,
+				OnError:    r.opts.OnDiscoveryError,
+			}, r.opts.Logger)
+		}
+		// Clear activation state now that it has been consumed.
+		e.needsHealth = false
+		e.discoverer = nil
+	}
+}
+
 // Abort discards a failed build, closing every freshly created staged pool (a
 // reused entry shares a live pool and is left running) so checker goroutines do
 // not leak. Because backend updates are deferred to Commit, live pools are
@@ -233,6 +285,21 @@ func (r *Registry) Abort() {
 		}
 	}
 	r.staged = make(map[poolKey]*poolEntry)
+}
+
+// CandidateSnapshot returns a static snapshot of the staged pool for name and
+// scheme, built from the candidate config's server list. It is used by build-
+// time consumers such as gRPC reflection so they see the new generation's
+// backends rather than the previous generation's live set (R9-06). It returns
+// nil when no pool is staged for the requested key.
+func (r *Registry) CandidateSnapshot(name, scheme string) *PoolSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.staged[poolKey{name: name, scheme: scheme}]
+	if !ok {
+		return nil
+	}
+	return e.pool.staticSnapshot(e.pending)
 }
 
 // SnapshotPool returns an immutable snapshot of the live pool for name and

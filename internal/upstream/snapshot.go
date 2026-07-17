@@ -6,6 +6,8 @@ package upstream
 import (
 	"context"
 	"time"
+
+	"jul/internal/config"
 )
 
 // PoolSnapshot is an immutable point-in-time view of a pool's backend set and
@@ -34,16 +36,22 @@ type PoolSnapshot struct {
 	dynamic bool
 }
 
+// Pick selects an available backend from the snapshot, mirroring Pool.Pick.
+func (s *PoolSnapshot) Pick() (*Backend, error) {
+	return s.pickExcluding(nil)
+}
+
 // pick selects an available backend from the snapshot, mirroring Pool.Pick.
 func (s *PoolSnapshot) pick() (*Backend, error) {
 	return s.pickExcluding(nil)
 }
 
 // pickExcluding selects an available backend from the snapshot, skipping any
-// backend in excluded. It returns ErrNoAvailableBackend when every available
-// backend is excluded. For dynamic pools it delegates to the live pool so
-// discovery convergence is visible to each request.
-func (s *PoolSnapshot) pickExcluding(excluded map[*Backend]struct{}) (*Backend, error) {
+// backend whose stable identity is in excluded. It returns
+// ErrNoAvailableBackend when every available backend is excluded. For dynamic
+// pools it delegates to the live pool so discovery convergence is visible to
+// each request.
+func (s *PoolSnapshot) pickExcluding(excluded map[BackendIdentity]struct{}) (*Backend, error) {
 	if s.dynamic {
 		return s.pool.pickExcluding(excluded)
 	}
@@ -53,7 +61,7 @@ func (s *PoolSnapshot) pickExcluding(excluded map[*Backend]struct{}) (*Backend, 
 		if !b.available(now) {
 			continue
 		}
-		if _, ok := excluded[b]; ok {
+		if _, ok := excluded[b.Identity()]; ok {
 			continue
 		}
 		avail = append(avail, b)
@@ -99,6 +107,22 @@ func (p *Pool) Snapshot() *PoolSnapshot {
 	}
 }
 
+// staticSnapshot returns a non-dynamic snapshot built from the supplied server
+// list. It is used for build-time consumers (such as gRPC reflection) that
+// need the candidate backend set rather than the live pool view (R9-06).
+func (p *Pool) staticSnapshot(servers []config.UpstreamServer) *PoolSnapshot {
+	return &PoolSnapshot{
+		key:         PoolSnapshotKey{Name: p.name, Scheme: p.scheme},
+		strategy:    p.strategy,
+		backends:    buildBackends(servers, p.scheme),
+		maxFails:    p.maxFails,
+		failTimeout: p.failTimeout,
+		balancer:    newBalancer(p.strategy),
+		pool:        p,
+		dynamic:     false,
+	}
+}
+
 // PickCtx returns a backend from the generation-scoped snapshot in ctx when
 // one exists for this pool, otherwise falls back to the live pool.
 func (p *Pool) PickCtx(ctx context.Context) (*Backend, error) {
@@ -106,10 +130,10 @@ func (p *Pool) PickCtx(ctx context.Context) (*Backend, error) {
 }
 
 // PickExcluding returns a backend from the generation-scoped snapshot or live
-// pool, skipping any backend in excluded. It is used by the proxy retry loop
-// so a failed backend does not consume an attempt while an untried backend
-// remains.
-func (p *Pool) PickExcluding(ctx context.Context, excluded map[*Backend]struct{}) (*Backend, error) {
+// pool, skipping any backend whose stable identity is in excluded. It is used
+// by the proxy retry loop so a failed backend does not consume an attempt while
+// an untried backend remains.
+func (p *Pool) PickExcluding(ctx context.Context, excluded map[BackendIdentity]struct{}) (*Backend, error) {
 	if snap := snapshotFrom(ctx, p.name, p.scheme); snap != nil {
 		return snap.pickExcluding(excluded)
 	}
@@ -117,8 +141,8 @@ func (p *Pool) PickExcluding(ctx context.Context, excluded map[*Backend]struct{}
 }
 
 // pickExcluding selects an available backend from the live pool, skipping any
-// backend in excluded.
-func (p *Pool) pickExcluding(excluded map[*Backend]struct{}) (*Backend, error) {
+// backend whose stable identity is in excluded.
+func (p *Pool) pickExcluding(excluded map[BackendIdentity]struct{}) (*Backend, error) {
 	now := time.Now().UnixNano()
 	backends := *p.backends.Load()
 	avail := make([]*Backend, 0, len(backends))
@@ -126,7 +150,7 @@ func (p *Pool) pickExcluding(excluded map[*Backend]struct{}) (*Backend, error) {
 		if !b.available(now) {
 			continue
 		}
-		if _, ok := excluded[b]; ok {
+		if _, ok := excluded[b.Identity()]; ok {
 			continue
 		}
 		avail = append(avail, b)
@@ -146,7 +170,7 @@ func (p *Pool) pickExcluding(excluded map[*Backend]struct{}) (*Backend, error) {
 // ctx when one exists for this pool, otherwise falls back to the live pool.
 func (p *Pool) BackendsCtx(ctx context.Context) []*Backend {
 	if snap := snapshotFrom(ctx, p.name, p.scheme); snap != nil {
-		return snap.backends
+		return snap.Backends()
 	}
 	return p.Backends()
 }
