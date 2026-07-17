@@ -176,9 +176,10 @@ func (t *Transcoder) evictLoop() {
 }
 
 // evictStaleConns moves cached connections for addresses that are no longer in
-// the pool into a retired grace-period map. Connections that have already been
-// retired for longer than retiredConnGrace are closed and removed. This keeps
-// in-flight streams alive during backend churn (R11-05).
+// the pool into a retired grace-period map. Connections whose backend address
+// becomes valid again are re-promoted to the active cache. Connections that
+// have been retired for longer than retiredConnGrace are closed and removed.
+// This keeps in-flight streams alive during backend churn (R11-05, R12-02).
 func (t *Transcoder) evictStaleConns() {
 	if t.pool == nil {
 		return
@@ -201,15 +202,27 @@ func (t *Transcoder) evictStaleConns() {
 		return true
 	})
 
-	// Close retired connections whose grace period has expired.
+	// Re-promote retired connections whose backend is valid again, or close
+	// those whose grace period has expired.
 	now := time.Now()
 	t.retired.Range(func(key, value any) bool {
+		addr := key.(string)
 		rc := value.(retiredConn)
-		if now.Sub(rc.retiredAt) < retiredConnGrace {
+		expired := now.Sub(rc.retiredAt) >= retiredConnGrace
+		if _, ok := valid[addr]; ok && !expired {
+			// Backend reappeared: atomically promote. If another connection
+			// won the race, close the retired one.
+			t.retired.Delete(key)
+			if actual, loaded := t.conns.LoadOrStore(addr, rc.conn); loaded {
+				_ = rc.conn.Close()
+				_ = actual
+			}
 			return true
 		}
-		_ = rc.conn.Close()
-		t.retired.Delete(key)
+		if expired {
+			_ = rc.conn.Close()
+			t.retired.Delete(key)
+		}
 		return true
 	})
 }
@@ -266,10 +279,10 @@ func (t *Transcoder) connFor(addr string) (*grpc.ClientConn, error) {
 	if v, ok := t.retired.Load(addr); ok {
 		rc := v.(retiredConn)
 		if time.Since(rc.retiredAt) < retiredConnGrace {
-			// Promote back to active so it can be reused; if we lose a race,
-			// fall through to LoadOrStore below.
+			// Atomically promote back to active. Only close the retired
+			// connection if another goroutine stored a different connection
+			// for the same address in the meantime (R12-02).
 			t.retired.Delete(addr)
-			t.conns.Store(addr, rc.conn)
 			if actual, loaded := t.conns.LoadOrStore(addr, rc.conn); loaded {
 				_ = rc.conn.Close()
 				return actual.(*grpc.ClientConn), nil

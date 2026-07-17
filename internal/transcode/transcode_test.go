@@ -843,3 +843,93 @@ func TestTranscodeReflectionWithReusedDiscoveryUpstream(t *testing.T) {
 		t.Fatalf("reused discovery reflection reply = %q, want reused", got)
 	}
 }
+
+// TestTranscoderRetiredConnectionReappearsUsable (R12-02) verifies that when a
+// removed backend reappears during the retirement grace period, the cached
+// connection is promoted back to the active map and remains usable. It must
+// not be closed by the promotion path itself.
+func TestTranscoderRetiredConnectionReappearsUsable(t *testing.T) {
+	setRetiredGraceForTest(t, 200*time.Millisecond)
+
+	fdp := echoFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	files, err := filesFromSet(set)
+	if err != nil {
+		t.Fatalf("build descriptors: %v", err)
+	}
+	fd, err := files.FindFileByPath("echo/echo.proto")
+	if err != nil {
+		t.Fatalf("find echo file: %v", err)
+	}
+
+	addr := startEchoServer(t, fd, false)
+
+	descFile := filepath.Join(t.TempDir(), "echo.pb")
+	raw, err := proto.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal set: %v", err)
+	}
+	if err := os.WriteFile(descFile, raw, 0o600); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:        "test-reappear",
+		Strategy:    "round_robin",
+		Servers:     []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails:    3,
+		FailTimeout: config.Duration(time.Minute),
+	}, "http")
+	if err != nil {
+		t.Fatalf("create test pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	cfg := config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile}
+	tr, err := New(cfg, pool, nil, Options{})
+	if err != nil {
+		t.Fatalf("New transcoder: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+
+	// Warm the connection cache.
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"warm"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("warmup request: status = %d, body = %s", res.StatusCode, body)
+	}
+
+	conn, err := tr.connFor(addr)
+	if err != nil {
+		t.Fatalf("connFor after warmup: %v", err)
+	}
+	if conn.GetState() == connectivity.Shutdown {
+		t.Fatal("cached connection is already shutdown before eviction")
+	}
+
+	// Remove the backend and retire the connection.
+	pool.UpdateBackends(nil)
+	tr.evictStaleConns()
+	if conn.GetState() == connectivity.Shutdown {
+		t.Fatal("connection was closed immediately, want retired grace")
+	}
+
+	// Re-add the backend before the grace period expires.
+	pool.UpdateBackends([]config.UpstreamServer{{Address: addr, Weight: 1}})
+	tr.evictStaleConns()
+
+	// Send multiple requests. The original connection must still be usable;
+	// the promotion path must not have closed it.
+	for i := 0; i < 5; i++ {
+		res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"reappear"}`, nil)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("request %d after reappearance: status = %d, body = %s", i, res.StatusCode, body)
+		}
+		if got := replyMessage(t, body); got != "reappear" {
+			t.Fatalf("request %d reply = %q, want reappear", i, got)
+		}
+	}
+
+	if state := conn.GetState(); state == connectivity.Shutdown {
+		t.Fatal("promoted connection ended up in Shutdown")
+	}
+}
