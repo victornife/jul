@@ -46,6 +46,52 @@ func TestWriterMasks(t *testing.T) {
 	}
 }
 
+func TestWriterObservesLiveStateAcrossInstall(t *testing.T) {
+	// Capture a writer while the global registry is in a known state.
+	Install(EmptyState())
+	var buf bytes.Buffer
+	w := Writer(&buf)
+
+	// Install a secret after the writer was created; the writer must still mask
+	// it on the next write (R6-01).
+	Install(NewState([]string{"dynamic-secret"}, DefaultMinLen))
+	if _, err := w.Write([]byte("dynamic-secret exposed\n")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "dynamic-secret") {
+		t.Errorf("writer did not observe installed secret: %q", buf.String())
+	}
+
+	// Rotating to a new state must also be observed by the same writer.
+	buf.Reset()
+	Install(NewState([]string{"rotated-secret"}, DefaultMinLen))
+	if _, err := w.Write([]byte("rotated-secret exposed\n")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "rotated-secret") {
+		t.Errorf("writer did not observe rotated secret: %q", buf.String())
+	}
+	// The old secret should no longer be masked.
+	buf.Reset()
+	if _, err := w.Write([]byte("dynamic-secret exposed\n")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "dynamic-secret") {
+		t.Errorf("writer still masked evicted secret: %q", buf.String())
+	}
+}
+
+func TestUnionRetainsOldSecretsWhileBothAreLive(t *testing.T) {
+	old := NewState([]string{"old-gen-secret"}, DefaultMinLen)
+	new := NewState([]string{"new-gen-secret"}, DefaultMinLen)
+	merged := old.Union(new)
+	for _, s := range []string{"old-gen-secret", "new-gen-secret"} {
+		if got := merged.Apply(s); !strings.Contains(got, Mask) {
+			t.Errorf("merged state did not mask %s: %q", s, got)
+		}
+	}
+}
+
 func TestApplyNoSecretsIsIdentity(t *testing.T) {
 	// Not asserting global emptiness (other tests register secrets); just that a
 	// string with no registered secret is returned unchanged.

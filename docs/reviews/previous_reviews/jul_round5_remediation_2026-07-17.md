@@ -75,10 +75,23 @@ Everything else builds on those three foundations.
 
 - [x] All PLANNED items above are DONE.
 - [x] `go test ./...` passes, including new reload-transaction tests.
-- [ ] Burn-in reload soak passes without redaction leaks, listener races, or HTTP/3 crashes.
+- [ ] Burn-in reload soak passes without redaction leaks, listener races, or HTTP/3 crashes. *(unchecked: the Round 6 re-audit introduced new reload/discovery/redaction findings that must be closed before the soak can be claimed as evidence; see R6 follow-up below)*
 - [x] Admin Console E2E asserts both persistence and serving behavior.
 - [x] `scripts/docs-check.py` enforces lifecycle-registry consistency.
 - [x] `docs/reload-semantics.md` accurately describes the implemented behavior.
+
+## Round 6 follow-up note
+
+The 2026-07-17 Round 6 re-audit (finding register in
+[`jul_full_repository_audit_2026-07-09.md`](../jul_full_repository_audit_2026-07-09.md))
+identified new critical/high issues in the reload-transaction redesign:
+log-redaction dynamic state (R6-01), old-generation secret pruning (R6-06),
+restart-required enforcement (R6-02), path/content fingerprinting (R6-03),
+generation-scoped discovery snapshots (R6-04), multi-SNI TLS fingerprints
+(R6-05), and governance gaps (R6-08 through R6-16). Remediation is being
+applied on `main` in phases after commit `2a8c788`; the burn-in soak item above
+remains open until those findings are resolved and the soak can be re-run as
+independent evidence.
 
 ## References
 
