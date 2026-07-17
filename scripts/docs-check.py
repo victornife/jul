@@ -10,6 +10,7 @@ Checks performed:
 5. No future "Updated" dates in living doc headers.
 6. Top-level config keys from schema.go appear in configuration.md (warning only).
 """
+import json
 import os
 import re
 import sys
@@ -352,13 +353,103 @@ def check_feature_status_manifest():
                 ok(f"feature-status.yaml: ID '{feat_id}' present in status.md")
 
 
-def check_lifecycle_manifest():
-    """Validate docs/config-lifecycle.yaml and cross-check reload-semantics.md.
+def _load_go_lifecycle_registry():
+    """Run the Go dump script and return the registry as a list of dicts."""
+    import subprocess
 
-    Two checks:
+    dump_script = ROOT / "scripts" / "dump-lifecycle-registry.go"
+    try:
+        result = subprocess.run(
+            ["go", "run", str(dump_script.relative_to(ROOT))],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except FileNotFoundError:
+        error(ROOT / "scripts" / "dump-lifecycle-registry.go", 0,
+              "'go' not found in PATH; cannot load lifecycle registry")
+        return None
+    except subprocess.TimeoutExpired:
+        error(ROOT / "scripts" / "dump-lifecycle-registry.go", 0,
+              "timeout running dump-lifecycle-registry.go")
+        return None
+    if result.returncode != 0:
+        error(ROOT / "scripts" / "dump-lifecycle-registry.go", 0,
+              f"dump-lifecycle-registry.go failed: {result.stderr.strip()}")
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        error(ROOT / "scripts" / "dump-lifecycle-registry.go", 0,
+              f"invalid JSON from dump-lifecycle-registry.go: {exc}")
+        return None
+
+
+def _normalize_yaml_field(field: str) -> str:
+    """Convert a YAML field expression to dotted wildcard path notation.
+
+    Examples:
+        '[global].log_format' -> 'global.log_format'
+        '[[servers]].tls.enabled' -> 'servers.*.tls.enabled'
+        '[observability.access_log].*' -> 'observability.access_log.*'
+    """
+    # Order matters: more specific bracket prefixes first.
+    field = field.strip()
+    replacements = [
+        ("[observability.access_log]", "observability.access_log"),
+        ("[observability.metrics]", "observability.metrics"),
+        ("[observability.tracing]", "observability.tracing"),
+        ("[rate_limit]", "rate_limit"),
+        ("[compression]", "compression"),
+        ("[global]", "global"),
+        ("[cache]", "cache"),
+        ("[admin]", "admin"),
+        ("[egress]", "egress"),
+        ("[waf]", "waf"),
+        ("[[servers]]", "servers.*"),
+        ("[[stream]]", "stream.*"),
+    ]
+    for old, new in replacements:
+        if field.startswith(old):
+            field = new + field[len(old):]
+            break
+    return field
+
+
+def _path_matches(registry_path: str, yaml_field: str) -> bool:
+    """Return True if yaml_field is covered by registry_path or vice versa."""
+    if registry_path == yaml_field:
+        return True
+    # Registry path covers a sub-field of the YAML field (YAML uses wildcard).
+    if yaml_field.endswith(".*") and registry_path.startswith(yaml_field[:-2] + "."):
+        return True
+    # YAML field is a sub-field of the registry path (registry uses wildcard).
+    if registry_path + "." in yaml_field and yaml_field.startswith(registry_path + "."):
+        return True
+    # Segment-wise wildcard match for paths like servers.*.listen.
+    rs = registry_path.split(".")
+    ys = yaml_field.split(".")
+    if len(rs) != len(ys):
+        return False
+    for r, y in zip(rs, ys):
+        if r == "*" or y == "*":
+            continue
+        if r != y:
+            return False
+    return True
+
+
+def check_lifecycle_manifest():
+    """Validate docs/config-lifecycle.yaml against the Go lifecycle registry.
+
+    Checks:
     1. The manifest file parses as valid YAML.
-    2. Every restart-required subsystem named in the manifest appears in
-       docs/reload-semantics.md, so the two sources of truth stay in sync.
+    2. Every entry has a non-empty subsystem and reason.
+    3. Every field normalizes to a path that matches at least one Go registry
+       entry, and the lifecycle class agrees.
+    4. Every Go registry entry is covered by at least one YAML field.
+    5. Every restart-required subsystem is mentioned in reload-semantics.md.
     """
     try:
         import yaml
@@ -379,11 +470,66 @@ def check_lifecycle_manifest():
         return
     ok("config-lifecycle.yaml parses as valid YAML")
 
-    if not isinstance(data, dict) or "restart_required" not in data:
-        error(manifest, 0, "config-lifecycle.yaml missing required 'restart_required' key")
+    if not isinstance(data, dict):
+        error(manifest, 0, "config-lifecycle.yaml must be a mapping")
         return
 
-    # Cross-check: each subsystem in the manifest must appear in reload-semantics.md.
+    registry = _load_go_lifecycle_registry()
+    if registry is None:
+        return
+
+    yaml_class_sections = {
+        "restart_required": "restart_required",
+        "new_listener_only": "new_listener_only",
+        "hot_reload": "hot_reload",
+    }
+    registry_paths = {e["path"] for e in registry}
+    covered_registry_paths: set[str] = set()
+
+    for section, class_name in yaml_class_sections.items():
+        for idx, entry in enumerate(data.get(section, [])):
+            if not isinstance(entry, dict):
+                # The hot_reload section may contain a free-form 'note' string
+                # or a 'deprecated' list; only validate structured entries.
+                continue
+            subsystem = entry.get("subsystem", "")
+            reason = entry.get("reason", "")
+            fields = entry.get("fields", [])
+            if not subsystem or not str(subsystem).strip():
+                error(manifest, 0, f"{section}[{idx}] missing subsystem")
+            if not reason or not str(reason).strip():
+                error(manifest, 0, f"{section}[{idx}] ({subsystem or '?'}) missing reason")
+            for raw_field in fields:
+                field = _normalize_yaml_field(raw_field)
+                matches = [e for e in registry if _path_matches(e["path"], field)]
+                if not matches:
+                    error(
+                        manifest, 0,
+                        f"{section}[{idx}] field '{raw_field}' ({field}) does not match any Go registry path",
+                    )
+                    continue
+                for m in matches:
+                    covered_registry_paths.add(m["path"])
+                    if m["class"] != class_name:
+                        error(
+                            manifest, 0,
+                            f"{section}[{idx}] field '{raw_field}' class mismatch: "
+                            f"YAML says {class_name}, Go registry says {m['class']} ({m['path']})",
+                        )
+
+    # Every registered path must be mentioned in the YAML manifest.
+    for entry in registry:
+        path = entry["path"]
+        if path not in covered_registry_paths:
+            # The hot_reload "note" may cover unlisted fields; only enforce for
+            # restart_required and new_listener_only entries.
+            if entry["class"] in ("restart_required", "new_listener_only"):
+                error(
+                    manifest, 0,
+                    f"Go registry path '{path}' ({entry['class']}) is missing from config-lifecycle.yaml",
+                )
+
+    # Cross-check: each restart-required subsystem must appear in reload-semantics.md.
     reload_doc = ROOT / "docs" / "reload-semantics.md"
     if not reload_doc.exists():
         error(reload_doc, 0, "docs/reload-semantics.md is missing")
@@ -394,7 +540,6 @@ def check_lifecycle_manifest():
         subsystem = entry.get("subsystem", "")
         if not subsystem:
             continue
-        # Use the first keyword from the subsystem name as the search term.
         keyword = subsystem.split("_")[0]
         if keyword not in reload_text:
             error(

@@ -132,6 +132,26 @@ func locationTarget(l *config.LocationConfig) string {
 	}
 }
 
+// coverLocationAction marks the lifecycle registry path that corresponds to
+// the location's action as covered, so the registry completeness pass does
+// not double-report it.
+func coverLocationAction(b, a *config.LocationConfig, d *ConfigDiff) {
+	switch {
+	case b.ProxyPass != "" || a.ProxyPass != "":
+		d.cover("servers.*.locations.*.proxy_pass")
+	case b.Root != "" || a.Root != "":
+		d.cover("servers.*.locations.*.root")
+	case b.Plugin != "" || a.Plugin != "":
+		d.cover("servers.*.locations.*.plugins")
+	}
+}
+
+// coverLocationTarget marks the lifecycle registry path that corresponds to
+// the location's target as covered.
+func coverLocationTarget(b, a *config.LocationConfig, d *ConfigDiff) {
+	coverLocationAction(b, a, d)
+}
+
 func locationIndex(locs []config.LocationConfig) map[string]*config.LocationConfig {
 	m := make(map[string]*config.LocationConfig, len(locs))
 	for i := range locs {
@@ -173,10 +193,12 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 	if locationAction(b) != locationAction(a) {
 		d.mod(DiffEntry{Kind: "location", Name: name, Before: locationAction(b), After: locationAction(a), Detail: "Change action of route " + key}, "route "+name+" action")
 	}
+	coverLocationAction(b, a, d)
 	if locationTarget(b) != locationTarget(a) {
 		d.mod(DiffEntry{Kind: "location", Name: name, Before: orNone(locationTarget(b)), After: orNone(locationTarget(a)), Detail: "Change target of route " + key}, "route "+name+" target")
 		d.warn("Changing the target of route %s on %s redirects matching traffic to a different backend or destination.", key, server)
 	}
+	coverLocationTarget(b, a, d)
 
 	// Effective WAF diff (inherits global policy when loc.WAF is nil).
 	bEffWAF := locationEffectiveWAF(b, beforeGlobWAF)
@@ -242,6 +264,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 			d.mod(DiffEntry{Kind: "waf", Name: name, Detail: fmt.Sprintf("%s WAF response-body inspection on route %s", action, key)}, "route "+name+" waf response_body_check")
 		}
 	}
+	d.cover("servers.*.locations.*.waf")
 
 	// Auth toggle.
 	if (b.Auth != nil) != (a.Auth != nil) {
@@ -254,6 +277,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 			d.warn("Disabling access control on route %s on %s exposes it without authentication.", key, server)
 		}
 	}
+	d.cover("servers.*.locations.*.auth")
 
 	// Cache toggle.
 	if b.Cache != a.Cache {
@@ -266,6 +290,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 			d.warn("Enabling cache on authenticated route %s on %s risks serving private responses to other clients.", key, server)
 		}
 	}
+	d.cover("servers.*.locations.*.cache")
 
 	// Per-route rate-limit override.
 	if (b.RateLimit != nil) != (a.RateLimit != nil) {
@@ -277,6 +302,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 	} else if a.RateLimit != nil && b.RateLimit != nil && (a.RateLimit.Rate != b.RateLimit.Rate || a.RateLimit.Burst != b.RateLimit.Burst || a.RateLimit.Key != b.RateLimit.Key) {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: rlStr(b.RateLimit), After: rlStr(a.RateLimit), Detail: "Change rate-limit policy on route " + key}, "route "+name+" rate limit")
 	}
+	d.cover("servers.*.locations.*.rate_limit")
 
 	// mTLS require-client-cert toggle.
 	if b.RequireClientCert != a.RequireClientCert {
@@ -302,6 +328,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 			d.mod(DiffEntry{Kind: "plugin", Name: name, Before: p, Detail: fmt.Sprintf("Detach plugin %s from route %s", p, key)}, "route "+name+" plugin "+p)
 		}
 	}
+	d.cover("servers.*.locations.*.plugins")
 
 	// Proxy timeouts.
 	diffProxyTimeouts(server, key, b, a, d)
@@ -359,9 +386,11 @@ func diffUpstreams(before, after *config.Config, d *ConfigDiff) {
 }
 
 func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff) {
+	d.cover("upstreams.*.name")
 	if !strings.EqualFold(b.Strategy, a.Strategy) {
 		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Strategy), After: orNone(a.Strategy), Detail: "Change load-balancing strategy of " + name}, "upstream "+name+" strategy")
 	}
+	d.cover("upstreams.*.strategy")
 
 	// Backend set (targets).
 	bb, ab := backendSet(b.Servers), backendSet(a.Servers)
@@ -378,6 +407,7 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 			d.warn("Removing backend %s from %s reduces its capacity and may overload remaining backends.", addr, name)
 		}
 	}
+	d.cover("upstreams.*.servers")
 
 	// Retries / passive health (max_fails, fail_timeout).
 	if b.MaxFails != a.MaxFails {
@@ -386,9 +416,11 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 			d.warn("Setting max_fails to 0 on %s disables passive health checking; failed backends stay in rotation.", name)
 		}
 	}
+	d.cover("upstreams.*.max_fails")
 	if b.FailTimeout != a.FailTimeout {
 		d.mod(DiffEntry{Kind: "retries", Name: name, Before: durStr(b.FailTimeout), After: durStr(a.FailTimeout), Detail: "Change fail_timeout of " + name}, "upstream "+name+" fail_timeout")
 	}
+	d.cover("upstreams.*.fail_timeout")
 
 	// Active health checks.
 	bHC := b.HealthCheck != nil && b.HealthCheck.Enabled
@@ -402,6 +434,7 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 	} else if bHC && aHC {
 		diffHealthCheckFields(name, b.HealthCheck, a.HealthCheck, d)
 	}
+	d.cover("upstreams.*.health_check")
 
 	// Service discovery.
 	bDisc := discoveryType(b.Discovery)

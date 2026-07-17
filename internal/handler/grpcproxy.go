@@ -90,7 +90,7 @@ type grpcBalancingTransport struct {
 }
 
 func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	b, err := t.pool.Pick()
+	b, err := t.pool.PickCtx(req.Context())
 	if err != nil {
 		return nil, err
 	}

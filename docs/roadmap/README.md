@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.32 · Updated 2026-07-13
+> Version 1.33 · Updated 2026-07-17
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever

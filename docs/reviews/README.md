@@ -41,6 +41,7 @@ each carries a dated status banner and lives under [`previous_reviews/`](previou
 
 | Archived | Document | Why archived |
 | --- | --- | --- |
+| 2026-07-17 | [Round 5 security/reload-transaction audit — remediation tracking](previous_reviews/jul_round5_remediation_2026-07-17.md) | Completed — ReloadPlan transaction and lifecycle registry landed; burn-in reload soak pending |
 | 2026-07-09 | [Full Repository Audit (2026-07-02)](previous_reviews/jul_full_repository_audit_2026-07.md) | Superseded by the 2026-07-09 audit |
 | 2026-07-09 | [Immediate Action Plan (2026-07)](previous_reviews/jul_immediate_action_plan_2026-07.md) | Completed — tasks folded into the 2026-07-02 remediation |
 | 2026-07-09 | [Console v2 Recovery & Excellence Plan](previous_reviews/jul_console_v2_recovery_action_plan.md) | Completed — Console v2 reached GA |

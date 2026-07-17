@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -28,6 +29,12 @@ type h3Conn struct {
 	server *http3.Server
 	ln     *quic.EarlyListener
 	udp    *net.UDPConn
+
+	onConn func(int64)
+	log    *slog.Logger
+
+	// activateOnce ensures the accept loop starts at most once.
+	activateOnce sync.Once
 }
 
 // Close gracefully drains in-flight HTTP/3 requests (bounded by ctx, which the
@@ -40,14 +47,36 @@ func (c *h3Conn) Close(ctx context.Context) error {
 	return err
 }
 
-// startHTTP3 opens a UDP listener on addr and serves HTTP/3 (QUIC) there using
-// handler. getCert is the same dynamic certificate source the TCP/TLS listener
-// uses, so static and ACME certificates — including hot reloads — apply to
-// HTTP/3 identically without a separate refresh path. onConn, when non-nil, is
-// called with +1 when a QUIC connection opens and -1 when it closes, backing the
-// jul_http3_connections gauge. Connections are accepted and served in a
-// background goroutine until Close.
+// Activate starts accepting QUIC connections and serving HTTP/3. It is safe to
+// call multiple times; the accept loop runs once.
+func (c *h3Conn) Activate() error {
+	var err error
+	c.activateOnce.Do(func() {
+		go c.acceptLoop(c.onConn, c.log)
+	})
+	return err
+}
+
+// startHTTP3 creates and immediately activates an HTTP/3 listener. It exists
+// for direct tests that need a running h3 endpoint without going through the
+// server lifecycle. Prefer newStagedHTTP3 inside the reload flow.
 func startHTTP3(addr string, getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), handler http.Handler, onConn func(int64), log *slog.Logger) (h3Listener, error) {
+	h3, err := newStagedHTTP3(addr, getCert, handler, onConn, log)
+	if err != nil {
+		return nil, err
+	}
+	_ = h3.Activate()
+	return h3, nil
+}
+
+// newStagedHTTP3 opens a UDP listener on addr and prepares HTTP/3 (QUIC)
+// serving there using handler, but does not start accepting connections. The
+// accept loop is started by Activate. getCert is the same dynamic certificate
+// source the TCP/TLS listener uses, so static and ACME certificates —
+// including hot reloads — apply to HTTP/3 identically without a separate
+// refresh path. onConn, when non-nil, is called with +1 when a QUIC connection
+// opens and -1 when it closes, backing the jul_http3_connections gauge.
+func newStagedHTTP3(addr string, getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), handler http.Handler, onConn func(int64), log *slog.Logger) (h3Listener, error) {
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("resolve udp address: %w", err)
@@ -74,8 +103,9 @@ func startHTTP3(addr string, getCert func(*tls.ClientHelloInfo) (*tls.Certificat
 		server: &http3.Server{Handler: handler},
 		ln:     ln,
 		udp:    udpConn,
+		onConn: onConn,
+		log:    log,
 	}
-	go inst.acceptLoop(onConn, log)
 	return inst, nil
 }
 

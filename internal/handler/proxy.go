@@ -119,7 +119,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	defer span.End()
 	span.SetString("upstream.name", t.pool.Name())
 
-	attempts := len(t.pool.Backends())
+	attempts := len(t.pool.BackendsCtx(req.Context()))
 	if attempts < 1 {
 		attempts = 1
 	}
@@ -127,7 +127,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		b, err := t.pool.Pick()
+		b, err := t.pool.PickCtx(req.Context())
 		if err != nil {
 			if lastErr != nil {
 				err = lastErr

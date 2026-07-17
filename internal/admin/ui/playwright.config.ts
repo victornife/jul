@@ -59,7 +59,7 @@ export default defineConfig({
     {
       // Path to the pre-built jul binary is relative to the ui/ directory.
       // In CI, the console-e2e job builds it into the repo root first.
-      command: "../../../../jul serve -config ../../../../testdata/console-e2e.toml",
+      command: "cd ../../../ && ./jul serve -config testdata/console-e2e.toml",
       url: `${realServerURL}/healthz`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,

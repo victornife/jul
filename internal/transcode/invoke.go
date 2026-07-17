@@ -209,8 +209,10 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	method := string(rt.method.FullName())
 
 	// Pick a backend per request so load-balancing and passive health checking
-	// apply to gRPC transcoding the same way they do for HTTP proxy.
-	backend, err := t.pool.Pick()
+	// apply to gRPC transcoding the same way they do for HTTP proxy. Prefer the
+	// generation-scoped snapshot when present so reloads cannot shift an
+	// in-flight request to a newer backend set.
+	backend, err := t.pool.PickCtx(r.Context())
 	if err != nil {
 		code := http.StatusServiceUnavailable
 		t.writeError(w, code, "no available gRPC backend: "+err.Error())

@@ -9,6 +9,7 @@ import (
 
 	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/server"
 )
 
@@ -30,6 +31,11 @@ type Preflight struct {
 
 	// Stream validates stream (L4) configuration without binding sockets.
 	Stream StreamPreflighter
+
+	// StartupFP is the effective startup fingerprint used for restart-required
+	// checks. When empty, restart-required classification is skipped so tests
+	// without a startup baseline are not rejected.
+	StartupFP lifecycle.Fingerprint
 }
 
 // Apply runs the admin write preflight gates:
@@ -53,16 +59,13 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
 	if err := ValidateRuntimeConfig(c); err != nil {
 		return err
 	}
-	// Expand a resolved clone so secret-referenced cert/key paths are resolved
-	// before PreflightTLS checks file existence. If secret expansion fails,
-	// fall back to the raw config (PreflightTLS will fail with a clear error).
-	// NOTE: config.ExpandSecrets has a global redaction side-effect (R3-04);
-	// this is acceptable here because ValidateRuntimeConfig already calls it.
+	// Resolve secrets into a clone so secret-referenced cert/key paths are
+	// expanded before PreflightTLS checks file existence. The returned redaction
+	// state is discarded: preflight must not mutate the serving redaction
+	// registry (R5-01).
 	resolvedForTLS := c
-	if clone, cerr := c.Clone(); cerr == nil {
-		if err := config.ExpandSecrets(clone); err == nil {
-			resolvedForTLS = clone
-		}
+	if expanded, _, _, rerr := config.Resolve(c); rerr == nil {
+		resolvedForTLS = expanded
 	}
 	if err := server.PreflightTLS(resolvedForTLS.Servers); err != nil {
 		return err
@@ -77,28 +80,17 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
 		if err := p.Stream.PreflightListeners(prev.Streams, c.Streams); err != nil {
 			return err
 		}
-		if reason, need := server.ACMERestartRequired(prev.Servers, c.Servers); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		// Restart-required classification is single-sourced from the lifecycle
+		// registry. Compare the candidate's effective fingerprint against the
+		// startup-bound fingerprint so secret-content rotation and effective
+		// value changes are detected without duplicating the check list.
+		if len(p.StartupFP.Values) > 0 {
+			candidateFP := lifecycle.ComputeFingerprint(resolvedForTLS)
+			if reason, need := lifecycle.RestartRequired(p.StartupFP, candidateFP); need {
+				return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+			}
 		}
 		if reason, need := server.ListenerRebindRequired(prev, c); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-		}
-		if reason, need := server.TracingRestartRequired(prev, c); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-		}
-		if reason, need := server.AccessLogRestartRequired(prev, c); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-		}
-		if reason, need := server.CacheRestartRequired(prev, c); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-		}
-		if reason, need := server.EgressRestartRequired(prev, c); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-		}
-		if reason, need := server.AdminRestartRequired(prev, c); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-		}
-		if reason, need := server.MetricsRestartRequired(prev, c); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 	}

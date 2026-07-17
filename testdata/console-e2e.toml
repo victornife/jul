@@ -7,7 +7,7 @@
 # only and never runs with real data.
 
 [global]
-log_level = "warn"
+log_level = "debug"
 
 [[servers]]
 listen = "127.0.0.1:9292"

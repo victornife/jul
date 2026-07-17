@@ -11,6 +11,34 @@ before a feature is labelled GA; this page is the consolidated index.
 
 ---
 
+## Configuration reload ([reload-semantics.md](reload-semantics.md))
+
+- **Some fields cannot be hot-reloaded.** The authoritative classification is
+  [`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go) and
+  the machine-readable copy in [config-lifecycle.yaml](config-lifecycle.yaml).
+  Restart-required fields are rejected by the admin apply path and by
+  SIGHUP/file-watch reloads; the new value is saved but takes effect only after
+  a process restart. New-listener-only fields (e.g. a different listen address)
+  apply to brand-new listeners on reload, but changing them on an already-bound
+  listener requires restart.
+- **Reload is Publish-then-Activate.** New listeners are bound during staging
+  but do not accept traffic until after the new handler generation is
+  published, so clients never see requests routed by a listener before the
+  handlers that should serve them are live. The transaction is implemented in
+  the `ReloadPlan` value in [`internal/server/reload_plan.go`](../internal/server/reload_plan.go).
+- **In-flight requests stay on their generation's pool snapshot.** When an
+  upstream pool changes, active requests that started on the previous
+  generation continue to use the old backend set until they drain; new
+  requests use the updated pool. This prevents a request from observing
+  backends that were added or removed after it began.
+- **Restart-required changes on saved-but-not-yet-active config are surfaced
+  by the Console.** `PendingRestartCheck` compares the startup-bound
+  effective values (including digests of file-backed secrets) against the
+  current on-disk config, so operators see a banner when a saved change needs
+  a restart.
+
+---
+
 ## Authentication ([auth.md](auth.md))
 
 - **One credential method per location.** Basic, JWT, forward-auth, or CIDR —

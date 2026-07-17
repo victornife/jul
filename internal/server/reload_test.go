@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/redact"
 )
 
 func quietLogger() *slog.Logger {
@@ -57,7 +58,7 @@ func cfgWith(addr string) *config.Config {
 }
 
 func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
-	return func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
+	return func(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
 		current := *tag.Load()
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, current)
@@ -77,7 +78,7 @@ func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
 				// nothing to discard
 			}
 		}
-		return m, commitFn, abortFn, nil
+		return m, commitFn, abortFn, redact.EmptyState(), nil
 	}
 }
 
@@ -225,7 +226,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 	var enterOnce, retireOnce sync.Once
 	var builds atomic.Int32
 
-	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
+	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
 		n := builds.Add(1)
 		var h http.Handler
 		switch n {
@@ -267,7 +268,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 				// nothing to discard
 			}
 		}
-		return m, commitFn, abortFn, nil
+		return m, commitFn, abortFn, redact.EmptyState(), nil
 	}
 
 	src := &stubSource{}
@@ -347,7 +348,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 func TestReloadNoGoroutineLeak(t *testing.T) {
 	addr := freePort(t)
 
-	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
+	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, "ok")
 		})
@@ -358,7 +359,7 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 		// Non-nil retire so every reload exercises the retire path.
 		commitFn := func() func() { return func() {} }
 		abortFn := func() {}
-		return m, commitFn, abortFn, nil
+		return m, commitFn, abortFn, redact.EmptyState(), nil
 	}
 
 	src := &stubSource{}

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -20,6 +21,7 @@ import (
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/plugins"
+	"jul/internal/redact"
 	"jul/internal/router"
 	"jul/internal/upstream"
 	"jul/internal/waf"
@@ -56,20 +58,24 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if err := config.ExpandSecrets(c); err != nil {
+	expanded, state, _, err := config.Resolve(c)
+	if err != nil {
 		return nil, nil, fmt.Errorf("secrets: %w", err)
 	}
+	*c = *expanded
 	upstreams := IndexUpstreams(c.Upstreams)
 	gen := f.GenRes.Begin()
 	defer gen.Abort()
 
-	handlers, err := f.buildHandlers(c, gen, upstreams)
+	handlers, captureSnapshots, err := f.buildHandlers(c, gen, upstreams)
 	if err != nil {
 		return nil, nil, err
 	}
 	var retirePrev func()
 	if commit {
+		redact.Install(state)
 		retirePrev = gen.Commit()
+		captureSnapshots()
 	}
 	return handlers, retirePrev, nil
 }
@@ -78,25 +84,29 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 // returned commitFn promotes the staged resources (upstream pools, closers) to
 // live and returns a retire callback for the previous generation. The returned
 // abortFn discards staged resources, leaving the live generation untouched.
+// The returned redact.State covers the secrets resolved during the build and
+// must be installed by the caller only at the reload publish boundary.
 // Exactly one of commitFn or abortFn must be called; both release the factory
 // mutex so no concurrent build can start while a staged generation is pending.
-func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
+func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
 	f.mu.Lock()
 	// Mutex is NOT deferred here: it is released by commitFn or abortFn.
 
-	if err := config.ExpandSecrets(c); err != nil {
+	expanded, state, _, err := config.Resolve(c)
+	if err != nil {
 		f.mu.Unlock()
-		return nil, nil, nil, fmt.Errorf("secrets: %w", err)
+		return nil, nil, nil, redact.State{}, fmt.Errorf("secrets: %w", err)
 	}
+	*c = *expanded
 	upstreams := IndexUpstreams(c.Upstreams)
 	gen := f.GenRes.Begin()
 	// No deferred gen.Abort: lifecycle is caller-controlled via commitFn/abortFn.
 
-	handlers, err := f.buildHandlers(c, gen, upstreams)
+	handlers, captureSnapshots, err := f.buildHandlers(c, gen, upstreams)
 	if err != nil {
 		gen.Abort()
 		f.mu.Unlock()
-		return nil, nil, nil, err
+		return nil, nil, nil, redact.State{}, err
 	}
 
 	committed := false
@@ -106,6 +116,7 @@ func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, fun
 		}
 		committed = true
 		ret := gen.Commit()
+		captureSnapshots()
 		f.mu.Unlock()
 		return ret
 	}
@@ -117,14 +128,19 @@ func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, fun
 		gen.Abort()
 		f.mu.Unlock()
 	}
-	return handlers, commitFn, abortFn, nil
+	return handlers, commitFn, abortFn, state, nil
 }
 
 // buildHandlers constructs the per-listen-address handler tree from c, staging
 // all closeable resources (plugin runtimes, static-file roots, gRPC connections)
 // into gen. It neither commits nor aborts gen; resource lifecycle is the
 // caller's responsibility. upstreams must be IndexUpstreams(c.Upstreams).
-func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, error) {
+//
+// The returned captureSnapshots function populates the generation-scoped pool
+// snapshots used by the request-time snapshot middleware. It must be called
+// exactly once after the upstream pools have been committed (Publish boundary),
+// so the snapshots reflect the generation's live backend set.
+func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, func(), error) {
 
 	// Build this generation's WASM plugin set. A lean build (or a malformed
 	// module) fails here, rejecting the reload. The set owns per-plugin wazero
@@ -132,10 +148,22 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 	// closed only after the new handlers are live.
 	pluginSet, err := f.PluginMgr.Build(c.Plugins)
 	if err != nil {
-		return nil, fmt.Errorf("plugins: %w", err)
+		return nil, nil, fmt.Errorf("plugins: %w", err)
 	}
 	gen.Stage(pluginSet)
 
+	usedUpstreamNames := upstreamNamesUsed(c, upstreams)
+	snapshots := make(map[string]*upstream.PoolSnapshot, len(usedUpstreamNames))
+	captureSnapshots := func() {
+		if f.PoolReg == nil {
+			return
+		}
+		for _, name := range usedUpstreamNames {
+			if snap := f.PoolReg.SnapshotPool(name); snap != nil {
+				snapshots[name] = snap
+			}
+		}
+	}
 	withCache := func(loc config.LocationConfig, h http.Handler) http.Handler {
 		if loc.Cache && f.Cache != nil {
 			return f.Cache.Handler(h)
@@ -246,7 +274,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 				DialContext: f.EgressDial,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("location %s: %w", key, err)
+				return nil, nil, fmt.Errorf("location %s: %w", key, err)
 			}
 			authByScope[key] = a
 		}
@@ -281,7 +309,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 				Hooks:  waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
 			})
 			if err != nil {
-				return nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
+				return nil, nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
 			}
 			wafByScope[WAFScope(c.Servers[i], loc)] = fw
 		}
@@ -359,7 +387,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 
 	rtr, err := router.New(c, builders, nil, locModifier, f.Log)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Compression is built once per reload and shared across listeners. It
@@ -376,7 +404,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 			OnCompress: f.Metrics.ObserveCompression,
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		compress = cm
 	}
@@ -403,6 +431,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 		// the router via LocationModifier, closer to the handler.
 		mws := []middleware.Middleware{
 			middleware.RequestID(),
+			f.poolSnapshotMiddleware(snapshots),
 			f.RT.Tracer.Middleware,
 			f.Metrics.Middleware,
 			middleware.AccessLog(f.AccessSinks...),
@@ -421,5 +450,54 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 		handlers[addr] = h
 	}
 
-	return handlers, nil
+	return handlers, captureSnapshots, nil
+}
+
+// upstreamNamesUsed returns the distinct named upstreams referenced by proxy,
+// gRPC passthrough, and gRPC transcoding locations. Only configured upstreams
+// (present in the upstreams index) are included; concrete host:port targets are
+// ignored because they build ad-hoc pools outside the registry.
+func upstreamNamesUsed(c *config.Config, upstreams map[string]config.UpstreamConfig) []string {
+	seen := make(map[string]struct{})
+	var names []string
+	add := func(name string) {
+		if _, ok := upstreams[name]; !ok {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	for i := range c.Servers {
+		for j := range c.Servers[i].Locations {
+			loc := &c.Servers[i].Locations[j]
+			if loc.ProxyPass != "" {
+				if u, err := url.Parse(loc.ProxyPass); err == nil && u.Host != "" {
+					add(u.Host)
+				}
+			}
+			if loc.GRPCTranscode != nil && loc.GRPCTranscode.Target != "" {
+				add(loc.GRPCTranscode.Target)
+			}
+		}
+	}
+	return names
+}
+
+// poolSnapshotMiddleware is captured by buildHandlers; it injects the
+// generation-scoped upstream snapshots into request context so downstream pool
+// users observe the backend set that was live when the generation committed.
+func (f *HandlerFactory) poolSnapshotMiddleware(snapshots map[string]*upstream.PoolSnapshot) middleware.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if len(snapshots) == 0 {
+				next.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(upstream.WithSnapshot(r.Context(), snapshots)))
+		})
+	}
 }

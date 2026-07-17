@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 )
 
 // (helpers: serverIndex, sortedKeys, durStr, sizeStr, orNone and the
@@ -23,6 +24,12 @@ type ConfigDiff struct {
 	Additions     []DiffEntry `json:"additions,omitempty"`
 	Removals      []DiffEntry `json:"removals,omitempty"`
 	Modifications []DiffEntry `json:"modifications,omitempty"`
+
+	// coveredPaths tracks which lifecycle registry paths have already been
+	// represented by the high-level comparators. The registry-driven
+	// completeness pass uses this to avoid duplicate entries while still
+	// reporting any registered field the comparators missed.
+	coveredPaths map[string]bool
 }
 
 // DiffEntry is one change entry in a structured diff.
@@ -32,6 +39,9 @@ type DiffEntry struct {
 	Before string `json:"before,omitempty"`
 	After  string `json:"after,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// LifecycleClass is the lifecycle classification of the changed field
+	// (hot_reload / restart_required / new_listener_only), when known.
+	LifecycleClass string `json:"lifecycle_class,omitempty"`
 }
 
 func (d *ConfigDiff) add(e DiffEntry, a string) {
@@ -48,30 +58,28 @@ func (d *ConfigDiff) mod(e DiffEntry, a string) {
 }
 func (d *ConfigDiff) warn(f string, a ...any) { d.Warnings = append(d.Warnings, fmt.Sprintf(f, a...)) }
 
-// canonicalTOML normalizes a config through a marshal→parse→marshal cycle so
-// that default values (e.g. protocol="" vs "tcp") are applied before string
-// comparison. Returns "" on any error so callers can skip the comparison.
-func canonicalTOML(c *config.Config) string {
-	raw, err := config.Marshal(c)
-	if err != nil {
-		return ""
+// cover marks a lifecycle registry path as already represented by a
+// high-level comparator. The registry-driven completeness pass skips covered
+// paths so it does not double-report changes.
+func (d *ConfigDiff) cover(path string) {
+	if d.coveredPaths == nil {
+		d.coveredPaths = make(map[string]bool)
 	}
-	normalized, err := config.Parse(raw)
-	if err != nil {
-		return string(raw)
-	}
-	out, err := config.Marshal(normalized)
-	if err != nil {
-		return string(raw)
-	}
-	return string(out)
+	d.coveredPaths[path] = true
 }
+
 
 // diffConfigs produces a human-auditable diff between the current running
 // configuration and a draft candidate, explaining operational consequences
 // across servers, locations/routes (action, target, auth, cache, compression,
 // rate limit, timeouts), TLS/ACME/mTLS, upstream pools (targets, retries), and
 // global cache/compression/rate-limit settings.
+//
+// The high-level comparators provide operational wording and warnings. They
+// are followed by a registry-driven completeness pass over lifecycle.Registry:
+// any registered field that changed and was not already represented by the
+// comparators is emitted as a structured entry with its class and reason. This
+// makes the diff complete by construction with respect to the registry.
 func diffConfigs(before, after *config.Config) ConfigDiff {
 	var d ConfigDiff
 	if before == nil || after == nil {
@@ -93,19 +101,10 @@ func diffConfigs(before, after *config.Config) ConfigDiff {
 	diffGlobalAdmin(before, after, &d)
 	diffGlobalMetrics(before, after, &d)
 
-	// Canonical fallback: if the configs differ in ways not yet modelled by the
-	// structured comparators, emit a raw-change marker rather than claiming
-	// "No structural changes." Both configs are normalized through a
-	// marshal→parse→marshal round-trip to apply defaults before comparing, so
-	// semantically equivalent values (e.g. empty string vs "tcp" default) do
-	// not produce spurious fallback entries.
-	if len(d.Affected) == 0 {
-		bNorm := canonicalTOML(before)
-		aNorm := canonicalTOML(after)
-		if bNorm != "" && aNorm != "" && bNorm != aNorm {
-			d.mod(DiffEntry{Kind: "raw", Name: "config", Detail: "Configuration changed (not yet modelled by the structured diff)"}, "raw_change")
-		}
-	}
+	// Registry-driven completeness pass. Any registered path that differs and
+	// was not covered by the high-level comparators is reported here, so the
+	// diff cannot silently miss a field that the lifecycle registry classifies.
+	diffLifecycleCompleteness(before, after, &d)
 
 	if len(d.Affected) == 0 {
 		d.Summary = "No structural changes detected between the current configuration and the draft."
@@ -114,6 +113,31 @@ func diffConfigs(before, after *config.Config) ConfigDiff {
 			len(d.Affected), len(d.Additions), len(d.Removals), len(d.Modifications))
 	}
 	return d
+}
+
+// diffLifecycleCompleteness adds DiffEntry records for any lifecycle-registry
+// path that changed but was not already covered by the high-level comparators.
+func diffLifecycleCompleteness(before, after *config.Config, d *ConfigDiff) {
+	for _, ch := range lifecycle.DiffConfig(before, after) {
+		if d.coveredPaths[ch.Path] {
+			continue
+		}
+		affected := "lifecycle " + ch.Path
+		detail := "Change " + ch.Path
+		if ch.Reason != "" {
+			detail += " — " + ch.Reason
+		}
+		classStr := ch.Class.String()
+		if ch.Class == lifecycle.RestartRequiredClass {
+			d.warn("%s is restart-required; the change is saved but will not take effect until the process restarts.", ch.Path)
+		}
+		d.mod(DiffEntry{
+			Kind:           ch.Subsystem,
+			Name:           ch.Path,
+			Detail:         detail,
+			LifecycleClass: classStr,
+		}, affected)
+	}
 }
 
 func diffServers(before, after *config.Config, d *ConfigDiff) {
@@ -129,6 +153,7 @@ func diffServers(before, after *config.Config, d *ConfigDiff) {
 			d.mod(DiffEntry{Kind: "server", Name: name, Before: b.Listen, After: srv.Listen, Detail: "Change " + name + " listen address"}, "server "+name+" listen")
 			d.warn("Changing the listen address on %s may break clients bound to the old address.", name)
 		}
+		d.cover("servers.*.listen")
 		diffServerNames(name, b, srv, d)
 		diffServerTimeouts(name, b, srv, d)
 		diffServerBodyLimit(name, b, srv, d)
@@ -150,10 +175,12 @@ func diffServers(before, after *config.Config, d *ConfigDiff) {
 // name re-keys the block, surfacing instead as a server remove + add above.
 func diffServerNames(name string, b, a serverWrapper, d *ConfigDiff) {
 	if serverNamesEqual(b.ServerNames, a.ServerNames) {
+		d.cover("servers.*.server_names")
 		return
 	}
 	d.mod(DiffEntry{Kind: "server", Name: name, Before: hostNamesLabel(b.ServerNames), After: hostNamesLabel(a.ServerNames), Detail: "Change host names for " + name}, "server "+name+" host names")
 	d.warn("Changing the host names on %s alters which requests (Host/SNI) this virtual host serves.", name)
+	d.cover("servers.*.server_names")
 }
 
 // serverNamesEqual reports order-independent set equality of two server_names
@@ -202,6 +229,10 @@ func diffServerTimeouts(name string, b, a serverWrapper, d *ConfigDiff) {
 			}
 		}
 	}
+	d.cover("servers.*.read_timeout")
+	d.cover("servers.*.read_header_timeout")
+	d.cover("servers.*.write_timeout")
+	d.cover("servers.*.idle_timeout")
 }
 
 func diffServerBodyLimit(name string, b, a serverWrapper, d *ConfigDiff) {
@@ -211,9 +242,11 @@ func diffServerBodyLimit(name string, b, a serverWrapper, d *ConfigDiff) {
 			d.warn("Removing the request body size limit on %s allows arbitrarily large uploads.", name)
 		}
 	}
+	d.cover("servers.*.client_max_body_size")
 }
 
 func diffServerTLS(name string, b, a *config.TLSConfig, d *ConfigDiff) {
+	defer d.cover("servers.*.tls")
 	bOn, aOn := b != nil && b.Enabled, a != nil && a.Enabled
 	if bOn != aOn {
 		action := "Enable"

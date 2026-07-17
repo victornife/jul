@@ -22,3 +22,8 @@ const http3Compiled = false
 func startHTTP3(_ string, _ func(*tls.ClientHelloInfo) (*tls.Certificate, error), _ http.Handler, _ func(int64), _ *slog.Logger) (h3Listener, error) {
 	return nil, errors.New("http3 requires a build with -tags http3")
 }
+
+// newStagedHTTP3 is the no-HTTP/3 stub for staged QUIC creation.
+func newStagedHTTP3(_ string, _ func(*tls.ClientHelloInfo) (*tls.Certificate, error), _ http.Handler, _ func(int64), _ *slog.Logger) (h3Listener, error) {
+	return nil, errors.New("http3 requires a build with -tags http3")
+}

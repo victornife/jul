@@ -5,12 +5,12 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +20,7 @@ import (
 	"jul/internal/cache"
 	"jul/internal/config"
 	"jul/internal/egress"
+	"jul/internal/lifecycle"
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/plugins"
@@ -83,10 +84,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return 1
 	}
 
-	// Store a digest of the resolved admin token so PendingRestartCheck can
-	// detect content rotation (file-backed secret whose path is unchanged but
-	// whose content changed). Never log or expose this value.
-	startupAdminTokenHash := sha256.Sum256([]byte(cfg.Admin.Token))
+	// Capture the startup-bound effective fingerprint for restart-required
+	// checks. Both the admin preflight and the Console pending-restart banner
+	// compare candidate effective values against this fingerprint.
+	startupFP := lifecycle.ComputeFingerprint(cfg)
 
 	// The response cache persists across reloads so counters and LRU state
 	// survive config edits. Created once and captured by the handler factory.
@@ -192,7 +193,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// factory adapts HandlerFactory.Prepare to the server reload hook: the
 	// three-phase prepare/commit/abort pattern keeps the generation uncommitted
 	// until listener staging succeeds (R4-01).
-	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
+	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
 		return f.Prepare(c)
 	}
 
@@ -227,6 +228,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	pf := Preflight{
 		BuildHandlers: f.Build,
 		Stream:        rt.Stream,
+		StartupFP:     startupFP,
 	}
 
 	// ── Section 4: Admin deps ──────────────────────────────────────────────
@@ -310,55 +312,30 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil || current == nil {
 				return nil
 			}
-			var pending []string
-			if _, need := server.CacheRestartRequired(startupCfg, current); need {
-				pending = append(pending, "cache")
+			expanded, _, _, err := config.Resolve(current)
+			if err != nil {
+				return nil
 			}
-			if _, need := server.EgressRestartRequired(startupCfg, current); need {
-				pending = append(pending, "egress")
-			}
-			if _, need := server.AdminRestartRequired(startupCfg, current); need {
-				pending = append(pending, "admin")
-			} else if current.Admin.Enabled {
-				// AdminRestartRequired compared unexpanded reference strings.
-				// Also detect file-backed token content rotation: clone and
-				// expand in a snapshot/restore pair so the read path does not
-				// permanently mutate the global redaction registry (R4-05).
-				if expanded, cerr := current.Clone(); cerr == nil {
-					snap := redact.Snapshot()
-					if xerr := config.ExpandSecrets(expanded); xerr == nil {
-						hash := sha256.Sum256([]byte(expanded.Admin.Token))
-						redact.Restore(snap)
-						if hash != startupAdminTokenHash {
-							pending = append(pending, "admin")
-						}
-					} else {
-						redact.Restore(snap)
-					}
+			currentFP := lifecycle.ComputeFingerprint(expanded)
+
+			pendingSet := make(map[string]struct{})
+			for _, path := range lifecycle.Diff(startupFP, currentFP) {
+				if e := lifecycle.ByPath(path); e != nil {
+					pendingSet[e.Subsystem] = struct{}{}
 				}
 			}
-			if _, need := server.MetricsRestartRequired(startupCfg, current); need {
-				pending = append(pending, "metrics")
-			}
-			if _, need := server.LogFormatRestartRequired(startupCfg, current); need {
-				pending = append(pending, "log_format")
-			}
-			if _, need := server.TracingRestartRequired(startupCfg, current); need {
-				pending = append(pending, "tracing")
-			}
-			if _, need := server.AccessLogRestartRequired(startupCfg, current); need {
-				pending = append(pending, "access_log")
-			}
-			if _, need := server.ACMERestartRequired(startupCfg.Servers, current.Servers); need {
-				pending = append(pending, "acme")
-			}
 			if _, need := server.ListenerRebindRequired(startupCfg, current); need {
-				pending = append(pending, "listener")
+				pendingSet["listener"] = struct{}{}
 			}
+
+			pending := make([]string, 0, len(pendingSet))
+			for sub := range pendingSet {
+				pending = append(pending, sub)
+			}
+			sort.Strings(pending)
 			return pending
 		}
 	}
-
 
 	// Construct the server and wire LastReload into deps BEFORE creating the
 	// admin server. admin.New copies deps by value, so any callback assigned
@@ -396,13 +373,15 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// but do not roll back the HTTP swap (the listener sets are independent).
 	srv.OnReloaded = func(c *config.Config) error {
 		// Hot-reload log level without rebuilding the handler. Log format changes
-		// are restart-required and blocked by reloadRestartRequired before here.
+		// are restart-required and blocked by lifecycle checks before here.
 		setLogLevel(c.Global.LogLevel)
 		// Apply worker_threads on reload. When set to a positive integer, cap
-		// GOMAXPROCS; when "auto" or empty, skip the call and let the Go runtime
-		// manage GOMAXPROCS automatically (container-aware, R3-08).
+		// GOMAXPROCS; when "auto" or empty, restore the initial container-aware
+		// default captured at process startup (R5-08).
 		if n := parseWorkerThreads(c.Global.WorkerThreads); n > 0 {
 			runtime.GOMAXPROCS(n)
+		} else {
+			runtime.GOMAXPROCS(lifecycle.InitialGOMAXPROCS())
 		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)

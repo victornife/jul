@@ -137,3 +137,49 @@ func TestContainsSecretRef(t *testing.T) {
 		t.Error("unknown scheme should not count as a supported ref")
 	}
 }
+
+func TestResolveDoesNotMutateLiveRedaction(t *testing.T) {
+	redact.Install(redact.EmptyState())
+	t.Setenv("JUL_RESOLVE_TEST", "resolve-secret")
+
+	c := &Config{Admin: AdminConfig{Token: "${env:JUL_RESOLVE_TEST}"}}
+	expanded, state, digests, err := Resolve(c)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if expanded.Admin.Token != "resolve-secret" {
+		t.Fatalf("expanded token = %q, want resolve-secret", expanded.Admin.Token)
+	}
+	if state.Count() != 1 {
+		t.Fatalf("state count = %d, want 1", state.Count())
+	}
+	if digests["${env:JUL_RESOLVE_TEST}"] == "" {
+		t.Fatal("expected digest for env reference")
+	}
+	if redact.Apply("resolve-secret") != "resolve-secret" {
+		t.Fatal("Resolve mutated the live redaction registry")
+	}
+	// After explicit install the secret is masked.
+	redact.Install(state)
+	if redact.Apply("resolve-secret") != "***" {
+		t.Fatal("installed state does not mask the secret")
+	}
+}
+
+func TestResolveReturnsFileDigest(t *testing.T) {
+	dir := t.TempDir()
+	secretFile := filepath.Join(dir, "secret")
+	if err := os.WriteFile(secretFile, []byte("file-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Config{Admin: AdminConfig{Token: "${file:" + secretFile + "}"}}
+	_, _, digests, err := Resolve(c)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	ref := "${file:" + secretFile + "}"
+	if digests[ref] == "" {
+		t.Fatal("expected digest for file reference")
+	}
+}

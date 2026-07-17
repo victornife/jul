@@ -425,3 +425,26 @@ func TestDiffServerHostNames(t *testing.T) {
 		t.Errorf("did not expect a change for reordered names, got %+v", d)
 	}
 }
+
+// TestDiffLifecycleCompleteness verifies that changes to fields not explicitly
+// compared by the high-level comparators are still surfaced by the
+// registry-driven completeness pass.
+func TestDiffLifecycleCompleteness(t *testing.T) {
+	mk := func(h2c, http3 bool) *config.Config {
+		return &config.Config{Servers: []config.ServerConfig{{
+			Listen: ":8080",
+			H2C:    h2c,
+			HTTP3:  &config.HTTP3Config{Enabled: http3},
+		}}}
+	}
+	d := diffConfigs(mk(false, false), mk(true, true))
+	if !diffHas(d, "servers.*.h2c") {
+		t.Errorf("expected lifecycle completeness entry for h2c, got %+v", d)
+	}
+	if !diffHas(d, "servers.*.http3") {
+		t.Errorf("expected lifecycle completeness entry for http3, got %+v", d)
+	}
+	if !warnHas(d, "restart-required") {
+		t.Errorf("expected restart-required warning for h2c/http3 change, got %+v", d.Warnings)
+	}
+}

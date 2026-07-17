@@ -25,7 +25,7 @@ version: 1
 
 restart_required:
   - subsystem: log_format
-    gated_by: "internal/server.LogFormatRestartRequired"
+    gated_by: "internal/lifecycle.RestartRequired"
     reason: >
       The logger handler (text vs JSON) is built once at startup by
       observability.NewDynamicLogger. Changing the format requires rebuilding
@@ -33,6 +33,17 @@ restart_required:
       hot_reload section).
     fields:
       - "[global].log_format"
+
+  - subsystem: global_process
+    gated_by: "internal/lifecycle.RestartRequired"
+    reason: >
+      Process-wide caps and legacy sinks are consumed at startup; changing
+      them after start has no effect or requires rebuilding startup state.
+    fields:
+      - "[global].worker_threads"
+      - "[global].access_log"
+      - "[global].error_log"
+      - "[global].redact_min_secret_length"
 
   - subsystem: cache
     gated_by: "internal/server.CacheRestartRequired"
@@ -129,27 +140,68 @@ restart_required:
       - "[[servers]].tls.acme.challenge"
       - "[[servers]].tls.acme.cache_dir"
 
+  - subsystem: listener_h2c
+    gated_by: "internal/server.listenerBoundRebindRequired"
+    reason: >
+      Cleartext HTTP/2 negotiation is set on the net/http.Server when the
+      listener binds; it cannot be toggled on an already-bound address without
+      a restart.
+    fields:
+      - "[[servers]].h2c"
+
+  - subsystem: listener_http3
+    gated_by: "internal/server.listenerBoundRebindRequired"
+    reason: >
+      The HTTP/3 (QUIC) listener and its Alt-Svc advertisement are created with
+      the TLS listener; changing them on an already-bound address requires a
+      restart.
+    fields:
+      - "[[servers]].http3.enabled"
+      - "[[servers]].http3.alt_svc_max_age"
+
+  - subsystem: listener_tls
+    gated_by: "internal/server.listenerBoundRebindRequired"
+    reason: >
+      The TLS handshake configuration (certificate, minimum version, mutual TLS)
+      is bound to the listener at creation; changing it on an already-bound
+      address requires a restart.
+    fields:
+      - "[[servers]].tls.enabled"
+      - "[[servers]].tls.min_version"
+      - "[[servers]].tls.client_auth.*"
+
+  - subsystem: stream_protocol
+    gated_by: "internal/lifecycle.RestartRequired"
+    reason: >
+      The L4 protocol (TCP or UDP) is chosen when the stream listener is
+      created; switching it on an already-bound address requires a restart.
+    fields:
+      - "[[stream]].protocol"
+
 new_listener_only:
   - subsystem: listener_bind
     gated_by: "internal/server.ListenerRebindRequired"
     reason: >
-      The TCP socket is bound once per listen address; these properties are
-      baked into the net.Listener and http.Server at bind time. They apply
+      The TCP socket is bound once per listen address; timeouts and header limits
+      are baked into the net.Listener and http.Server at bind time. They apply
       immediately to a brand-new listen address; for an address the server is
       already serving they require a restart.
     fields:
+      - "[[servers]].listen"
       - "[[servers]].read_header_timeout"
       - "[[servers]].read_timeout"
       - "[[servers]].write_timeout"
       - "[[servers]].idle_timeout"
       - "[[servers]].max_header_bytes"
-      - "[[servers]].h2c"
-      - "[[servers]].http3.enabled"
-      - "[[servers]].http3.alt_svc_max_age"
-      - "[[servers]].tls.enabled"
-      - "[[servers]].tls.min_version"
-      - "[[servers]].tls.client_auth.*"
       - "[rate_limit].max_conns"
+
+  - subsystem: stream_listener
+    gated_by: "internal/server.ListenerRebindRequired"
+    reason: >
+      L4 listeners are keyed by protocol and address. A new address is bound
+      fresh on reload; a kept address keeps its existing socket.
+    fields:
+      - "[[stream]].listen"
 
 hot_reload:
   note: >

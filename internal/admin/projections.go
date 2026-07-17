@@ -310,7 +310,7 @@ func projectTLS(c *config.Config, live []CertStatus) []CertProjection {
 		}
 	}
 
-	var certs []CertProjection
+	certs := make([]CertProjection, 0)
 	for i := range c.Servers {
 		srv := &c.Servers[i]
 		if srv.TLS == nil || !srv.TLS.Enabled {

@@ -4,6 +4,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -26,37 +28,71 @@ var secretRefRE = regexp.MustCompile(`\$\{(env|file|secret):([^}]*)\}`)
 // would leak the literal "${...}" into, say, a token field).
 var secretRefAnyRE = regexp.MustCompile(`\$\{([A-Za-z_]+):([^}]*)\}`)
 
-// ExpandSecrets resolves secret references (${env:NAME}, ${file:/path}) in every
-// string field of the configuration in place, replacing each reference with its
-// resolved value. Resolved values are registered with the redact package so
-// they are masked from logs. It returns an error that joins every reference it
-// could not resolve, so a single run surfaces all problems.
+// Resolve resolves secret references (${env:NAME}, ${file:/path}) in a deep
+// copy of c and returns the expanded configuration, a self-contained redaction
+// State covering all resolved values, and a digest map keyed by the original
+// reference string (e.g. "${file:/path}") whose value is a SHA-256 digest of
+// the bytes actually consumed. It does not mutate the live redaction registry.
 //
-// It is invoked on the serving configuration just before the runtime is built
-// (and on every reload). The on-disk and admin-facing representations keep the
-// unresolved references, so secrets are never written back to disk or surfaced
-// through the console.
-func ExpandSecrets(c *Config) error {
-	// Apply the operator-configured redaction floor before any resolved secret is
-	// registered, so a lowered floor masks short secrets and a reload that
-	// removes the override restores the default.
-	redact.SetMinLen(c.Global.RedactMinSecretLength)
+// The returned redaction state should be installed with redact.Install only at
+// the reload commit boundary. Validation and preflight can call Resolve and
+// discard the state on failure.
+func Resolve(c *Config) (*Config, redact.State, map[string]string, error) {
+	clone, err := c.Clone()
+	if err != nil {
+		return nil, redact.State{}, nil, fmt.Errorf("clone config for secret resolution: %w", err)
+	}
+
+	minLen := redact.DefaultMinLen
+	if clone.Global.RedactMinSecretLength > 0 {
+		minLen = clone.Global.RedactMinSecretLength
+	}
+
 	var errs []error
 	active := make(map[string]struct{})
-	minLen := redact.DefaultMinLen
-	if c.Global.RedactMinSecretLength > 0 {
-		minLen = c.Global.RedactMinSecretLength
-	}
-	walkConfigStrings(c, func(s string) string {
-		out, err := resolveSecretRefs(s, active, minLen)
+	digests := make(map[string]string)
+
+	walkConfigStrings(clone, func(s string) string {
+		out, err := resolveSecretRefs(s, active, digests, minLen)
 		if err != nil {
 			errs = append(errs, err)
 			return s
 		}
 		return out
 	})
-	redact.Replace(active)
-	return errors.Join(errs...)
+
+	if err := errors.Join(errs...); err != nil {
+		return nil, redact.State{}, nil, err
+	}
+
+	values := make([]string, 0, len(active))
+	for v := range active {
+		values = append(values, v)
+	}
+	state := redact.NewState(values, minLen)
+	return clone, state, digests, nil
+}
+
+// ExpandSecrets resolves secret references in every string field of c in place,
+// replacing each reference with its resolved value, and installs the resulting
+// redaction State as the live global state. Resolved values are masked from
+// logs. It returns an error that joins every reference it could not resolve.
+//
+// It is invoked on the serving configuration just before the runtime is built
+// (and on every reload). The on-disk and admin-facing representations keep the
+// unresolved references, so secrets are never written back to disk or surfaced
+// through the console.
+//
+// Deprecated: prefer Resolve for new code and call redact.Install only at the
+// reload commit boundary.
+func ExpandSecrets(c *Config) error {
+	expanded, state, _, err := Resolve(c)
+	if err != nil {
+		return err
+	}
+	*c = *expanded
+	redact.Install(state)
+	return nil
 }
 
 // CountSecretRefs reports how many secret references appear across all string
@@ -79,9 +115,10 @@ func containsSecretRef(s string) bool {
 }
 
 // resolveSecretRefs replaces every recognized secret reference in s with its
-// resolved value, registering the value for log redaction. A reference using an
-// unknown scheme (e.g. ${vault:...}) is an error so typos fail loudly.
-func resolveSecretRefs(s string, active map[string]struct{}, minLen int) (string, error) {
+// resolved value, registering the value for log redaction and recording a
+// digest of the consumed secret. A reference using an unknown scheme (e.g.
+// ${vault:...}) is an error so typos fail loudly.
+func resolveSecretRefs(s string, active map[string]struct{}, digests map[string]string, minLen int) (string, error) {
 	if !strings.Contains(s, "${") {
 		return s, nil
 	}
@@ -108,6 +145,7 @@ func resolveSecretRefs(s string, active map[string]struct{}, minLen int) (string
 		if len(val) >= minLen {
 			active[val] = struct{}{}
 		}
+		digests[match] = digestBytes([]byte(val))
 		return val
 	})
 	if resolveErr != nil {
@@ -142,6 +180,11 @@ func resolveOne(scheme, body string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown secret reference scheme %q (want env or file)", scheme)
 	}
+}
+
+func digestBytes(b []byte) string {
+	h := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(h[:])
 }
 
 // walkConfigStrings visits every settable string in the configuration —

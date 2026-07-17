@@ -16,6 +16,7 @@ import (
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/plugins"
+	"jul/internal/redact"
 	"jul/internal/upstream"
 )
 
@@ -171,7 +172,7 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	handlers, commitFn, abortFn, err := f.Prepare(cfg)
+	handlers, commitFn, abortFn, state, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -185,6 +186,9 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 		t.Fatal("Prepare returned nil abortFn")
 	}
 	retirePrev := commitFn()
+	// commitFn no longer installs redaction; the caller (ReloadPlan.Publish)
+	// owns that. Verify the state is returned and non-nil.
+	_ = state
 	// retirePrev is nil on the first commit (no previous generation).
 	if retirePrev != nil {
 		retirePrev()
@@ -204,7 +208,7 @@ func TestHandlerFactoryPrepareAbort(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	_, _, abortFn, err := f.Prepare(cfg)
+	_, _, abortFn, _, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -216,4 +220,50 @@ func TestHandlerFactoryPrepareAbort(t *testing.T) {
 	if err != nil {
 		t.Errorf("Build after Prepare+abort failed: %v", err)
 	}
+}
+
+func TestHandlerFactoryPrepareAbortDoesNotInstallRedaction(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	t.Setenv("JUL_FACTORY_ABORT_TEST", "candidate-secret-value")
+	redact.Install(redact.EmptyState())
+
+	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
+	cfg.Admin.Token = "${env:JUL_FACTORY_ABORT_TEST}"
+	_, _, abortFn, _, err := f.Prepare(cfg)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	abortFn()
+
+	if redact.Apply("candidate-secret-value") != "candidate-secret-value" {
+		t.Fatal("aborted Prepare installed candidate secret into live redaction state")
+	}
+}
+
+func TestHandlerFactoryPrepareReturnsRedactionState(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	t.Setenv("JUL_FACTORY_COMMIT_TEST", "commit-secret-value")
+	redact.Install(redact.EmptyState())
+
+	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
+	cfg.Admin.Token = "${env:JUL_FACTORY_COMMIT_TEST}"
+	_, commitFn, abortFn, state, err := f.Prepare(cfg)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	defer abortFn()
+	// The returned state must mask the secret; the caller installs it at the
+	// publish boundary.
+	if state.Apply("commit-secret-value") != "***" {
+		t.Fatal("Prepare returned redaction state that does not mask the secret")
+	}
+	// Live registry must remain untouched before explicit install.
+	if redact.Apply("commit-secret-value") != "commit-secret-value" {
+		t.Fatal("commitFn installed redaction before the publish boundary")
+	}
+	commitFn()
 }

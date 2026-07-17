@@ -13,11 +13,18 @@ import (
 	"jul/internal/config"
 )
 
-// h3Listener is the lifecycle handle for a running HTTP/3 (QUIC) listener. The
+// h3Listener is the lifecycle handle for a staged HTTP/3 (QUIC) listener. The
 // concrete type is built only in http3-tagged builds (see http3.go); the stub
 // build (http3_stub.go) never produces a value, so this stays a small interface
-// the untagged server lifecycle can hold and Close without importing quic-go.
+// the untagged server lifecycle can hold, Activate, and Close without importing
+// quic-go. Activation starts the accept loop; until Activate the QUIC socket
+// exists but does not serve.
 type h3Listener interface {
+	// Activate starts accepting QUIC connections and serving HTTP/3. It must be
+	// called only after the handler generation that covers this address has been
+	// published, so in-flight requests see the correct handlers immediately.
+	Activate() error
+
 	// Close stops serving HTTP/3 and releases the UDP socket, draining in-flight
 	// requests until ctx is done. The server lifecycle derives ctx from the
 	// configured shutdown_timeout so HTTP/3 drains on the same budget as the

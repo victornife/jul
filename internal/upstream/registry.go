@@ -228,6 +228,19 @@ func (r *Registry) Abort() {
 	r.staged = make(map[string]*poolEntry)
 }
 
+// SnapshotPool returns an immutable snapshot of the live pool for name, or nil
+// if the pool is not currently live. It is used by the factory's
+// generation-scoped snapshot middleware to capture the backend set at
+// generation commit time.
+func (r *Registry) SnapshotPool(name string) *PoolSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e, ok := r.live[name]; ok {
+		return e.pool.Snapshot()
+	}
+	return nil
+}
+
 // CloseAll stops every live pool's goroutines. It is called once at shutdown.
 func (r *Registry) CloseAll() {
 	r.mu.Lock()

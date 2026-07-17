@@ -164,3 +164,15 @@ features:
     maturity: GA
     doc: core-http.md
     criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}
+
+  - id: reload-tx
+    name: "Configuration reload transaction"
+    tags: ["core"]
+    maturity: GA
+    doc: reload-semantics.md
+    criteria: {1: true, 2: null, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+    notes: >
+      Reload transaction covered by conformance matrix in reload-semantics.md
+      and burn-in soak evidence; no custom benchmark target because reload
+      latency is recorded by LastReload and the burn-in generator. Fuzzing is
+      not applicable (no parser).

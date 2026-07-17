@@ -197,7 +197,7 @@ test(
 
     // Append a cache block — this crosses CacheRestartRequired and should be
     // rejected without writing anything.
-    const candidate = `${cfg.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MiB"\n`;
+    const candidate = `${cfg.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MB"\n`;
 
     const applyResp = await request.post(
       `${baseVersion ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}` : "/api/config/apply"}`,
@@ -254,10 +254,14 @@ test(
     expect(original.raw).toBeTruthy();
     const baseVersion = original.base_version ?? "";
 
-    // 2. Change log_level from "warn" to "debug" — a real semantic change
-    //    that is hot-reloadable (not restart-required).
+    // 2. Toggle log_level — a real semantic change that is hot-reloadable
+    //    (not restart-required). The starting level depends on leftover state
+    //    from earlier tests, so read it and switch to the other level.
     const originalRaw = original.raw ?? "";
-    const modified = originalRaw.replace(/log_level\s*=\s*"\w+"/, 'log_level = "debug"');
+    const levelMatch = originalRaw.match(/log_level\s*=\s*"(\w+)"/);
+    const currentLevel = levelMatch?.[1] ?? "warn";
+    const nextLevel = currentLevel === "debug" ? "warn" : "debug";
+    const modified = originalRaw.replace(/log_level\s*=\s*"\w+"/, `log_level = "${nextLevel}"`);
     // Sanity: the substitution changed something.
     expect(modified).not.toBe(originalRaw);
 
@@ -280,7 +284,7 @@ test(
     expect(afterApplyCfgResp.status()).toBe(200);
     const afterApplyCfgData: unknown = await afterApplyCfgResp.json();
     const afterApplyCfg = RawConfigSchema.parse(afterApplyCfgData);
-    expect(afterApplyCfg.raw ?? "").toContain('log_level = "debug"');
+    expect(afterApplyCfg.raw ?? "").toContain(`log_level = "${nextLevel}"`);
 
     // 4. A history entry must exist (the apply snapshots the previous config).
     const histResp = await request.get("/api/config/history");
@@ -302,7 +306,175 @@ test(
     expect(afterResp.status()).toBe(200);
     const afterData: unknown = await afterResp.json();
     const after = RawConfigSchema.parse(afterData);
-    expect(after.raw ?? "").not.toContain('log_level = "debug"');
-    expect(after.raw ?? "").toContain('log_level = "warn"');
+    expect(after.raw ?? "").not.toContain(`log_level = "${nextLevel}"`);
+    expect(after.raw ?? "").toContain(`log_level = "${currentLevel}"`);
+  },
+);
+
+// ── Reload serving behaviour (R5-11) ────────────────────────────────────────
+
+const trafficURL = "http://127.0.0.1:9292/";
+
+async function expectStaticOK(request: any, expected: string) {
+  const resp = await request.get(trafficURL, { headers: { Authorization: "" } });
+  expect(resp.status()).toBe(200);
+  const body = await resp.text();
+  expect(body).toContain(expected);
+}
+
+test(
+  "successful hot reload switches traffic serving",
+  async ({ request }) => {
+    // 1. Baseline traffic content.
+    await expectStaticOK(request, "Jul static OK");
+
+    // 2. Read current config and switch the static root to www-reload.
+    const cfgResp = await request.get("/api/config");
+    expect(cfgResp.status()).toBe(200);
+    const cfgData: unknown = await cfgResp.json();
+    const original = RawConfigSchema.parse(cfgData);
+    const baseVersion = original.base_version ?? "";
+    expect(original.raw ?? "").toContain('root = "testdata/www"');
+
+    const modified = (original.raw ?? "").replace(
+      'root = "testdata/www"',
+      'root = "testdata/www-reload"',
+    );
+    expect(modified).not.toBe(original.raw ?? "");
+
+    const applyUrl = baseVersion
+      ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
+      : "/api/config/apply";
+    const applyResp = await request.post(applyUrl, {
+      headers: { "Content-Type": "application/toml" },
+      data: modified,
+    });
+    expect(applyResp.status()).toBe(200);
+    const applyResult = assertShape(ApplyResultSchema, await applyResp.json(), "/api/config/apply");
+    expect(applyResult.ok).toBe(true);
+
+    // 3. Traffic must now serve the reloaded content.
+    await expectStaticOK(request, "Jul reloaded OK");
+
+    // 4. Roll back via the most recent history entry.
+    const histResp = await request.get("/api/config/history");
+    expect(histResp.status()).toBe(200);
+    const history = z.array(HistoryEntrySchema).parse(await histResp.json());
+    expect(history.length).toBeGreaterThan(0);
+    const rollbackResp = await request.post("/api/config/rollback", {
+      headers: { "Content-Type": "application/json" },
+      data: JSON.stringify({ id: history[0].id }),
+    });
+    expect([200, 204]).toContain(rollbackResp.status());
+
+    // 5. Traffic must revert to the original content.
+    await expectStaticOK(request, "Jul static OK");
+  },
+);
+
+test(
+  "rejected restart-required reload leaves traffic unchanged",
+  async ({ request }) => {
+    // 1. Baseline traffic content.
+    await expectStaticOK(request, "Jul static OK");
+
+    // 2. Read current config and append a restart-required [cache] block.
+    const cfgResp = await request.get("/api/config");
+    expect(cfgResp.status()).toBe(200);
+    const cfgData: unknown = await cfgResp.json();
+    const original = RawConfigSchema.parse(cfgData);
+    const baseVersion = original.base_version ?? "";
+    const candidate = `${original.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MB"\n`;
+
+    const applyUrl = baseVersion
+      ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
+      : "/api/config/apply";
+    const applyResp = await request.post(applyUrl, {
+      headers: { "Content-Type": "application/toml" },
+      data: candidate,
+    });
+    expect(applyResp.status()).toBe(409);
+    const body = (await applyResp.json()) as Record<string, unknown>;
+    expect(body.restart_required).toBe(true);
+
+    // 3. Traffic must still serve the original content (no partial swap).
+    await expectStaticOK(request, "Jul static OK");
+
+    // 4. On-disk config must be unchanged too.
+    const afterResp = await request.get("/api/config");
+    expect(afterResp.status()).toBe(200);
+    const after = RawConfigSchema.parse(await afterResp.json());
+    expect(after.raw ?? "").not.toContain("[cache]");
+  },
+);
+
+test(
+  "invalid config apply leaves traffic unchanged",
+  async ({ request }) => {
+    // 1. Baseline traffic content.
+    await expectStaticOK(request, "Jul static OK");
+
+    // 2. Send malformed TOML.
+    const applyResp = await request.post("/api/config/apply", {
+      headers: { "Content-Type": "application/toml" },
+      data: "[[servers\nmalformed toml",
+    });
+    expect(applyResp.status()).toBe(400);
+
+    // 3. Traffic must still serve the original content.
+    await expectStaticOK(request, "Jul static OK");
+  },
+);
+
+test(
+  "concurrent reload churn preserves traffic availability",
+  async ({ request }) => {
+    // 1. Baseline traffic content.
+    await expectStaticOK(request, "Jul static OK");
+
+    // 2. Apply several hot-reloadable toggles in sequence, verifying traffic
+    //    remains available after each one.
+    const cfgResp = await request.get("/api/config");
+    expect(cfgResp.status()).toBe(200);
+    const cfgData: unknown = await cfgResp.json();
+    const original = RawConfigSchema.parse(cfgData);
+    const baseVersion = original.base_version ?? "";
+
+    for (let i = 0; i < 3; i++) {
+      const level = i % 2 === 0 ? "debug" : "warn";
+      const modified = (original.raw ?? "").replace(
+        /log_level\s*=\s*"\w+"/,
+        `log_level = "${level}"`,
+      );
+      // Re-read the live base_version each iteration so optimistic concurrency
+      // does not reject the churn.
+      const currentCfgResp = await request.get("/api/config");
+      expect(currentCfgResp.status()).toBe(200);
+      const currentCfg = RawConfigSchema.parse(await currentCfgResp.json());
+      const currentVersion = currentCfg.base_version ?? "";
+      const applyUrl = currentVersion
+        ? `/api/config/apply?base_version=${encodeURIComponent(currentVersion)}`
+        : "/api/config/apply";
+      const applyResp = await request.post(applyUrl, {
+        headers: { "Content-Type": "application/toml" },
+        data: modified,
+      });
+      expect(applyResp.status()).toBe(200);
+      await expectStaticOK(request, "Jul static OK");
+    }
+
+    // 3. Restore original log_level using a fresh version token.
+    const finalCfgResp = await request.get("/api/config");
+    expect(finalCfgResp.status()).toBe(200);
+    const finalCfg = RawConfigSchema.parse(await finalCfgResp.json());
+    const finalVersion = finalCfg.base_version ?? "";
+    const restoreUrl = finalVersion
+      ? `/api/config/apply?base_version=${encodeURIComponent(finalVersion)}`
+      : "/api/config/apply";
+    const restoreResp = await request.post(restoreUrl, {
+      headers: { "Content-Type": "application/toml" },
+      data: original.raw ?? "",
+    });
+    expect(restoreResp.status()).toBe(200);
   },
 );

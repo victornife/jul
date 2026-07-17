@@ -22,6 +22,7 @@ var ErrNoAvailableBackend = errors.New("no available upstream backend")
 type Pool struct {
 	name        string
 	scheme      string
+	strategy    string
 	balancer    Balancer
 	maxFails    int
 	failTimeout time.Duration
@@ -58,6 +59,7 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 	p := &Pool{
 		name:        cfg.Name,
 		scheme:      scheme,
+		strategy:    cfg.Strategy,
 		balancer:    newBalancer(cfg.Strategy),
 		maxFails:    maxFails,
 		failTimeout: failTimeout,

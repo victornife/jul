@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.32 · Updated 2026-07-13
+> Version 1.33 · Updated 2026-07-17
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -40,6 +40,15 @@ labelled **GA — soak pending** until its soak run completes.
 
 Cell key: ✅ met · ☐ open · n/a not applicable (no custom parser).
 
+> **Configuration reload transaction.** The reload path is now implemented as
+> a single `ReloadPlan` value (ADR 0011): validation, listener staging, handler
+> publication, activation, and retirement are sequenced so no client request is
+> served by a listener before its handler generation is live. The authoritative
+> lifecycle classification is in [`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go)
+> and [`docs/config-lifecycle.yaml`](config-lifecycle.yaml). See the dedicated
+> row in the GA table below and [reload-semantics.md](reload-semantics.md) for
+> the full contract.
+
 ## GA
 
 All nine criteria met, including the post-GA soak gate in
@@ -56,6 +65,7 @@ release-blocking regression, not a reason to retract the label.
 | OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
 | Response cache (memory + disk) | core-cache | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
 | Core HTTP (static/proxy/FastCGI/vhosts/routing) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
+| Configuration reload transaction | reload-tx | core | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 | Zero-config + `jul lint` | Y1-08 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [zeroconf.md](zeroconf.md) |
@@ -157,6 +167,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | 2026-07-03 | 1.28 | **Beta → GA — soak pending:** Y1-05 Active health checks reaches GA — soak pending. Evidence: probe conformance matrix, threshold/limitation docs, balancer benchmarks. | [health.md](health.md), [status.md](status.md) |
 | 2026-06-30 | 1.27 | **Console continuous panels status correction:** the Console v2 Y2-09 remaining-work note is updated to show that live log tail, the WASM plugin manager, the gRPC route designer, and the `.wasm` upload incremental feature are all shipped. The roadmap `Not yet shipped` wording is corrected from "none" to an explicit panel table so the source of truth does not drift. | [status.md](status.md), [roadmap/README.md](roadmap/README.md) |
 | 2026-06-29 | 1.26 | **gRPC transcoding upstream pools + plugin fetch truncation + re-audit residuals:** upstream pool support for `grpc_transcode` targets; plugin fetch response truncation guard; documentation and validation fixes from external audit round. | [status.md](status.md) |
+| 2026-07-17 | 1.33 | **Round 5 reload-transaction remediation completed.** `ReloadPlan` transaction is GA; `lifecycle.Registry` is the single source of truth for restart-required/new-listener-only classification; diff is registry-driven; listener activation is gated after handler publication; generation-scoped pool snapshots isolate in-flight requests from newer/removed backends; `docs/config-lifecycle.yaml` is validated against the Go registry by `docs-check.py`; reload semantics rewritten to match the implemented transaction. | [reload-semantics.md](reload-semantics.md), [internal/lifecycle/lifecycle.go](../internal/lifecycle/lifecycle.go), [internal/server/reload_plan.go](../internal/server/reload_plan.go) |
 | 2026-07-05 | 1.30 | **Phase 2A soak completed + mass promotion to GA.** Consolidated 10-feature 8h burn-in finished (2.12M req, 0% err, 100% success) → mass-closes soak for TLS, mTLS, and OTel tracing in status + ga-push. All promoted rows now ✅. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [ga-push.md](ga-push.md) |
 | 2026-07-07 | 1.31 | **gRPC soak completed + promotion to GA.** Isolated 1h soak for transcoding (14.2M req, 0.000007% err) and passthrough (6.8M req, 0.0002% err) on Windows/amd64. Fixed `scripts/grpc-load.go` connection-pooling + body-drain to eliminate Windows ephemeral-port exhaustion on the test client (not a server bug). Both features promoted from GA — soak pending → GA. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
 | 2026-07-11 | 1.32 | **L4 stream proxy soak completed + promotion to GA.** Isolated 8h Linux soak (`TestSoakUDPChurn`) completed with 54,892,354 sends and 0 errors; goroutine/heap growth stayed bounded. Evidence logged in the soak log and status table. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [stream.md](stream.md) |

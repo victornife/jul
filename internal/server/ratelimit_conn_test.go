@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/redact"
 )
 
 // TestServerConnectionCap verifies that RateLimit.MaxConns caps concurrent
@@ -28,7 +29,7 @@ func TestServerConnectionCap(t *testing.T) {
 	var releaseOnce sync.Once
 	doRelease := func() { releaseOnce.Do(func() { close(release) }) }
 
-	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), error) {
+	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&entered, 1)
 			<-release
@@ -38,7 +39,7 @@ func TestServerConnectionCap(t *testing.T) {
 		for _, srv := range c.Servers {
 			m[srv.Listen] = h
 		}
-		return m, func() func() { return nil }, func() {}, nil
+		return m, func() func() { return nil }, func() {}, redact.EmptyState(), nil
 	}
 
 	cfg := &config.Config{
@@ -60,14 +61,35 @@ func TestServerConnectionCap(t *testing.T) {
 		<-done
 	})
 
-	waitListenerUp(t, addr)
+	// Give the server a moment to start accepting. Without this the test can
+	// race ahead and the first connection reaches the handler too late.
+	time.Sleep(50 * time.Millisecond)
 
-	// Connection 1 takes the single slot and blocks inside the handler.
-	conn1, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial conn1: %v", err)
+	select {
+	case err := <-done:
+		t.Fatalf("Run exited early: %v", err)
+	default:
+	}
+
+	// Wait for the listener to accept by retrying the first real connection.
+	// We avoid a separate probe dial because MaxConns=1: a probe would consume
+	// the single slot and race with this connection.
+	var conn1 net.Conn
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var err error
+		conn1, err = net.Dial("tcp", addr)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("listener never came up: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	defer conn1.Close()
+
+	// Connection 1 takes the single slot and blocks inside the handler.
 	if _, err := io.WriteString(conn1, "GET / HTTP/1.1\r\nHost: t\r\n\r\n"); err != nil {
 		t.Fatalf("write conn1: %v", err)
 	}
@@ -107,21 +129,6 @@ func TestServerConnectionCap(t *testing.T) {
 	if !strings.Contains(string(resp[:n]), "200") {
 		t.Fatalf("conn2 response did not indicate success: %q", string(resp[:n]))
 	}
-}
-
-// waitListenerUp blocks until addr accepts TCP connections (the probe sends no
-// request, so it never invokes the handler).
-func waitListenerUp(t *testing.T, addr string) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
-			_ = c.Close()
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("listener never came up")
 }
 
 // waitForCount polls an atomic counter until it reaches want or times out.

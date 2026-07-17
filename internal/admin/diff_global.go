@@ -21,21 +21,26 @@ func diffGlobalSettings(before, after *config.Config, d *ConfigDiff) {
 	if b.LogLevel != a.LogLevel {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(b.LogLevel), After: orNone(a.LogLevel), Detail: "Change log level (hot-reloadable)"}, "global log_level")
 	}
+	d.cover("global.log_level")
 	if b.LogFormat != a.LogFormat {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(b.LogFormat), After: orNone(a.LogFormat), Detail: "Change log format — restart required to apply"}, "global log_format")
 	}
+	d.cover("global.log_format")
 	if b.WorkerThreads != a.WorkerThreads {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(b.WorkerThreads), After: orNone(a.WorkerThreads), Detail: "Change worker threads / GOMAXPROCS (hot-reloadable)"}, "global worker_threads")
 	}
+	d.cover("global.worker_threads")
 	if b.ShutdownTimeout != a.ShutdownTimeout {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: durStr(b.ShutdownTimeout), After: durStr(a.ShutdownTimeout), Detail: "Change graceful shutdown timeout"}, "global shutdown_timeout")
 	}
+	d.cover("global.shutdown_timeout")
 	if b.ReloadTimeout != a.ReloadTimeout {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: durStr(b.ReloadTimeout), After: durStr(a.ReloadTimeout), Detail: "Change reload timeout threshold"}, "global reload_timeout")
 	}
 	if b.RedactMinSecretLength != a.RedactMinSecretLength {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: fmt.Sprintf("%d", b.RedactMinSecretLength), After: fmt.Sprintf("%d", a.RedactMinSecretLength), Detail: "Change secret redaction minimum length"}, "global redact_min")
 	}
+	d.cover("global.redact_min_secret_length")
 }
 
 func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
@@ -46,9 +51,14 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: action + " the response cache"}, "cache")
+		d.cover("cache.enabled")
+		d.cover("cache.memory_max_size")
+		d.cover("cache.disk_path")
+		d.cover("cache.disk_max_size")
 		return
 	}
 	if !a.Enabled {
+		d.cover("cache.enabled")
 		return
 	}
 	if b.MemoryMaxSize != a.MemoryMaxSize {
@@ -69,6 +79,10 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	if b.StaleIfError != a.StaleIfError {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.StaleIfError), After: durStr(a.StaleIfError), Detail: "Change cache stale-if-error window"}, "cache sif")
 	}
+	d.cover("cache.enabled")
+	d.cover("cache.memory_max_size")
+	d.cover("cache.disk_path")
+	d.cover("cache.disk_max_size")
 }
 
 // diffGlobalCompression compares the [compression] block.
@@ -80,9 +94,13 @@ func diffGlobalCompression(before, after *config.Config, d *ConfigDiff) {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "compression", Name: "global", Detail: action + " response compression"}, "compression")
+		d.cover("compression.enabled")
+		d.cover("compression.types")
+		d.cover("compression.min_length")
 		return
 	}
 	if !a.IsEnabled() {
+		d.cover("compression.enabled")
 		return
 	}
 	if strings.Join(b.Encoders, ",") != strings.Join(a.Encoders, ",") {
@@ -104,6 +122,9 @@ func diffGlobalCompression(before, after *config.Config, d *ConfigDiff) {
 		}
 		d.mod(DiffEntry{Kind: "compression", Name: "global", Detail: action + " precompressed sidecar serving"}, "compression precompressed")
 	}
+	d.cover("compression.enabled")
+	d.cover("compression.types")
+	d.cover("compression.min_length")
 }
 
 // diffGlobalRateLimit compares the global [rate_limit] block.
@@ -118,9 +139,13 @@ func diffGlobalRateLimit(before, after *config.Config, d *ConfigDiff) {
 		if !a.Enabled {
 			d.warn("Disabling global rate limiting removes protection against request floods.")
 		}
+		d.cover("rate_limit.enabled")
+		d.cover("rate_limit.rate")
+		d.cover("rate_limit.burst")
 		return
 	}
 	if !a.Enabled {
+		d.cover("rate_limit.enabled")
 		return
 	}
 	if b.Key != a.Key || b.Rate != a.Rate || b.Burst != a.Burst {
@@ -129,6 +154,9 @@ func diffGlobalRateLimit(before, after *config.Config, d *ConfigDiff) {
 	if b.MaxConns != a.MaxConns {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: "global", Before: fmt.Sprintf("%d", b.MaxConns), After: fmt.Sprintf("%d", a.MaxConns), Detail: "Change max concurrent connections"}, "rate limit max conns")
 	}
+	d.cover("rate_limit.enabled")
+	d.cover("rate_limit.rate")
+	d.cover("rate_limit.burst")
 }
 
 // diffGlobalWAF compares the global [waf] block.
@@ -145,9 +173,13 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 		} else {
 			d.warn("Disabling the global WAF removes rule inspection from routes that do not have a per-location override.")
 		}
+		d.cover("waf.enabled")
+		d.cover("waf.mode")
+		d.cover("waf.crs_enabled")
 		return
 	}
 	if !a.Enabled {
+		d.cover("waf.enabled")
 		return
 	}
 	if b.Mode != a.Mode {
@@ -194,6 +226,9 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 	if b.InlineRules != a.InlineRules {
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: "Change global WAF inline rules"}, "waf global inline_rules")
 	}
+	d.cover("waf.enabled")
+	d.cover("waf.mode")
+	d.cover("waf.crs_enabled")
 }
 
 func diffSecretRefs(before, after *config.Config, d *ConfigDiff) {
@@ -219,9 +254,13 @@ func diffGlobalTracing(before, after *config.Config, d *ConfigDiff) {
 		if a.Enabled {
 			d.warn("Enabling tracing exports spans to the collector; it is only active in binaries built with the otel tag.")
 		}
+		d.cover("observability.tracing.enabled")
+		d.cover("observability.tracing.endpoint")
+		d.cover("observability.tracing.sample_ratio")
 		return
 	}
 	if !a.Enabled {
+		d.cover("observability.tracing.enabled")
 		return
 	}
 	if b.Exporter != a.Exporter {
@@ -242,6 +281,9 @@ func diffGlobalTracing(before, after *config.Config, d *ConfigDiff) {
 			d.warn("Tracing now sends spans over plaintext (insecure); only use this for a local collector on a trusted network.")
 		}
 	}
+	d.cover("observability.tracing.enabled")
+	d.cover("observability.tracing.endpoint")
+	d.cover("observability.tracing.sample_ratio")
 }
 
 // diffGlobalPlugins compares the declared WASM plugin set ([plugins.NAME]),
@@ -438,9 +480,11 @@ func diffStreamFields(key string, b, a config.StreamServer, d *ConfigDiff) {
 	if strings.TrimSpace(b.ProxyPass) != strings.TrimSpace(a.ProxyPass) {
 		d.mod(DiffEntry{Kind: "stream", Name: key, Before: orNone(b.ProxyPass), After: orNone(a.ProxyPass), Detail: "Change default backend for stream " + key}, "stream "+key+" proxy_pass")
 	}
+	d.cover("stream.*.proxy_pass")
 	if !stringMapEqual(trimSNIRoutes(b.SNIRoutes), trimSNIRoutes(a.SNIRoutes)) {
 		d.mod(DiffEntry{Kind: "stream", Name: key, Before: fmt.Sprintf("%d route%s", len(b.SNIRoutes), plural(len(b.SNIRoutes))), After: fmt.Sprintf("%d route%s", len(a.SNIRoutes), plural(len(a.SNIRoutes))), Detail: "Change SNI routes for stream " + key}, "stream "+key+" sni_routes")
 	}
+	d.cover("stream.*.sni_routes")
 	if b.TLSPassthrough != a.TLSPassthrough {
 		d.mod(DiffEntry{Kind: "stream", Name: key, Detail: "Change TLS passthrough flag for stream " + key}, "stream "+key+" tls_passthrough")
 	}
@@ -464,6 +508,8 @@ func diffStreamFields(key string, b, a config.StreamServer, d *ConfigDiff) {
 func diffGlobalEgress(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Egress, after.Egress
 	if b.Enabled == a.Enabled && strings.Join(b.Allow, ",") == strings.Join(a.Allow, ",") {
+		d.cover("egress.enabled")
+		d.cover("egress.allow")
 		return
 	}
 	if b.Enabled != a.Enabled {
@@ -483,6 +529,8 @@ func diffGlobalEgress(before, after *config.Config, d *ConfigDiff) {
 			d.warn("Tightening the egress allow-list restricts the server's outbound fetches (JWKS, forward-auth, discovery). The new policy takes effect on restart.")
 		}
 	}
+	d.cover("egress.enabled")
+	d.cover("egress.allow")
 }
 
 // diffGlobalAdmin compares the [admin] block. All changes are restart-required
@@ -503,6 +551,9 @@ func diffGlobalAdmin(before, after *config.Config, d *ConfigDiff) {
 		b.PluginUploadDir == a.PluginUploadDir &&
 		b.PluginUploadMaxSize == a.PluginUploadMaxSize &&
 		boolPtrEqDiff(b.PluginUploadEnabled, a.PluginUploadEnabled) {
+		d.cover("admin.enabled")
+		d.cover("admin.listen")
+		d.cover("admin.token")
 		return
 	}
 	if b.Token != a.Token {
@@ -536,6 +587,9 @@ func diffGlobalAdmin(before, after *config.Config, d *ConfigDiff) {
 		!boolPtrEqDiff(b.PluginUploadEnabled, a.PluginUploadEnabled) {
 		d.mod(DiffEntry{Kind: "admin", Name: "global", Detail: "Change admin server settings (console, history, rate limits, audit log, plugin upload) — restart required"}, "admin settings")
 	}
+	d.cover("admin.enabled")
+	d.cover("admin.listen")
+	d.cover("admin.token")
 }
 
 // boolPtrEqDiff reports whether two *bool values are semantically equal for
@@ -555,6 +609,7 @@ func boolPtrEqDiff(a, b *bool) bool {
 func diffGlobalMetrics(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Observability.Metrics, after.Observability.Metrics
 	if b == a {
+		d.cover("observability.metrics.host_label")
 		return
 	}
 	if b.HostLabel != a.HostLabel {
@@ -567,4 +622,5 @@ func diffGlobalMetrics(before, after *config.Config, d *ConfigDiff) {
 			d.warn("Enabling host_label adds the request Host as a Prometheus label; unbounded host cardinality can exhaust memory — only enable when the host set is bounded.")
 		}
 	}
+	d.cover("observability.metrics.host_label")
 }
