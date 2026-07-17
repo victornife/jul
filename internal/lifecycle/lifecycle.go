@@ -275,33 +275,50 @@ var addressKeyedPaths = map[string]struct{}{
 // the startup and candidate fingerprints. The comparison uses the effective
 // (expanded) values of startup-consumed fields only.
 func RestartRequired(startup, candidate Fingerprint) (string, bool) {
+	paths := DiffAddressAware(startup, candidate)
+	if len(paths) == 0 {
+		return "", false
+	}
+	first := ByPath(paths[0])
+	if first == nil {
+		return fmt.Sprintf("%s changed", paths[0]), true
+	}
+	return fmt.Sprintf("%s changed (%s)", first.Path, first.Reason), true
+}
+
+// DiffAddressAware returns the list of startup-consumed paths that differ
+// between a and b, treating address-keyed paths (TLS, HTTP/3, h2c, stream
+// protocol) per-address so that re-added startup addresses do not produce a
+// false diff.
+func DiffAddressAware(a, b Fingerprint) []string {
+	var out []string
 	for _, e := range StartupFields() {
-		ov, ok1 := startup.Values[e.Path]
-		nv, ok2 := candidate.Values[e.Path]
+		av, ok1 := a.Values[e.Path]
+		bv, ok2 := b.Values[e.Path]
 		if !ok1 || !ok2 {
-			return fmt.Sprintf("%s: missing in one side", e.Path), true
+			out = append(out, e.Path)
+			continue
 		}
 		if _, addressKeyed := addressKeyedPaths[e.Path]; addressKeyed {
-			if reason, need := restartRequiredAddressKeyed(ov, nv, e.Path, e.Reason); need {
-				return reason, true
+			if diffAddressKeyed(av, bv) {
+				out = append(out, e.Path)
 			}
 			continue
 		}
-		if !deepEqualValues(ov, nv) {
-			return fmt.Sprintf("%s changed (%s)", e.Path, e.Reason), true
+		if !deepEqualValues(av, bv) {
+			out = append(out, e.Path)
 		}
 	}
-	return "", false
+	return out
 }
 
-// restartRequiredAddressKeyed compares two address-keyed maps. Only addresses
-// present in both fingerprints are compared; additions (new listeners) and
-// removals are ignored.
-func restartRequiredAddressKeyed(startup, candidate any, path, reason string) (string, bool) {
+// diffAddressKeyed reports whether two address-keyed maps differ for any
+// address present in both. Added or removed addresses are ignored.
+func diffAddressKeyed(startup, candidate any) bool {
 	om, ok1 := startup.(map[string]any)
 	nm, ok2 := candidate.(map[string]any)
 	if !ok1 || !ok2 {
-		return fmt.Sprintf("%s: not an address-keyed map", path), true
+		return true
 	}
 	for addr, sv := range om {
 		cv, ok := nm[addr]
@@ -309,10 +326,10 @@ func restartRequiredAddressKeyed(startup, candidate any, path, reason string) (s
 			continue // listener removed; no longer relevant
 		}
 		if !deepEqualValues(sv, cv) {
-			return fmt.Sprintf("%s changed for %s (%s)", path, addr, reason), true
+			return true
 		}
 	}
-	return "", false
+	return false
 }
 
 // deepEqualValues compares two values produced by the fingerprint. It handles

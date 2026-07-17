@@ -104,6 +104,35 @@ func TestRestartRequiredDetectsExistingListenerTLSChange(t *testing.T) {
 	}
 }
 
+// TestDiffAddressAwareReaddedAddress (R10-05) verifies that a startup address
+// removed and then re-added with the same settings is not reported as a diff.
+func TestDiffAddressAwareReaddedAddress(t *testing.T) {
+	base := makeFingerprint("text")
+	base.Values["servers.*.tls"] = map[string]any{
+		"127.0.0.1:8080": map[string]any{"enabled": true},
+		"127.0.0.1:8081": map[string]any{"enabled": false},
+	}
+
+	// Remove 8080, add 8082 with the same settings 8080 had.
+	candidate := makeFingerprint("text")
+	candidate.Values["servers.*.tls"] = map[string]any{
+		"127.0.0.1:8081": map[string]any{"enabled": false},
+		"127.0.0.1:8082": map[string]any{"enabled": true},
+	}
+	if paths := DiffAddressAware(base, candidate); len(paths) != 0 {
+		t.Fatalf("re-added address with same settings should not diff; got %v", paths)
+	}
+
+	// Re-add 8080 but with different settings -> diff.
+	candidate.Values["servers.*.tls"] = map[string]any{
+		"127.0.0.1:8080": map[string]any{"enabled": false},
+		"127.0.0.1:8081": map[string]any{"enabled": false},
+	}
+	if paths := DiffAddressAware(base, candidate); len(paths) != 1 || paths[0] != "servers.*.tls" {
+		t.Fatalf("expected servers.*.tls diff, got %v", paths)
+	}
+}
+
 func TestComputeFingerprintIncludesLogFormat(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Global.LogFormat = "json"
