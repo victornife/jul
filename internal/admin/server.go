@@ -28,6 +28,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/observability"
+	"jul/internal/server"
 )
 
 // Purger clears cached responses. A nil Purger means caching is disabled.
@@ -62,6 +63,10 @@ type Deps struct {
 	Reload func()
 	// Ready reports whether the server is ready to receive traffic.
 	Ready func() bool
+	// LiveSnapshot returns the current bound listener state from the runtime
+	// server. Used by PendingRestartCheck to evaluate listener rebind against
+	// actually-bound addresses rather than the on-disk baseline.
+	LiveSnapshot func() server.LiveSnapshot
 
 	// StreamStatus reports the most recent L4 stream-proxy reload outcome for the
 	// Console Overview. Because stream listeners reload asynchronously after the
@@ -139,10 +144,12 @@ type Deps struct {
 	LastReload func() *ReloadSnapshot
 	// PendingRestartCheck reports which startup-bound subsystems have changed
 	// on disk relative to the values the running process was built from,
-	// meaning they require a process restart to take effect. Returns an empty
-	// slice (or nil) when no restart is pending. Used by the Overview to show
-	// a persistent indicator when saved changes are not yet live.
-	PendingRestartCheck func() []string}
+	// meaning they require a process restart to take effect. The live snapshot
+	// lets the check compare against actually-bound listeners instead of the
+	// on-disk baseline. Returns an empty slice (or nil) when no restart is
+	// pending. Used by the Overview to show a persistent indicator when saved
+	// changes are not yet live.
+	PendingRestartCheck func(server.LiveSnapshot) []string}
 
 // ReloadSnapshot is the admin-package view of the most recent reload outcome.
 type ReloadSnapshot struct {

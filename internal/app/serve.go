@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -32,6 +33,23 @@ import (
 	"jul/internal/waf"
 )
 
+// ServeOption configures optional behaviour of Serve. Existing callers are
+// not required to pass any options.
+type ServeOption func(*serveOptions)
+
+type serveOptions struct {
+	logOutput io.Writer
+}
+
+// WithLogOutput directs Serve's log output to w instead of os.Stderr. It is
+// used by integration tests that need to inspect startup logs for secret
+// leakage without touching the process-wide stderr.
+func WithLogOutput(w io.Writer) ServeOption {
+	return func(o *serveOptions) {
+		o.logOutput = w
+	}
+}
+
 // Serve builds the runtime from a validated configuration and runs until
 // baseCtx is cancelled. It is the composition root for the Jul.IA server:
 //
@@ -48,14 +66,19 @@ import (
 //  4. Admin deps — web-console wiring (BuildAdminDeps) and listener startup.
 //
 // productName and version are shown in startup logs and the admin console.
-func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source, cfg *config.Config, productName, version string) int {
+func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source, cfg *config.Config, productName, version string, opts ...ServeOption) int {
+	options := serveOptions{logOutput: os.Stderr}
+	for _, o := range opts {
+		o(&options)
+	}
+
 	// ── Section 1: Init ────────────────────────────────────────────────────
 	//
 	// Wrap the log sink so any secret value resolved from a ${env:}/${file:}
 	// reference (SEC-1) is masked even if a message or attribute interpolates it.
 	// NewDynamicLogger returns a set-level function for hot-reload of log_level
 	// without rebuilding the handler. Log format (text vs json) is restart-bound.
-	log, setLogLevel := observability.NewDynamicLogger(redact.Writer(os.Stderr), cfg.Global.LogLevel, cfg.Global.LogFormat)
+	log, setLogLevel := observability.NewDynamicLogger(redact.Writer(options.logOutput), cfg.Global.LogLevel, cfg.Global.LogFormat)
 	log.Info("starting "+productName, "version", version, "config", src.Name())
 
 	// Apply worker_threads at startup. "auto" or empty leaves the Go runtime
@@ -324,39 +347,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Wire PendingRestartCheck using the startup config snapshot. It reports
 	// which startup-bound subsystems differ between what we were built from
 	// and what is currently on disk, so the Console can show a persistent
-	// "restart required" banner when saved changes are not yet active.
+	// "restart required" banner when saved changes are not yet active. The live
+	// snapshot is supplied by the caller so listener rebind is evaluated against
+	// actually-bound listeners (R9-11).
 	if startupCand.Raw != nil && deps.LoadConfig != nil {
-		loadFn := deps.LoadConfig
-		deps.PendingRestartCheck = func() []string {
-			current, err := loadFn()
-			if err != nil || current == nil {
-				return nil
-			}
-			candidate, err := config.NewCandidate(current)
-			if err != nil {
-				log.Warn("pending restart check failed: config resolution error", "error", err)
-				return []string{"resolve_error"}
-			}
-
-			pendingSet := make(map[string]struct{})
-			for _, path := range lifecycle.Diff(startupFP, lifecycle.ComputeFingerprint(candidate.Effective)) {
-				if e := lifecycle.ByPath(path); e != nil {
-					pendingSet[e.Subsystem] = struct{}{}
-				}
-			}
-			if _, need := server.ListenerRebindRequired(startupCand.Raw, candidate.Effective); need {
-				pendingSet["listener"] = struct{}{}
-			}
-			if _, need := server.ACMERestartRequired(startupCand.Raw.Servers, candidate.Effective.Servers); need {
-				pendingSet["acme"] = struct{}{}
-			}
-
-			pending := make([]string, 0, len(pendingSet))
-			for sub := range pendingSet {
-				pending = append(pending, sub)
-			}
-			sort.Strings(pending)
-			return pending
+		deps.PendingRestartCheck = func(live server.LiveSnapshot) []string {
+			return pendingRestartCheck(startupCand, startupFP, live, deps.LoadConfig, log)
 		}
 	}
 
@@ -370,6 +366,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Wire the runtime snapshot into preflight after the server exists so
 	// listener gates are evaluated against actually-bound listeners (R9-04).
 	pf.LiveSnapshot = srv.LiveSnapshot
+
+	// Make the live bound-listener snapshot available to the admin overview
+	// for the pending-restart check (R9-11).
+	deps.LiveSnapshot = srv.LiveSnapshot
 
 	// Re-wire the reload trigger so admin apply sends a typed ReloadRequest
 	// carrying the exact preflight candidate. The candidate is part of the
@@ -477,4 +477,41 @@ func parseWorkerThreads(s string) int {
 		return 0
 	}
 	return n
+}
+
+// pendingRestartCheck reports which startup-bound subsystems have changed on
+// disk relative to the values the running process was built from. It compares
+// effective values (secret references resolved, file-backed values digested)
+// and evaluates listener rebind against the live bound-listener snapshot
+// instead of the on-disk baseline (R9-11).
+func pendingRestartCheck(startupCand *config.Candidate, startupFP lifecycle.Fingerprint, live server.LiveSnapshot, loadFn func() (*config.Config, error), log *slog.Logger) []string {
+	current, err := loadFn()
+	if err != nil || current == nil {
+		return nil
+	}
+	candidate, err := config.NewCandidate(current)
+	if err != nil {
+		log.Warn("pending restart check failed: config resolution error", "error", err)
+		return []string{"resolve_error"}
+	}
+
+	pendingSet := make(map[string]struct{})
+	for _, path := range lifecycle.Diff(startupFP, lifecycle.ComputeFingerprint(candidate.Effective)) {
+		if e := lifecycle.ByPath(path); e != nil {
+			pendingSet[e.Subsystem] = struct{}{}
+		}
+	}
+	if _, need := server.PreflightRebindRequired(live, candidate.Effective); need {
+		pendingSet["listener"] = struct{}{}
+	}
+	if _, need := server.ACMERestartRequired(startupCand.Raw.Servers, candidate.Effective.Servers); need {
+		pendingSet["acme"] = struct{}{}
+	}
+
+	pending := make([]string, 0, len(pendingSet))
+	for sub := range pendingSet {
+		pending = append(pending, sub)
+	}
+	sort.Strings(pending)
+	return pending
 }

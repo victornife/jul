@@ -99,7 +99,9 @@ and bind under preflight conditions:
 8. **Restart-required and listener-rebind checks** — compares the candidate
    against the startup-bound effective fingerprint and the bind-time
    fingerprints of kept listeners. Secret-content rotation is detected via
-   file digests.
+   file digests. The live bound-listener snapshot is also used for the
+   Console's pending-restart indicator, so the indicator reflects actually
+   bound listeners rather than the on-disk baseline (R9-11).
 
 Only after all gates pass is the file written and the reload triggered.
 
@@ -185,6 +187,18 @@ GOMAXPROCS cap). This prevents a saved secret-reference change from hiding a
 real structural change and detects file-content rotation. Hot-reloadable
 fields such as `worker_threads` are diffed against the live effective value so
 that a change is applied on the next successful reload.
+
+### Pending-restart indicator
+
+The admin `/api/runtime/overview` endpoint exposes a `pending_restart` array
+that lists startup-bound subsystems whose effective values on disk now differ
+from what the running process was built from. The check compares effective
+values (not raw references), so rotating the contents of a `${file:...}`
+secret or changing an `${env:...}` value is detected even when the reference
+itself is unchanged. Listener rebind is evaluated against the live
+bound-listener snapshot, not the original on-disk baseline, so a kept
+listener whose bind-time settings changed is reported correctly even when the
+running set has drifted from disk (R9-11).
 
 ## Generation-scoped upstream pool snapshot
 

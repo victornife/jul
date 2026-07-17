@@ -4,11 +4,15 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,5 +346,133 @@ func TestApplyResponseIncludesReloadBlock(t *testing.T) {
 	}
 	if reload["error"] != nil && reload["error"] != "" {
 		t.Errorf("reload.error = %q, want nil or empty", reload["error"])
+	}
+}
+
+// TestConcurrentAdminAppliesSerialize (R9-14.3) proves that concurrent
+// POST /api/config/apply requests are serialized by applyMu and that both
+// leave causal audit/timeline records. The first apply holds the write lock
+// until released; the second cannot enter WriteConfigRaw until then, so the
+// final persisted config is the second apply's.
+func TestConcurrentAdminAppliesSerialize(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "server.toml")
+	initial := validTOML(t, "./public", ":8080")
+	if err := os.WriteFile(cfgPath, initial, 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var enteredOnce sync.Once
+
+	deps := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		WriteConfigRaw: func(data []byte) error {
+			c, err := config.Parse(data)
+			if err != nil {
+				return err
+			}
+			if err := config.Validate(c); err != nil {
+				return err
+			}
+			if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
+				return err
+			}
+			enteredOnce.Do(func() { entered <- struct{}{} })
+			<-release
+			return nil
+		},
+		LoadConfig: func() (*config.Config, error) {
+			raw, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return nil, err
+			}
+			return config.Parse(raw)
+		},
+	}
+	s := newTestServer(t, config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}, deps)
+
+	bodyA := validTOML(t, "./public-a", ":8080")
+	bodyB := validTOML(t, "./public-b", ":8080")
+
+	type result struct {
+		status int
+		err    error
+	}
+	apply := func(body []byte) <-chan result {
+		ch := make(chan result, 1)
+		go func() {
+			rr := httptest.NewRecorder()
+			s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(body)))
+			ch <- result{status: rr.Code}
+		}()
+		return ch
+	}
+
+	doneA := apply(bodyA)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first apply did not enter WriteConfigRaw")
+	}
+
+	doneB := apply(bodyB)
+	select {
+	case <-doneB:
+		t.Fatal("second apply completed while first still held the lock")
+	case <-time.After(200 * time.Millisecond):
+		// Expected: B is blocked waiting for applyMu.
+	}
+
+	close(release)
+
+	var resA, resB result
+	select {
+	case resA = <-doneA:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first apply did not complete")
+	}
+	select {
+	case resB = <-doneB:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second apply did not complete")
+	}
+
+	if resA.status != http.StatusOK {
+		t.Fatalf("first apply status = %d, want 200", resA.status)
+	}
+	if resB.status != http.StatusOK {
+		t.Fatalf("second apply status = %d, want 200", resB.status)
+	}
+
+	// Final file must be B's body because B wrote after A.
+	disk, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	if !bytes.Contains(disk, []byte("public-b")) {
+		t.Fatalf("final config should be from second apply; got:\n%s", disk)
+	}
+
+	// Both applies recorded audit events in causal order (A before B).
+	au := s.audit.snapshot("config.apply", "success", 0)
+	if len(au) != 2 {
+		t.Fatalf("audit apply successes = %d, want 2", len(au))
+	}
+	// snapshot returns newest-first, so au[1] is A and au[0] is B.
+	if !au[0].Time.After(au[1].Time) {
+		t.Error("audit events are not in causal order")
+	}
+
+	// Timeline also records both apply events.
+	tl := s.timeline.snapshot()
+	var applyEvents int
+	for _, ev := range tl {
+		if ev.Type == "apply" {
+			applyEvents++
+		}
+	}
+	if applyEvents != 2 {
+		t.Fatalf("timeline apply events = %d, want 2", applyEvents)
 	}
 }

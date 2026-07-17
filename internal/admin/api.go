@@ -13,6 +13,7 @@ import (
 
 	"jul/internal/auth"
 	"jul/internal/config"
+	"jul/internal/server"
 	"jul/internal/waf"
 )
 
@@ -105,7 +106,11 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 		CertRisk: certRisk,
 	}
 	if s.deps.PendingRestartCheck != nil {
-		if subsystems := s.deps.PendingRestartCheck(); len(subsystems) > 0 {
+		var live server.LiveSnapshot
+		if s.deps.LiveSnapshot != nil {
+			live = s.deps.LiveSnapshot()
+		}
+		if subsystems := s.deps.PendingRestartCheck(live); len(subsystems) > 0 {
 			out.PendingRestart = subsystems
 		}
 	}
