@@ -27,13 +27,6 @@ type Backend struct {
 	// consecutive failed probes. Backends without active checks stay true for
 	// their whole lifetime. It composes with the passive cooldown in available.
 	activeHealthy atomic.Bool
-
-	// currentWeight is smooth-weighted-round-robin state. It is owned by a
-	// single balancer instance (Pool.balancer or a PoolSnapshot's balancer);
-	// concurrent requests through the same balancer instance synchronize via
-	// that balancer's mutex. Backends shared across instances must not be
-	// mutated without their instance lock.
-	currentWeight int
 }
 
 // available reports whether the backend may receive traffic now. It combines

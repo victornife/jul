@@ -256,13 +256,13 @@ type PoolSnapshotKey struct {
 // SnapshotPools returns the snapshots for each named/schemed live pool. Pools
 // not currently live are omitted. It is called by HandlerFactory.Prepare to
 // capture the generation-scoped pool view.
-func (r *Registry) SnapshotPools(keys []PoolSnapshotKey) map[string]*PoolSnapshot {
+func (r *Registry) SnapshotPools(keys []PoolSnapshotKey) SnapshotMap {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make(map[string]*PoolSnapshot, len(keys))
+	out := make(SnapshotMap, len(keys))
 	for _, k := range keys {
 		if e, ok := r.live[poolKey{name: k.Name, scheme: k.Scheme}]; ok {
-			out[k.Name] = e.pool.Snapshot()
+			out[k] = e.pool.Snapshot()
 		}
 	}
 	if len(out) == 0 {

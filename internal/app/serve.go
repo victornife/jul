@@ -195,9 +195,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// the startup candidate so the initial generation masks exactly the secrets
 	// resolved at startup; reloads provide their own candidate redaction via
 	// ReloadPlan (R7-05).
-	factory := func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
-		handlers, snapshots, genID, commitFn, abortFn, _, err := f.Prepare(c)
-		return handlers, snapshots, genID, commitFn, abortFn, startupCand.Redaction, err
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
+		return f.Prepare(c)
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)

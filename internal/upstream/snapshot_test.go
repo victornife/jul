@@ -29,7 +29,7 @@ func TestPoolSnapshotPickUsesSnapshotBackends(t *testing.T) {
 		{Address: "10.0.0.2:80", Weight: 1},
 	})
 
-	ctx := WithSnapshot(context.Background(), map[string]*PoolSnapshot{"api": snap})
+	ctx := WithSnapshot(context.Background(), SnapshotMap{PoolSnapshotKey{Name: "api", Scheme: "http"}: snap})
 
 	b, err := pool.PickCtx(ctx)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestDiscoveryConvergenceUpdatesPerRequestSnapshot(t *testing.T) {
 	}
 
 	// The first snapshot remains stable (no time travel for in-flight requests).
-	ctx := WithSnapshot(context.Background(), map[string]*PoolSnapshot{"api": snap1})
+	ctx := WithSnapshot(context.Background(), SnapshotMap{PoolSnapshotKey{Name: "api", Scheme: "http"}: snap1})
 	b, err := pool.PickCtx(ctx)
 	if err != nil {
 		t.Fatalf("PickCtx: %v", err)
@@ -142,7 +142,7 @@ func TestPoolSnapshotBackendsCtxUsesSnapshot(t *testing.T) {
 		{Address: "10.0.0.2:80", Weight: 1},
 	})
 
-	ctx := WithSnapshot(context.Background(), map[string]*PoolSnapshot{"api": snap})
+	ctx := WithSnapshot(context.Background(), SnapshotMap{PoolSnapshotKey{Name: "api", Scheme: "http"}: snap})
 	if got := len(pool.BackendsCtx(ctx)); got != 1 {
 		t.Fatalf("snapshot backends = %d, want 1", got)
 	}
@@ -247,5 +247,163 @@ func TestPoolSnapshotFailoverSkipsTriedBackend(t *testing.T) {
 	defer b2.release()
 	if b2.Address == b1.Address {
 		t.Errorf("failover returned same backend %q; expected the other backend", b2.Address)
+	}
+}
+
+// TestSnapshotMapKeysByNameAndScheme verifies that mixed-scheme upstreams keep
+// distinct snapshots in the generation context (R8-02). Selecting through one
+// scheme must not return the snapshot for the other.
+func TestSnapshotMapKeysByNameAndScheme(t *testing.T) {
+	poolHTTP, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "http-backend", Weight: 1}},
+		MaxFails: 1,
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool http: %v", err)
+	}
+	defer poolHTTP.Close()
+	poolHTTPS, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "https-backend", Weight: 1}},
+		MaxFails: 1,
+	}, "https")
+	if err != nil {
+		t.Fatalf("NewPool https: %v", err)
+	}
+	defer poolHTTPS.Close()
+
+	m := SnapshotMap{poolHTTP.Snapshot().Key(): poolHTTP.Snapshot(), poolHTTPS.Snapshot().Key(): poolHTTPS.Snapshot()}
+	ctx := WithSnapshot(context.Background(), m)
+
+	bHTTP, err := poolHTTP.PickCtx(ctx)
+	if err != nil {
+		t.Fatalf("http pick: %v", err)
+	}
+	defer bHTTP.release()
+	if bHTTP.Address != "http-backend" {
+		t.Errorf("http pool selected %q, want http-backend", bHTTP.Address)
+	}
+	bHTTPS, err := poolHTTPS.PickCtx(ctx)
+	if err != nil {
+		t.Fatalf("https pick: %v", err)
+	}
+	defer bHTTPS.release()
+	if bHTTPS.Address != "https-backend" {
+		t.Errorf("https pool selected %q, want https-backend", bHTTPS.Address)
+	}
+}
+
+// TestWeightedRoundRobinStateIsLocalToBalancer verifies that each balancer
+// instance owns its smooth-weight state, so concurrent picks through different
+// snapshots (or the live pool) do not race on shared Backend fields (R8-03).
+func TestWeightedRoundRobinStateIsLocalToBalancer(t *testing.T) {
+	pool, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "weighted_round_robin",
+		Servers: []config.UpstreamServer{
+			{Address: "10.0.0.1:80", Weight: 1},
+			{Address: "10.0.0.2:80", Weight: 3},
+		},
+		MaxFails: 1,
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	snap1 := pool.Snapshot()
+	snap2 := pool.Snapshot()
+	var wg sync.WaitGroup
+	pickN := func(s *PoolSnapshot) {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			b, err := s.pick()
+			if err != nil {
+				t.Errorf("pick: %v", err)
+				return
+			}
+			time.Sleep(time.Microsecond)
+			b.release()
+		}
+	}
+	wg.Add(3)
+	go pickN(snap1)
+	go pickN(snap2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			b, err := pool.Pick()
+			if err != nil {
+				t.Errorf("live pick: %v", err)
+				return
+			}
+			time.Sleep(time.Microsecond)
+			pool.Release(b)
+		}
+	}()
+	wg.Wait()
+
+	// Each selector should distribute roughly 1:3 over its own 100 picks.
+	assertRatio := func(name string, s *PoolSnapshot) {
+		counts := map[string]int{}
+		for i := 0; i < 400; i++ {
+			b, err := s.pick()
+			if err != nil {
+				t.Fatalf("%s ratio pick: %v", name, err)
+			}
+			counts[b.Address]++
+			b.release()
+		}
+		if counts["10.0.0.1:80"] < 80 || counts["10.0.0.1:80"] > 120 {
+			t.Errorf("%s weight-1 backend count = %d, want ~100", name, counts["10.0.0.1:80"])
+		}
+		if counts["10.0.0.2:80"] < 280 || counts["10.0.0.2:80"] > 320 {
+			t.Errorf("%s weight-3 backend count = %d, want ~300", name, counts["10.0.0.2:80"])
+		}
+	}
+	assertRatio("snap1", snap1)
+	assertRatio("snap2", snap2)
+}
+
+// TestPickExcludingReturnsErrorWhenAllAvailableExcluded verifies that
+// pickExcluding stops before re-selecting an already-tried backend.
+func TestPickExcludingReturnsErrorWhenAllAvailableExcluded(t *testing.T) {
+	pool, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "least_conn",
+		Servers: []config.UpstreamServer{
+			{Address: "10.0.0.1:80", Weight: 1},
+			{Address: "10.0.0.2:80", Weight: 1},
+		},
+		MaxFails: 1,
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	snap := pool.Snapshot()
+	b1, err := snap.pick()
+	if err != nil {
+		t.Fatalf("first pick: %v", err)
+	}
+	defer b1.release()
+
+	tried := map[*Backend]struct{}{b1: {}}
+	b2, err := snap.pickExcluding(tried)
+	if err != nil {
+		t.Fatalf("second pick excluding first: %v", err)
+	}
+	defer b2.release()
+	if b2.Address == b1.Address {
+		t.Errorf("pickExcluding returned excluded backend %q", b2.Address)
+	}
+
+	tried[b2] = struct{}{}
+	if _, err := snap.pickExcluding(tried); err != ErrNoAvailableBackend {
+		t.Errorf("pickExcluding with all excluded returned %v, want ErrNoAvailableBackend", err)
 	}
 }

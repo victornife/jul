@@ -185,6 +185,33 @@ func TestProxyFailover(t *testing.T) {
 	}
 }
 
+func TestProxyFailoverLeastConn(t *testing.T) {
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "live")
+	}))
+	defer live.Close()
+	liveAddr := strings.TrimPrefix(live.URL, "http://")
+
+	ups := map[string]config.UpstreamConfig{
+		"pool": {
+			Name:     "pool",
+			Strategy: "least_conn",
+			Servers:  []config.UpstreamServer{{Address: "127.0.0.1:1", Weight: 1}, {Address: liveAddr, Weight: 1}},
+			MaxFails: 1,
+		},
+	}
+	h := newProxy(t, config.LocationConfig{ProxyPass: "http://pool"}, ups)
+
+	for i := 0; i < 4; i++ {
+		req := httptest.NewRequest(http.MethodGet, "http://edge/", nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.String() != "live" {
+			t.Fatalf("request %d: failover = %d %q", i, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestProxyRetryRewindSurfacesUpstreamError(t *testing.T) {
 	// Two dead backends so the first attempt fails (setting lastErr) and the
 	// retry then attempts to rewind the request body. GetBody is rigged to fail,
