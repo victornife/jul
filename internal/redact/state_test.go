@@ -172,3 +172,26 @@ func TestDynamicWriterObservesLaterInstalls(t *testing.T) {
 		t.Fatalf("after rotation (new secret): %q, want %q", got, want)
 	}
 }
+
+// TestStateApplyOverlappingLongestFirst verifies that when one registered value
+// is a substring of another, the longer value is masked first so its suffix is
+// not leaked (R7-08).
+func TestStateApplyOverlappingLongestFirst(t *testing.T) {
+	s := NewState([]string{"token1234", "token123456"}, DefaultMinLen)
+	got := s.Apply("value is token123456")
+	want := "value is ***"
+	if got != want {
+		t.Fatalf("Apply = %q, want %q", got, want)
+	}
+}
+
+// TestStateApplyPrefixValue verifies that a shorter secret which is a prefix of
+// a non-secret string does not corrupt the longer non-secret string.
+func TestStateApplyPrefixValue(t *testing.T) {
+	s := NewState([]string{"token"}, DefaultMinLen)
+	got := s.Apply("value is tokenExtra")
+	want := "value is ***Extra"
+	if got != want {
+		t.Fatalf("Apply = %q, want %q", got, want)
+	}
+}

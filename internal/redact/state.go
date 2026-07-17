@@ -5,6 +5,7 @@ package redact
 
 import (
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -20,7 +21,8 @@ type State struct {
 
 // NewState returns a redaction state that masks the supplied values and treats
 // values shorter than minLen as non-secret. A minLen below 1 is normalized to
-// DefaultMinLen.
+// DefaultMinLen. Values are stored sorted longest-first so Apply always masks
+// the longest match before shorter substrings can corrupt it (R7-08).
 func NewState(values []string, minLen int) State {
 	if minLen < 1 {
 		minLen = DefaultMinLen
@@ -32,6 +34,17 @@ func NewState(values []string, minLen int) State {
 		}
 	}
 	return State{values: m, minLen: minLen}
+}
+
+// sortedValues returns the registered values sorted longest-first. It is used
+// by Apply so overlapping secrets are masked deterministically.
+func (s State) sortedValues() []string {
+	vals := make([]string, 0, len(s.values))
+	for v := range s.values {
+		vals = append(vals, v)
+	}
+	sort.Slice(vals, func(i, j int) bool { return len(vals[i]) > len(vals[j]) })
+	return vals
 }
 
 // EmptyState returns a redaction state with no registered secrets and the
@@ -65,11 +78,13 @@ func (s State) WithMinLen(minLen int) State {
 }
 
 // Apply returns input with every registered secret value replaced by Mask.
+// Overlapping values are applied longest-first so that a shorter value never
+// leaves a suffix of a longer value unmasked.
 func (s State) Apply(input string) string {
 	if len(s.values) == 0 {
 		return input
 	}
-	for v := range s.values {
+	for _, v := range s.sortedValues() {
 		if strings.Contains(input, v) {
 			input = strings.ReplaceAll(input, v, Mask)
 		}
@@ -94,7 +109,8 @@ func (s State) MinLen() int {
 	return s.minLen
 }
 
-// Clone returns a deep copy of the state.
+// Clone returns a deep copy of the state. The cloned values are sorted
+// longest-first on the next Apply so ordering remains deterministic.
 func (s State) Clone() State {
 	out := State{minLen: s.minLen}
 	if len(s.values) == 0 {
