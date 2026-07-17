@@ -211,11 +211,13 @@ func (t *Transcoder) evictStaleConns() {
 		expired := now.Sub(rc.retiredAt) >= retiredConnGrace
 		if _, ok := valid[addr]; ok && !expired {
 			// Backend reappeared: atomically promote. If another connection
-			// won the race, close the retired one.
+			// won the race, close the retired one (R13-01).
 			t.retired.Delete(key)
 			if actual, loaded := t.conns.LoadOrStore(addr, rc.conn); loaded {
-				_ = rc.conn.Close()
-				_ = actual
+				actualConn := actual.(*grpc.ClientConn)
+				if actualConn != rc.conn {
+					_ = rc.conn.Close()
+				}
 			}
 			return true
 		}
@@ -281,11 +283,14 @@ func (t *Transcoder) connFor(addr string) (*grpc.ClientConn, error) {
 		if time.Since(rc.retiredAt) < retiredConnGrace {
 			// Atomically promote back to active. Only close the retired
 			// connection if another goroutine stored a different connection
-			// for the same address in the meantime (R12-02).
+			// for the same address in the meantime (R12-02, R13-01).
 			t.retired.Delete(addr)
 			if actual, loaded := t.conns.LoadOrStore(addr, rc.conn); loaded {
-				_ = rc.conn.Close()
-				return actual.(*grpc.ClientConn), nil
+				actualConn := actual.(*grpc.ClientConn)
+				if actualConn != rc.conn {
+					_ = rc.conn.Close()
+				}
+				return actualConn, nil
 			}
 			return rc.conn, nil
 		}
