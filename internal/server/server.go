@@ -273,6 +273,8 @@ type BoundListenerInfo struct {
 	Addr        string
 	Fingerprint string
 	TLSEnabled  bool
+	// H3 is true when an HTTP/3 (QUIC) listener is active on this address.
+	H3 bool
 }
 
 // LiveSnapshot is a point-in-time, read-only view of the running server's
@@ -354,6 +356,7 @@ func copyListenerMapFromEntries(src map[string]*listenerEntry) map[string]BoundL
 			Addr:        addr,
 			Fingerprint: e.boundFingerprint,
 			TLSEnabled:  e.provider != nil,
+			H3:          e.h3 != nil,
 		}
 	}
 	return out
@@ -1022,6 +1025,27 @@ func uniqueListenAddrs(servers []config.ServerConfig) []string {
 	return addrs
 }
 
+// http3Addrs returns the distinct listen addresses across server blocks that
+// have HTTP/3 enabled, preserving first-seen order.
+func http3Addrs(servers []config.ServerConfig) []string {
+	seen := map[string]struct{}{}
+	var addrs []string
+	for _, srv := range servers {
+		if srv.Listen == "" {
+			continue
+		}
+		if srv.HTTP3 == nil || !srv.HTTP3.Enabled {
+			continue
+		}
+		if _, ok := seen[srv.Listen]; ok {
+			continue
+		}
+		seen[srv.Listen] = struct{}{}
+		addrs = append(addrs, srv.Listen)
+	}
+	return addrs
+}
+
 func setOf(items []string) map[string]struct{} {
 	m := make(map[string]struct{}, len(items))
 	for _, it := range items {
@@ -1041,7 +1065,12 @@ func setOf(items []string) map[string]struct{} {
 // replacing the on-disk "old" config used previously (R9-04, R9-13). This
 // closes the gap where an address removed from the running server but still
 // present on disk would be skipped, causing a false negative or false positive.
-func PreflightListeners(boundAddrs map[string]struct{}, next []config.ServerConfig) error {
+//
+// For server blocks that enable HTTP/3, the UDP side of the address is also
+// probed via boundHTTP3, which records the addresses that already hold an
+// active HTTP/3 (QUIC) listener. This prevents an apply that enables HTTP/3 on
+// an address whose UDP port is already in use from being persisted (R10-07).
+func PreflightListeners(boundAddrs, boundHTTP3 map[string]struct{}, next []config.ServerConfig) error {
 	for _, addr := range uniqueListenAddrs(next) {
 		if _, bound := boundAddrs[addr]; bound {
 			continue
@@ -1051,6 +1080,16 @@ func PreflightListeners(boundAddrs map[string]struct{}, next []config.ServerConf
 			return fmt.Errorf("listen address %s: %w", addr, err)
 		}
 		_ = ln.Close()
+	}
+	for _, addr := range http3Addrs(next) {
+		if _, bound := boundHTTP3[addr]; bound {
+			continue
+		}
+		pc, err := net.ListenPacket("udp", addr)
+		if err != nil {
+			return fmt.Errorf("http3 listen address %s (udp): %w", addr, err)
+		}
+		_ = pc.Close()
 	}
 	return nil
 }

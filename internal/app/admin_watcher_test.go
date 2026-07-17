@@ -80,6 +80,14 @@ func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	if !waitForHTTPStatus(t, trafficURL, 200, 5*time.Second) {
 		t.Fatalf("traffic server did not start")
 	}
+	// Wait for the admin listener as well before sending the apply request; the
+	// admin goroutine starts just before the traffic server, and under loaded
+	// parallel test runs the listener may not be accepting yet (or may fail to
+	// bind) when the first request is issued.
+	adminHealthURL := "http://" + adminAddr + "/healthz"
+	if !waitForURL(t, adminHealthURL, 5*time.Second) {
+		t.Fatalf("admin server did not become ready")
+	}
 
 	// Admin apply: change return code from 200 to 201.
 	writeConfig(201)
