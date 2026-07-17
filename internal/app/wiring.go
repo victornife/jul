@@ -153,11 +153,15 @@ func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-cha
 					if !ok {
 						return
 					}
-					// Suppress the echo of a recent admin write: if the file
-					// digest matches the last digest produced by an admin apply,
-					// the watcher is just reporting our own save (R10-01).
+					// Suppress the one-shot echo of a recent admin write: if
+					// the file digest matches the last digest produced by an
+					// admin apply, the watcher is just reporting our own save
+					// (R10-01, R11-01).
 					if lastAdminDigest != nil {
-						if last := lastAdminDigest.Load(); last != nil && *last == digest {
+						// Atomically consume the digest so a later legitimate
+						// external write with the same bytes is not permanently
+						// suppressed (R11-01).
+						if last := lastAdminDigest.Swap(nil); last != nil && *last == digest {
 							continue
 						}
 					}
