@@ -32,6 +32,7 @@ func quietLogger() *slog.Logger {
 type stubSource struct {
 	mu      sync.Mutex
 	cfg     *config.Config
+	raw     []byte
 	loadErr error
 }
 
@@ -41,10 +42,22 @@ func (s *stubSource) set(cfg *config.Config, loadErr error) {
 	s.cfg, s.loadErr = cfg, loadErr
 }
 
+func (s *stubSource) setRaw(raw []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.raw = raw
+}
+
 func (s *stubSource) Load() (*config.Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg, s.loadErr
+}
+
+func (s *stubSource) ReadRaw() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.raw, s.loadErr
 }
 
 func (s *stubSource) Name() string { return "stub" }
@@ -1134,15 +1147,22 @@ func TestAdminReloadRequestUsesCandidate(t *testing.T) {
 	// Simulate the admin write path: the source now holds the same raw config
 	// the candidate was built from.
 	src.set(raw201, nil)
+	src.setRaw(data201)
 	reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: cand201, RawDigest: sha256Digest(data201)}
 
 	if !eventually(t, "http://"+addr+"/", "return-201") {
 		t.Fatal("admin candidate was not applied")
 	}
 
-	// Stale admin candidate: the candidate raw config no longer matches the
+	// Stale admin candidate: the on-disk raw bytes no longer match the
 	// supplied digest, so the server must fall back to the source load.
-	src.set(cfgWithReturn(addr, 202), nil)
+	raw202 := cfgWithReturn(addr, 202)
+	data202, err := config.Marshal(raw202)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	src.set(raw202, nil)
+	src.setRaw(data202)
 	raw203 := cfgWithReturn(addr, 203)
 	cand203, err := config.NewCandidate(raw203)
 	if err != nil {
@@ -1153,6 +1173,115 @@ func TestAdminReloadRequestUsesCandidate(t *testing.T) {
 
 	if !eventually(t, "http://"+addr+"/", "return-202") {
 		t.Fatal("stale admin candidate did not fall back to source load")
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+// TestAdminReloadRawDigestMatchesRawBytes (R11-03) verifies that the raw
+// digest used for candidate validity is compared against the source's raw
+// bytes, not against a canonical re-marshal. A file that contains comments
+// or formatting differences round-trips to the same Config but produces a
+// different canonical byte stream; only the raw bytes must determine
+// validity.
+func TestAdminReloadRawDigestMatchesRawBytes(t *testing.T) {
+	addr := freePort(t)
+
+	var genIDCounter atomic.Uint64
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		genID := genIDCounter.Add(1)
+		body := fmt.Sprintf("return-%d", c.Servers[0].Locations[0].Return)
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, body)
+		})
+		m := map[string]http.Handler{addr: h}
+		commitFn := func() (upstream.SnapshotMap, func()) { return nil, nil }
+		abortFn := func() {}
+		return m, genID, commitFn, abortFn, nil
+	}
+
+	cfgFrom := func(data []byte) *config.Config {
+		cfg, err := config.Parse(data)
+		if err != nil {
+			t.Fatalf("parse config: %v", err)
+		}
+		return cfg
+	}
+
+	src := &stubSource{}
+	startData := []byte(fmt.Sprintf(`
+[global]
+shutdown_timeout = "2s"
+
+[[servers]]
+listen = %q
+server_names = ["example.test"]
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+return = 200
+`, addr))
+	src.set(cfgFrom(startData), nil)
+	src.setRaw(startData)
+
+	srv := New(cfgFrom(startData), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+addr+"/", "return-200")
+
+	// Admin writes a config file that includes a comment. The raw digest is
+	// computed from the commented bytes; the candidate only carries the
+	// parsed config. Validity must compare against the source's raw bytes.
+	commented := []byte(fmt.Sprintf(`
+# admin comment
+[global]
+shutdown_timeout = "2s"
+
+[[servers]]
+listen = %q
+server_names = ["example.test"]
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+return = 201  # inline comment
+`, addr))
+	raw201 := cfgFrom(commented)
+	cand201, err := config.NewCandidate(raw201)
+	if err != nil {
+		t.Fatalf("NewCandidate: %v", err)
+	}
+	src.set(raw201, nil)
+	src.setRaw(commented)
+	reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: cand201, RawDigest: sha256Digest(commented)}
+
+	if !eventually(t, "http://"+addr+"/", "return-201") {
+		t.Fatal("commented admin candidate was not applied")
+	}
+
+	// Now the source is overwritten by a canonical marshal (no comments).
+	// The same logical config still validates because the digest matches
+	// the new raw bytes.
+	canonical202, err := config.Marshal(raw201)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	raw202 := cfgFrom(canonical202)
+	cand202, err := config.NewCandidate(raw202)
+	if err != nil {
+		t.Fatalf("NewCandidate: %v", err)
+	}
+	src.set(raw202, nil)
+	src.setRaw(canonical202)
+	reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: cand202, RawDigest: sha256Digest(canonical202)}
+
+	if !eventually(t, "http://"+addr+"/", "return-201") {
+		t.Fatal("canonical admin candidate was not applied")
 	}
 
 	cancel()
