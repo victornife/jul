@@ -123,6 +123,9 @@ func (p *ReloadPlan) Lifecycle() error {
 	if reason, need := p.s.listenerBoundRebindRequired(p.Candidate.Effective); need {
 		return fmt.Errorf("restart_required: %s", reason)
 	}
+	if reason, need := ACMERestartRequired(p.s.cfg.Servers, p.Candidate.Effective.Servers); need {
+		return fmt.Errorf("restart_required: %s", reason)
+	}
 	return nil
 }
 

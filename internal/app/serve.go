@@ -329,6 +329,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if _, need := server.ListenerRebindRequired(startupCand.Raw, candidate.Effective); need {
 				pendingSet["listener"] = struct{}{}
 			}
+			if _, need := server.ACMERestartRequired(startupCand.Raw.Servers, candidate.Effective.Servers); need {
+				pendingSet["acme"] = struct{}{}
+			}
 
 			pending := make([]string, 0, len(pendingSet))
 			for sub := range pendingSet {

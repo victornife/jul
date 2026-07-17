@@ -407,3 +407,82 @@ func TestPickExcludingReturnsErrorWhenAllAvailableExcluded(t *testing.T) {
 		t.Errorf("pickExcluding with all excluded returned %v, want ErrNoAvailableBackend", err)
 	}
 }
+
+// TestStaticSnapshotFreezesBackends verifies that a static (non-discovery) pool
+// snapshot captures the backend set at creation time and does not observe later
+// updates (R8 / decision 3A).
+func TestStaticSnapshotFreezesBackends(t *testing.T) {
+	pool, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "10.0.0.1:80", Weight: 1}},
+		MaxFails: 1,
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	snap := pool.Snapshot()
+	pool.UpdateBackends([]config.UpstreamServer{{Address: "10.0.0.2:80", Weight: 1}})
+
+	if got := len(snap.Backends()); got != 1 {
+		t.Fatalf("static snapshot has %d backends, want 1", got)
+	}
+	if got := snap.Backends()[0].Address; got != "10.0.0.1:80" {
+		t.Errorf("static snapshot backend = %q, want 10.0.0.1:80", got)
+	}
+	b, err := snap.pick()
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	defer b.release()
+	if b.Address != "10.0.0.1:80" {
+		t.Errorf("static snapshot pick = %q, want 10.0.0.1:80", b.Address)
+	}
+}
+
+// TestDynamicSnapshotUsesLiveBackends verifies that a discovery-owned pool's
+// snapshot reads from the live pool at request time, so backend convergence is
+// visible without waiting for a reload (R8 / decision 3A).
+func TestDynamicSnapshotUsesLiveBackends(t *testing.T) {
+	pool, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "10.0.0.1:80", Weight: 1}},
+		MaxFails: 1,
+		Discovery: &config.DiscoveryConfig{
+			Type: "dns",
+		},
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	if !pool.dynamic {
+		t.Fatal("pool with discovery config should be dynamic")
+	}
+
+	snap := pool.Snapshot()
+	if !snap.dynamic {
+		t.Fatal("snapshot of dynamic pool should be dynamic")
+	}
+
+	pool.UpdateBackends([]config.UpstreamServer{{Address: "10.0.0.2:80", Weight: 1}})
+
+	if got := len(snap.Backends()); got != 1 {
+		t.Fatalf("dynamic snapshot has %d backends, want 1", got)
+	}
+	if got := snap.Backends()[0].Address; got != "10.0.0.2:80" {
+		t.Errorf("dynamic snapshot backend = %q, want 10.0.0.2:80", got)
+	}
+	b, err := snap.pick()
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	defer b.release()
+	if b.Address != "10.0.0.2:80" {
+		t.Errorf("dynamic snapshot pick = %q, want 10.0.0.2:80", b.Address)
+	}
+}

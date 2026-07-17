@@ -127,14 +127,15 @@ func PreflightTLS(servers []config.ServerConfig) error {
 }
 
 // acmeFingerprint summarises the ACME settings that are fixed when the autocert
-// manager is built at startup: the union of issued domains plus the issuer
-// parameters (email, CA and challenge). Two configs with equal fingerprints can
-// swap their ACME state on reload without a restart; a non-empty fingerprint
-// means the candidate relies on ACME. Domains are de-duplicated and sorted so
-// the comparison is order-insensitive.
+// manager is built at startup: the union of listener addresses, issued domains,
+// and issuer parameters (email, CA and challenge). Two configs with equal
+// fingerprints can swap their ACME state on reload without a restart; a
+// non-empty fingerprint means the candidate relies on ACME. Addresses and
+// domains are de-duplicated and sorted so the comparison is order-insensitive.
 func acmeFingerprint(servers []config.ServerConfig) string {
-	var domains []string
-	seen := make(map[string]bool)
+	var domains, addrs []string
+	seenDomain := make(map[string]bool)
+	seenAddr := make(map[string]bool)
 	var email, ca, challenge string
 	for i := range servers {
 		srv := &servers[i]
@@ -143,9 +144,13 @@ func acmeFingerprint(servers []config.ServerConfig) string {
 			continue
 		}
 		a := srv.TLS.ACME
+		if !seenAddr[srv.Listen] {
+			seenAddr[srv.Listen] = true
+			addrs = append(addrs, srv.Listen)
+		}
 		for _, d := range a.Domains {
-			if !seen[d] {
-				seen[d] = true
+			if !seenDomain[d] {
+				seenDomain[d] = true
 				domains = append(domains, d)
 			}
 		}
@@ -159,11 +164,12 @@ func acmeFingerprint(servers []config.ServerConfig) string {
 			challenge = a.Challenge
 		}
 	}
-	if len(domains) == 0 {
+	if len(addrs) == 0 {
 		return ""
 	}
+	sort.Strings(addrs)
 	sort.Strings(domains)
-	return strings.Join(domains, ",") + "|" + email + "|" + ca + "|" + challenge
+	return strings.Join(addrs, ",") + "|" + strings.Join(domains, ",") + "|" + email + "|" + ca + "|" + challenge
 }
 
 // ACMERestartRequired reports whether moving from old to next changes the ACME

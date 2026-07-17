@@ -189,6 +189,21 @@ func TestACMERestartRequired(t *testing.T) {
 			t.Fatal("removing ACME hot-applies via provider swap; no restart required")
 		}
 	})
+
+	t.Run("adding an acme listener requires restart", func(t *testing.T) {
+		old := acme("example.com")
+		next := append([]config.ServerConfig(nil), old...)
+		next = append(next, config.ServerConfig{
+			Listen: ":8443",
+			TLS: &config.TLSConfig{
+				Enabled: true,
+				ACME:    &config.ACMEConfig{Enabled: true, Email: "ops@example.com", Domains: []string{"example.com"}},
+			},
+		})
+		if _, need := ACMERestartRequired(old, next); !need {
+			t.Fatal("adding an ACME listener must require a restart")
+		}
+	})
 }
 
 func TestSNICertSelection(t *testing.T) {

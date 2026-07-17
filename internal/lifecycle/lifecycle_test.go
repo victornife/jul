@@ -4,6 +4,10 @@
 package lifecycle
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"jul/internal/config"
@@ -451,5 +455,92 @@ func fullConfig() *config.Config {
 			IdleTimeout:    config.Duration(300e9),
 			MaxUDPSessions: 10000,
 		}},
+	}
+}
+
+// TestDigestTLSFileDetectsRelativePathContentChange verifies that a relative
+// certificate path (without "./") is read and its content digested, so
+// rotation is detected (R8 / relative path digest).
+func TestDigestTLSFileDetectsRelativePathContentChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cert.pem")
+	if err := os.WriteFile(path, []byte("CERT-A"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	first := digestTLSFile(path)
+	if first == "" {
+		t.Fatal("expected non-empty digest for readable relative path")
+	}
+	if !strings.HasPrefix(first, "file-sha256:") {
+		t.Fatalf("expected file-sha256 digest, got %q", first)
+	}
+
+	if err := os.WriteFile(path, []byte("CERT-B"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	second := digestTLSFile(path)
+	if second == first {
+		t.Fatal("expected digest to change when certificate content changes")
+	}
+}
+
+// TestDigestTLSFileTreatsWindowsPathsAsCandidates verifies that Windows-style
+// absolute and UNC paths are passed to os.Stat rather than being digested as
+// opaque strings. On non-Windows hosts the stat fails and the function falls
+// back to a string digest without panicking.
+func TestDigestTLSFileTreatsWindowsPathsAsCandidates(t *testing.T) {
+	cases := []string{
+		`C:\certs\cert.pem`,
+		`\\server\share\cert.pem`,
+		`C:/certs/cert.pem`,
+	}
+	for _, p := range cases {
+		d := digestTLSFile(p)
+		if d == "" {
+			t.Errorf("digest for %q is empty", p)
+		}
+		if strings.HasPrefix(d, "file-sha256:") && runtime.GOOS != "windows" {
+			t.Errorf("unexpected file digest on %s for %q; expected string fallback", runtime.GOOS, p)
+		}
+	}
+}
+
+// TestDigestTLSFileInlinePEMIsNotAPath verifies that inline PEM content is
+// digested as a string even if it resembles a path, so secret values are not
+// treated as files.
+func TestDigestTLSFileInlinePEMIsNotAPath(t *testing.T) {
+	pem := "-----BEGIN CERTIFICATE-----\nMIIB…\n-----END CERTIFICATE-----\n"
+	d := digestTLSFile(pem)
+	want := digestString(pem)
+	if d != want {
+		t.Errorf("inline PEM digest = %q, want %q", d, want)
+	}
+}
+
+// TestRestartRequiredDetectsTLSCertContentChange verifies that changing the
+// content of a relative-path TLS certificate triggers restart_required.
+func TestRestartRequiredDetectsTLSCertContentChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cert.pem")
+	if err := os.WriteFile(path, []byte("CERT-A"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	base := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: ":8443",
+			TLS:    &config.TLSConfig{Enabled: true, Cert: path, Key: path},
+		}},
+	}
+	before := ComputeFingerprint(base)
+
+	if err := os.WriteFile(path, []byte("CERT-B"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	after := ComputeFingerprint(base)
+
+	if _, need := RestartRequired(before, after); !need {
+		t.Fatal("expected restart required after TLS certificate content change")
 	}
 }

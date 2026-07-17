@@ -234,26 +234,27 @@ func digestFileContent(path string) string {
 // resolved to PEM content, or a plain file path. Inline PEM is digested as a
 // string; a readable file path is digested by content; an unreadable path is
 // digested as a string so misconfiguration is stable.
+//
+// The path check accepts Unix absolute paths, relative paths (with or without
+// a leading "./"), and Windows absolute/UNC paths (C:\..., \\server\share)
+// so rotating a certificate on any platform or via a bare filename is detected.
 func digestTLSFile(s string) string {
 	if s == "" {
 		return ""
 	}
 	// Inline PEM content (or any already-resolved secret value) is digested
-	// directly. PEM has a distinctive marker; non-PEM non-path values also fall
-	// through to string digest.
-	if strings.HasPrefix(s, "-----BEGIN") || !looksLikePath(s) {
+	// directly. PEM has a distinctive marker.
+	if strings.HasPrefix(s, "-----BEGIN") {
 		return digestString(s)
 	}
-	// Plain file path: digest the content so cert/key rotation is detected.
+	// Treat every other non-empty value as a candidate file path. This covers
+	// relative paths such as "certs/cert.pem" and Windows paths such as
+	// "C:\\certs\\cert.pem" without maintaining a fragile path-prefix allow-list.
 	info, err := os.Stat(s)
 	if err == nil && !info.IsDir() {
 		return digestFileContent(s)
 	}
 	return digestString(s)
-}
-
-func looksLikePath(s string) bool {
-	return strings.HasPrefix(s, "/") || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
 }
 
 func sniKey(names []string) string {

@@ -93,6 +93,9 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
 		if reason, need := server.ListenerRebindRequired(prevCandidate.Effective, candidate.Effective); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
+		if reason, need := server.ACMERestartRequired(prevCandidate.Effective.Servers, candidate.Effective.Servers); need {
+			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		}
 	}
 	return nil
 }
