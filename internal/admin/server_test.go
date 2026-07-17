@@ -5,6 +5,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -133,7 +134,7 @@ func TestPurgeMethodAndKey(t *testing.T) {
 
 func TestReloadTriggersHook(t *testing.T) {
 	var called atomic.Int64
-	s := newTestServer(t, config.AdminConfig{}, Deps{Reload: func() { called.Add(1) }})
+	s := newTestServer(t, config.AdminConfig{}, Deps{Reload: func() error { called.Add(1); return nil }})
 	h := s.routes()
 
 	rr := httptest.NewRecorder()
@@ -150,6 +151,17 @@ func TestReloadTriggersHook(t *testing.T) {
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/reload", nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET reload = %d, want 405", rr.Code)
+	}
+}
+
+func TestReloadReturns503OnEnqueueFailure(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{Reload: func() error { return errors.New("reload coordinator backlogged") }})
+	h := s.routes()
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/reload", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("reload = %d, want 503", rr.Code)
 	}
 }
 

@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -124,7 +125,8 @@ func TestMergeReloadFansInAndSkipsNil(t *testing.T) {
 	a := make(chan struct{}, 1)
 	admin := make(chan server.ReloadRequest, 1)
 	// fileWatch is nil; admin is non-nil.
-	out := MergeReload(ctx, a, nil, admin)
+	var lastAdminDigest atomic.Pointer[[32]byte]
+	out := MergeReload(ctx, a, nil, admin, &lastAdminDigest)
 
 	recv := func() (server.ReloadRequest, bool) {
 		select {
@@ -150,7 +152,54 @@ func TestMergeReloadFansInAndSkipsNil(t *testing.T) {
 	}
 
 	// nil admin channel should also be accepted without panic.
-	_ = MergeReload(ctx, a, nil, nil)
+	_ = MergeReload(ctx, a, nil, nil, &lastAdminDigest)
+}
+
+// TestMergeReloadSuppressesWatcherEcho (R10-01) verifies that a file-watch
+// event whose digest matches the last admin-written digest is dropped, while
+// a file-watch event with a different digest is forwarded as an external
+// write.
+func TestMergeReloadSuppressesWatcherEcho(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sig := make(chan struct{})
+	fileWatch := make(chan [32]byte, 1)
+	admin := make(chan server.ReloadRequest, 1)
+	var lastAdminDigest atomic.Pointer[[32]byte]
+	out := MergeReload(ctx, sig, fileWatch, admin, &lastAdminDigest)
+
+	recv := func(timeout time.Duration) (server.ReloadRequest, bool) {
+		select {
+		case r := <-out:
+			return r, true
+		case <-time.After(timeout):
+			return server.ReloadRequest{}, false
+		}
+	}
+
+	adminDigest := [32]byte{1, 2, 3}
+	lastAdminDigest.Store(&adminDigest)
+	admin <- server.ReloadRequest{Source: server.ReloadSourceAdmin}
+
+	r, ok := recv(time.Second)
+	if !ok || r.Source != server.ReloadSourceAdmin {
+		t.Fatalf("admin event not forwarded: got %+v ok=%v", r, ok)
+	}
+
+	// Watcher reports the same digest -> echo, must be suppressed.
+	fileWatch <- adminDigest
+	if r, ok := recv(200 * time.Millisecond); ok {
+		t.Fatalf("watcher echo was not suppressed: %+v", r)
+	}
+
+	// Watcher reports a different digest -> external write, must forward.
+	externalDigest := [32]byte{4, 5, 6}
+	fileWatch <- externalDigest
+	r, ok = recv(time.Second)
+	if !ok || r.Source != server.ReloadSourceFileWatch {
+		t.Fatalf("external file watch not forwarded: got %+v ok=%v", r, ok)
+	}
 }
 
 func TestValidateRuntimeConfig(t *testing.T) {

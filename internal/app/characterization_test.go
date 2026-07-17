@@ -143,7 +143,7 @@ func TestBuildAdminDepsWiringCompleteness(t *testing.T) {
 	os.WriteFile(path, []byte("[[servers]]\nlisten = \":8080\"\n"), 0o644)
 
 	deps := BuildAdminDeps("Jul.IA", "1.0.0", config.NewTOMLSource(path), subsystems)
-	deps.Reload = func() {}
+	deps.Reload = func() error { return nil }
 	deps.Ready = func() bool { return true }
 
 	requireNonNil := func(name string, v any) {

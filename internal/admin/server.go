@@ -59,8 +59,9 @@ type Deps struct {
 	TrafficSources func() observability.TrafficSources
 	// Cache, when non-nil, backs the /cache/purge endpoint.
 	Cache Purger
-	// Reload triggers a configuration reload. It must not block.
-	Reload func()
+	// Reload triggers a configuration reload. It returns an error if the
+	// reload could not be enqueued within the implementation's timeout.
+	Reload func() error
 	// Ready reports whether the server is ready to receive traffic.
 	Ready func() bool
 	// LiveSnapshot returns the current bound listener state from the runtime
@@ -339,7 +340,9 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "purged"})
 }
 
-// handleReload triggers a configuration reload. POST only.
+// handleReload triggers a configuration reload. POST only. It returns 202
+// when the reload is successfully enqueued and 503 when the enqueue times out
+// or is otherwise rejected by the runtime coordinator.
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -350,7 +353,11 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
-	s.deps.Reload()
+	if err := s.deps.Reload(); err != nil {
+		s.recordAudit("config.reload", "config", "failure", err.Error(), adminClientIP(r))
+		http.Error(w, "503 Service Unavailable: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	s.recordAudit("config.reload", "config", "success", "reload triggered via admin API", adminClientIP(r))
 	// Notify SSE subscribers and the timeline so the Console updates live.
 	s.emit("config", "reload", "info", "Configuration reload triggered.")

@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"jul/internal/auth"
 	"jul/internal/config"
@@ -100,7 +101,12 @@ func IndexUpstreams(ups []config.UpstreamConfig) map[string]config.UpstreamConfi
 // has capacity one per source so a burst of distinct events is coalesced to
 // the latest event but an admin candidate-bearing event is not dropped behind
 // a coalesced file-watch/SIGHUP signal.
-func MergeReload(ctx context.Context, sigReload, fileWatch <-chan struct{}, adminReload <-chan server.ReloadRequest) <-chan server.ReloadRequest {
+//
+// fileWatch, when non-nil, carries the SHA-256 digest of the file contents at
+// the moment the watcher fired. When a digest matches lastAdminDigest, the
+// event is treated as the echo of a recent admin write and is suppressed
+// (R10-01).
+func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-chan [32]byte, adminReload <-chan server.ReloadRequest, lastAdminDigest *atomic.Pointer[[32]byte]) <-chan server.ReloadRequest {
 	out := make(chan server.ReloadRequest, 3)
 
 	forward := func(in <-chan struct{}, source server.ReloadSource) {
@@ -136,7 +142,41 @@ func MergeReload(ctx context.Context, sigReload, fileWatch <-chan struct{}, admi
 	}
 
 	forward(sigReload, server.ReloadSourceSIGHUP)
-	forward(fileWatch, server.ReloadSourceFileWatch)
+
+	if fileWatch != nil {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case digest, ok := <-fileWatch:
+					if !ok {
+						return
+					}
+					// Suppress the echo of a recent admin write: if the file
+					// digest matches the last digest produced by an admin apply,
+					// the watcher is just reporting our own save (R10-01).
+					if lastAdminDigest != nil {
+						if last := lastAdminDigest.Load(); last != nil && *last == digest {
+							continue
+						}
+					}
+					select {
+					case out <- server.ReloadRequest{Source: server.ReloadSourceFileWatch}:
+					default:
+						select {
+						case <-out:
+						default:
+						}
+						select {
+						case out <- server.ReloadRequest{Source: server.ReloadSourceFileWatch}:
+						default:
+						}
+					}
+				}
+			}
+		}()
+	}
 
 	if adminReload != nil {
 		go func() {
