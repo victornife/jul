@@ -195,3 +195,43 @@ func TestStateApplyPrefixValue(t *testing.T) {
 		t.Fatalf("Apply = %q, want %q", got, want)
 	}
 }
+
+// TestStateSortedPrecomputed (R8-15) verifies that the longest-first ordering
+// used by Apply is precomputed at construction time and preserved by Clone and
+// Union, so Apply does not allocate or sort per call.
+func TestStateSortedPrecomputed(t *testing.T) {
+	equal := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	s := NewState([]string{"aaaa", "bbbbb", "cccccc"}, DefaultMinLen)
+	want := []string{"cccccc", "bbbbb", "aaaa"}
+	if got := s.sortedValues(); !equal(got, want) {
+		t.Fatalf("sortedValues = %v, want %v", got, want)
+	}
+
+	cloned := s.Clone()
+	if got := cloned.sortedValues(); !equal(got, want) {
+		t.Fatalf("Clone sortedValues = %v, want %v", got, want)
+	}
+
+	added := s.WithValue("ddddddd")
+	wantAdded := []string{"ddddddd", "cccccc", "bbbbb", "aaaa"}
+	if got := added.sortedValues(); !equal(got, wantAdded) {
+		t.Fatalf("WithValue sortedValues = %v, want %v", got, wantAdded)
+	}
+
+	union := s.Union(NewState([]string{"mmmmmmmm"}, DefaultMinLen))
+	wantUnion := []string{"mmmmmmmm", "cccccc", "bbbbb", "aaaa"}
+	if got := union.sortedValues(); !equal(got, wantUnion) {
+		t.Fatalf("Union sortedValues = %v, want %v", got, wantUnion)
+	}
+}

@@ -31,7 +31,7 @@ func TestServerConnectionCap(t *testing.T) {
 	var releaseOnce sync.Once
 	doRelease := func() { releaseOnce.Do(func() { close(release) }) }
 
-	factory := func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&entered, 1)
 			<-release
@@ -41,7 +41,7 @@ func TestServerConnectionCap(t *testing.T) {
 		for _, srv := range c.Servers {
 			m[srv.Listen] = h
 		}
-		return m, nil, 1, func() func() { return nil }, func() {}, redact.EmptyState(), nil
+		return m, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, redact.EmptyState(), nil
 	}
 
 	cfg := &config.Config{

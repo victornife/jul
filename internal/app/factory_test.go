@@ -174,7 +174,7 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	handlers, snapshots, genID, commitFn, abortFn, state, err := f.Prepare(cfg)
+	handlers, genID, commitFn, abortFn, state, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -190,8 +190,8 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	if genID == 0 {
 		t.Fatal("Prepare returned zero genID")
 	}
+	snapshots, retirePrev := commitFn()
 	_ = snapshots
-	retirePrev := commitFn()
 	// commitFn no longer installs redaction; the caller (ReloadPlan.Publish)
 	// owns that. Verify the state is returned and non-nil.
 	_ = state
@@ -214,7 +214,7 @@ func TestHandlerFactoryPrepareAbort(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	_, _, _, _, abortFn, _, err := f.Prepare(cfg)
+	_, _, _, abortFn, _, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestHandlerFactoryPrepareAbortDoesNotInstallRedaction(t *testing.T) {
 	if candidate.Redaction.Apply("candidate-secret-value") != "***" {
 		t.Fatal("candidate redaction does not mask the secret")
 	}
-	_, _, _, _, abortFn, state, err := f.Prepare(candidate.Effective)
+	_, _, _, abortFn, state, err := f.Prepare(candidate.Effective)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestHandlerFactoryPrepareReturnsEmptyRedactionState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCandidate: %v", err)
 	}
-	_, _, _, commitFn, abortFn, state, err := f.Prepare(candidate.Effective)
+	_, _, commitFn, abortFn, state, err := f.Prepare(candidate.Effective)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestGenerationScopedPoolSnapshotsViaContext(t *testing.T) {
 	})
 
 	snap1 := pool.Snapshot()
-	snapshots := map[string]*upstream.PoolSnapshot{"api": snap1}
+	snapshots := upstream.SnapshotMap{upstream.PoolSnapshotKey{Name: "api", Scheme: "http"}: snap1}
 	base := httptest.NewRequest("GET", "/", nil)
 	req1 := base.WithContext(upstream.WithSnapshot(base.Context(), snapshots))
 	handler.ServeHTTP(httptest.NewRecorder(), req1)
@@ -333,5 +333,69 @@ func TestGenerationScopedPoolSnapshotsViaContext(t *testing.T) {
 	}
 	if counts[1] != 1 {
 		t.Errorf("second request saw %d backends, want 1 (context snapshot should be stable)", counts[1])
+	}
+}
+
+// TestPrepareCapturesSnapshotsAfterCommit verifies that commitFn returns pool
+// snapshots taken from the live registry AFTER pools are committed (R8-01). A
+// newly staged upstream must be present in the returned snapshot map.
+func TestPrepareCapturesSnapshotsAfterCommit(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: ":0",
+			Locations: []config.LocationConfig{{
+				Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+				ProxyPass: "http://api",
+			}},
+		}},
+		Upstreams: []config.UpstreamConfig{{
+			Name:     "api",
+			Strategy: "round_robin",
+			Servers:  []config.UpstreamServer{{Address: "127.0.0.1:8001"}},
+		}},
+	}
+
+	_, _, commitFn, abortFn, _, err := f.Prepare(cfg)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	snapshots, retirePrev := commitFn()
+	defer func() {
+		if retirePrev != nil {
+			retirePrev()
+		}
+	}()
+	abortFn() // safe no-op after commit
+
+	key := upstream.PoolSnapshotKey{Name: "api", Scheme: "http"}
+	if snapshots == nil || snapshots[key] == nil {
+		t.Fatalf("commitFn did not return a snapshot for newly committed pool %v", key)
+	}
+	if len(snapshots[key].Backends()) != 1 {
+		t.Errorf("snapshot has %d backends, want 1", len(snapshots[key].Backends()))
+	}
+
+	// A second Prepare+commit must capture the new generation's backend view.
+	cfg.Upstreams[0].Servers = append(cfg.Upstreams[0].Servers, config.UpstreamServer{Address: "127.0.0.1:8002"})
+	_, _, commitFn2, abortFn2, _, err := f.Prepare(cfg)
+	if err != nil {
+		t.Fatalf("second Prepare: %v", err)
+	}
+	snapshots2, retirePrev2 := commitFn2()
+	defer func() {
+		if retirePrev2 != nil {
+			retirePrev2()
+		}
+	}()
+	abortFn2()
+
+	if snapshots2 == nil || snapshots2[key] == nil {
+		t.Fatalf("second commitFn did not return snapshot for %v", key)
+	}
+	if len(snapshots2[key].Backends()) != 2 {
+		t.Errorf("second snapshot has %d backends, want 2", len(snapshots2[key].Backends()))
 	}
 }

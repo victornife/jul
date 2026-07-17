@@ -27,19 +27,18 @@ import (
 )
 
 // HandlerFactory prepares a new handler generation for cfg without committing
-// it. The returned snapshots map is the generation-scoped pool view that must
-// be published atomically with the handlers. The returned genID uniquely
-// identifies this generation for redaction retirement. The returned commitFn
-// promotes staged resources (upstream pools, closers) to live and returns a
-// retire callback for the previous generation. The returned abortFn discards
-// staged resources, leaving the live generation untouched. The returned
-// redact.State covers the secrets resolved during the build and must be
-// installed by the caller only at the reload publish boundary. Exactly one of
-// commitFn or abortFn must be called; both release any lock held during the
-// build so concurrent builds are serialised without holding a lock across the
-// bind-attempt window. When commit or abort is nil (e.g. in tests), the caller
-// may skip the call safely.
-type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, snapshots map[string]*upstream.PoolSnapshot, genID uint64, commit func() func(), abort func(), state redact.State, err error)
+// it. The returned genID uniquely identifies this generation for redaction
+// retirement. The returned commitFn promotes staged resources (upstream pools,
+// closers) to live, captures the generation-scoped pool snapshots from the now-
+// live registry, and returns a retire callback for the previous generation. The
+// returned abortFn discards staged resources, leaving the live generation
+// untouched. The returned redact.State covers the secrets resolved during the
+// build and must be installed by the caller only at the reload publish boundary.
+// Exactly one of commitFn or abortFn must be called; both release any lock held
+// during the build so concurrent builds are serialised without holding a lock
+// across the bind-attempt window. When commit or abort is nil (e.g. in tests),
+// the caller may skip the call safely.
+type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, genID uint64, commit func() (snapshots upstream.SnapshotMap, retirePrev func()), abort func(), state redact.State, err error)
 
 // Server runs one http.Server per unique listen address and coordinates
 // graceful shutdown and configuration reload.
@@ -97,6 +96,12 @@ type Server struct {
 	listeners map[string]*listenerEntry // keyed by listen address
 	handlers  atomic.Pointer[handlerGen]
 
+	// pendingCandidate is injected by the admin apply path so the live reload
+	// uses the exact candidate that passed preflight, rather than re-reading the
+	// file and resolving secrets a second time (R8-11). It is consumed once by
+	// doReload.
+	pendingCandidate atomic.Pointer[config.Candidate]
+
 	// redactMu guards redactGens, the per-generation active redaction states.
 	// A generation is registered when its handlers are published and retired
 	// after its in-flight requests drain, so secrets are masked as long as any
@@ -127,6 +132,13 @@ func (s *Server) LastReload() *lastReloadInfo {
 	return nil
 }
 
+// InjectCandidate hands the exact candidate that passed admin preflight to the
+// next live reload. This prevents secret sources or the on-disk file from
+// changing between preflight validation and the asynchronous swap (R8-11).
+func (s *Server) InjectCandidate(c *config.Candidate) {
+	s.pendingCandidate.Store(c)
+}
+
 // handlerGen is one generation of the per-listen-address handler map plus the
 // bookkeeping that lets the server close the generation's resources only after
 // the requests that may be using them have drained. A reload installs a new
@@ -136,7 +148,7 @@ func (s *Server) LastReload() *lastReloadInfo {
 // directory handles) are never closed while an old request is still executing.
 type handlerGen struct {
 	handlers  map[string]http.Handler
-	snapshots map[string]*upstream.PoolSnapshot
+	snapshots upstream.SnapshotMap
 	genID     uint64
 
 	inflight   atomic.Int64
@@ -147,7 +159,7 @@ type handlerGen struct {
 	retireOnce sync.Once
 }
 
-func newHandlerGen(handlers map[string]http.Handler, snapshots map[string]*upstream.PoolSnapshot, genID uint64) *handlerGen {
+func newHandlerGen(handlers map[string]http.Handler, snapshots upstream.SnapshotMap, genID uint64) *handlerGen {
 	return &handlerGen{handlers: handlers, snapshots: snapshots, genID: genID, drained: make(chan struct{})}
 }
 
@@ -212,12 +224,12 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
 	// The startup effective config is already resolved by the composition root
 	// and passed as s.cfg. The factory receives the same candidate that will be
 	// served, so there is no second secret resolution at startup (R7-05).
-	handlers, snapshots, genID, commit, _, state, err := s.factory(s.cfg)
+	handlers, genID, commit, _, state, err := s.factory(s.cfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
 	}
-	commit() // promote the initial generation; retirePrev is nil at startup
-	redact.Install(s.registerRedactionGen(genID, state))
+	snapshots, _ := commit() // promote the initial generation; retirePrev is nil at startup
+	s.registerRedactionGen(genID, state)
 	s.handlers.Store(newHandlerGen(handlers, snapshots, genID))
 
 	addrs := uniqueListenAddrs(s.cfg.Servers)
@@ -456,20 +468,30 @@ func (s *Server) acquireGen() *handlerGen {
 }
 
 // retireGen closes the resources of a swapped-out generation after its in-flight
-// requests drain, or after the shutdown grace period if they do not. retire is
-// the factory-supplied closer for that generation and may be nil (the initial
-// generation owns nothing a previous one did not).
-func (s *Server) retireGen(g *handlerGen, retire func()) {
-	if g == nil || retire == nil {
+// requests drain, or after the shutdown grace period if they do not.
+// retireResources is the factory-supplied closer for that generation and may be
+// nil (the initial generation owns nothing a previous one did not).
+// retireRedaction removes the generation's secrets from the active redaction
+// set; it is invoked only when the generation actually drains, never on the
+// grace timeout, so secrets stay masked while old-generation code still
+// executes (R8-14).
+func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction func()) {
+	if g == nil || retireResources == nil {
 		return
 	}
-	g.retire = retire
+	g.retire = retireResources
 	g.retiring.Store(true)
 	if g.inflight.Load() == 0 {
 		g.doRetire()
+		if retireRedaction != nil {
+			retireRedaction()
+		}
 		return
 	}
 	grace := s.shutdownTimeout()
+
+	// Close resources when the generation drains or the grace timeout fires,
+	// whichever comes first.
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -481,6 +503,17 @@ func (s *Server) retireGen(g *handlerGen, retire func()) {
 			s.log.Warn("reload: previous handler generation did not drain within grace; closing its resources", "grace", grace)
 		}
 		g.doRetire()
+	}()
+
+	// Redaction is retired only when the generation truly drains, even if that
+	// happens after the resource grace timeout.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		<-g.drained
+		if retireRedaction != nil {
+			retireRedaction()
+		}
 	}()
 }
 
@@ -510,22 +543,26 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 	})
 }
 
-// registerRedactionGen adds genID's secrets to the active set and returns the
-// union of all active generations' redaction states. It is called on publish.
-func (s *Server) registerRedactionGen(genID uint64, state redact.State) redact.State {
+// registerRedactionGen adds genID's secrets to the active set and atomically
+// installs the union of all active generations' redaction states. Mutation,
+// union computation, and global installation happen under redactMu so a stale
+// asynchronous retirement can never overwrite a newer generation's union.
+func (s *Server) registerRedactionGen(genID uint64, state redact.State) {
 	s.redactMu.Lock()
 	defer s.redactMu.Unlock()
 	s.redactGens[genID] = state
-	return s.redactUnionLocked()
+	redact.Install(s.redactUnionLocked())
 }
 
-// retireRedactionGen removes genID's secrets and returns the union of the
-// remaining active generations. It is called once a generation has drained.
-func (s *Server) retireRedactionGen(genID uint64) redact.State {
+// retireRedactionGen removes genID's secrets and atomically installs the union
+// of the remaining active generations. It is called once a generation has
+// actually drained, not when its resource teardown timeout fires, so secret
+// masking outlives forced resource closure.
+func (s *Server) retireRedactionGen(genID uint64) {
 	s.redactMu.Lock()
 	defer s.redactMu.Unlock()
 	delete(s.redactGens, genID)
-	return s.redactUnionLocked()
+	redact.Install(s.redactUnionLocked())
 }
 
 // redactUnionLocked returns the union of all registered generation redaction
@@ -569,14 +606,19 @@ func (s *Server) doReload() {
 	}
 	s.log.Info("reloading configuration", "source", s.source.Name())
 
-	newCfg, err := s.source.Load()
-	if err != nil {
-		s.log.Error("reload aborted: load failed", "error", err)
-		s.lastReload.Store(&lastReloadInfo{OK: false, At: time.Now(), Error: err.Error()})
-		return
+	var plan *ReloadPlan
+	if candidate := s.pendingCandidate.Swap(nil); candidate != nil {
+		// Admin apply path: use the exact candidate that passed preflight.
+		plan = s.newReloadPlan(candidate.Raw, candidate)
+	} else {
+		newCfg, err := s.source.Load()
+		if err != nil {
+			s.log.Error("reload aborted: load failed", "error", err)
+			s.lastReload.Store(&lastReloadInfo{OK: false, At: time.Now(), Error: err.Error()})
+			return
+		}
+		plan = s.newReloadPlan(newCfg, nil)
 	}
-
-	plan := s.newReloadPlan(newCfg)
 	info := &lastReloadInfo{At: plan.start}
 
 	// Phase 1–5: side-effect-free preparation.

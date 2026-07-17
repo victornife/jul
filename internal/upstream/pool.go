@@ -27,6 +27,12 @@ type Pool struct {
 	maxFails    int
 	failTimeout time.Duration
 
+	// dynamic is true when the pool's backend set is owned by a discovery
+	// refresher rather than a static server list. Dynamic snapshots read from
+	// the live pool at request time so discovery convergence is visible to
+	// in-flight requests; static snapshots freeze the backend set at commit.
+	dynamic bool
+
 	// backends holds the current backend set as an immutable slice published
 	// via an atomic pointer, so Pick performs a lock-free read on the hot path
 	// while UpdateBackends swaps the whole set atomically.
@@ -63,6 +69,7 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 		balancer:    newBalancer(cfg.Strategy),
 		maxFails:    maxFails,
 		failTimeout: failTimeout,
+		dynamic:     discoveryEnabled(cfg.Discovery),
 		done:        make(chan struct{}),
 	}
 	bs := buildBackends(cfg.Servers, scheme)

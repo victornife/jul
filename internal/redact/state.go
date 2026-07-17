@@ -16,6 +16,7 @@ import (
 // mutate the serving redaction behavior.
 type State struct {
 	values map[string]struct{}
+	sorted []string // values sorted longest-first, precomputed for Apply
 	minLen int
 }
 
@@ -33,19 +34,22 @@ func NewState(values []string, minLen int) State {
 			m[v] = struct{}{}
 		}
 	}
-	return State{values: m, minLen: minLen}
+	return State{values: m, sorted: sortedLongestFirst(m), minLen: minLen}
 }
 
-// sortedValues returns the registered values sorted longest-first. It is used
-// by Apply so overlapping secrets are masked deterministically.
-func (s State) sortedValues() []string {
-	vals := make([]string, 0, len(s.values))
-	for v := range s.values {
+// sortedLongestFirst returns the keys of m sorted by length descending.
+func sortedLongestFirst(m map[string]struct{}) []string {
+	vals := make([]string, 0, len(m))
+	for v := range m {
 		vals = append(vals, v)
 	}
 	sort.Slice(vals, func(i, j int) bool { return len(vals[i]) > len(vals[j]) })
 	return vals
 }
+
+// sortedValues returns the registered values sorted longest-first. It is used
+// by Apply so overlapping secrets are masked deterministically.
+func (s State) sortedValues() []string { return s.sorted }
 
 // EmptyState returns a redaction state with no registered secrets and the
 // default minimum length.
@@ -59,15 +63,21 @@ func (s State) WithValue(value string) State {
 	if len(value) < s.minLen {
 		return s
 	}
+	if _, ok := s.values[value]; ok {
+		return s
+	}
 	out := s.Clone()
 	out.values[value] = struct{}{}
+	out.sorted = append(out.sorted, value)
+	sort.Slice(out.sorted, func(i, j int) bool { return len(out.sorted[i]) > len(out.sorted[j]) })
 	return out
 }
 
 // WithMinLen returns a new State with the given minimum length. Existing values
 // shorter than the new floor remain in the registry (they were already deemed
 // secret under a stricter policy), but future values added via WithValue will
-// be filtered by the new floor.
+// be filtered by the new floor. The pre-sorted slice is unchanged because the
+// existing values remain in the set.
 func (s State) WithMinLen(minLen int) State {
 	if minLen < 1 {
 		minLen = DefaultMinLen
@@ -109,8 +119,8 @@ func (s State) MinLen() int {
 	return s.minLen
 }
 
-// Clone returns a deep copy of the state. The cloned values are sorted
-// longest-first on the next Apply so ordering remains deterministic.
+// Clone returns a deep copy of the state. The cloned values and sorted slice
+// are preserved so Apply remains deterministic without re-sorting.
 func (s State) Clone() State {
 	out := State{minLen: s.minLen}
 	if len(s.values) == 0 {
@@ -120,6 +130,8 @@ func (s State) Clone() State {
 		for k := range s.values {
 			out.values[k] = struct{}{}
 		}
+		out.sorted = make([]string, len(s.sorted))
+		copy(out.sorted, s.sorted)
 	}
 	return out
 }
@@ -139,6 +151,7 @@ func (s State) Union(other State) State {
 	for v := range other.values {
 		out.values[v] = struct{}{}
 	}
+	out.sorted = sortedLongestFirst(out.values)
 	return out
 }
 

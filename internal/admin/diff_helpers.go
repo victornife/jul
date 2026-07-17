@@ -50,6 +50,32 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// stringSlicesEqual reports whether two string slices contain the same elements
+// in the same order.
+func stringSlicesEqual(x, y []string) bool {
+	if len(x) != len(y) {
+		return false
+	}
+	for i := range x {
+		if x[i] != y[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// sortedStringSlice returns a sorted copy of a string slice; used for
+// order-independent comparisons such as CIDR lists or JWT algorithms.
+func sortedStringSlice(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	cp := make([]string, len(s))
+	copy(cp, s)
+	sort.Strings(cp)
+	return cp
+}
+
 func durStr(d config.Duration) string {
 	if time.Duration(d) == 0 {
 		return "(none)"
@@ -266,18 +292,8 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 	}
 	d.cover("servers.*.locations.*.waf")
 
-	// Auth toggle.
-	if (b.Auth != nil) != (a.Auth != nil) {
-		action := "Enable"
-		if a.Auth == nil {
-			action = "Disable"
-		}
-		d.mod(DiffEntry{Kind: "auth", Name: name, Detail: fmt.Sprintf("%s access control on route %s", action, key)}, "route "+name+" auth")
-		if action == "Disable" {
-			d.warn("Disabling access control on route %s on %s exposes it without authentication.", key, server)
-		}
-	}
-	d.cover("servers.*.locations.*.auth")
+	// Auth changes (CIDR lists, Basic, JWT, forward-auth).
+	diffAuth(server, key, b.Auth, a.Auth, d)
 
 	// Cache toggle.
 	if b.Cache != a.Cache {
@@ -293,16 +309,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 	d.cover("servers.*.locations.*.cache")
 
 	// Per-route rate-limit override.
-	if (b.RateLimit != nil) != (a.RateLimit != nil) {
-		action := "Add"
-		if a.RateLimit == nil {
-			action = "Remove"
-		}
-		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Detail: fmt.Sprintf("%s rate-limit override on route %s", action, key)}, "route "+name+" rate limit")
-	} else if a.RateLimit != nil && b.RateLimit != nil && (a.RateLimit.Rate != b.RateLimit.Rate || a.RateLimit.Burst != b.RateLimit.Burst || a.RateLimit.Key != b.RateLimit.Key) {
-		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: rlStr(b.RateLimit), After: rlStr(a.RateLimit), Detail: "Change rate-limit policy on route " + key}, "route "+name+" rate limit")
-	}
-	d.cover("servers.*.locations.*.rate_limit")
+	diffRateLimit(server, key, b.RateLimit, a.RateLimit, d)
 
 	// mTLS require-client-cert toggle.
 	if b.RequireClientCert != a.RequireClientCert {
@@ -349,6 +356,140 @@ func diffProxyTimeouts(server, key string, b, a *config.LocationConfig, d *Confi
 			d.mod(DiffEntry{Kind: "timeouts", Name: name, Before: durStr(p.b), After: durStr(p.a), Detail: fmt.Sprintf("Change %s on route %s", p.label, key)}, fmt.Sprintf("route %s %s", name, p.label))
 		}
 	}
+}
+
+// diffAuth exhaustively compares per-location auth configuration. Add/remove
+// of the whole auth block is reported as a high-level enable/disable; every
+// sub-field change (CIDR lists, Basic/JWT/forward-auth settings) is reported
+// individually. The lifecycle path is only covered once all possible sub-field
+// changes have been inspected, so no auth change can be silently absorbed by
+// a broad `cover` call (R8-09).
+func diffAuth(server, key string, b, a *config.AuthConfig, d *ConfigDiff) {
+	name := server + " " + key
+
+	// Whole-block add/remove.
+	if (b != nil) != (a != nil) {
+		action := "Enable"
+		if a == nil {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "auth", Name: name, Detail: fmt.Sprintf("%s access control on route %s", action, key)}, "route "+name+" auth")
+		if action == "Disable" {
+			d.warn("Disabling access control on route %s on %s exposes it without authentication.", key, server)
+		}
+		d.cover("servers.*.locations.*.auth")
+		return
+	}
+	if a == nil {
+		return
+	}
+
+	// CIDR allow/deny lists.
+	if !stringSlicesEqual(sortedStringSlice(b.Allow), sortedStringSlice(a.Allow)) {
+		d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(strings.Join(b.Allow, ",")), After: orNone(strings.Join(a.Allow, ",")), Detail: "Change auth allow CIDRs on route " + key}, "route "+name+" auth allow")
+	}
+	if !stringSlicesEqual(sortedStringSlice(b.Deny), sortedStringSlice(a.Deny)) {
+		d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(strings.Join(b.Deny, ",")), After: orNone(strings.Join(a.Deny, ",")), Detail: "Change auth deny CIDRs on route " + key}, "route "+name+" auth deny")
+	}
+
+	// Basic auth.
+	if (b.Basic != nil) != (a.Basic != nil) {
+		action := "Enable"
+		if a.Basic == nil {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "auth", Name: name, Detail: fmt.Sprintf("%s Basic auth on route %s", action, key)}, "route "+name+" auth basic")
+	} else if a.Basic != nil {
+		if b.Basic.File != a.Basic.File {
+			d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(b.Basic.File), After: orNone(a.Basic.File), Detail: "Change Basic auth htpasswd file on route " + key}, "route "+name+" auth basic file")
+		}
+		if b.Basic.Realm != a.Basic.Realm {
+			d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(b.Basic.Realm), After: orNone(a.Basic.Realm), Detail: "Change Basic auth realm on route " + key}, "route "+name+" auth basic realm")
+		}
+	}
+
+	// JWT auth.
+	if (b.JWT != nil) != (a.JWT != nil) {
+		action := "Enable"
+		if a.JWT == nil {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "auth", Name: name, Detail: fmt.Sprintf("%s JWT auth on route %s", action, key)}, "route "+name+" auth jwt")
+	} else if a.JWT != nil {
+		if b.JWT.JWKSURL != a.JWT.JWKSURL {
+			d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(b.JWT.JWKSURL), After: orNone(a.JWT.JWKSURL), Detail: "Change JWT JWKS URL on route " + key}, "route "+name+" auth jwt jwks_url")
+		}
+		if b.JWT.Issuer != a.JWT.Issuer {
+			d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(b.JWT.Issuer), After: orNone(a.JWT.Issuer), Detail: "Change JWT issuer on route " + key}, "route "+name+" auth jwt issuer")
+		}
+		if b.JWT.Audience != a.JWT.Audience {
+			d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(b.JWT.Audience), After: orNone(a.JWT.Audience), Detail: "Change JWT audience on route " + key}, "route "+name+" auth jwt audience")
+		}
+		if !stringSlicesEqual(sortedStringSlice(b.JWT.Algorithms), sortedStringSlice(a.JWT.Algorithms)) {
+			d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(strings.Join(b.JWT.Algorithms, ",")), After: orNone(strings.Join(a.JWT.Algorithms, ",")), Detail: "Change JWT allowed algorithms on route " + key}, "route "+name+" auth jwt algorithms")
+		}
+	}
+
+	// Forward auth.
+	if (b.ForwardAuth != nil) != (a.ForwardAuth != nil) {
+		action := "Enable"
+		if a.ForwardAuth == nil {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "auth", Name: name, Detail: fmt.Sprintf("%s forward-auth on route %s", action, key)}, "route "+name+" auth forward_auth")
+	} else if a.ForwardAuth != nil {
+		if b.ForwardAuth.URL != a.ForwardAuth.URL {
+			d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(b.ForwardAuth.URL), After: orNone(a.ForwardAuth.URL), Detail: "Change forward-auth URL on route " + key}, "route "+name+" auth forward_auth url")
+		}
+		if !stringSlicesEqual(sortedStringSlice(b.ForwardAuth.AuthResponseHeaders), sortedStringSlice(a.ForwardAuth.AuthResponseHeaders)) {
+			d.mod(DiffEntry{Kind: "auth", Name: name, Before: orNone(strings.Join(b.ForwardAuth.AuthResponseHeaders, ",")), After: orNone(strings.Join(a.ForwardAuth.AuthResponseHeaders, ",")), Detail: "Change forward-auth response headers on route " + key}, "route "+name+" auth forward_auth auth_response_headers")
+		}
+	}
+
+	d.cover("servers.*.locations.*.auth")
+}
+
+// diffRateLimit exhaustively compares per-location rate-limit overrides.
+// Add/remove of the block is reported separately; every field change
+// (enabled, key, rate, burst, max_conns) is reported. The lifecycle path is
+// covered only after all fields have been inspected (R8-09).
+func diffRateLimit(server, key string, b, a *config.RateLimitConfig, d *ConfigDiff) {
+	name := server + " " + key
+
+	if (b != nil) != (a != nil) {
+		action := "Add"
+		if a == nil {
+			action = "Remove"
+		}
+		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Detail: fmt.Sprintf("%s rate-limit override on route %s", action, key)}, "route "+name+" rate limit")
+		d.cover("servers.*.locations.*.rate_limit")
+		return
+	}
+	if a == nil {
+		return
+	}
+
+	if b.Enabled != a.Enabled {
+		action := "Enable"
+		if !a.Enabled {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Detail: fmt.Sprintf("%s rate-limit on route %s", action, key)}, "route "+name+" rate limit enabled")
+	}
+	if b.Key != a.Key {
+		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: orNone(b.Key), After: orNone(a.Key), Detail: "Change rate-limit key on route " + key}, "route "+name+" rate limit key")
+	}
+	if b.Rate != a.Rate {
+		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: fmt.Sprintf("%d/s", b.Rate), After: fmt.Sprintf("%d/s", a.Rate), Detail: "Change rate-limit rate on route " + key}, "route "+name+" rate limit rate")
+	}
+	if b.Burst != a.Burst {
+		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: fmt.Sprintf("%d", b.Burst), After: fmt.Sprintf("%d", a.Burst), Detail: "Change rate-limit burst on route " + key}, "route "+name+" rate limit burst")
+	}
+	if b.MaxConns != a.MaxConns {
+		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: fmt.Sprintf("%d", b.MaxConns), After: fmt.Sprintf("%d", a.MaxConns), Detail: "Change rate-limit max_conns on route " + key}, "route "+name+" rate limit max_conns")
+	}
+
+	d.cover("servers.*.locations.*.rate_limit")
 }
 
 func rlStr(r *config.RateLimitConfig) string {

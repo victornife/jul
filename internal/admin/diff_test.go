@@ -448,3 +448,89 @@ func TestDiffLifecycleCompleteness(t *testing.T) {
 		t.Errorf("expected restart-required warning for h2c/http3 change, got %+v", d.Warnings)
 	}
 }
+
+// TestDiffAuthSubFieldsVisible (R8-09) ensures auth changes below the top-level
+// toggle — CIDR lists, Basic file/realm, JWKS URL, JWT issuer/audience/algorithms,
+// and forward-auth URL/headers — are reported individually instead of being
+// absorbed by a broad lifecycle cover.
+func TestDiffAuthSubFieldsVisible(t *testing.T) {
+	before := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{{
+			Match: config.MatchConfig{Type: "prefix", Path: "/"},
+			Auth: &config.AuthConfig{
+				Allow: []string{"10.0.0.0/8"},
+				JWT: &config.JWTAuthConfig{
+					JWKSURL:    "https://auth.example.com/jwks",
+					Issuer:     "old-issuer",
+					Audience:   "old-audience",
+					Algorithms: []string{"RS256"},
+				},
+				ForwardAuth: &config.ForwardAuthConfig{
+					URL:                 "https://auth.example.com/check",
+					AuthResponseHeaders: []string{"X-User"},
+				},
+			},
+		}},
+	}}}
+	after := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{{
+			Match: config.MatchConfig{Type: "prefix", Path: "/"},
+			Auth: &config.AuthConfig{
+				Allow: []string{"10.0.0.0/8", "192.168.0.0/16"},
+				JWT: &config.JWTAuthConfig{
+					JWKSURL:    "https://auth.example.com/jwks",
+					Issuer:     "new-issuer",
+					Audience:   "new-audience",
+					Algorithms: []string{"RS256", "ES256"},
+				},
+				ForwardAuth: &config.ForwardAuthConfig{
+					URL:                 "https://auth.example.com/verify",
+					AuthResponseHeaders: []string{"X-User", "X-Role"},
+				},
+			},
+		}},
+	}}}
+	d := diffConfigs(before, after)
+	want := []string{
+		"Change auth allow CIDRs",
+		"Change JWT issuer",
+		"Change JWT audience",
+		"Change JWT allowed algorithms",
+		"Change forward-auth URL",
+		"Change forward-auth response headers",
+	}
+	for _, w := range want {
+		if !diffHas(d, w) {
+			t.Errorf("expected %q in diff, got %+v", w, d)
+		}
+	}
+}
+
+// TestDiffRateLimitEnabledAndMaxConnsVisible (R8-09) ensures rate-limit field
+// changes beyond rate/burst/key — especially enabled and max_conns — are not
+// hidden by the broad lifecycle cover on servers.*.locations.*.rate_limit.
+func TestDiffRateLimitEnabledAndMaxConnsVisible(t *testing.T) {
+	before := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{{
+			Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+			RateLimit: &config.RateLimitConfig{Enabled: false, Rate: 100, Burst: 200, Key: "ip", MaxConns: 0},
+		}},
+	}}}
+	after := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{{
+			Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+			RateLimit: &config.RateLimitConfig{Enabled: true, Rate: 100, Burst: 200, Key: "ip", MaxConns: 50},
+		}},
+	}}}
+	d := diffConfigs(before, after)
+	if !diffHas(d, "Enable rate-limit") {
+		t.Errorf("expected rate-limit enable to be reported, got %+v", d)
+	}
+	if !diffHas(d, "Change rate-limit max_conns") {
+		t.Errorf("expected max_conns change to be reported, got %+v", d)
+	}
+}

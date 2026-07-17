@@ -56,14 +56,16 @@ func (l *leastConn) pick(a []*Backend) *Backend {
 
 // weightedRR implements smooth weighted round-robin (the algorithm NGINX uses),
 // which distributes load proportional to weight while avoiding bursts.
-// The per-backend currentWeight state is stored in local snapshot entries so
-// that concurrent requests do not race on shared Backend fields.
+// The per-backend currentWeight state is owned by the balancer instance so
+// concurrent requests through different balancers (live pool vs snapshots,
+// or snapshots across generations) do not race on shared Backend fields.
 type weightedRR struct {
-	mu sync.Mutex
+	mu      sync.Mutex
+	weights map[*Backend]int
 }
 
 func newWeightedRR() *weightedRR {
-	return &weightedRR{}
+	return &weightedRR{weights: make(map[*Backend]int)}
 }
 
 func (w *weightedRR) pick(a []*Backend) *Backend {
@@ -76,14 +78,15 @@ func (w *weightedRR) pick(a []*Backend) *Backend {
 	total := 0
 	var best *Backend
 	for _, b := range a {
-		b.currentWeight += b.Weight
+		cw := w.weights[b] + b.Weight
+		w.weights[b] = cw
 		total += b.Weight
-		if best == nil || b.currentWeight > best.currentWeight {
+		if best == nil || cw > w.weights[best] {
 			best = b
 		}
 	}
 	if best != nil {
-		best.currentWeight -= total
+		w.weights[best] -= total
 	}
 	return best
 }

@@ -60,7 +60,7 @@ func cfgWith(addr string) *config.Config {
 }
 
 func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
-	return func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
+	return func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
 		current := *tag.Load()
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, current)
@@ -71,16 +71,16 @@ func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
 		}
 		// No staged resources in test factory; commit and abort are no-ops.
 		committed := false
-		commitFn := func() func() {
+		commitFn := func() (upstream.SnapshotMap, func()) {
 			committed = true
-			return nil
+			return nil, nil
 		}
 		abortFn := func() {
 			if !committed {
 				// nothing to discard
 			}
 		}
-		return m, nil, 1, commitFn, abortFn, redact.EmptyState(), nil
+		return m, 1, commitFn, abortFn, redact.EmptyState(), nil
 	}
 }
 
@@ -228,7 +228,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 	var enterOnce, retireOnce sync.Once
 	var builds atomic.Int32
 
-	factory := func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
 		n := builds.Add(1)
 		var h http.Handler
 		switch n {
@@ -261,16 +261,16 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 			retire = func() { retireOnce.Do(func() { close(retired) }) }
 		}
 		committed := false
-		commitFn := func() func() {
+		commitFn := func() (upstream.SnapshotMap, func()) {
 			committed = true
-			return retire
+			return nil, retire
 		}
 		abortFn := func() {
 			if !committed {
 				// nothing to discard
 			}
 		}
-		return m, nil, uint64(n), commitFn, abortFn, redact.EmptyState(), nil
+		return m, uint64(n), commitFn, abortFn, redact.EmptyState(), nil
 	}
 
 	src := &stubSource{}
@@ -350,7 +350,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 func TestReloadNoGoroutineLeak(t *testing.T) {
 	addr := freePort(t)
 
-	factory := func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, "ok")
 		})
@@ -359,9 +359,9 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 			m[srv.Listen] = h
 		}
 		// Non-nil retire so every reload exercises the retire path.
-		commitFn := func() func() { return func() {} }
+		commitFn := func() (upstream.SnapshotMap, func()) { return nil, func() {} }
 		abortFn := func() {}
-		return m, nil, 1, commitFn, abortFn, redact.EmptyState(), nil
+		return m, 1, commitFn, abortFn, redact.EmptyState(), nil
 	}
 
 	src := &stubSource{}
