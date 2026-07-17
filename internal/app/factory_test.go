@@ -10,6 +10,8 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"jul/internal/config"
@@ -266,4 +268,44 @@ func TestHandlerFactoryPrepareReturnsRedactionState(t *testing.T) {
 		t.Fatal("commitFn installed redaction before the publish boundary")
 	}
 	commitFn()
+}
+
+func TestPoolSnapshotMiddlewareRefreshesPerRequest(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	up := config.UpstreamConfig{
+		Name:    "api",
+		Strategy: "round_robin",
+		Servers: []config.UpstreamServer{{Address: "127.0.0.1:8001"}},
+	}
+	f.PoolReg.Begin()
+	pool, err := f.PoolReg.For(up, "http")
+	if err != nil {
+		t.Fatalf("PoolReg.For: %v", err)
+	}
+	f.PoolReg.Commit()
+
+	mw := f.poolSnapshotMiddleware([]string{"api"})
+	var counts []int
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		counts = append(counts, len(pool.BackendsCtx(r.Context())))
+	}))
+
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	pool.UpdateBackends([]config.UpstreamServer{
+		{Address: "127.0.0.1:8001"},
+		{Address: "127.0.0.1:8002"},
+	})
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+
+	if len(counts) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(counts))
+	}
+	if counts[0] != 1 {
+		t.Errorf("first request saw %d backends, want 1", counts[0])
+	}
+	if counts[1] != 2 {
+		t.Errorf("second request saw %d backends, want 2 (discovery did not converge)", counts[1])
+	}
 }

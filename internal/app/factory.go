@@ -67,7 +67,7 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	gen := f.GenRes.Begin()
 	defer gen.Abort()
 
-	handlers, captureSnapshots, err := f.buildHandlers(c, gen, upstreams)
+	handlers, err := f.buildHandlers(c, gen, upstreams)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,7 +75,6 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	if commit {
 		redact.Install(state)
 		retirePrev = gen.Commit()
-		captureSnapshots()
 	}
 	return handlers, retirePrev, nil
 }
@@ -102,7 +101,7 @@ func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, fun
 	gen := f.GenRes.Begin()
 	// No deferred gen.Abort: lifecycle is caller-controlled via commitFn/abortFn.
 
-	handlers, captureSnapshots, err := f.buildHandlers(c, gen, upstreams)
+	handlers, err := f.buildHandlers(c, gen, upstreams)
 	if err != nil {
 		gen.Abort()
 		f.mu.Unlock()
@@ -116,7 +115,6 @@ func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, fun
 		}
 		committed = true
 		ret := gen.Commit()
-		captureSnapshots()
 		f.mu.Unlock()
 		return ret
 	}
@@ -140,7 +138,7 @@ func (f *HandlerFactory) Prepare(c *config.Config) (map[string]http.Handler, fun
 // snapshots used by the request-time snapshot middleware. It must be called
 // exactly once after the upstream pools have been committed (Publish boundary),
 // so the snapshots reflect the generation's live backend set.
-func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, func(), error) {
+func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, error) {
 
 	// Build this generation's WASM plugin set. A lean build (or a malformed
 	// module) fails here, rejecting the reload. The set owns per-plugin wazero
@@ -148,22 +146,11 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 	// closed only after the new handlers are live.
 	pluginSet, err := f.PluginMgr.Build(c.Plugins)
 	if err != nil {
-		return nil, nil, fmt.Errorf("plugins: %w", err)
+		return nil, fmt.Errorf("plugins: %w", err)
 	}
 	gen.Stage(pluginSet)
 
 	usedUpstreamNames := upstreamNamesUsed(c, upstreams)
-	snapshots := make(map[string]*upstream.PoolSnapshot, len(usedUpstreamNames))
-	captureSnapshots := func() {
-		if f.PoolReg == nil {
-			return
-		}
-		for _, name := range usedUpstreamNames {
-			if snap := f.PoolReg.SnapshotPool(name); snap != nil {
-				snapshots[name] = snap
-			}
-		}
-	}
 	withCache := func(loc config.LocationConfig, h http.Handler) http.Handler {
 		if loc.Cache && f.Cache != nil {
 			return f.Cache.Handler(h)
@@ -274,7 +261,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 				DialContext: f.EgressDial,
 			})
 			if err != nil {
-				return nil, nil, fmt.Errorf("location %s: %w", key, err)
+				return nil, fmt.Errorf("location %s: %w", key, err)
 			}
 			authByScope[key] = a
 		}
@@ -309,7 +296,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 				Hooks:  waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
 			})
 			if err != nil {
-				return nil, nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
+				return nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
 			}
 			wafByScope[WAFScope(c.Servers[i], loc)] = fw
 		}
@@ -387,7 +374,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 
 	rtr, err := router.New(c, builders, nil, locModifier, f.Log)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Compression is built once per reload and shared across listeners. It
@@ -404,7 +391,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 			OnCompress: f.Metrics.ObserveCompression,
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		compress = cm
 	}
@@ -431,7 +418,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 		// the router via LocationModifier, closer to the handler.
 		mws := []middleware.Middleware{
 			middleware.RequestID(),
-			f.poolSnapshotMiddleware(snapshots),
+			f.poolSnapshotMiddleware(usedUpstreamNames),
 			f.RT.Tracer.Middleware,
 			f.Metrics.Middleware,
 			middleware.AccessLog(f.AccessSinks...),
@@ -450,7 +437,7 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 		handlers[addr] = h
 	}
 
-	return handlers, captureSnapshots, nil
+	return handlers, nil
 }
 
 // upstreamNamesUsed returns the distinct named upstreams referenced by proxy,
@@ -487,15 +474,22 @@ func upstreamNamesUsed(c *config.Config, upstreams map[string]config.UpstreamCon
 	return names
 }
 
-// poolSnapshotMiddleware is captured by buildHandlers; it injects the
-// generation-scoped upstream snapshots into request context so downstream pool
-// users observe the backend set that was live when the generation committed.
-func (f *HandlerFactory) poolSnapshotMiddleware(snapshots map[string]*upstream.PoolSnapshot) middleware.Middleware {
+// poolSnapshotMiddleware captures a fresh upstream snapshot for every request,
+// then installs it in the request context. This keeps each request stable
+// (it never observes backends added after it began) while allowing dynamic
+// discovery updates to converge on the very next request (R6-04).
+func (f *HandlerFactory) poolSnapshotMiddleware(names []string) middleware.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if len(snapshots) == 0 {
+			if len(names) == 0 || f.PoolReg == nil {
 				next.ServeHTTP(w, r)
 				return
+			}
+			snapshots := make(map[string]*upstream.PoolSnapshot, len(names))
+			for _, name := range names {
+				if snap := f.PoolReg.SnapshotPool(name); snap != nil {
+					snapshots[name] = snap
+				}
 			}
 			next.ServeHTTP(w, r.WithContext(upstream.WithSnapshot(r.Context(), snapshots)))
 		})
