@@ -170,7 +170,14 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 		// set is refreshed at Commit (not here) so an aborted build leaves the live
 		// pool untouched, preserving an atomic reload. A discovery pool's backends
 		// are owned by its refresher, so its static seed is not re-applied.
-		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: discoveryEnabled(up.Discovery)}
+		//
+		// For discovery-only upstreams the static seed is empty, so CandidateSnapshot
+		// must build from the currently discovered backend set instead (R12-01).
+		disco := discoveryEnabled(up.Discovery)
+		if disco {
+			pending = backendsToServers(e.pool.Backends())
+		}
+		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco}
 		return e.pool, nil
 	}
 
@@ -425,6 +432,18 @@ func (r *Registry) Snapshot() []PoolStatus {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// backendsToServers converts the current pool backend set into upstream server
+// configs. It is used when staging a reused discovery pool so CandidateSnapshot
+// can reflect the discovered backends even though the static servers list is
+// empty (R12-01).
+func backendsToServers(backends []*Backend) []config.UpstreamServer {
+	servers := make([]config.UpstreamServer, 0, len(backends))
+	for _, b := range backends {
+		servers = append(servers, config.UpstreamServer{Address: b.Address, Weight: b.Weight})
+	}
+	return servers
 }
 
 // metaOf extracts the identity fields of an upstream.
