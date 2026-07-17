@@ -629,3 +629,24 @@ ordered phases; this section records the register and status.
 | R6-16 | Low | Stale comments and legacy rollback code | ✅ Resolved in Phase 3 — removed obsolete save/restore around `ValidateRuntimeConfig` |
 
 **Remaining work:** All Round 6 findings are resolved. Final evidence gathered: `go test ./...`, `go test -tags full ./...`, `go test -race` on reload-critical packages, and `python3 scripts/docs-check.py` (1249 passed, 0 failed).
+
+## Round 7 re-audit (2026-07-17)
+
+A subsequent source-level re-audit on 2026-07-17 reviewed the Round 7 report
+and confirmed the findings below. They are being remediated on `main` (via
+branch `r7-phase1`) and are treated as open blockers until the exact failure
+scenario for each has a regression test and the relevant code/docs are merged.
+
+| ID | Severity | Title | Status |
+| --- | --- | --- | --- |
+| R7-01 | Critical | `PoolSnapshot.pick()` creates a new balancer per call | ✅ Resolved in Phase 0 — snapshot owns one balancer; weighted RR no longer races |
+| R7-02 | Critical | Redaction retire callback installs captured state, out-of-order overwrite | ✅ Resolved in Phase 0b — per-generation redaction registry installs union while old generation drains |
+| R7-03 | High | Pool commit before handler swap window | ✅ Resolved in Phase 0b — handler generation packages handler map + pool snapshots + redaction gen ID atomically |
+| R7-04 | High | Upstream registry keyed by name only, scheme ignored | ✅ Resolved — registry staged/live maps and snapshots keyed by `(name, scheme)` |
+| R7-05 | High | Startup/admin/reload resolve secrets multiple times | ✅ Resolved — single immutable `config.Candidate` per transaction; secrets resolved exactly once |
+| R7-06 | High | Diff extractors missing for newly registered paths | ⏳ Open — `internal/lifecycle/diff.go` still uses hand-written extractors; generate from schema metadata or add fallback |
+| R7-07 | High | TLS static certificate rotation contract ambiguous | ✅ Resolved — restart-only; `reloadCertificates`/`RefreshCerts` are no-ops; lifecycle registry and docs aligned |
+| R7-08 | Medium | Redaction unordered replacement (substring leakage) | ✅ Resolved — longest-match-first masking |
+| R7-09 | Medium | Global registry lock on every request | ✅ Resolved by R7-03 — pool snapshots are generation-scoped; request path is lock-free except per-pool balancer state |
+| R7-10 | Medium | Feature-status validation incomplete | ✅ Resolved in Round 6 Phase 3 — docs-check parses status.md rows and compares criteria/doc per feature |
+| R7-11 | Medium | Premature closure claim / audit register governance | 🔄 In progress — Round 7 register added below; remaining open items must close with regression tests and linked CI evidence |

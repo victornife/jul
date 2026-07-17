@@ -41,28 +41,21 @@ type ReloadPlan struct {
 	s     *Server
 	start time.Time
 
-	// RawConfig is the unexpanded configuration loaded from the source.
-	RawConfig *config.Config
+	// rawConfig is the unexpanded configuration loaded from the source. It is
+	// preserved inside Candidate on Resolve.
+	rawConfig *config.Config
 
-	// EffectiveConfig is a deep clone of RawConfig with all secret references
-	// resolved. It becomes the new serving effective config on Publish.
-	EffectiveConfig *config.Config
-
-	// Redaction is the self-contained redaction state covering every secret
-	// consumed by EffectiveConfig. It is installed as the live global state on
-	// Publish and only on Publish.
-	Redaction redact.State
-
-	// SecretDigests maps each secret reference string to a digest of the bytes
-	// actually consumed, so file-content rotation can be detected even when the
-	// configured path is unchanged.
-	SecretDigests map[string]string
+	// Candidate is the single immutable configuration object for this reload
+	// transaction. It carries the raw (unexpanded) config, the resolved
+	// effective config, the redaction state, and secret digests. Secrets are
+	// resolved exactly once per reload (R7-05).
+	Candidate *config.Candidate
 
 	// StartupFP is the effective startup fingerprint the candidate is compared
 	// against. It is captured from the server at plan creation.
 	StartupFP lifecycle.Fingerprint
 
-	// CandidateFP is the effective fingerprint of EffectiveConfig.
+	// CandidateFP is the effective fingerprint of Candidate.Effective.
 	CandidateFP lifecycle.Fingerprint
 
 	// Handlers is the per-listen-address handler tree built by the factory.
@@ -90,42 +83,36 @@ func (s *Server) newReloadPlan(raw *config.Config) *ReloadPlan {
 	return &ReloadPlan{
 		s:               s,
 		start:           time.Now(),
-		RawConfig:       raw,
+		rawConfig:       raw,
 		StartupFP:       s.startupFP,
 		oldAddrs:        setOf(uniqueListenAddrs(s.cfg.Servers)),
 		stagedListeners: make(map[string]*listenerEntry),
 	}
 }
 
-// Resolve expands secret references into a deep-copied effective config and
-// computes the candidate fingerprint. It performs no global mutation.
+// Resolve builds the immutable Candidate for this reload and computes the
+// candidate fingerprint. Secrets are resolved exactly once here.
 func (p *ReloadPlan) Resolve() error {
-	clone, err := p.RawConfig.Clone()
+	candidate, err := config.NewCandidate(p.rawConfig)
 	if err != nil {
-		return fmt.Errorf("clone config: %w", err)
+		return fmt.Errorf("candidate: %w", err)
 	}
-	expanded, state, digests, err := config.Resolve(clone)
-	if err != nil {
-		return fmt.Errorf("secrets: %w", err)
-	}
-	p.EffectiveConfig = expanded
-	p.Redaction = state
-	p.SecretDigests = digests
-	p.CandidateFP = lifecycle.ComputeFingerprint(expanded)
-	p.newAddrs = setOf(uniqueListenAddrs(expanded.Servers))
+	p.Candidate = candidate
+	p.CandidateFP = lifecycle.ComputeFingerprint(candidate.Effective)
+	p.newAddrs = setOf(uniqueListenAddrs(candidate.Effective.Servers))
 	return nil
 }
 
 // Validate runs the configured runtime validator against the already-resolved
-// effective candidate. Validating the same EffectiveConfig that will be
+// effective candidate. Validating the same Candidate.Effective that will be
 // published guarantees that a secret rotation between resolve and validate
 // cannot make validation inspect different bytes from those that are published
-// (R6-07).
+// (R6-07, R7-05).
 func (p *ReloadPlan) Validate() error {
 	if p.s.validate == nil {
 		return nil
 	}
-	if err := p.s.validate(p.EffectiveConfig); err != nil {
+	if err := p.s.validate(p.Candidate.Effective); err != nil {
 		return fmt.Errorf("validate: %w", err)
 	}
 	return nil
@@ -138,7 +125,7 @@ func (p *ReloadPlan) Lifecycle() error {
 	if reason, need := lifecycle.RestartRequired(p.StartupFP, p.CandidateFP); need {
 		return fmt.Errorf("restart_required: %s", reason)
 	}
-	if reason, need := p.s.listenerBoundRebindRequired(p.EffectiveConfig); need {
+	if reason, need := p.s.listenerBoundRebindRequired(p.Candidate.Effective); need {
 		return fmt.Errorf("restart_required: %s", reason)
 	}
 	return nil
@@ -147,7 +134,7 @@ func (p *ReloadPlan) Lifecycle() error {
 // Prepare builds the handler tree and stages the upstream/generation resources.
 // It does not commit anything; Publish/Abort must follow.
 func (p *ReloadPlan) Prepare() error {
-	handlers, snapshots, genID, commit, abort, state, err := p.s.factory(p.EffectiveConfig)
+	handlers, snapshots, genID, commit, abort, _, err := p.s.factory(p.Candidate.Effective)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -156,11 +143,6 @@ func (p *ReloadPlan) Prepare() error {
 	p.GenID = genID
 	p.handlerCommit = commit
 	p.handlerAbort = abort
-	// The factory is authoritative for the redaction state it resolved while
-	// mutating EffectiveConfig in place. Prefer its state when non-empty.
-	if state.Count() > 0 || p.Redaction.Count() == 0 {
-		p.Redaction = state
-	}
 	return nil
 }
 
@@ -172,7 +154,7 @@ func (p *ReloadPlan) StageListeners() error {
 		if _, existed := p.oldAddrs[addr]; existed {
 			continue
 		}
-		entry, err := p.s.buildListenerEntry(addr, p.EffectiveConfig)
+		entry, err := p.s.buildListenerEntry(addr, p.Candidate.Effective)
 		if err != nil {
 			p.bindErrs = append(p.bindErrs, addr+": "+err.Error())
 			p.s.log.Error("reload: failed to stage new listener", "addr", addr, "error", err)
@@ -199,10 +181,10 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// continue to have their secrets masked. The previous generation's retire
 	// callback will remove its entry from the active set once it drains
 	// (R6-06, R7-02).
-	redact.Install(p.s.registerRedactionGen(p.GenID, p.Redaction))
+	redact.Install(p.s.registerRedactionGen(p.GenID, p.Candidate.Redaction))
 
-	p.s.cfg = p.EffectiveConfig
-	p.s.rawCfg = p.RawConfig
+	p.s.cfg = p.Candidate.Effective
+	p.s.rawCfg = p.Candidate.Raw
 
 	prevGen := p.s.handlers.Load()
 	p.s.handlers.Store(newHandlerGen(p.Handlers, p.Snapshots, p.GenID))
@@ -240,18 +222,17 @@ func (p *ReloadPlan) RetireRemovedListeners() {
 	}
 }
 
-// RefreshCerts reloads TLS certificates for listeners that remain TLS-enabled.
-// Errors are returned as a slice of address-qualified strings; they degrade the
-// reload result but do not roll back the published config.
+// RefreshCerts is now a no-op: TLS certificate rotation is restart-only
+// (R7-07). The reload plan no longer attempts to refresh certificates.
 func (p *ReloadPlan) RefreshCerts() []string {
-	return p.s.reloadCertificates()
+	return nil
 }
 
 // PostCommit applies dynamic side effects that must only run on a committed
 // reload: log level, GOMAXPROCS, and stream-proxy reload.
 func (p *ReloadPlan) PostCommit() error {
 	if p.s.OnReloaded != nil {
-		return p.s.OnReloaded(p.EffectiveConfig)
+		return p.s.OnReloaded(p.Candidate.Effective)
 	}
 	return nil
 }

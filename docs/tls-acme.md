@@ -119,7 +119,7 @@ Names are lower-cased; an empty SNI goes straight to the fallback.
 
 | Source | On config reload |
 | --- | --- |
-| Static `cert`/`key` | **Reloaded** — the provider is rebuilt and swapped atomically; the listener keeps serving with no downtime and no rebind. |
+| Static `cert`/`key` | **Not reloaded** — certificates are bound at listener start; restart to pick up new `cert`/`key` files. |
 | ACME domain set | **Not reloaded** — the issued-domain set is fixed when the manager starts. ACME *renewal* still happens in the background while running. Restart to add/remove domains. |
 | `client_auth` (mTLS) | **Not reloaded** — bound at listener start (see [mtls.md](mtls.md)). |
 

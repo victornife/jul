@@ -56,28 +56,28 @@ type Preflight struct {
 //
 // Any error aborts the write; the caller must not persist the config.
 func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
-	if err := ValidateRuntimeConfig(c); err != nil {
+	candidate, err := config.NewCandidate(c)
+	if err != nil {
 		return err
 	}
-	// Resolve secrets into a clone so secret-referenced cert/key paths are
-	// expanded before PreflightTLS checks file existence. The returned redaction
-	// state is discarded: preflight must not mutate the serving redaction
-	// registry (R5-01).
-	resolvedForTLS := c
-	if expanded, _, _, rerr := config.Resolve(c); rerr == nil {
-		resolvedForTLS = expanded
-	}
-	if err := server.PreflightTLS(resolvedForTLS.Servers); err != nil {
+	if err := ValidateRuntimeConfig(candidate.Effective); err != nil {
 		return err
 	}
-	if err := p.dryRun(c); err != nil {
+	if err := server.PreflightTLS(candidate.Effective.Servers); err != nil {
+		return err
+	}
+	if err := p.dryRun(candidate.Effective); err != nil {
 		return err
 	}
 	if prev != nil {
-		if err := server.PreflightListeners(prev.Servers, c.Servers); err != nil {
+		prevCandidate, err := config.NewCandidate(prev)
+		if err != nil {
 			return err
 		}
-		if err := p.Stream.PreflightListeners(prev.Streams, c.Streams); err != nil {
+		if err := server.PreflightListeners(prevCandidate.Effective.Servers, candidate.Effective.Servers); err != nil {
+			return err
+		}
+		if err := p.Stream.PreflightListeners(prevCandidate.Effective.Streams, candidate.Effective.Streams); err != nil {
 			return err
 		}
 		// Restart-required classification is single-sourced from the lifecycle
@@ -85,34 +85,30 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
 		// startup-bound fingerprint so secret-content rotation and effective
 		// value changes are detected without duplicating the check list.
 		if len(p.StartupFP.Values) > 0 {
-			candidateFP := lifecycle.ComputeFingerprint(resolvedForTLS)
+			candidateFP := lifecycle.ComputeFingerprint(candidate.Effective)
 			if reason, need := lifecycle.RestartRequired(p.StartupFP, candidateFP); need {
 				return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 			}
 		}
-		if reason, need := server.ListenerRebindRequired(prev, c); need {
+		if reason, need := server.ListenerRebindRequired(prevCandidate.Effective, candidate.Effective); need {
 			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 	}
 	return nil
 }
 
-// dryRun clones the config, expands secrets in place, builds all handlers
-// (commit=false), and validates the stream configuration.  A panic during
-// handler construction is recovered and returned as an error so a malformed
-// config cannot crash the admin goroutine.
+// dryRun builds all handlers (commit=false) on the already-resolved effective
+// config and validates the stream configuration. A panic during handler
+// construction is recovered and returned as an error so a malformed config
+// cannot crash the admin goroutine.
 func (p *Preflight) dryRun(c *config.Config) (err error) {
-	clone, cerr := c.Clone()
-	if cerr != nil {
-		return fmt.Errorf("clone config for preflight: %w", cerr)
-	}
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("configuration rejected: building it panicked: %v", r)
 		}
 	}()
-	if _, _, err = p.BuildHandlers(clone, false); err != nil {
+	if _, _, err = p.BuildHandlers(c, false); err != nil {
 		return err
 	}
-	return p.Stream.PreflightBuild(clone.Streams, IndexUpstreams(clone.Upstreams))
+	return p.Stream.PreflightBuild(c.Streams, IndexUpstreams(c.Upstreams))
 }

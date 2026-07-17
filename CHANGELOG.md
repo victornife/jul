@@ -21,6 +21,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 - **Semantic docs-check gates** (`scripts/docs-check.py`): `check_lifecycle_manifest()` and `check_feature_status_manifest()` validate YAML and cross-check reload-semantics.md; `check_finding_uniqueness()` catches conflicting resolved/open status markers in audit docs.
 
 ### Fixed
+- **Single immutable candidate per transaction** (`internal/config/candidate.go`, `internal/app/serve.go`, `internal/app/preflight.go`, `internal/server/reload_plan.go`, `internal/app/factory.go`): startup, admin preflight, and live reload now resolve secret references exactly once into a `config.Candidate{Raw,Effective,Redaction,Digests}` and pass that immutable object through validation, TLS checks, handler dry-runs, stream dry-runs, bind probes, and restart checks. The handler factory no longer re-resolves secrets, eliminating the window where preflight approval and served bytes could use different secret generations (R7-05).
+- **TLS certificate rotation is restart-only** (`internal/server/server.go`, `internal/server/reload_plan.go`, `internal/lifecycle/lifecycle.go`, `docs/tls-acme.md`, `docs/configuration.md`): `reloadCertificates`/`ReloadPlan.RefreshCerts` are now no-ops. Static `cert`/`key` rotation requires a process restart, matching the existing lifecycle registry classification (R7-07).
 - **Compression `*bool` tri-state semantics** (`internal/config/schema.go`, `internal/config/parser.go`): `CompressionConfig.Enabled` is now `*bool` with three distinct states — explicit true, explicit false, and omitted/nil (auto-detect). Auto-detect enables compression when any non-zero setting is present, including `precompressed = true` (RA-04). The previously unreachable auto-enable branch is replaced with correct logic.
 - **`LastReload` wired before `admin.New`** (`internal/app/serve.go`): `server.New` and `deps.LastReload` are now constructed before `admin.New`. The admin server's apply handlers now see the previous reload snapshot in `previous_reload`.
 - **`RateLimitConfig.Enabled` TOML tag typo** (`internal/config/schema.go`): corrected `tomm:"enabled"` → `toml:"enabled"`.
@@ -190,7 +192,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   - Console (operations cockpit)
 - Full feature set with expanded descriptions:
   - Core HTTP server engine: static file serving, reverse proxy, FastCGI/uWSGI, virtual hosts, and routing (`exact`, `prefix`, `regex`).
-  - TLS 1.2/1.3 termination with SNI certificate selection, HTTP→HTTPS redirect, and dynamic certificate reload without rebinding listeners.
+  - TLS 1.2/1.3 termination with SNI certificate selection, HTTP→HTTPS redirect, and dynamic certificate selection at listener startup.
   - ACME automatic HTTPS (HTTP-01 and TLS-ALPN-01 challenges) with on-disk certificate cache and OCSP stapling — gated behind `acme` build tag.
   - mTLS / client certificate authentication with CA bundles, SAN verification, and CRL checking.
   - HTTP/3 over QUIC sharing TLS certificates, advertised via `Alt-Svc` — gated behind `http3` build tag.

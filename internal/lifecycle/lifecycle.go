@@ -135,7 +135,7 @@ var Registry = []Entry{
 
 	// Server-level listener settings.
 	{Path: "servers.*.listen", Class: NewListenerOnlyClass, Subsystem: "listener", Reason: "listen address change requires a new socket"},
-	{Path: "servers.*.tls", Class: RestartRequiredClass, Subsystem: "tls", Reason: "TLS configuration is bound to a listener at creation", StartupConsumed: true},
+	{Path: "servers.*.tls", Class: RestartRequiredClass, Subsystem: "tls", Reason: "TLS configuration including certificates is bound to a listener at creation and refreshed only on restart", StartupConsumed: true},
 	{Path: "servers.*.http3", Class: RestartRequiredClass, Subsystem: "http3", Reason: "HTTP/3 is bound to a listener at creation", StartupConsumed: true},
 	{Path: "servers.*.h2c", Class: RestartRequiredClass, Subsystem: "h2c", Reason: "h2c is negotiated at listener creation", StartupConsumed: true},
 	{Path: "servers.*.read_timeout", Class: NewListenerOnlyClass, Subsystem: "listener_timeouts", Reason: "read timeout is fixed when the socket binds"},

@@ -60,15 +60,13 @@ type HandlerFactory struct {
 // staged generation is aborted before returning and the live serving state is
 // unchanged. When commit is true the generation is committed inline (legacy
 // live path). For the three-phase live-reload path use Prepare instead.
+//
+// c is expected to be the secret-expanded effective configuration; Build does
+// not resolve secrets again (R7-05).
 func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.Handler, func(), error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	expanded, state, _, err := config.Resolve(c)
-	if err != nil {
-		return nil, nil, fmt.Errorf("secrets: %w", err)
-	}
-	*c = *expanded
 	upstreams := IndexUpstreams(c.Upstreams)
 	gen := f.GenRes.Begin()
 	defer gen.Abort()
@@ -79,7 +77,6 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	}
 	var retirePrev func()
 	if commit {
-		redact.Install(state)
 		retirePrev = gen.Commit()
 	}
 	return handlers, retirePrev, nil
@@ -102,21 +99,17 @@ func (f *HandlerFactory) captureSnapshots(keys []upstream.PoolSnapshotKey) map[s
 // The returned snapshots map is the generation-scoped pool view that must be
 // published atomically with the handlers. The returned genID is the unique
 // identifier for this generation, used by the server to retire its redaction
-// entry. The returned redact.State covers the secrets resolved during the build
-// and must be installed by the caller only at the reload publish boundary.
+// entry. The returned redact.State is empty because the caller is expected to
+// resolve secrets exactly once into a config.Candidate and install its
+// redaction state at the publish boundary (R7-05).
 // Exactly one of commitFn or abortFn must be called; both release the factory
 // mutex so no concurrent build can start while a staged generation is pending.
 func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Handler, snapshots map[string]*upstream.PoolSnapshot, genID uint64, commitFn func() func(), abortFn func(), state redact.State, err error) {
 	f.mu.Lock()
 	// Mutex is NOT deferred here: it is released by commitFn or abortFn.
 
-	var expanded *config.Config
-	expanded, state, _, err = config.Resolve(c)
-	if err != nil {
-		f.mu.Unlock()
-		return nil, nil, 0, nil, nil, redact.State{}, fmt.Errorf("secrets: %w", err)
-	}
-	*c = *expanded
+	// c is the secret-expanded effective configuration. The caller (Serve,
+	// ReloadPlan, or tests) is responsible for resolving secrets exactly once.
 	upstreams := IndexUpstreams(c.Upstreams)
 	gen := f.GenRes.Begin()
 	// No deferred gen.Abort: lifecycle is caller-controlled via commitFn/abortFn.

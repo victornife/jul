@@ -66,23 +66,20 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		log.Info("set worker threads", "gomaxprocs", n)
 	}
 
-	// Clone the raw startup config before secret expansion so PendingRestartCheck
-	// can compare effective startup-time values against the current on-disk config.
-	// Both use the same unexpanded references for structural fields (cache, egress,
-	// admin) so secret-ref changes do not mask real structural differences.
-	var startupCfg *config.Config
-	if clone, cerr := cfg.Clone(); cerr == nil {
-		startupCfg = clone
-	}
-
-	// Resolve secret references (${env:NAME}, ${file:/path}) once, up front,
-	// so every one-time consumer below (admin token, ACME account, tracing)
-	// reads resolved credentials. The handler factory re-resolves on each
-	// reload; the admin/on-disk views keep the unresolved references (SEC-1).
-	if err := config.ExpandSecrets(cfg); err != nil {
+	// Build the immutable startup candidate: one resolved effective config plus
+	// its redaction state and secret digests. Every one-time consumer below
+	// (cache, metrics, tracing/ACME/stream runtime, access-log sinks, egress)
+	// reads the same secret generation, and the handler factory receives the
+	// same effective config without re-resolving (R7-05).
+	startupCand, err := config.NewCandidate(cfg)
+	if err != nil {
 		log.Error("failed to resolve secret references", "error", err)
 		return 1
 	}
+	redact.Install(startupCand.Redaction)
+
+	// Effective config alias for the rest of startup.
+	cfg = startupCand.Effective
 
 	// The response cache persists across reloads so counters and LRU state
 	// survive config edits. Created once and captured by the handler factory.
@@ -194,9 +191,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	// factory adapts HandlerFactory.Prepare to the server reload hook: the
 	// three-phase prepare/commit/abort pattern keeps the generation uncommitted
-	// until listener staging succeeds (R4-01).
+	// until listener staging succeeds (R4-01). The redaction state is taken from
+	// the startup candidate so the initial generation masks exactly the secrets
+	// resolved at startup; reloads provide their own candidate redaction via
+	// ReloadPlan (R7-05).
 	factory := func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
-		return f.Prepare(c)
+		handlers, snapshots, genID, commitFn, abortFn, _, err := f.Prepare(c)
+		return handlers, snapshots, genID, commitFn, abortFn, startupCand.Redaction, err
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -307,27 +308,26 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// which startup-bound subsystems differ between what we were built from
 	// and what is currently on disk, so the Console can show a persistent
 	// "restart required" banner when saved changes are not yet active.
-	if startupCfg != nil && deps.LoadConfig != nil {
+	if startupCand.Raw != nil && deps.LoadConfig != nil {
 		loadFn := deps.LoadConfig
 		deps.PendingRestartCheck = func() []string {
 			current, err := loadFn()
 			if err != nil || current == nil {
 				return nil
 			}
-			expanded, _, _, err := config.Resolve(current)
+			candidate, err := config.NewCandidate(current)
 			if err != nil {
 				log.Warn("pending restart check failed: config resolution error", "error", err)
 				return []string{"resolve_error"}
 			}
-			currentFP := lifecycle.ComputeFingerprint(expanded)
 
 			pendingSet := make(map[string]struct{})
-			for _, path := range lifecycle.Diff(startupFP, currentFP) {
+			for _, path := range lifecycle.Diff(startupFP, lifecycle.ComputeFingerprint(candidate.Effective)) {
 				if e := lifecycle.ByPath(path); e != nil {
 					pendingSet[e.Subsystem] = struct{}{}
 				}
 			}
-			if _, need := server.ListenerRebindRequired(startupCfg, current); need {
+			if _, need := server.ListenerRebindRequired(startupCand.Raw, candidate.Effective); need {
 				pendingSet["listener"] = struct{}{}
 			}
 
@@ -343,7 +343,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Construct the server and wire LastReload into deps BEFORE creating the
 	// admin server. admin.New copies deps by value, so any callback assigned
 	// after that call is invisible to the admin server's apply handlers.
-	srv := server.New(cfg, startupCfg, startupFP, log, factory, src, ValidateRuntimeConfig)
+	srv := server.New(cfg, startupCand.Raw, startupFP, log, factory, src, ValidateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = rt.ACME
 	deps.LastReload = func() *admin.ReloadSnapshot {
