@@ -8,6 +8,7 @@ package transcode
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -469,7 +470,17 @@ func TestTranscodePassiveHealthMarking(t *testing.T) {
 // address is removed from the upstream pool, the transcoder eventually closes
 // the cached gRPC connection for that address instead of keeping it open until
 // the handler generation is replaced.
+// setRetiredGraceForTest overrides the retired-connection grace period for the
+// duration of a test.
+func setRetiredGraceForTest(t testing.TB, d time.Duration) {
+	t.Helper()
+	old := retiredConnGrace
+	retiredConnGrace = d
+	t.Cleanup(func() { retiredConnGrace = old })
+}
+
 func TestTranscoderEvictsStaleConnections(t *testing.T) {
+	setRetiredGraceForTest(t, 50*time.Millisecond)
 	fdp := echoFileDescriptorProto(t)
 	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
 	files, err := filesFromSet(set)
@@ -529,8 +540,18 @@ func TestTranscoderEvictsStaleConnections(t *testing.T) {
 	pool.UpdateBackends(nil)
 	tr.evictStaleConns()
 
+	// The connection should be retired, not closed, so in-flight streams can
+	// continue during backend churn (R11-05).
+	if state := conn.GetState(); state == connectivity.Shutdown {
+		t.Fatal("stale connection was closed immediately, want retired grace")
+	}
+
+	// After the grace period expires the connection is closed.
+	time.Sleep(100 * time.Millisecond)
+	tr.evictStaleConns()
+
 	if state := conn.GetState(); state != connectivity.Shutdown {
-		t.Fatalf("stale connection state = %v, want Shutdown", state)
+		t.Fatalf("stale connection state = %v, want Shutdown after grace", state)
 	}
 
 	// The cached entry should also be gone: a subsequent connFor dials a new
@@ -542,4 +563,124 @@ func TestTranscoderEvictsStaleConnections(t *testing.T) {
 	if conn2 == conn {
 		t.Fatal("evicted connection was reused")
 	}
+}
+
+// startSlowEchoServer is like startEchoServer but sleeps for d on requests
+// whose message field equals "slow". This lets a test remove the backend from
+// the pool while a request is still using the cached connection.
+func startSlowEchoServer(t testing.TB, fd protoreflect.FileDescriptor, d time.Duration) string {
+	t.Helper()
+	reqDesc := fd.Services().Get(0).Methods().Get(0).Input()
+	respDesc := fd.Services().Get(0).Methods().Get(0).Output()
+
+	handler := func(_ any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+		in := dynamicpb.NewMessage(reqDesc)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		message := in.ProtoReflect().Get(reqDesc.Fields().ByName("message")).String()
+		if message == "slow" {
+			time.Sleep(d)
+		}
+
+		reply := dynamicpb.NewMessage(respDesc)
+		reply.ProtoReflect().Set(respDesc.Fields().ByName("message"), protoreflect.ValueOfString(message))
+		return reply, nil
+	}
+
+	srv := grpc.NewServer()
+	srv.RegisterService(&grpc.ServiceDesc{
+		ServiceName: "echo.EchoService",
+		HandlerType: (*any)(nil),
+		Methods:     []grpc.MethodDesc{{MethodName: "Echo", Handler: handler}},
+		Metadata:    "echo/echo.proto",
+	}, nil)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+	return lis.Addr().String()
+}
+
+// TestTranscoderRetiresStaleConnectionsDuringRequest (R11-05) verifies that a
+// request already holding a connection can finish after the backend is removed
+// from the pool, because the connection is retired with a grace period instead
+// of being closed immediately.
+func TestTranscoderRetiresStaleConnectionsDuringRequest(t *testing.T) {
+	setRetiredGraceForTest(t, 200*time.Millisecond)
+
+	fdp := echoFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	files, err := filesFromSet(set)
+	if err != nil {
+		t.Fatalf("build descriptors: %v", err)
+	}
+	fd, err := files.FindFileByPath("echo/echo.proto")
+	if err != nil {
+		t.Fatalf("find echo file: %v", err)
+	}
+
+	addr := startSlowEchoServer(t, fd, 300*time.Millisecond)
+
+	descFile := filepath.Join(t.TempDir(), "echo.pb")
+	raw, err := proto.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal set: %v", err)
+	}
+	if err := os.WriteFile(descFile, raw, 0o600); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:        "test-retire",
+		Strategy:    "round_robin",
+		Servers:     []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails:    3,
+		FailTimeout: config.Duration(time.Minute),
+	}, "http")
+	if err != nil {
+		t.Fatalf("create test pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	cfg := config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile}
+	tr, err := New(cfg, pool, nil, Options{})
+	if err != nil {
+		t.Fatalf("New transcoder: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+
+	// Start a slow request. It will pick the backend and conn before we remove
+	// the backend from the pool.
+	result := make(chan *http.Response, 1)
+	go func() {
+		res, _ := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"slow"}`, nil)
+		result <- res
+	}()
+
+	// Give the goroutine time to pick a backend and start the RPC.
+	time.Sleep(50 * time.Millisecond)
+
+	// Remove the backend and evict while the request is in flight.
+	pool.UpdateBackends(nil)
+	tr.evictStaleConns()
+
+	// The in-flight request must complete because its connection was retired,
+	// not closed.
+	select {
+	case res := <-result:
+		if res.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(res.Body)
+			t.Fatalf("in-flight request failed: status = %d, body = %s", res.StatusCode, string(body))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("in-flight request did not complete during retired grace")
+	}
+
+	// Once the grace period expires the retired connection is closed.
+	time.Sleep(250 * time.Millisecond)
+	tr.evictStaleConns()
 }

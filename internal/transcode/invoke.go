@@ -73,7 +73,23 @@ type Transcoder struct {
 	evictStop chan struct{}
 	// evictOnce ensures evictStop is closed at most once.
 	evictOnce sync.Once
+
+	// retired holds connections whose backend address has left the pool but
+	// which are kept alive for a grace period so in-flight requests and
+	// streams can finish (R11-05).
+	retired sync.Map // address -> retiredConn
 }
+
+// retiredConn is a connection that has left the active pool but is still
+// usable until its grace period expires.
+type retiredConn struct {
+	conn      *grpc.ClientConn
+	retiredAt time.Time
+}
+
+// retiredConnGrace is how long a removed backend's connection remains usable
+// before it is closed. It is a variable so tests can shorten it.
+var retiredConnGrace = 30 * time.Second
 
 // New builds a Transcoder from a location's grpc_transcode config. It loads the
 // method routing table from the configured descriptor source, dials the gRPC
@@ -159,8 +175,10 @@ func (t *Transcoder) evictLoop() {
 	}
 }
 
-// evictStaleConns closes and removes any cached connection whose address is not
-// present in the current pool backend set.
+// evictStaleConns moves cached connections for addresses that are no longer in
+// the pool into a retired grace-period map. Connections that have already been
+// retired for longer than retiredConnGrace are closed and removed. This keeps
+// in-flight streams alive during backend churn (R11-05).
 func (t *Transcoder) evictStaleConns() {
 	if t.pool == nil {
 		return
@@ -169,15 +187,29 @@ func (t *Transcoder) evictStaleConns() {
 	for _, b := range t.pool.Backends() {
 		valid[b.Address] = struct{}{}
 	}
+
+	// Move newly stale connections from active cache to retired.
 	t.conns.Range(func(key, value any) bool {
 		addr := key.(string)
 		if _, ok := valid[addr]; ok {
 			return true
 		}
 		if c, ok := value.(*grpc.ClientConn); ok {
-			_ = c.Close()
+			t.retired.Store(addr, retiredConn{conn: c, retiredAt: time.Now()})
 		}
 		t.conns.Delete(addr)
+		return true
+	})
+
+	// Close retired connections whose grace period has expired.
+	now := time.Now()
+	t.retired.Range(func(key, value any) bool {
+		rc := value.(retiredConn)
+		if now.Sub(rc.retiredAt) < retiredConnGrace {
+			return true
+		}
+		_ = rc.conn.Close()
+		t.retired.Delete(key)
 		return true
 	})
 }
@@ -214,14 +246,39 @@ func (t *Transcoder) Close() error {
 		}
 		return true
 	})
+	t.retired.Range(func(_, v any) bool {
+		if rc, ok := v.(retiredConn); ok {
+			_ = rc.conn.Close()
+		}
+		return true
+	})
 	return nil
 }
 
 // connFor returns a cached gRPC connection for addr, creating and caching one
-// if absent. Connections survive across requests to the same backend.
+// if absent. Connections survive across requests to the same backend. During
+// the retired grace period, a connection for a removed backend is re-promoted
+// to the active cache so in-flight streams can continue (R11-05).
 func (t *Transcoder) connFor(addr string) (*grpc.ClientConn, error) {
 	if v, ok := t.conns.Load(addr); ok {
 		return v.(*grpc.ClientConn), nil
+	}
+	if v, ok := t.retired.Load(addr); ok {
+		rc := v.(retiredConn)
+		if time.Since(rc.retiredAt) < retiredConnGrace {
+			// Promote back to active so it can be reused; if we lose a race,
+			// fall through to LoadOrStore below.
+			t.retired.Delete(addr)
+			t.conns.Store(addr, rc.conn)
+			if actual, loaded := t.conns.LoadOrStore(addr, rc.conn); loaded {
+				_ = rc.conn.Close()
+				return actual.(*grpc.ClientConn), nil
+			}
+			return rc.conn, nil
+		}
+		// Expired; close it lazily here and dial anew.
+		_ = rc.conn.Close()
+		t.retired.Delete(addr)
 	}
 	conn, err := dial(addr, t.useTLS)
 	if err != nil {
