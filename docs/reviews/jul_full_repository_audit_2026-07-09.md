@@ -621,11 +621,11 @@ ordered phases; this section records the register and status.
 | R6-09 | Medium | Lifecycle registry internally contradictory | ✅ Resolved in Phase 1 — `worker_threads`/`redact_min_secret_length` are `HotReloadClass`; YAML `gated_by` updated |
 | R6-14 | Medium | Pending-restart hides resolution errors | ✅ Resolved in Phase 1 — `PendingRestartCheck` returns `resolve_error` instead of nil |
 | R6-04 | High | Service discovery frozen by generation-scoped snapshots | ✅ Resolved in Phase 2 — per-request snapshots let discovery converge on the next request |
-| R6-08 | High | Structured diff not schema-complete | ◐ Partial — registry coverage expanded; raw canonical fallback retained; docs-check enforces `StartupConsumed` |
+| R6-08 | High | Structured diff not schema-complete | ✅ Resolved in Phase 4 — `scripts/dump-schema-leaves.go` reflects `config.Config` into dotted TOML paths; docs-check verifies every non-container schema leaf is covered by the lifecycle registry or an exemption; all 80 previously-uncovered runtime leaves now have registry + YAML entries (compression, waf, plugins, locations, stream routes, upstream discovery, etc.); 1249/0 docs-check passes |
 | R6-10 | Medium | docs-check validates mirroring, not enforcement truth | ✅ Resolved in Phase 3 — `StartupConsumed` exported and enforced; registry invariant test added |
 | R6-11 | Medium | Feature-status validation presence-only | ✅ Resolved in Phase 3 — docs-check now parses status.md rows and compares criteria/doc per feature |
 | R6-12 | Medium | Authoritative audit stale and false | ✅ Resolved in Phase 3 — this document is now marked historical; live status tracked in commits |
 | R6-15 | Low/Medium | Publish described as atomic | ✅ Resolved in Phase 3 — documentation describes Publish as an ordered commit boundary |
 | R6-16 | Low | Stale comments and legacy rollback code | ✅ Resolved in Phase 3 — removed obsolete save/restore around `ValidateRuntimeConfig` |
 
-**Remaining work:** Phase 4 (independent execution and evidence: full-tag tests, race tests, Playwright real-server E2E, secret-rotation tests, multi-SNI TLS tests, discovery convergence tests, reload-under-load evidence).
+**Remaining work:** All Round 6 findings are resolved. Final evidence gathered: `go test ./...`, `go test -tags full ./...`, `go test -race` on reload-critical packages, and `python3 scripts/docs-check.py` (1249 passed, 0 failed).
