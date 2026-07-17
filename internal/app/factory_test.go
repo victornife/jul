@@ -237,18 +237,28 @@ func TestHandlerFactoryPrepareAbortDoesNotInstallRedaction(t *testing.T) {
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
 	cfg.Admin.Token = "${env:JUL_FACTORY_ABORT_TEST}"
-	_, _, _, _, abortFn, _, err := f.Prepare(cfg)
+	candidate, err := config.NewCandidate(cfg)
+	if err != nil {
+		t.Fatalf("NewCandidate: %v", err)
+	}
+	if candidate.Redaction.Apply("candidate-secret-value") != "***" {
+		t.Fatal("candidate redaction does not mask the secret")
+	}
+	_, _, _, _, abortFn, state, err := f.Prepare(candidate.Effective)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	abortFn()
 
+	if state.Count() != 0 {
+		t.Fatal("Prepare resolved secrets itself instead of receiving a candidate")
+	}
 	if redact.Apply("candidate-secret-value") != "candidate-secret-value" {
 		t.Fatal("aborted Prepare installed candidate secret into live redaction state")
 	}
 }
 
-func TestHandlerFactoryPrepareReturnsRedactionState(t *testing.T) {
+func TestHandlerFactoryPrepareReturnsEmptyRedactionState(t *testing.T) {
 	f, cleanup := minimalFactory(t)
 	defer cleanup()
 
@@ -257,15 +267,19 @@ func TestHandlerFactoryPrepareReturnsRedactionState(t *testing.T) {
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
 	cfg.Admin.Token = "${env:JUL_FACTORY_COMMIT_TEST}"
-	_, _, _, commitFn, abortFn, state, err := f.Prepare(cfg)
+	candidate, err := config.NewCandidate(cfg)
+	if err != nil {
+		t.Fatalf("NewCandidate: %v", err)
+	}
+	_, _, _, commitFn, abortFn, state, err := f.Prepare(candidate.Effective)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	defer abortFn()
-	// The returned state must mask the secret; the caller installs it at the
-	// publish boundary.
-	if state.Apply("commit-secret-value") != "***" {
-		t.Fatal("Prepare returned redaction state that does not mask the secret")
+	// Prepare no longer resolves secrets; the caller is responsible for the
+	// candidate redaction state (R7-05).
+	if state.Count() != 0 {
+		t.Fatal("Prepare returned a non-empty redaction state; it should use the candidate")
 	}
 	// Live registry must remain untouched before explicit install.
 	if redact.Apply("commit-secret-value") != "commit-secret-value" {

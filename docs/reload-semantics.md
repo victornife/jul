@@ -71,22 +71,25 @@ and bind:
 
 1. **Parse + structural validation** — rejects malformed TOML and invalid field
    combinations.
-2. **TLS certificate validation** — resolves secret-referenced cert/key paths
-   (`${env:...}`, `${file:...}`) and checks file existence, but does *not*
-   mutate the live redaction registry.
-3. **Composition-root dry-run** — builds the entire runtime on a clone of the
-   config (plugins, static roots, proxy/gRPC/FastCGI handlers, auth, WAF,
-   router, compression) without disturbing the live runtime. A build error (or
-   panic) aborts the write.
-4. **Stream (L4) dry-run** — builds every `[[stream]]` route set on the clone
-   so a bad target is rejected too.
-5. **HTTP listener bind-probe** — every newly introduced HTTP listen address is
+2. **Candidate construction** — resolves secret references exactly once into an
+   immutable `config.Candidate{Raw,Effective,Redaction,Digests}`. The effective
+   config is used for every subsequent gate; the redaction state is *not*
+   installed until the asynchronous reload commits.
+3. **TLS certificate validation** — checks cert/key files using the resolved
+   candidate.
+4. **Composition-root dry-run** — builds the entire runtime from the candidate
+   (plugins, static roots, proxy/gRPC/FastCGI handlers, auth, WAF, router,
+   compression) without disturbing the live runtime. A build error (or panic)
+   aborts the write.
+5. **Stream (L4) dry-run** — builds every `[[stream]]` route set from the
+   candidate so a bad target is rejected too.
+6. **HTTP listener bind-probe** — every newly introduced HTTP listen address is
    bind-probed and released, so an apply that adds an unbindable port is
    rejected before the file is written.
-6. **Stream listener bind-probe** — every newly introduced `[[stream]]` listen
+7. **Stream listener bind-probe** — every newly introduced `[[stream]]` listen
    address (TCP and UDP) is bind-probed and released, symmetric with the HTTP
    probe.
-7. **Restart-required and listener-rebind checks** — compares the candidate
+8. **Restart-required and listener-rebind checks** — compares the candidate
    against the startup-bound effective fingerprint and the bind-time
    fingerprints of kept listeners. Secret-content rotation is detected via
    file digests.
@@ -95,29 +98,32 @@ Only after all gates pass is the file written and the reload triggered.
 
 ## The ReloadPlan transaction
 
-The live reload is implemented as a `ReloadPlan` value that owns every piece of
-candidate state from the moment the source config is loaded until it is either
-applied or aborted. The phases are:
+The live reload is implemented as a `ReloadPlan` value that owns exactly one
+`config.Candidate` per transaction. Secrets are resolved once at Resolve time;
+all later phases read the same effective config and redaction state. The phases
+are:
 
-1. **Resolve** — expand secret references into a deep-copied effective config;
-   compute the candidate fingerprint and a self-contained `redact.State`.
-2. **Validate** — run structural/runtime validation on the raw source config.
-3. **Lifecycle** — compare the candidate effective fingerprint against the
-   startup fingerprint; then check kept listeners for bind-time property
-   changes.
+1. **Resolve** — build the immutable `config.Candidate` from the raw source
+   config; compute the candidate fingerprint.
+2. **Validate** — run structural/runtime validation on `Candidate.Effective`.
+3. **Lifecycle** — compare the candidate fingerprint against the startup
+   fingerprint; then check kept listeners for bind-time property changes.
 4. **Prepare** — build the handler tree and stage upstream pools and closers.
 5. **StageListeners** — bind every newly added listen address; HTTP/3 QUIC
-   resources are created but their accept loops are **not** started.
+   resources are created but their accept loops are **not** started. A bind
+   failure aborts the reload before Publish, leaving the old generation
+   authoritative.
 6. **Publish** — the ordered commit boundary. Commit the handler generation,
-   install the new redaction state, assign the live config, and swap the
-   handler pointer. Each of these writes is ordered but not a single atomic
+   install the candidate's redaction state, assign the live config, and swap
+   the handler pointer. Each of these writes is ordered but not a single atomic
    transaction; the swap is race-free because the handler pointer is stored
    with one atomic operation and because downstream readers observe the new
    generation only after it is fully built.
 7. **Activate** — start serving on staged TCP and HTTP/3 listeners.
 8. **Retire** — remove listeners no longer in the config and retire the old
    handler generation after it drains.
-9. **Refresh** — reload TLS certificates for kept TLS-enabled listeners.
+9. **Refresh** — TLS certificate rotation is restart-only (R7-07); this phase
+   is intentionally a no-op.
 10. **PostCommit** — apply dynamic side effects: log level, GOMAXPROCS, and
     stream-proxy reload.
 
@@ -169,16 +175,18 @@ resolved, file-backed secrets digested, `worker_threads` auto resolved to the
 effective GOMAXPROCS cap). This prevents a saved secret-reference change from
 hiding a real structural change and detects file-content rotation.
 
-## Per-request upstream pool snapshot
+## Generation-scoped upstream pool snapshot
 
-When a request enters the handler chain, the factory captures a fresh
-`PoolSnapshot` of every referenced named upstream and installs it in the
-request context. Handlers select backends with `PickCtx` / `BackendsCtx`, which
-prefer the snapshot over the live registry. This gives each request a stable
-backend view for its own lifetime while allowing dynamic service-discovery
-updates to converge on the very next request (R6-04). An in-flight request
-started on generation *N* therefore continues to see the backend set that was
-live when it began, even if a subsequent config reload or discovery refresh
+Each handler generation carries an immutable map of `PoolSnapshot` values for
+the upstream pools reachable from that generation's routes. The snapshot is
+captured from the live registry when the generation is committed, and the
+server installs it in the request context before dispatching. Handlers select
+backends with `PickCtx` / `BackendsCtx`, which prefer the generation-scoped
+snapshot over the live registry. This gives every request a stable backend view
+for its own lifetime while allowing dynamic service-discovery updates to
+converge on the next request after a reload (R6-04, R7-03). An in-flight
+request started on generation *N* continues to see the backend set that was
+live when that generation began, even if discovery or a subsequent reload
 changes the pool before the request drains.
 
 ## HTTP handler-generation retirement (resource teardown)

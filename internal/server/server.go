@@ -209,17 +209,10 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 // receive from the reload channel, then drains in-flight requests within the
 // configured shutdown timeout.
 func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
-	// Use the raw (pre-expansion) startup config for the initial factory call so
-	// that ExpandSecrets runs on the original secret-reference strings and
-	// registers the resolved values in the redaction registry (R3-04). If rawCfg
-	// is nil (tests with literal values), fall back to s.cfg.
-	buildCfg := s.cfg
-	if s.rawCfg != nil {
-		if clone, cerr := s.rawCfg.Clone(); cerr == nil {
-			buildCfg = clone
-		}
-	}
-	handlers, snapshots, genID, commit, _, state, err := s.factory(buildCfg)
+	// The startup effective config is already resolved by the composition root
+	// and passed as s.cfg. The factory receives the same candidate that will be
+	// served, so there is no second secret resolution at startup (R7-05).
+	handlers, snapshots, genID, commit, _, state, err := s.factory(s.cfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
 	}
@@ -627,7 +620,7 @@ func (s *Server) doReload() {
 
 	info.Duration = time.Since(plan.start)
 	// Advisory timeout check: warn but do not fail the reload.
-	threshold := plan.EffectiveConfig.Global.ReloadTimeout.Std()
+	threshold := plan.Candidate.Effective.Global.ReloadTimeout.Std()
 	if threshold > 0 && info.Duration > threshold {
 		info.TimedOut = true
 		s.log.Warn("reload exceeded timeout threshold", "duration", info.Duration, "threshold", threshold)
