@@ -124,15 +124,20 @@ type Server struct {
 	listeners map[string]*listenerEntry // keyed by listen address
 	handlers  atomic.Pointer[handlerGen]
 
+	// runtimeState is the atomically-published coherent view of the server's
+	// runtime state: effective config, raw config, bound listener metadata,
+	// and current handler generation. It is published by Run after startup
+	// binds and by ReloadPlan.Publish/FinalizeRuntimeState during reload, and
+	// read by LiveSnapshot, so callers observe a consistent snapshot even when
+	// reload runs concurrently (R10-02).
+	runtimeState atomic.Pointer[runtimeState]
+
 	// redactMu guards redactGens and retiredRedaction. A generation is
 	// registered when its handlers are published and retired after its
 	// in-flight requests drain, so secrets are masked as long as any request
 	// of that generation may still emit them (R7-02). Generations that do not
 	// drain before the resource grace timeout move to retiredRedaction so the
 	// secret union remains masked without blocking shutdown (R9-03).
-	// A generation is registered when its handlers are published and retired
-	// after its in-flight requests drain, so secrets are masked as long as any
-	// request of that generation may still emit them (R7-02).
 	redactMu         sync.Mutex
 	redactGens       map[uint64]redact.State
 	retiredRedaction redact.State // union of grace-expired generations
@@ -148,6 +153,23 @@ type lastReloadInfo struct {
 	Duration time.Duration
 	At       time.Time
 	Error    string
+}
+
+// runtimeState is an immutable snapshot of the server's live runtime state.
+// It is published atomically so readers (LiveSnapshot, preflight) observe a
+// coherent view: the effective config, raw config, bound listener set, and
+// handler generation all belong to the same logical moment.
+type runtimeState struct {
+	// EffectiveConfig is the expanded effective config currently being served.
+	// Treat as read-only.
+	EffectiveConfig *config.Config
+	// RawConfig is the pre-expansion config corresponding to EffectiveConfig.
+	// Treat as read-only.
+	RawConfig *config.Config
+	// Listeners is a copy of the bound listener metadata map.
+	Listeners map[string]BoundListenerInfo
+	// Generation is the current handler generation ID.
+	Generation uint64
 }
 
 // LastReload returns a copy of the most recent reload outcome. It returns nil
@@ -262,6 +284,10 @@ type LiveSnapshot struct {
 	// treat it as read-only.
 	EffectiveConfig *config.Config
 
+	// RawConfig is the server's current pre-expansion config. Callers must
+	// treat it as read-only.
+	RawConfig *config.Config
+
 	// Listeners maps bound address -> bound listener metadata. Only addresses
 	// currently accepting connections are present.
 	Listeners map[string]BoundListenerInfo
@@ -273,30 +299,64 @@ type LiveSnapshot struct {
 }
 
 // LiveSnapshot returns a read-only snapshot of the server's currently bound
-// listeners and effective config. The snapshot is safe to use outside the
-// server's mutex because it copies all mutable state.
+// listeners and effective config. The snapshot is published atomically by
+// ReloadPlan.Publish, so readers observe a coherent runtime state even when
+// a reload is in progress (R10-02).
 func (s *Server) LiveSnapshot() LiveSnapshot {
+	if rs := s.runtimeState.Load(); rs != nil {
+		return LiveSnapshot{
+			EffectiveConfig: rs.EffectiveConfig,
+			RawConfig:       rs.RawConfig,
+			Listeners:       copyListenerMap(rs.Listeners),
+			Generation:      rs.Generation,
+		}
+	}
+	// Fallback for callers before the first publish (should not happen in
+	// production because Run publishes the initial generation before serving).
 	s.mu.Lock()
-	listeners := make(map[string]BoundListenerInfo, len(s.listeners))
-	for addr, e := range s.listeners {
-		listeners[addr] = BoundListenerInfo{
+	listeners := copyListenerMapFromEntries(s.listeners)
+	s.mu.Unlock()
+	var gen uint64
+	if g := s.handlers.Load(); g != nil {
+		gen = g.genID
+	}
+	return LiveSnapshot{
+		EffectiveConfig: s.cfg,
+		RawConfig:       s.rawCfg,
+		Listeners:       listeners,
+		Generation:      gen,
+	}
+}
+
+// publishRuntimeStateDirect atomically publishes a runtimeState from the
+// server's current fields. It is used by Run before serving begins.
+func (s *Server) publishRuntimeStateDirect(gen uint64) {
+	s.runtimeState.Store(&runtimeState{
+		EffectiveConfig: s.cfg,
+		RawConfig:       s.rawCfg,
+		Listeners:       s.boundListenerSnapshot(),
+		Generation:      gen,
+	})
+}
+
+func copyListenerMap(src map[string]BoundListenerInfo) map[string]BoundListenerInfo {
+	out := make(map[string]BoundListenerInfo, len(src))
+	for addr, info := range src {
+		out[addr] = info
+	}
+	return out
+}
+
+func copyListenerMapFromEntries(src map[string]*listenerEntry) map[string]BoundListenerInfo {
+	out := make(map[string]BoundListenerInfo, len(src))
+	for addr, e := range src {
+		out[addr] = BoundListenerInfo{
 			Addr:        addr,
 			Fingerprint: e.boundFingerprint,
 			TLSEnabled:  e.provider != nil,
 		}
 	}
-	cfg := s.cfg
-	var gen uint64
-	if g := s.handlers.Load(); g != nil {
-		gen = g.genID
-	}
-	s.mu.Unlock()
-
-	return LiveSnapshot{
-		EffectiveConfig: cfg,
-		Listeners:       listeners,
-		Generation:      gen,
-	}
+	return out
 }
 
 // New creates a Server. source and validate may be nil to disable reload.
@@ -329,9 +389,6 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 // Run binds all listeners, serves until ctx is cancelled, reloading on each
 // receive from the reload channel, then drains in-flight requests within the
 // configured shutdown timeout.
-// Run binds all listeners, serves until ctx is cancelled, reloading on each
-// receive from the reload channel, then drains in-flight requests within the
-// configured shutdown timeout.
 //
 // initialRedaction is the redaction state for the startup candidate. The
 // factory intentionally does not return redaction state (R9-01); it is passed
@@ -359,6 +416,10 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 			s.wg.Wait()
 			return err
 		}
+		// Publish an updated runtime snapshot after each bind so LiveSnapshot
+		// readers observe the listener set as it grows and the first generation
+		// is live before any admin/preflight request runs (R10-02).
+		s.publishRuntimeStateDirect(genID)
 	}
 
 	for {
@@ -529,6 +590,15 @@ func (s *Server) startServing(entry *listenerEntry) {
 			}
 		}
 	}()
+}
+
+// boundListenerSnapshot returns a copy of the currently bound listener metadata
+// map. It must be called with the caller holding any lock needed for s.listeners
+// consistency; LiveSnapshot callers should use the atomic runtimeState instead.
+func (s *Server) boundListenerSnapshot() map[string]BoundListenerInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return copyListenerMapFromEntries(s.listeners)
 }
 
 // listenerBoundRebindRequired reports whether any listener that is kept across
@@ -838,6 +908,7 @@ func (s *Server) doReload(req ReloadRequest) {
 	// Phase 7–10: activation and post-commit side effects.
 	plan.Activate()
 	plan.RetireRemovedListeners()
+	plan.FinalizeRuntimeState()
 	certErrs := plan.RefreshCerts()
 	onReloadErr := plan.PostCommit()
 

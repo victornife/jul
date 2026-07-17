@@ -190,11 +190,19 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// (R6-06, R7-02).
 	p.s.registerRedactionGen(p.GenID, p.Candidate.Redaction)
 
+	prevGen := p.s.handlers.Load()
+	newGen := newHandlerGen(p.Handlers, snapshots, p.GenID)
+	p.s.handlers.Store(newGen)
+
+	// Update the authoritative config pointers so code that still reads s.cfg
+	// directly sees the new effective config. Then publish the coherent runtime
+	// snapshot with the listener set that exists right now; Activate and
+	// RetireRemovedListeners will update it again once listener changes settle
+	// (R10-02).
 	p.s.cfg = p.Candidate.Effective
 	p.s.rawCfg = p.Candidate.Raw
+	p.publishRuntimeState()
 
-	prevGen := p.s.handlers.Load()
-	p.s.handlers.Store(newHandlerGen(p.Handlers, snapshots, p.GenID))
 	if prevGen != nil {
 		genID := prevGen.genID
 		p.s.retireGen(prevGen, func() {
@@ -210,6 +218,30 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 		retirePrev()
 	}
 	return retirePrev, nil
+}
+
+// FinalizeRuntimeState republishes the runtime snapshot after listener
+// activation and retirement have settled. This ensures LiveSnapshot reflects
+// the actually bound listener set rather than the pre-activation state.
+func (p *ReloadPlan) FinalizeRuntimeState() {
+	p.publishRuntimeState()
+}
+
+// publishRuntimeState captures s.cfg, s.rawCfg, the current handler generation,
+// and the currently bound listener set into an immutable runtimeState and
+// stores it atomically. Callers must not mutate the configs after publication.
+func (p *ReloadPlan) publishRuntimeState() {
+	var gen uint64
+	if g := p.s.handlers.Load(); g != nil {
+		gen = g.genID
+	}
+	rs := &runtimeState{
+		EffectiveConfig: p.s.cfg,
+		RawConfig:       p.s.rawCfg,
+		Listeners:       p.s.boundListenerSnapshot(),
+		Generation:      gen,
+	}
+	p.s.runtimeState.Store(rs)
 }
 
 // Activate releases the staged TCP listeners to accept connections. It must be
