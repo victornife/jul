@@ -338,6 +338,7 @@ type memorySource struct {
 }
 
 func (m memorySource) Load() (*config.Config, error) { return m.cfg, nil }
+func (m memorySource) ReadRaw() ([]byte, error)      { return config.Marshal(m.cfg) }
 func (m memorySource) Name() string                  { return m.name }
 
 // flattenErrors expands an errors.Join tree into a flat slice so each problem

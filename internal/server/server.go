@@ -202,13 +202,11 @@ func (s *Server) candidateStillValid(req ReloadRequest) bool {
 	if req.RawDigest == [32]byte{} {
 		return true
 	}
-	current, err := s.source.Load()
-	if err != nil {
-		return false
-	}
-	// Compare canonical TOML bytes so normalization differences (defaults,
-	// ordering) do not produce false mismatches.
-	currentBytes, err := config.Marshal(current)
+	// Compare the raw persisted bytes against the digest captured at admin
+	// write time. Canonical re-marshaling strips comments and formatting,
+	// so two byte-for-byte different files can hash differently even when
+	// their parsed config is identical (R11-03).
+	currentBytes, err := s.source.ReadRaw()
 	if err != nil {
 		return false
 	}

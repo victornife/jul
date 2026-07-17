@@ -18,6 +18,11 @@ import (
 type Source interface {
 	// Load reads and decodes the configuration. It does not validate.
 	Load() (*Config, error)
+	// ReadRaw returns the raw configuration bytes as stored by the source.
+	// For file-backed sources this is the on-disk bytes, preserving comments
+	// and formatting, so digest comparisons match the bytes an admin editor
+	// actually wrote (R11-03).
+	ReadRaw() ([]byte, error)
 	// Name identifies the source for logging (e.g. the file path).
 	Name() string
 }
@@ -32,6 +37,11 @@ func NewTOMLSource(path string) *TOMLSource { return &TOMLSource{Path: path} }
 
 // Name returns the file path.
 func (s *TOMLSource) Name() string { return s.Path }
+
+// ReadRaw returns the raw TOML bytes from disk.
+func (s *TOMLSource) ReadRaw() ([]byte, error) {
+	return os.ReadFile(s.Path)
+}
 
 // Load reads and decodes the TOML file into a Config, applying defaults.
 func (s *TOMLSource) Load() (*Config, error) {
