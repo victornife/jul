@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -105,7 +106,7 @@ func extractValue(cfg *config.Config, path string) any {
 	case "admin.max_event_conns":
 		return cfg.Admin.MaxEventConns
 	case "admin.audit_log_file":
-		return digestString(cfg.Admin.AuditLogFile)
+		return cfg.Admin.AuditLogFile
 	case "admin.audit_log_rotate_max_mb":
 		return cfg.Admin.AuditLogRotateMaxMB
 	case "admin.audit_log_rotate_keep":
@@ -124,7 +125,9 @@ func extractValue(cfg *config.Config, path string) any {
 	case "cache.memory_max_size":
 		return cfg.Cache.MemoryMaxSize
 	case "cache.disk_path":
-		return digestString(cfg.Cache.DiskPath)
+		// Disk cache path is compared as a path; directory creation must not
+		// create false restart signals (R6-03).
+		return cfg.Cache.DiskPath
 	case "cache.disk_max_size":
 		return cfg.Cache.DiskMaxSize
 	case "cache.default_ttl":
@@ -150,7 +153,9 @@ func extractValue(cfg *config.Config, path string) any {
 	case "observability.access_log.sinks":
 		return cfg.Observability.AccessLog.Sinks
 	case "observability.access_log.file":
-		return digestString(cfg.Observability.AccessLog.File)
+		// Access-log file path is compared as a path; log growth must not
+		// create false restart signals (R6-03).
+		return cfg.Observability.AccessLog.File
 	case "observability.access_log.format":
 		return cfg.Observability.AccessLog.Format
 	case "observability.access_log.rotate_max_mb":
@@ -198,26 +203,24 @@ func parseWorkerThreads(raw string) int {
 	return n
 }
 
+// digestString hashes an inline value. It is used for fields whose effective
+// value is the secret or configuration text itself (e.g. admin.token, an
+// inline PEM block). It never reads the filesystem, so path-like strings are
+// compared as paths and growing files cannot create false restart signals
+// (R6-03).
 func digestString(s string) string {
 	if s == "" {
 		return ""
 	}
-	// If the value looks like a file path, digest the file contents so that
-	// secret rotation is detected.
-	if (strings.HasPrefix(s, "/") || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")) && fileExists(s) {
-		return digestFile(s)
-	}
-	// Otherwise treat it as an inline value and digest it.
 	h := sha256.Sum256([]byte(s))
 	return "sha256:" + hex.EncodeToString(h[:])
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func digestFile(path string) string {
+// digestFileContent reads path and returns a digest of its bytes. It is used
+// for TLS certificate/key/CA/CRL files where the bind-time content matters.
+// If the path cannot be read, an error marker is returned; that still signals
+// a change from a previously readable file.
+func digestFileContent(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Sprintf("error:%v", err)
@@ -226,11 +229,51 @@ func digestFile(path string) string {
 	return "file-sha256:" + hex.EncodeToString(h[:])
 }
 
+// digestTLSFile canonicalizes a TLS certificate/key/CA/CRL value. After secret
+// resolution the value may be inline PEM content, a ${file:...} reference
+// resolved to PEM content, or a plain file path. Inline PEM is digested as a
+// string; a readable file path is digested by content; an unreadable path is
+// digested as a string so misconfiguration is stable.
+func digestTLSFile(s string) string {
+	if s == "" {
+		return ""
+	}
+	// Inline PEM content (or any already-resolved secret value) is digested
+	// directly. PEM has a distinctive marker; non-PEM non-path values also fall
+	// through to string digest.
+	if strings.HasPrefix(s, "-----BEGIN") || !looksLikePath(s) {
+		return digestString(s)
+	}
+	// Plain file path: digest the content so cert/key rotation is detected.
+	info, err := os.Stat(s)
+	if err == nil && !info.IsDir() {
+		return digestFileContent(s)
+	}
+	return digestString(s)
+}
+
+func looksLikePath(s string) bool {
+	return strings.HasPrefix(s, "/") || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
+}
+
+func sniKey(names []string) string {
+	if len(names) == 0 {
+		return "_default_"
+	}
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, ",")
+}
+
 func tlsFingerprint(cfg *config.Config) any {
-	entries := map[string]any{}
+	byAddr := map[string]map[string]any{}
 	for _, s := range cfg.Servers {
+		hosts, ok := byAddr[s.Listen]
+		if !ok {
+			hosts = map[string]any{}
+			byAddr[s.Listen] = hosts
+		}
 		m := map[string]any{
-			"listen":           s.Listen,
 			"enabled":          false,
 			"client_auth_mode": "",
 			"cert_file":        "",
@@ -243,17 +286,21 @@ func tlsFingerprint(cfg *config.Config) any {
 			m["enabled"] = s.TLS.Enabled
 			if s.TLS.ClientAuth != nil {
 				m["client_auth_mode"] = s.TLS.ClientAuth.Mode
-				m["ca_file"] = digestString(s.TLS.ClientAuth.CAFile)
-				m["crl_file"] = digestString(s.TLS.ClientAuth.CRLFile)
+				m["ca_file"] = digestTLSFile(s.TLS.ClientAuth.CAFile)
+				m["crl_file"] = digestTLSFile(s.TLS.ClientAuth.CRLFile)
 				m["verify_san"] = s.TLS.ClientAuth.VerifySAN
 			}
-			m["cert_file"] = digestString(s.TLS.Cert)
-			m["key_file"] = digestString(s.TLS.Key)
+			m["cert_file"] = digestTLSFile(s.TLS.Cert)
+			m["key_file"] = digestTLSFile(s.TLS.Key)
 			if s.TLS.ACME != nil {
 				m["acme"] = acmeFingerprint(s.TLS.ACME)
 			}
 		}
-		entries[s.Listen] = m
+		hosts[sniKey(s.ServerNames)] = m
+	}
+	entries := map[string]any{}
+	for addr, hosts := range byAddr {
+		entries[addr] = hosts
 	}
 	return entries
 }
@@ -268,34 +315,50 @@ func acmeFingerprint(a *config.ACMEConfig) map[string]any {
 		"ca":            a.CA,
 		"domains":       a.Domains,
 		"challenge":     a.Challenge,
-		"cache_dir":     digestString(a.CacheDir),
+		"cache_dir":     a.CacheDir,
 		"ocsp_stapling": a.OCSPStaplingEnabled(),
 	}
 }
 
 func http3Fingerprint(cfg *config.Config) any {
-	entries := map[string]any{}
+	byAddr := map[string]map[string]any{}
 	for _, s := range cfg.Servers {
+		hosts, ok := byAddr[s.Listen]
+		if !ok {
+			hosts = map[string]any{}
+			byAddr[s.Listen] = hosts
+		}
 		m := map[string]any{
-			"listen":          s.Listen,
 			"enabled":         s.HTTP3 != nil && s.HTTP3.Enabled,
 			"alt_svc_max_age": 0,
 		}
 		if s.HTTP3 != nil {
 			m["alt_svc_max_age"] = s.HTTP3.AltSvcMaxAge
 		}
-		entries[s.Listen] = m
+		hosts[sniKey(s.ServerNames)] = m
+	}
+	entries := map[string]any{}
+	for addr, hosts := range byAddr {
+		entries[addr] = hosts
 	}
 	return entries
 }
 
 func h2cFingerprint(cfg *config.Config) any {
-	entries := map[string]any{}
+	byAddr := map[string]map[string]any{}
 	for _, s := range cfg.Servers {
-		entries[s.Listen] = map[string]any{
-			"listen": s.Listen,
-			"h2c":    s.H2C,
+		hosts, ok := byAddr[s.Listen]
+		if !ok {
+			hosts = map[string]any{}
+			byAddr[s.Listen] = hosts
 		}
+		hosts[sniKey(s.ServerNames)] = map[string]any{
+			"h2c": s.H2C,
+		}
+	}
+	entries := map[string]any{}
+	for addr, hosts := range byAddr {
+		entries[addr] = hosts
 	}
 	return entries
 }

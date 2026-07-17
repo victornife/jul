@@ -37,16 +37,14 @@ restart_required:
   - subsystem: global_process
     gated_by: "internal/lifecycle.RestartRequired"
     reason: >
-      Process-wide caps and legacy sinks are consumed at startup; changing
-      them after start has no effect or requires rebuilding startup state.
+      Legacy [global] sinks are ignored at runtime; they remain in the schema
+      only for compatibility. Changing them has no effect.
     fields:
-      - "[global].worker_threads"
       - "[global].access_log"
       - "[global].error_log"
-      - "[global].redact_min_secret_length"
 
   - subsystem: cache
-    gated_by: "internal/server.CacheRestartRequired"
+    gated_by: "internal/lifecycle.RestartRequired"
     reason: >
       cache.New builds the LRU+disk tiers once at startup; in-memory state
       and counters persist across reloads to avoid counter resets on edits.
@@ -60,7 +58,7 @@ restart_required:
       - "[cache].stale_if_error"
 
   - subsystem: egress
-    gated_by: "internal/server.EgressRestartRequired"
+    gated_by: "internal/lifecycle.RestartRequired"
     reason: >
       egress.New compiles the outbound dial allow-list once at startup. A
       tightened allow-list saved via the Console would appear active in
@@ -70,7 +68,7 @@ restart_required:
       - "[egress].allow"
 
   - subsystem: admin
-    gated_by: "internal/server.AdminRestartRequired"
+    gated_by: "internal/lifecycle.RestartRequired"
     reason: >
       admin.New copies AdminConfig by value. Changes to the bearer token, listen
       address, rate limits, history dir, plugin upload policy, or audit log path
@@ -95,7 +93,7 @@ restart_required:
       - "[admin].plugin_upload_enabled"
 
   - subsystem: metrics
-    gated_by: "internal/server.MetricsRestartRequired"
+    gated_by: "internal/lifecycle.RestartRequired"
     reason: >
       observability.NewMetrics sets the host_label once when it creates the
       Prometheus registry at startup.
@@ -103,7 +101,7 @@ restart_required:
       - "[observability.metrics].host_label"
 
   - subsystem: tracing
-    gated_by: "internal/server.TracingRestartRequired"
+    gated_by: "internal/lifecycle.RestartRequired"
     reason: >
       The OpenTelemetry exporter pipeline is wired once at startup. Enabling,
       disabling, or reconfiguring tracing takes effect on restart.
@@ -116,7 +114,7 @@ restart_required:
       - "[observability.tracing].insecure"
 
   - subsystem: access_log
-    gated_by: "internal/server.AccessLogRestartRequired"
+    gated_by: "internal/lifecycle.RestartRequired"
     reason: >
       The file and syslog sinks are opened once at startup; the file sink owns a
       rotating handle and the syslog sink a system-log connection.
@@ -128,7 +126,7 @@ restart_required:
       - "[observability.access_log].rotate_keep"
 
   - subsystem: acme
-    gated_by: "internal/server.ACMERestartRequired"
+    gated_by: "internal/lifecycle.RestartRequired"
     reason: >
       The autocert manager is built at startup with a fixed issued-domain set
       and issuer. Changing domains or the CA requires restart.
@@ -209,7 +207,8 @@ hot_reload:
     This includes: server_names, locations.*, upstreams.*, compression.*,
     rate_limit.rate/burst/key, waf.*, plugins.*, stream routes (not stream.listen),
     global.log_level (level var updated atomically without handler rebuild),
-    global.worker_threads (GOMAXPROCS updated on reload),
+    global.worker_threads (GOMAXPROCS cap updated on reload),
+    global.redact_min_secret_length (redaction state rebuilt on reload),
     global.shutdown_timeout, global.reload_timeout, and all other [global].* fields
     except log_format (restart-required, above).
 

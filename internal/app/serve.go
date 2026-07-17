@@ -316,7 +316,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 			expanded, _, _, err := config.Resolve(current)
 			if err != nil {
-				return nil
+				log.Warn("pending restart check failed: config resolution error", "error", err)
+				return []string{"resolve_error"}
 			}
 			currentFP := lifecycle.ComputeFingerprint(expanded)
 

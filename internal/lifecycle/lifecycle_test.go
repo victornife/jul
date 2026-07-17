@@ -50,33 +50,9 @@ func TestRestartRequiredDetectsChange(t *testing.T) {
 }
 
 func makeFingerprint(logFormat string) Fingerprint {
-	return Fingerprint{Values: map[string]any{
-		"global.log_format":                  logFormat,
-		"global.access_log":                  "",
-		"global.error_log":                   "",
-		"global.worker_threads":              4,
-		"global.redact_min_secret_length":    4,
-		"admin.enabled":                      false,
-		"admin.listen":                       "",
-		"admin.token":                        "",
-		"cache.enabled":                      false,
-		"cache.memory_max_size":              0,
-		"cache.disk_path":                    "",
-		"cache.disk_max_size":                0,
-		"observability.metrics.host_label":   false,
-		"observability.tracing.enabled":      false,
-		"observability.tracing.endpoint":     "",
-		"observability.tracing.sample_ratio": 0.0,
-		"observability.access_log.sinks":     []any{},
-		"observability.access_log.file":      "",
-		"observability.access_log.format":    "",
-		"egress.enabled":                     false,
-		"egress.allow":                       []any{},
-		"servers.*.tls":                      map[string]any{},
-		"servers.*.http3":                    map[string]any{},
-		"servers.*.h2c":                      map[string]any{},
-		"stream.*.protocol":                  map[string]any{},
-	}}
+	cfg := &config.Config{}
+	cfg.Global.LogFormat = logFormat
+	return ComputeFingerprint(cfg)
 }
 
 func TestRestartRequiredNoChange(t *testing.T) {
@@ -125,11 +101,58 @@ func TestComputeFingerprintIncludesLogFormat(t *testing.T) {
 	}
 }
 
-func TestComputeFingerprintWorkerThreadsAuto(t *testing.T) {
+func TestComputeFingerprintTLSAggregatesVirtualHostsPerAddress(t *testing.T) {
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{
+			{Listen: ":8443", ServerNames: []string{"a.example.com"}, TLS: &config.TLSConfig{Enabled: true, Cert: "cert-a"}},
+			{Listen: ":8443", ServerNames: []string{"b.example.com"}, TLS: &config.TLSConfig{Enabled: true, Cert: "cert-b"}},
+		},
+	}
+	fp := ComputeFingerprint(cfg)
+	tls, ok := fp.Values["servers.*.tls"].(map[string]any)
+	if !ok {
+		t.Fatalf("tls fingerprint type = %T, want map[string]any", fp.Values["servers.*.tls"])
+	}
+	vhosts, ok := tls[":8443"].(map[string]any)
+	if !ok {
+		t.Fatalf("tls vhosts type = %T, want map[string]any", tls[":8443"])
+	}
+	if len(vhosts) != 2 {
+		t.Fatalf("expected 2 vhosts, got %d", len(vhosts))
+	}
+	if _, ok := vhosts["a.example.com"]; !ok {
+		t.Fatal("missing vhost a.example.com")
+	}
+	if _, ok := vhosts["b.example.com"]; !ok {
+		t.Fatal("missing vhost b.example.com")
+	}
+}
+
+func TestComputeFingerprintTLSIgnoresVirtualHostOrder(t *testing.T) {
+	cfgA := &config.Config{
+		Servers: []config.ServerConfig{
+			{Listen: ":8443", ServerNames: []string{"a.example.com"}, TLS: &config.TLSConfig{Enabled: true, Cert: "cert-a"}},
+			{Listen: ":8443", ServerNames: []string{"b.example.com"}, TLS: &config.TLSConfig{Enabled: true, Cert: "cert-b"}},
+		},
+	}
+	cfgB := &config.Config{
+		Servers: []config.ServerConfig{
+			{Listen: ":8443", ServerNames: []string{"b.example.com"}, TLS: &config.TLSConfig{Enabled: true, Cert: "cert-b"}},
+			{Listen: ":8443", ServerNames: []string{"a.example.com"}, TLS: &config.TLSConfig{Enabled: true, Cert: "cert-a"}},
+		},
+	}
+	fpA := ComputeFingerprint(cfgA)
+	fpB := ComputeFingerprint(cfgB)
+	if reason, need := RestartRequired(fpA, fpB); need {
+		t.Fatalf("same vhosts in different order should not require restart: %s", reason)
+	}
+}
+
+func TestComputeFingerprintWorkerThreadsNotStartupConsumed(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Global.WorkerThreads = "auto"
 	fp := ComputeFingerprint(cfg)
-	if fp.Values["global.worker_threads"] == nil {
-		t.Fatal("worker_threads fingerprint is nil")
+	if _, ok := fp.Values["global.worker_threads"]; ok {
+		t.Fatal("worker_threads is hot-reloadable and must not appear in startup fingerprint")
 	}
 }
