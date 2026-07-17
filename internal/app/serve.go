@@ -205,7 +205,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// adminReload lets the admin /reload endpoint trigger a reload through the
 	// same path as SIGHUP and file-watch events.
 	adminReload := make(chan struct{}, 1)
-	triggerReload := func() {
+	var triggerReload func(*config.Candidate)
+	triggerReload = func(*config.Candidate) {
 		select {
 		case adminReload <- struct{}{}:
 		default:
@@ -249,7 +250,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		LastStreamReload: &rt.LastStreamReload,
 	}
 	deps := BuildAdminDeps(productName, version, src, subsystems)
-	deps.Reload = triggerReload
+	// Defer the candidate-injecting reload until after the server is created.
+	// For now wire the no-candidate fallback used by the admin /reload button.
+	deps.Reload = func() { triggerReload(nil) }
 	var readyFlag admin.Readiness
 	deps.Ready = readyFlag.Ready
 	deps.LoadConfig = src.Load
@@ -269,13 +272,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					prevCfg = prev
 				}
 			}
-			if err := pf.Apply(cfg, prevCfg); err != nil {
+			candidate, err := pf.Apply(cfg, prevCfg)
+			if err != nil {
 				return err
 			}
 			if err := atomicfile.Write(path, data, 0o600); err != nil {
 				return err
 			}
-			triggerReload()
+			triggerReload(candidate)
 			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
@@ -288,7 +292,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					prevCfg = prev
 				}
 			}
-			if err := pf.Apply(c, prevCfg); err != nil {
+			candidate, err := pf.Apply(c, prevCfg)
+			if err != nil {
 				return err
 			}
 			data, err := config.Marshal(c)
@@ -298,7 +303,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err := atomicfile.Write(path, data, 0o600); err != nil {
 				return err
 			}
-			triggerReload()
+			triggerReload(candidate)
 			return nil
 		}
 	}
@@ -348,6 +353,21 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv := server.New(cfg, startupCand.Raw, startupFP, log, factory, src, ValidateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = rt.ACME
+
+	// Re-wire the reload trigger so admin apply injects the exact preflight
+	// candidate into the server before signalling the reload channel (R8-11).
+	// Manual reloads via the admin /reload endpoint have no candidate and fall
+	// back to reading the source.
+	triggerReload = func(c *config.Candidate) {
+		if c != nil {
+			srv.InjectCandidate(c)
+		}
+		select {
+		case adminReload <- struct{}{}:
+		default:
+		}
+	}
+	deps.Reload = func() { triggerReload(nil) }
 	deps.LastReload = func() *admin.ReloadSnapshot {
 		if li := srv.LastReload(); li != nil {
 			return &admin.ReloadSnapshot{

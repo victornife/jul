@@ -28,7 +28,7 @@ func TestPreflightApplyValidConfigOK(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	if err := p.Apply(cfg, nil); err != nil {
+	if _, err := p.Apply(cfg, nil); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 }
@@ -47,7 +47,7 @@ func TestPreflightApplyInvalidConfigFailsFast(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	if err := p.Apply(bad, nil); err == nil {
+	if _, err := p.Apply(bad, nil); err == nil {
 		t.Fatal("structurally invalid config accepted")
 	}
 }
@@ -60,7 +60,7 @@ func TestPreflightApplyPanicCaught(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	err := p.Apply(cfg, nil)
+	_, err := p.Apply(cfg, nil)
 	if err == nil {
 		t.Fatal("expected error from panic recovery, got nil")
 	}
@@ -77,7 +77,46 @@ func TestPreflightApplyWithIdenticalPrevOK(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	if err := p.Apply(cfg, cfg); err != nil {
+	if _, err := p.Apply(cfg, cfg); err != nil {
 		t.Fatalf("identical prev/next rejected: %v", err)
+	}
+}
+
+// TestPreflightApplyReturnsCandidate (R8-11) verifies that a successful
+// preflight returns the same immutable candidate that the live reload will use,
+// so secrets are resolved exactly once and handed off without re-resolution.
+func TestPreflightApplyReturnsCandidate(t *testing.T) {
+	t.Setenv("PREFLIGHT_SECRET", "preflight-secret-value")
+	cfg := &config.Config{
+		Global: config.GlobalConfig{WorkerThreads: "${env:PREFLIGHT_SECRET}"},
+		Servers: []config.ServerConfig{{
+			Listen:    ":8080",
+			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
+		}},
+	}
+	p := Preflight{
+		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			return map[string]http.Handler{}, nil, nil
+		},
+		Stream: &mockStreamPreflighter{},
+	}
+	cand, err := p.Apply(cfg, nil)
+	if err != nil {
+		t.Fatalf("valid config rejected: %v", err)
+	}
+	if cand == nil {
+		t.Fatal("Preflight.Apply returned nil candidate")
+	}
+	if cand.Effective == nil {
+		t.Fatal("candidate.Effective is nil")
+	}
+	if cand.Effective.Global.WorkerThreads != "preflight-secret-value" {
+		t.Fatalf("candidate effective worker_threads = %q, want resolved secret", cand.Effective.Global.WorkerThreads)
+	}
+	if cand.Raw == nil {
+		t.Fatal("candidate.Raw is nil")
+	}
+	if cand.Raw.Global.WorkerThreads != "${env:PREFLIGHT_SECRET}" {
+		t.Fatalf("candidate raw worker_threads = %q, want original reference", cand.Raw.Global.WorkerThreads)
 	}
 }

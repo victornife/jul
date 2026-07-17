@@ -74,11 +74,14 @@ type ReloadPlan struct {
 }
 
 // newReloadPlan creates a plan for reloading raw (unexpanded) config into s.
-func (s *Server) newReloadPlan(raw *config.Config) *ReloadPlan {
+// When candidate is non-nil it is used directly and secrets are not resolved
+// again; this is the admin apply path that hands off the preflight candidate.
+func (s *Server) newReloadPlan(raw *config.Config, candidate *config.Candidate) *ReloadPlan {
 	return &ReloadPlan{
 		s:               s,
 		start:           time.Now(),
 		rawConfig:       raw,
+		Candidate:       candidate,
 		StartupFP:       s.startupFP,
 		oldAddrs:        setOf(uniqueListenAddrs(s.cfg.Servers)),
 		stagedListeners: make(map[string]*listenerEntry),
@@ -86,15 +89,18 @@ func (s *Server) newReloadPlan(raw *config.Config) *ReloadPlan {
 }
 
 // Resolve builds the immutable Candidate for this reload and computes the
-// candidate fingerprint. Secrets are resolved exactly once here.
+// candidate fingerprint. Secrets are resolved exactly once here, unless a
+// candidate was already supplied by the admin preflight handoff.
 func (p *ReloadPlan) Resolve() error {
-	candidate, err := config.NewCandidate(p.rawConfig)
-	if err != nil {
-		return fmt.Errorf("candidate: %w", err)
+	if p.Candidate == nil {
+		candidate, err := config.NewCandidate(p.rawConfig)
+		if err != nil {
+			return fmt.Errorf("candidate: %w", err)
+		}
+		p.Candidate = candidate
 	}
-	p.Candidate = candidate
-	p.CandidateFP = lifecycle.ComputeFingerprint(candidate.Effective)
-	p.newAddrs = setOf(uniqueListenAddrs(candidate.Effective.Servers))
+	p.CandidateFP = lifecycle.ComputeFingerprint(p.Candidate.Effective)
+	p.newAddrs = setOf(uniqueListenAddrs(p.Candidate.Effective.Servers))
 	return nil
 }
 
@@ -194,6 +200,7 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 			if retirePrev != nil {
 				retirePrev()
 			}
+		}, func() {
 			p.s.retireRedactionGen(prevGen.genID)
 		})
 	} else if retirePrev != nil {

@@ -25,7 +25,11 @@ path validates *before* persistence.**
 
 The admin write path runs the full preflight (parse, dry-run, bind-probe, and
 all restart-required checks) *before* the file is written. Nothing is saved
-unless the config is guaranteed to build and apply.
+unless the config is validated to build and bind under preflight conditions.
+Because preflight cannot observe every runtime condition (e.g. a bind race,
+a late certificate file change, or transient disk errors), the live reload may
+still fail after the file is written; such failures are recorded in
+`LastReload` and leave the previous generation authoritative.
 
 SIGHUP and file-watch trigger the same live runtime swap, but they run restart-
 required checks *at swap time* rather than before the file is written. This
@@ -35,11 +39,12 @@ means:
   compression, rate limiting, etc.) apply exactly as they do through the
   Console.
 - Changes to **restart-required** fields (cache, egress, admin, tracing,
-  access-log, ACME, log format, worker threads, listener bind settings) are
-  **rejected at swap time** — the swap is aborted, `LastReload.OK=false` is
-  recorded with the reason, and the old config remains authoritative. The file
-  on disk may contain the new value, but the running process ignores it until a
-  restart.
+  access-log, ACME, log format, listener bind settings) are **rejected at swap
+  time** — the swap is aborted, `LastReload.OK=false` is recorded with the
+  reason, and the old config remains authoritative. The file on disk may
+  contain the new value, but the running process ignores it until a restart.
+  `global.worker_threads` is *hot-reloadable* (the GOMAXPROCS cap is updated on
+  the next successful reload).
 - **New-listener-only** fields (a new listen address, or a new L4 listener)
   apply to brand-new listeners without a restart; changing the same property on
   an already-bound listener is treated as restart-required.
@@ -66,15 +71,17 @@ as possible by an up-front preflight (below), and it is normally sub-second.
 ## The apply preflight (truthfulness gate)
 
 Before a configuration is written to disk, the admin write path runs a full
-preflight so that a configuration recorded as *applied* is guaranteed to build
-and bind:
+preflight so that a configuration recorded as *applied* is validated to build
+and bind under preflight conditions:
 
 1. **Parse + structural validation** — rejects malformed TOML and invalid field
    combinations.
 2. **Candidate construction** — resolves secret references exactly once into an
-   immutable `config.Candidate{Raw,Effective,Redaction,Digests}`. The effective
-   config is used for every subsequent gate; the redaction state is *not*
-   installed until the asynchronous reload commits.
+   immutable `config.Candidate{Raw,Effective,Redaction,Digests}`. The same
+   candidate is handed to the live reload transaction, so the runtime does not
+   re-resolve secrets or re-build the effective config after the preflight
+   passes. The redaction state is *not* installed until the asynchronous reload
+   commits.
 3. **TLS certificate validation** — checks cert/key files using the resolved
    candidate.
 4. **Composition-root dry-run** — builds the entire runtime from the candidate
@@ -103,8 +110,10 @@ The live reload is implemented as a `ReloadPlan` value that owns exactly one
 all later phases read the same effective config and redaction state. The phases
 are:
 
-1. **Resolve** — build the immutable `config.Candidate` from the raw source
-   config; compute the candidate fingerprint.
+1. **Resolve** — obtain the immutable `config.Candidate`. On the admin apply
+   path the candidate is the one already built during preflight and handed to
+   the reload transaction; on SIGHUP/file-watch it is built here from the raw
+   source config. In both cases secrets are resolved exactly once per reload.
 2. **Validate** — run structural/runtime validation on `Candidate.Effective`.
 3. **Lifecycle** — compare the candidate fingerprint against the startup
    fingerprint; then check kept listeners for bind-time property changes.
@@ -170,24 +179,32 @@ classes are:
 - **new_listener_only** — honored for a brand-new listen address on reload;
   changing the property on an already-bound listener is restart-required.
 
-Restart-required checks compare **effective values** (secret references
-resolved, file-backed secrets digested, `worker_threads` auto resolved to the
-effective GOMAXPROCS cap). This prevents a saved secret-reference change from
-hiding a real structural change and detects file-content rotation.
+Lifecycle checks compare **effective values** (secret references resolved,
+file-backed secrets digested, `worker_threads` auto resolved to the effective
+GOMAXPROCS cap). This prevents a saved secret-reference change from hiding a
+real structural change and detects file-content rotation. Hot-reloadable
+fields such as `worker_threads` are diffed against the live effective value so
+that a change is applied on the next successful reload.
 
 ## Generation-scoped upstream pool snapshot
 
 Each handler generation carries an immutable map of `PoolSnapshot` values for
 the upstream pools reachable from that generation's routes. The snapshot is
-captured from the live registry when the generation is committed, and the
-server installs it in the request context before dispatching. Handlers select
-backends with `PickCtx` / `BackendsCtx`, which prefer the generation-scoped
-snapshot over the live registry. This gives every request a stable backend view
-for its own lifetime while allowing dynamic service-discovery updates to
+captured from the live registry when the generation is committed. Handlers
+select backends with `PickCtx` / `BackendsCtx`, which prefer the generation-
+scoped snapshot over the live registry. This gives every request a stable
+backend view for its own lifetime while allowing static upstream changes to
 converge on the next request after a reload (R6-04, R7-03). An in-flight
-request started on generation *N* continues to see the backend set that was
-live when that generation began, even if discovery or a subsequent reload
-changes the pool before the request drains.
+request started on generation *N* continues to see the static backend set that
+was live when that generation began, even if a subsequent reload changes the
+pool before the request drains.
+
+For **service-discovery-backed pools**, the set of backends is intentionally
+not frozen at reload time. The generation snapshot carries the discovery
+configuration, and the actual backend list is resolved on each request so that
+newly registered or deregistered instances are visible without requiring a
+reload. This means discovery pools converge in request time, while static pools
+converge on the next reload.
 
 ## HTTP handler-generation retirement (resource teardown)
 
@@ -267,10 +284,11 @@ time (admin path) or at swap time (SIGHUP/file-watch):
 
 - **Log format and access-log sinks** — the log handler and sink handles are
   built once at startup. Log *level* is hot-reloadable.
-- **Process-wide GOMAXPROCS cap** (`global.worker_threads`) — applied once at
-  startup; `"auto"` restores the container-aware default.
 - **ACME issued-domain set / issuer** — frozen when the autocert manager is
   built at startup.
+
+`global.worker_threads` is *not* restart-required: the GOMAXPROCS cap is
+applied dynamically on the next successful reload.
 - **Listener bind-time settings** — for an address the server already holds,
   the socket is bound once and reused. Changing read/read-header/write/idle
   timeouts, max header bytes, h2c, HTTP/3, or the global connection cap cannot

@@ -32,7 +32,8 @@ type Candidate struct {
 }
 
 // NewCandidate builds a Candidate from raw. It resolves secret references
-// exactly once and returns an immutable view. The raw config is not modified.
+// exactly once and returns an immutable view. The raw config is cloned so the
+// candidate cannot be mutated through the caller's pointer.
 func NewCandidate(raw *Config) (*Candidate, error) {
 	clone, err := raw.Clone()
 	if err != nil {
@@ -42,8 +43,12 @@ func NewCandidate(raw *Config) (*Candidate, error) {
 	if err != nil {
 		return nil, err
 	}
+	rawClone, err := raw.Clone()
+	if err != nil {
+		return nil, err
+	}
 	return &Candidate{
-		Raw:       raw,
+		Raw:       rawClone,
 		Effective: effective,
 		Redaction: state,
 		Digests:   digests,

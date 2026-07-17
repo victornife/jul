@@ -96,6 +96,12 @@ type Server struct {
 	listeners map[string]*listenerEntry // keyed by listen address
 	handlers  atomic.Pointer[handlerGen]
 
+	// pendingCandidate is injected by the admin apply path so the live reload
+	// uses the exact candidate that passed preflight, rather than re-reading the
+	// file and resolving secrets a second time (R8-11). It is consumed once by
+	// doReload.
+	pendingCandidate atomic.Pointer[config.Candidate]
+
 	// redactMu guards redactGens, the per-generation active redaction states.
 	// A generation is registered when its handlers are published and retired
 	// after its in-flight requests drain, so secrets are masked as long as any
@@ -124,6 +130,13 @@ func (s *Server) LastReload() *lastReloadInfo {
 		return &cp
 	}
 	return nil
+}
+
+// InjectCandidate hands the exact candidate that passed admin preflight to the
+// next live reload. This prevents secret sources or the on-disk file from
+// changing between preflight validation and the asynchronous swap (R8-11).
+func (s *Server) InjectCandidate(c *config.Candidate) {
+	s.pendingCandidate.Store(c)
 }
 
 // handlerGen is one generation of the per-listen-address handler map plus the
@@ -455,20 +468,30 @@ func (s *Server) acquireGen() *handlerGen {
 }
 
 // retireGen closes the resources of a swapped-out generation after its in-flight
-// requests drain, or after the shutdown grace period if they do not. retire is
-// the factory-supplied closer for that generation and may be nil (the initial
-// generation owns nothing a previous one did not).
-func (s *Server) retireGen(g *handlerGen, retire func()) {
-	if g == nil || retire == nil {
+// requests drain, or after the shutdown grace period if they do not.
+// retireResources is the factory-supplied closer for that generation and may be
+// nil (the initial generation owns nothing a previous one did not).
+// retireRedaction removes the generation's secrets from the active redaction
+// set; it is invoked only when the generation actually drains, never on the
+// grace timeout, so secrets stay masked while old-generation code still
+// executes (R8-14).
+func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction func()) {
+	if g == nil || retireResources == nil {
 		return
 	}
-	g.retire = retire
+	g.retire = retireResources
 	g.retiring.Store(true)
 	if g.inflight.Load() == 0 {
 		g.doRetire()
+		if retireRedaction != nil {
+			retireRedaction()
+		}
 		return
 	}
 	grace := s.shutdownTimeout()
+
+	// Close resources when the generation drains or the grace timeout fires,
+	// whichever comes first.
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -480,6 +503,17 @@ func (s *Server) retireGen(g *handlerGen, retire func()) {
 			s.log.Warn("reload: previous handler generation did not drain within grace; closing its resources", "grace", grace)
 		}
 		g.doRetire()
+	}()
+
+	// Redaction is retired only when the generation truly drains, even if that
+	// happens after the resource grace timeout.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		<-g.drained
+		if retireRedaction != nil {
+			retireRedaction()
+		}
 	}()
 }
 
@@ -572,14 +606,19 @@ func (s *Server) doReload() {
 	}
 	s.log.Info("reloading configuration", "source", s.source.Name())
 
-	newCfg, err := s.source.Load()
-	if err != nil {
-		s.log.Error("reload aborted: load failed", "error", err)
-		s.lastReload.Store(&lastReloadInfo{OK: false, At: time.Now(), Error: err.Error()})
-		return
+	var plan *ReloadPlan
+	if candidate := s.pendingCandidate.Swap(nil); candidate != nil {
+		// Admin apply path: use the exact candidate that passed preflight.
+		plan = s.newReloadPlan(candidate.Raw, candidate)
+	} else {
+		newCfg, err := s.source.Load()
+		if err != nil {
+			s.log.Error("reload aborted: load failed", "error", err)
+			s.lastReload.Store(&lastReloadInfo{OK: false, At: time.Now(), Error: err.Error()})
+			return
+		}
+		plan = s.newReloadPlan(newCfg, nil)
 	}
-
-	plan := s.newReloadPlan(newCfg)
 	info := &lastReloadInfo{At: plan.start}
 
 	// Phase 1–5: side-effect-free preparation.

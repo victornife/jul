@@ -54,31 +54,34 @@ type Preflight struct {
 //  7. Restart-required checks (ACME, listener-rebind, tracing, access-log).
 //  8. Startup-bound subsystem checks (cache, egress, admin, metrics).
 //
+// On success the validated candidate is returned. The caller must pass the
+// exact candidate to the live reload so secret sources or the on-disk file
+// cannot change between preflight and swap (R8-11).
 // Any error aborts the write; the caller must not persist the config.
-func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
+func (p *Preflight) Apply(c *config.Config, prev *config.Config) (*config.Candidate, error) {
 	candidate, err := config.NewCandidate(c)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := ValidateRuntimeConfig(candidate.Effective); err != nil {
-		return err
+		return nil, err
 	}
 	if err := server.PreflightTLS(candidate.Effective.Servers); err != nil {
-		return err
+		return nil, err
 	}
 	if err := p.dryRun(candidate.Effective); err != nil {
-		return err
+		return nil, err
 	}
 	if prev != nil {
 		prevCandidate, err := config.NewCandidate(prev)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := server.PreflightListeners(prevCandidate.Effective.Servers, candidate.Effective.Servers); err != nil {
-			return err
+			return nil, err
 		}
 		if err := p.Stream.PreflightListeners(prevCandidate.Effective.Streams, candidate.Effective.Streams); err != nil {
-			return err
+			return nil, err
 		}
 		// Restart-required classification is single-sourced from the lifecycle
 		// registry. Compare the candidate's effective fingerprint against the
@@ -87,17 +90,17 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) error {
 		if len(p.StartupFP.Values) > 0 {
 			candidateFP := lifecycle.ComputeFingerprint(candidate.Effective)
 			if reason, need := lifecycle.RestartRequired(p.StartupFP, candidateFP); need {
-				return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+				return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 			}
 		}
 		if reason, need := server.ListenerRebindRequired(prevCandidate.Effective, candidate.Effective); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 		if reason, need := server.ACMERestartRequired(prevCandidate.Effective.Servers, candidate.Effective.Servers); need {
-			return fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 	}
-	return nil
+	return candidate, nil
 }
 
 // dryRun builds all handlers (commit=false) on the already-resolved effective
