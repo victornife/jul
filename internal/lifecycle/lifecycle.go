@@ -198,7 +198,6 @@ var Registry = []Entry{
 	// Compression.
 	{Path: "compression.enabled", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
 	{Path: "compression.types", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
-	{Path: "compression.min_length", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
 	{Path: "compression.encoders", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
 	{Path: "compression.level", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
 	{Path: "compression.min_size", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},

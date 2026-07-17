@@ -260,7 +260,9 @@ very large configs or environments with slow DNS.
 
 The authoritative list is [`docs/config-lifecycle.yaml`](config-lifecycle.yaml),
 whose entries are checked against the Go registry by `scripts/docs-check.py`.
-The runtime rejects the following categories with `restart_required` at apply
+`lifecycle.DiffConfig` compares the effective value of every registered path
+using schema-derived extractors, so a field cannot be added to the registry
+without being diffed. The runtime rejects the following categories with `restart_required` at apply
 time (admin path) or at swap time (SIGHUP/file-watch):
 
 - **Log format and access-log sinks** — the log handler and sink handles are
