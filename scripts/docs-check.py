@@ -489,8 +489,10 @@ def _normalize_yaml_field(field: str) -> str:
         ("[admin]", "admin"),
         ("[egress]", "egress"),
         ("[waf]", "waf"),
+        ("[plugins]", "plugins.*"),
         ("[[servers]]", "servers.*"),
         ("[[stream]]", "stream.*"),
+        ("[[upstreams]]", "upstreams.*"),
     ]
     for old, new in replacements:
         if field.startswith(old):
@@ -569,10 +571,16 @@ def check_lifecycle_manifest():
     covered_registry_paths: set[str] = set()
 
     for section, class_name in yaml_class_sections.items():
-        for idx, entry in enumerate(data.get(section, [])):
+        section_data = data.get(section, [])
+        # Allow sections to be wrapped in a mapping with an explicit 'entries' list
+        # (used by hot_reload to keep the free-form note and deprecated list as
+        # sibling keys).
+        if isinstance(section_data, dict):
+            section_data = section_data.get("entries", [])
+        for idx, entry in enumerate(section_data):
             if not isinstance(entry, dict):
-                # The hot_reload section may contain a free-form 'note' string
-                # or a 'deprecated' list; only validate structured entries.
+                # Entries may be free-form note strings or a 'deprecated' list;
+                # only validate structured entries.
                 continue
             subsystem = entry.get("subsystem", "")
             reason = entry.get("reason", "")
@@ -622,6 +630,10 @@ def check_lifecycle_manifest():
                 f"is not StartupConsumed; RestartRequired will silently ignore it",
             )
 
+    # Schema coverage check: every TOML schema leaf must be covered by a
+    # lifecycle registry entry or an explicit exemption (R6-08).
+    check_schema_lifecycle_coverage(registry)
+
     # Cross-check: each restart-required subsystem must appear in reload-semantics.md.
     reload_doc = ROOT / "docs" / "reload-semantics.md"
     if not reload_doc.exists():
@@ -643,6 +655,127 @@ def check_lifecycle_manifest():
             )
         else:
             ok(f"reload-semantics.md covers restart-required subsystem '{subsystem}'")
+
+
+def _load_schema_leaves():
+    """Run the Go schema-leaves dump script and return a list of dicts."""
+    import subprocess
+
+    dump_script = ROOT / "scripts" / "dump-schema-leaves.go"
+    try:
+        result = subprocess.run(
+            ["go", "run", str(dump_script.relative_to(ROOT))],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except FileNotFoundError:
+        error(dump_script, 0, "'go' not found in PATH; cannot load schema leaves")
+        return None
+    except subprocess.TimeoutExpired:
+        error(dump_script, 0, "timeout running dump-schema-leaves.go")
+        return None
+    if result.returncode != 0:
+        error(dump_script, 0, f"dump-schema-leaves.go failed: {result.stderr.strip()}")
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        error(dump_script, 0, f"invalid JSON from dump-schema-leaves.go: {exc}")
+        return None
+
+
+# Schema-leaf paths that are not operator-editable runtime configuration and
+# therefore do not require a lifecycle/diff entry. Each entry must carry a
+# short justification.
+SCHEMA_EXEMPTIONS = {
+    # Display/identifier fields with no runtime effect.
+    "servers.*.name": "server display name; not consumed by runtime",
+    "upstreams.*.servers.*.address": "covered by upstreams.*.servers aggregate",
+    "upstreams.*.servers.*.weight": "covered by upstreams.*.servers aggregate",
+    "stream.*.sni_routes.*": "covered by stream.*.sni_routes aggregate",
+    "servers.*.locations.*.match": "covered by match.type and match.path",
+    "servers.*.locations.*.match.type": "routing key; hot-reloadable via handler rebuild",
+    "servers.*.locations.*.match.path": "routing key; hot-reloadable via handler rebuild",
+    # Per-server access/error_log overrides are currently ignored; the global
+    # observability.access_log sink is used instead.
+    "servers.*.access_log": "per-server access_log is not consumed at runtime",
+    "servers.*.error_log": "per-server error_log is not consumed at runtime",
+    # Legacy/ignored global sinks.
+    "global.access_log": "deprecated global access_log; not consumed at runtime",
+    "global.error_log": "deprecated global error_log; not consumed at runtime",
+}
+
+
+def _segment_match(path_a: str, path_b: str) -> bool:
+    """Return True if two dotted paths match segment-wise, with '*' as wildcard."""
+    a = path_a.split(".")
+    b = path_b.split(".")
+    if len(a) != len(b):
+        return False
+    for x, y in zip(a, b):
+        if x == "*" or y == "*" or x == y:
+            continue
+        return False
+    return True
+
+
+def _registry_covers_leaf(registry_paths: set[str], leaf: str) -> bool:
+    """Return True if a registry path (exact, wildcard, or ancestor container) covers leaf."""
+    segments = leaf.split(".")
+    # Exact or wildcard match.
+    for rp in registry_paths:
+        if _segment_match(rp, leaf):
+            return True
+    # Ancestor container coverage: a registry path that is a prefix of the leaf
+    # (with wildcard segments matching) covers all descendant leaves.
+    for rp in registry_paths:
+        rs = rp.split(".")
+        if len(rs) > len(segments):
+            continue
+        match = True
+        for i in range(len(rs)):
+            if rs[i] == "*" or rs[i] == segments[i]:
+                continue
+            match = False
+            break
+        if match:
+            return True
+    return False
+
+
+def check_schema_lifecycle_coverage(registry):
+    """Verify every TOML schema leaf is covered by the lifecycle registry or an exemption."""
+    leaves = _load_schema_leaves()
+    if leaves is None:
+        return
+
+    registry_paths = {e["path"] for e in registry}
+    container_paths = {leaf["path"] for leaf in leaves if leaf.get("container", False)}
+
+    uncovered: list[str] = []
+    for leaf in leaves:
+        path = leaf["path"]
+        if leaf.get("container", False):
+            # Container paths group their children; children are checked individually.
+            continue
+        if path in SCHEMA_EXEMPTIONS:
+            ok(f"schema leaf '{path}' exempted: {SCHEMA_EXEMPTIONS[path]}")
+            continue
+        if _registry_covers_leaf(registry_paths, path):
+            ok(f"schema leaf '{path}' covered by lifecycle registry")
+            continue
+        uncovered.append(path)
+
+    if uncovered:
+        for path in sorted(uncovered):
+            error(
+                ROOT / "internal" / "config" / "schema.go",
+                0,
+                f"schema leaf '{path}' has no lifecycle registry entry or exemption — "
+                f"add it to internal/lifecycle/lifecycle.go or document an exemption",
+            )
 
 
 def check_finding_uniqueness():

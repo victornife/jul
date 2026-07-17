@@ -204,13 +204,124 @@ new_listener_only:
 hot_reload:
   note: >
     All fields not listed above take effect on the next successful hot reload.
-    This includes: server_names, locations.*, upstreams.*, compression.*,
-    rate_limit.rate/burst/key, waf.*, plugins.*, stream routes (not stream.listen),
-    global.log_level (level var updated atomically without handler rebuild),
-    global.worker_threads (GOMAXPROCS cap updated on reload),
+    This includes: global.log_level (level var updated atomically without handler
+    rebuild), global.worker_threads (GOMAXPROCS cap updated on reload),
     global.redact_min_secret_length (redaction state rebuilt on reload),
     global.shutdown_timeout, global.reload_timeout, and all other [global].* fields
     except log_format (restart-required, above).
+
+  entries:
+    - subsystem: compression
+      gated_by: "internal/app factory rebuild"
+      reason: >
+        Compression encoder and threshold settings are rebuilt into the middleware
+        chain on every successful reload.
+      fields:
+        - "[compression].encoders"
+        - "[compression].level"
+        - "[compression].min_size"
+        - "[compression].precompressed"
+
+    - subsystem: rate_limit
+      gated_by: "internal/ratelimit update"
+      reason: >
+        Rate-limit key expression is evaluated against the current policy store.
+      fields:
+        - "[rate_limit].key"
+
+    - subsystem: waf
+      gated_by: "internal/waf rebuild"
+      reason: >
+        WAF policy, CRS directives, paranoia level, and body limits are rebuilt on
+        every successful reload.
+      fields:
+        - "[waf].block_status"
+        - "[waf].directives_files"
+        - "[waf].inline_rules"
+        - "[waf].paranoia"
+        - "[waf].request_body_limit"
+        - "[waf].response_body_check"
+
+    - subsystem: plugins
+      gated_by: "internal/plugins.Manager.Build"
+      reason: >
+        WASM plugin definitions are recompiled into a new plugin Set on every
+        successful reload; capability and sandbox limits are honored per Set.
+      fields:
+        - "[plugins].path"
+        - "[plugins].inline"
+        - "[plugins].type"
+        - "[plugins].config"
+        - "[plugins].memory_limit"
+        - "[plugins].timeout"
+        - "[plugins].kv"
+        - "[plugins].fetch"
+        - "[plugins].allowed_hosts"
+        - "[plugins].max_request_body"
+        - "[plugins].max_response_body"
+        - "[plugins].fetch_timeout"
+        - "[plugins].max_fetch_response"
+        - "[plugins].kv_max_entries"
+        - "[plugins].kv_max_bytes"
+
+    - subsystem: server_routes
+      gated_by: "internal/app factory rebuild"
+      reason: >
+        Per-server redirect, error page map, and plugin list are rebuilt into the
+        handler tree on every successful reload.
+      fields:
+        - "[[servers]].redirect_https"
+        - "[[servers]].error_pages"
+        - "[[servers]].plugins"
+
+    - subsystem: locations
+      gated_by: "internal/app factory rebuild"
+      reason: >
+        Location-level static file, proxy, redirect, rewrite, header, auth, WAF,
+        rate-limit, cache, gRPC, FastCGI, and uWSGI settings are rebuilt into the
+        handler tree on every successful reload.
+      fields:
+        - "[[servers]].locations.*.plugin"
+        - "[[servers]].locations.*.redirect"
+        - "[[servers]].locations.*.return"
+        - "[[servers]].locations.*.rewrites"
+        - "[[servers]].locations.*.headers"
+        - "[[servers]].locations.*.try_files"
+        - "[[servers]].locations.*.index"
+        - "[[servers]].locations.*.allow_hidden"
+        - "[[servers]].locations.*.directory_listing"
+        - "[[servers]].locations.*.cache_control"
+        - "[[servers]].locations.*.deny"
+        - "[[servers]].locations.*.client_max_body_size"
+        - "[[servers]].locations.*.require_client_cert"
+        - "[[servers]].locations.*.proxy_connect_timeout"
+        - "[[servers]].locations.*.proxy_read_timeout"
+        - "[[servers]].locations.*.proxy_send_timeout"
+        - "[[servers]].locations.*.grpc"
+        - "[[servers]].locations.*.grpc_transcode"
+        - "[[servers]].locations.*.fastcgi_pass"
+        - "[[servers]].locations.*.fastcgi_params"
+        - "[[servers]].locations.*.uwsgi_pass"
+
+    - subsystem: upstream_discovery
+      gated_by: "internal/upstream discovery refresh"
+      reason: >
+        Service-discovery backends and their parameters are refreshed on every
+        successful reload.
+      fields:
+        - "[[upstreams]].discovery"
+
+    - subsystem: stream_routes
+      gated_by: "internal/stream buildRoute"
+      reason: >
+        L4 route timeouts, proxy-protocol mode, and TLS-passthrough flag are
+        rebuilt into the routing table on every successful reload.
+      fields:
+        - "[[stream]].connect_timeout"
+        - "[[stream]].idle_timeout"
+        - "[[stream]].max_udp_sessions"
+        - "[[stream]].proxy_protocol"
+        - "[[stream]].tls_passthrough"
 
   deprecated:
     - field: "[global].access_log"

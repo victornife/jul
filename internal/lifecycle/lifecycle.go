@@ -89,6 +89,22 @@ var Registry = []Entry{
 	{Path: "admin.plugin_upload_dir", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload directory is opened at startup", StartupConsumed: true},
 	{Path: "admin.plugin_upload_max_size", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload limits are configured at startup", StartupConsumed: true},
 	{Path: "admin.plugin_upload_enabled", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload endpoint is configured at startup", StartupConsumed: true},
+	// Plugin definitions.
+	{Path: "plugins.*.path", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.inline", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.type", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.config", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.memory_limit", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.timeout", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.kv", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.fetch", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.allowed_hosts", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.max_request_body", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.max_response_body", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.fetch_timeout", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.max_fetch_response", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.kv_max_entries", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
+	{Path: "plugins.*.kv_max_bytes", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
 
 	// Cache settings.
 	{Path: "cache.enabled", Class: RestartRequiredClass, Subsystem: "cache", Reason: "cache backend is initialized once at startup", StartupConsumed: true},
@@ -129,11 +145,15 @@ var Registry = []Entry{
 	{Path: "servers.*.max_header_bytes", Class: NewListenerOnlyClass, Subsystem: "listener_limits", Reason: "max header bytes is fixed when the socket binds"},
 	{Path: "servers.*.client_max_body_size", Class: HotReloadClass, Subsystem: "server_limits", Reason: "handler tree reads the value per request"},
 	{Path: "servers.*.server_names", Class: HotReloadClass, Subsystem: "server_names", Reason: "virtual host routing uses the current handler tree"},
+	{Path: "servers.*.redirect_https", Class: HotReloadClass, Subsystem: "server_redirect", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.error_pages", Class: HotReloadClass, Subsystem: "error_pages", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.plugins", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin chain is rebuilt on reload"},
 
 	// Rate limiting.
 	{Path: "rate_limit.enabled", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},
 	{Path: "rate_limit.rate", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},
 	{Path: "rate_limit.burst", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},
+	{Path: "rate_limit.key", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},
 	{Path: "rate_limit.max_conns", Class: NewListenerOnlyClass, Subsystem: "rate_limit", Reason: "connection cap is enforced per listener"},
 
 	// Location settings.
@@ -144,6 +164,27 @@ var Registry = []Entry{
 	{Path: "servers.*.locations.*.auth", Class: HotReloadClass, Subsystem: "auth", Reason: "auth handlers are rebuilt on reload"},
 	{Path: "servers.*.locations.*.waf", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
 	{Path: "servers.*.locations.*.plugins", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin chain is rebuilt on reload"},
+	{Path: "servers.*.locations.*.plugin", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin chain is rebuilt on reload"},
+	{Path: "servers.*.locations.*.redirect", Class: HotReloadClass, Subsystem: "redirect", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.return", Class: HotReloadClass, Subsystem: "return", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.rewrites", Class: HotReloadClass, Subsystem: "rewrites", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.headers", Class: HotReloadClass, Subsystem: "headers", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.try_files", Class: HotReloadClass, Subsystem: "try_files", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.index", Class: HotReloadClass, Subsystem: "index", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.allow_hidden", Class: HotReloadClass, Subsystem: "static_files", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.directory_listing", Class: HotReloadClass, Subsystem: "static_files", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.cache_control", Class: HotReloadClass, Subsystem: "static_files", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.deny", Class: HotReloadClass, Subsystem: "access_control", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.client_max_body_size", Class: HotReloadClass, Subsystem: "server_limits", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.require_client_cert", Class: HotReloadClass, Subsystem: "mtls", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.proxy_connect_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.proxy_read_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.proxy_send_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.grpc", Class: HotReloadClass, Subsystem: "grpc", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.grpc_transcode", Class: HotReloadClass, Subsystem: "grpc_transcode", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.fastcgi_pass", Class: HotReloadClass, Subsystem: "fastcgi", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.fastcgi_params", Class: HotReloadClass, Subsystem: "fastcgi", Reason: "handler tree is rebuilt on reload"},
+	{Path: "servers.*.locations.*.uwsgi_pass", Class: HotReloadClass, Subsystem: "uwsgi", Reason: "handler tree is rebuilt on reload"},
 
 	// Upstream settings.
 	{Path: "upstreams.*.name", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
@@ -152,22 +193,38 @@ var Registry = []Entry{
 	{Path: "upstreams.*.max_fails", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
 	{Path: "upstreams.*.fail_timeout", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
 	{Path: "upstreams.*.health_check", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
+	{Path: "upstreams.*.discovery", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
 
 	// Compression.
 	{Path: "compression.enabled", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
 	{Path: "compression.types", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
 	{Path: "compression.min_length", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
+	{Path: "compression.encoders", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
+	{Path: "compression.level", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
+	{Path: "compression.min_size", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
+	{Path: "compression.precompressed", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
 
 	// WAF global.
 	{Path: "waf.enabled", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
 	{Path: "waf.mode", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
 	{Path: "waf.crs_enabled", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
+	{Path: "waf.block_status", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
+	{Path: "waf.directives_files", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
+	{Path: "waf.inline_rules", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
+	{Path: "waf.paranoia", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
+	{Path: "waf.request_body_limit", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
+	{Path: "waf.response_body_check", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
 
 	// Stream (L4).
 	{Path: "stream.*.listen", Class: NewListenerOnlyClass, Subsystem: "stream", Reason: "L4 listen address change requires a new socket"},
 	{Path: "stream.*.protocol", Class: RestartRequiredClass, Subsystem: "stream", Reason: "L4 protocol is bound at listener creation", StartupConsumed: true},
 	{Path: "stream.*.proxy_pass", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
 	{Path: "stream.*.sni_routes", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
+	{Path: "stream.*.connect_timeout", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
+	{Path: "stream.*.idle_timeout", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
+	{Path: "stream.*.max_udp_sessions", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
+	{Path: "stream.*.proxy_protocol", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
+	{Path: "stream.*.tls_passthrough", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
 }
 
 // ByPath returns the registry entry for an exact path, or nil if none is
