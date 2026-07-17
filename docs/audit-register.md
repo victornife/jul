@@ -56,6 +56,12 @@ intended as a lightweight compliance artifact for reviewers and releases.
 | R12-01 | Reused discovery pool loses reflection candidate backends | `internal/upstream/registry.go` | `TestTranscodeReflectionWithReusedDiscoveryUpstream` | Integration test output | ✅ Implemented | `a63ad49` |
 | R12-02 | Retired connection promotion closes the connection it returns | `internal/transcode/invoke.go` | `TestTranscoderRetiredConnectionReappearsUsable` | Unit test output | ✅ Implemented | `2457aea` |
 
+## Round 13 Register
+
+| Finding | Title | Fix location | Test | Evidence | Status | Commit |
+|---|---|---|---|---|---|---|
+| R13-01 | Concurrent retired connection promotion closes the shared connection | `internal/transcode/invoke.go` | `TestTranscoderRetiredConnectionConcurrentReappearance` | Race test output | ✅ Implemented | `2bdf43e` |
+
 ## Deferred work rationale
 
 - **R9-14.4 (never-draining shutdown test)** — Timing-sensitive, high flakiness
@@ -93,6 +99,9 @@ go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithDiscove
 
 # Round 12
 go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithReusedDiscoveryUpstream|TestTranscoderRetiredConnectionReappearsUsable' -race -count=1
+
+# Round 13
+go test -tags grpc ./internal/transcode -run TestTranscoderRetiredConnectionConcurrentReappearance -race -count=1
 
 # Full matrix
 go test ./... -race -count=1
