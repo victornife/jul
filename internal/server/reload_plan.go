@@ -106,12 +106,16 @@ func (p *ReloadPlan) Resolve() error {
 	return nil
 }
 
-// Validate runs the configured runtime validator against the raw source config.
+// Validate runs the configured runtime validator against the already-resolved
+// effective candidate. Validating the same EffectiveConfig that will be
+// published guarantees that a secret rotation between resolve and validate
+// cannot make validation inspect different bytes from those that are published
+// (R6-07).
 func (p *ReloadPlan) Validate() error {
 	if p.s.validate == nil {
 		return nil
 	}
-	if err := p.s.validate(p.RawConfig); err != nil {
+	if err := p.s.validate(p.EffectiveConfig); err != nil {
 		return fmt.Errorf("validate: %w", err)
 	}
 	return nil
@@ -178,7 +182,12 @@ func (p *ReloadPlan) StageListeners() error {
 // be invoked only after that generation has drained.
 func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	retirePrev = p.handlerCommit()
-	redact.Install(p.Redaction)
+	// Install the union of the current and new redaction states so that
+	// in-flight requests on the previous generation continue to have their
+	// secrets masked. The previous generation's retire callback will prune the
+	// old-only secrets once it has drained (R6-06).
+	merged := redact.Global().Union(p.Redaction)
+	redact.Install(merged)
 
 	p.s.cfg = p.EffectiveConfig
 	p.s.rawCfg = p.RawConfig
@@ -186,7 +195,12 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	prevGen := p.s.handlers.Load()
 	p.s.handlers.Store(newHandlerGen(p.Handlers))
 	if prevGen != nil {
-		p.s.retireGen(prevGen, retirePrev)
+		p.s.retireGen(prevGen, func() {
+			if retirePrev != nil {
+				retirePrev()
+			}
+			redact.Install(p.Redaction)
+		})
 	} else if retirePrev != nil {
 		retirePrev()
 	}

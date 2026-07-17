@@ -108,6 +108,24 @@ func (s State) Clone() State {
 	return out
 }
 
+// Union returns a new State that masks every value in either s or other. The
+// minimum length is the minimum of the two states so that secrets already
+// registered under a lower floor remain masked.
+func (s State) Union(other State) State {
+	minLen := s.minLen
+	if other.minLen < minLen {
+		minLen = other.minLen
+	}
+	out := NewState(nil, minLen)
+	for v := range s.values {
+		out.values[v] = struct{}{}
+	}
+	for v := range other.values {
+		out.values[v] = struct{}{}
+	}
+	return out
+}
+
 type stateRedactingWriter struct {
 	state State
 	w     io.Writer

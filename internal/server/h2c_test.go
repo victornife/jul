@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 )
 
 func TestH2CEnabledForAddr(t *testing.T) {
@@ -15,7 +16,7 @@ func TestH2CEnabledForAddr(t *testing.T) {
 		{Listen: "127.0.0.1:80", H2C: true},
 		{Listen: "127.0.0.1:81"},
 	}}
-	s := New(cfg, nil, quietLogger(), nil, nil, nil)
+	s := New(cfg, nil, lifecycle.Fingerprint{}, quietLogger(), nil, nil, nil)
 
 	if !s.h2cEnabledForAddr("127.0.0.1:80") {
 		t.Error("addr :80 should report h2c enabled")

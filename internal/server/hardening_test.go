@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 )
 
 func TestServerTimeoutDefaults(t *testing.T) {
 	// A server block with no explicit timeouts should get safe defaults.
 	cfg := &config.Config{Servers: []config.ServerConfig{{Listen: "127.0.0.1:80"}}}
-	s := New(cfg, nil, quietLogger(), nil, nil, nil)
+	s := New(cfg, nil, lifecycle.Fingerprint{}, quietLogger(), nil, nil, nil)
 
 	if got := s.readHeaderTimeout("127.0.0.1:80"); got != 10*time.Second {
 		t.Errorf("readHeaderTimeout default = %v, want 10s", got)
@@ -42,7 +43,7 @@ func TestServerTimeoutOverrides(t *testing.T) {
 		IdleTimeout:       config.Duration(90 * time.Second),
 		MaxHeaderBytes:    config.Size(4096),
 	}}}
-	s := New(cfg, nil, quietLogger(), nil, nil, nil)
+	s := New(cfg, nil, lifecycle.Fingerprint{}, quietLogger(), nil, nil, nil)
 
 	if got := s.readHeaderTimeout("127.0.0.1:80"); got != 3*time.Second {
 		t.Errorf("readHeaderTimeout = %v, want 3s", got)

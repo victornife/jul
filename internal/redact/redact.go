@@ -85,12 +85,32 @@ func Apply(s string) string {
 	return Global().Apply(s)
 }
 
+// dynamicRedactingWriter masks using the current global redaction state on
+// every write. This is essential for long-lived log sinks created before
+// startup secrets are installed: a writer that captured a snapshot at
+// construction time would never see secrets added by later redact.Install calls.
+type dynamicRedactingWriter struct{ w io.Writer }
+
+func (rw *dynamicRedactingWriter) Write(p []byte) (int, error) {
+	out := Global().Apply(string(p))
+	if out == string(p) {
+		return rw.w.Write(p)
+	}
+	if _, err := rw.w.Write([]byte(out)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
 // Writer wraps w so that every write has registered secrets masked first. It is
 // intended to wrap a log sink (e.g. os.Stderr) so secret values never reach the
 // logs even if a message or attribute interpolates one. slog's handlers emit a
 // whole record per Write, so masking per Write does not split a secret across
 // calls.
-func Writer(w io.Writer) io.Writer { return Global().Writer(w) }
+//
+// The returned writer reads the live global state on each Write so secret
+// rotation via Install takes effect immediately.
+func Writer(w io.Writer) io.Writer { return &dynamicRedactingWriter{w: w} }
 
 
 // Replace replaces the entire secret registry with newSecrets.

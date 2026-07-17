@@ -37,6 +37,11 @@ var secretRefAnyRE = regexp.MustCompile(`\$\{([A-Za-z_]+):([^}]*)\}`)
 // The returned redaction state should be installed with redact.Install only at
 // the reload commit boundary. Validation and preflight can call Resolve and
 // discard the state on failure.
+//
+// If c is already resolved (contains no secret references), Resolve returns a
+// deep copy and an empty redaction state. This lets multiple consumers call
+// Resolve on the same effective candidate without re-reading secret sources or
+// changing the candidate between validation and publication (R6-07).
 func Resolve(c *Config) (*Config, redact.State, map[string]string, error) {
 	clone, err := c.Clone()
 	if err != nil {
@@ -46,6 +51,12 @@ func Resolve(c *Config) (*Config, redact.State, map[string]string, error) {
 	minLen := redact.DefaultMinLen
 	if clone.Global.RedactMinSecretLength > 0 {
 		minLen = clone.Global.RedactMinSecretLength
+	}
+
+	// Short-circuit if the config is already resolved: return the clone and an
+	// empty redaction state so the candidate does not change between phases.
+	if IsResolved(clone) {
+		return clone, redact.NewState(nil, minLen), map[string]string{}, nil
 	}
 
 	var errs []error
@@ -105,6 +116,20 @@ func CountSecretRefs(c *Config) int {
 		return s
 	})
 	return n
+}
+
+// IsResolved reports whether c contains no unresolved secret references.
+// A resolved config can be passed to consumers that would otherwise resolve
+// again, ensuring one immutable effective candidate per transaction (R6-07).
+func IsResolved(c *Config) bool {
+	resolved := true
+	walkConfigStrings(c, func(s string) string {
+		if strings.Contains(s, "${") {
+			resolved = false
+		}
+		return s
+	})
+	return resolved
 }
 
 // containsSecretRef reports whether s carries at least one supported secret

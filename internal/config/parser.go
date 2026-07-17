@@ -480,12 +480,12 @@ func (c *Config) Clone() (*Config, error) {
 	return Parse(data)
 }
 
-// PreflightClone clones the config, resolves secret references on the clone,
-// and runs structural validation so that checks which inspect files or URLs
-// (e.g. ca_file, jwks_url) work correctly when the value comes from a secret
-// reference. Optional extra validators (e.g. a dry-run WAF build) are run
-// against the expanded clone. The original config is never modified and the
-// live redaction registry is untouched.
+// PreflightClone clones the config, resolves secret references on the clone if
+// needed, and runs structural validation so that checks which inspect files or
+// URLs (e.g. ca_file, jwks_url) work correctly when the value comes from a
+// secret reference. Optional extra validators (e.g. a dry-run WAF build) are
+// run against the expanded clone. The original config is never modified and
+// the live redaction registry is untouched.
 func PreflightClone(c *Config, extra ...func(*Config) error) error {
 	expanded, _, _, err := Resolve(c)
 	if err != nil {

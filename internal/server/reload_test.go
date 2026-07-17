@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/redact"
 )
 
@@ -162,7 +163,7 @@ func TestReloadSwapsHandler(t *testing.T) {
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
 
-	srv := New(cfgWith(addr), nil, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan struct{}, 1)
@@ -273,7 +274,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), nil, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan struct{}, 1)
@@ -364,7 +365,7 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), nil, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan struct{})
@@ -434,7 +435,7 @@ func TestReloadRejectsInvalidConfig(t *testing.T) {
 		}
 		return nil
 	}
-	srv := New(cfgWith(addr), nil, quietLogger(), bodyHandlerFactory(tag), src, validate)
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, validate)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -472,7 +473,7 @@ func TestReloadAddsAndRemovesListener(t *testing.T) {
 	oneAddr := cfgWith(addr1)
 
 	src := &stubSource{}
-	srv := New(oneAddr, nil, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(oneAddr, nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -587,7 +588,7 @@ func TestDoReloadBlocksOnRestartRequired(t *testing.T) {
 	initial := "v1"
 	tag.Store(&initial)
 	// Pass rawCfg = base (simulates the pre-expansion startup config).
-	srv := New(base, base, quietLogger(), bodyHandlerFactory(tag), src,
+	srv := New(base, base, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -636,7 +637,7 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), nil, quietLogger(), bodyHandlerFactory(tag), src,
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -709,7 +710,7 @@ func TestDoReloadReplacementAddressBindFailureKeepsOld(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(oldAddr), nil)
-	srv := New(cfgWith(oldAddr), nil, quietLogger(), bodyHandlerFactory(tag), src,
+	srv := New(cfgWith(oldAddr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -782,7 +783,7 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr1), nil)
-	srv := New(cfgWith(addr1), nil, quietLogger(), bodyHandlerFactory(tag), src,
+	srv := New(cfgWith(addr1), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())

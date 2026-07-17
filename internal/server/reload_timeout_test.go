@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/redact"
 )
 
@@ -47,7 +48,7 @@ func TestReloadTimeout(t *testing.T) {
 		return factoryFor(c, "v1"), commitFn, abortFn, redact.EmptyState(), nil
 	}
 
-	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -99,7 +100,7 @@ func TestReloadRecordsSuccessAndDuration(t *testing.T) {
 	v1 := "v1"
 	tag.Store(&v1)
 
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

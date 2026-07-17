@@ -84,11 +84,6 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return 1
 	}
 
-	// Capture the startup-bound effective fingerprint for restart-required
-	// checks. Both the admin preflight and the Console pending-restart banner
-	// compare candidate effective values against this fingerprint.
-	startupFP := lifecycle.ComputeFingerprint(cfg)
-
 	// The response cache persists across reloads so counters and LRU state
 	// survive config edits. Created once and captured by the handler factory.
 	responseCache, err := cache.New(cfg.Cache, log)
@@ -172,6 +167,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// genRes owns the generational teardown lifecycle of the handler tree.
 	genRes := NewGenerationResources(poolReg)
 	defer genRes.CloseLive()
+
+	// Capture the startup-bound effective fingerprint for restart-required
+	// checks. Compute it after all process-lifetime consumers above have
+	// initialized (cache, metrics, tracing/ACME/stream runtime, access-log
+	// sinks, egress) so path/content canonicalization sees the same state that
+	// the running process will use (R6-13).
+	startupFP := lifecycle.ComputeFingerprint(cfg)
 
 	// ── Section 2: HandlerFactory ──────────────────────────────────────────
 	//
@@ -340,7 +342,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Construct the server and wire LastReload into deps BEFORE creating the
 	// admin server. admin.New copies deps by value, so any callback assigned
 	// after that call is invisible to the admin server's apply handlers.
-	srv := server.New(cfg, startupCfg, log, factory, src, ValidateRuntimeConfig)
+	srv := server.New(cfg, startupCfg, startupFP, log, factory, src, ValidateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = rt.ACME
 	deps.LastReload = func() *admin.ReloadSnapshot {

@@ -169,11 +169,14 @@ type listenerEntry struct {
 // rawStartupCfg is the pre-expansion configuration at process startup; when
 // non-nil it is used by doReload for restart-required comparison so that
 // secret references (${env:...}) do not produce false restart signals. Pass
-// nil from tests that use literal configuration values.
-func New(cfg *config.Config, rawStartupCfg *config.Config, log *slog.Logger, factory HandlerFactory, source config.Source, validate func(*config.Config) error) *Server {
-	startupFP := lifecycle.EmptyFingerprint()
-	if expanded, _, _, err := config.Resolve(cfg); err == nil {
-		startupFP = lifecycle.ComputeFingerprint(expanded)
+// nil from tests that use literal configuration values. startupFP is the
+// authoritative effective startup fingerprint; when empty it is computed from
+// cfg.
+func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.Fingerprint, log *slog.Logger, factory HandlerFactory, source config.Source, validate func(*config.Config) error) *Server {
+	if len(startupFP.Values) == 0 {
+		if expanded, _, _, err := config.Resolve(cfg); err == nil {
+			startupFP = lifecycle.ComputeFingerprint(expanded)
+		}
 	}
 	return &Server{
 		log:       log,

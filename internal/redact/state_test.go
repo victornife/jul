@@ -111,3 +111,64 @@ func TestLegacyAPIUsesLiveState(t *testing.T) {
 		t.Fatalf("live minLen = %d, want 3", Global().MinLen())
 	}
 }
+
+// TestDynamicWriterObservesLaterInstalls verifies that a Writer created before
+// any secrets are installed still masks values added by later redact.Install
+// calls (R6-01).
+func TestStateUnion(t *testing.T) {
+	s1 := NewState([]string{"alpha"}, DefaultMinLen)
+	s2 := NewState([]string{"beta"}, DefaultMinLen)
+	u := s1.Union(s2)
+	if u.Apply("alpha beta gamma") != "*** *** gamma" {
+		t.Fatalf("union did not mask both secrets: %q", u.Apply("alpha beta gamma"))
+	}
+	// Originals unmodified.
+	if s1.Apply("beta") != "beta" {
+		t.Fatal("first state mutated by Union")
+	}
+	if s2.Apply("alpha") != "alpha" {
+		t.Fatal("second state mutated by Union")
+	}
+}
+
+func TestDynamicWriterObservesLaterInstalls(t *testing.T) {
+	Install(EmptyState())
+
+	var buf bytes.Buffer
+	w := Writer(&buf)
+
+	// Writer created before secret exists.
+	if _, err := w.Write([]byte("password is hunter2")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := buf.String(), "password is hunter2"; got != want {
+		t.Fatalf("before install: %q, want %q", got, want)
+	}
+
+	// Install a secret; the same writer must now mask it.
+	Install(NewState([]string{"hunter2"}, DefaultMinLen))
+	buf.Reset()
+	if _, err := w.Write([]byte("password is hunter2")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := buf.String(), "password is ***"; got != want {
+		t.Fatalf("after install: %q, want %q", got, want)
+	}
+
+	// Rotate to a different secret; the same writer must observe the new state.
+	Install(NewState([]string{"battery-horse-staple"}, DefaultMinLen))
+	buf.Reset()
+	if _, err := w.Write([]byte("password is hunter2")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := buf.String(), "password is hunter2"; got != want {
+		t.Fatalf("after rotation (old secret): %q, want %q", got, want)
+	}
+	buf.Reset()
+	if _, err := w.Write([]byte("token is battery-horse-staple")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := buf.String(), "token is ***"; got != want {
+		t.Fatalf("after rotation (new secret): %q, want %q", got, want)
+	}
+}

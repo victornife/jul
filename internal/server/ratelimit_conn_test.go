@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/redact"
 )
 
@@ -51,7 +52,7 @@ func TestServerConnectionCap(t *testing.T) {
 		}},
 	}
 
-	srv := New(cfg, nil, quietLogger(), factory, nil, nil)
+	srv := New(cfg, nil, lifecycle.Fingerprint{}, quietLogger(), factory, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Run(ctx, nil) }()
