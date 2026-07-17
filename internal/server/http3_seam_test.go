@@ -77,7 +77,7 @@ func TestHandlerForAddrAltSvc(t *testing.T) {
 	handlers := map[string]http.Handler{":443": http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})}
-	s.handlers.Store(newHandlerGen(handlers))
+	s.handlers.Store(newHandlerGen(handlers, nil, 1))
 
 	// With an Alt-Svc value, the wrapper advertises h3.
 	rec := httptest.NewRecorder()

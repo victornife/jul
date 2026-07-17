@@ -14,6 +14,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/redact"
+	"jul/internal/upstream"
 )
 
 func cfgWithReloadTimeout(addr string, timeout time.Duration) *config.Config {
@@ -41,11 +42,11 @@ func TestReloadTimeout(t *testing.T) {
 	src.set(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil)
 
 	// Factory that sleeps longer than the reload timeout.
-	slowFactory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
+	slowFactory := func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
 		time.Sleep(200 * time.Millisecond)
 		commitFn := func() func() { return nil }
 		abortFn := func() {}
-		return factoryFor(c, "v1"), commitFn, abortFn, redact.EmptyState(), nil
+		return factoryFor(c, "v1"), nil, 1, commitFn, abortFn, redact.EmptyState(), nil
 	}
 
 	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), slowFactory, src, func(*config.Config) error { return nil })

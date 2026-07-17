@@ -195,7 +195,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// factory adapts HandlerFactory.Prepare to the server reload hook: the
 	// three-phase prepare/commit/abort pattern keeps the generation uncommitted
 	// until listener staging succeeds (R4-01).
-	factory := func(c *config.Config) (map[string]http.Handler, func() func(), func(), redact.State, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, map[string]*upstream.PoolSnapshot, uint64, func() func(), func(), redact.State, error) {
 		return f.Prepare(c)
 	}
 

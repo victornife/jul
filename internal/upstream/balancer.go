@@ -19,7 +19,7 @@ func newBalancer(strategy string) Balancer {
 	case "least_conn":
 		return &leastConn{}
 	case "weighted_round_robin":
-		return &weightedRR{}
+		return newWeightedRR()
 	default: // "round_robin" and anything unrecognized
 		return &roundRobin{}
 	}
@@ -56,8 +56,14 @@ func (l *leastConn) pick(a []*Backend) *Backend {
 
 // weightedRR implements smooth weighted round-robin (the algorithm NGINX uses),
 // which distributes load proportional to weight while avoiding bursts.
+// The per-backend currentWeight state is stored in local snapshot entries so
+// that concurrent requests do not race on shared Backend fields.
 type weightedRR struct {
 	mu sync.Mutex
+}
+
+func newWeightedRR() *weightedRR {
+	return &weightedRR{}
 }
 
 func (w *weightedRR) pick(a []*Backend) *Backend {

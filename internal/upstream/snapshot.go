@@ -20,6 +20,7 @@ type PoolSnapshot struct {
 	backends    []*Backend
 	maxFails    int
 	failTimeout time.Duration
+	balancer    Balancer
 }
 
 // pick selects an available backend from the snapshot, mirroring Pool.Pick.
@@ -34,7 +35,7 @@ func (s *PoolSnapshot) pick() (*Backend, error) {
 	if len(avail) == 0 {
 		return nil, ErrNoAvailableBackend
 	}
-	b := newBalancer(s.strategy).pick(avail)
+	b := s.balancer.pick(avail)
 	if b == nil {
 		return nil, ErrNoAvailableBackend
 	}
@@ -47,7 +48,9 @@ func (s *PoolSnapshot) pick() (*Backend, error) {
 func (s *PoolSnapshot) Backends() []*Backend { return s.backends }
 
 // Snapshot returns an immutable snapshot of the pool's current backend set and
-// selection parameters.
+// selection parameters. The snapshot owns a dedicated balancer instance so
+// selection state advances per request and concurrent snapshots do not race
+// on shared backend currentWeight state.
 func (p *Pool) Snapshot() *PoolSnapshot {
 	return &PoolSnapshot{
 		name:        p.name,
@@ -55,6 +58,7 @@ func (p *Pool) Snapshot() *PoolSnapshot {
 		backends:    p.Backends(),
 		maxFails:    p.maxFails,
 		failTimeout: p.failTimeout,
+		balancer:    newBalancer(p.strategy),
 	}
 }
 

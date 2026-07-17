@@ -126,6 +126,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	canRetry := isIdempotent(req.Method) && (req.Body == nil || req.GetBody != nil)
 
 	var lastErr error
+	tried := make(map[*upstream.Backend]struct{})
 	for i := 0; i < attempts; i++ {
 		b, err := t.pool.PickCtx(req.Context())
 		if err != nil {
@@ -135,6 +136,15 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			span.RecordError(err)
 			return nil, err
 		}
+		// Skip a backend we already attempted in this request. This is essential
+		// when the passive-health threshold has not yet ejected a failed backend:
+		// without exclusion the same backend can be selected repeatedly, wasting
+		// attempts and never trying an alternative.
+		if _, ok := tried[b]; ok {
+			t.pool.Release(b)
+			continue
+		}
+		tried[b] = struct{}{}
 
 		out := req
 		if i > 0 && req.GetBody != nil {

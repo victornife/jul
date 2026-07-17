@@ -150,3 +150,102 @@ func TestPoolSnapshotBackendsCtxUsesSnapshot(t *testing.T) {
 		t.Errorf("snapshot backend = %q, want 10.0.0.1:80", got)
 	}
 }
+
+func TestPoolSnapshotRoundRobinAdvances(t *testing.T) {
+	pool, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "round_robin",
+		Servers: []config.UpstreamServer{
+			{Address: "10.0.0.1:80", Weight: 1},
+			{Address: "10.0.0.2:80", Weight: 1},
+		},
+		MaxFails: 1,
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	snap := pool.Snapshot()
+	counts := map[string]int{}
+	for i := 0; i < 100; i++ {
+		b, err := snap.pick()
+		if err != nil {
+			t.Fatalf("pick %d: %v", i, err)
+		}
+		counts[b.Address]++
+		b.release()
+	}
+	if counts["10.0.0.1:80"] != 50 || counts["10.0.0.2:80"] != 50 {
+		t.Errorf("round-robin distribution uneven: %v", counts)
+	}
+}
+
+func TestPoolSnapshotWeightedRoundRobinNoRace(t *testing.T) {
+	pool, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "weighted_round_robin",
+		Servers: []config.UpstreamServer{
+			{Address: "10.0.0.1:80", Weight: 1},
+			{Address: "10.0.0.2:80", Weight: 3},
+		},
+		MaxFails: 1,
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	snap := pool.Snapshot()
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				b, err := snap.pick()
+				if err != nil {
+					t.Errorf("pick: %v", err)
+					return
+				}
+				time.Sleep(time.Microsecond)
+				b.release()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestPoolSnapshotFailoverSkipsTriedBackend(t *testing.T) {
+	pool, err := NewPool(config.UpstreamConfig{
+		Name:     "api",
+		Strategy: "round_robin",
+		Servers: []config.UpstreamServer{
+			{Address: "10.0.0.1:80", Weight: 1},
+			{Address: "10.0.0.2:80", Weight: 1},
+		},
+		MaxFails: 3, // default: first backend is not ejected after one failure
+	}, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	// Simulate two attempts within the same request: the second pick must not
+	// return the same backend as the first, even though it is still available.
+	snap := pool.Snapshot()
+	b1, err := snap.pick()
+	if err != nil {
+		t.Fatalf("first pick: %v", err)
+	}
+	b1.release()
+
+	b2, err := snap.pick()
+	if err != nil {
+		t.Fatalf("second pick: %v", err)
+	}
+	defer b2.release()
+	if b2.Address == b1.Address {
+		t.Errorf("failover returned same backend %q; expected the other backend", b2.Address)
+	}
+}

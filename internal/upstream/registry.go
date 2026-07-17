@@ -34,8 +34,8 @@ type Registry struct {
 	opts RegistryOptions
 
 	mu     sync.Mutex
-	live   map[string]*poolEntry // committed pools currently serving
-	staged map[string]*poolEntry // pools assembled by the in-progress build
+	live   map[poolKey]*poolEntry // committed pools currently serving, keyed by (name, scheme)
+	staged map[poolKey]*poolEntry // pools assembled by the in-progress build
 }
 
 // RegistryOptions configures a Registry. All fields are optional.
@@ -113,12 +113,18 @@ func healthConfigEqual(a, b config.HealthCheckConfig) bool {
 	return true
 }
 
+// poolKey uniquely identifies a live/staged pool by upstream name and scheme.
+type poolKey struct {
+	name   string
+	scheme string
+}
+
 // NewRegistry creates an empty pool registry.
 func NewRegistry(opts RegistryOptions) *Registry {
 	return &Registry{
 		opts:   opts,
-		live:   make(map[string]*poolEntry),
-		staged: make(map[string]*poolEntry),
+		live:   make(map[poolKey]*poolEntry),
+		staged: make(map[poolKey]*poolEntry),
 	}
 }
 
@@ -127,7 +133,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 func (r *Registry) Begin() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.staged = make(map[string]*poolEntry)
+	r.staged = make(map[poolKey]*poolEntry)
 }
 
 // For returns the pool for a named upstream within the current build, creating
@@ -139,18 +145,19 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if e, ok := r.staged[up.Name]; ok {
+	key := poolKey{name: up.Name, scheme: scheme}
+	if e, ok := r.staged[key]; ok {
 		// Already staged by an earlier location referencing the same upstream.
 		return e.pool, nil
 	}
 
 	meta := metaOf(up, scheme)
-	if e, ok := r.live[up.Name]; ok && e.meta.equal(meta) {
+	if e, ok := r.live[key]; ok && e.meta.equal(meta) {
 		// Same shape: keep the running pool (and its checker/refresher). The backend
 		// set is refreshed at Commit (not here) so an aborted build leaves the live
 		// pool untouched, preserving an atomic reload. A discovery pool's backends
 		// are owned by its refresher, so its static seed is not re-applied.
-		r.staged[up.Name] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: up.Servers, discovery: discoveryEnabled(up.Discovery)}
+		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: up.Servers, discovery: discoveryEnabled(up.Discovery)}
 		return e.pool, nil
 	}
 
@@ -175,7 +182,7 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 			OnError:    r.opts.OnDiscoveryError,
 		}, r.opts.Logger)
 	}
-	r.staged[up.Name] = &poolEntry{pool: pool, meta: meta, discovery: disco}
+	r.staged[key] = &poolEntry{pool: pool, meta: meta, discovery: disco}
 	return pool, nil
 }
 
@@ -194,21 +201,21 @@ func (r *Registry) Commit() {
 			e.pool.UpdateBackends(e.pending)
 		}
 	}
-	for name, e := range r.live {
-		if staged, ok := r.staged[name]; !ok || staged.pool != e.pool {
+	for key, e := range r.live {
+		if staged, ok := r.staged[key]; !ok || staged.pool != e.pool {
 			e.pool.Close()
 			if r.opts.Logger != nil {
-				r.opts.Logger.Info("upstream pool stopped", "upstream", name)
+				r.opts.Logger.Info("upstream pool stopped", "upstream", key.name, "scheme", key.scheme)
 			}
 		}
 	}
 	r.live = r.staged
-	r.staged = make(map[string]*poolEntry)
+	r.staged = make(map[poolKey]*poolEntry)
 	// Seed the backend-count gauge for every live pool (discovery pools also
 	// update it from their refresher).
 	if r.opts.OnBackends != nil {
-		for name, e := range r.live {
-			r.opts.OnBackends(name, len(e.pool.Backends()))
+		for key, e := range r.live {
+			r.opts.OnBackends(key.name, len(e.pool.Backends()))
 		}
 	}
 }
@@ -225,20 +232,43 @@ func (r *Registry) Abort() {
 			e.pool.Close()
 		}
 	}
-	r.staged = make(map[string]*poolEntry)
+	r.staged = make(map[poolKey]*poolEntry)
 }
 
-// SnapshotPool returns an immutable snapshot of the live pool for name, or nil
-// if the pool is not currently live. It is used by the factory's
-// generation-scoped snapshot middleware to capture the backend set at
-// generation commit time.
-func (r *Registry) SnapshotPool(name string) *PoolSnapshot {
+// SnapshotPool returns an immutable snapshot of the live pool for name and
+// scheme, or nil if the pool is not currently live.
+func (r *Registry) SnapshotPool(name, scheme string) *PoolSnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if e, ok := r.live[name]; ok {
+	if e, ok := r.live[poolKey{name: name, scheme: scheme}]; ok {
 		return e.pool.Snapshot()
 	}
 	return nil
+}
+
+// PoolSnapshotKey identifies a named upstream together with the scheme used to
+// reach it. It is the public key for SnapshotPools.
+type PoolSnapshotKey struct {
+	Name   string
+	Scheme string
+}
+
+// SnapshotPools returns the snapshots for each named/schemed live pool. Pools
+// not currently live are omitted. It is called by HandlerFactory.Prepare to
+// capture the generation-scoped pool view.
+func (r *Registry) SnapshotPools(keys []PoolSnapshotKey) map[string]*PoolSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]*PoolSnapshot, len(keys))
+	for _, k := range keys {
+		if e, ok := r.live[poolKey{name: k.Name, scheme: k.Scheme}]; ok {
+			out[k.Name] = e.pool.Snapshot()
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // CloseAll stops every live pool's goroutines. It is called once at shutdown.
@@ -248,7 +278,7 @@ func (r *Registry) CloseAll() {
 	for _, e := range r.live {
 		e.pool.Close()
 	}
-	r.live = make(map[string]*poolEntry)
+	r.live = make(map[poolKey]*poolEntry)
 }
 
 // PoolStatus is a point-in-time view of one live pool for operational
@@ -274,7 +304,11 @@ func (r *Registry) Snapshot() []PoolStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]PoolStatus, 0, len(r.live))
-	for name, e := range r.live {
+	for key, e := range r.live {
+		name := key.name
+		if key.scheme != "" {
+			name = name + "(" + key.scheme + ")"
+		}
 		ps := PoolStatus{Name: name, Strategy: e.meta.strategy}
 		for _, b := range e.pool.Backends() {
 			ps.Backends = append(ps.Backends, BackendStatus{
