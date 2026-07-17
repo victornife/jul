@@ -267,9 +267,9 @@ func TestPreflightListenersSkipsExisting(t *testing.T) {
 	addr := held.Addr().String()
 
 	s := newTestServer(t, Hooks{})
-	old := []config.StreamServer{{Listen: addr, Protocol: "tcp", ProxyPass: "127.0.0.1:1"}}
+	bound := map[string]struct{}{"tcp|" + addr: {}}
 	next := []config.StreamServer{{Listen: addr, Protocol: "tcp", ProxyPass: "127.0.0.1:2"}}
-	if err := s.PreflightListeners(old, next); err != nil {
+	if err := s.PreflightListeners(bound, next); err != nil {
 		t.Fatalf("preflight re-probed an existing listener: %v", err)
 	}
 }

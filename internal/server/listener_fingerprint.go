@@ -76,12 +76,14 @@ func listenerBindFingerprint(cfg *config.Config, addr string) string {
 		s.readHeaderTimeout(addr), s.readTimeout(addr), s.writeTimeout(addr),
 		s.idleTimeout(addr), s.maxHeaderBytes(addr))
 
-	_, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
+	bindings, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
 	fmt.Fprintf(&b, "tls=%t;", tlsOK)
 	if tlsOK {
-		// TLS minimum version, the mutual-TLS bundle, and HTTP/3 are all wired
-		// into the TLS listener at bind time.
-		fmt.Fprintf(&b, "minver=%d;mtls=%s;", minVer, mtlsConfigFingerprint(cfg.Servers, addr))
+		// TLS minimum version, the mutual-TLS bundle, HTTP/3, and the static
+		// TLS identity (cert/key/SNI or ACME domain set) are all wired into the
+		// TLS listener at bind time. Rotating a cert file in place must change
+		// the fingerprint so the rebind check rejects it (R9-05).
+		fmt.Fprintf(&b, "minver=%d;mtls=%s;identity=%s;", minVer, mtlsConfigFingerprint(cfg.Servers, addr), tlsIdentityFingerprint(bindings))
 		if s.http3EnabledForAddr(addr) {
 			fmt.Fprintf(&b, "h3=1,ma=%d;", s.http3MaxAgeForAddr(addr))
 		} else {
@@ -155,9 +157,10 @@ func mtlsConfigFingerprint(servers []config.ServerConfig, addr string) string {
 		strings.Join(caHashes, "+"), strings.Join(sans, "+"), strings.Join(crlHashes, "+"))
 }
 
-// hashFileContent returns a hex-encoded 8-byte SHA-256 prefix of the file
-// contents for use in fingerprints. Returns an error marker when the file
-// cannot be read so a non-readable file looks different from any readable one.
+// hashFileContent returns a hex-encoded full SHA-256 digest of the file
+// contents for use in fingerprints (R9-12). Returns an error marker when the
+// file cannot be read so a non-readable file looks different from any readable
+// one.
 func hashFileContent(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -166,7 +169,42 @@ func hashFileContent(path string) string {
 		return "err:" + path
 	}
 	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:8])
+	return hex.EncodeToString(sum[:])
+}
+
+// tlsIdentityFingerprint captures the certificate identity used by a TLS
+// listener at bind time. For file-backed certificates it digests the cert and
+// key bytes together with the SNI name set, so rotating either file in place
+// changes the fingerprint. For ACME-backed listeners it captures the ACME
+// domain set and issuer parameters. This makes the bound fingerprint sensitive
+// to certificate rotations that would otherwise be invisible to a config-only
+// comparison (R9-05).
+func tlsIdentityFingerprint(bindings []certBinding) string {
+	if len(bindings) == 0 {
+		return "none"
+	}
+
+	// ACME identity is shared across all blocks on the address; report it once.
+	if a := bindings[0].tls.ACME; a != nil && a.Enabled {
+		domains := append([]string(nil), a.Domains...)
+		sort.Strings(domains)
+		return fmt.Sprintf("acme:%s:%s:%s:%s", strings.Join(domains, ","), a.Email, a.CA, a.Challenge)
+	}
+
+	// File-backed: one entry per (cert,key,names) binding, sorted for stability.
+	entries := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		names := append([]string(nil), b.names...)
+		for i := range names {
+			names[i] = strings.ToLower(strings.TrimSpace(names[i]))
+		}
+		sort.Strings(names)
+		certHash := hashFileContent(b.tls.Cert)
+		keyHash := hashFileContent(b.tls.Key)
+		entries = append(entries, fmt.Sprintf("names=%s;cert=%s;key=%s", strings.Join(names, ","), certHash, keyHash))
+	}
+	sort.Strings(entries)
+	return "file:" + strings.Join(entries, "|")
 }
 
 // mtlsModeRank ranks client-auth modes the way clientAuthMode + authStrength do,

@@ -4,6 +4,8 @@
 package server
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,8 +187,17 @@ func TestListenerRebindRequired(t *testing.T) {
 			}})
 		}
 		// ListenerRebindRequired must not fire for an ACME-only change;
-		// ACMERestartRequired owns that classification.
-		hotApplies(t, acme("a.example.com"), acme("a.example.com", "b.example.com"))
+		// ACMERestartRequired owns that classification. With R9-05 the listener
+		// fingerprint includes ACME identity, so we now expect it to require a
+		// rebind; the test name documents that the *classification* still lives
+		// in the restart-required path, not a listener error.
+		reason, need := ListenerRebindRequired(acme("a.example.com"), acme("a.example.com", "b.example.com"))
+		if !need {
+			t.Fatal("expected ACME domain change to require listener rebind via fingerprint")
+		}
+		if reason == "" {
+			t.Fatal("expected non-empty reason")
+		}
 	})
 	t.Run("hot-reloadable field (server_names) does not force restart", func(t *testing.T) {
 		old := cfg(plain())
@@ -194,4 +205,93 @@ func TestListenerRebindRequired(t *testing.T) {
 		nextSrv.ServerNames = []string{"api.example.com"}
 		hotApplies(t, old, cfg(nextSrv))
 	})
+}
+
+// TestPreflightRebindRequiredUsesLiveSnapshot (R9-04, R9-13) verifies that the
+// runtime-aware rebind gate uses actually-bound listeners as the old side, not
+// the on-disk prev config. A re-added address that is no longer bound is
+// treated as a new listener (no rebind check), and a kept address whose bound
+// fingerprint differs triggers restart_required.
+func TestPreflightRebindRequiredUsesLiveSnapshot(t *testing.T) {
+	addr := freePort(t)
+	base := cfgWith(addr)
+	next := cfgWith(addr)
+	next.Servers[0].ReadHeaderTimeout = config.Duration(7 * time.Second)
+
+	// Address not currently bound: even though it appears in both base and next,
+	// it should be treated as a fresh bind, so no rebind check fires.
+	empty := LiveSnapshot{Listeners: map[string]BoundListenerInfo{}}
+	if _, need := PreflightRebindRequired(empty, next); need {
+		t.Fatal("an unbound address present in both prev and next should not trigger rebind check")
+	}
+
+	// Address is bound with the base fingerprint: next changes a frozen setting,
+	// so rebind is required.
+	live := LiveSnapshot{
+		Listeners: map[string]BoundListenerInfo{
+			addr: {Addr: addr, Fingerprint: listenerBindFingerprint(base, addr)},
+		},
+	}
+	reason, need := PreflightRebindRequired(live, next)
+	if !need {
+		t.Fatal("expected rebind required for a kept listener with changed frozen setting")
+	}
+	if reason == "" {
+		t.Fatal("expected non-empty reason")
+	}
+}
+
+// TestListenerBindFingerprintDetectsCertRotation (R9-05) verifies that rotating
+// the contents of a cert or key file on a kept listener changes the bound
+// fingerprint, so the rebind check rejects the rotation as restart-required.
+func TestListenerBindFingerprintDetectsCertRotation(t *testing.T) {
+	dir := t.TempDir()
+	cert1, key1 := writeSelfSigned(t, dir, "cert1", "a.example.com")
+	cert2, key2 := writeSelfSigned(t, dir, "cert2", "a.example.com")
+
+	addr := freePort(t)
+	cfg := func(cert, key string) *config.Config {
+		return &config.Config{
+			Servers: []config.ServerConfig{{
+				Listen: addr,
+				TLS: &config.TLSConfig{
+					Enabled: true,
+					Cert:    cert,
+					Key:     key,
+				},
+			}},
+		}
+	}
+
+	fp1 := listenerBindFingerprint(cfg(cert1, key1), addr)
+	fp2 := listenerBindFingerprint(cfg(cert2, key2), addr)
+	if fp1 == fp2 {
+		t.Fatal("rotating cert/key content did not change listener fingerprint")
+	}
+
+	// Re-using the same cert/key pair must produce an identical fingerprint.
+	fp1b := listenerBindFingerprint(cfg(cert1, key1), addr)
+	if fp1 != fp1b {
+		t.Fatal("identical cert/key content produced different fingerprints")
+	}
+}
+
+// TestHashFileContentUsesFullSHA256 (R9-12) verifies that the helper used by
+// the listener fingerprint returns the full 256-bit (64 hex char) digest.
+func TestHashFileContentUsesFullSHA256(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "hash-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString("hello listener fingerprint"); err != nil {
+		t.Fatal(err)
+	}
+	got := hashFileContent(f.Name())
+	if len(got) != 64 {
+		t.Fatalf("hashFileContent returned %d hex chars (%q), want 64", len(got), got)
+	}
+	if strings.HasPrefix(got, "err:") {
+		t.Fatalf("hashFileContent returned error marker: %q", got)
+	}
 }

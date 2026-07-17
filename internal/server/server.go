@@ -244,6 +244,61 @@ type listenerEntry struct {
 	boundFingerprint string               // listenerBindFingerprint at bind time, for rotation detection
 }
 
+// BoundListenerInfo is a read-only summary of a bound HTTP listener, used by
+// LiveSnapshot to expose the runtime listener state to preflight without
+// handing out the full entry.
+type BoundListenerInfo struct {
+	Addr        string
+	Fingerprint string
+	TLSEnabled  bool
+}
+
+// LiveSnapshot is a point-in-time, read-only view of the running server's
+// listener state. It is used by the admin apply preflight so that bind probes,
+// rebind checks, and restart-required classification are evaluated against
+// the live runtime instead of the on-disk config (R9-04, R9-13).
+type LiveSnapshot struct {
+	// EffectiveConfig is the server's current effective config. Callers must
+	// treat it as read-only.
+	EffectiveConfig *config.Config
+
+	// Listeners maps bound address -> bound listener metadata. Only addresses
+	// currently accepting connections are present.
+	Listeners map[string]BoundListenerInfo
+
+	// Generation is the server's current handler generation ID. It lets the
+	// admin layer detect whether an asynchronous reload occurred while the
+	// snapshot was being prepared.
+	Generation uint64
+}
+
+// LiveSnapshot returns a read-only snapshot of the server's currently bound
+// listeners and effective config. The snapshot is safe to use outside the
+// server's mutex because it copies all mutable state.
+func (s *Server) LiveSnapshot() LiveSnapshot {
+	s.mu.Lock()
+	listeners := make(map[string]BoundListenerInfo, len(s.listeners))
+	for addr, e := range s.listeners {
+		listeners[addr] = BoundListenerInfo{
+			Addr:        addr,
+			Fingerprint: e.boundFingerprint,
+			TLSEnabled:  e.provider != nil,
+		}
+	}
+	cfg := s.cfg
+	var gen uint64
+	if g := s.handlers.Load(); g != nil {
+		gen = g.genID
+	}
+	s.mu.Unlock()
+
+	return LiveSnapshot{
+		EffectiveConfig: cfg,
+		Listeners:       listeners,
+		Generation:      gen,
+	}
+}
+
 // New creates a Server. source and validate may be nil to disable reload.
 // rawStartupCfg is the pre-expansion configuration at process startup; when
 // non-nil it is used by doReload for restart-required comparison so that
@@ -905,23 +960,19 @@ func setOf(items []string) map[string]struct{} {
 }
 
 // PreflightListeners validates that every listen address introduced by next
-// (present in next but not in old) can actually be bound, so an apply that adds
-// an unbindable address — a port already in use by another process, an invalid
-// host, or a privileged port without permission — fails fast before the config
-// is persisted. Without this, doReload binds new listeners best-effort and only
-// logs a bind failure, so the apply would already be recorded as successful
-// while the new listener silently never serves.
+// and not already bound by the running server can actually be bound, so an
+// apply that adds an unbindable address fails fast before the config is
+// persisted. Only NEW addresses are probed: the running server still holds
+// every address it already serves, so probing a bound address would fail with
+// "address already in use" (a false positive).
 //
-// Only NEW addresses are probed. The running server still holds every address it
-// already serves, so probing an unchanged address would always fail with
-// "address already in use" (a false positive). Each probe binds and immediately
-// closes the listener; a narrow TOCTOU window remains before the reload re-binds
-// the same address, which is acceptable for a fail-fast check that strictly
-// improves on the silent-failure status quo.
-func PreflightListeners(old, next []config.ServerConfig) error {
-	oldAddrs := setOf(uniqueListenAddrs(old))
+// The boundAddrs set is authoritative runtime state (from LiveSnapshot),
+// replacing the on-disk "old" config used previously (R9-04, R9-13). This
+// closes the gap where an address removed from the running server but still
+// present on disk would be skipped, causing a false negative or false positive.
+func PreflightListeners(boundAddrs map[string]struct{}, next []config.ServerConfig) error {
 	for _, addr := range uniqueListenAddrs(next) {
-		if _, existed := oldAddrs[addr]; existed {
+		if _, bound := boundAddrs[addr]; bound {
 			continue
 		}
 		ln, err := net.Listen("tcp", addr)
@@ -931,6 +982,27 @@ func PreflightListeners(old, next []config.ServerConfig) error {
 		_ = ln.Close()
 	}
 	return nil
+}
+
+// PreflightRebindRequired reports whether moving from the live bound listener
+// state to next changes a bind-time-frozen setting on an address that remains
+// bound. It is the runtime-aware counterpart to ListenerRebindRequired, using
+// the bound fingerprint captured at bind time as the old side so in-place
+// file rotation is detected (R9-04, R9-13).
+func PreflightRebindRequired(live LiveSnapshot, next *config.Config) (string, bool) {
+	for _, addr := range uniqueListenAddrs(next.Servers) {
+		info, bound := live.Listeners[addr]
+		if !bound {
+			continue // newly added address: bind() applies its settings fresh
+		}
+		if info.Fingerprint != listenerBindFingerprint(next, addr) {
+			return fmt.Sprintf(
+				"listener %s has bind-time settings (timeouts, header limits, h2c, HTTP/3, TLS, mutual TLS, or connection cap) that changed; these are fixed when the listener binds and take effect on restart",
+				addr,
+			), true
+		}
+	}
+	return "", false
 }
 
 func (s *Server) readHeaderTimeout(addr string) time.Duration {

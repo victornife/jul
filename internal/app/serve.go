@@ -367,6 +367,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = rt.ACME
 
+	// Wire the runtime snapshot into preflight after the server exists so
+	// listener gates are evaluated against actually-bound listeners (R9-04).
+	pf.LiveSnapshot = srv.LiveSnapshot
+
 	// Re-wire the reload trigger so admin apply sends a typed ReloadRequest
 	// carrying the exact preflight candidate. The candidate is part of the
 	// channel message, not a global slot, so it cannot be consumed by an

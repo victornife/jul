@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -223,16 +224,12 @@ func (s *Server) PreflightBuild(streams []config.StreamServer, upstreams map[str
 // the subsequent Reload performs the authoritative bind under the lock and
 // rolls back on failure. A probe-then-bind race is possible but matches the
 // established HTTP gate's semantics.
-func (s *Server) PreflightListeners(old, next []config.StreamServer) error {
-	oldKeys := make(map[string]struct{}, len(old))
-	for i := range old {
-		oldKeys[normProto(old[i].Protocol)+"|"+old[i].Listen] = struct{}{}
-	}
+func (s *Server) PreflightListeners(boundKeys map[string]struct{}, next []config.StreamServer) error {
 	probed := make(map[string]struct{}, len(next))
 	for i := range next {
 		proto := normProto(next[i].Protocol)
 		key := proto + "|" + next[i].Listen
-		if _, existed := oldKeys[key]; existed {
+		if _, bound := boundKeys[key]; bound {
 			continue
 		}
 		if _, dup := probed[key]; dup {
@@ -254,6 +251,20 @@ func (s *Server) PreflightListeners(old, next []config.StreamServer) error {
 		_ = ln.Close()
 	}
 	return nil
+}
+
+// BoundKeys returns a snapshot of the currently bound stream listener keys
+// ("proto|addr") used by preflight to decide which stream addresses are new
+// and which are already held by the running server (R9-04, R9-13).
+func (s *Server) BoundKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := make([]string, 0, len(s.listeners))
+	for k := range s.listeners {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Close stops every listener and releases all sockets.

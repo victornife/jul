@@ -18,7 +18,8 @@ import (
 // no-op stub in lean builds.
 type StreamPreflighter interface {
 	PreflightBuild(streams []config.StreamServer, upstreams map[string]config.UpstreamConfig) error
-	PreflightListeners(old, next []config.StreamServer) error
+	PreflightListeners(boundKeys map[string]struct{}, next []config.StreamServer) error
+	BoundKeys() []string
 }
 
 // Preflight encapsulates the admin write validation gate sequence.  It holds
@@ -36,6 +37,11 @@ type Preflight struct {
 	// checks. When empty, restart-required classification is skipped so tests
 	// without a startup baseline are not rejected.
 	StartupFP lifecycle.Fingerprint
+
+	// LiveSnapshot returns the current HTTP server runtime state: effective
+	// config, bound listener fingerprints, and generation. When nil, preflight
+	// falls back to the on-disk prev baseline (legacy behaviour).
+	LiveSnapshot func() server.LiveSnapshot
 }
 
 // Apply runs the admin write preflight gates:
@@ -77,10 +83,21 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) (*config.Candid
 		if err != nil {
 			return nil, err
 		}
-		if err := server.PreflightListeners(prevCandidate.Effective.Servers, candidate.Effective.Servers); err != nil {
+
+		// Use the live runtime snapshot as the authoritative baseline for
+		// listener-related gates. If unavailable, fall back to the on-disk prev
+		// config (legacy path).
+		var live server.LiveSnapshot
+		if p.LiveSnapshot != nil {
+			live = p.LiveSnapshot()
+		}
+		httpBound := boundAddrs(live)
+		streamBound := streamBoundKeys(p.Stream)
+
+		if err := server.PreflightListeners(httpBound, candidate.Effective.Servers); err != nil {
 			return nil, err
 		}
-		if err := p.Stream.PreflightListeners(prevCandidate.Effective.Streams, candidate.Effective.Streams); err != nil {
+		if err := p.Stream.PreflightListeners(streamBound, candidate.Effective.Streams); err != nil {
 			return nil, err
 		}
 		// Restart-required classification is single-sourced from the lifecycle
@@ -93,14 +110,40 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) (*config.Candid
 				return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 			}
 		}
-		if reason, need := server.ListenerRebindRequired(prevCandidate.Effective, candidate.Effective); need {
-			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		// Runtime-aware rebind check: compare the candidate against actually
+		// bound listeners. Fall back to the config-only check when no snapshot
+		// is available.
+		if p.LiveSnapshot != nil {
+			if reason, need := server.PreflightRebindRequired(live, candidate.Effective); need {
+				return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+			}
+		} else {
+			if reason, need := server.ListenerRebindRequired(prevCandidate.Effective, candidate.Effective); need {
+				return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+			}
 		}
 		if reason, need := server.ACMERestartRequired(prevCandidate.Effective.Servers, candidate.Effective.Servers); need {
 			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 	}
 	return candidate, nil
+}
+
+func boundAddrs(s server.LiveSnapshot) map[string]struct{} {
+	m := make(map[string]struct{}, len(s.Listeners))
+	for addr := range s.Listeners {
+		m[addr] = struct{}{}
+	}
+	return m
+}
+
+func streamBoundKeys(sp StreamPreflighter) map[string]struct{} {
+	keys := sp.BoundKeys()
+	m := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		m[k] = struct{}{}
+	}
+	return m
 }
 
 // dryRun builds all handlers (commit=false) on the already-resolved effective

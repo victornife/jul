@@ -4,11 +4,14 @@
 package app
 
 import (
+	"net"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/server"
 )
 
 type mockStreamPreflighter struct{}
@@ -16,9 +19,10 @@ type mockStreamPreflighter struct{}
 func (m *mockStreamPreflighter) PreflightBuild(_ []config.StreamServer, _ map[string]config.UpstreamConfig) error {
 	return nil
 }
-func (m *mockStreamPreflighter) PreflightListeners(_, _ []config.StreamServer) error {
+func (m *mockStreamPreflighter) PreflightListeners(_ map[string]struct{}, _ []config.StreamServer) error {
 	return nil
 }
+func (m *mockStreamPreflighter) BoundKeys() []string { return nil }
 
 func TestPreflightApplyValidConfigOK(t *testing.T) {
 	cfg := config.ProxyTarget(":9000", ":0")
@@ -119,4 +123,59 @@ func TestPreflightApplyReturnsCandidate(t *testing.T) {
 	if cand.Raw.Global.WorkerThreads != "${env:PREFLIGHT_SECRET}" {
 		t.Fatalf("candidate raw worker_threads = %q, want original reference", cand.Raw.Global.WorkerThreads)
 	}
+}
+
+// TestPreflightApplyUsesLiveSnapshotForRebind (R9-04) verifies that when a
+// LiveSnapshot is provided, the listener rebind check uses the actually-bound
+// listener set rather than the on-disk prev config. A re-added address that is
+// no longer bound is treated as a fresh listener, so a frozen-setting change
+// does not trigger a false restart_required.
+func TestPreflightApplyUsesLiveSnapshotForRebind(t *testing.T) {
+	addr := freePort(t)
+	base := &config.Config{
+		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Servers: []config.ServerConfig{{
+			Listen:    addr,
+			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
+		}},
+	}
+
+	// next changes a bind-time-frozen setting on the same address.
+	next, err := base.Clone()
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	next.Servers[0].ReadHeaderTimeout = config.Duration(9 * time.Second)
+
+	p := Preflight{
+		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			return map[string]http.Handler{}, nil, nil
+		},
+		Stream: &mockStreamPreflighter{},
+	}
+
+	// Without a live snapshot, the on-disk prev says addr is kept, so the
+	// frozen-setting change is rejected.
+	if _, err := p.Apply(next, base); err == nil {
+		t.Fatal("expected restart_required without live snapshot")
+	}
+
+	// With a live snapshot showing the address is NOT currently bound, the
+	// address is treated as newly added (probed) and the rebind check is skipped.
+	p.LiveSnapshot = func() server.LiveSnapshot {
+		return server.LiveSnapshot{Listeners: map[string]server.BoundListenerInfo{}}
+	}
+	if _, err := p.Apply(next, base); err != nil {
+		t.Fatalf("expected hot-apply with live snapshot showing address unbound, got: %v", err)
+	}
+}
+
+func freePort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().String()
 }
