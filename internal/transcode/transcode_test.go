@@ -684,3 +684,83 @@ func TestTranscoderRetiresStaleConnectionsDuringRequest(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 	tr.evictStaleConns()
 }
+
+// staticDiscoverer is a test discovery provider that returns a fixed target
+// set. It lets acceptance tests build a discovery-only upstream without
+// touching real DNS/Consul infrastructure.
+type staticDiscoverer struct {
+	targets []upstream.Target
+	err     error
+}
+
+func (d staticDiscoverer) Resolve(context.Context) ([]upstream.Target, error) {
+	return d.targets, d.err
+}
+
+func (d staticDiscoverer) Describe() string { return "static" }
+
+// TestTranscodeReflectionWithDiscoveryUpstream (R11-04) verifies that a
+// grpc_transcode location using server reflection can be backed by a
+// discovery-only upstream. The reflection RPC must see the resolved target
+// from the candidate-generation snapshot rather than an empty static seed.
+func TestTranscodeReflectionWithDiscoveryUpstream(t *testing.T) {
+	fdp := echoFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	files, err := filesFromSet(set)
+	if err != nil {
+		t.Fatalf("build descriptors: %v", err)
+	}
+	fd, err := files.FindFileByPath("echo/echo.proto")
+	if err != nil {
+		t.Fatalf("find echo file: %v", err)
+	}
+
+	addr := startEchoServer(t, fd, true)
+
+	reg := upstream.NewRegistry(upstream.RegistryOptions{
+		NewDiscoverer: func(config.DiscoveryConfig, upstream.DialFunc) (upstream.Discoverer, error) {
+			return staticDiscoverer{targets: []upstream.Target{{Address: addr, Weight: 1}}}, nil
+		},
+	})
+	up := config.UpstreamConfig{
+		Name: "echo",
+		Discovery: &config.DiscoveryConfig{
+			Type:    "dns", // ignored by the test discoverer, but marks pool dynamic
+			Refresh: config.Duration(time.Minute),
+		},
+	}
+
+	reg.Begin()
+	pool, err := reg.For(up, "http")
+	if err != nil {
+		t.Fatalf("registry.For: %v", err)
+	}
+	snap := reg.CandidateSnapshot("echo", "http")
+	if snap == nil {
+		t.Fatal("CandidateSnapshot for discovery upstream is nil")
+	}
+	if _, err := snap.Pick(); err != nil {
+		t.Fatalf("CandidateSnapshot has no backends: %v", err)
+	}
+	reg.Commit()
+	reg.Activate()
+	t.Cleanup(reg.CloseAll)
+
+	cfg := config.GRPCTranscodeConfig{
+		Target:        "echo",
+		UseReflection: true,
+	}
+	tr, err := New(cfg, pool, snap, Options{})
+	if err != nil {
+		t.Fatalf("New transcoder with discovery reflection: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"discovery"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("discovery reflection request: status = %d, body = %s", res.StatusCode, body)
+	}
+	if got := replyMessage(t, body); got != "discovery" {
+		t.Fatalf("discovery reflection reply = %q, want discovery", got)
+	}
+}

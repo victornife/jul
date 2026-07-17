@@ -198,7 +198,13 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 		targets, resolveErr := d.Resolve(ctx)
 		cancel()
 		if resolveErr == nil && len(targets) > 0 {
-			pool.UpdateBackends(targetsToServers(targets))
+			servers := targetsToServers(targets)
+			pool.UpdateBackends(servers)
+			// CandidateSnapshot builds from pending; for discovery-only
+			// upstreams the static seed is empty, so store the resolved
+			// targets so build-time reflection sees the new backends
+			// (R11-04).
+			pending = servers
 			if r.opts.OnBackends != nil {
 				r.opts.OnBackends(up.Name, len(targets))
 			}
