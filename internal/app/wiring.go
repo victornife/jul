@@ -19,6 +19,7 @@ import (
 	"jul/internal/auth"
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/server"
 	"jul/internal/waf"
 )
 
@@ -94,14 +95,19 @@ func IndexUpstreams(ups []config.UpstreamConfig) map[string]config.UpstreamConfi
 	return m
 }
 
-// MergeReload fans multiple reload sources into one channel.
-func MergeReload(ctx context.Context, sources ...<-chan struct{}) <-chan struct{} {
-	out := make(chan struct{}, 1)
-	for _, src := range sources {
-		if src == nil {
-			continue
+// MergeReload fans multiple reload sources into one typed channel. Each source
+// is tagged with its source kind; nil sources are skipped. The output channel
+// has capacity one per source so a burst of distinct events is coalesced to
+// the latest event but an admin candidate-bearing event is not dropped behind
+// a coalesced file-watch/SIGHUP signal.
+func MergeReload(ctx context.Context, sigReload, fileWatch <-chan struct{}, adminReload <-chan server.ReloadRequest) <-chan server.ReloadRequest {
+	out := make(chan server.ReloadRequest, 3)
+
+	forward := func(in <-chan struct{}, source server.ReloadSource) {
+		if in == nil {
+			return
 		}
-		go func(in <-chan struct{}) {
+		go func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -111,13 +117,56 @@ func MergeReload(ctx context.Context, sources ...<-chan struct{}) <-chan struct{
 						return
 					}
 					select {
-					case out <- struct{}{}:
+					case out <- server.ReloadRequest{Source: source}:
 					default:
+						// Coalesce untyped events: drop the buffered one and
+						// replace it with the latest signal.
+						select {
+						case <-out:
+						default:
+						}
+						select {
+						case out <- server.ReloadRequest{Source: source}:
+						default:
+						}
 					}
 				}
 			}
-		}(src)
+		}()
 	}
+
+	forward(sigReload, server.ReloadSourceSIGHUP)
+	forward(fileWatch, server.ReloadSourceFileWatch)
+
+	if adminReload != nil {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case req, ok := <-adminReload:
+					if !ok {
+						return
+					}
+					// Admin candidate-bearing events must not be coalesced away.
+					select {
+					case out <- req:
+					default:
+						// Drain a pending untyped event to make room.
+						select {
+						case <-out:
+						default:
+						}
+						select {
+						case out <- req:
+						default:
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	return out
 }
 

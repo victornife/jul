@@ -138,7 +138,7 @@ func (p *ReloadPlan) Lifecycle() error {
 // Prepare builds the handler tree and stages the upstream/generation resources.
 // It does not commit anything; Publish/Abort must follow.
 func (p *ReloadPlan) Prepare() error {
-	handlers, genID, commit, abort, _, err := p.s.factory(p.Candidate.Effective)
+	handlers, genID, commit, abort, err := p.s.factory(p.Candidate.Effective)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -196,12 +196,15 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	prevGen := p.s.handlers.Load()
 	p.s.handlers.Store(newHandlerGen(p.Handlers, snapshots, p.GenID))
 	if prevGen != nil {
+		genID := prevGen.genID
 		p.s.retireGen(prevGen, func() {
 			if retirePrev != nil {
 				retirePrev()
 			}
 		}, func() {
-			p.s.retireRedactionGen(prevGen.genID)
+			p.s.retireRedactionGen(genID)
+		}, func() {
+			p.s.retireRedactionForGen(genID)
 		})
 	} else if retirePrev != nil {
 		retirePrev()

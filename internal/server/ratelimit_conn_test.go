@@ -31,7 +31,7 @@ func TestServerConnectionCap(t *testing.T) {
 	var releaseOnce sync.Once
 	doRelease := func() { releaseOnce.Do(func() { close(release) }) }
 
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&entered, 1)
 			<-release
@@ -41,7 +41,7 @@ func TestServerConnectionCap(t *testing.T) {
 		for _, srv := range c.Servers {
 			m[srv.Listen] = h
 		}
-		return m, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, redact.EmptyState(), nil
+		return m, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
 	}
 
 	cfg := &config.Config{
@@ -56,7 +56,7 @@ func TestServerConnectionCap(t *testing.T) {
 	srv := New(cfg, nil, lifecycle.Fingerprint{}, quietLogger(), factory, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, nil) }()
+	go func() { done <- srv.Run(ctx, nil, redact.EmptyState()) }()
 	t.Cleanup(func() {
 		doRelease()
 		cancel()

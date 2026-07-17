@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -26,19 +27,46 @@ import (
 	"jul/internal/upstream"
 )
 
+// ReloadSource identifies which mechanism requested a configuration reload.
+type ReloadSource int
+
+const (
+	// ReloadSourceSIGHUP is a manual Unix signal reload.
+	ReloadSourceSIGHUP ReloadSource = iota
+	// ReloadSourceFileWatch is an automatic reload triggered by a change to
+	// the on-disk configuration file.
+	ReloadSourceFileWatch
+	// ReloadSourceAdmin is an explicit reload triggered through the admin API.
+	ReloadSourceAdmin
+)
+
+// ReloadRequest is a typed reload event. It carries the candidate for admin
+// apply paths so the exact preflight-resolved candidate is tied to the event
+// that publishes it (R9-02). File-watch and SIGHUP events carry a nil
+// Candidate and the live reload falls back to loading from the source.
+type ReloadRequest struct {
+	Source    ReloadSource
+	Candidate *config.Candidate
+	// RawDigest, when non-empty, is the SHA-256 of the raw configuration bytes
+	// that Candidate represents. It lets the server reject a stale candidate
+	// if the on-disk file has changed since the candidate was injected.
+	RawDigest [32]byte
+}
+
 // HandlerFactory prepares a new handler generation for cfg without committing
 // it. The returned genID uniquely identifies this generation for redaction
 // retirement. The returned commitFn promotes staged resources (upstream pools,
 // closers) to live, captures the generation-scoped pool snapshots from the now-
 // live registry, and returns a retire callback for the previous generation. The
 // returned abortFn discards staged resources, leaving the live generation
-// untouched. The returned redact.State covers the secrets resolved during the
-// build and must be installed by the caller only at the reload publish boundary.
+// untouched. The factory does not return a redact.State: the caller (the
+// composition root for startup, ReloadPlan for reloads) owns the single
+// candidate redaction state and installs it only at the publish boundary.
 // Exactly one of commitFn or abortFn must be called; both release any lock held
 // during the build so concurrent builds are serialised without holding a lock
 // across the bind-attempt window. When commit or abort is nil (e.g. in tests),
 // the caller may skip the call safely.
-type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, genID uint64, commit func() (snapshots upstream.SnapshotMap, retirePrev func()), abort func(), state redact.State, err error)
+type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, genID uint64, commit func() (snapshots upstream.SnapshotMap, retirePrev func()), abort func(), err error)
 
 // Server runs one http.Server per unique listen address and coordinates
 // graceful shutdown and configuration reload.
@@ -96,18 +124,18 @@ type Server struct {
 	listeners map[string]*listenerEntry // keyed by listen address
 	handlers  atomic.Pointer[handlerGen]
 
-	// pendingCandidate is injected by the admin apply path so the live reload
-	// uses the exact candidate that passed preflight, rather than re-reading the
-	// file and resolving secrets a second time (R8-11). It is consumed once by
-	// doReload.
-	pendingCandidate atomic.Pointer[config.Candidate]
-
-	// redactMu guards redactGens, the per-generation active redaction states.
+	// redactMu guards redactGens and retiredRedaction. A generation is
+	// registered when its handlers are published and retired after its
+	// in-flight requests drain, so secrets are masked as long as any request
+	// of that generation may still emit them (R7-02). Generations that do not
+	// drain before the resource grace timeout move to retiredRedaction so the
+	// secret union remains masked without blocking shutdown (R9-03).
 	// A generation is registered when its handlers are published and retired
 	// after its in-flight requests drain, so secrets are masked as long as any
 	// request of that generation may still emit them (R7-02).
-	redactMu   sync.Mutex
-	redactGens map[uint64]redact.State
+	redactMu         sync.Mutex
+	redactGens       map[uint64]redact.State
+	retiredRedaction redact.State // union of grace-expired generations
 
 	wg       sync.WaitGroup
 	serveErr chan error
@@ -132,11 +160,37 @@ func (s *Server) LastReload() *lastReloadInfo {
 	return nil
 }
 
-// InjectCandidate hands the exact candidate that passed admin preflight to the
-// next live reload. This prevents secret sources or the on-disk file from
-// changing between preflight validation and the asynchronous swap (R8-11).
+// InjectCandidate is retained for compatibility but is no longer used by the
+// typed reload request path (R9-02). Callers should send a ReloadRequest with
+// Source == ReloadSourceAdmin and Candidate set.
 func (s *Server) InjectCandidate(c *config.Candidate) {
-	s.pendingCandidate.Store(c)
+	// No-op: typed ReloadRequest carries the candidate directly.
+	_ = c
+}
+
+// candidateStillValid reports whether an injected admin candidate still
+// matches the configuration currently persisted by the source. When the
+// source has diverged from the candidate since preflight, the candidate is
+// stale and must not be published (R9-02).
+func (s *Server) candidateStillValid(req ReloadRequest) bool {
+	if req.Candidate == nil || req.Candidate.Raw == nil || s.source == nil {
+		return false
+	}
+	// If no digest was supplied, accept the candidate (legacy path).
+	if req.RawDigest == [32]byte{} {
+		return true
+	}
+	current, err := s.source.Load()
+	if err != nil {
+		return false
+	}
+	// Compare canonical TOML bytes so normalization differences (defaults,
+	// ordering) do not produce false mismatches.
+	currentBytes, err := config.Marshal(current)
+	if err != nil {
+		return false
+	}
+	return sha256Digest(currentBytes) == req.RawDigest
 }
 
 // handlerGen is one generation of the per-listen-address handler map plus the
@@ -220,16 +274,24 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 // Run binds all listeners, serves until ctx is cancelled, reloading on each
 // receive from the reload channel, then drains in-flight requests within the
 // configured shutdown timeout.
-func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
+// Run binds all listeners, serves until ctx is cancelled, reloading on each
+// receive from the reload channel, then drains in-flight requests within the
+// configured shutdown timeout.
+//
+// initialRedaction is the redaction state for the startup candidate. The
+// factory intentionally does not return redaction state (R9-01); it is passed
+// separately so the initial generation's secrets remain masked for the
+// process lifetime.
+func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRedaction redact.State) error {
 	// The startup effective config is already resolved by the composition root
 	// and passed as s.cfg. The factory receives the same candidate that will be
 	// served, so there is no second secret resolution at startup (R7-05).
-	handlers, genID, commit, _, state, err := s.factory(s.cfg)
+	handlers, genID, commit, _, err := s.factory(s.cfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
 	}
 	snapshots, _ := commit() // promote the initial generation; retirePrev is nil at startup
-	s.registerRedactionGen(genID, state)
+	s.registerRedactionGen(genID, initialRedaction)
 	s.handlers.Store(newHandlerGen(handlers, snapshots, genID))
 
 	addrs := uniqueListenAddrs(s.cfg.Servers)
@@ -254,8 +316,8 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) error {
 			s.shutdownAll(context.Background())
 			s.wg.Wait()
 			return err
-		case <-reload:
-			s.doReload()
+		case req := <-reload:
+			s.doReload(req)
 		}
 	}
 }
@@ -472,10 +534,11 @@ func (s *Server) acquireGen() *handlerGen {
 // retireResources is the factory-supplied closer for that generation and may be
 // nil (the initial generation owns nothing a previous one did not).
 // retireRedaction removes the generation's secrets from the active redaction
-// set; it is invoked only when the generation actually drains, never on the
-// grace timeout, so secrets stay masked while old-generation code still
-// executes (R8-14).
-func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction func()) {
+// set. If the generation drains within the grace timeout it is removed from
+// the active generation set. If the grace timeout fires first, the generation's
+// secrets are moved to retiredRedaction instead, so secret masking outlives
+// forced resource closure without blocking process shutdown (R8-14, R9-03).
+func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction, retireToTombstone func()) {
 	if g == nil || retireResources == nil {
 		return
 	}
@@ -487,6 +550,9 @@ func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction func(
 			retireRedaction()
 		}
 		return
+	}
+	if retireToTombstone == nil {
+		retireToTombstone = retireRedaction
 	}
 	grace := s.shutdownTimeout()
 
@@ -505,16 +571,61 @@ func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction func(
 		g.doRetire()
 	}()
 
-	// Redaction is retired only when the generation truly drains, even if that
-	// happens after the resource grace timeout.
+	// Wait for genuine drain, but do not block shutdown. If the drain completes
+	// within grace, retire the redaction normally. If it does not, move the
+	// generation's secrets to retiredRedaction so masking continues until the
+	// process exits while the shutdown wait group remains bounded (R9-03).
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		<-g.drained
-		if retireRedaction != nil {
-			retireRedaction()
+		t := time.NewTimer(grace)
+		defer t.Stop()
+		select {
+		case <-g.drained:
+			if retireRedaction != nil {
+				retireRedaction()
+			}
+		case <-t.C:
+			s.moveRedactionToRetired(retireToTombstone)
 		}
 	}()
+}
+
+// moveRedactionToRetired transfers a generation's redaction state into the
+// permanent retired union. It is used when a generation fails to drain before
+// the resource grace timeout, so secrets stay masked without an unbounded
+// shutdown waiter.
+func (s *Server) moveRedactionToRetired(retireRedaction func()) {
+	if retireRedaction == nil {
+		return
+	}
+	// The callback (e.g. retireRedactionForGen) acquires redactMu itself, so
+	// do not hold it across the call: that would deadlock.
+	retireRedaction()
+	s.redactMu.Lock()
+	defer s.redactMu.Unlock()
+	// Recompute the live union after retiring the generation; any secrets that
+	// were unique to it are now captured in retiredRedaction.
+	redact.Install(s.redactUnionLocked())
+}
+
+// retireRedactionForGen extracts the generation's redaction state and adds it
+// to retiredRedaction. It is used as the retireRedaction callback when a
+// generation's resource grace timeout fires before the generation drains.
+func (s *Server) retireRedactionForGen(genID uint64) {
+	s.redactMu.Lock()
+	defer s.redactMu.Unlock()
+	state, ok := s.redactGens[genID]
+	if !ok {
+		return
+	}
+	delete(s.redactGens, genID)
+	if s.retiredRedaction.Count() == 0 {
+		s.retiredRedaction = state
+	} else {
+		s.retiredRedaction = s.retiredRedaction.Union(state)
+	}
+	redact.Install(s.redactUnionLocked())
 }
 
 // dynamicHandler returns a handler that dispatches to the currently-installed
@@ -567,10 +678,11 @@ func (s *Server) retireRedactionGen(genID uint64) {
 
 // redactUnionLocked returns the union of all registered generation redaction
 // states. Callers must hold s.redactMu.
+func sha256Digest(data []byte) [32]byte {
+	return sha256.Sum256(data)
+}
+
 func (s *Server) redactUnionLocked() redact.State {
-	if len(s.redactGens) == 0 {
-		return redact.EmptyState()
-	}
 	var merged redact.State
 	first := true
 	for _, state := range s.redactGens {
@@ -580,6 +692,13 @@ func (s *Server) redactUnionLocked() redact.State {
 		} else {
 			merged = merged.Union(state)
 		}
+	}
+	if !first && s.retiredRedaction.Count() > 0 {
+		merged = merged.Union(s.retiredRedaction)
+	} else if first && s.retiredRedaction.Count() > 0 {
+		merged = s.retiredRedaction
+	} else if first {
+		merged = redact.EmptyState()
 	}
 	return merged
 }
@@ -600,17 +719,24 @@ func (s *Server) redactUnionLocked() redact.State {
 //
 // 10. PostCommit — log level, GOMAXPROCS, stream reload.
 // On any failure before Publish, plan.Abort() releases candidate resources.
-func (s *Server) doReload() {
+func (s *Server) doReload(req ReloadRequest) {
 	if s.source == nil {
 		return
 	}
 	s.log.Info("reloading configuration", "source", s.source.Name())
 
 	var plan *ReloadPlan
-	if candidate := s.pendingCandidate.Swap(nil); candidate != nil {
+	if req.Candidate != nil {
 		// Admin apply path: use the exact candidate that passed preflight.
-		plan = s.newReloadPlan(candidate.Raw, candidate)
-	} else {
+		// If the on-disk file has diverged from the candidate's raw digest,
+		// fall back to source load so a stale candidate cannot publish.
+		if s.candidateStillValid(req) {
+			plan = s.newReloadPlan(req.Candidate.Raw, req.Candidate)
+		} else {
+			s.log.Warn("reload: injected candidate no longer matches persisted file; falling back to source load", "source", s.source.Name())
+		}
+	}
+	if plan == nil {
 		newCfg, err := s.source.Load()
 		if err != nil {
 			s.log.Error("reload aborted: load failed", "error", err)

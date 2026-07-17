@@ -174,7 +174,7 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	handlers, genID, commitFn, abortFn, state, err := f.Prepare(cfg)
+	handlers, genID, commitFn, abortFn, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -193,8 +193,7 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	snapshots, retirePrev := commitFn()
 	_ = snapshots
 	// commitFn no longer installs redaction; the caller (ReloadPlan.Publish)
-	// owns that. Verify the state is returned and non-nil.
-	_ = state
+	// owns that.
 	// retirePrev is nil on the first commit (no previous generation).
 	if retirePrev != nil {
 		retirePrev()
@@ -214,7 +213,7 @@ func TestHandlerFactoryPrepareAbort(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	_, _, _, abortFn, _, err := f.Prepare(cfg)
+	_, _, _, abortFn, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -244,21 +243,18 @@ func TestHandlerFactoryPrepareAbortDoesNotInstallRedaction(t *testing.T) {
 	if candidate.Redaction.Apply("candidate-secret-value") != "***" {
 		t.Fatal("candidate redaction does not mask the secret")
 	}
-	_, _, _, abortFn, state, err := f.Prepare(candidate.Effective)
+	_, _, _, abortFn, err := f.Prepare(candidate.Effective)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	abortFn()
 
-	if state.Count() != 0 {
-		t.Fatal("Prepare resolved secrets itself instead of receiving a candidate")
-	}
 	if redact.Apply("candidate-secret-value") != "candidate-secret-value" {
 		t.Fatal("aborted Prepare installed candidate secret into live redaction state")
 	}
 }
 
-func TestHandlerFactoryPrepareReturnsEmptyRedactionState(t *testing.T) {
+func TestHandlerFactoryPrepareDoesNotReturnRedactionState(t *testing.T) {
 	f, cleanup := minimalFactory(t)
 	defer cleanup()
 
@@ -271,16 +267,13 @@ func TestHandlerFactoryPrepareReturnsEmptyRedactionState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCandidate: %v", err)
 	}
-	_, _, commitFn, abortFn, state, err := f.Prepare(candidate.Effective)
+	_, _, commitFn, abortFn, err := f.Prepare(candidate.Effective)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	defer abortFn()
-	// Prepare no longer resolves secrets; the caller is responsible for the
-	// candidate redaction state (R7-05).
-	if state.Count() != 0 {
-		t.Fatal("Prepare returned a non-empty redaction state; it should use the candidate")
-	}
+	// Prepare no longer resolves secrets and does not return a redaction state;
+	// the caller is responsible for the candidate redaction state (R7-05, R9-01).
 	// Live registry must remain untouched before explicit install.
 	if redact.Apply("commit-secret-value") != "commit-secret-value" {
 		t.Fatal("commitFn installed redaction before the publish boundary")
@@ -358,7 +351,7 @@ func TestPrepareCapturesSnapshotsAfterCommit(t *testing.T) {
 		}},
 	}
 
-	_, _, commitFn, abortFn, _, err := f.Prepare(cfg)
+	_, _, commitFn, abortFn, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -380,7 +373,7 @@ func TestPrepareCapturesSnapshotsAfterCommit(t *testing.T) {
 
 	// A second Prepare+commit must capture the new generation's backend view.
 	cfg.Upstreams[0].Servers = append(cfg.Upstreams[0].Servers, config.UpstreamServer{Address: "127.0.0.1:8002"})
-	_, _, commitFn2, abortFn2, _, err := f.Prepare(cfg)
+	_, _, commitFn2, abortFn2, err := f.Prepare(cfg)
 	if err != nil {
 		t.Fatalf("second Prepare: %v", err)
 	}

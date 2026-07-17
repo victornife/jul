@@ -22,7 +22,6 @@ import (
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/plugins"
-	"jul/internal/redact"
 	"jul/internal/router"
 	"jul/internal/upstream"
 	"jul/internal/waf"
@@ -88,13 +87,13 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 // registry, and returns a retire callback for the previous generation. The
 // returned abortFn discards staged resources, leaving the live generation
 // untouched. The returned genID is the unique identifier for this generation,
-// used by the server to retire its redaction entry. The returned redact.State
-// is empty because the caller is expected to resolve secrets exactly once into
-// a config.Candidate and install its redaction state at the publish boundary
-// (R7-05).
+// used by the server to retire its redaction entry. The factory does not
+// return a redact.State: the caller resolves secrets exactly once into a
+// config.Candidate and installs its redaction state at the publish boundary
+// (R7-05, R9-01).
 // Exactly one of commitFn or abortFn must be called; both release the factory
 // mutex so no concurrent build can start while a staged generation is pending.
-func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Handler, genID uint64, commitFn func() (upstream.SnapshotMap, func()), abortFn func(), state redact.State, err error) {
+func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Handler, genID uint64, commitFn func() (upstream.SnapshotMap, func()), abortFn func(), err error) {
 	f.mu.Lock()
 	// Mutex is NOT deferred here: it is released by commitFn or abortFn.
 
@@ -108,7 +107,7 @@ func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Han
 	if err != nil {
 		gen.Abort()
 		f.mu.Unlock()
-		return nil, 0, nil, nil, redact.State{}, err
+		return nil, 0, nil, nil, err
 	}
 
 	usedUpstreamKeys := upstreamKeysUsed(c, upstreams)
@@ -135,7 +134,7 @@ func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Han
 		gen.Abort()
 		f.mu.Unlock()
 	}
-	return handlers, genID, commitFn, abortFn, state, nil
+	return handlers, genID, commitFn, abortFn, nil
 }
 
 // buildHandlers constructs the per-listen-address handler tree from c, staging

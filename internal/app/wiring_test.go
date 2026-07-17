@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/server"
 )
 
 func TestRateKeyKind(t *testing.T) {
@@ -121,26 +122,35 @@ func TestMergeReloadFansInAndSkipsNil(t *testing.T) {
 	defer cancel()
 
 	a := make(chan struct{}, 1)
-	b := make(chan struct{}, 1)
-	out := MergeReload(ctx, a, nil, b)
+	admin := make(chan server.ReloadRequest, 1)
+	// fileWatch is nil; admin is non-nil.
+	out := MergeReload(ctx, a, nil, admin)
 
-	recv := func() bool {
+	recv := func() (server.ReloadRequest, bool) {
 		select {
-		case <-out:
-			return true
+		case r := <-out:
+			return r, true
 		case <-time.After(time.Second):
-			return false
+			return server.ReloadRequest{}, false
 		}
 	}
 
 	a <- struct{}{}
-	if !recv() {
+	if r, ok := recv(); !ok || r.Source != server.ReloadSourceSIGHUP {
 		t.Error("signal on source a did not propagate to merged channel")
 	}
-	b <- struct{}{}
-	if !recv() {
-		t.Error("signal on source b did not propagate to merged channel")
+
+	// Admin channel carries typed ReloadRequest, not bare struct{}. Candidate-
+	// bearing events must remain intact so the server applies the exact
+	// preflight-resolved candidate (R9-02).
+	want := server.ReloadRequest{Source: server.ReloadSourceAdmin, Candidate: &config.Candidate{}}
+	admin <- want
+	if r, ok := recv(); !ok || r.Source != server.ReloadSourceAdmin || r.Candidate == nil {
+		t.Errorf("admin candidate event was corrupted or dropped: got source=%v candidate=%v", r.Source, r.Candidate)
 	}
+
+	// nil admin channel should also be accepted without panic.
+	_ = MergeReload(ctx, a, nil, nil)
 }
 
 func TestValidateRuntimeConfig(t *testing.T) {

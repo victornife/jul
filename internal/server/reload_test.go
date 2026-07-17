@@ -59,8 +59,14 @@ func cfgWith(addr string) *config.Config {
 	}
 }
 
+func cfgWithReturn(addr string, code int) *config.Config {
+	c := cfgWith(addr)
+	c.Servers[0].Locations[0].Return = code
+	return c
+}
+
 func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
-	return func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
+	return func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		current := *tag.Load()
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, current)
@@ -80,7 +86,7 @@ func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
 				// nothing to discard
 			}
 		}
-		return m, 1, commitFn, abortFn, redact.EmptyState(), nil
+		return m, 1, commitFn, abortFn, nil
 	}
 }
 
@@ -167,16 +173,16 @@ func TestReloadSwapsHandler(t *testing.T) {
 	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reload := make(chan struct{}, 1)
+	reload := make(chan ReloadRequest, 1)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }()
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitForServe(t, "http://"+addr+"/", "v1")
 
 	// Change what the factory produces, then trigger reload.
 	v2 := "v2"
 	tag.Store(&v2)
 	src.set(cfgWith(addr), nil)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 
 	if !eventually(t, "http://"+addr+"/", "v2") {
 		t.Fatal("handler did not swap to v2 after reload")
@@ -228,7 +234,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 	var enterOnce, retireOnce sync.Once
 	var builds atomic.Int32
 
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		n := builds.Add(1)
 		var h http.Handler
 		switch n {
@@ -270,7 +276,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 				// nothing to discard
 			}
 		}
-		return m, uint64(n), commitFn, abortFn, redact.EmptyState(), nil
+		return m, uint64(n), commitFn, abortFn, nil
 	}
 
 	src := &stubSource{}
@@ -278,9 +284,9 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reload := make(chan struct{}, 1)
+	reload := make(chan ReloadRequest, 1)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }()
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
 
 	// Wait until the server is actually serving HTTP responses, not just TCP
 	// connections. Under the race detector the HTTP stack initialises slowly, so
@@ -303,7 +309,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 
 	// Trigger the reload while the gen-1 request is in flight.
 	src.set(cfgWith(addr), nil)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 
 	// New requests must immediately observe the new generation.
 	if !eventually(t, "http://"+addr+"/", "v2") {
@@ -350,7 +356,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 func TestReloadNoGoroutineLeak(t *testing.T) {
 	addr := freePort(t)
 
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, "ok")
 		})
@@ -361,7 +367,7 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 		// Non-nil retire so every reload exercises the retire path.
 		commitFn := func() (upstream.SnapshotMap, func()) { return nil, func() {} }
 		abortFn := func() {}
-		return m, 1, commitFn, abortFn, redact.EmptyState(), nil
+		return m, 1, commitFn, abortFn, nil
 	}
 
 	src := &stubSource{}
@@ -369,9 +375,9 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reload := make(chan struct{})
+	reload := make(chan ReloadRequest)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }()
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitForServe(t, "http://"+addr+"/", "ok")
 
 	// A no-keep-alive client so each request's server-side connection goroutine
@@ -398,7 +404,7 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 	const reloads = 50
 	for i := 0; i < reloads; i++ {
 		src.set(cfgWith(addr), nil)
-		reload <- struct{}{}
+		reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 		get()
 	}
 
@@ -440,15 +446,15 @@ func TestReloadRejectsInvalidConfig(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reload := make(chan struct{}, 1)
-	go func() { _ = srv.Run(ctx, reload) }()
+	reload := make(chan ReloadRequest, 1)
+	go func() { _ = srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitForServe(t, "http://"+addr+"/", "v1")
 
 	// Make the next config invalid and bump the factory output.
 	v2 := "v2"
 	tag.Store(&v2)
 	validateErr.Store(true)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 	time.Sleep(200 * time.Millisecond)
 
 	// Server must keep serving the old handler (v1) after a rejected reload.
@@ -478,20 +484,20 @@ func TestReloadAddsAndRemovesListener(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reload := make(chan struct{}, 1)
-	go func() { _ = srv.Run(ctx, reload) }()
+	reload := make(chan ReloadRequest, 1)
+	go func() { _ = srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitForServe(t, "http://"+addr1+"/", "ok")
 
 	// Reload to a config that adds addr2.
 	src.set(twoAddr, nil)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 	if !eventually(t, "http://"+addr2+"/", "ok") {
 		t.Fatal("new listener addr2 not serving after reload")
 	}
 
 	// Reload back to one address; addr2 should stop accepting.
 	src.set(oneAddr, nil)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 	time.Sleep(300 * time.Millisecond)
 	if reachable("http://" + addr2 + "/") {
 		t.Fatal("addr2 should be removed after reload")
@@ -593,14 +599,14 @@ func TestDoReloadBlocksOnRestartRequired(t *testing.T) {
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reload := make(chan struct{}, 1)
+	reload := make(chan ReloadRequest, 1)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }()
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitDialable(t, addr)
 
 	// Push a restart-required change via the direct reload path.
 	src.set(withCache, nil)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 
 	// Wait for the reload to be processed.
 	deadline := time.Now().Add(3 * time.Second)
@@ -642,9 +648,9 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reload := make(chan struct{}, 1)
+	reload := make(chan ReloadRequest, 1)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }()
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitForServe(t, "http://"+addr+"/", "v1")
 
 	// Occupy a second port so the reload's bind will fail.
@@ -666,7 +672,7 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 		},
 	}
 	src.set(newCfg, nil)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 
 	// Wait for the reload result.
 	deadline := time.Now().Add(3 * time.Second)
@@ -715,9 +721,9 @@ func TestDoReloadReplacementAddressBindFailureKeepsOld(t *testing.T) {
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reload := make(chan struct{}, 1)
+	reload := make(chan ReloadRequest, 1)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }()
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitForServe(t, "http://"+oldAddr+"/", "v1")
 
 	// Occupy a port, then reload with the new config replacing oldAddr with it.
@@ -740,7 +746,7 @@ func TestDoReloadReplacementAddressBindFailureKeepsOld(t *testing.T) {
 		},
 	}
 	src.set(replacement, nil)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 
 	// Wait for the reload to complete.
 	deadline := time.Now().Add(3 * time.Second)
@@ -788,9 +794,9 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 		func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reload := make(chan struct{}, 1)
+	reload := make(chan ReloadRequest, 1)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }()
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitForServe(t, "http://"+addr1+"/", "v1")
 
 	// New config adds addr2 with a distinctive idle timeout so we can verify the
@@ -811,7 +817,7 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 		},
 	}
 	src.set(newCfg, nil)
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 
 	// Wait for the reload to complete and addr2 to be serving.
 	deadline := time.Now().Add(3 * time.Second)
@@ -850,4 +856,158 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+// TestAdminReloadRequestUsesCandidate (R9-02) verifies the typed admin reload
+// path: a ReloadRequest carrying a preflight-resolved candidate is applied
+// directly, and a stale candidate whose raw digest no longer matches is
+// rejected in favor of the source load.
+func TestAdminReloadRequestUsesCandidate(t *testing.T) {
+	addr := freePort(t)
+
+	var genIDCounter atomic.Uint64
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		genID := genIDCounter.Add(1)
+		body := fmt.Sprintf("return-%d", c.Servers[0].Locations[0].Return)
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, body)
+		})
+		m := map[string]http.Handler{addr: h}
+		commitFn := func() (upstream.SnapshotMap, func()) { return nil, nil }
+		abortFn := func() {}
+		return m, genID, commitFn, abortFn, nil
+	}
+
+	src := &stubSource{}
+	src.set(cfgWithReturn(addr, 200), nil)
+
+	srv := New(cfgWithReturn(addr, 200), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+addr+"/", "return-200")
+
+	// Valid admin candidate: Return 201. The server should apply it directly.
+	raw201 := cfgWithReturn(addr, 201)
+	cand201, err := config.NewCandidate(raw201)
+	if err != nil {
+		t.Fatalf("NewCandidate: %v", err)
+	}
+	data201, err := config.Marshal(cand201.Raw)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	// Simulate the admin write path: the source now holds the same raw config
+	// the candidate was built from.
+	src.set(raw201, nil)
+	reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: cand201, RawDigest: sha256Digest(data201)}
+
+	if !eventually(t, "http://"+addr+"/", "return-201") {
+		t.Fatal("admin candidate was not applied")
+	}
+
+	// Stale admin candidate: the candidate raw config no longer matches the
+	// supplied digest, so the server must fall back to the source load.
+	src.set(cfgWithReturn(addr, 202), nil)
+	raw203 := cfgWithReturn(addr, 203)
+	cand203, err := config.NewCandidate(raw203)
+	if err != nil {
+		t.Fatalf("NewCandidate: %v", err)
+	}
+	// Deliberately use the digest from raw201 to force a mismatch.
+	reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: cand203, RawDigest: sha256Digest(data201)}
+
+	if !eventually(t, "http://"+addr+"/", "return-202") {
+		t.Fatal("stale admin candidate did not fall back to source load")
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+// TestShutdownBoundedByGraceTimeout (R9-03) verifies that shutdown does not
+// hang forever when a previous generation never drains: the redaction waiter
+// hits its grace timeout, moves secrets to the retired tombstone, and exits,
+// so Run returns within the configured shutdown window.
+func TestShutdownBoundedByGraceTimeout(t *testing.T) {
+	addr := freePort(t)
+
+	entered := make(chan struct{})
+	blocking := make(chan struct{}) // never closed
+
+	var genIDCounter atomic.Uint64
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		genID := genIDCounter.Add(1)
+		var h http.Handler
+		if genID == 1 {
+			h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/ready" {
+					_, _ = io.WriteString(w, "ready")
+					return
+				}
+				close(entered)
+				<-blocking
+			})
+		} else {
+			h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, "v2")
+			})
+		}
+		m := map[string]http.Handler{addr: h}
+		commitFn := func() (upstream.SnapshotMap, func()) { return nil, nil }
+		abortFn := func() {}
+		return m, genID, commitFn, abortFn, nil
+	}
+
+	src := &stubSource{}
+	src.set(cfgWith(addr), nil)
+	cfg := cfgWith(addr)
+	cfg.Global.ShutdownTimeout = config.Duration(100 * time.Millisecond)
+	srv := New(cfg, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+addr+"/ready", "ready")
+
+	// Start a request on generation 1 that will never complete.
+	go func() {
+		client := &http.Client{Transport: testTransport, Timeout: 5 * time.Second}
+		resp, err := client.Get("http://" + addr + "/")
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("request never entered handler")
+	}
+
+	// Reload to generation 2. Generation 1 is now retiring but will never drain.
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
+
+	if !eventually(t, "http://"+addr+"/ready", "v2") {
+		t.Fatal("reload did not install generation 2")
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down within bounded time")
+	}
+
+	// Release the blocked handler goroutine so goleak does not flag it.
+	close(blocking)
 }

@@ -42,20 +42,20 @@ func TestReloadTimeout(t *testing.T) {
 	src.set(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil)
 
 	// Factory that sleeps longer than the reload timeout.
-	slowFactory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
+	slowFactory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		time.Sleep(200 * time.Millisecond)
 		commitFn := func() (upstream.SnapshotMap, func()) { return nil, nil }
 		abortFn := func() {}
-		return factoryFor(c, "v1"), 1, commitFn, abortFn, redact.EmptyState(), nil
+		return factoryFor(c, "v1"), 1, commitFn, abortFn, nil
 	}
 
 	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reload := make(chan struct{}, 1)
+	reload := make(chan ReloadRequest, 1)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }()
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
 	waitDialable(t, addr)
 
 	// Trigger a reload that exceeds the timeout threshold. Poll for the result
@@ -63,7 +63,7 @@ func TestReloadTimeout(t *testing.T) {
 	// goroutine scheduling and coverage-instrumentation overhead on a loaded
 	// machine can push the total past a tight fixed sleep, making the test
 	// intermittently flaky.
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 	var li *lastReloadInfo
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -105,12 +105,12 @@ func TestReloadRecordsSuccessAndDuration(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reload := make(chan struct{}, 1)
+	reload := make(chan ReloadRequest, 1)
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(ctx, reload) }() //nolint:errcheck
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }() //nolint:errcheck
 	waitDialable(t, addr)
 
-	reload <- struct{}{}
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
 	time.Sleep(50 * time.Millisecond)
 
 	li := srv.LastReload()

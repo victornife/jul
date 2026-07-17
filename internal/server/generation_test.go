@@ -4,14 +4,17 @@
 package server
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/redact"
 	"jul/internal/upstream"
 )
@@ -122,13 +125,48 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// TestRedactionRetiredOnlyOnDrain (R8-14) verifies that redaction secrets are
-// removed only when the generation truly drains, not when the resource grace
-// timeout fires. This prevents old-generation request logs from leaking secrets
-// that were removed from the new generation.
-func TestRedactionRetiredOnlyOnDrain(t *testing.T) {
+// TestStartupRedactionIsRegistered (R9-01) verifies that the initial redaction
+// state passed to Run is installed before the server starts serving, so secrets
+// resolved at startup are masked from the first request.
+func TestStartupRedactionIsRegistered(t *testing.T) {
+	addr := freePort(t)
+	secret := "startup-secret-" + addr
+
+	var genIDCounter atomic.Uint64
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		genID := genIDCounter.Add(1)
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, redact.Apply(secret))
+		})
+		m := map[string]http.Handler{addr: h}
+		commitFn := func() (upstream.SnapshotMap, func()) { return nil, nil }
+		abortFn := func() {}
+		return m, genID, commitFn, abortFn, nil
+	}
+
+	src := &stubSource{}
+	src.set(cfgWith(addr), nil)
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+
+	initial := redact.NewState([]string{secret}, redact.DefaultMinLen)
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, initial) }()
+	waitForServe(t, "http://"+addr+"/", redact.Mask)
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+// TestRedactionRetiredWhenGenerationDrains verifies the normal reload path:
+// when the previous generation drains before the grace timeout, its secrets
+// are removed from the active set and stop being masked.
+func TestRedactionRetiredWhenGenerationDrains(t *testing.T) {
 	s := &Server{
-		cfg:        &config.Config{Global: config.GlobalConfig{ShutdownTimeout: config.Duration(50 * time.Millisecond)}},
+		cfg:        &config.Config{Global: config.GlobalConfig{ShutdownTimeout: config.Duration(5 * time.Second)}},
 		log:        slog.Default(),
 		redactGens: make(map[uint64]redact.State),
 	}
@@ -151,6 +189,68 @@ func TestRedactionRetiredOnlyOnDrain(t *testing.T) {
 			s.retireRedactionGen(1)
 			close(redactionRetired)
 		},
+		func() {
+			s.retireRedactionForGen(1)
+			close(redactionRetired)
+		},
+	)
+
+	// Let the generation drain before the grace timeout fires.
+	g.release()
+
+	select {
+	case <-resourcesRetired:
+	case <-time.After(time.Second):
+		t.Fatal("resources were not retired after drain")
+	}
+	select {
+	case <-redactionRetired:
+	case <-time.After(time.Second):
+		t.Fatal("redaction was not retired after drain")
+	}
+
+	if redact.Apply("old-secret") != "old-secret" {
+		t.Fatal("old-secret still masked after generation drained")
+	}
+	if redact.Apply("new-secret") != "***" {
+		t.Fatal("new-secret not masked after old generation retired")
+	}
+}
+
+// TestRedactionMovedToTombstoneOnGraceTimeout (R9-03) verifies that when a
+// generation does not drain before the resource grace timeout, its secrets are
+// moved to the retiredRedaction tombstone instead of blocking shutdown. The
+// secrets stay masked for the process lifetime even after the generation
+// eventually drains.
+func TestRedactionMovedToTombstoneOnGraceTimeout(t *testing.T) {
+	s := &Server{
+		cfg:        &config.Config{Global: config.GlobalConfig{ShutdownTimeout: config.Duration(50 * time.Millisecond)}},
+		log:        slog.Default(),
+		redactGens: make(map[uint64]redact.State),
+	}
+
+	oldGen := redact.NewState([]string{"old-secret"}, redact.DefaultMinLen)
+	newGen := redact.NewState([]string{"new-secret"}, redact.DefaultMinLen)
+
+	s.registerRedactionGen(1, oldGen)
+	s.registerRedactionGen(2, newGen)
+
+	g := newHandlerGen(map[string]http.Handler{}, upstream.SnapshotMap{}, 1)
+	g.inflight.Add(1) // simulate a request still executing on generation 1
+
+	resourcesRetired := make(chan struct{})
+	redactionTombstoned := make(chan struct{})
+
+	s.retireGen(g,
+		func() { close(resourcesRetired) },
+		func() {
+			s.retireRedactionGen(1)
+			close(redactionTombstoned)
+		},
+		func() {
+			s.retireRedactionForGen(1)
+			close(redactionTombstoned)
+		},
 	)
 
 	// Wait for the grace timeout to fire and resources to be closed.
@@ -160,25 +260,32 @@ func TestRedactionRetiredOnlyOnDrain(t *testing.T) {
 		t.Fatal("resources were not retired within timeout")
 	}
 
-	// Immediately after the grace timeout, redaction must still cover the old
-	// generation's secret because the request has not drained.
-	if redact.Apply("old-secret") != "***" {
-		t.Fatal("old-secret no longer masked after grace timeout but before drain")
-	}
-
-	// Now let the generation drain.
-	g.release()
-
+	// The redaction goroutine should also have hit the timeout and moved
+	// secrets to the tombstone.
 	select {
-	case <-redactionRetired:
+	case <-redactionTombstoned:
 	case <-time.After(time.Second):
-		t.Fatal("redaction was not retired after generation drained")
+		t.Fatal("redaction was not tombstoned after grace timeout")
 	}
 
-	if redact.Apply("old-secret") != "old-secret" {
-		t.Fatal("old-secret still masked after generation drained")
+	// Secrets must remain masked after the grace timeout: the request is still
+	// in flight and the tombstone keeps masking alive.
+	if redact.Apply("old-secret") != "***" {
+		t.Fatal("old-secret no longer masked after grace timeout")
 	}
 	if redact.Apply("new-secret") != "***" {
-		t.Fatal("new-secret not masked after old generation retired")
+		t.Fatal("new-secret not masked while generation 2 is active")
+	}
+
+	// Let the generation drain. With R9-03 the tombstone is permanent for the
+	// process lifetime, so old-secret stays masked even after drain.
+	g.release()
+	time.Sleep(25 * time.Millisecond)
+
+	if redact.Apply("old-secret") != "***" {
+		t.Fatal("old-secret no longer masked after drain; tombstone should preserve it")
+	}
+	if redact.Apply("new-secret") != "***" {
+		t.Fatal("new-secret not masked after drain")
 	}
 }

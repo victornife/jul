@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"log/slog"
 	"net"
 	"net/http"
@@ -191,24 +192,36 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	// factory adapts HandlerFactory.Prepare to the server reload hook: the
 	// three-phase prepare/commit/abort pattern keeps the generation uncommitted
-	// until listener staging succeeds (R4-01). The redaction state is taken from
-	// the startup candidate so the initial generation masks exactly the secrets
-	// resolved at startup; reloads provide their own candidate redaction via
-	// ReloadPlan (R7-05).
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), redact.State, error) {
+	// until listener staging succeeds (R4-01). The factory no longer returns a
+	// redact.State; the server receives the startup candidate's redaction
+	// directly so the initial generation masks exactly the secrets resolved at
+	// startup (R7-05, R9-01).
+	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		return f.Prepare(c)
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 
-	// adminReload lets the admin /reload endpoint trigger a reload through the
-	// same path as SIGHUP and file-watch events.
-	adminReload := make(chan struct{}, 1)
-	var triggerReload func(*config.Candidate)
-	triggerReload = func(*config.Candidate) {
+	// adminReload carries typed reload requests from the admin apply path.
+	// It is buffered so a candidate-bearing request can queue while a reload is
+	// in progress, but it preserves causal ordering: the candidate is part of
+	// the request message, not stored in a separate global slot (R9-02).
+	adminReload := make(chan server.ReloadRequest, 1)
+	var triggerReload func(*config.Candidate, []byte)
+	triggerReload = func(c *config.Candidate, raw []byte) {
+		req := server.ReloadRequest{Source: server.ReloadSourceAdmin}
+		if c != nil {
+			req.Candidate = c
+			// Digest the candidate's canonical raw config, not the exact bytes
+			// written to disk, so the reload-side check compares normalized TOML
+			// and tolerates serialization differences (R9-02).
+			if data, err := config.Marshal(c.Raw); err == nil {
+				req.RawDigest = sha256.Sum256(data)
+			}
+		}
 		select {
-		case adminReload <- struct{}{}:
+		case adminReload <- req:
 		default:
 		}
 	}
@@ -220,7 +233,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		fileWatch = watchConfig(ctx, ts.Path, log)
 	}
 	// Merge SIGHUP (when present), config file-watch, and admin-triggered
-	// reloads into a single channel.
+	// reloads into a single typed channel.
 	reload := MergeReload(ctx, sigReload, fileWatch, adminReload)
 
 	// ── Section 3: Preflight ───────────────────────────────────────────────
@@ -252,7 +265,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps := BuildAdminDeps(productName, version, src, subsystems)
 	// Defer the candidate-injecting reload until after the server is created.
 	// For now wire the no-candidate fallback used by the admin /reload button.
-	deps.Reload = func() { triggerReload(nil) }
+	deps.Reload = func() { triggerReload(nil, nil) }
 	var readyFlag admin.Readiness
 	deps.Ready = readyFlag.Ready
 	deps.LoadConfig = src.Load
@@ -279,7 +292,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err := atomicfile.Write(path, data, 0o600); err != nil {
 				return err
 			}
-			triggerReload(candidate)
+			triggerReload(candidate, data)
 			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
@@ -303,7 +316,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err := atomicfile.Write(path, data, 0o600); err != nil {
 				return err
 			}
-			triggerReload(candidate)
+			triggerReload(candidate, data)
 			return nil
 		}
 	}
@@ -354,20 +367,29 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.ConnStateHook = metrics.ConnState
 	srv.ACME = rt.ACME
 
-	// Re-wire the reload trigger so admin apply injects the exact preflight
-	// candidate into the server before signalling the reload channel (R8-11).
-	// Manual reloads via the admin /reload endpoint have no candidate and fall
-	// back to reading the source.
-	triggerReload = func(c *config.Candidate) {
+	// Re-wire the reload trigger so admin apply sends a typed ReloadRequest
+	// carrying the exact preflight candidate. The candidate is part of the
+	// channel message, not a global slot, so it cannot be consumed by an
+	// unrelated SIGHUP or file-watch event (R9-02).
+	triggerReload = func(c *config.Candidate, raw []byte) {
+		req := server.ReloadRequest{Source: server.ReloadSourceAdmin}
 		if c != nil {
-			srv.InjectCandidate(c)
+			req.Candidate = c
+			// Digest the candidate's canonical raw config, not the exact bytes
+			// written to disk, so the reload-side check compares normalized TOML
+			// and tolerates serialization differences (R9-02).
+			if data, err := config.Marshal(c.Raw); err == nil {
+				req.RawDigest = sha256.Sum256(data)
+			}
 		}
 		select {
-		case adminReload <- struct{}{}:
+		case adminReload <- req:
 		default:
 		}
 	}
-	deps.Reload = func() { triggerReload(nil) }
+	deps.Reload = func() {
+		triggerReload(nil, nil)
+	}
 	deps.LastReload = func() *admin.ReloadSnapshot {
 		if li := srv.LastReload(); li != nil {
 			return &admin.ReloadSnapshot{
@@ -421,7 +443,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		rt.LastStreamReload.Store(&ok)
 		return nil
 	}
-	if err := srv.Run(ctx, reload); err != nil {
+	if err := srv.Run(ctx, reload, startupCand.Redaction); err != nil {
 		log.Error("server exited with error", "error", err)
 		return 1
 	}
