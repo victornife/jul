@@ -190,7 +190,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   - Console (operations cockpit)
 - Full feature set with expanded descriptions:
   - Core HTTP server engine: static file serving, reverse proxy, FastCGI/uWSGI, virtual hosts, and routing (`exact`, `prefix`, `regex`).
-  - TLS 1.2/1.3 termination with SNI certificate selection, HTTP→HTTPS redirect, and dynamic certificate reload without rebinding listeners.
+  - TLS 1.2/1.3 termination with SNI certificate selection, HTTP→HTTPS redirect, and dynamic certificate selection at listener startup.
   - ACME automatic HTTPS (HTTP-01 and TLS-ALPN-01 challenges) with on-disk certificate cache and OCSP stapling — gated behind `acme` build tag.
   - mTLS / client certificate authentication with CA bundles, SAN verification, and CRL checking.
   - HTTP/3 over QUIC sharing TLS certificates, advertised via `Alt-Svc` — gated behind `http3` build tag.

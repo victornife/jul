@@ -240,11 +240,10 @@ func (p *ReloadPlan) RetireRemovedListeners() {
 	}
 }
 
-// RefreshCerts reloads TLS certificates for listeners that remain TLS-enabled.
-// Errors are returned as a slice of address-qualified strings; they degrade the
-// reload result but do not roll back the published config.
+// RefreshCerts is now a no-op: TLS certificate rotation is restart-only
+// (R7-07). The reload plan no longer attempts to refresh certificates.
 func (p *ReloadPlan) RefreshCerts() []string {
-	return p.s.reloadCertificates()
+	return nil
 }
 
 // PostCommit applies dynamic side effects that must only run on a committed

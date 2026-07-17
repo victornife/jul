@@ -655,34 +655,12 @@ func (s *Server) doReload() {
 	s.lastReload.Store(info)
 }
 
-// reloadCertificates rebuilds and swaps the cert provider for each currently
-// TLS-enabled listener that is still TLS-enabled in the new config.
-// reloadCertificates rebuilds and swaps the cert provider for each currently
-// TLS-enabled listener that is still TLS-enabled in the new config.
-// Returns a slice of error strings for addresses that failed to refresh;
-// the old provider remains active on those listeners.
+// reloadCertificates is now a no-op: TLS certificate rotation is restart-only
+// (R7-07). The dynamicCertProvider is still used by new listeners at bind time,
+// but once a listener is bound its provider is frozen for the listener's
+// lifetime. Operators must restart the process to pick up new cert/key files.
 func (s *Server) reloadCertificates() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var errs []string
-	for addr, entry := range s.listeners {
-		if entry.provider == nil {
-			continue
-		}
-		bindings, _, ok := tlsBindingsForAddr(s.cfg.Servers, addr)
-		if !ok {
-			continue // becomes plain HTTP; handled by listener diff (rebind)
-		}
-		provider, err := s.certProviderFor(addr, bindings)
-		if err != nil {
-			s.log.Error("reload: certificate reload failed", "addr", addr, "error", err)
-			errs = append(errs, addr+": "+err.Error())
-			continue
-		}
-		entry.provider.set(provider)
-		s.log.Info("reload: certificates refreshed", "addr", addr)
-	}
-	return errs
+	return nil
 }
 
 // removeListener gracefully shuts down and forgets a listener.

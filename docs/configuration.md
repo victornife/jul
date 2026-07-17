@@ -746,8 +746,9 @@ Access-log settings are fixed at startup; changing them needs a restart.
 ## TLS
 
 TLS is configured per server block. Jul supports TLS 1.2 and 1.3, SNI
-certificate selection, and dynamic certificate reload without rebinding listeners.
-Use `redirect_https` on a plain HTTP server to force clients onto HTTPS.
+certificate selection, and dynamic certificate selection at listener startup.
+Certificate rotation (static `cert`/`key` files or ACME domain changes) requires a
+process restart. Use `redirect_https` on a plain HTTP server to force clients onto HTTPS.
 
 ```toml
 [[servers]]
