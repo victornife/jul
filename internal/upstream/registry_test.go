@@ -225,7 +225,7 @@ func TestRegistrySnapshot(t *testing.T) {
 	if len(snap) != 2 {
 		t.Fatalf("len = %d", len(snap))
 	}
-	if snap[0].Name != "a" || snap[1].Name != "z" {
+	if snap[0].Name != "a(http)" || snap[1].Name != "z(http)" {
 		t.Errorf("order = %v, %v", snap[0].Name, snap[1].Name)
 	}
 }

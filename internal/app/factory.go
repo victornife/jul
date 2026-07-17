@@ -88,11 +88,11 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 // captureSnapshots returns a map of upstream name -> pool snapshot for the
 // current live registry. It is called while the factory mutex is held during
 // Prepare so the snapshots are stable for the generation being built.
-func (f *HandlerFactory) captureSnapshots(names []string) map[string]*upstream.PoolSnapshot {
-	if f.PoolReg == nil || len(names) == 0 {
+func (f *HandlerFactory) captureSnapshots(keys []upstream.PoolSnapshotKey) map[string]*upstream.PoolSnapshot {
+	if f.PoolReg == nil || len(keys) == 0 {
 		return nil
 	}
-	return f.PoolReg.SnapshotPools(names)
+	return f.PoolReg.SnapshotPools(keys)
 }
 
 // Prepare stages a new handler generation for cfg without committing it. The
@@ -128,9 +128,9 @@ func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Han
 		return nil, nil, 0, nil, nil, redact.State{}, err
 	}
 
-	usedUpstreamNames := upstreamNamesUsed(c, upstreams)
+	usedUpstreamKeys := upstreamKeysUsed(c, upstreams)
 	genID = f.genCounter.Add(1)
-	snapshots = f.captureSnapshots(usedUpstreamNames)
+	snapshots = f.captureSnapshots(usedUpstreamKeys)
 
 	committed := false
 	commitFn = func() func() {
@@ -457,22 +457,26 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 	return handlers, nil
 }
 
-// upstreamNamesUsed returns the distinct named upstreams referenced by proxy,
-// gRPC passthrough, and gRPC transcoding locations. Only configured upstreams
-// (present in the upstreams index) are included; concrete host:port targets are
-// ignored because they build ad-hoc pools outside the registry.
-func upstreamNamesUsed(c *config.Config, upstreams map[string]config.UpstreamConfig) []string {
+// upstreamKeysUsed returns the distinct (name, scheme) pairs referenced by
+// proxy, gRPC passthrough, and gRPC transcoding locations. Only configured
+// upstreams (present in the upstreams index) are included; concrete host:port
+// targets are ignored because they build ad-hoc pools outside the registry.
+func upstreamKeysUsed(c *config.Config, upstreams map[string]config.UpstreamConfig) []upstream.PoolSnapshotKey {
 	seen := make(map[string]struct{})
-	var names []string
-	add := func(name string) {
+	var keys []upstream.PoolSnapshotKey
+	add := func(name, scheme string) {
 		if _, ok := upstreams[name]; !ok {
 			return
 		}
-		if _, ok := seen[name]; ok {
+		if scheme == "" {
+			scheme = "http"
+		}
+		key := name + "\x1f" + scheme
+		if _, ok := seen[key]; ok {
 			return
 		}
-		seen[name] = struct{}{}
-		names = append(names, name)
+		seen[key] = struct{}{}
+		keys = append(keys, upstream.PoolSnapshotKey{Name: name, Scheme: scheme})
 	}
 
 	for i := range c.Servers {
@@ -480,13 +484,13 @@ func upstreamNamesUsed(c *config.Config, upstreams map[string]config.UpstreamCon
 			loc := &c.Servers[i].Locations[j]
 			if loc.ProxyPass != "" {
 				if u, err := url.Parse(loc.ProxyPass); err == nil && u.Host != "" {
-					add(u.Host)
+					add(u.Host, u.Scheme)
 				}
 			}
 			if loc.GRPCTranscode != nil && loc.GRPCTranscode.Target != "" {
-				add(loc.GRPCTranscode.Target)
+				add(loc.GRPCTranscode.Target, "http")
 			}
 		}
 	}
-	return names
+	return keys
 }
