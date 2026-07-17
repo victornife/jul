@@ -4,13 +4,16 @@
 package app
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/server"
 )
 
@@ -170,28 +173,33 @@ func TestPreflightApplyUsesLiveSnapshotForRebind(t *testing.T) {
 	}
 }
 
-// TestPreflightApplyUsesLiveSnapshotWithoutPrev (R10-04) verifies that the
-// listener probe, restart-required, and ACME checks still run against the live
-// runtime snapshot when prev is nil.
+// TestPreflightApplyUsesLiveSnapshotWithoutPrev (R10-04, R11-02) verifies that
+// the listener probe, restart-required, and ACME checks still run against the
+// live runtime snapshot when prev is nil.
 func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
 	boundAddr := freePort(t)
-	newAddr := freePort(t)
+	freeAddr := freePort(t)
 	base := &config.Config{
 		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
 		Servers: []config.ServerConfig{{
-			Listen:    newAddr,
+			Listen:    freeAddr,
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
 		}},
 	}
+
+	// Hold a listener so the candidate address is genuinely in use. The live
+	// snapshot says it is unbound, so PreflightListeners must probe it and fail.
+	ln, err := net.Listen("tcp", boundAddr)
+	if err != nil {
+		t.Fatalf("hold listener: %v", err)
+	}
+	defer ln.Close()
 
 	p := Preflight{
 		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},
-		// Live snapshot shows boundAddr is already in use. The candidate uses
-		// newAddr, so the listener probe must allow it; if the probe were
-		// skipped because prev is nil, no gate would distinguish the two.
 		LiveSnapshot: func() server.LiveSnapshot {
 			return server.LiveSnapshot{
 				Listeners: map[string]server.BoundListenerInfo{boundAddr: {Addr: boundAddr}},
@@ -199,9 +207,39 @@ func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
 		},
 	}
 
-	if _, err := p.Apply(base, nil); err != nil {
-		t.Fatalf("expected apply to succeed with live snapshot and nil prev, got: %v", err)
-	}
+	t.Run("listener probe runs and rejects occupied address", func(t *testing.T) {
+		occupied, err := base.Clone()
+		if err != nil {
+			t.Fatalf("clone: %v", err)
+		}
+		occupied.Servers[0].Listen = boundAddr
+		if _, err := p.Apply(occupied, nil); err == nil {
+			t.Fatal("expected listener probe to reject an occupied address when prev is nil")
+		}
+	})
+
+	t.Run("restart-required runs and rejects startup-bound change", func(t *testing.T) {
+		p2 := p
+		p2.StartupFP = lifecycle.Fingerprint{Values: map[string]any{"global.access_log": "startup.log"}}
+		changed, err := base.Clone()
+		if err != nil {
+			t.Fatalf("clone: %v", err)
+		}
+		changed.Global.AccessLog = "changed.log"
+		_, err = p2.Apply(changed, nil)
+		if err == nil {
+			t.Fatal("expected restart_required for startup-bound change when prev is nil")
+		}
+		if !errors.Is(err, admin.ErrRestartRequired) {
+			t.Fatalf("expected ErrRestartRequired, got: %v", err)
+		}
+	})
+
+	t.Run("valid candidate passes with live snapshot and nil prev", func(t *testing.T) {
+		if _, err := p.Apply(base, nil); err != nil {
+			t.Fatalf("expected apply to succeed with live snapshot and nil prev, got: %v", err)
+		}
+	})
 }
 
 func freePort(t *testing.T) string {

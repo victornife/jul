@@ -60,6 +60,12 @@ type Preflight struct {
 //  7. Restart-required checks (ACME, listener-rebind, tracing, access-log).
 //  8. Startup-bound subsystem checks (cache, egress, admin, metrics).
 //
+// The listener and restart-required gates always run against the live runtime
+// snapshot when it is available, even when prev is nil. prev is used only for
+// ACME restart-required and the config-only rebind fallback when no snapshot
+// is available, not as the primary baseline for listener state (R10-04,
+// R11-02).
+//
 // On success the validated candidate is returned. The caller must pass the
 // exact candidate to the live reload so secret sources or the on-disk file
 // cannot change between preflight and swap (R8-11).
@@ -78,55 +84,63 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) (*config.Candid
 	if err := p.dryRun(candidate.Effective); err != nil {
 		return nil, err
 	}
-	if prev != nil {
+
+	// Use the live runtime snapshot as the authoritative baseline for
+	// listener-related gates. If unavailable, fall back to the on-disk prev
+	// config (legacy path).
+	var live server.LiveSnapshot
+	if p.LiveSnapshot != nil {
+		live = p.LiveSnapshot()
+	}
+	httpBound := boundAddrs(live)
+	http3Bound := boundHTTP3Addrs(live)
+	streamBound := streamBoundKeys(p.Stream)
+
+	if err := server.PreflightListeners(httpBound, http3Bound, candidate.Effective.Servers); err != nil {
+		return nil, err
+	}
+	if err := p.Stream.PreflightListeners(streamBound, candidate.Effective.Streams); err != nil {
+		return nil, err
+	}
+
+	// Restart-required classification is single-sourced from the lifecycle
+	// registry. Compare the candidate's effective fingerprint against the
+	// startup-bound fingerprint so secret-content rotation and effective
+	// value changes are detected without duplicating the check list.
+	if len(p.StartupFP.Values) > 0 {
+		candidateFP := lifecycle.ComputeFingerprint(candidate.Effective)
+		if reason, need := lifecycle.RestartRequired(p.StartupFP, candidateFP); need {
+			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		}
+	}
+
+	// Runtime-aware rebind check: compare the candidate against actually
+	// bound listeners. Fall back to the config-only check when no snapshot
+	// is available.
+	if p.LiveSnapshot != nil {
+		if reason, need := server.PreflightRebindRequired(live, candidate.Effective); need {
+			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+		}
+	} else if prev != nil {
 		prevCandidate, err := config.NewCandidate(prev)
 		if err != nil {
 			return nil, err
 		}
-
-		// Use the live runtime snapshot as the authoritative baseline for
-		// listener-related gates. If unavailable, fall back to the on-disk prev
-		// config (legacy path).
-		var live server.LiveSnapshot
-		if p.LiveSnapshot != nil {
-			live = p.LiveSnapshot()
-		}
-		httpBound := boundAddrs(live)
-		http3Bound := boundHTTP3Addrs(live)
-		streamBound := streamBoundKeys(p.Stream)
-
-		if err := server.PreflightListeners(httpBound, http3Bound, candidate.Effective.Servers); err != nil {
-			return nil, err
-		}
-		if err := p.Stream.PreflightListeners(streamBound, candidate.Effective.Streams); err != nil {
-			return nil, err
-		}
-		// Restart-required classification is single-sourced from the lifecycle
-		// registry. Compare the candidate's effective fingerprint against the
-		// startup-bound fingerprint so secret-content rotation and effective
-		// value changes are detected without duplicating the check list.
-		if len(p.StartupFP.Values) > 0 {
-			candidateFP := lifecycle.ComputeFingerprint(candidate.Effective)
-			if reason, need := lifecycle.RestartRequired(p.StartupFP, candidateFP); need {
-				return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-			}
-		}
-		// Runtime-aware rebind check: compare the candidate against actually
-		// bound listeners. Fall back to the config-only check when no snapshot
-		// is available.
-		if p.LiveSnapshot != nil {
-			if reason, need := server.PreflightRebindRequired(live, candidate.Effective); need {
-				return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-			}
-		} else {
-			if reason, need := server.ListenerRebindRequired(prevCandidate.Effective, candidate.Effective); need {
-				return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
-			}
-		}
-		if reason, need := server.ACMERestartRequired(prevCandidate.Effective.Servers, candidate.Effective.Servers); need {
+		if reason, need := server.ListenerRebindRequired(prevCandidate.Effective, candidate.Effective); need {
 			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 	}
+
+	// ACME restart-required uses prev's server list only for the comparison.
+	// When prev is unavailable, compare against an empty server list.
+	var prevServers []config.ServerConfig
+	if prev != nil {
+		prevServers = prev.Servers
+	}
+	if reason, need := server.ACMERestartRequired(prevServers, candidate.Effective.Servers); need {
+		return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
+	}
+
 	return candidate, nil
 }
 
