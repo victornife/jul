@@ -1,4 +1,4 @@
-# Round 9 + 10 Audit Register
+# Round 9 + 10 + 11 Audit Register
 
 This page tracks every Round 9 and Round 10 audit finding, the code change that
 closes it, the test that demonstrates the fix, and the current status. It is
@@ -39,6 +39,16 @@ intended as a lightweight compliance artifact for reviewers and releases.
 | R10-07 | HTTP/3 UDP bind probe in preflight | `internal/server/server.go`, `internal/app/preflight.go` | `TestPreflightListenersHTTP3UDP` | Unit test output | ✅ Implemented | `b7ba281` |
 | R10-08 | Round 10 audit register | `docs/audit-register.md` | `scripts/docs-check.py` | Docs check output | ✅ Implemented | *(this commit)* |
 
+## Round 11 Register
+
+| Finding | Title | Fix location | Test | Evidence | Status | Commit |
+|---|---|---|---|---|---|---|
+| R11-01 | Consume admin digest after suppressing watcher echo | `internal/app/wiring.go` | `TestMergeReloadConsumesAdminDigest` | Unit test output | ✅ Implemented | `e174f0c` |
+| R11-02 | Restore live-aware preflight gates when `prev` is `nil` | `internal/app/preflight.go` | `TestPreflightApplyUsesLiveSnapshotWithoutPrev` | Unit test output | ✅ Implemented | `79aa1c0` |
+| R11-03 | Compare admin candidate digest against raw source bytes | `internal/server/server.go`, `internal/config/parser.go` | `TestAdminReloadRawDigestMatchesRawBytes` | Unit test output | ✅ Implemented | `ba4ddf5` |
+| R11-04 | Discovery-only upstream candidate snapshot for reflection | `internal/upstream/registry.go` | `TestTranscodeReflectionWithDiscoveryUpstream` | Integration test output | ✅ Implemented | `c2549df` |
+| R11-05 | Graceful retirement of removed gRPC backend connections | `internal/transcode/invoke.go` | `TestTranscoderRetiresStaleConnectionsDuringRequest`, `TestTranscoderEvictsStaleConnections` | Unit/integration test output | ✅ Implemented | `d1b5b92` |
+
 ## Deferred work rationale
 
 - **R9-14.4 (never-draining shutdown test)** — Timing-sensitive, high flakiness
@@ -68,6 +78,11 @@ go test -tags grpc ./internal/server -run TestPreflightListenersHTTP3UDP -race -
 
 # Full matrix
 go test ./... -race -count=1
+
+# Round 11
+go test ./internal/app -run 'TestMergeReloadConsumesAdminDigest|TestPreflightApplyUsesLiveSnapshotWithoutPrev' -race -count=1
+go test ./internal/server -run 'TestAdminReloadRawDigestMatchesRawBytes' -race -count=1
+go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithDiscoveryUpstream|TestTranscoderRetiresStaleConnectionsDuringRequest|TestTranscoderEvictsStaleConnections' -race -count=1
 ```
 
 ## Semantics reference
