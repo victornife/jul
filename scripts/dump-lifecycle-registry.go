@@ -17,20 +17,22 @@ import (
 )
 
 type entryJSON struct {
-	Path      string `json:"path"`
-	Class     string `json:"class"`
-	Subsystem string `json:"subsystem"`
-	Reason    string `json:"reason"`
+	Path            string `json:"path"`
+	Class           string `json:"class"`
+	Subsystem       string `json:"subsystem"`
+	Reason          string `json:"reason"`
+	StartupConsumed bool   `json:"startup_consumed"`
 }
 
 func main() {
 	out := make([]entryJSON, 0, len(lifecycle.Registry))
 	for _, e := range lifecycle.Registry {
 		out = append(out, entryJSON{
-			Path:      e.Path,
-			Class:     e.Class.String(),
-			Subsystem: e.Subsystem,
-			Reason:    e.Reason,
+			Path:            e.Path,
+			Class:           e.Class.String(),
+			Subsystem:       e.Subsystem,
+			Reason:          e.Reason,
+			StartupConsumed: e.StartupConsumed,
 		})
 	}
 	enc := json.NewEncoder(os.Stdout)

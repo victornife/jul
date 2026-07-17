@@ -21,6 +21,14 @@ func TestFieldClassExact(t *testing.T) {
 	}
 }
 
+func TestRestartRequiredEntriesAreStartupConsumed(t *testing.T) {
+	for _, e := range Registry {
+		if e.Class == RestartRequiredClass && !e.StartupConsumed {
+			t.Errorf("restart_required entry %q is not StartupConsumed", e.Path)
+		}
+	}
+}
+
 func TestFieldClassUnknownIsHotReload(t *testing.T) {
 	if got := FieldClass("unknown.path"); got != HotReloadClass {
 		t.Fatalf("unknown class = %v, want hot_reload", got)

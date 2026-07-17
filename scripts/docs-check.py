@@ -322,35 +322,117 @@ def check_feature_status_manifest():
             else:
                 ok(f"feature-status.yaml: doc {doc} exists")
 
-    # Cross-check: every feature in the manifest must appear in docs/status.md.
-    # Two levels of verification:
-    # 1. Feature name (key substring) present in status.md.
-    # 2. Feature ID (e.g. "Y1-01") present in status.md — more precise; catches
-    #    missing rows and ID mismatches between the manifest and the table.
+    # Cross-check: every feature in the manifest must appear in docs/status.md
+    # with matching row-level data (maturity, criteria, doc) (R6-11).
     status_doc = DOCS / "status.md"
     if not status_doc.exists():
         error(manifest, 0, "docs/status.md is missing for cross-check")
         return
     status_text = status_doc.read_text(encoding="utf-8")
+    status_rows = _parse_status_md_rows(status_text)
+
     for entry in data.get("features", []):
         name = entry.get("name", "?")
         feat_id = entry.get("id", "")
-        # Level 1: name substring
         search_term = re.split(r"[\(\+]", name)[0].strip()
         if search_term and search_term not in status_text:
             error(manifest, 0,
                   f"feature '{name}' from feature-status.yaml not found in docs/status.md — "
                   f"keep both in sync")
-        else:
-            ok(f"feature-status.yaml: '{search_term}' appears in status.md")
-        # Level 2: ID present (catches rows missing from status.md or ID mismatches)
+            continue
         if feat_id:
             if feat_id not in status_text:
                 error(manifest, 0,
                       f"feature ID '{feat_id}' ({name}) not found in docs/status.md — "
                       f"table row may be missing or ID mismatch")
+                continue
+            row = status_rows.get(feat_id)
+            if row:
+                _compare_feature_row(manifest, entry, row)
             else:
+                # ID present somewhere but not in a parseable GA/Beta row;
+                # still acceptable, but note it for visibility.
                 ok(f"feature-status.yaml: ID '{feat_id}' present in status.md")
+
+
+def _cell_to_criterion(cell: str):
+    """Convert a status.md criterion cell to its canonical value."""
+    text = cell.strip().lower()
+    if "✅" in text or "true" in text:
+        return True
+    if "n/a" in text or "not applicable" in text or "-" == text:
+        return None
+    if "☐" in text or "open" in text or "false" in text:
+        return False
+    return None
+
+
+def _parse_status_md_rows(text: str) -> dict[str, dict]:
+    """Parse GA and Beta tables in status.md, returning id -> row data."""
+    rows: dict[str, dict] = {}
+    in_table = False
+    header_count = 0
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            in_table = False
+            header_count = 0
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if all(re.match(r"^[:\-]+$", c) for c in cells if c):
+            in_table = True
+            header_count += 1
+            continue
+        if not in_table or header_count < 1:
+            continue
+        # Expect Feature, ID, Tag, 1..9, Doc
+        if len(cells) < 13:
+            continue
+        feat_id = cells[1]
+        if not feat_id or feat_id in ("—", "-", "ID"):
+            continue
+        rows[feat_id] = {
+            "name": cells[0],
+            "tag": cells[2],
+            "criteria": {
+                i: _cell_to_criterion(cells[2 + i])
+                for i in range(1, 10)
+            },
+            "doc": cells[12] if len(cells) > 12 else "",
+        }
+    return rows
+
+
+def _compare_feature_row(manifest: Path, entry: dict, row: dict):
+    """Compare a feature-status.yaml entry against its status.md table row."""
+    feat_id = entry.get("id", "?")
+    name = entry.get("name", "?")
+    yaml_criteria = entry.get("criteria", {})
+    row_criteria = row.get("criteria", {})
+    for i in range(1, 10):
+        yaml_val = yaml_criteria.get(i)
+        row_val = row_criteria.get(i)
+        if yaml_val != row_val:
+            error(
+                manifest,
+                0,
+                f"feature {feat_id} ({name}) criterion {i} mismatch: "
+                f"YAML={yaml_val}, status.md={row_val}",
+            )
+    yaml_doc = entry.get("doc", "")
+    row_doc = row.get("doc", "")
+    if yaml_doc and row_doc:
+        # status.md doc cell is a markdown link like [doc](doc.md); extract target.
+        link_match = re.search(r"\]\(([^)]+)\)", row_doc)
+        if link_match:
+            row_doc_target = link_match.group(1)
+            if row_doc_target != yaml_doc:
+                error(
+                    manifest,
+                    0,
+                    f"feature {feat_id} ({name}) doc mismatch: "
+                    f"YAML={yaml_doc}, status.md={row_doc_target}",
+                )
+    ok(f"feature-status.yaml: {feat_id} row data matches status.md")
 
 
 def _load_go_lifecycle_registry():
@@ -528,6 +610,17 @@ def check_lifecycle_manifest():
                     manifest, 0,
                     f"Go registry path '{path}' ({entry['class']}) is missing from config-lifecycle.yaml",
                 )
+
+    # Enforcement check: every restart-required registry entry must be
+    # StartupConsumed so RestartRequired actually compares it (R6-02/R6-10).
+    for entry in registry:
+        if entry["class"] == "restart_required" and not entry.get("startup_consumed", False):
+            error(
+                ROOT / "internal" / "lifecycle" / "lifecycle.go",
+                0,
+                f"restart_required registry entry '{entry['path']}' ({entry['subsystem']}) "
+                f"is not StartupConsumed; RestartRequired will silently ignore it",
+            )
 
     # Cross-check: each restart-required subsystem must appear in reload-semantics.md.
     reload_doc = ROOT / "docs" / "reload-semantics.md"

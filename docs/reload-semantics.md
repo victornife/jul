@@ -108,9 +108,12 @@ applied or aborted. The phases are:
 4. **Prepare** — build the handler tree and stage upstream pools and closers.
 5. **StageListeners** — bind every newly added listen address; HTTP/3 QUIC
    resources are created but their accept loops are **not** started.
-6. **Publish** — the point of no return. Commit the handler generation,
-   install the new redaction state, and atomically swap the live config and
-   handler pointer.
+6. **Publish** — the ordered commit boundary. Commit the handler generation,
+   install the new redaction state, assign the live config, and swap the
+   handler pointer. Each of these writes is ordered but not a single atomic
+   transaction; the swap is race-free because the handler pointer is stored
+   with one atomic operation and because downstream readers observe the new
+   generation only after it is fully built.
 7. **Activate** — start serving on staged TCP and HTTP/3 listeners.
 8. **Retire** — remove listeners no longer in the config and retire the old
    handler generation after it drains.
@@ -166,14 +169,17 @@ resolved, file-backed secrets digested, `worker_threads` auto resolved to the
 effective GOMAXPROCS cap). This prevents a saved secret-reference change from
 hiding a real structural change and detects file-content rotation.
 
-## Generation-scoped upstream pool snapshot
+## Per-request upstream pool snapshot
 
-When `Prepare` commits the upstream plan, it captures a generation-scoped
-`PoolSnapshot`. The handler factory injects this snapshot into every request
-context. Handlers select backends with `PickCtx` / `BackendsCtx`, which prefer
-the snapshot over the live registry. This guarantees that an in-flight request
-started on generation *N* continues to see the backend set from generation *N*
-until it drains, even if generation *N+1* adds or removes backends.
+When a request enters the handler chain, the factory captures a fresh
+`PoolSnapshot` of every referenced named upstream and installs it in the
+request context. Handlers select backends with `PickCtx` / `BackendsCtx`, which
+prefer the snapshot over the live registry. This gives each request a stable
+backend view for its own lifetime while allowing dynamic service-discovery
+updates to converge on the very next request (R6-04). An in-flight request
+started on generation *N* therefore continues to see the backend set that was
+live when it began, even if a subsequent config reload or discovery refresh
+changes the pool before the request drains.
 
 ## HTTP handler-generation retirement (resource teardown)
 

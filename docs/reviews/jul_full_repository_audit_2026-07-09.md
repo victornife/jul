@@ -1,6 +1,8 @@
 # Jul.IA — Full Repository Audit (2026-07-09)
 
-> **Status: AUTHORITATIVE — Single Source of Truth.** Version 1.2 · Audited 2026-07-09 · **Updated 2026-07-16** (v1.1: Wave A/B + RG-1 soak closure; v1.2: Sprints 1–3 + all remaining audit items resolved). Repo state at original audit: `main`, commit `032929b`, Go 1.26.4. Current `main`: commit `6e266bd`, Go 1.26.5.
+> **Status: HISTORICAL SNAPSHOT — no longer the single source of truth.** Version 1.2 · Audited 2026-07-09 · **Updated 2026-07-16** (v1.1: Wave A/B + RG-1 soak closure; v1.2: Sprints 1–3 + all remaining audit items resolved). Repo state at original audit: `main`, commit `032929b`, Go 1.26.4. Snapshot `main`: commit `6e266bd`, Go 1.26.5.
+>
+> **Round 6 re-audit (2026-07-17):** A subsequent source-level re-audit identified new critical/high findings (R6-01 through R6-16). Remediation is tracked in live commits on `main` after `6e266bd` and is not yet reflected in the body below. See the Round 6 re-audit section at the end of this document for the finding register and remediation status.
 >
 > This document **supersedes** the [Full Repository Audit (2026-07-02)](previous_reviews/jul_full_repository_audit_2026-07.md) for the purpose of *current repository state*. The 2026-07-02 audit (and the point reviews it consolidated) is retained under [`previous_reviews/`](previous_reviews/) as historical decision input; where the two overlap, **this file wins**. See [`README.md`](README.md) for the decision-log index.
 
@@ -597,3 +599,33 @@ None of these soften the two headline items — **fix N-1 (go1.26.5)** and **rec
 | 2026-07-16 | 1.2 | **§ 0.1 rewritten as v1.2 final-state table.** All sprint / week items logged: Week-1 (R-1 35 ESLint errors, R-2 cmdServe parity, R-3 fmt-diff tests, R-5 getting-started docs); Sprint-1 (C4 zeroconf fmt note, C5 admin floor 76→77, C6 WASM soak labels); Sprint-2 (R-4 TrafficControlEditor decomposition, C2 real-server Playwright E2E closing UI-1); Sprint-3 (C3 K8s kind CI lane); bonus TestHealthCheckTCP polling fix. **Only remaining open item: N-4 (RBAC Phase 1).** UI-1 closed by C2. Header updated to v1.2 / commit `6e266bd`. § 1 executive summary note updated. | Original §2–§16 audit body preserved verbatim. Strategic bets (E1–E5) remain demand-gated. | commits `02a0f1b`, `80915d8`, `4d760e1`, `8391577`, `6e266bd` |
 | 2026-07-16 | 1.1 | § 0.1 reconciliation added. All July-9 findings mapped to current status: N-1 resolved (go1.26.5); N-2/N-2b resolved (4 RG-1 isolated 8h Linux soaks); CQ-2 resolved (main.go 91 LOC; ADR-0007 closed); N-3 resolved/moot; N-5 resolved (eslint, macOS CI, coverage floor); N-4 partially addressed (limitation documented, RBAC unshipped); UX-3/QA-2/SEC-1 confirmed already resolved in codebase. Additional Wave A/B work logged. | Original §2–§16 preserved verbatim. | commits `a708aff`, `56f4c40`, `bb89459`, `a0557e3`, `1bcf0b8`, `3bc40ab` |
 | 2026-07-09 | 1.0 | New authoritative full-repository audit superseding the [2026-07-02 audit](previous_reviews/jul_full_repository_audit_2026-07.md). Full local re-verification (lean+full build/test, govulncheck, Console typecheck/eslint/vitest, docs-check, CLI). Reconciled all 16 prior findings (11 Resolved incl. CQ-4 via `gofast` vendoring, 5 Carried). New findings: N-1 (go1.26.5 stdlib CVEs), N-2 (soak-claim vs RG-1/#39), N-3 (no Console maturity signal), N-4 (single-token admin), N-5 (CI hygiene drift); net-new positives (egress, metric cardinality, patch CRUD, apply-outcome, digest pinning). | The maturity model (ADR-0003/0005), Console-first invariant (ADR-0004), protocol-adapter strategy (ADR-0002), and the "leanest serious edge/protocol gateway" positioning are unchanged. | issue #39; [status.md](../status.md); [ga-push.md](../ga-push.md); [soak-evidence.md](../soak-evidence.md); local verification |
+
+---
+
+## Round 6 re-audit (2026-07-17)
+
+This document is a historical snapshot as of commit `6e266bd`. A subsequent
+source-level re-audit on 2026-07-17 reviewed commits through `2a8c788` and
+identified the findings below. Remediation is being applied on `main` in
+ordered phases; this section records the register and status.
+
+| ID | Severity | Title | Status |
+| --- | --- | --- | --- |
+| R6-01 | Critical | Process log redaction bound to empty startup snapshot | ✅ Resolved in Phase 0 — `redact.Writer` now reads live global state per write |
+| R6-06 | High | Old-generation secrets pruned before drain | ✅ Resolved in Phase 0 — union old+new state installed at Publish; pruned in retire callback |
+| R6-07 | Medium/High | Resolution/validation do not use one immutable candidate | ✅ Resolved in Phase 0 — `ReloadPlan.Validate` validates `EffectiveConfig`; `config.Resolve` is idempotent |
+| R6-13 | Medium | Two startup fingerprints can diverge | ✅ Resolved in Phase 0 — one authoritative `startupFP` computed after startup consumers and shared |
+| R6-02 | High | Restart-required registry entries not enforced | ✅ Resolved in Phase 1 — all `RestartRequiredClass` entries now `StartupConsumed`; invariant test added |
+| R6-03 | High | Path/content fingerprint heuristic creates false restart signals | ✅ Resolved in Phase 1 — field-specific canonicalization; paths compared as paths, TLS files by content |
+| R6-05 | High | TLS/HTTP3/h2c fingerprints overwrite virtual hosts on same address | ✅ Resolved in Phase 1 — fingerprints now aggregate per SNI/server_names within each listen address |
+| R6-09 | Medium | Lifecycle registry internally contradictory | ✅ Resolved in Phase 1 — `worker_threads`/`redact_min_secret_length` are `HotReloadClass`; YAML `gated_by` updated |
+| R6-14 | Medium | Pending-restart hides resolution errors | ✅ Resolved in Phase 1 — `PendingRestartCheck` returns `resolve_error` instead of nil |
+| R6-04 | High | Service discovery frozen by generation-scoped snapshots | ✅ Resolved in Phase 2 — per-request snapshots let discovery converge on the next request |
+| R6-08 | High | Structured diff not schema-complete | ◐ Partial — registry coverage expanded; raw canonical fallback retained; docs-check enforces `StartupConsumed` |
+| R6-10 | Medium | docs-check validates mirroring, not enforcement truth | ✅ Resolved in Phase 3 — `StartupConsumed` exported and enforced; registry invariant test added |
+| R6-11 | Medium | Feature-status validation presence-only | ✅ Resolved in Phase 3 — docs-check now parses status.md rows and compares criteria/doc per feature |
+| R6-12 | Medium | Authoritative audit stale and false | ✅ Resolved in Phase 3 — this document is now marked historical; live status tracked in commits |
+| R6-15 | Low/Medium | Publish described as atomic | ✅ Resolved in Phase 3 — documentation describes Publish as an ordered commit boundary |
+| R6-16 | Low | Stale comments and legacy rollback code | ✅ Resolved in Phase 3 — removed obsolete save/restore around `ValidateRuntimeConfig` |
+
+**Remaining work:** Phase 4 (independent execution and evidence: full-tag tests, race tests, Playwright real-server E2E, secret-rotation tests, multi-SNI TLS tests, discovery convergence tests, reload-under-load evidence).
