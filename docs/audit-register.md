@@ -49,6 +49,13 @@ intended as a lightweight compliance artifact for reviewers and releases.
 | R11-04 | Discovery-only upstream candidate snapshot for reflection | `internal/upstream/registry.go` | `TestTranscodeReflectionWithDiscoveryUpstream` | Integration test output | ✅ Implemented | `c2549df` |
 | R11-05 | Graceful retirement of removed gRPC backend connections | `internal/transcode/invoke.go` | `TestTranscoderRetiresStaleConnectionsDuringRequest`, `TestTranscoderEvictsStaleConnections` | Unit/integration test output | ✅ Implemented | `d1b5b92` |
 
+## Round 12 Register
+
+| Finding | Title | Fix location | Test | Evidence | Status | Commit |
+|---|---|---|---|---|---|---|
+| R12-01 | Reused discovery pool loses reflection candidate backends | `internal/upstream/registry.go` | `TestTranscodeReflectionWithReusedDiscoveryUpstream` | Integration test output | ✅ Implemented | `a63ad49` |
+| R12-02 | Retired connection promotion closes the connection it returns | `internal/transcode/invoke.go` | `TestTranscoderRetiredConnectionReappearsUsable` | Unit test output | ✅ Implemented | `2457aea` |
+
 ## Deferred work rationale
 
 - **R9-14.4 (never-draining shutdown test)** — Timing-sensitive, high flakiness
@@ -83,6 +90,12 @@ go test ./... -race -count=1
 go test ./internal/app -run 'TestMergeReloadConsumesAdminDigest|TestPreflightApplyUsesLiveSnapshotWithoutPrev' -race -count=1
 go test ./internal/server -run 'TestAdminReloadRawDigestMatchesRawBytes' -race -count=1
 go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithDiscoveryUpstream|TestTranscoderRetiresStaleConnectionsDuringRequest|TestTranscoderEvictsStaleConnections' -race -count=1
+
+# Round 12
+go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithReusedDiscoveryUpstream|TestTranscoderRetiredConnectionReappearsUsable' -race -count=1
+
+# Full matrix
+go test ./... -race -count=1
 ```
 
 ## Semantics reference
