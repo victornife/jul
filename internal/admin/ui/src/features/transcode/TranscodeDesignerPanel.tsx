@@ -87,6 +87,7 @@ export function TranscodeDesignerPanel() {
   const routesQuery = useQuery({ queryKey: ["routes"], queryFn: fetchRoutes });
 
   const [listen, setListen] = useState(":8080");
+  const [customListen, setCustomListen] = useState(":8080");
   const [serverNames, setServerNames] = useState("");
   const [path, setPath] = useState("/");
   const [matchType, setMatchType] = useState<"prefix" | "exact" | "regex">("prefix");
@@ -108,7 +109,10 @@ export function TranscodeDesignerPanel() {
   useEffect(() => {
     if (searchParams.get("edit") !== "1") return;
     const l = searchParams.get("listen");
-    if (l) setListen(l);
+    if (l) {
+      setListen(l);
+      setCustomListen(l);
+    }
     const sn = searchParams.get("server_names");
     if (sn) setServerNames(sn);
     const mt = searchParams.get("match_type");
@@ -136,8 +140,9 @@ export function TranscodeDesignerPanel() {
 
   async function openInEditor() {
     setEditorError(null);
+    const effectiveListen = listen === ":8080" ? customListen : listen;
     const draft = {
-      listen,
+      listen: effectiveListen,
       serverNames,
       path,
       matchType,
@@ -213,9 +218,9 @@ export function TranscodeDesignerPanel() {
             {listen === ":8080" && (
               <TextField
                 label="Custom listen"
-                value={listen}
+                value={customListen}
                 placeholder=":8080"
-                onChange={setListen}
+                onChange={setCustomListen}
               />
             )}
           </div>
