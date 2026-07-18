@@ -157,11 +157,12 @@ is a correctness bug; each is a bounded scope decision.
   the edge).
 - **HTTP framing only for streams.** Streamed responses are NDJSON or SSE over
   HTTP/1.1+; there is no gRPC-Web or WebSocket bridge.
-- **Long-lived streams may be cut at the retired-connection grace boundary.**
+- **RPCs may be cut at the retired-connection grace boundary.**
   When the upstream pool changes (e.g. service discovery), removed backend
-  connections are kept for 30 seconds so in-flight streams can drain. Streams
-  that outlast that grace period are closed when the retired connection is
-  evicted; clients should be prepared to reconnect. Unary calls are unaffected.
+  connections are kept for 30 seconds so in-flight RPCs can drain. RPCs that
+  outlast that grace period may be interrupted when the retired connection is
+  closed; this primarily affects long-lived streams and unusually long unary
+  calls. Clients should be prepared to reconnect.
 - **No per-call transform hooks.** Translation is `protojson` in/out; there is no
   scriptable request/response rewriting in the transcoding path.
 

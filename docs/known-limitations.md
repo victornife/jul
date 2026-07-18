@@ -90,11 +90,12 @@ before a feature is labelled GA; this page is the consolidated index.
 - **Server reflection requires a live upstream.** When `use_reflection = true`,
   the descriptor is fetched from the upstream at startup; a down upstream
   prevents the location from initialising.
-- **Long-lived streams may be cut at the retired-connection grace boundary.**
+- **RPCs may be cut at the retired-connection grace boundary.**
   Dynamic upstream churn retires removed backend connections for 30 seconds so
-  in-flight streams can drain. Streams that outlast that grace period are
-  closed when the retired connection is evicted; clients should be prepared to
-  reconnect. Unary calls are unaffected.
+  in-flight RPCs can drain. RPCs that outlast that grace period may be
+  interrupted when the retired connection is closed; this primarily affects
+  long-lived streams and unusually long unary calls. Clients should be prepared
+  to reconnect.
 
 ---
 
