@@ -12,7 +12,7 @@ location, and run in **block** or **detect** mode.
 The WAF lives behind the `waf` build tag, so lean builds carry none of the
 engine or rule-set weight.
 
-> **Maturity:** Beta (see [ADR 0003](adr/0003-maturity-and-ga.md)). It is off by
+> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). It is off by
 > default; turn it on per scope. The recommended rollout is **detect → block**.
 
 ## Contents
