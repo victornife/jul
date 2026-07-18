@@ -800,7 +800,7 @@ def check_finding_uniqueness():
 
     text = current_audit.read_text(encoding="utf-8")
     # Extract all table rows that look like finding status rows:
-    # | R9-01  | ... | ✅ Implemented | or | ... | ⏳ Open |
+    # | R9-01  | ... | ✅ Implemented | 2026-07-17 |
     # IDs look like R9-01, R10-01, R9-14.1 (decimal suffix for sub-findings).
     finding_re = re.compile(r"R\d+-\d+(?:\.\d+)?")
     resolved_ids: set[str] = set()
@@ -812,11 +812,13 @@ def check_finding_uniqueness():
         # and the word "open" in an unrelated clause.
         if not line.startswith("|"):
             continue
-        cells = [c.strip() for c in line.split("|")]
+        # Strip leading/trailing pipes so the first and last cells are data,
+        # not empty strings.
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
         # Skip header rows and rows without enough cells.
-        if len(cells) < 3:
+        if len(cells) < 2:
             continue
-        first_cell = cells[1]
+        first_cell = cells[0]
         id_match = finding_re.search(first_cell)
         if not id_match:
             continue
