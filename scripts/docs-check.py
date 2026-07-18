@@ -800,7 +800,9 @@ def check_finding_uniqueness():
 
     text = current_audit.read_text(encoding="utf-8")
     # Extract all table rows that look like finding status rows:
-    # | **ID** | ... | ✅ Resolved | or | ... | ⏳ Still open |
+    # | R9-01  | ... | ✅ Implemented | or | ... | ⏳ Open |
+    # IDs look like R9-01, R10-01, R9-14.1 (decimal suffix for sub-findings).
+    finding_re = re.compile(r"R\d+-\d+(?:\.\d+)?")
     resolved_ids: set[str] = set()
     open_ids: set[str] = set()
 
@@ -810,14 +812,21 @@ def check_finding_uniqueness():
         # and the word "open" in an unrelated clause.
         if not line.startswith("|"):
             continue
-        id_match = re.search(r"\*\*([A-Z]+-\d+[a-z]?)\*\*", line)
+        cells = [c.strip() for c in line.split("|")]
+        # Skip header rows and rows without enough cells.
+        if len(cells) < 3:
+            continue
+        first_cell = cells[1]
+        id_match = finding_re.search(first_cell)
         if not id_match:
             continue
-        finding_id = id_match.group(1)
-        low = line.lower()
-        if "✅" in line or "resolved" in low:
+        finding_id = id_match.group(0)
+        # Determine status from the last cell (status) only, so narrative
+        # mentions of words like "open" in other columns do not confuse us.
+        status_cell = cells[-2].lower()
+        if "✅" in status_cell or "implemented" in status_cell or "resolved" in status_cell or "closed" in status_cell:
             resolved_ids.add(finding_id)
-        if "⏳" in line or "still open" in low or "open —" in low:
+        if "⏳" in status_cell or "still open" in status_cell or "open" in status_cell or "deferred" in status_cell:
             open_ids.add(finding_id)
 
     conflicts = resolved_ids & open_ids
