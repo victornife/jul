@@ -11,8 +11,9 @@ The at-a-glance view of **every shipped feature**, its **maturity**, and how
 it stands against the nine-criteria GA bar ([ADR 0003](adr/0003-maturity-and-ga.md)).
 
 > For a critical, evidence-based assessment of the repository — including scrutiny of
-> the maturity and soak claims on this page — see the current
-> [Full Repository Audit (2026-07-09, v1.1 updated 2026-07-16)](reviews/jul_full_repository_audit_2026-07-09.md).
+> the maturity and soak claims on this page — see the historical
+> [Full Repository Audit (2026-07-09, v1.1 updated 2026-07-16)](reviews/previous_reviews/jul_full_repository_audit_2026-07-09.md)
+> and the live finding register in [`docs/audit-register.md`](audit-register.md).
 
 **Keep this current.** When a feature's maturity or any GA criterion changes,
 update [`docs/feature-status.yaml`](feature-status.yaml) first — that is the

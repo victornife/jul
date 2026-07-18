@@ -11,8 +11,8 @@
 > and moves Console to **GA — soak pending**. Governed by
 > [ADR 0006](../adr/0006-console-v2-stack.md) (amends
 > [ADR 0004](../adr/0004-console-ui-invariants.md) #4/#5). Source proposals:
-> the [operations & configuration UI spike](../reviews/jul_console_v2_spike.md) and
-> the [frontend stack recommendation](../reviews/jul_console_tech_stack_recommendation.md).
+the [operations & configuration UI spike](../reviews/previous_reviews/jul_console_v2_spike.md) and
+the [frontend stack recommendation](../reviews/previous_reviews/jul_console_tech_stack_recommendation.md).
 
 ## Goal & non-negotiables
 
@@ -262,4 +262,4 @@ single-binary / no-Node-runtime invariant.
 
 | Version | Date | Change |
 | --- | --- | --- |
-| 1.0 | 2026-06-23 | Initial spec from the Console v2 [operations & configuration UI spike](../reviews/jul_console_v2_spike.md) and [frontend stack recommendation](../reviews/jul_console_tech_stack_recommendation.md) + [ADR 0006](../adr/0006-console-v2-stack.md). |
+| 1.0 | 2026-06-23 | Initial spec from the Console v2 [operations & configuration UI spike](../reviews/previous_reviews/jul_console_v2_spike.md) and [frontend stack recommendation](../reviews/previous_reviews/jul_console_tech_stack_recommendation.md) + [ADR 0006](../adr/0006-console-v2-stack.md). |

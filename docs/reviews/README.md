@@ -1,16 +1,13 @@
 # Reviews & decision log
 
-> Version 1.5 · Updated 2026-07-16
+> Version 1.6 · Updated 2026-07-19
 
-> **📌 Single source of truth for current repository state:**
-> [**Full Repository Audit (2026-07-09) — v1.2, final state**](jul_full_repository_audit_2026-07-09.md).
-> It consolidates and, for *present-state* purposes, supersedes the point reviews
-> below.
+> **📌 Current repository state:** all findings from Rounds 5–13 are resolved and
+> tracked in [`docs/audit-register.md`](../audit-register.md). The point-in-time
+> reviews previously linked here are now archived under [`previous_reviews/`](previous_reviews/).
 >
-> **v1.2 (2026-07-16 — final):** All audit findings resolved except N-4 (RBAC Phase 1,
-> design-complete, runtime not implemented). Sprint 1–3 items all landed. Every CI gate
-> green. Only open work: D1 (RBAC Phase 1, L effort, Critical impact) and demand-gated
-> strategic bets (E1–E5). See § 0.1 of the audit for the complete status table.
+> This directory no longer holds an authoritative current-state audit; it is a
+> **historical decision log** only.
 
 This folder is the **decision log** for Jul.IA: external/internal reviews that have
 been evaluated, plus the explicit record of *what we adopted, reframed, deferred,
@@ -18,21 +15,23 @@ or rejected* and *where each decision landed*. It exists so the product's
 evolution stays legible — every durable choice is traceable from a review to an
 ADR and to the vision / roadmap / specs change it produced.
 
-Reviewed documents stay here verbatim (with a dated **Reviewed** acknowledgement
+Reviewed documents are archived verbatim (with a dated **Reviewed** acknowledgement
 header); they are never silently edited. Decisions are recorded below and, when
 durable, promoted to an [ADR](../adr/).
 
-## Reviewed inputs
+## Reviewed inputs (archived)
+
+All reviewed inputs below are now in [`previous_reviews/`](previous_reviews/):
 
 | Date reviewed | Document | Disposition |
 | --- | --- | --- |
-| 2026-07-16 | [Full Repository Audit (2026-07-09) — v1.1](jul_full_repository_audit_2026-07-09.md) | **Authoritative — current-state single source of truth** · v1.1 reconciliation adds § 0.1 tracking all findings against Wave A/B work and RG-1 soak closure |
-| 2026-07-09 | [Full Repository Audit (2026-07-09)](jul_full_repository_audit_2026-07-09.md) | v1.0 (original) — see v1.1 for updated status |
-| 2026-07-02 | [Full Repository Audit (2026-07)](previous_reviews/jul_full_repository_audit_2026-07.md) | Superseded (historical — see `previous_reviews/`) |
-| 2026-06-21 | [Protocol Adapters — Product Strategy](jul_protocol_adapters_product_strategy.md) | Adopted (with scoping) |
-| 2026-06-21 | [Roadmap, Vision & Specs — Critical Product Review](jul_roadmap_vision_specs_critical_review.md) | Adopted / Reframed |
-| 2026-06-23 | [Console v2 — Self-explanatory operations & configuration UI spike](jul_console_v2_spike.md) | Adopted |
-| 2026-06-23 | [Console v2 — Frontend stack recommendation](jul_console_tech_stack_recommendation.md) | Adopted |
+| 2026-07-16 | Full Repository Audit (2026-07-09) — v1.1 | Superseded — see `docs/audit-register.md` for current finding status |
+| 2026-07-09 | Full Repository Audit (2026-07-09) | Superseded — archived as `previous_reviews/jul_full_repository_audit_2026-07-09.md` |
+| 2026-07-02 | Full Repository Audit (2026-07) | Superseded (historical — see `previous_reviews/`) |
+| 2026-06-21 | Protocol Adapters — Product Strategy | Adopted (with scoping) — archived as `previous_reviews/jul_protocol_adapters_product_strategy.md` |
+| 2026-06-21 | Roadmap, Vision & Specs — Critical Product Review | Adopted / Reframed — archived as `previous_reviews/jul_roadmap_vision_specs_critical_review.md` |
+| 2026-06-23 | Console v2 — Self-explanatory operations & configuration UI spike | Adopted — archived as `previous_reviews/jul_console_v2_spike.md` |
+| 2026-06-23 | Console v2 — Frontend stack recommendation | Adopted — archived as `previous_reviews/jul_console_tech_stack_recommendation.md` |
 
 ## Superseded / archived (`previous_reviews/`)
 
@@ -41,7 +40,12 @@ each carries a dated status banner and lives under [`previous_reviews/`](previou
 
 | Archived | Document | Why archived |
 | --- | --- | --- |
-| 2026-07-17 | [Round 5 security/reload-transaction audit — remediation tracking](previous_reviews/jul_round5_remediation_2026-07-17.md) | Completed — ReloadPlan transaction and lifecycle registry landed; burn-in reload soak pending |
+| 2026-07-19 | [Full Repository Audit (2026-07-09) — v1.2](previous_reviews/jul_full_repository_audit_2026-07-09.md) | Superseded — Round 6–13 findings and closure recorded in `docs/audit-register.md` |
+| 2026-07-17 | [Round 5 security/reload-transaction audit — remediation tracking](previous_reviews/jul_round5_remediation_2026-07-17.md) | Completed — ReloadPlan transaction and lifecycle registry landed |
+| 2026-07-17 | [Protocol Adapters — Product Strategy](previous_reviews/jul_protocol_adapters_product_strategy.md) | Adopted — decisions promoted to ADR 0002 and ADR 0003 |
+| 2026-07-17 | [Roadmap, Vision & Specs — Critical Product Review](previous_reviews/jul_roadmap_vision_specs_critical_review.md) | Adopted / Reframed — decisions promoted to ADR 0003 and ADR 0004 |
+| 2026-07-17 | [Console v2 — Self-explanatory operations & configuration UI spike](previous_reviews/jul_console_v2_spike.md) | Adopted — decisions promoted to ADR 0006 and the Console v2 spec |
+| 2026-07-17 | [Console v2 — Frontend stack recommendation](previous_reviews/jul_console_tech_stack_recommendation.md) | Adopted — decisions promoted to ADR 0006 and the Console v2 spec |
 | 2026-07-09 | [Full Repository Audit (2026-07-02)](previous_reviews/jul_full_repository_audit_2026-07.md) | Superseded by the 2026-07-09 audit |
 | 2026-07-09 | [Immediate Action Plan (2026-07)](previous_reviews/jul_immediate_action_plan_2026-07.md) | Completed — tasks folded into the 2026-07-02 remediation |
 | 2026-07-09 | [Console v2 Recovery & Excellence Plan](previous_reviews/jul_console_v2_recovery_action_plan.md) | Completed — Console v2 reached GA |
@@ -76,8 +80,8 @@ to shrink the vision — it is to make the vision honest and demand-gated:
 ## Console v2 synthesis (2026-06-23)
 
 *Jul-authored digest distilling the two Console v2 inputs above (the
-[operations & configuration UI spike](jul_console_v2_spike.md) and the
-[frontend stack recommendation](jul_console_tech_stack_recommendation.md)) into the
+[operations & configuration UI spike](previous_reviews/jul_console_v2_spike.md) and the
+[frontend stack recommendation](previous_reviews/jul_console_tech_stack_recommendation.md)) into the
 decisions Jul committed to. This is a synthesis, not a verbatim review; the
 authoritative decision record is [ADR 0006](../adr/0006-console-v2-stack.md) and the
 [Console v2 execution spec](../specs/console-v2.md).*
@@ -175,4 +179,5 @@ constrain the roadmap:
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
 | 2026-06-21 | 1.0 | Created the reviews & decision log: relocated the two reviewed documents here with dated acknowledgement headers; recorded the adopted / reframed / deferred / rejected traceability, the synthesis, and the resolved open questions; linked the decisions to ADR 0002/0003/0004 and the vision/roadmap/specs updates. | The two review documents themselves (verbatim, with only an ack header added). | review 2026-06-21; [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |
-| 2026-06-23 | 1.1 | Logged the two Console v2 inputs verbatim ([operations & configuration UI spike](jul_console_v2_spike.md); [frontend stack recommendation](jul_console_tech_stack_recommendation.md)); added the Console v2 synthesis digest and four Console v2 traceability rows; promoted the decisions to [ADR 0006](../adr/0006-console-v2-stack.md) and the [console-v2 spec](../specs/console-v2.md). | The 2026-06-21 reviews, synthesis, and resolved open questions are unchanged. | review 2026-06-23; [ADR 0006](../adr/0006-console-v2-stack.md), [console-v2 spec](../specs/console-v2.md) |
+| 2026-06-23 | 1.1 | Logged the two Console v2 inputs verbatim ([operations & configuration UI spike](previous_reviews/jul_console_v2_spike.md); [frontend stack recommendation](previous_reviews/jul_console_tech_stack_recommendation.md)); added the Console v2 synthesis digest and four Console v2 traceability rows; promoted the decisions to [ADR 0006](../adr/0006-console-v2-stack.md) and the [console-v2 spec](../specs/console-v2.md). | The 2026-06-21 reviews, synthesis, and resolved open questions are unchanged. | review 2026-06-23; [ADR 0006](../adr/0006-console-v2-stack.md), [console-v2 spec](../specs/console-v2.md) |
+| 2026-07-19 | 1.6 | Archived all superseded point-in-time reviews to `previous_reviews/`; redirected current-state pointer to `docs/audit-register.md`; updated outgoing links. | Decision log structure and promoted ADRs unchanged. | repository cleanup |

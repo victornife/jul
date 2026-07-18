@@ -4,7 +4,7 @@
 - **Date:** 2026-06-23
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** [ADR 0004](0004-console-ui-invariants.md) invariants #4 (no external assets / size budget) and #5 (continuous, not big-bang); the Console surface GA criterion in [ADR 0003](0003-maturity-and-ga.md) (criterion 9)
-- **Source:** the Console v2 reviews — [operations & configuration UI spike](../reviews/jul_console_v2_spike.md) and [frontend stack recommendation](../reviews/jul_console_tech_stack_recommendation.md)
+- **Source:** the Console v2 reviews — [operations & configuration UI spike](../reviews/previous_reviews/jul_console_v2_spike.md) and [frontend stack recommendation](../reviews/previous_reviews/jul_console_tech_stack_recommendation.md)
 - **Implemented:** the cutover shipped in the 2026-06-23 **v1.9** release — the v2 SPA is the default admin UI at `/`, the hand-written v1 `console.html` and its dev route are retired, and the ~250 KB gz initial-route budget and no-Node drift guard run in CI ([ga-push.md](../ga-push.md)).
 
 ## Context
