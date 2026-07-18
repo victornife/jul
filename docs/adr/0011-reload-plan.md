@@ -1,200 +1,105 @@
 # ADR 0011 — ReloadPlan: a single, side-effect-free reload transaction
 
-- **Status:** Proposed
-- **Date:** 2026-07-16
+- **Status:** Accepted — ReloadPlan transaction implemented; lifecycle registry single-sources restart classification (R5-01 through R5-17, 2026-07-19)
+- **Date:** 2026-07-16 (updated 2026-07-19)
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** configuration reload, secret resolution, listener lifecycle, upstream pool lifecycle, HTTP/3, ACME, admin preflight, lifecycle governance
 - **Source:** Round 5 external re-audit (R5-01 through R5-17)
 
 ## Context
 
-The current reload path has improved substantially (handler preparation is now a three-phase prepare/commit/abort, TCP bind failure aborts the generation, raw config advances after success, bound listener fingerprints exist, stream errors propagate into `LastReload`). However, Round 5 identified that the transaction still spans several independently mutable states:
+The reload path had evolved into an ordered sequence of in-place mutations across several independently mutable states: the global redaction registry, the handler generation pointer, upstream registry live/staged maps, TCP and HTTP/3 listener goroutines, raw and effective config pointers, certificate providers, the L4 stream runtime, and dynamic runtime policy (`log_level`, `worker_threads`).
 
-- process-wide redaction map and floor (`internal/config/secrets.go` → `redact.Replace` / `redact.SetMinLen`);
-- handler generation pointer (`s.handlers`);
-- upstream registry live/staged maps (`internal/upstream/registry.go`);
-- generation closer ownership (`internal/app/generation.go`);
-- TCP listener map and serve goroutines (`s.listeners`);
-- HTTP/3 UDP/QUIC accept loops (`internal/server/http3.go`);
-- expanded effective configuration (`s.cfg`) and raw source configuration (`s.rawCfg`);
-- dynamic certificate providers (`dynamicCertProvider`);
-- L4 stream runtime (`rt.Stream.Reload`);
-- log level and GOMAXPROCS (`OnReloaded`);
-- pending-restart and bound fingerprints.
-
-The code has improved ordering but does not yet define one authoritative object that owns all candidate state and can abort or commit it coherently. As a result:
-
-1. Secret expansion mutates global redaction state during validation and preparation; an aborted reload can leave candidate redaction state installed (R5-01).
-2. Restart-required checks compare raw configuration references, so rotating the contents behind an unchanged secret reference silently bypasses restart detection (R5-02).
-3. HTTP/3 starts its accept loop during listener staging, before commit (R5-04).
-4. TCP listeners start serving before the handler pointer is swapped (R5-05).
-5. Upstream pool backends are updated before the new handler generation is published (R5-05).
-6. Admin preflight omits the `log_format` restart gate (R5-06).
-7. The ACME startup fingerprint omits `cache_dir` and `ocsp_stapling` (R5-07).
-8. `worker_threads = auto` does not restore the previous numeric GOMAXPROCS cap (R5-08).
-9. Documentation and governance checks are presence-based rather than semantic (R5-10, R5-12, R5-13, R5-14).
+Round 5 found that this ordering allowed candidate state to leak into live state before commit: secret expansion mutated global redaction during validation; HTTP/3 accept loops started before publish; TCP listeners served the previous generation while the new handler tree was still being built; upstream pool backends were visible before the new handler generation was published; and restart-required classification was duplicated across preflight, direct reload, pending-restart checks, and documentation.
 
 ## Decision
 
-Introduce a single **`ReloadPlan`** value that owns every piece of candidate state, and a **`LifecycleRegistry`** that is the single source of truth for restart-required classification.
+Adopt a single **`ReloadPlan`** value that owns every piece of candidate state from resolution through publish or abort, and a **`lifecycle.Registry`** that is the single source of truth for restart-required classification.
 
-### 1. ReloadPlan
+### 1. ReloadPlan transaction
 
-```go
-type ReloadPlan struct {
-    RawConfig       *config.Config          // unexpanded source config
-    EffectiveConfig *config.Config          // expanded clone
-    Redaction       redact.State            // values + minLength
-    StartupFP       lifecycle.Fingerprint   // bound effective startup values
-    CandidateFP     lifecycle.Fingerprint   // candidate effective values
-    Handlers        map[string]http.Handler // per-listen-address handler tree
-    HandlerCommit   func() func()           // promote handler generation
-    HandlerAbort    func()                  // discard handler generation
-    TCPListeners    []*StagedListener       // staged TCP listeners
-    HTTP3Listeners  []*StagedHTTP3          // staged HTTP/3 listeners
-    StreamPlan      stream.Plan             // L4 stream reload plan
-    CertUpdates     []CertUpdate            // TLS provider refreshes
-}
-```
+`internal/server/server.go` defines `ReloadPlan` with the phases:
 
-Phases:
+1. **Resolve** — expand secrets once and build the immutable `config.Candidate` (raw config, effective config, redaction state, secret digests, candidate fingerprint).
+2. **Validate** — run structural/runtime validation on `Candidate.Effective`.
+3. **Lifecycle** — compare `CandidateFP` against the bound startup fingerprint.
+4. **Prepare** — build handlers and stage upstream/generation resources.
+5. **StageListeners** — bind new TCP listeners and HTTP/3 resources without serving.
+6. **Publish** — atomically install redaction state, swap configs, publish handler generation, and commit pool/generation resources.
+7. **Activate** — start serving on staged listeners.
+8. **Retire** — stop listeners no longer in the config and retire the old handler generation.
+9. **Refresh** — reload TLS certificates.
+10. **PostCommit** — apply dynamic side effects (`log_level`, `GOMAXPROCS`, stream reload).
 
-1. **Resolve** — pure secret expansion and effective fingerprint computation; no global mutation.
-2. **Validate** — structural/runtime validation on the expanded clone.
-3. **Lifecycle** — compare candidate effective fingerprint against bound startup fingerprint; reject if any startup-bound value changed.
-4. **Prepare** — build handlers, stage pools, stage listeners, stage certs, build stream plan; all still abortable.
-5. **Abort** — close all candidate resources; no live-state writes.
-6. **Publish** — one coordinator critical section: publish effective/raw config, redaction state, handler/pool generation, bound fingerprints.
-7. **Activate** — release TCP and QUIC accept barriers.
-8. **Retire** — drain old handler/pool/listener resources.
-9. **PostCommit** — apply dynamic log level/worker policy and report degraded optional subsystem failures truthfully.
+On any failure before Publish, `Abort` releases all candidate resources without touching live state.
 
-### 2. Pure secret resolution
+### 2. Pure secret resolution and redaction state
 
-`config.ExpandSecrets` is replaced by:
+Secret expansion was moved from `internal/config/secrets.go` into `config.NewCandidate`, which returns a deep-copied effective config and a self-contained `redact.State`. The global redaction registry is updated only inside `ReloadPlan.Publish`, so validation, preflight, and aborted reloads cannot alter live redaction behavior.
 
-```go
-func ResolveSecrets(raw *config.Config) (effective *config.Config, state redact.State, digests map[string]string, err error)
-```
+### 3. Lifecycle registry
 
-- Returns a deep-copied expanded config and a self-contained `redact.State`.
-- Does not call `redact.SetMinLen` or `redact.Replace`.
-- The caller installs `state` only at the Publish boundary.
+`internal/lifecycle/lifecycle.go` now declares every restart-required, new-listener-only, and hot-reloadable field in a single registry. `lifecycle.RestartRequired`, `lifecycle.PendingRestarts`, `lifecycle.FieldClass`, and `lifecycle.StartupFields` are consumed by:
 
-### 3. Redaction State
-
-```go
-package redact
-
-type State struct {
-    values map[string]struct{}
-    minLen int
-}
-
-func (s State) Apply(string) string
-func (s State) Writer(io.Writer) io.Writer
-func (s State) Count() int
-func Global() State
-func Install(State)
-```
-
-The global package retains an atomic `State` for the live runtime. Legacy helpers (`Snapshot`/`Restore`) are removed once all callers migrate.
-
-### 4. LifecycleRegistry
-
-A single Go registry declares every restart-required/new-listener-only/hot-reloadable field:
-
-```go
-package lifecycle
-
-type Class int
-
-const (
-    HotReload Class = iota
-    RestartRequired
-    NewListenerOnly
-)
-
-type Entry struct {
-    Path            string             // TOML path, e.g. "[global].log_format"
-    Class           Class
-    Subsystem       string             // "log_format"
-    Gate            func(*Config) bool // optional runtime gate
-    Reason          string
-    StartupConsumed bool               // included in effective startup fingerprint
-}
-
-var Registry = []Entry{...}
-
-func RestartRequired(old, next *config.Config) (string, bool)
-func PendingRestarts(startup, current *config.Config) []string
-func FieldClass(path string) Class
-func StartupFields() []Entry
-```
-
-The registry is used by:
 - `Preflight.Apply` (admin write gate);
 - `Server.doReload` (direct reload gate);
-- `PendingRestartCheck` (Console banner);
+- pending-restart checks for the Console banner;
 - diff warnings;
 - docs generation/validation.
 
-### 5. Effective startup fingerprint
+The registry also drives the effective startup fingerprint, which captures resolved values and file-content digests for startup-bound fields.
 
-For every field marked `StartupConsumed`, the registry captures the resolved value and, for file-backed values, a digest of the bytes actually consumed. The fingerprint is stored on the live `Server`/`Runtime` after initial startup and compared against the candidate fingerprint before Prepare.
+### 4. Activation order
 
-### 6. HTTP/3 staging
-
-Extend `h3Listener` with `Activate()` and `Abort()`:
-
-```go
-type h3Listener interface {
-    Close(ctx context.Context) error
-    Activate() error
-    Abort() error
-}
-```
-
-`buildListenerEntry` creates the UDP/QUIC resources but does not start the accept loop. `Activate` is called after Publish. `Abort` is called on any pre-commit failure.
-
-### 7. Activation order
-
-Reorder the successful reload so that handler publication precedes listener activation:
+Successful reload now publishes the handler generation before listeners start accepting:
 
 ```
-commitFn()            // promote pools/generation
-s.handlers.Store(...) // publish new handler generation
-for _, l := range stagedTCP { l.Activate() }
-for _, h := range stagedHTTP3 { h.Activate() }
+commitFn()              // promote pools/generation
+s.handlers.Store(...)   // publish new handler generation
+stagedTCP.Activate()    // start serving TCP
+stagedHTTP3.Activate()  // start serving HTTP/3
 ```
 
-### 8. Generation-owned pool view
+### 5. Generation-scoped pool snapshots
 
-`Registry.Commit` continues to stage/replace pools, but the handler factory receives a generation-scoped snapshot of backends at commit time. Old in-flight requests use the snapshot, so they never observe backends introduced by a later generation or stopped by pool replacement.
+The handler factory receives an immutable `upstream.SnapshotMap` at commit time. In-flight requests from the previous generation continue using their own snapshot, so they never observe backends introduced or removed by a newer generation.
 
-## Alternatives considered
+## Completed implementation table
 
-- **Keep the current ordering and add more equality checks.** Rejected: it does not solve the redaction side-effect problem, the secret-reference bypass problem, or the HTTP/3 pre-commit serving problem. It also requires maintaining duplicate gate lists in preflight, direct reload, pending status, and docs.
-- **Make `ExpandSecrets` idempotent and keep global mutation.** Rejected: even idempotent mutation is unsafe during validation/preflight because a draft config can remove secrets that the serving config relies on.
-- **Compute the effective fingerprint from raw config plus file mtime.** Rejected: environment-variable-backed secrets have no mtime, and the digest must reflect the bytes actually consumed, not the file metadata.
-- **Version the pool internally.** Rejected: unbounded version growth and complex cleanup; snapshot at generation commit is simpler and sufficient.
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| `ReloadPlan` | `internal/server/reload_plan.go` | Transaction object owning candidate state and reload phases |
+| `config.Candidate` | `internal/config/candidate.go` | Immutable raw + effective config, redaction state, and secret digests |
+| `redact.State` | `internal/redact/state.go` | Self-contained redaction state installed only at Publish |
+| `lifecycle.Registry` | `internal/lifecycle/lifecycle.go` | Single source of truth for field lifecycle classification |
+| `Preflight.Apply` | `internal/app/preflight.go` | Admin write gate using live snapshot and lifecycle registry |
+| `Server.doReload` | `internal/server/server.go` | Orchestrates `ReloadPlan` phases |
+| `GenerationResources` | `internal/app/generation.go` | Generational handler-closer and pool staging lifecycle |
+| `Registry` | `internal/upstream/registry.go` | Pool staging/reuse across reloads |
+| `listenerEntry` | `internal/server/listener.go` | Staged TCP listeners with deferred activation |
+| `h3Listener` | `internal/server/http3.go` | Staged HTTP/3 listeners with `Activate`/`Abort` |
+| Stream reload | `internal/stream/server.go` | L4 stream runtime reload invoked in PostCommit |
 
 ## Consequences
 
-- **Positive:** one object owns the reload transaction; side-effect-free validation/preflight; secret rotation is detected; HTTP/3 obeys the staging contract; activation order is correct; lifecycle classification is single-sourced; docs can be generated from code.
-- **Negative / cost:** a cross-cutting refactor touching `internal/config`, `internal/redact`, `internal/app`, `internal/server`, `internal/upstream`, `internal/admin`, and docs. Estimated 10–16 engineer-weeks for the full remediation.
+- **Positive:** one object owns the reload transaction; validation and preflight are side-effect-free; secret rotation is detected via effective-value fingerprints; HTTP/3 obeys the staging contract; activation order guarantees listeners serve only a published generation; lifecycle classification is single-sourced across preflight, reload, pending-restart checks, and docs; older in-flight requests never observe a newer generation's backends.
+- **Negative / trade-off:** a cross-cutting change touching config, redaction, app, server, upstream, admin, and docs; the orchestration in `internal/server/server.go` remains a policy choke-point.
 - **Invariant:** no endpoint or failed reload can alter live redaction behavior; no listener serves a candidate generation before it is published; no old request observes a newer generation's pool backends.
 
 ## Related
 
 - Round 5 audit findings R5-01 through R5-17
-- `internal/server/server.go` — current reload orchestration
-- `internal/app/serve.go` — composition root and `OnReloaded`
+- `internal/server/server.go` — reload orchestration
+- `internal/server/reload_plan.go` — `ReloadPlan` implementation
+- `internal/app/serve.go` — composition root and file-watch
 - `internal/app/factory.go` — `HandlerFactory.Prepare`
 - `internal/app/generation.go` — generational resource lifecycle
+- `internal/app/preflight.go` — admin write preflight
 - `internal/upstream/registry.go` — pool staging
+- `internal/config/candidate.go` — immutable candidate
 - `internal/config/secrets.go` — secret expansion
-- `internal/redact/redact.go` — redaction registry
+- `internal/redact/state.go` — redaction state
+- `internal/lifecycle/lifecycle.go` — lifecycle registry
 - `docs/config-lifecycle.yaml` — field lifecycle manifest
 - `docs/reload-semantics.md` — operator-facing reload semantics
 - `docs/specs/reload-plan.md` — detailed implementation design
