@@ -786,9 +786,17 @@ def check_finding_uniqueness():
     resulted in UI-1 being marked both Resolved and Still-open in the same
     document.
     """
-    current_audit = ROOT / "docs" / "reviews" / "jul_full_repository_audit_2026-07-09.md"
+    current_audit = ROOT / "docs" / "audit-register.md"
     if not current_audit.exists():
-        return  # no current audit to check
+        # The audit register is the authoritative document for closed and
+        # deferred findings. If it is missing, the docs-check suite itself is
+        # incomplete, so fail loudly rather than silently skipping validation.
+        error(
+            current_audit,
+            0,
+            "audit register docs/audit-register.md is missing; cannot validate finding uniqueness",
+        )
+        return
 
     text = current_audit.read_text(encoding="utf-8")
     # Extract all table rows that look like finding status rows:

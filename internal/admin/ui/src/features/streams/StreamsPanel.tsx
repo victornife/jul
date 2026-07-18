@@ -367,7 +367,7 @@ export function StreamsPanel() {
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold">L4 streams</h1>
-            <MaturityBadge level="beta" />
+            <MaturityBadge level="ga" />
           </div>
           <p className="max-w-3xl text-sm text-jul-muted">
             Raw TCP and UDP reverse-proxy listeners operating below the HTTP layer.

@@ -90,6 +90,11 @@ before a feature is labelled GA; this page is the consolidated index.
 - **Server reflection requires a live upstream.** When `use_reflection = true`,
   the descriptor is fetched from the upstream at startup; a down upstream
   prevents the location from initialising.
+- **Long-lived streams may be cut at the retired-connection grace boundary.**
+  Dynamic upstream churn retires removed backend connections for 30 seconds so
+  in-flight streams can drain. Streams that outlast that grace period are
+  closed when the retired connection is evicted; clients should be prepared to
+  reconnect. Unary calls are unaffected.
 
 ---
 
@@ -164,8 +169,9 @@ before a feature is labelled GA; this page is the consolidated index.
   upstream; WAF findings are logged/metrics-only.
 - **CRS rule updates require a rebuild.** The OWASP Core Rule Set is embedded
   in the binary; updating it requires rebuilding with the `waf` tag.
-- **SecLang parser errors fail open at startup.** A malformed directive file
-  prevents the WAF engine from building and the location is not protected.
+- **SecLang parser errors fail closed at startup.** A malformed directive file
+  prevents the WAF engine from building, and the server refuses to start so the
+  misconfigured location cannot be exposed without protection.
 
 ---
 
