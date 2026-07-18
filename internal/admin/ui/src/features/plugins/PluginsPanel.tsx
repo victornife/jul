@@ -55,7 +55,7 @@ export function PluginsPanel() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold">Plugins</h1>
-            <MaturityBadge level="beta" />
+            <MaturityBadge level="ga" />
           </div>
           <p className="max-w-3xl text-sm text-jul-muted">
             WASM plugins attached to routes for custom request/response processing.

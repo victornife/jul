@@ -207,10 +207,10 @@ describe("StreamsPanel", () => {
     expect(screen.getByText("TLS passthrough")).toBeInTheDocument();
   });
 
-  it("marks the panel Beta per the maturity model", async () => {
+  it("marks the panel GA per the maturity model", async () => {
     render(<StreamsPanel />, { wrapper: Wrapper });
     await screen.findByText("L4 streams");
-    expect(screen.getByText("beta")).toBeInTheDocument();
+    expect(screen.getByText("GA")).toBeInTheDocument();
   });
 
   it("opens the editor drawer from New stream", async () => {

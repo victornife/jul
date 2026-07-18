@@ -103,25 +103,31 @@ export function Badge({
 }
 
 // ── MaturityBadge ───────────────────────────────────────────────────────────-
-// Honest feature-maturity labeling per ADR 0003: a feature that is implemented
-// but not yet at the GA bar is marked Beta so operators set correct
-// expectations. Tooltip explains the level; the link to the maturity model is in
-// the Console guide.
-type Maturity = "beta" | "best-effort" | "experimental";
+// Honest feature-maturity labeling per ADR 0003. Tooltip explains the level;
+// the link to the maturity model is in the Console guide.
+type Maturity = "ga" | "beta" | "best-effort" | "experimental";
 
 const MATURITY_HINT: Record<Maturity, string> = {
+  ga: "GA — meets the GA bar and is stable for production use.",
   beta: "Beta — usable, with known limitations; config/API may change before GA.",
   "best-effort": "Best-effort — no stability or completeness guarantees.",
   experimental: "Experimental — may change or be removed.",
+};
+
+const MATURITY_STYLE: Record<Maturity, string> = {
+  ga: "bg-jul-success/15 text-jul-success",
+  beta: "bg-jul-warning/15 text-jul-warning",
+  "best-effort": "bg-jul-warning/15 text-jul-warning",
+  experimental: "bg-jul-danger/15 text-jul-danger",
 };
 
 export function MaturityBadge({ level = "beta" }: { readonly level?: Maturity }) {
   return (
     <span
       title={MATURITY_HINT[level]}
-      className="inline-block rounded-full bg-jul-warning/15 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-jul-warning"
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-wide ${MATURITY_STYLE[level]}`}
     >
-      {level}
+      {level === "ga" ? "GA" : level}
     </span>
   );
 }
