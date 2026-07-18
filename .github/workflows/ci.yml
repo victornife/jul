@@ -484,6 +484,8 @@ jobs:
         run: pip install tomli pyyaml
       - name: validate docs
         run: python scripts/docs-check.py
+      - name: run docs-check unit tests
+        run: python scripts/test_docs_check.py
 
   full-tags-sync:
     name: full-tags-sync

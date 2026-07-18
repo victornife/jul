@@ -26,10 +26,10 @@ def test_check_finding_uniqueness_detects_conflict():
         audit.parent.mkdir(parents=True)
         audit.write_text(
             "# Audit Register\n\n"
-            "| Finding | Title | Status |\n"
-            "|---|---|---|\n"
-            "| R9-01 | Example | ✅ Implemented |\n"
-            "| R9-01 | Example | ⏳ Deferred |\n",
+            "| Finding | Title | Fix location | Test | Evidence | Status | Commit |\n"
+            "|---|---|---|---|---|---|---|\n"
+            "| R9-01 | Example | internal/x | TestX | unit | ✅ Implemented | abc123 |\n"
+            "| R9-01 | Example | internal/x | TestX | unit | ⏳ Deferred | — |\n",
             encoding="utf-8",
         )
 
@@ -57,10 +57,10 @@ def test_check_finding_uniqueness_allows_decimal_suffixes():
         audit.parent.mkdir(parents=True)
         audit.write_text(
             "# Audit Register\n\n"
-            "| Finding | Title | Status |\n"
-            "|---|---|---|\n"
-            "| R9-14.1 | One | ✅ Implemented |\n"
-            "| R9-14.2 | Two | ⏳ Deferred |\n",
+            "| Finding | Title | Fix location | Test | Evidence | Status | Commit |\n"
+            "|---|---|---|---|---|---|---|\n"
+            "| R9-14.1 | One | internal/x | TestX | unit | ✅ Implemented | abc123 |\n"
+            "| R9-14.2 | Two | internal/x | TestX | unit | ⏳ Deferred | — |\n",
             encoding="utf-8",
         )
 
