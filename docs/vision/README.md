@@ -1,6 +1,6 @@
 # Jul.IA — Vision
 
-> Version 1.3 · Updated 2026-07-08
+> Version 1.4 · Updated 2026-07-20
 >
 > Status snapshot: Year 1 shipped (11/11); Year 2 shipped (9/9). All 20 shipped
 > features are **GA** and the soak-test post-GA gate is fully closed. The
@@ -14,6 +14,42 @@ Jul.IA is an NGINX-inspired HTTP edge server written in Go and configured
 entirely through TOML. It bundles reverse-proxying, load balancing, static
 serving, application gateways, a two-tier cache, TLS, hot reload, and a built-in
 admin/observability surface — in a **single static, dependency-free binary**.
+
+## Who Jul.IA is for
+
+### Primary user
+
+Small-to-medium platform or infrastructure teams that need modern proxy, TLS,
+policy, gRPC, observability, and extensibility without operating a heavyweight
+gateway platform.
+
+### Primary jobs
+
+- Modernize or replace an NGINX estate.
+- Expose internal gRPC services safely.
+- Run a serious single-node edge/protocol gateway.
+- Manage routing, security, and observability from one binary.
+- Extend behavior through sandboxed WASM.
+- Establish a simple single-node base before any fleet platform.
+
+### Secondary users
+
+- Self-hosters and application teams.
+- Teams needing lightweight protocol adaptation.
+- Future AI platform teams if Phase 6 proves demand.
+
+### Anti-personas
+
+- Hyperscale CDN operators.
+- Organizations seeking a complete service mesh now.
+- Teams requiring a managed global data plane today.
+- Teams already standardized on a larger gateway platform with no need for a
+  standalone node.
+
+### Product promise
+
+> Jul.IA remains fully useful and operable as a standalone single-node product
+> even if fleet, AI, or hosted capabilities are added later.
 
 ## The three pillars
 
@@ -131,6 +167,7 @@ example: the AI Gateway MVP behind the `ai` tag).
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-07-20 | 1.4 | Added **Who Jul.IA is for**: primary user, primary jobs, secondary users, anti-personas, and the standalone-single-node product promise. Linked the [operating roadmap](../roadmap/README.md#active-operating-roadmap) and [evidence gates](../roadmap/README.md#evidence-gates-and-product-signals) from the vision. | The three pillars, architectural commitments, business ladder, and demand-gated horizons. | Issue #63; [roadmap/README.md](../roadmap/README.md) |
 | 2026-06-22 | 1.3 | Linked the new beginner-friendly [concepts appendix](appendix.md) — how a request travels through modern edge infrastructure (HTTP, proxies, TLS, caching, observability) — from **Related documents**. | The vision body, pillars, commitments, status snapshot, and demand-gated horizons. | [appendix.md](appendix.md) |
 | 2026-06-22 | 1.2 | Refreshed the status snapshot: added the shipped **Y2-07 mTLS** (Year 2 is now 6/9 shipped, not "Y2-01…Y2-05") and recorded that Core HTTP, Y1-01, Y1-04, Y2-01, Y2-04, and Y2-07 are **GA** rather than all-Beta; pointed maturity at the canonical [status matrix](../status.md). | The vision body, pillars, commitments, and the demand-gated horizon. | [status.md](../status.md), [roadmap](../roadmap/) |
 | 2026-06-21 | 1.1 | Repositioned pillar 1 from "most powerful" to "leanest serious gateway"; added commitments *Operable by design / Console-first*, *Explicit adapters not universal conversion*, *Evidence before expansion*; added an evidence-gates table; softened the OSS→open-core→Cloud ladder to a demand-gated horizon with a two-edition (Core/OSS · Full) model; extended non-goals; fixed ADR links after the folder move. | The three-pillar model, the *leanness-wins* tie-breaker, and the single-binary / no-cgo / validate-then-atomic-reload / stable-seams commitments. | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |

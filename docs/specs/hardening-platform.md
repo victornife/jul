@@ -1,20 +1,23 @@
 <!-- Engineering execution spec for the pre-1.0 Hardening & platform backlog (HP-01..HP-07).
      Source-of-truth for the strategic items deferred out of the pre-1.0 hardening pass
      (Console v2 robustness Phases 1-4) plus the structured-config parity patch-ops.
-     Companion to ../roadmap/ and ../specs/README.md. This is DESIGN-AHEAD, not committed
-     work: nothing here has shipped. Update when the design changes; bump Version + changelog. -->
+     Companion to ../roadmap/ and ../specs/README.md. Some items are now delivered;
+     remaining work is mapped to the active Phases 2-5 sequence. Update when the design
+     changes; bump Version + changelog. -->
 
 # JUL Engineering Execution Plan — Hardening & platform (pre-1.0)
 
-> Version 1.0 · Updated 2026-06-28
+> Version 1.1 · Updated 2026-07-20
 >
 > Scope note: this is the home for cross-cutting robustness work that was
 > **scoped out** of the pre-1.0 hardening pass (the Console v2 robustness phases:
 > reload truthfulness, admin self-lockout guard, error taxonomy, build-tag
 > degradation, a11y, edge-timeout/observability fixes, and ops/supply-chain
-> readiness) so the items are **tracked, not lost**. None of HP-01..HP-07 has
-> shipped. Each entry records what the hardening pass **already delivered** versus
-> what remains, so this spec does not re-litigate solved problems.
+> readiness) so the items are **tracked, not lost**. Several HP items are now
+> delivered; the rest are mapped to the active phase sequence in
+> [../roadmap/README.md](../roadmap/README.md#active-operating-roadmap). Each entry
+> records what the hardening pass **already delivered** versus what remains, so
+> this spec does not re-litigate solved problems.
 
 ## Relationship to the roadmap
 
@@ -24,15 +27,17 @@ to committed roadmap features — notably **HP-02 Console RBAC** feeds
 [Y3-02 (Console RBAC + SSO/SAML/OIDC)](../roadmap/). The backlog table lives in
 [roadmap/README.md](../roadmap/); this spec is the design source-of-truth behind it.
 
-| ID | Item | Precursor to | Effort |
-| --- | --- | --- | --- |
-| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | — | M |
-| HP-02 | Console RBAC + multi-user | [Y3-02](../roadmap/) | L |
-| HP-03 | Metric-cardinality & relabel strategy | — | M |
-| HP-04 | Pre-commit hooks / local gate parity | — | M |
-| HP-05 | Container & process-supervision hardening | [Y3-06](../roadmap/) | M |
-| HP-06 | Structured-config parity patch-ops | [Y2-09](../specs/console-v2.md) | L |
-| HP-07 | SSRF allow-list hardening (defense-in-depth) | — | M |
+| ID | Item | Precursor to | Phase mapping | Effort |
+| --- | --- | --- | --- | --- |
+| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | — | Partially delivered; Phase 2 completes it | M |
+| HP-02 | Console RBAC + multi-user | [Y3-02](../roadmap/) | Design complete; Phase 3 implements it | L |
+| HP-03 | Metric-cardinality & relabel strategy | — | ✅ Delivered | M |
+| HP-04 | Pre-commit hooks / local gate parity | — | ✅ Delivered | M |
+| HP-05 | Container & process-supervision hardening | [Y3-06](../roadmap/) | ✅ Delivered | M |
+| HP-06A | Structured-config parity — backend entity CRUD | [Y2-09](../specs/console-v2.md) | ✅ Delivered | L |
+| HP-06B | Structured-config parity — Console entity CRUD | [Y2-09](../specs/console-v2.md) | Phase 5 active | L |
+| HP-06C | Structured-config parity — near-term global tables | [Y2-09](../specs/console-v2.md) | `global_set`, `compression_set`, `rate_limit_global_set` Phase 5 active; `cache_set`, decomposed admin ops, and `access_log_set` deferred | L |
+| HP-07 | SSRF allow-list hardening (defense-in-depth) | — | Core policy delivered; Phase 4 completes integration and diagnostics | M |
 
 Effort: **M** ≈ weeks · **L** ≈ ~a quarter (per the roadmap T-shirt sizing).
 
@@ -422,6 +427,7 @@ already covered when the register was actioned (see notes).
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.5 | 2026-07-20 | Reconciled HP-01..HP-07 against the active Phases 1-7 programme: HP-03/04/05 and HP-06A backend entity CRUD are delivered; HP-01 is partially delivered and completed in Phase 2; HP-02 design is complete and implemented in Phase 3; HP-06B Console entity CRUD and HP-06C near-term global tables (`global_set`, `compression_set`, `rate_limit_global_set`) are Phase 5 active, with `cache_set`, decomposed admin operations, and `access_log_set` deferred; HP-07 core egress policy is delivered, with Phase 4 completing integration and diagnostics. Updated the relationship table with a Phase mapping column. |
 | 1.4 | 2026 | HP-05 completed: both deferred container items delivered. The [Dockerfile](../../Dockerfile) pins both base images by tag + `@sha256` digest (Dependabot-maintained) and declares a shell-less `HEALTHCHECK` running `jul healthcheck`. The image bakes a self-consistent container config ([deploy/docker/server.toml](../../deploy/docker/server.toml) + placeholder `/var/www` site) that enables the admin listener on loopback, so the server starts unmounted and the probe passes out of the box (also fixing the latent non-existent `/srv/www/example` root). |
 | 1.3 | 2026 | HP-03 delivered: the request `method` label is folded to a fixed set (unknown → `other`) so every client-derived metric label is now bounded by construction; published the full label-cardinality policy table + operator relabel cookbook in [core-http.md](../core-http.md#metrics); enforced by `TestMetricLabelPolicy` / `TestHTTPMethodLabelBounded` in `internal/observability/cardinality_test.go`. |
 | 1.2 | 2026 | HP-06 Phase 1 delivered: six structured entity-CRUD patch-ops close the create/delete parity gap for servers, routes, and upstream pools (`server_add`/`server_remove`, `location_add`/`location_remove`, `upstream_add`/`upstream_remove`) in `internal/admin/patch.go`, with round-trip + guard tests in `patch_crud_test.go`. Global-table structured ops (`global_set`/`cache_set`/`compression_set`/`rate_limit_global_set`/`admin_set`/`access_log_set`) are deferred to Phase 2 — their guided TOML-upsert editors already provide a diff-reviewed structured path, so the remaining gap degrades gracefully. Console create/delete forms (`client.ts`) still to follow. |

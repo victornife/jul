@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.33 · Updated 2026-07-17
+> Version 1.34 · Updated 2026-07-20
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -150,6 +150,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-07-20 | 1.34 | Bumped version to keep the status page in sync with the roadmap after the Phase 1 normalization (active sequence, evidence gates, target users). No feature maturity or GA criteria changed. | [roadmap/README.md](roadmap/README.md), Issue #63 |
 | 2026-07-04 | 1.30 | **Auth soak completed:** HTTP Basic auth path soaked 1h Windows local (929K req, 0% err). pprof endpoints added to admin server behind auth; load generator updated with `-authUser`/`-authPassword`/`-compress` flags. Evidence logged in `docs/soak-evidence.md`. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
 | 2026-07-04 | 1.30 | **Compression soak completed:** gzip/brotli/zstd paths soaked 1h Windows local (11.6M req, ~3,235 rps, 0% err). zstd encoder pool allocations (~48 MiB) verified as legitimate library pre-allocation, not a leak. Evidence logged. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |
 | 2026-07-04 | 1.30 | **Cache soak completed:** response cache (memory + disk) soaked 1h Windows local (1.5M req, 0% err). Hit/miss/evict/revalidate paths exercised with 8 MB memory cap + 10 s TTL. pprof-verified: 16 goroutines, ~1.6 MiB heap. Evidence logged. | [soak-evidence.md](soak-evidence.md), [status.md](status.md) |

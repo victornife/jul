@@ -22,8 +22,10 @@ interface — all in a single static, dependency-free binary.
 - **Language:** Go 1.26.5
 - **License:** AGPL-3.0
 
-> Where this is headed: see the [vision](docs/vision/) and the
-> [roadmap](docs/roadmap/), with detailed per-feature
+> Where this is headed: see the [vision](docs/vision/) (including who Jul.IA is
+> for and the standalone-single-node product promise) and the
+> [roadmap](docs/roadmap/) (including the active Phase 2→7 sequence and the
+> evidence-gated horizon), with detailed per-feature
 > [engineering specs](docs/specs/). Durable technical decisions are
 > recorded as [ADRs](docs/adr/), and how the direction evolves is tracked in
 > the [reviews & decision log](docs/reviews/).

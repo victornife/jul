@@ -9,8 +9,8 @@ acceptance/DoD, risks, rollout/build-tags and docs updates.
 
 For the high-level "why" and the delivery status of each feature, see:
 
-- [../vision/](../vision/) — product north star and architectural commitments
-- [../roadmap/](../roadmap/) — consolidated 5-year plan with status (delivered / in progress / planned)
+- [../vision/](../vision/) — product north star, architectural commitments, and target users
+- [../roadmap/](../roadmap/) — consolidated 5-year plan, the [active operating roadmap](../roadmap/README.md#active-operating-roadmap), and [evidence gates](../roadmap/README.md#evidence-gates-and-product-signals)
 - [../adr/](../adr/) — architecture decision records
 
 ## Index
@@ -35,6 +35,7 @@ add an ADR. See the maintenance note in [../roadmap/](../roadmap/).
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-07-20 | 1.3 | Linked the [active operating roadmap](../roadmap/README.md#active-operating-roadmap) and [evidence gates](../roadmap/README.md#evidence-gates-and-product-signals) from the navigation guidance; noted that [../vision/](../vision/) now includes target users and the product promise. | The per-year index rows, the hardening-platform row, and sync guidance. | Issue #63 |
 | 2026-07-08 | 1.2 | Added the [Console RBAC deep-dive spec](console-rbac.md) (HP-02): principal/role/permission model, predefined + custom roles, scoped tokens, an exhaustive permission matrix over every admin endpoint, `[admin.rbac]` schema, migration, threat model, and a four-phase plan. Recorded in [ADR 0010](../adr/0010-console-rbac.md). | The per-year rows, the hardening-platform row, and sync guidance. | [console-rbac.md](console-rbac.md), [#35](https://github.com/victornife/jul/issues/35) |
 | 2026-06-28 | 1.1 | Indexed the new cross-cutting [Hardening & platform spec](hardening-platform.md) (HP-01..HP-07 + micro-fixes register) — the design source-of-truth behind the roadmap's pre-1.0 robustness backlog. | The per-year index rows and sync guidance. | [hardening-platform.md](hardening-platform.md), [roadmap](../roadmap/) |
 | 2026-06-21 | 1.0 | Added a version stamp; corrected the Year-2 index blurb from "gRPC GA" to "gRPC streaming" (shipped at Beta, not GA). | The index, per-spec descriptions, and sync guidance. | [review 2026-06-21](../reviews/); [ADR 0003](../adr/0003-maturity-and-ga.md) |

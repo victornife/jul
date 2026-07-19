@@ -82,6 +82,10 @@ category until its evidence exists. The long-term vision stays broad; the
 | **Service mesh** | Customers explicitly ask for east-west identity/policy |
 | **GSLB** | Customers run multi-region Jul.IA fleets |
 
+The operating roadmap now publishes quantitative thresholds and a lightweight
+product-signal table for each of these categories; see
+[docs/roadmap/README.md#evidence-gates-and-product-signals](../roadmap/README.md#evidence-gates-and-product-signals).
+
 A **Time-boxed bet** is the sanctioned exception: a category may be entered ahead
 of its gate as a small, thin, time-boxed MVP with an explicit kill/continue
 decision (current example: the AI Gateway MVP behind the `ai` tag).

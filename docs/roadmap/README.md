@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.33 · Updated 2026-07-17
+> Version 1.34 · Updated 2026-07-20
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -25,6 +25,29 @@ Alpha · **Beta** · **GA** · Deprecated. *Implemented ≠ GA:* a shipped featu
 shipped features to GA; the soak test is a post-GA gate per
 [ADR 0005](../adr/0005-soak-post-ga-gate.md). All Year 1 and Year 2 shipped
 features have now reached **GA**; the soak test post-GA gate is **fully closed**.
+
+## Active operating roadmap
+
+The current execution sequence is fixed and sequential. Each phase is a
+releasable increment; later phases build on earlier ones.
+
+| Phase | Focus | Key deliverables | Status |
+| --- | --- | --- | --- |
+| Phase 2 | Reload results, bounded managed applies, and planned restart | Correlated reload results, exact restoration, planned-restart staging/discard/preflight | 🚧 next |
+| Phase 3 | RBAC Phase 1 | Named principals, predefined + custom roles, scoped tokens, deny-by-default admin routes | 🔒 queued |
+| Phase 4 | Egress coverage and hardening | JWKS, forward-auth, discovery, ACME/OCSP, WASM fetch under shared egress policy | 🔒 queued |
+| Phase 5 | Structured CRUD + near-term global-table patch ops | Batch patch preview, entity lifecycle, `global_set`, `compression_set`, `rate_limit_global_set` | 🔒 queued |
+| Phase 6 | AI Gateway MVP | Time-boxed multi-provider routing, failover, streaming, token/cost metrics | ⏳ time-boxed bet |
+| Phase 7 | Activate at most one evidence-backed horizon | Fleet, K8s/Gateway API, AI continuation, Cloud, or GraphQL — only if gate trips | 🔒 demand-gated |
+
+**Planned restart** is delivered as a shared Phase 2 foundation and is consumed
+by later restart-bound settings (for example the global-table operations in
+Phase 5).
+
+**Deferred table families:** `cache_set`, decomposed admin operations, and
+`access_log_set` are explicitly follow-ups, not hidden Phase 5 stretch goals.
+See the [evidence gates](#evidence-gates-and-product-signals) below and the
+[Hardening & platform spec](../specs/hardening-platform.md).
 
 ---
 
@@ -96,18 +119,57 @@ Cross-cutting robustness work parked out of the pre-1.0 hardening pass (the Cons
 v2 robustness phases) so it is tracked, not lost. These are **not** demand-gated
 vision items; they are near-term durability/parity work. The design source-of-truth
 is the [Hardening & platform spec](../specs/hardening-platform.md) (HP-01..HP-07 +
-the HP-m\* micro-fixes register). Items marked **Shipped** are complete; the
-remaining rows are the active backlog.
+the HP-m\* micro-fixes register). Items are reconciled against the active phase
+sequence above.
 
-| ID | Item | Description | Impact / what it unlocks | Effort |
-| --- | --- | --- | --- | --- |
-| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | Add context-deadline to reload + structured per-subsystem result in apply response | Better operator visibility when reload stalls or partial-fails | M |
-| HP-02 | Console RBAC + multi-user | Named principals, roles (viewer/operator/admin), scoped revocable tokens; authz at the API boundary; per-principal audit attribution. **Design:** [console-rbac.md](../specs/console-rbac.md) + [ADR 0010](../adr/0010-console-rbac.md). Precursor to [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core). | Multiple operators under least-privilege with attributable audit | L |
-| HP-03 | Metric-cardinality & relabel strategy | **Shipped:** full label-cardinality policy table + operator relabel cookbook ([core-http.md](../core-http.md#metrics)); the client-derived `method` label is folded to a fixed set (unknown → `other`) so every client-derived label is bounded by construction (`host` was already opt-in); enforced by `TestMetricLabelPolicy`. | Predictable Prometheus cardinality at scale | M |
-| HP-04 | Pre-commit hooks / local gate parity | A repo-managed hook running the CI gate's fast path locally (fmt/vet/changed-pkg test + console lint/typecheck), full test + drift/size on push. | Red builds caught before they reach `main` | M |
-| HP-05 | Container & process-supervision hardening | **Shipped:** base images pinned by tag + `@sha256` digest (Dependabot-maintained); shell-less `HEALTHCHECK` running `jul healthcheck`; image bakes a self-consistent config (admin on loopback + placeholder `/var/www`) so it starts unmounted and the probe passes. (systemd resource/crash-loop limits landed earlier.) | Self-healing containers + reproducible images | M |
-| HP-06 | Structured-config parity patch-ops | **Phase 1 shipped:** create/delete ops for servers/routes/upstream pools (`server_add`/`server_remove`, `location_add`/`location_remove`, `upstream_add`/`upstream_remove`) close the entity CRUD gap. **Phase 2 (deferred):** structured global-table ops (`[global]`/`[cache]`/`[compression]`/global `[rate_limit]`/`[admin]`/access-log) — their guided validated-TOML-upsert editors already give a diff-reviewed path, so the console need not drop to raw TOML (the raw editor stays the universal fallback). | Full structured editing parity with the raw editor | L |
-| HP-07 | SSRF allow-list hardening | Optional, default-off egress allow-list (host/CIDR) for config-driven JWKS/forward-auth/ACME/discovery fetches. Defense-in-depth — config is trusted per [SECURITY.md](../../SECURITY.md), so this bounds operator-error blast radius, not a request-driven hole. | Limits outbound reach even with a mistaken/compromised config | M |
+| ID | Item | Description | Impact / what it unlocks | Phase | Effort |
+| --- | --- | --- | --- | --- | --- |
+| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | Add context-deadline to reload + structured per-subsystem result in apply response | Better operator visibility when reload stalls or partial-fails | **Partially delivered**; Phase 2 completes it | M |
+| HP-02 | Console RBAC + multi-user | Named principals, roles (viewer/operator/admin), scoped revocable tokens; authz at the API boundary; per-principal audit attribution. **Design:** [console-rbac.md](../specs/console-rbac.md) + [ADR 0010](../adr/0010-console-rbac.md). Precursor to [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core). | Multiple operators under least-privilege with attributable audit | **Design complete**; Phase 3 implements it | L |
+| HP-03 | Metric-cardinality & relabel strategy | **Delivered:** full label-cardinality policy table + operator relabel cookbook ([core-http.md](../core-http.md#metrics)); the client-derived `method` label is folded to a fixed set (unknown → `other`) so every client-derived label is bounded by construction (`host` was already opt-in); enforced by `TestMetricLabelPolicy`. | Predictable Prometheus cardinality at scale | ✅ Delivered | M |
+| HP-04 | Pre-commit hooks / local gate parity | **Delivered:** repo-managed hooks running the CI gate's fast path locally (fmt/vet/changed-pkg test + console lint/typecheck), full test + drift/size on push. | Red builds caught before they reach `main` | ✅ Delivered | M |
+| HP-05 | Container & process-supervision hardening | **Delivered:** base images pinned by tag + `@sha256` digest (Dependabot-maintained); shell-less `HEALTHCHECK` running `jul healthcheck`; image bakes a self-consistent config (admin on loopback + placeholder `/var/www`) so it starts unmounted and the probe passes. (systemd resource/crash-loop limits landed earlier.) | Self-healing containers + reproducible images | ✅ Delivered | M |
+| HP-06A | Structured-config parity — backend entity CRUD | **Delivered:** create/delete ops for servers/routes/upstream pools (`server_add`/`server_remove`, `location_add`/`location_remove`, `upstream_add`/`upstream_remove`) close the entity CRUD gap. | Full structured lifecycle for servers, routes, and upstream pools | ✅ Delivered | L |
+| HP-06B | Structured-config parity — Console entity CRUD | Mirror the backend entity CRUD ops in the Console patch union, Zod schema, and structured create/delete forms. | Console users can create and delete entities without dropping to raw TOML | 🚧 Phase 5 active | L |
+| HP-06C | Structured-config parity — near-term global tables | Structured patch ops for `global_set`, `compression_set`, and `rate_limit_global_set`. `cache_set`, decomposed admin operations, and `access_log_set` are deferred follow-ups. | Close the global-table editing gap for the most common settings | 🚧 Phase 5 active (three ops); 🔒 deferred (cache/admin/access_log) | L |
+| HP-07 | SSRF allow-list hardening | **Core policy delivered:** optional, default-off egress allow-list (host/CIDR) for config-driven JWKS/forward-auth/ACME/discovery fetches. Defense-in-depth — config is trusted per [SECURITY.md](../../SECURITY.md), so this bounds operator-error blast radius, not a request-driven hole. Phase 4 completes integration and diagnostics across all outbound clients. | Limits outbound reach even with a mistaken/compromised config | ✅ Core delivered; Phase 4 completes integration | M |
+
+---
+
+## Evidence gates and product signals
+
+Major roadmap expansions are demand-gated. A category enters the operating
+roadmap only when its evidence gate trips. The long-term vision (Years 3–5)
+remains in the [vision horizon](#vision-horizon--demand-gated) below; the
+operating roadmap stays narrow.
+
+### Evidence gates
+
+| Category | Hypothesis | Minimum evidence threshold | Technical prerequisites | Continue/extend/stop outcome | Decision note |
+| --- | --- | --- | --- | --- | --- |
+| Fleet | Jul.IA users need multi-node coordination | ≥3 external users operating multiple nodes; ≥2 operating ≥10 nodes; repeated rollout/drift/rollback pain; ≥2 willing to pilot a control plane | Planned-restart workflow proven; mTLS enrollment; config versioning | Continue to fleet design / stop if users stay single-node | — |
+| Kubernetes/Gateway API | Users want Jul.IA as a K8s ingress controller | ≥3 credible requests; ≥2 pilot commitments; agreed bounded Gateway API subset; evidence a controller will not weaken the standalone product | Kubernetes discovery tag stable; RBAC API contract stable | Continue to controller design / stop if demand is speculative | — |
+| AI continuation | The AI Gateway MVP should grow into the Year 4 program | ≥2 real users with meaningful traffic; 3 provider adapters demonstrated; reliable streaming and failover; useful token/cost accounting; acceptable `ai` build-tag size/runtime cost; clear reason to choose Jul.IA over a generic proxy | AI Gateway MVP (Phase 6) completed | Continue to full AI-native program / stop and keep MVP only / kill tag | — |
+| Cloud | Users want a hosted control plane | Fleet demand already proven; repeated request for hosted control plane; acceptance of BYO-node/control-traffic-only model; credible willingness to pay | Fleet control plane proven; multi-tenant isolation design | Continue to JUL Cloud stage 1 / stop if self-hosting remains dominant | — |
+| GraphQL | Users need BFF/composition over existing REST/gRPC | Multiple concrete composition cases not cleanly solved by current REST/gRPC support; willingness to define explicit schema/resolver mappings and operational limits | REST/gRPC support stable; explicit adapter pattern accepted | Continue to GraphQL composition prototype / stop if REST/gRPC suffice | — |
+
+### Lightweight product signals
+
+| Signal | Collection method | Current evidence | Last updated |
+| --- | --- | --- | --- |
+| Known production users | voluntary reports/issues | — | — |
+| Multi-node users | voluntary reports | — | — |
+| Kubernetes requests | issues/discussions | — | — |
+| AI Gateway pilots | direct pilots/issues | — | — |
+| Raw-editor friction | local audit/support reports | — | — |
+
+Rules:
+
+- No central telemetry.
+- No user payloads.
+- No mandatory monthly reporting.
+- Empty evidence is acceptable.
+- Update when making a horizon decision, not as ceremony.
 
 ---
 
@@ -115,8 +177,8 @@ remaining rows are the active backlog.
 
 Years 3–5 below remain the **broad long-term vision**, kept for narrative and
 direction. **None is a committed plan:** each category enters the operating
-roadmap only when its [evidence gate](../adr/0003-maturity-and-ga.md) trips. The
-tables are intentionally preserved (not deleted) to show where Jul.IA *can* go.
+roadmap only when its [evidence gate](#evidence-gates-and-product-signals) trips.
+The tables are intentionally preserved (not deleted) to show where Jul.IA *can* go.
 
 ### Year 3 — Scale, Fleet & Ecosystem ⬜ (horizon · open-core)
 
@@ -196,6 +258,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-07-20 | 1.34 | **Phase 1 roadmap normalization.** Added the [active operating roadmap](#active-operating-roadmap) with the strict Phase 2→7 sequence; reconciled HP-01..HP-07 against the phase plan (delivered/partially-delivered/phase-active/deferred); added [evidence gates and lightweight product signals](#evidence-gates-and-product-signals) with quantitative thresholds for Fleet, K8s/Gateway API, AI continuation, Cloud, and GraphQL. | All Year 1–5 feature rows, IDs, and descriptions; the vision horizon remains demand-gated. | Issue #63; [specs/hardening-platform.md](../specs/hardening-platform.md) |
 | 2026-06-30 | 1.27 | Added the **Hardening & platform** pre-1.0 robustness backlog (HP-01..HP-07) under *Planned*, with a dedicated [engineering spec](../specs/hardening-platform.md): unified reload transaction + `[global].reload_timeout`, Console RBAC/multi-user, metric-cardinality strategy, pre-commit gate parity, container/supervision hardening (image digest pinning + a `jul healthcheck` target), structured-config parity patch-ops, and an optional SSRF allow-list. This records the strategic items and work deferred out of the pre-1.0 hardening pass so they are tracked, not lost. | All Delivered/Planned feature rows, IDs, and maturity states; the 5-year vision horizon is unchanged and nothing moved to Delivered. | [specs/hardening-platform.md](../specs/hardening-platform.md) |
 | 2026-07-04 | 1.30 | **Beta backlog cleared — all 20 shipped features are GA — soak pending.** The last 10 Beta features (Y1-02, Y1-03, Y1-08, Y1-09, Y1-10, Y1-11, cache, Y2-02, Y2-03, SEC-1) completed their evidence bundles (behaviour matrix, benchmarks, limitations, threat note, fuzz targets, docs, Console surface) and moved to **GA — soak pending**. Year-1 checklist is **11/11**, Year-2 checklist is **9/9** — zero committed Beta features remain. The only remaining GA gate is the **soak test** (post-GA per [ADR 0005](../adr/0005-soak-post-ga-gate.md)). Next work is the **Hardening & platform** backlog (HP-01..HP-07), the **AI-MVP bet** (time-boxed), or demand-gated horizon items. | All Year 3–5 vision rows remain horizon-demand-gated; no feature rows or IDs changed, only maturity labels and checklist counts. | [status.md](../status.md), [ga-push.md](../ga-push.md), http3.md, plugins.md, stream.md |
 | 2026-06-24 | 1.12 | Shipped **Y2-06 WAF** (Coraza + OWASP CRS, `waf` tag) and **SEC-1 secrets references** (core), both **Beta**. WAF adds block/detect engines per-location, embedded CRS (paranoia 0–4), inline SecLang rules, request/response body inspection, the `jul_waf_events_total` metric, and a Console **Status**/**Security** surface. SEC-1 adds `${env:}`/`${file:}`/`${secret:}` references resolved across all string config, automatic log redaction of resolved values, a `jul lint` rule for literal secrets, and a Console secret-reference count. Year-2 checklist **6/9 → 8/9**; committed remaining is now just Y2-09 Console. | All other feature rows, IDs, and maturity states; Y2-08 GraphQL stays deferred and AI-MVP stays a time-boxed bet. | [waf.md](../waf.md), [secrets.md](../secrets.md), [year-2.md](../specs/year-2.md), [status.md](../status.md) |

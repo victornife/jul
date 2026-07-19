@@ -45,7 +45,7 @@ binary.
 - **[ADRs](adr/)** — Architecture Decision Records for durable design choices.
 - **[Reviews & decision log](reviews/)** — Dated architecture reviews, product direction changes, and audit findings that shaped the current design.
 - **[Engineering specs](specs/)** — Year-by-year execution plans and detailed feature specs.
-- **[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Where the project is headed.
+- **[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Where the project is headed. The [active operating roadmap](roadmap/README.md#active-operating-roadmap) shows the current Phase 2→7 sequence and the [evidence gates](roadmap/README.md#evidence-gates-and-product-signals) that govern horizon decisions.
 - **[Release process](release.md)** — How releases are cut, versioned, and signed.
 - **[Soak evidence log](soak-evidence.md)** — Dated soak runs and where the CI/release soak artifacts are published (ADR-0005 post-GA gate).
 - **[Changelog](../CHANGELOG.md)** — Release history.
