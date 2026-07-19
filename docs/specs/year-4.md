@@ -3,18 +3,23 @@
 
 # JUL Engineering Execution Plan — Year 4 (AI-native + Edge platform)
 
-> Version 1.0 · Updated 2026-06-21 · **Vision horizon — demand-gated.** Entered via
-> the time-boxed AI Gateway MVP (`ai` tag) with a kill/continue gate; the full
-> program is not committed (see [ADR 0003](../adr/0003-maturity-and-ga.md)). The
-> "most powerful" framing below is superseded by the vision's positioning —
-> *leanest serious edge/protocol gateway*, not most-powerful overall.
+> Version 1.0 · Updated 2026-06-21 · **Concept horizon — not committed.**
+> This document captures long-term technical possibilities, not a scheduled
+> delivery plan. Entry is via the time-boxed AI Gateway MVP (`ai` tag) with a
+> kill/continue gate; the full Year 4 program is not committed (see
+> [ADR 0003](../adr/0003-maturity-and-ga.md)). All implementation details must
+> be revalidated before work starts.
 
 Goal: deliver on the ".IA" in Jul.IA — make JUL simultaneously the MOST POWERFUL (AI Gateway category, edge compute, CDN-grade cache) and FRIENDLIEST (natural-language ops) light server. Headlines: (A) AI GATEWAY (LLM proxy: multi-provider routing+failover, semantic cache, token rate-limit, guardrails, cost observability), (B) AI-assisted Console (NL->config, anomaly detection, plain-English incidents), (C) Edge compute / WASM FaaS (staged: richer plugins first). Plus CDN-grade caching, 1-click app templates, new standards (Early Hints 103, WebTransport, post-quantum TLS).
 Exit: proxy LLM traffic across >=3 providers w/ failover; semantic cache cuts token spend; per-key token budgets + cost dashboards; guardrails block prompt-injection/PII; Console turns plain English into validated config; edge plugins get KV+fetch+cron; CDN tiering+image-opt+ESI+tag-purge; PQ-TLS + Early Hints + WebTransport.
 REV3 decision honored: AI Gateway is FULL-SCOPE here in Y4 (no early Y2/3 preview). Edge = richer WASM plugins first; full Workers-style FaaS only if ecosystem pulls.
 
-Squads: SQ-AI new (Y4-01 gateway core, Y4-02 semantic cache, Y4-03 token/cost, Y4-04 guardrails) · SQ-CONSOLE (Y4-05 AI Console) · SQ-PLUGINS (Y4-06 edge/FaaS) · SQ-CACHE (Y4-07 CDN-grade) · SQ-DX (Y4-08 templates) · SQ-EDGE (Y4-09 standards).
-Quarters: Q1 gateway core (provider adapters+routing+failover), CDN tiered cache+tag-purge, edge KV host ABI, PQ-TLS. Q2 semantic cache, token/cost, image-opt, FaaS cron+fetch, Early Hints. Q3 guardrails, AI Console NL->config, ESI, WebTransport, app templates. Q4 AI Console anomaly+incident, AI hardening, perf+security gate, docs.
+> Historical design notes: earlier drafts assigned squad names and quarter
+> schedules. Those have been removed; Git history preserves them if needed.
+> What remains are the target problems, possible scope, architectural
+> hypotheses, risks, non-goals, and evidence gate. The bounded AI Gateway MVP
+> is kept separate from the full Year 4 concept; it is the only committed
+> entry point.
 
 Build tags added Y4: ai (AI gateway), imageopt (image optimization), webtransport. PQ-TLS + Early Hints = core (stdlib). Edge/FaaS extends `wasm` tag. Templates = core CLI.
 

@@ -25,6 +25,20 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   in [docs/vision/README.md](docs/vision/README.md),
   [docs/roadmap/README.md](docs/roadmap/README.md), [README.md](README.md),
   and [docs/compatibility.md](docs/compatibility.md).
+- **Horizon spec simplification and objective docs checks** (P1-03, #65):
+  replaced "Vision horizon — demand-gated" with the standard
+  "Concept horizon — not committed" banner in
+  [docs/specs/year-3.md](docs/specs/year-3.md),
+  [docs/specs/year-4.md](docs/specs/year-4.md), and
+  [docs/specs/year-5.md](docs/specs/year-5.md); removed squad assignments and
+  quarter schedules (Git history preserves them); added a revalidation note
+  and kept the bounded AI Gateway MVP separate from the full Year 4 concept.
+  Updated [docs/specs/README.md](docs/specs/README.md) navigation to label
+  Year 3–5 as concept horizons. Extended [scripts/docs-check.py](scripts/docs-check.py)
+  with `check_horizon_specs()`, `check_active_roadmap_links()`, and
+  `check_roadmap_active_ids()`; added matching fixtures in
+  [scripts/test_docs_check.py](scripts/test_docs_check.py) for missing banners,
+  broken active links, duplicate active IDs, and delivered/active overlap.
 - **`jul capabilities [-json]`** (`cmd/jul/capabilities.go`): new subcommand that reports which optional features are compiled into this binary (`waf`, `stream_proxy`, `wasm_plugins`) and the canonical exit-code contract. Outputs human-readable text or JSON. Compiles in both lean and full builds (false/true via existing stubs).
 - **`make ci-pr` local gate** (`Makefile`): adds `go vet` and `docs-check.py` on top of `ci-full`, giving the closest local approximation to the merge gate. CONTRIBUTING.md updated to accurately describe what `ci-full` and `ci-pr` do and do not cover.
 - **Startup-bound restart-required gates** (`internal/server/startup_restart.go`, `internal/app/preflight.go`): `Preflight.Apply` now rejects changes to `[cache]`, `[egress]`, `[admin]`, and `[observability.metrics]` on admin write paths with `restart_required` (HTTP 409). Previously these fields could be saved without taking effect in the running process.

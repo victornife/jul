@@ -3,17 +3,21 @@
 
 # JUL Engineering Execution Plan — Year 5 (Global scale, Mesh & Cloud — commercial completion)
 
-> Version 1.0 · Updated 2026-06-21 · **Vision horizon — demand-gated.** Cloud/mesh/
-> GSLB are not committed; entered only when their evidence gates trip (see
-> [ADR 0003](../adr/0003-maturity-and-ga.md)). The "most powerful" framing below is
-> superseded by the vision's *leanest serious gateway* positioning.
+> Version 1.0 · Updated 2026-06-21 · **Concept horizon — not committed.**
+> This document captures long-term technical possibilities, not a scheduled
+> delivery plan. Cloud, mesh, and GSLB are not committed; they enter the
+> operating roadmap only when their evidence gates trip (see
+> [ADR 0003](../adr/0003-maturity-and-ga.md)). All implementation details must
+> be revalidated before work starts.
 
 Goal: complete the OSS -> open-core -> CLOUD ladder and the "global, powerful, still friendly" endgame. Headlines: (A) JUL CLOUD (managed SaaS, STAGED: hosted Console + bring-your-own-nodes BEFORE building anycast network), (B) GSLB (geo-routing + multi-region health-aware failover), (C) Service mesh mode (ambient/sidecar, mTLS east-west, SPIFFE/SVID). Plus bot/DDoS mitigation, RUM + synthetic + SLO tracking in Console, secrets/identity integrations (Vault/KMS/SPIFFE), ecosystem maturity (certification, gallery, learning hub).
 Exit: paying JUL Cloud tenants managing their fleets from a hosted Console (BYO nodes); geo-aware multi-region routing+failover; JUL runs as a mesh data plane w/ SPIFFE identities + east-west mTLS; bot/DDoS mitigation live; RUM+SLO in Console; secrets via Vault/KMS; mature ecosystem (certified plugins, templates, docs hub).
 REV3 honored: JUL Cloud STARTS THIN (hosted Console + BYO-nodes), build global anycast + usage billing only once demand proven (avoid capital-heavy upfront). Mesh + GSLB are the "most powerful" endgame; friendliness preserved via Console + AI assist (Y4-05) across all of it.
 
-Squads: SQ-CLOUD new (Y5-01 Cloud platform, Y5-08 billing/usage) · SQ-EDGE (Y5-02 GSLB, Y5-09 standards/perf) · SQ-MESH new (Y5-03 mesh mode, Y5-06 secrets/identity) · SQ-SEC (Y5-04 bot/DDoS) · SQ-CONSOLE (Y5-05 RUM+SLO) · SQ-DX/ECO (Y5-07 ecosystem).
-Quarters: Q1 Cloud control-plane-as-a-service (multi-tenant CP) + hosted Console, GSLB geo-routing, SPIFFE identity foundation. Q2 BYO-node enrollment to Cloud, mesh east-west mTLS + sidecar, bot/DDoS detection, Vault/KMS secrets. Q3 GSLB multi-region failover, ambient mesh, RUM+synthetic+SLO, usage metering. Q4 Cloud billing (when demand proven), ecosystem (certification/gallery/hub), GA hardening, final perf+security+compliance gate.
+> Historical design notes: earlier drafts assigned squad names and quarter
+> schedules. Those have been removed; Git history preserves them if needed.
+> What remains are the target problems, possible scope, architectural
+> hypotheses, risks, non-goals, and evidence gate.
 
 Build tags added Y5: cloud (Cloud-agent/tenant features), mesh, spiffe, gslb, botmgmt. Most are enterprise/cloud-gated (reuse Y3 `enterprise` + license seam). Core stays lean.
 

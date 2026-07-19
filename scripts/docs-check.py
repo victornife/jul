@@ -778,6 +778,199 @@ def check_schema_lifecycle_coverage(registry):
             )
 
 
+# Standard banner required on Year 3–5 horizon specs so they cannot be read as
+# committed delivery schedules.
+HORIZON_BANNER_TEXT = "Concept horizon — not committed"
+
+
+def check_horizon_specs():
+    """Year 3–5 specs must contain the standard horizon banner."""
+    for year in (3, 4, 5):
+        path = DOCS / "specs" / f"year-{year}.md"
+        if not path.exists():
+            error(path, 0, f"year-{year}.md is missing")
+            continue
+        text = path.read_text(encoding="utf-8")
+        if HORIZON_BANNER_TEXT not in text:
+            error(path, 0, f"missing horizon banner: {HORIZON_BANNER_TEXT!r}")
+        else:
+            ok(f"year-{year}.md has horizon banner")
+
+
+def check_active_roadmap_links():
+    """Links inside the Active operating roadmap section must resolve."""
+    roadmap = DOCS / "roadmap" / "README.md"
+    if not roadmap.exists():
+        error(roadmap, 0, "roadmap README is missing")
+        return
+
+    text = roadmap.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    in_active = False
+
+    for line_no, line in enumerate(lines, 1):
+        if line.startswith("## Active operating roadmap"):
+            in_active = True
+            continue
+        if in_active and line.startswith("## "):
+            break
+        if not in_active:
+            continue
+
+        for match in re.finditer(r"!?\[([^\]]+)\]\(([^)]+)\)", line):
+            raw_url = match.group(2)
+            # Skip external URLs, anchors-only, and mailto.
+            if re.match(r"^(https?|mailto|ftp):", raw_url):
+                continue
+            if raw_url.startswith("#"):
+                continue
+
+            parts = raw_url.split("#", 1)
+            url = parts[0]
+            anchor = parts[1] if len(parts) > 1 else None
+            if not url:
+                continue
+
+            target = (roadmap.parent / url).resolve()
+            if not target.exists():
+                error(roadmap, line_no, f"active roadmap broken link: {raw_url}")
+                continue
+
+            if anchor and target.suffix == ".md":
+                target_text = target.read_text(encoding="utf-8")
+                explicit = re.compile(rf"\{{#?{re.escape(anchor)}\}}", re.IGNORECASE)
+                if explicit.search(target_text):
+                    ok(f"active roadmap link {raw_url}")
+                    continue
+
+                anchor_words = anchor.replace("-", " ").lower().split()
+                found = False
+                for hm in re.finditer(
+                    r"^#+\s+(.+?)(?:\s*\{#[^}]+\})?\s*$", target_text, re.MULTILINE
+                ):
+                    heading_words = _slugify(hm.group(1))
+                    idx = 0
+                    for hw in heading_words:
+                        if idx < len(anchor_words) and hw == anchor_words[idx]:
+                            idx += 1
+                    if idx == len(anchor_words):
+                        found = True
+                        break
+                    if "".join(anchor_words) in "".join(heading_words):
+                        found = True
+                        break
+                if not found:
+                    error(roadmap, line_no, f"active roadmap broken anchor: {raw_url}")
+                    continue
+
+            ok(f"active roadmap link {raw_url}")
+
+
+def check_roadmap_active_ids():
+    """Active roadmap IDs must be unique and must not overlap delivered items."""
+    roadmap = DOCS / "roadmap" / "README.md"
+    if not roadmap.exists():
+        error(roadmap, 0, "roadmap README is missing")
+        return
+
+    text = roadmap.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    # Feature IDs used in roadmap tables. Phase rows in the active operating
+    # roadmap use "Phase N" and are checked for uniqueness separately.
+    feat_id_re = re.compile(r"^(Y\d+-\d+|HP-\d+[A-Z]?|AI-MVP|SEC-\d+|R\d+-\d+(?:\.\d+)?)$")
+    phase_id_re = re.compile(r"^Phase\s+(\d+)$")
+
+    active_ids: dict[str, int] = {}      # id -> first line where seen as active
+    delivered_ids: set[str] = set()
+    in_active_section = False
+    in_hardening_section = False
+    in_delivered_section = False
+
+    for line_no, line in enumerate(lines, 1):
+        # Section detection: top-level headings only.
+        if line.startswith("## Active operating roadmap"):
+            in_active_section = True
+            in_hardening_section = False
+            in_delivered_section = False
+            continue
+        if line.startswith("## Hardening & platform"):
+            in_active_section = False
+            in_hardening_section = True
+            in_delivered_section = False
+            continue
+        if re.match(r"^## Delivered", line):
+            in_active_section = False
+            in_hardening_section = False
+            in_delivered_section = True
+            continue
+        if line.startswith("## ") and not line.startswith("### "):
+            in_active_section = False
+            in_hardening_section = False
+            in_delivered_section = False
+            continue
+
+        if not line.startswith("|"):
+            continue
+
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+
+        first_cell = cells[0]
+        row_text = " ".join(cells)
+
+        # Phase rows in the active operating roadmap.
+        phase_match = phase_id_re.match(first_cell)
+        if phase_match and in_active_section:
+            phase_id = first_cell
+            if phase_id in active_ids:
+                error(roadmap, line_no, f"duplicate active roadmap ID: {phase_id}")
+            else:
+                active_ids[phase_id] = line_no
+            continue
+
+        # Feature IDs.
+        id_match = feat_id_re.match(first_cell)
+        if not id_match:
+            continue
+        feat_id = id_match.group(1)
+
+        is_delivered = "✅" in row_text or "Delivered" in row_text
+        is_active = (
+            "🚧" in row_text
+            or "⏳" in row_text
+            or "🔒" in row_text
+            or "active" in row_text.lower()
+            or "in progress" in row_text.lower()
+            or "Partially delivered" in row_text
+            or "Design complete" in row_text
+        )
+
+        if in_delivered_section and is_delivered:
+            delivered_ids.add(feat_id)
+        elif in_hardening_section or in_active_section:
+            if is_delivered:
+                delivered_ids.add(feat_id)
+            elif is_active:
+                if feat_id in active_ids:
+                    error(roadmap, line_no, f"duplicate active roadmap ID: {feat_id}")
+                else:
+                    active_ids[feat_id] = line_no
+
+    # Delivered items must not also be listed under active work.
+    for feat_id in sorted(active_ids):
+        if feat_id in delivered_ids:
+            error(
+                roadmap,
+                active_ids[feat_id],
+                f"active roadmap ID {feat_id} also appears as delivered",
+            )
+
+    if active_ids:
+        ok(f"roadmap active IDs are unique and do not overlap delivered items")
+
+
 def check_finding_uniqueness():
     """Verify that no finding ID appears in the current audit doc with two
     conflicting status values (one resolved, one open) in the same table.
@@ -867,6 +1060,9 @@ def main():
     check_feature_status_manifest()
     check_lifecycle_manifest()
     check_finding_uniqueness()
+    check_horizon_specs()
+    check_active_roadmap_links()
+    check_roadmap_active_ids()
 
     print()
     print(f"Results: {OK} passed, {FAIL} failed")

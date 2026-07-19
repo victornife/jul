@@ -3,17 +3,21 @@
 
 # JUL Engineering Execution Plan — Year 3 (Scale, Fleet & Ecosystem — open-core monetization)
 
-> Version 1.0 · Updated 2026-06-21 · **Vision horizon — demand-gated.** Not a
-> committed plan; entered only when fleet/K8s evidence gates trip (see
-> [ADR 0003](../adr/0003-maturity-and-ga.md)).
+> Version 1.0 · Updated 2026-06-21 · **Concept horizon — not committed.**
+> This document captures long-term technical possibilities, not a scheduled
+> delivery plan. It enters the operating roadmap only when its evidence gate
+> trips (see [ADR 0003](../adr/0003-maturity-and-ga.md)). All implementation
+> details must be revalidated before work starts.
 
 Goal: take JUL from single-node platform to FLEET-SCALE + ENTERPRISE-READY + K8S-NATIVE. This is where open-core monetization lands. Headlines: (A) multi-node control plane (fleet config sync + staged rollout), (B) Kubernetes Ingress + Gateway API, (C) Console RBAC + SSO/SAML. Plus distributed cache/rate-limit, traffic management, hot binary upgrade, plugin marketplace, audit logging.
 Exit: manage N nodes from one control plane w/ staged rollout+rollback; run as a K8s ingress controller at scale; RBAC+SSO gate the Console; distributed cache+rate-limit across nodes; canary/blue-green/mirroring; signed-plugin marketplace; tamper-evident audit log.
 
 Open-core note: most Y3 features are ENTERPRISE/open-core (control plane, RBAC+SSO, distributed state, K8s-at-scale, audit). Add a licensing seam: internal/license (feature gate by signed license token); OSS build = single-node + community features; enterprise build tag `enterprise` enables gated features. Keep OSS fully functional single-node.
 
-Squads: SQ-FLEET new (Y3-01 control plane, Y3-06 hot upgrade) · SQ-K8S new (Y3-04 ingress/gateway/helm) · SQ-CONSOLE (Y3-02 RBAC+SSO, Y3-09 Console v3) · SQ-SCALE new (Y3-03 distributed cache+rate-limit) · SQ-PROXY (Y3-05 traffic mgmt) · SQ-PLUGINS (Y3-07 marketplace) · SQ-SEC (Y3-08 audit).
-Quarters: Q1 control-plane protocol+agent, K8s ingress MVP, RBAC model, distributed cache (Redis) design. Q2 config sync+staged rollout, Gateway API, SSO/SAML+OIDC, distributed rate-limit. Q3 traffic mgmt, marketplace+signing, audit log, Helm chart, hot upgrade (unix). Q4 Console v3 (fleet+traffic+RBAC UI), enterprise hardening, compliance docs, perf gate.
+> Historical design notes: earlier drafts assigned squad names and quarter
+> schedules. Those have been removed; Git history preserves them if needed.
+> What remains are the target problems, possible scope, architectural
+> hypotheses, risks, non-goals, and evidence gate.
 
 Build tags added Y3: enterprise (license-gated), redis (distributed tiers — could be core dep, tag to stay lean), saml. K8s reuses `kubernetes` tag from Y2. controlplane under `enterprise`.
 
