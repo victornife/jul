@@ -16,6 +16,8 @@ Jul.IA follows [Semantic Versioning 2.0.0](https://semver.org): **MAJOR.MINOR.PA
 - **PATCH** — bug and security fixes with no contract change.
 
 The first stable line is **v1.0.0**. The version is reported by `jul -version`.
+The core configuration format and documented standalone admin API covered by
+this policy remain open-source per [ADR 0012](adr/0012-oss-open-core-boundary.md).
 
 ## What the GA contract covers
 

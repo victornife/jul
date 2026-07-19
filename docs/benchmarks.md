@@ -64,22 +64,21 @@ BenchmarkStaticServe-12     123456    9876 ns/op    456 B/op    7 allocs/op
 
 ### Upstream connection pooling
 
-Jul.IA reuses upstream connections by default (Go `http.Transport` keep-alive). Tune when you see connection exhaustion or high `TIME_WAIT`:
+Jul.IA reuses upstream connections by default through Go's `http.Transport`
+keep-alive. The exact idle-connection limits and timeouts are internal Go
+transport settings; they are **not exposed in the TOML schema** because the
+current `GlobalConfig` contract is intentionally small. If you observe
+connection exhaustion or high `TIME_WAIT`, the supported levers are:
 
-```toml
-[global]
-# Max simultaneous idle connections per upstream host.
-# Default is 100. Raise for high-throughput proxy workloads; lower to reduce
-# memory when upstream count is large.
-max_idle_conns = 200
+1. **Reduce per-location `proxy_connect_timeout`** so failed dials fail fast.
+2. **Add more upstream backends** and use `least_conn` to spread long-lived
+   connections.
+3. **Raise OS file-descriptor limits** (`ulimit -n`) so the transport can keep
+   more idle sockets.
 
-# Idle connection timeout. Connections idle longer than this are closed.
-# Default is 90s. Match your upstream's keep-alive timeout to avoid racing
-# a close against a new request.
-idle_conn_timeout = "60s"
-```
-
-**Trade-off:** More idle conns → lower latency (no handshake) but higher memory per upstream host.
+If a config knob for idle connections becomes necessary, it will be added
+through the normal ADR/config-lifecycle process rather than documented as an
+unsupported key.
 
 ### Worker / thread pool sizing
 
@@ -97,6 +96,14 @@ memory_max_size  = "64m"
 default_ttl      = "60s"
 stale_while_revalidate = "30s"
 stale_if_error   = "5s"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:3000"
+  cache = true
 ```
 
 Or use a disk tier for larger working sets:
@@ -110,6 +117,14 @@ disk_max_size    = "1g"
 default_ttl      = "60s"
 stale_while_revalidate = "30s"
 stale_if_error   = "5s"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:3000"
+  cache = true
 ```
 
 **Rule of thumb:** Size the memory cache to hold your hottest 20% of responses. Disk cache is for larger working sets where memory is too expensive.
@@ -118,34 +133,71 @@ stale_if_error   = "5s"
 
 ### Compression levels
 
-Jul.IA supports `gzip` (always-on), `brotli`, and `zstd` (tag-gated). Default levels balance CPU and ratio:
+Jul.IA supports `gzip` (always-on), `brotli`, and `zstd` (tag-gated). The
+`[compression]` schema uses a single `level` integer that is clamped to each
+encoder's valid range; `0` selects each encoder's default.
 
-| Encoder | Default level | Tune when … |
-| --- | --- | --- |
-| gzip | 6 | High CPU → lower to 4; poor ratio → raise to 8 |
-| brotli | 4 | Same logic; Brotli-4 ≈ gzip-9 at lower CPU |
-| zstd | 3 | Very fast; raise to 6 for better ratio |
+| Encoder | Default level | Valid range | Tune when … |
+| --- | --- | --- | --- |
+| gzip | 6 | 1–9 | High CPU → lower to 4; poor ratio → raise to 8 |
+| brotli | 6 | 0–11 | Same logic; Brotli-4 ≈ gzip-9 at lower CPU |
+| zstd | 3 | 1–4 (mapped to Speed* levels) | Very fast; raise for better ratio |
 
 ```toml
 [compression]
-gzip_level  = 6
-brotli_level = 4
+enabled   = true
+encoders  = ["zstd", "br", "gzip"]
+level     = 4          # 0 = encoder default; clamped per encoder
+min_size  = "1k"
+types     = ["text/*", "application/json", "application/javascript", "application/xml", "application/wasm", "image/svg+xml"]
+precompressed = true
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:3000"
 ```
 
-**Trade-off:** Higher level → smaller bytes → lower bandwidth but more CPU per request. On CPU-bound edges, lowering the level often increases total throughput.
+**Trade-off:** Higher level → smaller bytes → lower bandwidth but more CPU per
+request. On CPU-bound edges, lowering the level often increases total
+throughput. See [docs/compression.md](compression.md) for the full behaviour
+matrix and build-tag requirements.
 
 ### Rate limiter tuning
 
-The rate limiter uses a 32-shard token bucket. Each unique key (IP, header, JWT claim) gets its own bucket.
+The rate limiter uses a 32-shard token bucket. Each unique key (IP, header,
+JWT claim) gets its own bucket. `rate` is an integer number of requests per
+second.
 
 ```toml
-[[servers.locations.rate_limit]]
-key   = "ip"
-rate  = "100r/m"
-burst = 20
+[rate_limit]
+enabled   = true
+key       = "ip"
+rate      = 100        # requests per second per key
+burst     = 200
+max_conns = 1024       # concurrent connections per listener
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api" }
+  proxy_pass = "http://127.0.0.1:3000"
+
+    [servers.locations.rate_limit]
+    enabled = true
+    key     = "header:X-Api-Key"
+    rate    = 10
+    burst   = 20
 ```
 
-**Trade-off:** Higher `burst` absorbs traffic spikes but allows larger bursts through. Lower `burst` is stricter but may reject legitimate staggered requests. The default `rate = "100r/m"` is conservative; production APIs often use `1000r/m` or `10r/s`.
+**Trade-off:** Higher `burst` absorbs traffic spikes but allows larger bursts
+through. Lower `burst` is stricter but may reject legitimate staggered
+requests. A global rate of `100` r/s is conservative; production APIs often use
+`1000` r/s or more. See [docs/ratelimit.md](ratelimit.md) for scope rules and
+key strategies.
 
 ### TLS / mTLS handshake cost
 
@@ -177,6 +229,92 @@ Structured logging (`json` or `text`) has a small per-request cost. At extreme t
 
 - Setting `log_level = "warn"` to skip `info`-level lines.
 - Using an asynchronous access-log sink (`syslog` or `file` with buffering) rather than `stdout`.
+
+## Lean product budgets
+
+Jul.IA's "lean" promise is enforced as a set of recorded budgets. The numbers
+below are the current baselines; they are updated when a deliberate change
+moves them. Deterministic checks (binary size, generated-asset size) may gate
+CI; shared-runner latency and RSS remain evidence artifacts until stable
+runners exist.
+
+### Binary size
+
+Measured on `windows/amd64` with `go1.26.5`, stripped Go binary only:
+
+| Profile | Size | Notes |
+| --- | --- | --- |
+| Lean (no tags) | ~21 MiB | Core HTTP, TLS, auth, rate limiting, cache, compression (gzip), health checks, discovery (DNS/SRV), secrets, egress |
+| Full (all tags) | ~51 MiB | Lean + ACME, console, OTel, gRPC, HTTP/3, NGINX importer, WASM plugins, stream proxy, Consul/Kubernetes discovery, WAF, Brotli, Zstd |
+
+Representative per-tag deltas over the lean binary:
+
+| Tag | Delta | Main contributor |
+| --- | --- | --- |
+| `waf` | ~8.5 MiB | Coraza + embedded OWASP CRS |
+| `otel` | ~5.8 MiB | OpenTelemetry SDK/exporters |
+| `console` | ~6.3 MiB | Embedded React SPA assets |
+| `wasmplugins` | ~4.1 MiB | wazero runtime |
+| `grpc` | ~4.0 MiB | gRPC + protobuf stack |
+| `http3` | ~2.4 MiB | quic-go |
+| `brotli` | ~1.0 MiB | brotli encoder |
+| `acme` | ~0.7 MiB | autocert / x/crypto |
+| `zstd` | ~0.4 MiB | zstd encoder |
+| `importer` | ~0.3 MiB | NGINX config parser |
+| `stream` | ~0.1 MiB | L4 proxy runtime |
+| `consul` / `kubernetes` | ~0.02 MiB each | Small REST clients (no vendor SDKs) |
+
+**Gate:** a +10% change to lean or full size requires explanation in the
+change notes; a +20% deterministic regression fails CI unless deliberately
+accepted in the same change.
+
+### Runtime footprint
+
+Measured on `windows/amd64`, idle process with a minimal HTTP + admin config:
+
+| Metric | Lean | Full | Notes |
+| --- | --- | --- | --- |
+| Startup to `/healthz` | ~520 ms | ~520 ms | Wall-clock on a local VM; dominated by binary load |
+| Idle RSS | ~27 MiB | ~33 MiB | Working set before any traffic |
+| `jul check` (warm) p50 | ~62 ms | ~75 ms | Parse + validate a small config |
+| `jul check` (warm) p95 | ~69 ms | ~85 ms | — |
+
+These are **evidence artifacts** on shared runners; they are recorded for
+trending, not gating, until stable CI hardware exists.
+
+### Hot-path allocations
+
+Stable, allocation-free or near-allocation-free hot paths (measured with
+`go test -benchmem`):
+
+| Path | Time/op | Allocs/op | Notes |
+| --- | --- | --- | --- |
+| `BenchmarkMatchLocation/prefix` | ~39 ns | 0 | Most common location match |
+| `BenchmarkHostScore/exact` | ~106 ns | 0 | Virtual-host selection |
+| `BenchmarkBalancerRoundRobin` | ~14 ns | 0 | Backend rotation |
+| `BenchmarkBalancerLeastConn` | ~16 ns | 0 | Backend selection |
+| `BenchmarkPoolPick` | ~89 ns | 1 (32 B) | Full pick including health filter |
+| `BenchmarkRateLimiterAllow` | ~300 ns | 1 | Token-bucket admission |
+
+### Console asset budget
+
+The Console v2 SPA is embedded in the binary. The initial route budget is
+**~250 KB gzip** ([ADR 0006](adr/0006-console-v2-stack.md)). Current initial
+route (HTML shell + entry JS/CSS + runtime + vendor) is **~168 KB gzip**,
+leaving headroom for new panels.
+
+### Dependency and license budget
+
+New packages are reviewed for:
+
+- License compatibility with AGPL-3.0.
+- Whether the same capability can be achieved with the stdlib or an existing
+dependency.
+- Build-tag gating so the lean binary is unaffected when the feature is
+optional.
+
+Every optional feature records its approximate binary delta above so the cost
+of a new dependency is visible before it is merged.
 
 ## Interpreting results for capacity planning
 

@@ -67,7 +67,10 @@ Every decision is weighed against three properties that must hold *together*:
    plain-English operations (AI assist) and 1-click app templates.
 3. **Lean** — one static binary, `CGO_ENABLED=0`, trivial cross-compilation, and
    a *lean-by-default* build where every heavy feature is opt-in behind a build
-   tag. The default binary stays small.
+   tag. The default binary stays small. The concrete budgets (binary size,
+   per-tag delta, idle RSS, startup latency, hot-path allocations, Console
+   asset size) are recorded and updated in
+   [docs/benchmarks.md](../benchmarks.md#lean-product-budgets).
 
 When these tensions conflict, leanness wins by default and power is added behind
 a build tag. See [ADR 0001 — language strategy](../adr/0001-language-strategy.md).
@@ -108,7 +111,9 @@ beyond it is a **Vision horizon — demand-gated**, not a committed plan.
 
 Editions today are deliberately just two: **Core/OSS** (lean, default build) and
 **Full** (all OSS build tags, including the Console). Enterprise and Cloud naming
-is deferred until their evidence gates trip.
+is deferred until their evidence gates trip. The permanent boundary between
+what stays OSS and what may become commercial is recorded in
+[ADR 0012](../adr/0012-oss-open-core-boundary.md).
 
 - **OSS (now):** a fully-functional single-node edge server and protocol gateway.
 - **Open-core (horizon, demand-gated):** fleet control plane, RBAC/SSO,

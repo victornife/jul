@@ -10,6 +10,21 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **Schema-correct lean budgets and OSS/open-core boundary** (P1-02, #64):
+  reconciled stale TOML examples in [docs/benchmarks.md](docs/benchmarks.md)
+  against the current `GlobalConfig`, `[compression]`, and `[rate_limit]`
+  schemas; added `## Lean product budgets` with recorded baselines for binary
+  size, per-build-tag delta, idle RSS, startup latency, config check latency,
+  hot-path allocations, and Console initial-route compressed size; added
+  `internal/config/benchmarks_doc_test.go` to parse and validate every
+  `docs/benchmarks.md` TOML block against the live schema. Created
+  [ADR 0012](docs/adr/0012-oss-open-core-boundary.md) recording the permanent
+  OSS floor (single-node data plane, core config format, security fixes,
+  no Cloud dependency, data portability) and the legitimate commercial ceiling
+  (fleet, identity, compliance, hosted ops, support). Updated cross-references
+  in [docs/vision/README.md](docs/vision/README.md),
+  [docs/roadmap/README.md](docs/roadmap/README.md), [README.md](README.md),
+  and [docs/compatibility.md](docs/compatibility.md).
 - **`jul capabilities [-json]`** (`cmd/jul/capabilities.go`): new subcommand that reports which optional features are compiled into this binary (`waf`, `stream_proxy`, `wasm_plugins`) and the canonical exit-code contract. Outputs human-readable text or JSON. Compiles in both lean and full builds (false/true via existing stubs).
 - **`make ci-pr` local gate** (`Makefile`): adds `go vet` and `docs-check.py` on top of `ci-full`, giving the closest local approximation to the merge gate. CONTRIBUTING.md updated to accurately describe what `ci-full` and `ci-pr` do and do not cover.
 - **Startup-bound restart-required gates** (`internal/server/startup_restart.go`, `internal/app/preflight.go`): `Preflight.Apply` now rejects changes to `[cache]`, `[egress]`, `[admin]`, and `[observability.metrics]` on admin write paths with `restart_required` (HTTP 409). Previously these fields could be saved without taking effect in the running process.

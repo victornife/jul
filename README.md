@@ -28,7 +28,8 @@ interface — all in a single static, dependency-free binary.
 > evidence-gated horizon), with detailed per-feature
 > [engineering specs](docs/specs/). Durable technical decisions are
 > recorded as [ADRs](docs/adr/), and how the direction evolves is tracked in
-> the [reviews & decision log](docs/reviews/).
+> the [reviews & decision log](docs/reviews/). The OSS/open-core boundary is
+> defined in [ADR 0012](docs/adr/0012-oss-open-core-boundary.md).
 >
 > New to HTTP, proxies, TLS, caching, or observability? The
 > [concepts appendix](docs/vision/appendix.md) walks through how a request

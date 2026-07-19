@@ -5,7 +5,8 @@
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
 a feature ships, move its row to *Delivered* and tick the year checklist; whenever
-an ADR is added, link it where relevant.
+an ADR is added, link it where relevant. The permanent OSS/open-core boundary
+is defined in [ADR 0012](../adr/0012-oss-open-core-boundary.md).
 
 Detailed per-feature engineering specs (design, config, tasks, DoD) live in
 [specs/](../specs/) — one file per year. The product direction behind these
