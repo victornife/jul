@@ -52,6 +52,15 @@ func (s *Server) handleDiscardPendingRestart(w http.ResponseWriter, r *http.Requ
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
+	// Snapshot the staged config into history BEFORE discarding it so the
+	// operator can recover the staged candidate via expert history if needed
+	// (M-04 fix: discard must be reversible through history).
+	if s.deps.ReadConfigRaw != nil {
+		if stagedBytes, err := s.deps.ReadConfigRaw(); err == nil {
+			s.recordHistory(stagedBytes)
+		}
+	}
+
 	result, err := s.deps.DiscardPendingRestart()
 	if err != nil {
 		s.recordAudit("config.stage_restart.discarded", "config", "failure",
@@ -69,5 +78,9 @@ func (s *Server) handleDiscardPendingRestart(w http.ResponseWriter, r *http.Requ
 		"staged restart discarded; previous configuration restored", adminClientIP(r))
 	s.emit("config", "stage_restart_discarded", "info",
 		"Staged configuration discarded and previous configuration restored.")
+	// Also emit a config.restored event so the history timeline shows a restore
+	// action separate from the discard (M-04 fix: restored event).
+	s.recordAudit("config.restored", "config", "success",
+		"configuration restored from pre-stage backup", adminClientIP(r))
 	writeJSON(w, http.StatusOK, result)
 }

@@ -147,6 +147,12 @@ type Server struct {
 	// corresponding ReloadResult fields.
 	OnReloadComplete func(source, outcome string, durationMs int64)
 
+	// OnReloadResult, when set, is invoked alongside OnReloadComplete and
+	// receives the full ReloadResult including PhaseDurations and TimedOut.
+	// It is used by the composition root to observe per-phase timing and
+	// timeout counts without this package importing observability.
+	OnReloadResult func(ReloadResult)
+
 	// OnInitialGenerationReady, when set, is invoked exactly once after all
 	// startup listeners have bound successfully and the initial handler
 	// generation is live. It fires only on a successful startup, so it is safe
@@ -1008,6 +1014,15 @@ func (s *Server) doReload(req ReloadRequest) {
 	result.DurationMS = time.Since(plan.start).Milliseconds()
 	result.ServingVersion = CanonicalVersion(plan.Candidate.Effective)
 
+	// Copy per-phase durations into the result so callers can observe them
+	// (M-04: jul_reload_phase_duration_seconds metric).
+	if len(plan.phaseDurations) > 0 {
+		result.PhaseDurations = make(map[string]time.Duration, len(plan.phaseDurations))
+		for k, v := range plan.phaseDurations {
+			result.PhaseDurations[k] = v
+		}
+	}
+
 	// HTTP subsystem result covers the publish/activate/retire work.
 	result.HTTP = ReloadSubsystemResult{
 		Status:     ReloadSubsystemOK,
@@ -1058,6 +1073,9 @@ func (s *Server) sendReloadResult(ch chan<- ReloadResult, r *ReloadResult) {
 	if s.OnReloadComplete != nil {
 		source := r.Source.String()
 		s.OnReloadComplete(source, string(r.Outcome), r.DurationMS)
+	}
+	if s.OnReloadResult != nil {
+		s.OnReloadResult(*r)
 	}
 	if ch == nil {
 		return

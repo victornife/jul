@@ -54,22 +54,26 @@ type ReloadSubsystemResult struct {
 // transaction. It is produced by the server after every reload attempt and
 // returned to callers that supplied a result channel on ReloadRequest.
 type ReloadResult struct {
-	ID             string                `json:"id"`
-	Source         ReloadSource          `json:"source"`
-	DesiredVersion string                `json:"desired_version,omitempty"`
-	ServingVersion string                `json:"serving_version,omitempty"`
-	StartedAt      time.Time             `json:"started_at"`
-	CompletedAt    time.Time             `json:"completed_at"`
-	DurationMS     int64                 `json:"duration_ms"`
-	Outcome        ReloadOutcome         `json:"outcome"`
-	Persisted      bool                  `json:"persisted"`
-	Published      bool                  `json:"published"`
-	TimedOut       bool                  `json:"timed_out"`
-	TimedOutPhase  string                `json:"timed_out_phase,omitempty"`
-	FailedPhase    string                `json:"failed_phase,omitempty"`
-	HTTP           ReloadSubsystemResult `json:"http"`
-	Stream         ReloadSubsystemResult `json:"stream"`
-	Error          string                `json:"error,omitempty"`
+	ID             string        `json:"id"`
+	Source         ReloadSource  `json:"source"`
+	DesiredVersion string        `json:"desired_version,omitempty"`
+	ServingVersion string        `json:"serving_version,omitempty"`
+	StartedAt      time.Time     `json:"started_at"`
+	CompletedAt    time.Time     `json:"completed_at"`
+	DurationMS     int64         `json:"duration_ms"`
+	Outcome        ReloadOutcome `json:"outcome"`
+	Persisted      bool          `json:"persisted"`
+	Published      bool          `json:"published"`
+	TimedOut       bool          `json:"timed_out"`
+	TimedOutPhase  string        `json:"timed_out_phase,omitempty"`
+	FailedPhase    string        `json:"failed_phase,omitempty"`
+	// PhaseDurations records wall-clock time spent in each named reload phase
+	// (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate).
+	// Present only when phases ran; absent if the result comes from a cached store.
+	PhaseDurations map[string]time.Duration `json:"phase_durations_ms,omitempty"`
+	HTTP           ReloadSubsystemResult    `json:"http"`
+	Stream         ReloadSubsystemResult    `json:"stream"`
+	Error          string                   `json:"error,omitempty"`
 }
 
 // CanonicalVersion returns a short, stable fingerprint of a configuration

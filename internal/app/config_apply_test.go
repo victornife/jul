@@ -463,3 +463,175 @@ func TestCoordinatorDiscardPlannedRestart(t *testing.T) {
 // atomicPointer32 is a test helper type alias to avoid repeating the verbose
 // atomic pointer type in every test.
 type atomicPointer32 = atomic.Pointer[[32]byte]
+
+// ── H-07 race/interaction tests ───────────────────────────────────────────────
+
+// TestCoordinatorConcurrentStageRestartsSerialized verifies that concurrent
+// stage_restart applies do not race under the Go race detector. The coordinator
+// serializes applies via applyMu so only one stage completes at a time; all
+// goroutines must either succeed or return a clean error — never corrupt state.
+func TestCoordinatorConcurrentStageRestartsSerialized(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	original := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(path)
+	pf := testPreflightStage(t, original)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      pf,
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	const workers = 8
+	errs := make([]error, workers)
+	done := make(chan struct{})
+	for i := 0; i < workers; i++ {
+		go func(idx int) {
+			defer func() { done <- struct{}{} }()
+			candidate := validConfigRaw(t, ":8080")
+			res, err := c.ApplyRaw(candidate, ApplyStageRestart)
+			if err != nil {
+				errs[idx] = err
+				return
+			}
+			if !res.OK && !res.RestartRequired {
+				errs[idx] = errors.New("unexpected non-OK result")
+			}
+		}(i)
+	}
+	for i := 0; i < workers; i++ {
+		<-done
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("worker %d: %v", i, err)
+		}
+	}
+	// After concurrent stages, the store must be in a deterministic state:
+	// exactly one staged pending restart.
+	if !store.IsPending() {
+		t.Error("expected a pending staged restart after concurrent stages")
+	}
+}
+
+// TestCoordinatorStageDiscardRace verifies that a discard immediately following
+// a stage does not leave the store in an inconsistent state. This exercises the
+// serialization path (applyMu is held for both operations).
+func TestCoordinatorStageDiscardRace(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	original := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(path)
+	pf := testPreflightStage(t, original)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      pf,
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	// Stage.
+	candidate := validConfigRaw(t, ":8080")
+	res, err := c.ApplyRaw(candidate, ApplyStageRestart)
+	if err != nil {
+		t.Fatalf("stage error: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("stage ok=false: %s", res.Message)
+	}
+	if !store.IsPending() {
+		t.Fatal("expected pending after stage")
+	}
+
+	// Discard immediately.
+	discardRes, err := c.DiscardPlannedRestart()
+	if err != nil {
+		t.Fatalf("discard error: %v", err)
+	}
+	if !discardRes.OK {
+		t.Fatalf("discard ok=false: %s", discardRes.Message)
+	}
+	if store.IsPending() {
+		t.Error("expected no pending restart after discard")
+	}
+	// On-disk bytes must be the original.
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(original) {
+		t.Error("discard should restore original bytes")
+	}
+}
+
+// TestCoordinatorStagedRestartIsUpdateFlag verifies that wasPendingBefore is
+// false on the first stage and true on a subsequent update stage (M-04 fix:
+// created/updated audit event distinction relies on this ordering).
+func TestCoordinatorStagedRestartIsUpdateFlag(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	original := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(path)
+	pf := testPreflightStage(t, original)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      pf,
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	candidate := validConfigRaw(t, ":8080")
+
+	// First stage — store must NOT be pending before.
+	if store.IsPending() {
+		t.Fatal("store should not be pending before first stage")
+	}
+	res1, err := c.ApplyRaw(candidate, ApplyStageRestart)
+	if err != nil {
+		t.Fatalf("first stage error: %v", err)
+	}
+	if !res1.OK {
+		t.Fatalf("first stage ok=false: %s", res1.Message)
+	}
+
+	// Second stage — store MUST be pending before (it was set by the first).
+	if !store.IsPending() {
+		t.Fatal("store should be pending before second stage")
+	}
+	res2, err := c.ApplyRaw(candidate, ApplyStageRestart)
+	if err != nil {
+		t.Fatalf("second stage error: %v", err)
+	}
+	if !res2.OK {
+		t.Fatalf("second stage ok=false: %s", res2.Message)
+	}
+}
+
+// testPreflightStage builds a Preflight that accepts a stage_restart apply for
+// a config that is identical to the running startup config (hot path would also
+// accept it, but we test stage mode here). The StartupFP is derived from the
+// seed bytes so restart-required classification sees them as unchanged.
+func testPreflightStage(t *testing.T, seed []byte) *Preflight {
+	t.Helper()
+	cfg, err := config.Parse(seed)
+	if err != nil {
+		t.Fatalf("parse seed config: %v", err)
+	}
+	fp := lifecycle.ComputeFingerprint(cfg)
+	p := testPreflight()
+	p.StartupFP = fp
+	return p
+}

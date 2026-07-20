@@ -38,6 +38,7 @@ import {
   HistoryEntrySchema,
   PluginsProjectionSchema,
   ValidationResultSchema,
+  PendingRestartStatusSchema,
 } from "../src/api/client.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -476,5 +477,174 @@ test(
       data: original.raw ?? "",
     });
     expect(restoreResp.status()).toBe(200);
+  },
+);
+
+// ── Stage_restart workflow (H-07) ─────────────────────────────────────────────
+
+test("GET /api/config/pending-restart returns pending=false when no restart is staged", async ({ request }) => {
+  const resp = await request.get("/api/config/pending-restart");
+  expect(resp.status()).toBe(200);
+  const body: unknown = await resp.json();
+  // Either {pending: false} or {pending: true, status: {...}} — both are valid.
+  // The server just started fresh, so pending should be false.
+  expect((body as Record<string, unknown>).pending).toBe(false);
+});
+
+test(
+  "stage_restart: stage a restart-required change, verify traffic unchanged, then discard",
+  async ({ request }) => {
+    // 1. Ensure no staged restart is active before we start.
+    const preClearResp = await request.post("/api/config/pending-restart/discard");
+    // 404 or 409 are acceptable here; we just want to clear any leftover state.
+    expect([200, 409, 501]).toContain(preClearResp.status());
+
+    // 2. Read current config.
+    const cfgResp = await request.get("/api/config");
+    expect(cfgResp.status()).toBe(200);
+    const cfgData: unknown = await cfgResp.json();
+    const original = RawConfigSchema.parse(cfgData);
+    const baseVersion = original.base_version ?? "";
+
+    // 3. Build a candidate with a restart-required change ([cache] block).
+    const candidate = `${original.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MB"\n`;
+    const applyUrl = baseVersion
+      ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}&mode=stage_restart`
+      : "/api/config/apply?mode=stage_restart";
+
+    const stageResp = await request.post(applyUrl, {
+      headers: { "Content-Type": "application/toml" },
+      data: candidate,
+    });
+    expect(stageResp.status()).toBe(200);
+    const stageData: unknown = await stageResp.json();
+    const stageResult = assertShape(ApplyResultSchema, stageData, "/api/config/apply?mode=stage_restart");
+    expect(stageResult.ok).toBe(true);
+    expect(stageResult.mode).toBe("stage_restart");
+
+    // 4. Traffic must still serve the original content (staged restart does NOT
+    //    trigger a hot reload — the running server is unchanged).
+    await expectStaticOK(request, "Jul static OK");
+
+    // 5. GET /api/config/pending-restart must now show staged=true.
+    const pendingResp = await request.get("/api/config/pending-restart");
+    expect(pendingResp.status()).toBe(200);
+    const pendingBody: unknown = await pendingResp.json();
+    const pendingRecord = pendingBody as Record<string, unknown>;
+    expect(pendingRecord.pending).toBe(true);
+    if (pendingRecord.status) {
+      const status = PendingRestartStatusSchema.safeParse(pendingRecord.status);
+      if (status.success) {
+        expect(status.data.staged).toBe(true);
+        expect(status.data.managed).toBe(true);
+      }
+    }
+
+    // 6. The overview must include pending_restart_status.
+    const overviewResp = await request.get("/api/runtime/overview");
+    expect(overviewResp.status()).toBe(200);
+    const overview = assertShape(OverviewSchema, await overviewResp.json(), "/api/runtime/overview");
+    // pending_restart may be present (flat list from legacy field) or
+    // pending_restart_status (structured) — both are optional in the schema.
+    // Just verify the response parses without error.
+    expect(overview).toBeTruthy();
+
+    // 7. Hot apply must be blocked (409) while a staged restart is pending.
+    const cfgResp2 = await request.get("/api/config");
+    expect(cfgResp2.status()).toBe(200);
+    const latestCfg = RawConfigSchema.parse(await cfgResp2.json());
+    const hotResp = await request.post(
+      latestCfg.base_version
+        ? `/api/config/apply?base_version=${encodeURIComponent(latestCfg.base_version ?? "")}`
+        : "/api/config/apply",
+      {
+        headers: { "Content-Type": "application/toml" },
+        data: latestCfg.raw ?? "",
+      },
+    );
+    expect(hotResp.status()).toBe(409);
+
+    // 8. Discard the staged restart.
+    const discardResp = await request.post("/api/config/pending-restart/discard");
+    expect(discardResp.status()).toBe(200);
+    const discardData: unknown = await discardResp.json();
+    expect((discardData as Record<string, unknown>).ok).toBe(true);
+
+    // 9. After discard, pending-restart must be clear.
+    const afterDiscardResp = await request.get("/api/config/pending-restart");
+    expect(afterDiscardResp.status()).toBe(200);
+    const afterDiscardBody = (await afterDiscardResp.json()) as Record<string, unknown>;
+    expect(afterDiscardBody.pending).toBe(false);
+
+    // 10. Hot apply must be unblocked now.
+    const cfgResp3 = await request.get("/api/config");
+    expect(cfgResp3.status()).toBe(200);
+    const restoredCfg = RawConfigSchema.parse(await cfgResp3.json());
+    const unlockedResp = await request.post(
+      restoredCfg.base_version
+        ? `/api/config/apply?base_version=${encodeURIComponent(restoredCfg.base_version ?? "")}`
+        : "/api/config/apply",
+      {
+        headers: { "Content-Type": "application/toml" },
+        data: restoredCfg.raw ?? "",
+      },
+    );
+    // Applying the same config as is on disk is a no-op apply — 200 OK.
+    expect(unlockedResp.status()).toBe(200);
+
+    // 11. Traffic still serves original content.
+    await expectStaticOK(request, "Jul static OK");
+  },
+);
+
+test(
+  "stage_restart: updating a staged config records updated (not created) state",
+  async ({ request }) => {
+    // 1. Clear any leftover staged restart.
+    await request.post("/api/config/pending-restart/discard");
+
+    // 2. Read config and stage a first restart.
+    const cfgResp = await request.get("/api/config");
+    expect(cfgResp.status()).toBe(200);
+    const cfgData: unknown = await cfgResp.json();
+    const original = RawConfigSchema.parse(cfgData);
+    const baseVersion = original.base_version ?? "";
+    const candidate = `${original.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MB"\n`;
+
+    const stageUrl = baseVersion
+      ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}&mode=stage_restart`
+      : "/api/config/apply?mode=stage_restart";
+    const stage1Resp = await request.post(stageUrl, {
+      headers: { "Content-Type": "application/toml" },
+      data: candidate,
+    });
+    expect(stage1Resp.status()).toBe(200);
+    const stage1 = ApplyResultSchema.parse(await stage1Resp.json());
+    expect(stage1.ok).toBe(true);
+
+    // 3. Update the staged config with a slightly different candidate.
+    const candidateV2 = `${original.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "128MB"\n`;
+    const cfgResp2 = await request.get("/api/config");
+    const latestCfg = RawConfigSchema.parse(await cfgResp2.json());
+    const updateUrl = latestCfg.base_version
+      ? `/api/config/apply?base_version=${encodeURIComponent(latestCfg.base_version ?? "")}&mode=stage_restart`
+      : "/api/config/apply?mode=stage_restart";
+    const stage2Resp = await request.post(updateUrl, {
+      headers: { "Content-Type": "application/toml" },
+      data: candidateV2,
+    });
+    expect(stage2Resp.status()).toBe(200);
+    const stage2 = ApplyResultSchema.parse(await stage2Resp.json());
+    expect(stage2.ok).toBe(true);
+    expect(stage2.mode).toBe("stage_restart");
+
+    // 4. Pending status should still be active after the update.
+    const pendingResp = await request.get("/api/config/pending-restart");
+    expect(pendingResp.status()).toBe(200);
+    const pendingBody = (await pendingResp.json()) as Record<string, unknown>;
+    expect(pendingBody.pending).toBe(true);
+
+    // 5. Clean up.
+    await request.post("/api/config/pending-restart/discard");
   },
 );

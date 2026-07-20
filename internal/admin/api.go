@@ -513,10 +513,16 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		s.recordHistory(prev)
 		// Use distinct audit/timeline events for stage_restart vs hot apply so
 		// the timeline clearly distinguishes which transaction type ran.
+		// StagedRestartIsUpdate is set by the serve.go closure BEFORE the apply
+		// so we get the correct created/updated distinction without re-reading
+		// disk state post-apply (M-04 fix).
 		if mode == "stage_restart" {
-			if result.PendingRestart != nil && result.PendingRestart.Staged {
-				// Check if the pending_restart was just created (serving_version
-				// is set, meaning it was pre-existing) or is a first stage.
+			if result.StagedRestartIsUpdate {
+				s.recordAudit("config.stage_restart.updated", "config", "success",
+					"staged configuration updated for next process restart", adminClientIP(r))
+				s.emit("config", "stage_restart_updated", "info",
+					"Staged configuration updated; previous staged config replaced.")
+			} else {
 				s.recordAudit("config.stage_restart.created", "config", "success",
 					"configuration staged for next process restart", adminClientIP(r))
 				s.emit("config", "stage_restart_created", "info",

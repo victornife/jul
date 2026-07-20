@@ -328,6 +328,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.ConnStateHook = metrics.ConnState
 	srv.OnReloadStart = metrics.ReloadStarted
 	srv.OnReloadComplete = metrics.ObserveReload
+	srv.OnReloadResult = func(r server.ReloadResult) {
+		metrics.ObserveReloadResult(string(r.Outcome), r.PhaseDurations, r.TimedOut, r.TimedOutPhase)
+	}
 	srv.ACME = rt.ACME
 
 	// Wire the runtime snapshot into preflight after the server exists so
@@ -418,6 +421,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			res, err := coordinator.ApplyRaw(data, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
+				result.StagedRestartIsUpdate = wasAlreadyPending
 				if res.OK {
 					if wasAlreadyPending {
 						metrics.ObserveStageRestart("updated")
@@ -436,6 +440,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			res, err := coordinator.ApplyConfig(c, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
+				result.StagedRestartIsUpdate = wasAlreadyPending
 				if res.OK {
 					if wasAlreadyPending {
 						metrics.ObserveStageRestart("updated")

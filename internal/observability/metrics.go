@@ -65,8 +65,12 @@ type Metrics struct {
 	reloadTotal      *prometheus.CounterVec
 	reloadDuration   *prometheus.HistogramVec
 	reloadInProgress prometheus.Gauge
-	stageRestarts    *prometheus.CounterVec
-	pendingRestart   prometheus.Gauge
+	// reloadPhaseDuration records per-phase latency (M-04: jul_reload_phase_duration_seconds).
+	reloadPhaseDuration *prometheus.HistogramVec
+	// reloadTimeouts counts reloads that exceeded their deadline (M-04: jul_reload_timeout_total).
+	reloadTimeouts *prometheus.CounterVec
+	stageRestarts  *prometheus.CounterVec
+	pendingRestart prometheus.Gauge
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -259,6 +263,15 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_config_pending_restart",
 			Help: "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",
 		}),
+		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "jul_reload_phase_duration_seconds",
+			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		}, []string{"phase", "outcome"}),
+		reloadTimeouts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_reload_timeout_total",
+			Help: "Configuration reloads that exceeded their deadline, labeled by the phase that timed out.",
+		}, []string{"phase"}),
 
 		samples:       newRequestSampleBuffer(requestSampleCap),
 		routeFailures: newRouteFailureTracker(routeFailureCap),
@@ -298,6 +311,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.reloadTotal,
 		m.reloadDuration,
 		m.reloadInProgress,
+		m.reloadPhaseDuration,
+		m.reloadTimeouts,
 		m.stageRestarts,
 		m.pendingRestart,
 		collectors.NewGoCollector(),
@@ -604,6 +619,24 @@ func (m *Metrics) ObserveReload(source, outcome string, durationMs int64) {
 		m.reloadDuration.WithLabelValues(source, outcome).Observe(float64(durationMs) / 1000.0)
 	}
 	m.reloadInProgress.Dec()
+}
+
+// ObserveReloadResult records per-phase durations and timeout counts from the
+// full ReloadResult (M-04: jul_reload_phase_duration_seconds, jul_reload_timeout_total).
+// It is called alongside ObserveReload so both sets of metrics are always current.
+// outcome is the terminal classification string; phaseDurations is the per-phase
+// timing map from ReloadResult.PhaseDurations; timedOut/timedOutPhase come from
+// the ReloadResult.TimedOut/TimedOutPhase fields.
+func (m *Metrics) ObserveReloadResult(outcome string, phaseDurations map[string]time.Duration, timedOut bool, timedOutPhase string) {
+	if timedOut {
+		if timedOutPhase == "" {
+			timedOutPhase = "unknown"
+		}
+		m.reloadTimeouts.WithLabelValues(timedOutPhase).Inc()
+	}
+	for phase, d := range phaseDurations {
+		m.reloadPhaseDuration.WithLabelValues(phase, outcome).Observe(d.Seconds())
+	}
 }
 
 // ReloadStarted increments the in-progress gauge at the beginning of a reload

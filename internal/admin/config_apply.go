@@ -27,6 +27,12 @@ type ConfigApplyResult struct {
 	// CanStage is set together with RestartRequired when the candidate can be
 	// staged for the next process restart instead of being rejected outright.
 	CanStage bool `json:"can_stage,omitempty"`
+	// StagedRestartIsUpdate is true when the stage_restart apply succeeded and
+	// replaced an already-pending staged restart (update), false when it created
+	// the first staged restart. The API handler uses this to emit the correct
+	// audit event (config.stage_restart.updated vs config.stage_restart.created)
+	// without re-reading disk state after the apply.
+	StagedRestartIsUpdate bool `json:"-"`
 	// Summary and Diff are populated by the structured-patch apply path.
 	Summary []string   `json:"summary,omitempty"`
 	Diff    ConfigDiff `json:"diff,omitempty"`
