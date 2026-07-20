@@ -254,16 +254,13 @@ func wizardAppConfig(in wizardInput) (*config.Config, string) {
 	if name == "" {
 		return nil, "app mode requires a name"
 	}
-	var backends []config.UpstreamServer
-	for _, b := range in.Backends {
-		addr := strings.TrimSpace(b)
-		if addr == "" {
-			continue
-		}
-		backends = append(backends, config.UpstreamServer{Address: addr, Weight: 1})
-	}
-	if len(backends) == 0 {
+	backendAddrs := normalizeStringSlice(in.Backends)
+	if len(backendAddrs) == 0 {
 		return nil, "app mode requires at least one backend (host:port)"
+	}
+	backends := make([]config.UpstreamServer, 0, len(backendAddrs))
+	for _, addr := range backendAddrs {
+		backends = append(backends, config.UpstreamServer{Address: addr, Weight: 1})
 	}
 
 	preset := appPresets[strings.ToLower(strings.TrimSpace(in.Preset))]
@@ -329,16 +326,6 @@ func wizardAppConfig(in wizardInput) (*config.Config, string) {
 			Locations: []config.LocationConfig{loc},
 		}},
 		Upstreams: []config.UpstreamConfig{up},
-		Compression: config.CompressionConfig{
-			Enabled:  config.Bool(true),
-			Encoders: []string{"gzip"},
-			MinSize:  config.Size(1 << 10),
-			Types: []string{
-				"text/html", "text/css", "text/plain",
-				"application/json", "application/javascript",
-				"application/xml", "image/svg+xml",
-			},
-		},
 	}
 	return cfg, ""
 }
