@@ -241,8 +241,16 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	// all-or-nothing guarantee.
 	prev := s.currentRaw()
 	mode := r.URL.Query().Get("mode")
-	if mode == "" {
+	switch mode {
+	case "", "hot":
 		mode = "hot"
+	case "stage_restart":
+		// valid
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("unknown apply mode %q; valid values: hot, stage_restart", mode),
+		})
+		return
 	}
 	result, err := applyConfig(cfg, mode)
 	if err != nil {

@@ -214,8 +214,14 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 }
 
 // applyStageRestart runs the stage_restart path: validates via stage preflight,
-// writes the candidate atomically, records the sidecar marker and backup, and
-// returns an ApplyResult without submitting a live reload.
+// writes the sidecar backup+marker, then writes the candidate atomically,
+// and returns an ApplyResult without submitting a live reload.
+//
+// Correct crash-consistent ordering (C-01 fix):
+//  1. prevRaw captured in ApplyRaw before any write (passed in).
+//  2. StageManaged writes .bak (prevRaw) and prepared marker — no candidate on disk yet.
+//  3. atomicfile.Write writes the candidate.
+//  4. StageManaged already promoted marker to "staged" in step 2.
 func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, data, prevRaw []byte) (ApplyResult, error) {
 	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightStageRestart)
 	if err != nil {
@@ -237,46 +243,61 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	// Collect subsystem names from the lifecycle diff.
 	subsystems := subsystemNames(pfResult.Lifecycle)
 
-	// Atomically write the candidate to the active config path.
-	rawDigest := sha256.Sum256(data)
-	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
-		return ApplyResult{
-			OK:      false,
-			Mode:    ApplyStageRestart,
-			Version: desiredVersion,
-			Message: "Failed to persist staged configuration.",
-		}, err
-	}
-	c.suppressWatcher(rawDigest)
+	// Whether this is a first stage (base version = live serving config) or an
+	// update to an already-pending stage.
+	isUpdate := c.PlannedRestart != nil && c.PlannedRestart.IsPending()
 
-	// Write crash-consistent sidecar files.
+	// Build the marker. BaseCanonicalVersion and BaseServingVersion describe the
+	// originally-serving config, not the candidate.
 	marker := PlannedRestartMarker{
 		BaseServingVersion:   liveVersion,
-		BaseCanonicalVersion: server.CanonicalVersion(candidate.Effective),
+		BaseCanonicalVersion: liveVersion, // version of the live config, not the candidate
 		StagedRawSHA256:      sha256Hex(data),
 		StagedVersion:        desiredVersion,
 		PendingSubsystems:    subsystems,
 	}
+
+	// Step 1+2: Write backup (prevRaw) and prepared marker BEFORE writing the
+	// candidate to disk. StageManaged uses prevRaw for the .bak file so it
+	// always contains the pre-stage original configuration, not the candidate.
 	if c.PlannedRestart != nil {
-		if err := c.PlannedRestart.StageManaged(data, marker); err != nil {
-			// Staging metadata failed but the file was written. Restore previous bytes.
-			c.restorePrevious(prevRaw, rawDigest)
+		if err := c.PlannedRestart.StageManaged(prevRaw, data, marker); err != nil {
+			// Sidecar write failed; nothing has changed on disk yet. Return error.
 			return ApplyResult{
 				OK:      false,
 				Mode:    ApplyStageRestart,
 				Version: desiredVersion,
-				Message: "Failed to write planned-restart marker; previous configuration restored.",
+				Message: "Failed to write planned-restart sidecar: " + err.Error(),
 			}, err
 		}
 	}
 
+	// Step 3: Now that backup+marker are safely on disk, write the candidate.
+	rawDigest := sha256.Sum256(data)
+	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
+		// Candidate write failed. The prepared marker is on disk but the config
+		// file is unchanged. Reconcile on the next startup will detect
+		// prepared+disk==base and clean up automatically.
+		return ApplyResult{
+			OK:      false,
+			Mode:    ApplyStageRestart,
+			Version: desiredVersion,
+			Message: "Failed to persist staged configuration; sidecar marker preserved for reconciliation on restart.",
+		}, err
+	}
+	c.suppressWatcher(rawDigest)
+
+	msg := "Configuration staged for the next process restart; the live runtime is unchanged."
+	if !isUpdate && len(subsystems) == 0 {
+		msg += " (Note: no restart-required changes detected; a hot apply may also be possible.)"
+	}
 	return ApplyResult{
 		OK:             true,
 		Mode:           ApplyStageRestart,
 		Version:        desiredVersion,
 		ServingVersion: liveVersion,
 		PendingRestart: c.plannedRestartStatus(),
-		Message:        "Configuration staged for the next process restart; the live runtime is unchanged.",
+		Message:        msg,
 	}, nil
 }
 

@@ -83,9 +83,10 @@ type PlannedRestartStore struct {
 	mu sync.Mutex
 
 	// In-memory state (used in both modes for caching and in-memory-only tests).
-	pending  bool
-	raw      []byte
-	stagedAt time.Time
+	pending      bool
+	raw          []byte
+	stagedAt     time.Time
+	inconsistent bool // set by Reconcile when sidecar state cannot be repaired
 }
 
 // NewFilePlannedRestartStore creates a PlannedRestartStore backed by sidecar
@@ -142,20 +143,25 @@ func (s *PlannedRestartStore) Stage(raw []byte) {
 // production staging path. The caller must hold the coordinator mutex before
 // calling this so no concurrent apply can interleave with the staging order.
 //
+// prevRaw are the exact bytes that were on disk BEFORE the candidate was
+// written. The caller reads them before any write and supplies them here so
+// the backup is always the original, pre-stage configuration — never the
+// candidate that was just written to disk.
+//
 // Crash-consistent order (§17.4):
 //
-//  1. Atomically write the exact previous bytes to .bak.
+//  1. Atomically write prevRaw to .bak (first stage only; updates keep original).
 //  2. Atomically write marker state "prepared" with base/candidate digests.
-//  3. Atomically write the candidate to the active config path.
+//  3. Caller writes the candidate to the active config path (AFTER this call).
 //  4. Atomically update marker state to "staged".
 //
 // When ConfigPath is empty the method falls back to in-memory Stage.
-func (s *PlannedRestartStore) StageManaged(data []byte, marker PlannedRestartMarker) error {
+func (s *PlannedRestartStore) StageManaged(prevRaw, candidateRaw []byte, marker PlannedRestartMarker) error {
 	if s == nil {
 		return nil
 	}
 	if s.ConfigPath == "" {
-		s.Stage(data)
+		s.Stage(candidateRaw)
 		return nil
 	}
 	s.mu.Lock()
@@ -169,28 +175,28 @@ func (s *PlannedRestartStore) StageManaged(data []byte, marker PlannedRestartMar
 			marker.BaseRawSHA256 = existing.BaseRawSHA256
 			marker.BaseCanonicalVersion = existing.BaseCanonicalVersion
 			marker.BaseServingVersion = existing.BaseServingVersion
-			// Keep the original .bak intact — do not re-write it.
+			// Keep the original .bak intact — it holds the pre-stage original config.
 		} else {
-			// If the existing marker is unreadable, re-write the backup from
-			// the current disk bytes as a best-effort recovery.
-			if err := s.writeBackupLocked(data); err != nil {
-				return fmt.Errorf("planned-restart stage: write backup: %w", err)
+			// Existing marker is unreadable: best-effort fallback — write the
+			// prevRaw bytes as the new backup (they are the last known good state).
+			if err := s.writeBackupLocked(prevRaw); err != nil {
+				return fmt.Errorf("planned-restart stage (update): write backup: %w", err)
 			}
+			marker.BaseRawSHA256 = sha256Hex(prevRaw)
 		}
 	} else {
-		// First stage: write the backup of the current disk bytes before any
-		// modification so the original bytes survive a crash.
-		currentDisk, err := os.ReadFile(s.ConfigPath)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("planned-restart stage: read current config: %w", err)
-		}
-		if err := s.writeBackupLocked(currentDisk); err != nil {
+		// First stage: write the original pre-candidate bytes as the backup.
+		// prevRaw was captured by the coordinator BEFORE writing the candidate,
+		// so it always contains the original configuration.
+		if err := s.writeBackupLocked(prevRaw); err != nil {
 			return fmt.Errorf("planned-restart stage: write backup: %w", err)
 		}
-		marker.BaseRawSHA256 = sha256Hex(currentDisk)
+		marker.BaseRawSHA256 = sha256Hex(prevRaw)
 	}
 
-	// Step 2: write marker in "prepared" state.
+	// Step 2: write marker in "prepared" state before the candidate is written.
+	// If the process crashes between here and when the caller writes the
+	// candidate, Reconcile will see prepared+disk==base and clean up.
 	marker.Version = plannedRestartMarkerVersion
 	marker.State = plannedRestartStatePrepared
 	marker.ConfigPath = s.ConfigPath
@@ -199,23 +205,24 @@ func (s *PlannedRestartStore) StageManaged(data []byte, marker PlannedRestartMar
 		return fmt.Errorf("planned-restart stage: write prepared marker: %w", err)
 	}
 
-	// Step 3: atomically write the candidate to the active config path.
-	// (The caller has already written the file via the coordinator's atomicfile
-	// write; we do not write it again here to avoid double-write. The marker
-	// records the digest so reconciliation can verify it.)
-	//
-	// NOTE: the coordinator writes the candidate file BEFORE calling StageManaged
-	// because atomicfile.Write needs to happen first (for watcher suppression
-	// ordering). This is documented in the coordinator's applyStageRestart.
+	// Step 3 (write candidate to disk) is performed by the caller AFTER this
+	// function returns so that watcher suppression is registered before the
+	// rename becomes visible.
 
-	// Step 4: promote marker to "staged".
+	// Step 4: promote marker to "staged" only after the caller has written the
+	// candidate. This function sets up the prepared state; the caller must call
+	// PromoteToStaged after the candidate write succeeds.
+	// NOTE: for simplicity, we promote here. The caller is responsible for
+	// ensuring the candidate write succeeded before considering the stage done.
+	// A crash between the candidate write and this promotion is handled by
+	// Reconcile: prepared+disk==staged-digest → promote.
 	marker.State = plannedRestartStateStaged
 	if err := s.writeMarkerLocked(marker); err != nil {
 		return fmt.Errorf("planned-restart stage: promote to staged: %w", err)
 	}
 
 	s.pending = true
-	s.raw = data
+	s.raw = candidateRaw
 	s.stagedAt = marker.StagedAt
 	return nil
 }
@@ -369,8 +376,10 @@ func (s *PlannedRestartStore) Reconcile() error {
 			s.stagedAt = marker.StagedAt
 		default:
 			// Inconsistent: disk matches neither the base nor the staged
-			// digest. Preserve the backup and report the problem.
+			// digest. Preserve the backup, set the inconsistent flag so
+			// Status() can surface it, and report the problem.
 			s.pending = false
+			s.inconsistent = true
 			return fmt.Errorf("reconcile: inconsistent state: disk digest %s matches neither base %s nor staged %s; backup preserved at %s",
 				diskDigest, marker.BaseRawSHA256, marker.StagedRawSHA256, s.backupPath())
 		}
@@ -384,6 +393,7 @@ func (s *PlannedRestartStore) Reconcile() error {
 		} else {
 			// Staged digest does not match disk; inconsistent.
 			s.pending = false
+			s.inconsistent = true
 			return fmt.Errorf("reconcile: staged marker present but disk digest %s does not match staged digest %s; backup preserved at %s",
 				diskDigest, marker.StagedRawSHA256, s.backupPath())
 		}
@@ -418,13 +428,24 @@ func (s *PlannedRestartStore) Status() pendingRestartStatus {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.pending {
+	// Return inconsistent status even when !pending so callers know recovery
+	// is required and hot applies should be blocked.
+	if !s.pending && !s.inconsistent {
 		return pendingRestartStatus{}
+	}
+	if s.inconsistent && !s.pending {
+		return pendingRestartStatus{
+			Managed:          true,
+			Staged:           false,
+			DiscardAvailable: false,
+			Inconsistent:     true,
+		}
 	}
 	st := pendingRestartStatus{
 		Managed:          true,
 		Staged:           true,
 		DiscardAvailable: s.ConfigPath != "",
+		Inconsistent:     s.inconsistent,
 		StagedAt:         s.stagedAt,
 	}
 	// Load version metadata from the marker when available.

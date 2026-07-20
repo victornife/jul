@@ -147,6 +147,15 @@ type Server struct {
 	// corresponding ReloadResult fields.
 	OnReloadComplete func(source, outcome string, durationMs int64)
 
+	// OnInitialGenerationReady, when set, is invoked exactly once after all
+	// startup listeners have bound successfully and the initial handler
+	// generation is live. It fires only on a successful startup, so it is safe
+	// for the composition root to clear or reconcile recovery state that
+	// requires the data plane to have adopted the configuration. On any startup
+	// failure (build error, bind error) this hook is never called and recovery
+	// files are preserved.
+	OnInitialGenerationReady func()
+
 	lastReload atomic.Pointer[ReloadResult]
 	// baseCtx is the process-level context stored during Run. It is used to
 	// derive per-reload deadline contexts in doReload.
@@ -455,6 +464,14 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 		// readers observe the listener set as it grows and the first generation
 		// is live before any admin/preflight request runs (R10-02).
 		s.publishRuntimeStateDirect(genID)
+	}
+
+	// All startup listeners bound successfully and the initial generation is
+	// live. Fire the hook so the composition root can reconcile any recovery
+	// state (e.g. planned-restart sidecar files) that must only be cleared
+	// after the data plane has adopted the configuration.
+	if s.OnInitialGenerationReady != nil {
+		s.OnInitialGenerationReady()
 	}
 
 	for {

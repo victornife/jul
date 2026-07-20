@@ -366,6 +366,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	// Wire the managed apply path now that srv exists so the coordinator can
 	// read the live serving version and submit correlated reload requests.
+	//
+	// ONE shared PlannedRestartStore is constructed here and used by both the
+	// coordinator and the startup reconciliation hook. This ensures that
+	// reconciliation on successful startup updates the same in-memory state
+	// that the coordinator and API see, preventing the split-brain defect where
+	// a second store reconciles sidecar files but the coordinator's store still
+	// reports pending=true (C-02 fix).
 	if configPath != "" {
 		submitReload := func(req server.ReloadRequest) error {
 			select {
@@ -376,6 +383,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 		}
 
+		// Single shared store — coordinator and reconciliation use the same instance.
+		sharedStore := NewFilePlannedRestartStore(configPath)
+
 		coordinator := &ConfigApplyCoordinator{
 			BaseCtx:        ctx,
 			Path:           configPath,
@@ -383,15 +393,33 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			SubmitReload:   submitReload,
 			LiveSnapshot:   srv.LiveSnapshot,
 			WatchDigest:    &lastAdminDigest,
-			PlannedRestart: NewFilePlannedRestartStore(configPath),
+			PlannedRestart: sharedStore,
+		}
+
+		// Reconcile planned-restart sidecar files after the data plane is live.
+		// Using OnInitialGenerationReady ensures reconciliation fires only after
+		// all startup listeners have bound successfully. On any startup failure
+		// the hook is never called and recovery files are preserved.
+		srv.OnInitialGenerationReady = func() {
+			if err := sharedStore.Reconcile(); err != nil {
+				log.Warn("planned-restart reconciliation warning (manual recovery may be needed)",
+					"error", err,
+					"backup", configPath+".pending-restart.bak",
+				)
+			}
+			// Sync the pending-restart gauge from the now-reconciled shared store.
+			metrics.SetPendingRestart(sharedStore.IsPending())
 		}
 
 		deps.ApplyConfigRaw = func(data []byte, mode string) (admin.ConfigApplyResult, error) {
+			// Capture whether a staged restart was already pending BEFORE the apply
+			// so we can emit the correct created/updated metric.
+			wasAlreadyPending := sharedStore.IsPending()
 			res, err := coordinator.ApplyRaw(data, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
 				if res.OK {
-					if coordinator.PlannedRestart != nil && coordinator.PlannedRestart.IsPending() {
+					if wasAlreadyPending {
 						metrics.ObserveStageRestart("updated")
 					} else {
 						metrics.ObserveStageRestart("created")
@@ -404,11 +432,16 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return result, err
 		}
 		deps.ApplyConfig = func(c *config.Config, mode string) (admin.ConfigApplyResult, error) {
+			wasAlreadyPending := sharedStore.IsPending()
 			res, err := coordinator.ApplyConfig(c, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
 				if res.OK {
-					metrics.ObserveStageRestart("updated")
+					if wasAlreadyPending {
+						metrics.ObserveStageRestart("updated")
+					} else {
+						metrics.ObserveStageRestart("created")
+					}
 					metrics.SetPendingRestart(true)
 				} else {
 					metrics.ObserveStageRestart("failed")
@@ -430,12 +463,38 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// Keep legacy closures for external callers during the deprecation
 		// window.
 		deps.WriteConfigRaw = func(data []byte) error {
-			_, err := deps.ApplyConfigRaw(data, string(ApplyHot))
-			return err
+			result, err := deps.ApplyConfigRaw(data, string(ApplyHot))
+			if err != nil {
+				return err
+			}
+			if !result.OK {
+				// Convert structured rejection to a typed error so legacy callers
+				// (rollbackToSnapshot, etc.) see the real failure reason.
+				if result.RestartRequired {
+					return fmt.Errorf("%w: %s", admin.ErrRestartRequired, result.Message)
+				}
+				if len(result.ValidationErrors) > 0 {
+					return fmt.Errorf("validation failed: %s", strings.Join(result.ValidationErrors, "; "))
+				}
+				if result.PendingRestart != nil {
+					return fmt.Errorf("hot apply blocked: a managed staged restart is pending; discard it first")
+				}
+				return fmt.Errorf("apply rejected: %s", result.Message)
+			}
+			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
-			_, err := deps.ApplyConfig(c, string(ApplyHot))
-			return err
+			result, err := deps.ApplyConfig(c, string(ApplyHot))
+			if err != nil {
+				return err
+			}
+			if !result.OK {
+				if result.RestartRequired {
+					return fmt.Errorf("%w: %s", admin.ErrRestartRequired, result.Message)
+				}
+				return fmt.Errorf("apply rejected: %s", result.Message)
+			}
+			return nil
 		}
 	}
 
@@ -448,24 +507,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	}
 
 	readyFlag.Set(true)
-
-	// Reconcile any pending-restart sidecar files left by a previous process.
-	// A managed staged restart that completed successfully is cleared here;
-	// a crash-interrupted staging is diagnosed and logged so the operator knows
-	// recovery action is needed. Reconciliation is best-effort: a failure logs
-	// a warning but does not prevent the server from serving traffic.
-	if configPath != "" {
-		reconcileStore := NewFilePlannedRestartStore(configPath)
-		if err := reconcileStore.Reconcile(); err != nil {
-			log.Warn("planned-restart reconciliation warning (manual recovery may be needed)",
-				"error", err,
-				"backup", configPath+".pending-restart.bak",
-			)
-		}
-		// Initialise the pending-restart gauge from the reconciled state so the
-		// metric is accurate from the first scrape.
-		metrics.SetPendingRestart(reconcileStore.IsPending())
-	}
+	// NOTE: planned-restart reconciliation now happens in srv.OnInitialGenerationReady
+	// (wired above) which fires after all startup listeners are bound successfully.
+	// This ensures recovery files are never removed if startup subsequently fails.
 
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
 	srv.MTLSResultHook = metrics.ObserveMTLSHandshake

@@ -5,8 +5,10 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // This file holds the configuration-history and rollback handlers, split out of
@@ -65,6 +67,14 @@ func (s *Server) rollbackToSnapshot(id string) (int, error) {
 	defer s.applyMu.Unlock()
 	prev := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(raw); err != nil {
+		// Map coordinator rejections to the correct HTTP status so the handler
+		// does not report a false success.
+		if errors.Is(err, ErrRestartRequired) {
+			return http.StatusConflict, err
+		}
+		if strings.Contains(err.Error(), "staged restart is pending") {
+			return http.StatusConflict, err
+		}
 		return http.StatusBadRequest, err
 	}
 	s.recordHistory(prev)

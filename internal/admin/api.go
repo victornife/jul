@@ -465,8 +465,16 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	prev := s.currentRaw()
 
 	mode := r.URL.Query().Get("mode")
-	if mode == "" {
+	switch mode {
+	case "", "hot":
 		mode = "hot"
+	case "stage_restart":
+		// valid
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("unknown apply mode %q; valid values: hot, stage_restart", mode),
+		})
+		return
 	}
 	result, err := applyRaw(body, mode)
 	if err != nil {

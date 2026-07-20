@@ -42,7 +42,7 @@ func TestFileStoreStageManaged(t *testing.T) {
 		BaseServingVersion: "v1",
 		PendingSubsystems:  []string{"log_format"},
 	}
-	if err := store.StageManaged([]byte("new"), marker); err != nil {
+	if err := store.StageManaged(seed, []byte("new"), marker); err != nil {
 		t.Fatalf("StageManaged: %v", err)
 	}
 	if !store.IsPending() {
@@ -509,4 +509,205 @@ func TestCoordinatorHotApplyBlockedWhileStagePending(t *testing.T) {
 // marshalMarker is a test helper that encodes a marker to JSON bytes.
 func marshalMarker(m PlannedRestartMarker) ([]byte, error) {
 	return json.Marshal(m)
+}
+
+// ─── C-01 fix: backup contains original bytes, not the candidate ─────────────
+
+// TestStageFirstBackupEqualsOriginal is the primary C-01 regression test.
+// It stages through the real coordinator and asserts that the .bak file is
+// byte-identical to the seed file — including comments and whitespace — not
+// to the candidate that was staged.
+func TestStageFirstBackupEqualsOriginal(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+
+	// Seed with comments to make it easy to detect if backup == candidate.
+	seed := []byte("# original comment\n[global]\nlog_level = \"info\"\n\n[[servers]]\nlisten = \":8080\"\n[[servers.locations]]\nmatch = { type = \"prefix\", path = \"/\" }\nreturn = 200\n")
+	if err := os.WriteFile(configPath, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+
+	base := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	base.Global.LogFormat = "text"
+	p := testPreflight()
+	p.StartupFP = lifecycle.ComputeFingerprint(base)
+
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           configPath,
+		Preflight:      p,
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	// Stage a restart-required change.
+	next := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	next.Global.LogFormat = "json"
+	nextRaw, _ := config.Marshal(next)
+
+	res, err := c.ApplyRaw(nextRaw, ApplyStageRestart)
+	if err != nil {
+		t.Fatalf("ApplyRaw stage_restart: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("ok = false; message: %s", res.Message)
+	}
+
+	// The backup must be the original seed bytes, NOT the candidate.
+	backup, err := os.ReadFile(store.backupPath())
+	if err != nil {
+		t.Fatalf("read backup: %v", err)
+	}
+	if string(backup) != string(seed) {
+		t.Errorf("backup != seed\nbackup: %q\nseed:   %q", backup, seed)
+	}
+	// The active config must now contain the staged candidate.
+	onDisk, _ := os.ReadFile(configPath)
+	if string(onDisk) != string(nextRaw) {
+		t.Error("active config should contain the staged candidate")
+	}
+}
+
+// TestStageDiscardRoundtripRestoresExactBytes verifies that a stage → discard
+// cycle through the real coordinator restores the exact original bytes including
+// comments and formatting.
+func TestStageDiscardRoundtripRestoresExactBytes(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+
+	seed := []byte("# preserved comment\n[global]\nlog_level = \"info\"\n\n[[servers]]\nlisten = \":8080\"\n[[servers.locations]]\nmatch = { type = \"prefix\", path = \"/\" }\nreturn = 200\n")
+	if err := os.WriteFile(configPath, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+	base := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	base.Global.LogFormat = "text"
+	p := testPreflight()
+	p.StartupFP = lifecycle.ComputeFingerprint(base)
+
+	liveVersion := "v1"
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           configPath,
+		Preflight:      p,
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	next := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	next.Global.LogFormat = "json"
+	nextRaw, _ := config.Marshal(next)
+
+	if _, err := c.ApplyRaw(nextRaw, ApplyStageRestart); err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+
+	// Discard.
+	res, err := c.DiscardPlannedRestart()
+	if err != nil {
+		t.Fatalf("discard: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("discard ok=false; message: %s", res.Message)
+	}
+
+	// Active config must be exactly the original seed.
+	onDisk, _ := os.ReadFile(configPath)
+	if string(onDisk) != string(seed) {
+		t.Errorf("discard did not restore original bytes\ngot:  %q\nwant: %q", onDisk, seed)
+	}
+	// Sidecar files must be removed.
+	if _, err := os.Stat(store.markerPath()); !os.IsNotExist(err) {
+		t.Error("marker should be removed after discard")
+	}
+	if _, err := os.Stat(store.backupPath()); !os.IsNotExist(err) {
+		t.Error("backup should be removed after discard")
+	}
+	_ = liveVersion
+}
+
+// TestStageUpdatePreservesOriginalBackup verifies that a staged update (a
+// second stage_restart while one is already pending) does not overwrite the
+// .bak file — the backup must still contain the pre-stage original.
+func TestStageUpdatePreservesOriginalBackup(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	seed := []byte("# original\n[global]\nlog_level = \"info\"\n\n[[servers]]\nlisten = \":8080\"\n[[servers.locations]]\nmatch = { type = \"prefix\", path = \"/\" }\nreturn = 200\n")
+	if err := os.WriteFile(configPath, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+	base := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	base.Global.LogFormat = "text"
+	p := testPreflight()
+	p.StartupFP = lifecycle.ComputeFingerprint(base)
+
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           configPath,
+		Preflight:      p,
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	// First stage.
+	v1 := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	v1.Global.LogFormat = "json"
+	v1Raw, _ := config.Marshal(v1)
+	if _, err := c.ApplyRaw(v1Raw, ApplyStageRestart); err != nil {
+		t.Fatalf("first stage: %v", err)
+	}
+
+	// Second stage (update).
+	v2 := config.ProxyTarget("127.0.0.1:9001", ":8080")
+	v2.Global.LogFormat = "json"
+	v2Raw, _ := config.Marshal(v2)
+	if _, err := c.ApplyRaw(v2Raw, ApplyStageRestart); err != nil {
+		t.Fatalf("second stage: %v", err)
+	}
+
+	// Backup must still equal the original seed, not v1 or v2.
+	backup, _ := os.ReadFile(store.backupPath())
+	if string(backup) != string(seed) {
+		t.Errorf("staged update overwrote original backup\ngot:  %q\nwant: %q", backup, seed)
+	}
+}
+
+// ─── C-02 fix: single store, reconciliation after listeners bind ─────────────
+
+// TestInconsistentMarkerSetsFlag verifies that a corrupt/inconsistent sidecar
+// state is surfaced through Status().Inconsistent rather than silently dropped.
+func TestInconsistentMarkerSetsFlag(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	// Disk content matches neither base nor staged digest → inconsistent.
+	if err := os.WriteFile(configPath, []byte("unknown-content"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+	marker := PlannedRestartMarker{
+		Version:         plannedRestartMarkerVersion,
+		State:           plannedRestartStatePrepared,
+		ConfigPath:      configPath,
+		BaseRawSHA256:   sha256Hex([]byte("original")),
+		StagedRawSHA256: sha256Hex([]byte("staged")),
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(store.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	err := store.Reconcile()
+	if err == nil {
+		t.Fatal("expected error for inconsistent state")
+	}
+	st := store.Status()
+	if !st.Inconsistent {
+		t.Error("Status().Inconsistent should be true after Reconcile detects inconsistency")
+	}
 }

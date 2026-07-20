@@ -9,6 +9,33 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Fixed
+- **P2-Remediation Wave 1: C-01, C-02, H-01, M-05 (L-01)** — critical correctness fixes for the planned-restart and managed-apply layer:
+  - **C-01 (staging backup ordering):** `applyStageRestart` now writes the backup
+    and prepared marker BEFORE writing the candidate to disk. `StageManaged` signature
+    changed to `StageManaged(prevRaw, candidateRaw []byte, marker)` so it receives the
+    original pre-stage bytes from the coordinator rather than reading them from disk (where
+    the candidate was already written). `BaseCanonicalVersion` now set from the live serving
+    config, not the candidate.
+  - **C-02 (single store + deferred reconciliation):** a single `PlannedRestartStore` is
+    now constructed once and shared by the `ConfigApplyCoordinator` and startup reconciliation.
+    Reconciliation moved from `serve.go` (before `srv.Run`) to `server.OnInitialGenerationReady`
+    hook (after all startup listeners bind successfully). On any startup failure the hook is
+    never called and recovery files are preserved.
+  - **H-01 (rollback false-success regression):** `WriteConfigRaw` and `SaveConfig` compatibility
+    adapters now inspect `ConfigApplyResult.OK` and convert `RestartRequired`,
+    `ValidationErrors`, and `PendingRestart` rejections to typed errors.
+    `rollbackToSnapshot` maps `ErrRestartRequired` to HTTP 409 instead of 400.
+  - **M-05 (mode validation):** `POST /api/config/apply` and `POST /api/config/patch/apply`
+    now return HTTP 400 for any mode value other than `hot` or `stage_restart`.
+  - **L-01:** Phase 2 and HP-01 roadmap/hardening-platform status reverted to
+    in-progress during remediation.
+  - Added `PlannedRestartStore.inconsistent` field exposed via `Status().Inconsistent`
+    when `Reconcile` detects an irrecoverable marker/disk mismatch.
+  - New regression tests: `TestStageFirstBackupEqualsOriginal`,
+    `TestStageDiscardRoundtripRestoresExactBytes`, `TestStageUpdatePreservesOriginalBackup`,
+    `TestInconsistentMarkerSetsFlag`.
+
 ### Added
 - **Phase 2 close: reload metrics, stage_restart tests, docs, and compat cleanup** (P2-05, #70):
   added `jul_reload_total{source,outcome}`, `jul_reload_duration_seconds{source,outcome}`,
