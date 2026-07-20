@@ -303,6 +303,15 @@ export const AuditSinkStatusSchema = z.object({
 });
 export type AuditSinkStatus = z.infer<typeof AuditSinkStatusSchema>;
 
+// AdminHealthStatus mirrors the backend AdminHealthStatus: the health of the
+// admin subsystem, surfaced as a top-level banner only when degraded (F-05).
+export const AdminHealthStatusSchema = z.object({
+  healthy: z.boolean(),
+  reason: z.enum(["audit_sink", "admin_reload", "admin_health"]).optional(),
+  detail: z.string().optional(),
+});
+export type AdminHealthStatus = z.infer<typeof AdminHealthStatusSchema>;
+
 export const CertRiskSchema = z.object({
   count: z.number(),
   expiring_soon: z.number(),
@@ -1060,9 +1069,7 @@ export type LocationMatchPatch = {
 };
 
 // LocationActionPatch is the new action for location_set_action. The backend
-// clears every other action field first, so exactly one action remains. Only
-// the tag-free actions the console edits structurally are offered; richer
-// actions (gRPC, transcode, FastCGI/uWSGI, handler plugin) stay read-only.
+// clears every other action field first, so exactly one action remains.
 export type LocationActionPatch =
   | { kind: "proxy"; target: string }
   | { kind: "grpc_proxy"; target: string }
@@ -1381,13 +1388,22 @@ export const ApplyResultSchema = z.object({
   message: z.string().optional(),
   status: z.array(FeatureStatusSchema).optional(),
   // previous_reload is the outcome of the most recent reload before this apply.
-  // When timed_out is true the prior reload exceeded reload_timeout; the new
-  // config is serving but the slow path should be investigated.
+  // @deprecated Replaced by the `reload` field. New consumers must use `reload`
+  // to correlate the live reload outcome with this apply. previous_reload is
+  // retained for one compat release and will be removed.
   previous_reload: ReloadSnapshotSchema.optional(),
-  // reload is the correlated result of the live reload triggered by this apply
-  // (P2-04). Replaces previous_reload for new consumers; both are present
-  // during the compatibility window.
+  // reload is the correlated, structured result of the live reload triggered by
+  // this apply (P2-04). It carries per-subsystem status, the terminal outcome,
+  // and timing so the console can distinguish fully-live, degraded, timed-out,
+  // and not-applied reloads.
   reload: ReloadResultSchema.optional(),
+  // Restoration fields (F-03): first-class truth about whether a rejected
+  // candidate was rolled back to the previous configuration.
+  persisted: z.boolean().optional(),
+  restored: z.boolean().optional(),
+  restore_error: z.string().optional(),
+  final_disk_version: z.string().optional(),
+  final_serving_version: z.string().optional(),
   // pending_restart is set when mode=stage_restart and the staged config is now
   // waiting for a process restart to take effect.
   pending_restart: z
@@ -1460,6 +1476,20 @@ export async function applyConfig(
           conflict.data.changes ?? [],
         );
       }
+      // A managed hot apply can be accepted, persisted, and then rejected by the
+      // live reload; the coordinator restores the previous config (F-03). The
+      // server returns 409 with ok=false plus restoration fields so the console
+      // can explain that nothing changed, rather than calling it a conflict.
+      if (
+        conflict.success &&
+        (conflict.data.restored || (conflict.data.restore_error && conflict.data.restore_error.length > 0))
+      ) {
+        throw new ConfigApplyRejectedError(
+          conflict.data.message ?? "The configuration was saved but the live reload rejected it.",
+          conflict.data.restored ?? false,
+          conflict.data.restore_error,
+        );
+      }
       throw new ConfigConflictError(
         conflict.success && conflict.data.message
           ? conflict.data.message
@@ -1526,7 +1556,23 @@ export class ConfigAdminChangeError extends Error {
   }
 }
 
+// ConfigApplyRejectedError is thrown when a hot apply was persisted but the
+// live reload rejected the candidate and the coordinator restored the previous
+// configuration (F-03). restored is true when the previous config is back on
+// disk; restoreError is set when restoration itself failed.
+export class ConfigApplyRejectedError extends Error {
+  constructor(
+    message: string,
+    public readonly restored: boolean,
+    public readonly restoreError?: string,
+  ) {
+    super(message);
+    this.name = "ConfigApplyRejectedError";
+  }
+}
+
 const ConflictBodySchema = z.object({
+  ok: z.boolean().optional(),
   conflict: z.boolean().optional(),
   restart_required: z.boolean().optional(),
   can_stage: z.boolean().optional(),
@@ -1534,6 +1580,13 @@ const ConflictBodySchema = z.object({
   changes: z.array(z.string()).optional(),
   message: z.string().optional(),
   current_version: z.string().optional(),
+  // Restoration fields (F-03): present when the candidate was persisted but the
+  // live reload rejected it and the coordinator restored the previous config.
+  restored: z.boolean().optional(),
+  restore_error: z.string().optional(),
+  // Reload union (P2-04): present on any 409 that carries a reload result,
+  // including restart_required and restoration-failure responses.
+  reload: ReloadResultSchema.optional(),
   // pending_restart carries subsystem info when restart_required is true
   // (H-06 fix: full ConfigApplyResult returned at 409).
   pending_restart: z
@@ -1548,7 +1601,7 @@ export const PatchApplyResultSchema = z.object({
   // mode is "hot" or "stage_restart" (D1). Absent for legacy responses.
   mode: z.enum(["hot", "stage_restart"]).optional(),
   // pending_reload mirrors applyConfig: persisted and validated, but the live
-  // runtime swap is asynchronous.
+  // runtime swap is asynchronous. Legacy; prefer `reload`.
   pending_reload: z.boolean().optional(),
   // version is the fresh config fingerprint for the next optimistic-concurrency
   // check after this apply lands.
@@ -1558,7 +1611,9 @@ export const PatchApplyResultSchema = z.object({
   // status is the post-apply runtime delta derived from the persisted config.
   status: z.array(FeatureStatusSchema).optional(),
   message: z.string().optional(),
-  // previous_reload: see ApplyResultSchema for semantics.
+  // Structured reload result (P2-04 / H-06). Replaces previous_reload.
+  reload: ReloadResultSchema.optional(),
+  // previous_reload: see ApplyResultSchema for semantics. @deprecated.
   previous_reload: ReloadSnapshotSchema.optional(),
   // reload is the correlated result of the live reload triggered by this apply
   // (D2/H-06). Replaces previous_reload for new consumers.

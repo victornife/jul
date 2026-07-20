@@ -20,6 +20,7 @@ import {
   ConfigConflictError,
   ConfigRestartRequiredError,
   ConfigAdminChangeError,
+  ConfigApplyRejectedError,
   type FeatureStatus,
   type ConfigDiff,
   type PendingRestartStatus,
@@ -207,16 +208,16 @@ export function ConfigPanel() {
   const [confirming, setConfirming] = useState(false);
   const [stageConfirming, setStageConfirming] = useState(false);
   // applied holds the accepted-apply result: the post-apply capability status,
-  // the server's pending_reload flag, and whether the previous reload exceeded
-  // the configured reload_timeout (surfaced via previous_reload.timed_out). The
-  // live outcome (fully live, still reloading, partial subsystem failure, or a
-  // timed-out reload) is derived from these signals plus the post-apply runtime
-  // snapshot below, so the operator sees an explicit outcome rather than an
-  // unconditional "saved" (AUX-02). mode tracks how it was applied.
+  // the structured reload result, and restoration state. The live outcome
+  // (fully live, still reloading, partial subsystem failure, timed-out reload,
+  // or restored) is derived from these signals plus the post-apply runtime
+  // snapshot below (AUX-02 / H-06). mode tracks how it was applied.
   const [applied, setApplied] = useState<{
     status: FeatureStatus[];
     pendingReload: boolean;
-    reloadTimedOut: boolean;
+    reload: import("@/api/client.ts").ReloadResult | undefined;
+    restored: boolean | undefined;
+    restoreError: string | undefined;
     mode: "hot" | "stage_restart";
     isStagedUpdate: boolean;
   } | null>(null);
@@ -384,7 +385,9 @@ export function ConfigPanel() {
       setApplied({
         status: res.status ?? [],
         pendingReload: false,
-        reloadTimedOut: false,
+        reload: undefined,
+        restored: undefined,
+        restoreError: undefined,
         mode: "stage_restart",
         isStagedUpdate: hasPendingRestart,
       });
@@ -464,7 +467,9 @@ export function ConfigPanel() {
         accepted: true,
         pendingReload: applied.pendingReload,
         runtimeObserved: postApply.isSuccess,
-        reloadTimedOut: applied.reloadTimedOut,
+        ...(applied.restored !== undefined ? { restored: applied.restored } : {}),
+        ...(applied.restoreError !== undefined ? { restoreError: applied.restoreError } : {}),
+        ...(applied.reload !== undefined ? { reload: applied.reload } : {}),
         ...(streamStatus !== undefined ? { streamStatus } : {}),
       });
     }
@@ -658,8 +663,23 @@ export function ConfigPanel() {
                   ? applyError.message
                   : applyError instanceof ConfigConflictError
                     ? "Conflict — another change was applied while you were editing."
-                    : "Apply failed."}
+                    : applyError instanceof ConfigApplyRejectedError
+                      ? applyError.restored
+                        ? "Apply rejected - previous configuration restored"
+                        : applyError.restoreError
+                          ? "Apply rejected and restoration failed"
+                          : "Apply rejected by live reload"
+                      : "Apply failed."}
               </p>
+              {applyError instanceof ConfigApplyRejectedError && (
+                <p className="mt-1 text-xs text-jul-muted">
+                  {applyError.restored
+                    ? "The candidate was saved but the live reload rejected it. The previous configuration has been restored and is serving."
+                    : applyError.restoreError
+                      ? `Restoration failed: ${applyError.restoreError}. Check the server logs and the on-disk configuration.`
+                      : applyError.message}
+                </p>
+              )}
               {applyError instanceof ConfigRejectedError &&
                 applyError.issues.map((iss, i) => (
                   <p key={`ae-${String(i)}`} className="mt-1 text-xs text-jul-muted">

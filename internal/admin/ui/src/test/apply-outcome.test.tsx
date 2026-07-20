@@ -16,9 +16,31 @@ import { render, screen, cleanup } from "@testing-library/react";
 import {
   deriveApplyOutcome,
   streamReloadFailure,
+  reloadSubsystemFailures,
   type ApplyOutcome,
 } from "@/lib/applyOutcome.ts";
 import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
+import type { ReloadResult } from "@/api/client.ts";
+
+function reload(over: Partial<ReloadResult> = {}): ReloadResult {
+  return {
+    id: "rl_1",
+    source: "admin",
+    outcome: "applied_live",
+    desired_version: "v1",
+    serving_version: "v1",
+    started_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+    duration_ms: 12,
+    persisted: true,
+    published: true,
+    timed_out: false,
+    http: { status: "ok" },
+    stream: { status: "ok" },
+    admin: { status: "ok" },
+    ...over,
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -100,7 +122,7 @@ describe("deriveApplyOutcome", () => {
     const o = deriveApplyOutcome({
       accepted: true,
       pendingReload: true,
-      runtimeObserved: false,
+      runtimeObserved: true,
       streamStatus: "failed: bad config",
     });
     expect(o.kind).toBe("partial-reload");
@@ -129,13 +151,13 @@ describe("deriveApplyOutcome", () => {
     expect(o.message).toMatch(/restart the server/i);
   });
 
-  it("reload-timed-out: accepted but previous reload exceeded timeout", () => {
+  it("reload-timed-out: accepted but reload exceeded timeout", () => {
     const o = deriveApplyOutcome({
       accepted: true,
-      pendingReload: true,
+      pendingReload: false,
       runtimeObserved: true,
       streamStatus: "ok",
-      reloadTimedOut: true,
+      reload: reload({ outcome: "applied_degraded", timed_out: true }),
     });
     expect(o.kind).toBe("reload-timed-out");
     expect(o.severity).toBe("warning");
@@ -148,12 +170,75 @@ describe("deriveApplyOutcome", () => {
     // A timed-out reload takes precedence over stream failure and pending state.
     const o = deriveApplyOutcome({
       accepted: true,
-      pendingReload: true,
+      pendingReload: false,
       runtimeObserved: false,
       streamStatus: "failed: bind error",
-      reloadTimedOut: true,
+      reload: reload({ outcome: "applied_degraded", timed_out: true }),
     });
     expect(o.kind).toBe("reload-timed-out");
+  });
+
+  it("reports partial-reload from applied_degraded reload outcome", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      reload: reload({
+        outcome: "applied_degraded",
+        http: { status: "ok" },
+        admin: { status: "failed", error: "admin listener reload failed" },
+      }),
+    });
+    expect(o.kind).toBe("partial-reload");
+    expect(o.failures).toHaveLength(1);
+    expect(o.failures[0]?.name).toBe("Admin subsystem");
+  });
+
+  it("reports restored when the candidate was rolled back", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: false,
+      restored: true,
+    });
+    expect(o.kind).toBe("restored");
+    expect(o.severity).toBe("warning");
+  });
+
+  it("reports restoration-failed when rollback failed", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: false,
+      restoreError: "permission denied",
+    });
+    expect(o.kind).toBe("restoration-failed");
+    expect(o.blocking).toBe(true);
+  });
+
+  it("reports reload-pending from saved_not_live outcome", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: false,
+      reload: reload({ outcome: "saved_not_live", persisted: true }),
+    });
+    expect(o.kind).toBe("reload-pending");
+  });
+});
+
+describe("reloadSubsystemFailures", () => {
+  it("collects failed and timed-out subsystems", () => {
+    const failures = reloadSubsystemFailures(
+      reload({
+        http: { status: "ok" },
+        stream: { status: "failed", error: "bind error" },
+        admin: { status: "timed_out", error: "deadline exceeded" },
+      }),
+    );
+    expect(failures).toHaveLength(2);
+    expect(failures.map((f) => f.name)).toContain("L4 stream proxy");
+    expect(failures.map((f) => f.name)).toContain("Admin subsystem");
   });
 });
 
@@ -211,10 +296,10 @@ describe("ApplyOutcomeBanner", () => {
       <ApplyOutcomeBanner
         outcome={bannerFor({
           accepted: true,
-          pendingReload: true,
+          pendingReload: false,
           runtimeObserved: true,
           streamStatus: "ok",
-          reloadTimedOut: true,
+          reload: reload({ outcome: "applied_degraded", timed_out: true }),
         })}
       />,
     );
@@ -312,10 +397,10 @@ describe("ApplyOutcomeBanner — reload-timed-out and capabilities (continued)",
       <ApplyOutcomeBanner
         outcome={bannerFor({
           accepted: true,
-          pendingReload: true,
+          pendingReload: false,
           runtimeObserved: true,
           streamStatus: "ok",
-          reloadTimedOut: true,
+          reload: reload({ outcome: "applied_degraded", timed_out: true }),
         })}
       />,
     );
