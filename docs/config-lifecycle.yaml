@@ -91,6 +91,7 @@ restart_required:
       - "[admin].plugin_upload_dir"
       - "[admin].plugin_upload_max_size"
       - "[admin].plugin_upload_enabled"
+      - "[admin].rbac.enabled"
 
   - subsystem: metrics
     gated_by: "internal/lifecycle.RestartRequired"
@@ -322,6 +323,19 @@ hot_reload:
         - "[[stream]].max_udp_sessions"
         - "[[stream]].proxy_protocol"
         - "[[stream]].tls_passthrough"
+
+    - subsystem: rbac
+      gated_by: "internal/rbac.Policy (hot-swappable)"
+      reason: >
+        The RBAC policy (roles, principals, token hashes) is rebuilt from the
+        effective candidate after each successful hot reload and installed
+        atomically via admin.Server.UpdatePolicy. No restart is required for
+        role or principal changes; only admin.rbac.enabled (which changes auth
+        middleware wiring) requires a restart.
+      fields:
+        - "[admin].rbac.default_role"
+        - "[admin].rbac.roles.*"
+        - "[admin].rbac.principals.*"
 
   deprecated:
     - field: "[global].access_log"

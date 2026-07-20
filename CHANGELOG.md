@@ -9,6 +9,43 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+- **Phase 3 — RBAC schema, permission catalog, roles, tokens, and policy core** (P3-01, #59):
+  - New package `internal/rbac`: `Permission` catalog + `Known`/`Matches` helpers;
+    predefined roles `viewer`/`operator`/`admin`/`auditor` with stable permission sets;
+    `Identity` struct with context helpers `WithIdentity`/`IdentityFromContext`;
+    `Policy` value (immutable after `Build`) with `Authenticate`/`Authorize` + O(1) tokenID
+    lookup and constant-time hash comparison; SHA-256 token hashing + 12-hex-char public
+    `TokenID` that never exposes secret bytes; `disabled` and `expires_at` honored.
+  - `internal/config/schema.go`: `AdminRBACConfig`, `AdminRole`, `AdminPrincipal` types
+    added to `AdminConfig.RBAC`; `time.Time` imported for `ExpiresAt`.
+  - `internal/config/parser.go`: `default_role = "admin"` defaulted when RBAC is enabled.
+  - `internal/config/validate_rbac.go` (new): validates unique principal/role names,
+    predefined-role-name protection, permission catalog membership, no duplicate token IDs,
+    at least one enabled admin-capable principal, expiry sanity check; `isSecretRef` helper.
+  - `internal/config/lint.go`: per-principal literal-token lint warning (SEC-1 parity
+    with legacy `admin.token`).
+  - `internal/lifecycle/lifecycle.go`: `admin.rbac.enabled` = restart-required;
+    `admin.rbac.principals.*`, `admin.rbac.roles.*`, `admin.rbac.default_role` = hot-reloadable.
+  - `internal/lifecycle/fingerprint.go`: `admin.rbac.enabled` extractor.
+  - `internal/admin/server.go`: `policy atomic.Pointer[rbacPolicy]` field; `auth()` now
+    delegates to `authWithRBAC` rather than a hard-coded constant-time comparison.
+  - `internal/admin/rbac.go` (new): `rbacPolicy` wrapper; `UpdatePolicy` atomic install;
+    `authWithRBAC` middleware — RBAC path stores `Identity` in request context; legacy path
+    stores a synthetic `shared/admin` identity; unauthenticated → 401; disabled/expired → 403.
+  - `internal/app/serve.go`: `buildRBACPolicy` helper converts `config.AdminConfig` to
+    `rbac.Policy`; builds initial policy after `admin.New` when RBAC is enabled; hot-swaps
+    policy via `adminSrv.UpdatePolicy` in `srv.OnReloaded` after each successful hot reload;
+    `adminSrv` hoisted from inner scope so the reload hook can reach it.
+  - `docs/config-lifecycle.yaml`: `[admin].rbac.enabled` in restart_required admin block;
+    new hot_reload `rbac` subsystem entry.
+  - `docs/reload-semantics.md`: restart-required fields list updated to include
+    `admin.rbac.enabled`; hot-swappable RBAC policy note added.
+  - Tests: `internal/rbac/*_test.go` — 35 tests covering catalog, predefined-role contract,
+    custom-role resolve, policy build/authenticate/authorize, token ID derivation, disabled/
+    expired principal, duplicate token rejection, no-admin lockout guard, context round-trip;
+    `internal/config/validate_rbac_test.go` — 13 tests covering all validation branches.
+
 ### Fixed
 - **P2-Remediation Wave 2b: H-02 full context propagation** — context threading through factory and builders:
   - `HandlerFactory` type in `internal/server/server.go` changed to accept `context.Context`

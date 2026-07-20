@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -195,6 +194,11 @@ type Server struct {
 	health   *consoleHealth
 	quit     chan struct{}
 	httpd    *http.Server
+	// policy holds the active RBAC policy. It is atomically swapped on each
+	// successful config apply when RBAC is enabled (P3-01). Nil until RBAC is
+	// enabled; legacy single-token auth is used when the pointer is nil or when
+	// the stored policy reports !Enabled().
+	policy atomic.Pointer[rbacPolicy]
 	// applyMu serializes config writes (raw apply, structured patch apply, and
 	// history rollback) so optimistic-concurrency checks and the write they guard
 	// are atomic, closing the read-modify-write race between concurrent edits
@@ -274,26 +278,13 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-// auth enforces bearer-token authentication when a token is configured.
+// auth enforces authentication. When RBAC is enabled (a policy is installed
+// with Enabled() == true) it delegates to authWithRBAC which handles named
+// principals and stores the Identity in the request context. Otherwise it
+// falls back to legacy single-token auth. Routes always call s.auth(...) so
+// this is the single chokepoint — there is no way to bypass the check.
 func (s *Server) auth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.Token != "" {
-			const prefix = "Bearer "
-			h := r.Header.Get("Authorization")
-			ok := len(h) > len(prefix) && h[:len(prefix)] == prefix &&
-				subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(s.cfg.Token)) == 1
-			// The Console v2 SPA streams /api/events with the bearer token in the
-			// Authorization header over fetch (never EventSource), so no query-token
-			// fallback is offered: a ?token= parameter would leak the credential into
-			// access logs, the browser history, and the Referer header (Milestone 1.5).
-			if !ok {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
+	return s.authWithRBAC(next)
 }
 
 // handleHealthz reports process liveness.

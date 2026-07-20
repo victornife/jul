@@ -131,6 +131,19 @@ func Lint(c *Config) []Diagnostic {
 			Hint:     `reference a secret instead, e.g. token = "${env:JUL_ADMIN_TOKEN}" or "${file:/run/secrets/admin-token}"`,
 		})
 	}
+	// Warn when RBAC principal tokens are literal values (SEC-1). Principal
+	// tokens are high-entropy secrets and should be sourced from the environment
+	// or a file to avoid committing them to the config file.
+	for i, p := range c.Admin.RBAC.Principals {
+		if p.Token != "" && !containsSecretRef(p.Token) {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    fmt.Sprintf("[admin.rbac.principals[%d]].token", i),
+				Message:  fmt.Sprintf("principal %q token is a literal value in the config file", p.Name),
+				Hint:     `reference a secret instead, e.g. token = "${env:JUL_ALICE_TOKEN}" or "${file:/run/secrets/alice-token}"`,
+			})
+		}
+	}
 	for i := range c.Upstreams {
 		d := c.Upstreams[i].Discovery
 		if d == nil {

@@ -11,6 +11,8 @@
 // and is active in builds with the "wasmplugins" tag.
 package config
 
+import "time"
+
 // Config is the root configuration document.
 type Config struct {
 	Global        GlobalConfig        `toml:"global"`
@@ -770,6 +772,9 @@ type AdminConfig struct {
 	Listen  string `toml:"listen"`
 	// Token, when set, requires `Authorization: Bearer <token>`.
 	Token string `toml:"token"`
+	// RBAC, when enabled, replaces the single shared token with named principals,
+	// predefined/custom roles, and per-route permission gates (Phase 3).
+	RBAC AdminRBACConfig `toml:"rbac"`
 	// Console toggles the web console dashboard at the admin root. It is a
 	// pointer so an omitted value defaults to enabled (when admin is enabled)
 	// while an explicit `console = false` serves only the basic config page.
@@ -839,6 +844,53 @@ type AdminConfig struct {
 // to true when unset and honors an explicit false. The `console` build tag
 // still governs whether the console UI is compiled in.
 func (a AdminConfig) ConsoleEnabled() bool { return a.Console == nil || *a.Console }
+
+// AdminRBACConfig holds the opt-in named-principal, role-based access-control
+// layer. When Enabled is false the server operates in legacy single-token mode.
+type AdminRBACConfig struct {
+	// Enabled activates named-principal RBAC. When false (default) the server
+	// uses the legacy shared-token path and ignores Roles/Principals.
+	Enabled bool `toml:"enabled"`
+	// DefaultRole is the role assigned to the synthetic "shared" legacy principal
+	// when RBAC is enabled alongside a legacy admin.token. Defaults to "admin".
+	DefaultRole string `toml:"default_role"`
+	// Roles defines custom roles available to principals. Predefined role names
+	// (viewer/operator/admin/auditor) may not be redefined here.
+	Roles []AdminRole `toml:"roles"`
+	// Principals lists the named credentials. Each has exactly one token in
+	// this phase; rotation is a future additive extension.
+	Principals []AdminPrincipal `toml:"principals"`
+}
+
+// AdminRole defines a custom role and its permission set. Predefined role names
+// are reserved; attempting to define them here is a validation error.
+type AdminRole struct {
+	// Name is the role identifier referenced by principals.
+	Name string `toml:"name"`
+	// Permissions is the list of permission strings. Wildcard "*" and
+	// resource-scoped "<resource>:*" patterns are supported.
+	Permissions []string `toml:"permissions"`
+}
+
+// AdminPrincipal defines a named identity with one bearer-token credential.
+type AdminPrincipal struct {
+	// Name is the human-readable identifier used in audit records.
+	Name string `toml:"name"`
+	// Role is the predefined or custom role name that governs this principal's
+	// permission set.
+	Role string `toml:"role"`
+	// Token is the raw bearer token. ${env:}, ${file:}, and ${secret:}
+	// references are resolved at startup/apply time. The plaintext value is
+	// never logged, metricked, or returned by API projections.
+	Token string `toml:"token"`
+	// Disabled, when true, prevents this principal from authenticating even if
+	// the correct token is supplied. Useful for emergency access revocation
+	// without removing the config entry.
+	Disabled bool `toml:"disabled"`
+	// ExpiresAt, when non-zero, sets a hard expiry for this credential. After
+	// this time the principal is treated as disabled.
+	ExpiresAt time.Time `toml:"expires_at"`
+}
 
 // EgressConfig is the optional outbound-destination allow-list ([egress]). When
 // Enabled, the server's config-driven auxiliary fetches (JWKS, forward-auth,

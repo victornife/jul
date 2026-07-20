@@ -203,6 +203,11 @@ func (c *Config) applyDefaults() {
 				c.Admin.AuditLogRotateKeep = 14
 			}
 		}
+		// RBAC defaults (P3-01). RBAC is disabled by default. When enabled,
+		// default_role defaults to "admin" for the legacy compatibility principal.
+		if c.Admin.RBAC.Enabled && c.Admin.RBAC.DefaultRole == "" {
+			c.Admin.RBAC.DefaultRole = "admin"
+		}
 	}
 
 	if c.Cache.Enabled {

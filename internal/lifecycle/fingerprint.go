@@ -120,6 +120,11 @@ func extractValue(cfg *config.Config, path string) any {
 			return nil
 		}
 		return *cfg.Admin.PluginUploadEnabled
+	case "admin.rbac.enabled":
+		// Enabling or disabling RBAC changes the auth middleware wiring and
+		// requires a restart. The policy contents (roles, principals) are
+		// hot-swappable and are not fingerprinted here.
+		return cfg.Admin.RBAC.Enabled
 	case "cache.enabled":
 		return cfg.Cache.Enabled
 	case "cache.memory_max_size":

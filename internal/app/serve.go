@@ -27,6 +27,7 @@ import (
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/plugins"
+	"jul/internal/rbac"
 	"jul/internal/redact"
 	"jul/internal/server"
 	"jul/internal/stream"
@@ -529,7 +530,19 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 	}
 
-	if adminSrv := admin.New(cfg.Admin, log, deps); adminSrv != nil {
+	// Build admin server before srv.Run so it is running when the first
+	// generation is ready. adminSrv is hoisted out of the if-block so the
+	// reload hook can call UpdatePolicy after each successful hot reload.
+	adminSrv := admin.New(cfg.Admin, log, deps)
+	if adminSrv != nil {
+		// Install the initial RBAC policy from the startup candidate.
+		if cfg.Admin.RBAC.Enabled {
+			if p, err := buildRBACPolicy(startupCand.Effective.Admin); err != nil {
+				log.Warn("RBAC policy build failed at startup; falling back to legacy auth", "error", err)
+			} else {
+				adminSrv.UpdatePolicy(p)
+			}
+		}
 		go func() {
 			if err := adminSrv.Run(ctx); err != nil {
 				log.Error("admin listener failed", "error", err)
@@ -558,6 +571,16 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			runtime.GOMAXPROCS(n)
 		} else {
 			runtime.GOMAXPROCS(lifecycle.InitialGOMAXPROCS())
+		}
+		// Hot-swap RBAC policy after a successful hot reload. The candidate is the
+		// already-Publish-committed effective config, so secrets are resolved.
+		// This runs after Publish so the new policy never races with handler swap.
+		if adminSrv != nil && c.Admin.RBAC.Enabled {
+			if p, err := buildRBACPolicy(c.Admin); err != nil {
+				log.Warn("RBAC policy rebuild failed on reload; retaining previous policy", "error", err)
+			} else {
+				adminSrv.UpdatePolicy(p)
+			}
 		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)
@@ -594,6 +617,36 @@ func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 		RestartRequired:  r.RestartRequired,
 		CanStage:         r.CanStage,
 	}
+}
+
+// buildRBACPolicy constructs an rbac.Policy from the already-secrets-expanded
+// AdminConfig. It is called once at startup and once after each successful
+// hot reload. The caller must pass an effective (resolved) config so token
+// secret references are already expanded — the policy hashes them once and
+// discards the plaintext.
+func buildRBACPolicy(a config.AdminConfig) (*rbac.Policy, error) {
+	customRoles := make(map[string][]string, len(a.RBAC.Roles))
+	for _, r := range a.RBAC.Roles {
+		customRoles[r.Name] = r.Permissions
+	}
+	principals := make([]rbac.PrincipalDef, 0, len(a.RBAC.Principals))
+	for _, p := range a.RBAC.Principals {
+		principals = append(principals, rbac.PrincipalDef{
+			Name:      p.Name,
+			Role:      p.Role,
+			Token:     p.Token,
+			Disabled:  p.Disabled,
+			ExpiresAt: p.ExpiresAt,
+		})
+	}
+	return rbac.Build(
+		a.RBAC.Enabled,
+		a.RBAC.DefaultRole,
+		customRoles,
+		principals,
+		a.Token, // legacy shared token, may be empty
+		time.Now(),
+	)
 }
 
 // watchConfig starts a debounced file watcher for path, returning a reload

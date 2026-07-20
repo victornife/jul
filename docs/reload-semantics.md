@@ -40,12 +40,14 @@ means:
   compression, rate limiting, etc.) apply exactly as they do through the
   Console.
 - Changes to **restart-required** fields (cache, egress, admin, tracing,
-  access-log, ACME, log format, listener bind settings) are **rejected at swap
+  access-log, ACME, log format, listener bind settings, `admin.rbac.enabled`) are **rejected at swap
   time** — the swap is aborted, `LastReload.Outcome=not_applied` is recorded
   with the reason, and the old config remains authoritative. The file on disk
   may contain the new value, but the running process ignores it until a
   restart. `global.worker_threads` is *hot-reloadable* (the GOMAXPROCS cap is
-  updated on the next successful reload).
+  updated on the next successful reload). **RBAC policy contents** (roles,
+  principals, token hashes) are hot-reloadable via atomic policy swap even
+  though `admin.rbac.enabled` itself is restart-required.
 - **New-listener-only** fields (a new listen address, or a new L4 listener)
   apply to brand-new listeners without a restart; changing the same property on
   an already-bound listener is treated as restart-required.

@@ -89,6 +89,14 @@ var Registry = []Entry{
 	{Path: "admin.plugin_upload_dir", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload directory is opened at startup", StartupConsumed: true},
 	{Path: "admin.plugin_upload_max_size", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload limits are configured at startup", StartupConsumed: true},
 	{Path: "admin.plugin_upload_enabled", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload endpoint is configured at startup", StartupConsumed: true},
+	// RBAC enabled flag is restart-required; the policy contents are hot-swappable.
+	{Path: "admin.rbac.enabled", Class: RestartRequiredClass, Subsystem: "admin", Reason: "enabling or disabling RBAC changes auth middleware wiring at startup", StartupConsumed: true},
+	// RBAC policy contents (roles, principals, tokens) are hot-reloadable through
+	// atomic policy swap after a successful config apply (P3-01). They are not
+	// in the startup fingerprint because changing them does not require a restart.
+	{Path: "admin.rbac.principals.*", Class: HotReloadClass, Subsystem: "rbac", Reason: "RBAC policy is rebuilt and atomically swapped on each successful hot reload"},
+	{Path: "admin.rbac.roles.*", Class: HotReloadClass, Subsystem: "rbac", Reason: "RBAC policy is rebuilt and atomically swapped on each successful hot reload"},
+	{Path: "admin.rbac.default_role", Class: HotReloadClass, Subsystem: "rbac", Reason: "RBAC policy is rebuilt and atomically swapped on each successful hot reload"},
 	// Plugin definitions.
 	{Path: "plugins.*.path", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
 	{Path: "plugins.*.inline", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
