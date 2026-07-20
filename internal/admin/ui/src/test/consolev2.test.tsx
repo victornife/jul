@@ -288,6 +288,25 @@ describe("OverviewPanel", () => {
     render(<OverviewPanel />, { wrapper: Wrapper });
     expect(await screen.findByText("inactive")).toBeInTheDocument();
   });
+
+  it("renders an admin_health banner when the admin subsystem is unhealthy", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            product: "Jul.IA",
+            version: "2.0.0",
+            status: [],
+            admin_health: { healthy: false, reason: "admin_reload", detail: "reload timed out" },
+          }),
+      }),
+    );
+    render(<OverviewPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText("Admin subsystem degraded.")).toBeInTheDocument();
+    expect(await screen.findByText(/reload timed out/)).toBeInTheDocument();
+  });
 });
 
 // ── RoutesPanel rendering ─────────────────────────────────────────────────────
