@@ -222,6 +222,24 @@ func wizardPatchOps(cfg *config.Config, existing *config.Config) ([]patchRequest
 			}
 		}
 	}
+
+	// Global compression block. The wizard config always enables compression
+	// with production defaults; emit a matching compression_set op so the patch
+	// output and the TOML preview stay synchronized.
+	if cfg.Compression.IsEnabled() {
+		ops = append(ops, patchRequest{
+			Op: "compression_set",
+			Compression: &compressionPatch{
+				Enabled:       ptr(true),
+				Encoders:      cfg.Compression.Encoders,
+				Level:         cfg.Compression.Level,
+				MinSize:       cfg.Compression.MinSize.String(),
+				Types:         cfg.Compression.Types,
+				Precompressed: cfg.Compression.Precompressed,
+			},
+		})
+	}
+
 	return ops, nil
 }
 
@@ -326,6 +344,12 @@ func wizardAppConfig(in wizardInput) (*config.Config, string) {
 			Locations: []config.LocationConfig{loc},
 		}},
 		Upstreams: []config.UpstreamConfig{up},
+		Compression: config.CompressionConfig{
+			Enabled:  config.Bool(true),
+			Encoders: []string{"gzip"},
+			MinSize:  config.Size(1 << 10),
+			Types:    config.DefaultCompressionTypes(),
+		},
 	}
 	return cfg, ""
 }

@@ -682,6 +682,60 @@ func TestApplyPatchErrors(t *testing.T) {
 	}
 }
 
+func TestApplyPatchCompressionSet(t *testing.T) {
+	c := patchTestConfig()
+	_, err := applyPatch(c, patchRequest{
+		Op: "compression_set",
+		Compression: &compressionPatch{
+			Enabled:  boolPtr(true),
+			Encoders: []string{"gzip", "br"},
+			Level:    6,
+			MinSize:  "2k",
+			Types:    []string{"text/html", "application/json"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if !c.Compression.IsEnabled() {
+		t.Error("compression not enabled")
+	}
+	if got := c.Compression.Encoders; len(got) != 2 || got[0] != "gzip" || got[1] != "br" {
+		t.Errorf("encoders = %v, want [gzip br]", got)
+	}
+	if c.Compression.Level != 6 {
+		t.Errorf("level = %d, want 6", c.Compression.Level)
+	}
+	if c.Compression.MinSize.String() != "2k" {
+		t.Errorf("min_size = %s, want 2k", c.Compression.MinSize.String())
+	}
+	if got := c.Compression.Types; len(got) != 2 || got[0] != "text/html" || got[1] != "application/json" {
+		t.Errorf("types = %v", got)
+	}
+
+	// Disabling clears active compression.
+	_, err = applyPatch(c, patchRequest{Op: "compression_set", Compression: &compressionPatch{Enabled: boolPtr(false)}})
+	if err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if c.Compression.IsEnabled() {
+		t.Error("compression not disabled")
+	}
+}
+
+func TestApplyPatchCompressionSetErrors(t *testing.T) {
+	cases := []patchRequest{
+		{Op: "compression_set"},                                             // nil payload
+		{Op: "compression_set", Compression: &compressionPatch{MinSize: "x"}}, // bad size
+	}
+	for _, req := range cases {
+		c := patchTestConfig()
+		if _, err := applyPatch(c, req); err == nil {
+			t.Errorf("expected error for compression payload %+v", req.Compression)
+		}
+	}
+}
+
 // TestApplyPatchLocationSetMatch proves a route's match (type + path) can be
 // changed in place, that the change is rejected when it would collide with a
 // sibling route or leaves the match untouched, and that an invalid type/path is

@@ -474,6 +474,14 @@ func applyHTTP3Defaults(srv *ServerConfig) {
 // defaultCompressionTypes is the MIME allow-list applied when compression is
 // enabled without an explicit list.
 func defaultCompressionTypes() []string {
+	return DefaultCompressionTypes()
+}
+
+// DefaultCompressionTypes returns the default MIME allow-list used when
+// compression is enabled without an explicit list. It is exported so callers
+// (e.g. the setup wizard) can build a self-describing CompressionConfig without
+// relying on applyDefaults.
+func DefaultCompressionTypes() []string {
 	return []string{
 		"text/*",
 		"application/json",

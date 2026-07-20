@@ -728,6 +728,30 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		c.Upstreams = append(c.Upstreams[:idx], c.Upstreams[idx+1:]...)
 		return fmt.Sprintf("upstream %s removed", name), nil
 
+	case "compression_set":
+		if req.Compression == nil {
+			return "", fmt.Errorf("compression_set: compression payload is required")
+		}
+		cp := req.Compression
+		c.Compression.Encoders = cp.Encoders
+		c.Compression.Level = cp.Level
+		c.Compression.Types = cp.Types
+		c.Compression.Precompressed = cp.Precompressed
+		if cp.MinSize != "" {
+			var sz config.Size
+			if err := sz.UnmarshalText([]byte(cp.MinSize)); err != nil {
+				return "", fmt.Errorf("compression_set: invalid min_size %q", cp.MinSize)
+			}
+			c.Compression.MinSize = sz
+		} else {
+			c.Compression.MinSize = 0
+		}
+		if cp.Enabled != nil {
+			c.Compression.Enabled = config.Bool(*cp.Enabled)
+		}
+		return fmt.Sprintf("compression set (enabled=%v, encoders=%v, level=%d, min_size=%s)",
+			c.Compression.IsEnabled(), c.Compression.Encoders, c.Compression.Level, c.Compression.MinSize.String()), nil
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}

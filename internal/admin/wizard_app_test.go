@@ -54,6 +54,38 @@ func TestWizardAppModeGeneratesUpstreamAndRoute(t *testing.T) {
 	if cfg.Servers[0].Locations[0].Match.Path != "/api" {
 		t.Errorf("expected route path /api, got %q", cfg.Servers[0].Locations[0].Match.Path)
 	}
+	if !cfg.Compression.IsEnabled() {
+		t.Error("wizard app config should enable compression")
+	}
+}
+
+func TestWizardPatchIncludesCompression(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	body := `{"mode":"proxy","target":"http://localhost:8080","listen":":3000"}`
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/wizard/generate?format=patch", strings.NewReader(body))
+	s.routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Ops []patchRequest `json:"ops"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var found bool
+	for _, op := range resp.Ops {
+		if op.Op == "compression_set" && op.Compression != nil && *op.Compression.Enabled {
+			found = true
+			if len(op.Compression.Encoders) == 0 {
+				t.Error("compression_set op should include encoders")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("wizard patch output missing compression_set op; ops=%+v", resp.Ops)
+	}
 }
 
 func TestWizardAppModeRequiresNameAndBackends(t *testing.T) {

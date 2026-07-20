@@ -108,6 +108,23 @@ type patchRequest struct {
 	// certificate) settings. A "none"/empty mode disables it. The server is
 	// addressed by Listen + ServerNames above.
 	ClientAuth *clientAuthDef `json:"client_auth,omitempty"`
+
+	// compression_set payload: the global [compression] block. The op replaces
+	// the block wholesale so the editor can toggle or reconfigure compression in
+	// a single structured edit.
+	Compression *compressionPatch `json:"compression,omitempty"`
+}
+
+// compressionPatch carries the global [compression] settings the guided editor
+// controls. Replacing the block wholesale keeps the patch semantics simple and
+// matches how the wizard emits a complete compression block.
+type compressionPatch struct {
+	Enabled       *bool    `json:"enabled,omitempty"`
+	Encoders      []string `json:"encoders,omitempty"`
+	Level         int      `json:"level,omitempty"`
+	MinSize       string   `json:"min_size,omitempty"` // size string, e.g. "1k"
+	Types         []string `json:"types,omitempty"`
+	Precompressed bool     `json:"precompressed,omitempty"`
 }
 
 // locationMatch is the new match (type + path) for location_set_match. It
