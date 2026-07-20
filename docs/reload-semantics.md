@@ -39,15 +39,18 @@ means:
 - Changes to **hot-reloadable** fields (routes, handlers, upstreams,
   compression, rate limiting, etc.) apply exactly as they do through the
   Console.
-- Changes to **restart-required** fields (cache, egress, admin, tracing,
-  access-log, ACME, log format, listener bind settings, `admin.rbac.enabled`) are **rejected at swap
-  time** — the swap is aborted, `LastReload.Outcome=not_applied` is recorded
-  with the reason, and the old config remains authoritative. The file on disk
-  may contain the new value, but the running process ignores it until a
-  restart. `global.worker_threads` is *hot-reloadable* (the GOMAXPROCS cap is
-  updated on the next successful reload). **RBAC policy contents** (roles,
-  principals, token hashes) are hot-reloadable via atomic policy swap even
-  though `admin.rbac.enabled` itself is restart-required.
+- Changes to **restart-required** fields (cache, egress, admin listener,
+  rate limits, history, plugin-upload, audit-log, tracing, access-log, ACME, log
+  format, listener bind settings) are **rejected at swap time** — the swap is
+  aborted, `LastReload.Outcome=not_applied` is recorded with the reason, and the
+  old config remains authoritative. The file on disk may contain the new value,
+  but the running process ignores it until a restart. `global.worker_threads`
+  is *hot-reloadable* (the GOMAXPROCS cap is updated on the next successful
+  reload). **`admin.token` and `admin.rbac.enabled`** are hot-reloadable: the
+  bearer token is updated live via `UpdateLiveAdminConfig`, and RBAC is enabled
+  or disabled via `UpdatePolicy` after each successful reload. **RBAC policy
+  contents** (roles, principals, token hashes, default role) are also
+  hot-reloadable via atomic policy swap.
 - **New-listener-only** fields (a new listen address, or a new L4 listener)
   apply to brand-new listeners without a restart; changing the same property on
   an already-bound listener is treated as restart-required.
@@ -403,9 +406,10 @@ applied dynamically on the next successful reload.
 - **Response cache** — the cache backend (LRU/disk tiers, counters) is built
   once at startup.
 - **Egress allow-list** — the outbound dial policy is built once at startup.
-- **Admin server** — listener, token, rate limits, history, plugin-upload, and
-  audit-log settings are baked in at startup. Token rotation in particular does
-  not revoke the old token until restart.
+- **Admin server** — listener, enabled flag, rate limits, history,
+  plugin-upload, and audit-log settings are baked in at startup. The bearer
+  token and RBAC enabled flag are hot-reloadable; token rotation takes effect
+  immediately on the next successful reload.
 - **Metrics host label** — set when the Prometheus registry is created.
 
 Adding a brand-new `listen` address is *not* restart-required: the reload binds
