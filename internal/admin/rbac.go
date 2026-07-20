@@ -94,7 +94,7 @@ func (s *Server) requirePermissionForMethods(perms map[string]rbac.Permission, n
 // always use rbac.IdentityFromContext uniformly.
 //
 // Return values:
-//   - 401 + WWW-Authenticate for absent/invalid/expired credentials.
+//   - 401 + WWW-Authenticate for absent/invalid/expired/disabled credentials.
 //   - 403 JSON for authenticated but unauthorized.
 func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
