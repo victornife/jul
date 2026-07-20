@@ -381,7 +381,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			SubmitReload:   submitReload,
 			LiveSnapshot:   srv.LiveSnapshot,
 			WatchDigest:    &lastAdminDigest,
-			PlannedRestart: &PlannedRestartStore{},
+			PlannedRestart: NewFilePlannedRestartStore(configPath),
 		}
 
 		deps.ApplyConfigRaw = func(data []byte, mode string) (admin.ConfigApplyResult, error) {
@@ -413,6 +413,21 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	}
 
 	readyFlag.Set(true)
+
+	// Reconcile any pending-restart sidecar files left by a previous process.
+	// A managed staged restart that completed successfully is cleared here;
+	// a crash-interrupted staging is diagnosed and logged so the operator knows
+	// recovery action is needed. Reconciliation is best-effort: a failure logs
+	// a warning but does not prevent the server from serving traffic.
+	if configPath != "" {
+		reconcileStore := NewFilePlannedRestartStore(configPath)
+		if err := reconcileStore.Reconcile(); err != nil {
+			log.Warn("planned-restart reconciliation warning (manual recovery may be needed)",
+				"error", err,
+				"backup", configPath+".pending-restart.bak",
+			)
+		}
+	}
 
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
 	srv.MTLSResultHook = metrics.ObserveMTLSHandshake

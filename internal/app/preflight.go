@@ -4,14 +4,42 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
 	"jul/internal/admin"
+	"jul/internal/cache"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
+	"jul/internal/observability"
 	"jul/internal/server"
 )
+
+// PreflightMode selects which validation gates run in Preflight.Apply.
+type PreflightMode int
+
+const (
+	// PreflightHot runs all gates including restart-required rejection. It is
+	// the mode used by the managed hot-apply path.
+	PreflightHot PreflightMode = iota
+	// PreflightStageRestart runs all shared gates plus startup-resource
+	// preflights, but classifies lifecycle differences instead of rejecting
+	// them. It is the mode used by the stage_restart apply path.
+	PreflightStageRestart
+)
+
+// PreflightResult is the structured output of a successful Preflight.Apply.
+type PreflightResult struct {
+	// Candidate is the immutable resolved config that must be handed to the
+	// live reload so secrets are not re-resolved between preflight and swap.
+	Candidate *config.Candidate
+	// Lifecycle contains the registered configuration fields whose effective
+	// value changed relative to prev. It is populated only when prev is
+	// non-nil and mode is PreflightStageRestart; it is used by the coordinator
+	// to build the pending-restart marker without re-running the diff.
+	Lifecycle lifecycle.ChangeSet
+}
 
 // StreamPreflighter abstracts the stream (L4) server's preflight methods so
 // the Preflight struct can work with both the real stream.Server and the
@@ -44,33 +72,31 @@ type Preflight struct {
 	LiveSnapshot func() server.LiveSnapshot
 }
 
-// Apply runs the admin write preflight gates:
+// Apply runs the admin write preflight gates and returns a PreflightResult on
+// success. ctx is reserved for future use and may be context.Background().
+//
+// Shared gates (both modes):
 //
 //  1. Structural + stateless validation (ValidateRuntimeConfig).
-//  2. TLS certificate file validation (PreflightTLS) — using a resolved clone
-//     so secret-referenced cert/key paths (${env:...}, ${file:...}) are expanded
-//     before file existence is checked.
+//  2. TLS certificate file validation (PreflightTLS).
 //  3. Full HTTP handler dry-run via BuildHandlers (commit=false).
 //  4. Stream config dry-run via Stream.PreflightBuild.
-//
-// When prev is non-nil, eight additional gates run:
-//
 //  5. HTTP bind probe for newly introduced listen addresses.
 //  6. Stream bind probe for newly introduced L4 listeners.
-//  7. Restart-required checks (ACME, listener-rebind, tracing, access-log).
-//  8. Startup-bound subsystem checks (cache, egress, admin, metrics).
 //
-// The listener and restart-required gates always run against the live runtime
-// snapshot when it is available, even when prev is nil. prev is used only for
-// ACME restart-required and the config-only rebind fallback when no snapshot
-// is available, not as the primary baseline for listener state (R10-04,
-// R11-02).
+// Hot-only additional gates (PreflightHot):
 //
-// On success the validated candidate is returned. The caller must pass the
-// exact candidate to the live reload so secret sources or the on-disk file
-// cannot change between preflight and swap (R8-11).
+//  7. Restart-required fingerprint check.
+//  8. Runtime-aware rebind check for frozen settings on kept listeners.
+//  9. ACME restart-required check.
+//
+// Stage-restart additional gates (PreflightStageRestart):
+//
+//  7. Startup-resource preflights (cache, admin, access-log, tracing, ACME).
+//  8. Lifecycle diff classification (populates PreflightResult.Lifecycle).
+//
 // Any error aborts the write; the caller must not persist the config.
-func (p *Preflight) Apply(c *config.Config, prev *config.Config) (*config.Candidate, error) {
+func (p *Preflight) Apply(_ context.Context, c *config.Config, prev *config.Config, mode PreflightMode) (*PreflightResult, error) {
 	candidate, err := config.NewCandidate(c)
 	if err != nil {
 		return nil, err
@@ -96,12 +122,35 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) (*config.Candid
 	http3Bound := boundHTTP3Addrs(live)
 	streamBound := streamBoundKeys(p.Stream)
 
+	// Probe only addresses NOT currently bound (new listeners). Occupied
+	// addresses are checked for frozen-setting changes in the hot path only;
+	// the stage-restart path classifies those changes rather than rejecting
+	// them.
 	if err := server.PreflightListeners(httpBound, http3Bound, candidate.Effective.Servers); err != nil {
 		return nil, err
 	}
 	if err := p.Stream.PreflightListeners(streamBound, candidate.Effective.Streams); err != nil {
 		return nil, err
 	}
+
+	result := &PreflightResult{Candidate: candidate}
+
+	if mode == PreflightStageRestart {
+		// Classify lifecycle changes; do not reject them.
+		if prev != nil {
+			result.Lifecycle = lifecycle.DiffConfig(prev, candidate.Effective)
+		}
+		// Validate that startup-consumed resources can be applied at the next
+		// restart. These checks are side-effect-minimized: they create and
+		// immediately remove a temp file to prove writability, then close all
+		// handles.
+		if err := startupResourcePreflight(candidate.Effective); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	// ── Hot-apply gates ────────────────────────────────────────────────────
 
 	// Restart-required classification is single-sourced from the lifecycle
 	// registry. Compare the candidate's effective fingerprint against the
@@ -141,7 +190,31 @@ func (p *Preflight) Apply(c *config.Config, prev *config.Config) (*config.Candid
 		return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 	}
 
-	return candidate, nil
+	return result, nil
+}
+
+// startupResourcePreflight runs side-effect-minimized preflights for all
+// startup-consumed subsystems that stage_restart mode must validate. Each
+// check creates and immediately removes a temporary file to prove writability
+// without retaining any handle, starting any goroutine, or contacting external
+// services.
+func startupResourcePreflight(cfg *config.Config) error {
+	if err := cache.Preflight(cfg.Cache); err != nil {
+		return err
+	}
+	if err := admin.PreflightConfig(cfg.Admin); err != nil {
+		return err
+	}
+	if err := observability.PreflightAccessSinks(cfg.Observability.AccessLog); err != nil {
+		return err
+	}
+	if err := observability.ValidateTracerConfig(cfg.Observability.Tracing); err != nil {
+		return err
+	}
+	if err := server.PreflightACMEStartup(cfg.Servers); err != nil {
+		return err
+	}
+	return nil
 }
 
 func boundAddrs(s server.LiveSnapshot) map[string]struct{} {

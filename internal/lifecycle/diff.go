@@ -18,6 +18,13 @@ type DiffEntry struct {
 	After     any
 }
 
+// ChangeSet is the list of registered configuration fields that changed
+// between two resolved configs, together with their lifecycle class and
+// subsystem. It is the structured output of a stage-restart preflight
+// classification so the coordinator can populate the pending-restart marker
+// without re-running the diff.
+type ChangeSet = []DiffEntry
+
 // DiffConfig compares the effective values of every registered path between
 // two configs and returns the paths that differ. It is the source of truth for
 // completeness checks: any registered field that changed is reported here.

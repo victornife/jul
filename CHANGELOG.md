@@ -10,6 +10,28 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **Planned-restart staging, discard, reconciliation, and startup preflights** (P2-03, #68):
+  introduced `PlannedRestartMarker` and file-backed `PlannedRestartStore`
+  (`internal/app/planned_restart.go`) using `<config>.pending-restart.json`
+  and `<config>.pending-restart.bak` sidecar files (both `0600`, atomic writes).
+  Crash-consistent staging order: backup → prepared marker → write config →
+  staged marker. Discard (`DiscardSafe`) verifies marker consistency, disk
+  digest, and live serving version before atomically restoring the backup.
+  Startup `Reconcile` handles all four cases: prepared/staged × disk-equals-base
+  vs disk-equals-staged.
+  Added `PreflightMode` (`PreflightHot` / `PreflightStageRestart`) and
+  `PreflightResult` (Candidate + `lifecycle.ChangeSet`) to `Preflight.Apply`
+  (`internal/app/preflight.go`); stage-restart mode classifies lifecycle
+  differences instead of rejecting them and runs side-effect-minimized startup
+  resource preflights.
+  Added startup preflight helpers:
+  `cache.Preflight`, `observability.PreflightAccessSinks`,
+  `observability.ValidateTracerConfig`, `admin.PreflightConfig`,
+  `server.PreflightACMEStartup` (each probes writability with a temp file;
+  no long-lived handles).
+  Added `lifecycle.ChangeSet` type alias to `internal/lifecycle/diff.go`.
+  Wired file-backed store into `ConfigApplyCoordinator` (`serve.go`); added
+  startup reconciliation after readiness. Updated docs/reload-semantics.md.
 - **Managed hot-apply coordinator with exact restoration** (P2-02, #67):
   introduced `ConfigApplyCoordinator` (`internal/app/config_apply.go`) that
   serializes every managed config write, keeps exact previous raw bytes, runs

@@ -93,6 +93,47 @@ includes `pending_restart` and the operator must discard or complete the staged
 restart first. Restart-required changes return `restart_required: true` with
 `can_stage: true` so the UI can offer staging instead of a flat rejection.
 
+## Planned-restart staging
+
+A `stage_restart` apply mode persists a candidate that contains restart-bound
+changes without triggering a live reload. The staged configuration takes effect
+on the next process restart.
+
+Two sidecar files are written adjacent to the active config:
+
+- `<config-path>.pending-restart.json` — the marker (state, digests, versions,
+  pending subsystems); mode `0600`; atomic write.
+- `<config-path>.pending-restart.bak` — the exact previous raw bytes; mode
+  `0600`; atomic write.
+
+### Crash-consistent staging order
+
+1. Backup written atomically to `.bak`.
+2. Marker written in `prepared` state with base and candidate digests.
+3. Candidate written atomically to the active config path.
+4. Marker updated to `staged` state.
+
+On a crash between steps 2 and 4 the next startup's `Reconcile` repairs the
+state:
+
+| Marker state | Disk digest vs marker | Action |
+|---|---|---|
+| `prepared` | equals base | Write never completed — remove marker + backup |
+| `prepared` | equals staged | Write completed, state not updated — promote to `staged` |
+| `staged`   | equals staged | Successful startup with staged config — remove marker + backup |
+| any | neither | Inconsistent — log warning, preserve backup, require manual recovery |
+
+### Discard
+
+`DiscardPlannedRestart` restores the backup only after verifying:
+
+1. Marker is present and in `staged` state.
+2. Current disk digest matches the marker's staged digest (no external edit).
+3. Live serving version still matches the marker's base serving version (no
+   concurrent reload changed the runtime while the restart was pending).
+
+On any verification failure a `409 Conflict` is returned and no file is touched.
+
 ## The apply preflight (truthfulness gate)
 
 Before a configuration is written to disk, the admin write path runs a full

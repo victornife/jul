@@ -16,6 +16,7 @@ import (
 	"jul/internal/admin"
 	"jul/internal/atomicfile"
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/server"
 )
 
@@ -45,57 +46,6 @@ type ApplyResult struct {
 	ValidationErrors []string
 	RestartRequired  bool
 	CanStage         bool
-}
-
-// PlannedRestartStore holds the managed planned-restart sidecar state. In
-// P2-02 it is used only to refuse hot applies while a staged restart is
-// pending; the full stage/discard/reconcile workflow is implemented in P2-03.
-type PlannedRestartStore struct {
-	mu       sync.Mutex
-	pending  bool
-	raw      []byte
-	stagedAt time.Time
-}
-
-// IsPending reports whether a managed planned restart is currently staged.
-func (s *PlannedRestartStore) IsPending() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.pending
-}
-
-// Stage records a planned-restart candidate. It is a no-op if the candidate
-// bytes are identical to the already-staged bytes.
-func (s *PlannedRestartStore) Stage(raw []byte) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pending = true
-	s.raw = raw
-	s.stagedAt = time.Now()
-}
-
-// Discard clears any staged planned restart and returns the previously staged
-// raw bytes and true when there was one.
-func (s *PlannedRestartStore) Discard() ([]byte, bool) {
-	if s == nil {
-		return nil, false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.pending {
-		return nil, false
-	}
-	raw := s.raw
-	s.pending = false
-	s.raw = nil
-	s.stagedAt = time.Time{}
-	return raw, true
 }
 
 // ConfigApplyCoordinator owns every managed configuration write: it serializes
@@ -151,7 +101,11 @@ func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyRes
 		prevCfg, _ = config.Parse(prevRaw)
 	}
 
-	candidate, err := c.Preflight.Apply(cfg, prevCfg)
+	if mode == ApplyStageRestart {
+		return c.applyStageRestart(cfg, prevCfg, data, prevRaw)
+	}
+
+	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightHot)
 	if err != nil {
 		result := ApplyResult{
 			OK:      false,
@@ -168,7 +122,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyRes
 		return result, nil
 	}
 
-	return c.applyCandidate(data, candidate, prevRaw, mode)
+	return c.applyCandidate(data, pfResult.Candidate, prevRaw, mode)
 }
 
 // ApplyConfig applies a parsed configuration. It marshals the config and
@@ -186,17 +140,47 @@ func (c *ConfigApplyCoordinator) ApplyConfig(cfg *config.Config, mode ApplyMode)
 	return c.ApplyRaw(data, mode)
 }
 
-// DiscardPlannedRestart clears any staged planned restart. In P2-02 the full
-// staging workflow is not yet implemented, so this always reports that no
-// planned restart was pending.
+// DiscardPlannedRestart clears any staged planned restart. When the store is
+// file-backed it performs the safety-verified discard from §17.5: it checks
+// marker consistency, disk digest, and live serving version before restoring
+// the backup. On success the watcher echo of the restoration is suppressed.
 func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
-	if c.PlannedRestart == nil {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.PlannedRestart == nil || !c.PlannedRestart.IsPending() {
 		return ApplyResult{
 			OK:      true,
 			Mode:    ApplyHot,
 			Message: "No planned restart was pending.",
 		}, nil
 	}
+
+	// File-backed safe discard.
+	if c.PlannedRestart.ConfigPath != "" {
+		var liveVersion string
+		if c.LiveSnapshot != nil {
+			liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+		}
+		restoredBytes, err := c.PlannedRestart.DiscardSafe(liveVersion)
+		if err != nil {
+			return ApplyResult{
+				OK:      false,
+				Mode:    ApplyHot,
+				Message: "Discard failed: " + err.Error(),
+			}, err
+		}
+		// Suppress the watcher echo of the restoration write.
+		restoreDigest := sha256.Sum256(restoredBytes)
+		c.suppressWatcher(restoreDigest)
+		return ApplyResult{
+			OK:      true,
+			Mode:    ApplyHot,
+			Message: "Planned restart discarded and previous configuration restored.",
+		}, nil
+	}
+
+	// In-memory discard (tests / no config path).
 	if _, ok := c.PlannedRestart.Discard(); !ok {
 		return ApplyResult{
 			OK:      true,
@@ -221,16 +205,110 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 	}
 }
 
+// applyStageRestart runs the stage_restart path: validates via stage preflight,
+// writes the candidate atomically, records the sidecar marker and backup, and
+// returns an ApplyResult without submitting a live reload.
+func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, data, prevRaw []byte) (ApplyResult, error) {
+	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightStageRestart)
+	if err != nil {
+		return ApplyResult{
+			OK:               false,
+			Mode:             ApplyStageRestart,
+			Message:          "The configuration contains errors; no change was staged.",
+			ValidationErrors: []string{err.Error()},
+		}, nil
+	}
+
+	candidate := pfResult.Candidate
+	desiredVersion := server.CanonicalVersion(candidate.Effective)
+	liveVersion := ""
+	if c.LiveSnapshot != nil {
+		liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+	}
+
+	// Collect subsystem names from the lifecycle diff.
+	subsystems := subsystemNames(pfResult.Lifecycle)
+
+	// Atomically write the candidate to the active config path.
+	rawDigest := sha256.Sum256(data)
+	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
+		return ApplyResult{
+			OK:      false,
+			Mode:    ApplyStageRestart,
+			Version: desiredVersion,
+			Message: "Failed to persist staged configuration.",
+		}, err
+	}
+	c.suppressWatcher(rawDigest)
+
+	// Write crash-consistent sidecar files.
+	marker := PlannedRestartMarker{
+		BaseServingVersion:   liveVersion,
+		BaseCanonicalVersion: server.CanonicalVersion(candidate.Effective),
+		StagedRawSHA256:      sha256Hex(data),
+		StagedVersion:        desiredVersion,
+		PendingSubsystems:    subsystems,
+	}
+	if c.PlannedRestart != nil {
+		if err := c.PlannedRestart.StageManaged(data, marker); err != nil {
+			// Staging metadata failed but the file was written. Restore previous bytes.
+			c.restorePrevious(prevRaw, rawDigest)
+			return ApplyResult{
+				OK:      false,
+				Mode:    ApplyStageRestart,
+				Version: desiredVersion,
+				Message: "Failed to write planned-restart marker; previous configuration restored.",
+			}, err
+		}
+	}
+
+	return ApplyResult{
+		OK:             true,
+		Mode:           ApplyStageRestart,
+		Version:        desiredVersion,
+		ServingVersion: liveVersion,
+		PendingRestart: c.plannedRestartStatus(),
+		Message:        "Configuration staged for the next process restart; the live runtime is unchanged.",
+	}, nil
+}
+
+// subsystemNames extracts unique subsystem names from a lifecycle ChangeSet.
+func subsystemNames(cs lifecycle.ChangeSet) []string {
+	seen := make(map[string]struct{}, len(cs))
+	var out []string
+	for _, e := range cs {
+		if e.Subsystem == "" {
+			continue
+		}
+		if _, ok := seen[e.Subsystem]; !ok {
+			seen[e.Subsystem] = struct{}{}
+			out = append(out, e.Subsystem)
+		}
+	}
+	return out
+}
+
 func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartStatus {
 	if c.PlannedRestart == nil || !c.PlannedRestart.IsPending() {
 		return nil
 	}
-	return &admin.PendingRestartStatus{
-		Managed:          true,
-		Staged:           true,
-		DiscardAvailable: true,
-		Inconsistent:     false,
+	st := c.PlannedRestart.Status()
+	if !st.Managed {
+		return nil
 	}
+	res := &admin.PendingRestartStatus{
+		Managed:          true,
+		Staged:           st.Staged,
+		DiscardAvailable: st.DiscardAvailable,
+		Inconsistent:     st.Inconsistent,
+		Subsystems:       st.Subsystems,
+		StagedVersion:    st.StagedVersion,
+		ServingVersion:   st.ServingVersion,
+	}
+	if !st.StagedAt.IsZero() {
+		res.StagedAt = st.StagedAt.UTC().Format(time.RFC3339)
+	}
+	return res
 }
 
 func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.Candidate, prevRaw []byte, mode ApplyMode) (ApplyResult, error) {

@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -35,7 +36,7 @@ func TestPreflightApplyValidConfigOK(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	if _, err := p.Apply(cfg, nil); err != nil {
+	if _, err := p.Apply(context.Background(), cfg, nil, PreflightHot); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 }
@@ -54,7 +55,7 @@ func TestPreflightApplyInvalidConfigFailsFast(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	if _, err := p.Apply(bad, nil); err == nil {
+	if _, err := p.Apply(context.Background(), bad, nil, PreflightHot); err == nil {
 		t.Fatal("structurally invalid config accepted")
 	}
 }
@@ -67,7 +68,7 @@ func TestPreflightApplyPanicCaught(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	_, err := p.Apply(cfg, nil)
+	_, err := p.Apply(context.Background(), cfg, nil, PreflightHot)
 	if err == nil {
 		t.Fatal("expected error from panic recovery, got nil")
 	}
@@ -84,7 +85,7 @@ func TestPreflightApplyWithIdenticalPrevOK(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	if _, err := p.Apply(cfg, cfg); err != nil {
+	if _, err := p.Apply(context.Background(), cfg, cfg, PreflightHot); err != nil {
 		t.Fatalf("identical prev/next rejected: %v", err)
 	}
 }
@@ -107,10 +108,14 @@ func TestPreflightApplyReturnsCandidate(t *testing.T) {
 		},
 		Stream: &mockStreamPreflighter{},
 	}
-	cand, err := p.Apply(cfg, nil)
+	res, err := p.Apply(context.Background(), cfg, nil, PreflightHot)
 	if err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
+	if res == nil {
+		t.Fatal("Preflight.Apply returned nil result")
+	}
+	cand := res.Candidate
 	if cand == nil {
 		t.Fatal("Preflight.Apply returned nil candidate")
 	}
@@ -159,7 +164,7 @@ func TestPreflightApplyUsesLiveSnapshotForRebind(t *testing.T) {
 
 	// Without a live snapshot, the on-disk prev says addr is kept, so the
 	// frozen-setting change is rejected.
-	if _, err := p.Apply(next, base); err == nil {
+	if _, err := p.Apply(context.Background(), next, base, PreflightHot); err == nil {
 		t.Fatal("expected restart_required without live snapshot")
 	}
 
@@ -168,7 +173,7 @@ func TestPreflightApplyUsesLiveSnapshotForRebind(t *testing.T) {
 	p.LiveSnapshot = func() server.LiveSnapshot {
 		return server.LiveSnapshot{Listeners: map[string]server.BoundListenerInfo{}}
 	}
-	if _, err := p.Apply(next, base); err != nil {
+	if _, err := p.Apply(context.Background(), next, base, PreflightHot); err != nil {
 		t.Fatalf("expected hot-apply with live snapshot showing address unbound, got: %v", err)
 	}
 }
@@ -213,7 +218,7 @@ func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
 			t.Fatalf("clone: %v", err)
 		}
 		occupied.Servers[0].Listen = boundAddr
-		if _, err := p.Apply(occupied, nil); err == nil {
+		if _, err := p.Apply(context.Background(), occupied, nil, PreflightHot); err == nil {
 			t.Fatal("expected listener probe to reject an occupied address when prev is nil")
 		}
 	})
@@ -226,7 +231,7 @@ func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
 			t.Fatalf("clone: %v", err)
 		}
 		changed.Global.AccessLog = "changed.log"
-		_, err = p2.Apply(changed, nil)
+		_, err = p2.Apply(context.Background(), changed, nil, PreflightHot)
 		if err == nil {
 			t.Fatal("expected restart_required for startup-bound change when prev is nil")
 		}
@@ -236,7 +241,7 @@ func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
 	})
 
 	t.Run("valid candidate passes with live snapshot and nil prev", func(t *testing.T) {
-		if _, err := p.Apply(base, nil); err != nil {
+		if _, err := p.Apply(context.Background(), base, nil, PreflightHot); err != nil {
 			t.Fatalf("expected apply to succeed with live snapshot and nil prev, got: %v", err)
 		}
 	})
