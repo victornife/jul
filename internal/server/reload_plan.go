@@ -39,6 +39,9 @@ import (
 type ReloadPlan struct {
 	s     *Server
 	start time.Time
+	// ctx bounds the pre-publish phases. Post-publish work uses the process
+	// context because Publish is the point of no return.
+	ctx context.Context
 
 	// rawConfig is the unexpanded configuration loaded from the source. It is
 	// preserved inside Candidate on Resolve.
@@ -71,37 +74,69 @@ type ReloadPlan struct {
 	newAddrs        map[string]struct{}
 	stagedListeners map[string]*listenerEntry
 	bindErrs        []string
+
+	// published is true once Publish has succeeded; it gates Abort safety.
+	published bool
+	// phaseDurations records wall-clock time spent in each named phase.
+	phaseDurations map[string]time.Duration
 }
 
 // newReloadPlan creates a plan for reloading raw (unexpanded) config into s.
 // When candidate is non-nil it is used directly and secrets are not resolved
 // again; this is the admin apply path that hands off the preflight candidate.
-func (s *Server) newReloadPlan(raw *config.Config, candidate *config.Candidate) *ReloadPlan {
+func (s *Server) newReloadPlan(ctx context.Context, raw *config.Config, candidate *config.Candidate) *ReloadPlan {
 	return &ReloadPlan{
 		s:               s,
+		ctx:             ctx,
 		start:           time.Now(),
 		rawConfig:       raw,
 		Candidate:       candidate,
 		StartupFP:       s.startupFP,
 		oldAddrs:        setOf(uniqueListenAddrs(s.cfg.Servers)),
 		stagedListeners: make(map[string]*listenerEntry),
+		phaseDurations:  make(map[string]time.Duration),
 	}
+}
+
+// runPhase executes fn and records its duration under name. It returns early
+// with ctx.Err() when the plan context is cancelled before fn runs.
+func (p *ReloadPlan) runPhase(name string, fn func() error) error {
+	if err := p.ctx.Err(); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	start := time.Now()
+	err := fn()
+	p.phaseDurations[name] = time.Since(start)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return p.ctx.Err()
+}
+
+// phaseDurationMS returns the duration of a named phase in milliseconds.
+func (p *ReloadPlan) phaseDurationMS(name string) int64 {
+	if d, ok := p.phaseDurations[name]; ok {
+		return d.Milliseconds()
+	}
+	return 0
 }
 
 // Resolve builds the immutable Candidate for this reload and computes the
 // candidate fingerprint. Secrets are resolved exactly once here, unless a
 // candidate was already supplied by the admin preflight handoff.
 func (p *ReloadPlan) Resolve() error {
-	if p.Candidate == nil {
-		candidate, err := config.NewCandidate(p.rawConfig)
-		if err != nil {
-			return fmt.Errorf("candidate: %w", err)
+	return p.runPhase("resolve", func() error {
+		if p.Candidate == nil {
+			candidate, err := config.NewCandidate(p.rawConfig)
+			if err != nil {
+				return fmt.Errorf("candidate: %w", err)
+			}
+			p.Candidate = candidate
 		}
-		p.Candidate = candidate
-	}
-	p.CandidateFP = lifecycle.ComputeFingerprint(p.Candidate.Effective)
-	p.newAddrs = setOf(uniqueListenAddrs(p.Candidate.Effective.Servers))
-	return nil
+		p.CandidateFP = lifecycle.ComputeFingerprint(p.Candidate.Effective)
+		p.newAddrs = setOf(uniqueListenAddrs(p.Candidate.Effective.Servers))
+		return nil
+	})
 }
 
 // Validate runs the configured runtime validator against the already-resolved
@@ -110,66 +145,74 @@ func (p *ReloadPlan) Resolve() error {
 // cannot make validation inspect different bytes from those that are published
 // (R6-07, R7-05).
 func (p *ReloadPlan) Validate() error {
-	if p.s.validate == nil {
+	return p.runPhase("validate", func() error {
+		if p.s.validate == nil {
+			return nil
+		}
+		if err := p.s.validate(p.Candidate.Effective); err != nil {
+			return fmt.Errorf("validate: %w", err)
+		}
 		return nil
-	}
-	if err := p.s.validate(p.Candidate.Effective); err != nil {
-		return fmt.Errorf("validate: %w", err)
-	}
-	return nil
+	})
 }
 
 // Lifecycle checks restart-required classification using the effective startup
 // and candidate fingerprints, then checks for bind-time listener property
 // changes that require a rebind.
 func (p *ReloadPlan) Lifecycle() error {
-	if reason, need := lifecycle.RestartRequired(p.StartupFP, p.CandidateFP); need {
-		return fmt.Errorf("restart_required: %s", reason)
-	}
-	if reason, need := p.s.listenerBoundRebindRequired(p.Candidate.Effective); need {
-		return fmt.Errorf("restart_required: %s", reason)
-	}
-	if reason, need := ACMERestartRequired(p.s.cfg.Servers, p.Candidate.Effective.Servers); need {
-		return fmt.Errorf("restart_required: %s", reason)
-	}
-	return nil
+	return p.runPhase("lifecycle", func() error {
+		if reason, need := lifecycle.RestartRequired(p.StartupFP, p.CandidateFP); need {
+			return fmt.Errorf("restart_required: %s", reason)
+		}
+		if reason, need := p.s.listenerBoundRebindRequired(p.Candidate.Effective); need {
+			return fmt.Errorf("restart_required: %s", reason)
+		}
+		if reason, need := ACMERestartRequired(p.s.cfg.Servers, p.Candidate.Effective.Servers); need {
+			return fmt.Errorf("restart_required: %s", reason)
+		}
+		return nil
+	})
 }
 
 // Prepare builds the handler tree and stages the upstream/generation resources.
 // It does not commit anything; Publish/Abort must follow.
 func (p *ReloadPlan) Prepare() error {
-	handlers, genID, commit, abort, err := p.s.factory(p.Candidate.Effective)
-	if err != nil {
-		return fmt.Errorf("build: %w", err)
-	}
-	p.Handlers = handlers
-	p.GenID = genID
-	p.handlerCommit = commit
-	p.handlerAbort = abort
-	return nil
+	return p.runPhase("prepare", func() error {
+		handlers, genID, commit, abort, err := p.s.factory(p.Candidate.Effective)
+		if err != nil {
+			return fmt.Errorf("build: %w", err)
+		}
+		p.Handlers = handlers
+		p.GenID = genID
+		p.handlerCommit = commit
+		p.handlerAbort = abort
+		return nil
+	})
 }
 
 // StageListeners binds every newly added listen address without starting the
 // accept loop. On any bind failure it records the error and returns a non-nil
 // error; successfully staged entries are retained so Abort can close them.
 func (p *ReloadPlan) StageListeners() error {
-	for addr := range p.newAddrs {
-		if _, existed := p.oldAddrs[addr]; existed {
-			continue
+	return p.runPhase("stage_listeners", func() error {
+		for addr := range p.newAddrs {
+			if _, existed := p.oldAddrs[addr]; existed {
+				continue
+			}
+			entry, err := p.s.buildListenerEntry(addr, p.Candidate.Effective)
+			if err != nil {
+				p.bindErrs = append(p.bindErrs, addr+": "+err.Error())
+				p.s.log.Error("reload: failed to stage new listener", "addr", addr, "error", err)
+				continue
+			}
+			p.stagedListeners[addr] = entry
+			p.s.log.Debug("reload: staged new listener (not yet serving)", "addr", addr)
 		}
-		entry, err := p.s.buildListenerEntry(addr, p.Candidate.Effective)
-		if err != nil {
-			p.bindErrs = append(p.bindErrs, addr+": "+err.Error())
-			p.s.log.Error("reload: failed to stage new listener", "addr", addr, "error", err)
-			continue
+		if len(p.bindErrs) > 0 {
+			return fmt.Errorf("bind: %s", strings.Join(p.bindErrs, "; "))
 		}
-		p.stagedListeners[addr] = entry
-		p.s.log.Debug("reload: staged new listener (not yet serving)", "addr", addr)
-	}
-	if len(p.bindErrs) > 0 {
-		return fmt.Errorf("bind: %s", strings.Join(p.bindErrs, "; "))
-	}
-	return nil
+		return nil
+	})
 }
 
 // Publish promotes the prepared generation to live, installs the new redaction
@@ -178,6 +221,16 @@ func (p *ReloadPlan) StageListeners() error {
 // returned retire callback closes the previous generation's resources and must
 // be invoked only after that generation has drained.
 func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
+	if err := p.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("publish: %w", err)
+	}
+	start := time.Now()
+	defer func() {
+		p.phaseDurations["publish"] = time.Since(start)
+		if err == nil {
+			p.published = true
+		}
+	}()
 	// Commit the staged upstream pools first, then capture the generation-scoped
 	// snapshots from the now-live registry. This guarantees that the published
 	// handler generation carries the backend view of the configuration it
@@ -248,6 +301,8 @@ func (p *ReloadPlan) publishRuntimeState() {
 // called after Publish so connections draining from the backlog see the new
 // handler generation immediately.
 func (p *ReloadPlan) Activate() error {
+	start := time.Now()
+	defer func() { p.phaseDurations["activate"] = time.Since(start) }()
 	for _, entry := range p.stagedListeners {
 		p.s.startServing(entry)
 	}
@@ -257,6 +312,8 @@ func (p *ReloadPlan) Activate() error {
 // RetireRemovedListeners stops listeners whose addresses are no longer in the
 // effective config and removes them from s.listeners.
 func (p *ReloadPlan) RetireRemovedListeners() {
+	start := time.Now()
+	defer func() { p.phaseDurations["retire"] = time.Since(start) }()
 	for addr := range p.oldAddrs {
 		if _, kept := p.newAddrs[addr]; !kept {
 			p.s.removeListener(addr)
@@ -268,12 +325,16 @@ func (p *ReloadPlan) RetireRemovedListeners() {
 // RefreshCerts is now a no-op: TLS certificate rotation is restart-only
 // (R7-07). The reload plan no longer attempts to refresh certificates.
 func (p *ReloadPlan) RefreshCerts() []string {
+	start := time.Now()
+	defer func() { p.phaseDurations["refresh_certs"] = time.Since(start) }()
 	return nil
 }
 
 // PostCommit applies dynamic side effects that must only run on a committed
 // reload: log level, GOMAXPROCS, and stream-proxy reload.
 func (p *ReloadPlan) PostCommit() error {
+	start := time.Now()
+	defer func() { p.phaseDurations["post_commit"] = time.Since(start) }()
 	if p.s.OnReloaded != nil {
 		return p.s.OnReloaded(p.Candidate.Effective)
 	}
@@ -283,6 +344,9 @@ func (p *ReloadPlan) PostCommit() error {
 // Abort releases every candidate resource owned by the plan. It is safe to
 // call after any phase before Publish and is a no-op after Publish.
 func (p *ReloadPlan) Abort() {
+	if p.published {
+		return
+	}
 	if p.handlerAbort != nil {
 		p.handlerAbort()
 	}

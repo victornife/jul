@@ -137,17 +137,43 @@ type conflictResponse struct {
 // handleConfigPatchApply applies a batch of structured patch operations
 // atomically and entirely server-side — it never trusts a client-rendered
 // candidate. All ops are applied to one freshly-loaded config under s.applyMu,
-// and the result is persisted through the same validated WriteConfigRaw
-// preflight as /api/config/apply, so a config that passes cannot fail the
-// subsequent build. Optimistic concurrency (base_version) prevents a stale edit
-// from silently clobbering a concurrent change (P2-12 lost update).
+// and the result is persisted through the same validated apply preflight as
+// /api/config/apply, so a config that passes cannot fail the subsequent build.
+// Optimistic concurrency (base_version) prevents a stale edit from silently
+// clobbering a concurrent change (P2-12 lost update).
 // POST /api/config/patch/apply
 func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if s.deps.LoadConfig == nil || s.deps.WriteConfigRaw == nil {
+	// Prefer the new correlated apply path; fall back to the legacy
+	// WriteConfigRaw closure for tests and callers that have not migrated.
+	applyConfig := s.deps.ApplyConfig
+	if applyConfig == nil && s.deps.WriteConfigRaw != nil {
+		applyConfig = func(cfg *config.Config, mode string) (ConfigApplyResult, error) {
+			data, err := config.Marshal(cfg)
+			if err != nil {
+				return ConfigApplyResult{OK: false, Mode: mode}, err
+			}
+			if err := s.deps.WriteConfigRaw(data); err != nil {
+				result := ConfigApplyResult{OK: false, Mode: mode, Message: err.Error()}
+				if errors.Is(err, ErrRestartRequired) {
+					result.RestartRequired = true
+					return result, nil
+				}
+				return result, err
+			}
+			return ConfigApplyResult{
+				OK:             true,
+				Mode:           mode,
+				Version:        configVersion(data),
+				ServingVersion: configVersion(data),
+				Message:        "Configuration validated and saved.",
+			}, nil
+		}
+	}
+	if s.deps.LoadConfig == nil || applyConfig == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -210,62 +236,50 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		summaries = append(summaries, summary)
 	}
 
-	candidate, err := config.Marshal(cfg)
+	// Snapshot the prior config, then persist through the authoritative apply
+	// preflight. A rejection here means nothing was written, preserving the
+	// all-or-nothing guarantee.
+	prev := s.currentRaw()
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "hot"
+	}
+	result, err := applyConfig(cfg, mode)
 	if err != nil {
+		s.recordAudit("config.patch", "config", "failure", "coordinator error: "+err.Error(), adminClientIP(r))
+		s.emit("config", "apply_failed", "error", "Structured patch apply coordinator failed.")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Snapshot the prior config, then persist through the authoritative preflight
-	// (WriteConfigRaw). A rejection here means nothing was written, preserving
-	// the all-or-nothing guarantee.
-	prev := s.currentRaw()
-	if err := s.deps.WriteConfigRaw(candidate); err != nil {
-		if errors.Is(err, ErrRestartRequired) {
-			s.writeRestartRequired(w, r, "config.patch", err)
-			return
-		}
-		s.recordAudit("config.patch", "config", "failure", "rejected: invalid configuration", adminClientIP(r))
-		s.emit("config", "apply_failed", "error", "Structured patch apply was rejected (invalid).")
+	if result.RestartRequired {
+		s.writeRestartRequired(w, r, "config.patch", errors.New(result.Message))
+		return
+	}
+	if len(result.ValidationErrors) > 0 {
+		s.recordAudit("config.patch", "config", "failure", "rejected: validation failed", adminClientIP(r))
+		s.emit("config", "apply_failed", "warn", "Structured patch apply rejected: validation failed.")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
 			OK:      false,
-			Message: "The configuration contains errors; no change was applied.",
-			Errors:  humanizeErr(err.Error()),
+			Message: result.Message,
+			Errors:  humanizeErr(strings.Join(result.ValidationErrors, "\n")),
 		})
 		return
 	}
-	s.recordHistory(prev)
-	s.recordAudit("config.patch", "config", "success", strings.Join(summaries, "; "), adminClientIP(r))
-	s.emit("config", "apply", "info", "Structured patch validated and saved; the live runtime is reloading.")
+
+	if result.OK {
+		s.recordHistory(prev)
+		s.recordAudit("config.patch", "config", "success", strings.Join(summaries, "; "), adminClientIP(r))
+		s.emit("config", "apply", "info", "Structured patch validated and saved.")
+	}
 
 	beforeCfg, _ := config.Parse(before)
-	// Return a post-apply status delta so the UI can reflect what changed. It is
-	// derived from the persisted configuration: the apply preflight guarantees
-	// the runtime will build this config, but the reload that swaps it in is
-	// asynchronous, so "pending_reload" tells the UI this is the configuration
-	// taking effect rather than a confirmation that the swap has completed.
-	var status []FeatureStatus
-	if s.deps.LoadConfig != nil {
-		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
-			status = s.runtimeStatus(cfg)
-		}
+	result.Summary = summaries
+	result.Diff = diffConfigs(beforeCfg, cfg)
+
+	status := http.StatusOK
+	if !result.OK {
+		status = http.StatusConflict
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":             true,
-		"pending_reload": true,
-		"version":        configVersion(candidate),
-		"summary":        summaries,
-		"diff":           diffConfigs(beforeCfg, cfg),
-		"status":         status,
-		"message":        "Structured patch validated and saved. The live runtime is reloading to apply it.",
-		// previous_reload mirrors the /api/config/apply response: carries
-		// timed_out=true when the prior reload exceeded the configured
-		// reload_timeout so the Console can surface a slow-reload warning.
-		"previous_reload": func() interface{} {
-			if s.deps.LastReload == nil {
-				return nil
-			}
-			return s.deps.LastReload()
-		}(),
-	})
+	writeJSON(w, status, result)
 }

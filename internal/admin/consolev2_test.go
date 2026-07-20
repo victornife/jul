@@ -44,6 +44,59 @@ func v2WriteServer(t *testing.T) (*Server, string) {
 			}
 			return os.WriteFile(cfgPath, data, 0o644)
 		},
+		ApplyConfigRaw: func(data []byte, mode string) (ConfigApplyResult, error) {
+			c, err := config.Parse(data)
+			if err != nil {
+				return ConfigApplyResult{
+					OK:               false,
+					Mode:             mode,
+					Message:          "parse error",
+					ValidationErrors: []string{err.Error()},
+				}, nil
+			}
+			if err := config.Validate(c); err != nil {
+				return ConfigApplyResult{
+					OK:               false,
+					Mode:             mode,
+					Message:          "validation error",
+					ValidationErrors: []string{err.Error()},
+				}, nil
+			}
+			if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
+				return ConfigApplyResult{OK: false, Mode: mode, Message: "write error"}, err
+			}
+			return ConfigApplyResult{
+				OK:             true,
+				Mode:           mode,
+				Version:        configVersion(data),
+				ServingVersion: configVersion(data),
+				Message:        "Configuration validated, saved, and applied live.",
+			}, nil
+		},
+		ApplyConfig: func(c *config.Config, mode string) (ConfigApplyResult, error) {
+			data, err := config.Marshal(c)
+			if err != nil {
+				return ConfigApplyResult{OK: false, Mode: mode, Message: "marshal error"}, err
+			}
+			if err := config.Validate(c); err != nil {
+				return ConfigApplyResult{
+					OK:               false,
+					Mode:             mode,
+					Message:          "validation error",
+					ValidationErrors: []string{err.Error()},
+				}, nil
+			}
+			if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
+				return ConfigApplyResult{OK: false, Mode: mode, Message: "write error"}, err
+			}
+			return ConfigApplyResult{
+				OK:             true,
+				Mode:           mode,
+				Version:        configVersion(data),
+				ServingVersion: configVersion(data),
+				Message:        "Configuration validated, saved, and applied live.",
+			}, nil
+		},
 		LoadConfig: func() (*config.Config, error) {
 			raw, err := os.ReadFile(cfgPath)
 			if err != nil {
@@ -947,15 +1000,14 @@ func TestConfigPatchApplyPersistsAtomically(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	var out struct {
-		OK            bool   `json:"ok"`
-		PendingReload bool   `json:"pending_reload"`
-		Version       string `json:"version"`
+		OK      bool   `json:"ok"`
+		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !out.OK || !out.PendingReload {
-		t.Fatalf("ok=%v pending_reload=%v, want both true", out.OK, out.PendingReload)
+	if !out.OK {
+		t.Fatalf("ok=%v, want true", out.OK)
 	}
 	if out.Version == "" {
 		t.Error("version should be returned for the next optimistic-concurrency check")

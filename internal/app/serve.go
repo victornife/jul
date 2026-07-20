@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -304,58 +305,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps.LoadConfig = src.Load
 	deps.TrafficSources = metrics.TrafficSnapshot
 
+	var configPath string
 	if ts, ok := src.(*config.TOMLSource); ok {
-		path := ts.Path
-		deps.ReadConfigRaw = func() ([]byte, error) { return os.ReadFile(path) }
-		deps.WriteConfigRaw = func(data []byte) error {
-			cfg, err := config.Parse(data)
-			if err != nil {
-				return err
-			}
-			var prevCfg *config.Config
-			if prevData, rerr := os.ReadFile(path); rerr == nil {
-				if prev, perr := config.Parse(prevData); perr == nil {
-					prevCfg = prev
-				}
-			}
-			candidate, err := pf.Apply(cfg, prevCfg)
-			if err != nil {
-				return err
-			}
-			// Digest the exact bytes that will be on disk so the watcher can
-			// suppress its own echo of this admin write (R10-01).
-			rawDigest := sha256.Sum256(data)
-			lastAdminDigest.Store(&rawDigest)
-			if err := atomicfile.Write(path, data, 0o600); err != nil {
-				return err
-			}
-			return triggerReload(candidate, rawDigest)
-		}
-		deps.SaveConfig = func(c *config.Config) error {
-			// Load the current on-disk config as prev so that Preflight.Apply runs
-			// all restart-required checks (ACME, listener rebind, tracing, access
-			// log) on the structured-patch write path, matching WriteConfigRaw.
-			var prevCfg *config.Config
-			if prevData, rerr := os.ReadFile(path); rerr == nil {
-				if prev, perr := config.Parse(prevData); perr == nil {
-					prevCfg = prev
-				}
-			}
-			candidate, err := pf.Apply(c, prevCfg)
-			if err != nil {
-				return err
-			}
-			data, err := config.Marshal(c)
-			if err != nil {
-				return err
-			}
-			rawDigest := sha256.Sum256(data)
-			lastAdminDigest.Store(&rawDigest)
-			if err := atomicfile.Write(path, data, 0o600); err != nil {
-				return err
-			}
-			return triggerReload(candidate, rawDigest)
-		}
+		configPath = ts.Path
+		deps.ReadConfigRaw = func() ([]byte, error) { return os.ReadFile(configPath) }
 	}
 
 	// Wire PendingRestartCheck using the startup config snapshot. It reports
@@ -407,17 +360,151 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps.Reload = func() error {
 		return triggerReload(nil, [32]byte{})
 	}
-	deps.LastReload = func() *admin.ReloadSnapshot {
-		if li := srv.LastReload(); li != nil {
-			return &admin.ReloadSnapshot{
-				OK:       li.OK,
-				TimedOut: li.TimedOut,
-				Duration: li.Duration,
-				At:       li.At,
-				Error:    li.Error,
+	deps.LastReload = func() *server.ReloadResult {
+		return srv.LastReload()
+	}
+
+	// Wire the managed apply path now that srv exists so the coordinator can
+	// read the live serving version and submit correlated reload requests.
+	if configPath != "" {
+		path := configPath
+
+		// reloadSeq generates short, unique reload transaction IDs.
+		var reloadSeq atomic.Uint64
+		nextReloadID := func() string {
+			return fmt.Sprintf("rl_%d", reloadSeq.Add(1))
+		}
+
+		// applyConfig is the shared managed-apply path for raw bytes and
+		// structured configs. It validates, persists, submits a correlated
+		// reload, and waits for the result. Only hot apply is implemented in
+		// this issue; stage_restart is reserved for the planned-restart
+		// workflow.
+		applyConfig := func(data []byte, mode string, candidate *config.Candidate) (admin.ConfigApplyResult, error) {
+			if mode != "" && mode != string(ApplyHot) {
+				return admin.ConfigApplyResult{OK: false, Mode: mode, Message: "only hot apply is supported in this release"}, nil
+			}
+			mode = string(ApplyHot)
+
+			var cfg *config.Config
+			var err error
+			if candidate != nil {
+				cfg = candidate.Effective
+			} else {
+				cfg, err = config.Parse(data)
+				if err != nil {
+					return admin.ConfigApplyResult{
+						OK:               false,
+						Mode:             mode,
+						Message:          "The configuration could not be parsed.",
+						ValidationErrors: []string{err.Error()},
+					}, nil
+				}
+			}
+
+			var prevCfg *config.Config
+			if prevData, rerr := os.ReadFile(path); rerr == nil {
+				if prev, perr := config.Parse(prevData); perr == nil {
+					prevCfg = prev
+				}
+			}
+
+			if candidate == nil {
+				candidate, err = pf.Apply(cfg, prevCfg)
+				if err != nil {
+					result := admin.ConfigApplyResult{
+						OK:      false,
+						Mode:    mode,
+						Message: "The configuration contains errors; no change was applied.",
+					}
+					if errors.Is(err, admin.ErrRestartRequired) {
+						result.RestartRequired = true
+						result.Message = err.Error()
+						return result, nil
+					}
+					result.ValidationErrors = []string{err.Error()}
+					return result, nil
+				}
+			}
+
+			desiredVersion := server.CanonicalVersion(candidate.Effective)
+			rawDigest := sha256.Sum256(data)
+			lastAdminDigest.Store(&rawDigest)
+			if err := atomicfile.Write(path, data, 0o600); err != nil {
+				return admin.ConfigApplyResult{OK: false, Mode: mode, Version: desiredVersion, Message: "Failed to persist configuration."}, err
+			}
+
+			resultCh := make(chan server.ReloadResult, 1)
+			deadline := time.Now().Add(candidate.Effective.Global.ReloadTimeout.Std())
+			req := server.ReloadRequest{
+				ID:        nextReloadID(),
+				Source:    server.ReloadSourceAdmin,
+				Candidate: candidate,
+				RawDigest: rawDigest,
+				Deadline:  deadline,
+				Result:    resultCh,
+			}
+			select {
+			case adminReload <- req:
+			case <-time.After(5 * time.Second):
+				return admin.ConfigApplyResult{
+					OK:      false,
+					Mode:    mode,
+					Version: desiredVersion,
+					Message: "Reload enqueue timed out after 5s; the configuration was saved but may not be applied.",
+				}, fmt.Errorf("reload enqueue timed out after 5s")
+			}
+
+			waitTimeout := time.Until(deadline) + time.Second
+			if waitTimeout <= 0 {
+				waitTimeout = time.Second
+			}
+			select {
+			case rr := <-resultCh:
+				return buildConfigApplyResult(mode, desiredVersion, &rr), nil
+			case <-time.After(waitTimeout):
+				return admin.ConfigApplyResult{
+					OK:             true,
+					Mode:           mode,
+					Version:        desiredVersion,
+					ServingVersion: server.CanonicalVersion(srv.LiveSnapshot().EffectiveConfig),
+					Reload: &server.ReloadResult{
+						ID:        req.ID,
+						Source:    server.ReloadSourceAdmin,
+						Outcome:   server.ReloadSavedNotLive,
+						Persisted: true,
+						TimedOut:  true,
+						StartedAt: req.Deadline.Add(-candidate.Effective.Global.ReloadTimeout.Std()),
+					},
+					Message: "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome.",
+				}, nil
 			}
 		}
-		return nil
+
+		deps.ApplyConfigRaw = func(data []byte, mode string) (admin.ConfigApplyResult, error) {
+			return applyConfig(data, mode, nil)
+		}
+		deps.ApplyConfig = func(c *config.Config, mode string) (admin.ConfigApplyResult, error) {
+			data, err := config.Marshal(c)
+			if err != nil {
+				return admin.ConfigApplyResult{OK: false, Mode: mode, Message: "Failed to marshal configuration."}, err
+			}
+			candidate, err := config.NewCandidate(c)
+			if err != nil {
+				return admin.ConfigApplyResult{OK: false, Mode: mode, Message: "Failed to resolve configuration candidate."}, err
+			}
+			return applyConfig(data, mode, candidate)
+		}
+		// Keep legacy closures for external callers during the deprecation
+		// window.
+		deps.WriteConfigRaw = func(data []byte) error {
+			_, err := deps.ApplyConfigRaw(data, string(ApplyHot))
+			return err
+		}
+		deps.SaveConfig = func(c *config.Config) error {
+			_, err := deps.ApplyConfig(c, string(ApplyHot))
+			return err
+		}
 	}
 
 	if adminSrv := admin.New(cfg.Admin, log, deps); adminSrv != nil {
@@ -465,6 +552,37 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return 1
 	}
 	return 0
+}
+
+// buildConfigApplyResult decorates a server ReloadResult into the admin API
+// response shape for a managed hot apply.
+func buildConfigApplyResult(mode, desiredVersion string, rr *server.ReloadResult) admin.ConfigApplyResult {
+	if rr == nil {
+		return admin.ConfigApplyResult{
+			OK:      false,
+			Mode:    mode,
+			Version: desiredVersion,
+			Message: "Reload result is unavailable.",
+		}
+	}
+	res := admin.ConfigApplyResult{
+		OK:             rr.Outcome == server.ReloadAppliedLive || rr.Outcome == server.ReloadAppliedDegraded,
+		Mode:           mode,
+		Version:        desiredVersion,
+		ServingVersion: rr.ServingVersion,
+		Reload:         rr,
+	}
+	switch rr.Outcome {
+	case server.ReloadAppliedLive:
+		res.Message = "Configuration validated, saved, and applied live."
+	case server.ReloadAppliedDegraded:
+		res.Message = "Configuration applied live with degradation: " + rr.Error
+	case server.ReloadSavedNotLive:
+		res.Message = "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome."
+	default:
+		res.Message = "Configuration was saved but the live reload did not apply: " + rr.Error
+	}
+	return res
 }
 
 // watchConfig starts a debounced file watcher for path, returning a reload

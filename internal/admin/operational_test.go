@@ -313,16 +313,6 @@ func TestApplyEmitsTimelineAndAudit(t *testing.T) {
 
 func TestApplyResponseIncludesReloadBlock(t *testing.T) {
 	s, _ := v2WriteServer(t)
-	// Seed a mock last-reload snapshot.
-	s.deps.LastReload = func() *ReloadSnapshot {
-		return &ReloadSnapshot{
-			OK:       true,
-			TimedOut: false,
-			Duration: 150 * time.Millisecond,
-			At:       time.Now().Add(-time.Second),
-			Error:    "",
-		}
-	}
 	body := validTOML(t, "./public", ":8080")
 
 	rr := httptest.NewRecorder()
@@ -334,25 +324,21 @@ func TestApplyResponseIncludesReloadBlock(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	reload, ok := out["previous_reload"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected previous_reload object in response, got %T", out["previous_reload"])
+	if out["ok"] != true {
+		t.Errorf("ok = %v, want true", out["ok"])
 	}
-	if reload["ok"] != true {
-		t.Errorf("reload.ok = %v, want true", reload["ok"])
+	if out["mode"] != "hot" {
+		t.Errorf("mode = %v, want hot", out["mode"])
 	}
-	if reload["timed_out"] != false {
-		t.Errorf("reload.timed_out = %v, want false", reload["timed_out"])
-	}
-	if reload["error"] != nil && reload["error"] != "" {
-		t.Errorf("reload.error = %q, want nil or empty", reload["error"])
+	if out["version"] == "" {
+		t.Error("expected version in response")
 	}
 }
 
 // TestConcurrentAdminAppliesSerialize (R9-14.3) proves that concurrent
 // POST /api/config/apply requests are serialized by applyMu and that both
 // leave causal audit/timeline records. The first apply holds the write lock
-// until released; the second cannot enter WriteConfigRaw until then, so the
+// until released; the second cannot enter ApplyConfigRaw until then, so the
 // final persisted config is the second apply's.
 func TestConcurrentAdminAppliesSerialize(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "server.toml")
@@ -367,20 +353,20 @@ func TestConcurrentAdminAppliesSerialize(t *testing.T) {
 
 	deps := Deps{
 		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
-		WriteConfigRaw: func(data []byte) error {
+		ApplyConfigRaw: func(data []byte, mode string) (ConfigApplyResult, error) {
 			c, err := config.Parse(data)
 			if err != nil {
-				return err
+				return ConfigApplyResult{OK: false, Mode: mode}, err
 			}
 			if err := config.Validate(c); err != nil {
-				return err
+				return ConfigApplyResult{OK: false, Mode: mode}, err
 			}
 			if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
-				return err
+				return ConfigApplyResult{OK: false, Mode: mode}, err
 			}
 			enteredOnce.Do(func() { entered <- struct{}{} })
 			<-release
-			return nil
+			return ConfigApplyResult{OK: true, Mode: mode, Version: configVersion(data), ServingVersion: configVersion(data)}, nil
 		},
 		LoadConfig: func() (*config.Config, error) {
 			raw, err := os.ReadFile(cfgPath)
@@ -413,7 +399,7 @@ func TestConcurrentAdminAppliesSerialize(t *testing.T) {
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
-		t.Fatal("first apply did not enter WriteConfigRaw")
+		t.Fatal("first apply did not enter ApplyConfigRaw")
 	}
 
 	doneB := apply(bodyB)

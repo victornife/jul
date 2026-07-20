@@ -366,7 +366,29 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if s.deps.WriteConfigRaw == nil {
+	// Prefer the new correlated apply path; fall back to the legacy
+	// WriteConfigRaw closure for tests and callers that have not migrated.
+	applyRaw := s.deps.ApplyConfigRaw
+	if applyRaw == nil && s.deps.WriteConfigRaw != nil {
+		applyRaw = func(data []byte, mode string) (ConfigApplyResult, error) {
+			if err := s.deps.WriteConfigRaw(data); err != nil {
+				result := ConfigApplyResult{OK: false, Mode: mode, Message: err.Error()}
+				if errors.Is(err, ErrRestartRequired) {
+					result.RestartRequired = true
+					return result, nil
+				}
+				return result, err
+			}
+			return ConfigApplyResult{
+				OK:             true,
+				Mode:           mode,
+				Version:        configVersion(data),
+				ServingVersion: configVersion(data),
+				Message:        "Configuration validated and saved.",
+			}, nil
+		}
+	}
+	if applyRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -433,54 +455,44 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	// Snapshot the current config before applying so the apply is reversible.
 	prev := s.currentRaw()
 
-	if err := s.deps.WriteConfigRaw(body); err != nil {
-		if errors.Is(err, ErrRestartRequired) {
-			s.writeRestartRequired(w, r, "config.apply", err)
-			return
-		}
-		s.recordAudit("config.apply", "config", "failure", "rejected: invalid configuration", adminClientIP(r))
-		s.emit("config", "apply_failed", "error", "Configuration apply was rejected (invalid).")
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "hot"
+	}
+	result, err := applyRaw(body, mode)
+	if err != nil {
+		s.recordAudit("config.apply", "config", "failure", "coordinator error: "+err.Error(), adminClientIP(r))
+		s.emit("config", "apply_failed", "error", "Configuration apply coordinator failed.")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if result.RestartRequired {
+		s.writeRestartRequired(w, r, "config.apply", errors.New(result.Message))
+		return
+	}
+	if len(result.ValidationErrors) > 0 {
+		s.recordAudit("config.apply", "config", "failure", "rejected: validation failed", adminClientIP(r))
+		s.emit("config", "apply_failed", "warn", "Configuration apply rejected: validation failed.")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
 			OK:      false,
-			Message: "The configuration contains errors; no change was applied.",
-			Errors:  humanizeErr(err.Error()),
+			Message: result.Message,
+			Errors:  humanizeErr(strings.Join(result.ValidationErrors, "\n")),
 		})
 		return
 	}
-	s.recordHistory(prev)
-	s.recordAudit("config.apply", "config", "success", "configuration validated and saved; live runtime reloading", adminClientIP(r))
 
-	// Record the apply on the timeline and broadcast it to SSE subscribers.
-	s.emit("config", "apply", "info", "Configuration validated and saved; the live runtime is reloading.")
+	if result.OK {
+		s.recordHistory(prev)
+		s.recordAudit("config.apply", "config", "success", "configuration validated and saved", adminClientIP(r))
+		s.emit("config", "apply", "info", "Configuration validated and saved.")
+	}
 
-	// Return a post-apply status delta so the UI can reflect what changed. It is
-	// derived from the persisted configuration: the apply preflight guarantees
-	// the runtime will build this config, but the reload that swaps it in is
-	// asynchronous, so "pending_reload" tells the UI this is the configuration
-	// taking effect rather than a confirmation that the swap has completed.
-	var status []FeatureStatus
-	var version string
-	if s.deps.LoadConfig != nil {
-		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
-			status = s.runtimeStatus(cfg)
-			if marshaled, merr := config.Marshal(cfg); merr == nil {
-				version = configVersion(marshaled)
-			}
-		}
+	status := http.StatusOK
+	if !result.OK {
+		status = http.StatusConflict
 	}
-	resp := map[string]any{
-		"ok":             true,
-		"pending_reload": true,
-		"message":        "Configuration validated and saved. The live runtime is reloading to apply it.",
-		"status":         status,
-		"version":        version,
-	}
-	if s.deps.LastReload != nil {
-		if snap := s.deps.LastReload(); snap != nil {
-			resp["previous_reload"] = snap
-		}
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, status, result)
 }
 
 // adminGuardResponse is the 409 body when an apply would change a setting that

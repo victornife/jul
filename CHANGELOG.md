@@ -10,6 +10,22 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **Correlated reload results, deadlines, phase timing, and bounded cancellation** (P2-01, #66):
+  introduced structured `ReloadResult` (`internal/server/reload_result.go`) with
+  transaction ID, source, desired/serving version fingerprints, per-phase
+  timing, and per-subsystem (`http`, `stream`) status. `ReloadRequest` now
+  carries `ID`, `Deadline`, and a result channel; `Server.doReload` derives a
+  per-request bounded context, records `started_at`/`completed_at`/`duration_ms`,
+  and cancels before Publish when the deadline expires. Added `ApplyMode`,
+  `ConfigApplyResult`, and `PendingRestartStatus` types
+  (`internal/app/config_apply.go`, `internal/admin/config_apply.go`); admin
+  apply handlers now return the correlated reload outcome in the `reload`
+  block and map validation failures to 400 and restart-required rejections to
+  409. Composition root in `internal/app/serve.go` wires `ApplyConfigRaw`,
+  `ApplyConfig`, `WriteConfigRaw`, and `SaveConfig` closures that persist,
+  submit correlated reloads, and wait for results. Updated
+  `docs/reload-semantics.md` with deadline/result semantics and added focused
+  tests in `internal/server/reload_timeout_test.go`.
 - **Schema-correct lean budgets and OSS/open-core boundary** (P1-02, #64):
   reconciled stale TOML examples in [docs/benchmarks.md](docs/benchmarks.md)
   against the current `GlobalConfig`, `[compression]`, and `[rate_limit]`

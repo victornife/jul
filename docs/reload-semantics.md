@@ -15,21 +15,22 @@ Jul.IA reloads configuration **without dropping connections**. A reload can be
 triggered three ways:
 
 - **Admin apply** — `POST /api/config/apply` (the Console "Apply changes"
-  button) writes a new config and triggers a reload. This path runs the full
-  preflight gate before writing anything to disk.
+  button) writes a new config and triggers a correlated reload. This path runs
+  the full preflight gate before writing anything to disk and waits for the
+  live reload outcome, returning it in the `reload` block of the response.
 - **SIGHUP** (Unix) — operator sends the signal after editing the file directly.
 - **Config file-watch** — the on-disk config file changed and the watcher fired.
 
 **These three paths share the same live reload transaction, but the admin write
-path validates *before* persistence.**
+path validates *before* persistence and correlates the result with the request.**
 
 The admin write path runs the full preflight (parse, dry-run, bind-probe, and
 all restart-required checks) *before* the file is written. Nothing is saved
 unless the config is validated to build and bind under preflight conditions.
 Because preflight cannot observe every runtime condition (e.g. a bind race,
 a late certificate file change, or transient disk errors), the live reload may
-still fail after the file is written; such failures are recorded in
-`LastReload` and leave the previous generation authoritative.
+still fail after the file is written; such failures are recorded in the
+structured `ReloadResult` and leave the previous generation authoritative.
 
 SIGHUP and file-watch trigger the same live runtime swap, but they run restart-
 required checks *at swap time* rather than before the file is written. This
@@ -40,17 +41,17 @@ means:
   Console.
 - Changes to **restart-required** fields (cache, egress, admin, tracing,
   access-log, ACME, log format, listener bind settings) are **rejected at swap
-  time** — the swap is aborted, `LastReload.OK=false` is recorded with the
-  reason, and the old config remains authoritative. The file on disk may
-  contain the new value, but the running process ignores it until a restart.
-  `global.worker_threads` is *hot-reloadable* (the GOMAXPROCS cap is updated on
-  the next successful reload).
+  time** — the swap is aborted, `LastReload.Outcome=not_applied` is recorded
+  with the reason, and the old config remains authoritative. The file on disk
+  may contain the new value, but the running process ignores it until a
+  restart. `global.worker_threads` is *hot-reloadable* (the GOMAXPROCS cap is
+  updated on the next successful reload).
 - **New-listener-only** fields (a new listen address, or a new L4 listener)
   apply to brand-new listeners without a restart; changing the same property on
   an already-bound listener is treated as restart-required.
 - A new listen address that fails to bind aborts the reload before Publish
-  (`OK=false`); existing listeners continue serving the previous handler
-  generation.
+  (`Outcome=not_applied`); existing listeners continue serving the previous
+  handler generation.
 
 For the strongest guarantees, use the Console or admin API for configuration
 changes. Direct file edits followed by SIGHUP are safe for hot-reloadable
@@ -63,10 +64,15 @@ reload rather than silent mixed state.
   and a reload was triggered. This is what the apply API confirms.
 - **Serving** — the live runtime has finished swapping to the new configuration.
 
-The swap is asynchronous, so the apply response says the configuration was
-**"validated and saved; the live runtime is reloading"** rather than the
-past-tense "reloaded." The gap between *applied* and *serving* is kept as small
-as possible by an up-front preflight (below), and it is normally sub-second.
+The admin apply path now waits for the live reload outcome up to the configured
+`reload_timeout` plus a small scheduling margin. The response includes a
+`reload` object that carries the correlated result: `outcome`
+(`applied_live`, `applied_degraded`, `not_applied`, or `saved_not_live`),
+`started_at`, `completed_at`, `duration_ms`, per-subsystem status (`http` and
+`stream`), and the `desired_version` / `serving_version` fingerprints. If the
+reload is still in flight when the coordinator's wait expires, the response
+returns `saved_not_live` so the operator knows the config is persisted but the
+live swap has not yet been confirmed.
 
 ## The apply preflight (truthfulness gate)
 
@@ -141,8 +147,10 @@ are:
 
 On any failure before Publish, `Abort()` releases all candidate resources
 without touching live state. On any failure after Publish, the reload is
-recorded as **degraded** (`LastReload.OK=false`) but is not rolled back,
-because Publish is the point of no return.
+recorded as **degraded** (`Outcome=applied_degraded`) but is not rolled back,
+because Publish is the point of no return. Every phase records its wall-clock
+duration; the total `duration_ms` and per-subsystem timings are exposed in the
+`ReloadResult`.
 
 ### Publish-then-Activate ordering
 
@@ -271,19 +279,21 @@ at runtime by `internal/auth`'s `TestReloadChurnNoLeak`, which drives sustained
 build/exercise/drop churn across every auth permutation and asserts the
 goroutine count and post-GC heap return to their pre-churn baseline.
 
-## Reload timeout (`[global].reload_timeout`)
+## Reload timeout and deadlines (`[global].reload_timeout`)
 
 A reload measures its own duration against `[global].reload_timeout` (default
-10s; zero or omitted defaults to 10s). If the reload takes longer than the
-configured threshold, it is recorded as `timed_out`:
+10s; zero or omitted defaults to 10s). The admin apply path submits a
+per-request deadline of `now + reload_timeout` to the live reload transaction.
+If the reload cannot reach Publish before the deadline expires, it is
+**cancelled before Publish** (`Outcome=not_applied`, `timed_out=true`) and the
+previous generation remains authoritative. This is bounded cancellation: only
+the side-effect-free preparation phases are interruptible, so a slow factory
+never leaves the runtime in a mixed state.
 
-- The **swap still completes** — the timeout is advisory, not a hard
-  cancellation, because the factory is side-effectful and cannot be safely
-  interrupted mid-flight. What was previously an unsafe goroutine-based
-  "abort" has been replaced by a warning so that operators know the reload was
-  slow, while the runtime stays consistent.
-- The apply response may include `previous_reload` so the UI can warn the operator
-  that the last completed reload exceeded the expected duration.
+After Publish the timeout no longer cancels work; the remaining activation and
+post-commit phases complete even if the deadline has passed, and the outcome is
+recorded as `applied_degraded` if a post-commit side effect fails or the
+overall duration exceeded the threshold.
 
 The default 10s should accommodate all normal configs; operators may raise it for
 very large configs or environments with slow DNS.

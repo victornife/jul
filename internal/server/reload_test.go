@@ -866,8 +866,8 @@ func TestDoReloadBlocksOnRestartRequired(t *testing.T) {
 	if li == nil {
 		t.Fatal("LastReload is nil after reload attempt")
 	}
-	if li.OK {
-		t.Error("LastReload.OK = true; want false for a restart-required change")
+	if li.Outcome == ReloadAppliedLive {
+		t.Error("LastReload.Outcome = applied_live; want not applied for a restart-required change")
 	}
 	if !strings.Contains(li.Error, "restart_required") {
 		t.Errorf("LastReload.Error = %q; want it to contain 'restart_required'", li.Error)
@@ -932,8 +932,8 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 	if li == nil {
 		t.Fatal("LastReload is nil after reload attempt")
 	}
-	if li.OK {
-		t.Error("LastReload.OK = true; want false when a new listener failed to bind")
+	if li.Outcome == ReloadAppliedLive {
+		t.Error("LastReload.Outcome = applied_live; want not applied when a new listener failed to bind")
 	}
 	// New doReload aborts entirely on bind failure (no partial state).
 	if !strings.Contains(li.Error, "aborted") {
@@ -1006,8 +1006,8 @@ func TestDoReloadReplacementAddressBindFailureKeepsOld(t *testing.T) {
 	if li == nil {
 		t.Fatal("LastReload is nil after reload attempt")
 	}
-	if li.OK {
-		t.Error("LastReload.OK = true; want false when replacement bind failed")
+	if li.Outcome == ReloadAppliedLive {
+		t.Error("LastReload.Outcome = applied_live; want not applied when replacement bind failed")
 	}
 
 	// oldAddr must still be alive and serving the OLD handler (v1, not v2).
@@ -1067,14 +1067,14 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 	// Wait for the reload to complete and addr2 to be serving.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if li := srv.LastReload(); li != nil && li.OK {
+		if li := srv.LastReload(); li != nil && li.Outcome == ReloadAppliedLive {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	li := srv.LastReload()
-	if li == nil || !li.OK {
-		t.Fatalf("LastReload = %+v; want OK=true after reload", li)
+	if li == nil || li.Outcome != ReloadAppliedLive {
+		t.Fatalf("LastReload = %+v; want outcome=applied_live after reload", li)
 	}
 
 	// addr2 must be reachable: the bind succeeded using newCfg.

@@ -139,10 +139,10 @@ type Deps struct {
 	// preflight rejects an enabled WAF on a non-waf build.
 	WAFCompiled bool
 
-	// LastReload reports the outcome and timing of the most recent runtime
+	// LastReload reports the structured outcome of the most recent runtime
 	// reload. Nil when no reload has been attempted yet. Used by the apply
 	// handler to include the previous reload snapshot in the apply response.
-	LastReload func() *ReloadSnapshot
+	LastReload func() *server.ReloadResult
 	// PendingRestartCheck reports which startup-bound subsystems have changed
 	// on disk relative to the values the running process was built from,
 	// meaning they require a process restart to take effect. The live snapshot
@@ -150,9 +150,21 @@ type Deps struct {
 	// on-disk baseline. Returns an empty slice (or nil) when no restart is
 	// pending. Used by the Overview to show a persistent indicator when saved
 	// changes are not yet live.
-	PendingRestartCheck func(server.LiveSnapshot) []string}
+	PendingRestartCheck func(server.LiveSnapshot) []string
 
-// ReloadSnapshot is the admin-package view of the most recent reload outcome.
+	// ApplyConfigRaw validates, persists, and reloads raw configuration bytes.
+	// The mode string is "hot" or "stage_restart". It returns a structured
+	// result correlated with the live reload outcome.
+	ApplyConfigRaw func([]byte, string) (ConfigApplyResult, error)
+	// ApplyConfig validates, persists, and reloads a structured config object.
+	// The mode string is "hot" or "stage_restart". It returns a structured
+	// result correlated with the live reload outcome.
+	ApplyConfig func(*config.Config, string) (ConfigApplyResult, error)
+}
+
+// ReloadSnapshot is the legacy admin-package view of the most recent reload
+// outcome. It is kept for one compatibility release; new code should use
+// server.ReloadResult.
 type ReloadSnapshot struct {
 	OK       bool          `json:"ok"`
 	TimedOut bool          `json:"timed_out"`

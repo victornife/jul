@@ -44,13 +44,25 @@ const (
 // apply paths so the exact preflight-resolved candidate is tied to the event
 // that publishes it (R9-02). File-watch and SIGHUP events carry a nil
 // Candidate and the live reload falls back to loading from the source.
+//
+// For correlated results, callers may set ID, Deadline, and Result. ID is
+// returned verbatim in ReloadResult. Deadline bounds the pre-publish phases;
+// a zero deadline means no per-request bound. Result is a buffered channel
+// with capacity one; the server sends the ReloadResult non-blockingly.
 type ReloadRequest struct {
+	ID        string
 	Source    ReloadSource
 	Candidate *config.Candidate
 	// RawDigest, when non-empty, is the SHA-256 of the raw configuration bytes
 	// that Candidate represents. It lets the server reject a stale candidate
 	// if the on-disk file has changed since the candidate was injected.
 	RawDigest [32]byte
+	// Deadline bounds the pre-publish preparation work. A zero value means no
+	// per-request deadline; the process context governs cancellation.
+	Deadline time.Time
+	// Result receives the structured outcome of this reload. When non-nil the
+	// server sends the result once, non-blockingly, after the reload finishes.
+	Result chan<- ReloadResult
 }
 
 // HandlerFactory prepares a new handler generation for cfg without committing
@@ -108,7 +120,10 @@ type Server struct {
 	// but do not roll back the handler swap.
 	OnReloaded func(*config.Config) error
 
-	lastReload atomic.Pointer[lastReloadInfo]
+	lastReload atomic.Pointer[ReloadResult]
+	// baseCtx is the process-level context stored during Run. It is used to
+	// derive per-reload deadline contexts in doReload.
+	baseCtx context.Context
 
 	mu  sync.Mutex
 	cfg *config.Config
@@ -146,15 +161,6 @@ type Server struct {
 	serveErr chan error
 }
 
-// lastReloadInfo captures the outcome and timing of the most recent reload.
-type lastReloadInfo struct {
-	OK       bool
-	TimedOut bool
-	Duration time.Duration
-	At       time.Time
-	Error    string
-}
-
 // runtimeState is an immutable snapshot of the server's live runtime state.
 // It is published atomically so readers (LiveSnapshot, preflight) observe a
 // coherent view: the effective config, raw config, bound listener set, and
@@ -174,7 +180,7 @@ type runtimeState struct {
 
 // LastReload returns a copy of the most recent reload outcome. It returns nil
 // if no reload has been attempted.
-func (s *Server) LastReload() *lastReloadInfo {
+func (s *Server) LastReload() *ReloadResult {
 	if p := s.lastReload.Load(); p != nil {
 		cp := *p
 		return &cp
@@ -396,6 +402,7 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 // separately so the initial generation's secrets remain masked for the
 // process lifetime.
 func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRedaction redact.State) error {
+	s.baseCtx = ctx
 	// The startup effective config is already resolved by the composition root
 	// and passed as s.cfg. The factory receives the same candidate that will be
 	// served, so there is no second secret resolution at startup (R7-05).
@@ -846,10 +853,32 @@ func (s *Server) redactUnionLocked() redact.State {
 // 10. PostCommit — log level, GOMAXPROCS, stream reload.
 // On any failure before Publish, plan.Abort() releases candidate resources.
 func (s *Server) doReload(req ReloadRequest) {
+	result := ReloadResult{
+		ID:        req.ID,
+		Source:    req.Source,
+		StartedAt: time.Now(),
+	}
+	defer s.sendReloadResult(req.Result, &result)
+
 	if s.source == nil {
+		result.Outcome = ReloadNotApplied
+		result.Error = "reload source is nil"
 		return
 	}
-	s.log.Info("reloading configuration", "source", s.source.Name())
+
+	// Derive a per-request context bounded by the caller's deadline. A zero
+	// deadline means no per-request bound; the process context still governs
+	// cancellation. The deadline is based on the currently serving config's
+	// reload_timeout, so a candidate that changes reload_timeout affects the
+	// next transaction, never this one (R15-01).
+	reloadCtx := s.baseCtx
+	if !req.Deadline.IsZero() {
+		ctx, cancel := context.WithDeadline(s.baseCtx, req.Deadline)
+		defer cancel()
+		reloadCtx = ctx
+	}
+
+	s.log.Info("reloading configuration", "source", s.source.Name(), "reload_id", req.ID)
 
 	var plan *ReloadPlan
 	if req.Candidate != nil {
@@ -857,21 +886,23 @@ func (s *Server) doReload(req ReloadRequest) {
 		// If the on-disk file has diverged from the candidate's raw digest,
 		// fall back to source load so a stale candidate cannot publish.
 		if s.candidateStillValid(req) {
-			plan = s.newReloadPlan(req.Candidate.Raw, req.Candidate)
+			plan = s.newReloadPlan(reloadCtx, req.Candidate.Raw, req.Candidate)
 		} else {
-			s.log.Warn("reload: injected candidate no longer matches persisted file; falling back to source load", "source", s.source.Name())
+			s.log.Warn("reload: injected candidate no longer matches persisted file; falling back to source load", "source", s.source.Name(), "reload_id", req.ID)
 		}
 	}
 	if plan == nil {
 		newCfg, err := s.source.Load()
 		if err != nil {
-			s.log.Error("reload aborted: load failed", "error", err)
-			s.lastReload.Store(&lastReloadInfo{OK: false, At: time.Now(), Error: err.Error()})
+			s.log.Error("reload aborted: load failed", "error", err, "reload_id", req.ID)
+			result.Outcome = ReloadNotApplied
+			result.FailedPhase = "load"
+			result.Error = "load: " + err.Error()
 			return
 		}
-		plan = s.newReloadPlan(newCfg, nil)
+		plan = s.newReloadPlan(reloadCtx, newCfg, nil)
 	}
-	info := &lastReloadInfo{At: plan.start}
+	result.StartedAt = plan.start
 
 	// Phase 1–5: side-effect-free preparation.
 	for _, phase := range []struct {
@@ -886,61 +917,105 @@ func (s *Server) doReload(req ReloadRequest) {
 	} {
 		if err := phase.fn(); err != nil {
 			plan.Abort()
-			info.Duration = time.Since(plan.start)
-			info.OK = false
-			info.Error = phase.name + ": " + err.Error() + "; reload aborted"
-			s.log.Error("reload aborted", "stage", phase.name, "error", err)
-			s.lastReload.Store(info)
+			result.CompletedAt = time.Now()
+			result.DurationMS = time.Since(plan.start).Milliseconds()
+			result.Outcome = ReloadNotApplied
+			result.FailedPhase = phase.name
+			if reloadCtx.Err() != nil {
+				result.TimedOut = true
+				result.TimedOutPhase = phase.name
+			}
+			result.Error = phase.name + ": " + err.Error() + "; reload aborted"
+			s.log.Error("reload aborted", "stage", phase.name, "error", err, "reload_id", req.ID)
 			return
 		}
 	}
+	result.DesiredVersion = CanonicalVersion(plan.Candidate.Effective)
 
 	// Phase 6: publish — this is the point of no return.
 	if _, err := plan.Publish(); err != nil {
 		plan.Abort()
-		info.Duration = time.Since(plan.start)
-		info.OK = false
-		info.Error = "publish: " + err.Error()
-		s.log.Error("reload aborted", "stage", "publish", "error", err)
-		s.lastReload.Store(info)
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNotApplied
+		result.FailedPhase = "publish"
+		if reloadCtx.Err() != nil {
+			result.TimedOut = true
+			result.TimedOutPhase = "publish"
+		}
+		result.Error = "publish: " + err.Error()
+		s.log.Error("reload aborted", "stage", "publish", "error", err, "reload_id", req.ID)
 		return
 	}
+	result.Published = true
 
-	// Phase 7–10: activation and post-commit side effects.
+	// Phase 7–10: activation and post-commit side effects. After Publish we
+	// complete the minimum safe work even if the deadline has expired.
 	plan.Activate()
 	plan.RetireRemovedListeners()
 	plan.FinalizeRuntimeState()
 	certErrs := plan.RefreshCerts()
 	onReloadErr := plan.PostCommit()
 
-	info.Duration = time.Since(plan.start)
-	// Advisory timeout check: warn but do not fail the reload.
-	threshold := plan.Candidate.Effective.Global.ReloadTimeout.Std()
-	if threshold > 0 && info.Duration > threshold {
-		info.TimedOut = true
-		s.log.Warn("reload exceeded timeout threshold", "duration", info.Duration, "threshold", threshold)
+	result.CompletedAt = time.Now()
+	result.DurationMS = time.Since(plan.start).Milliseconds()
+	result.ServingVersion = CanonicalVersion(plan.Candidate.Effective)
+
+	// HTTP subsystem result covers the publish/activate/retire work.
+	result.HTTP = ReloadSubsystemResult{
+		Status:     ReloadSubsystemOK,
+		DurationMS: plan.phaseDurationMS("publish") + plan.phaseDurationMS("activate") + plan.phaseDurationMS("retire"),
+	}
+
+	// Stream subsystem result covers the post-commit hook (which reloads the
+	// L4 stream proxy when configured).
+	result.Stream = ReloadSubsystemResult{Status: ReloadSubsystemOK}
+	if onReloadErr != nil {
+		result.Stream = ReloadSubsystemResult{
+			Status:     ReloadSubsystemFailed,
+			DurationMS: plan.phaseDurationMS("post_commit"),
+			Error:      onReloadErr.Error(),
+		}
+	}
+
+	if reloadCtx.Err() != nil {
+		result.TimedOut = true
+		result.TimedOutPhase = "post_commit"
 	}
 
 	switch {
 	case len(certErrs) > 0 && onReloadErr != nil:
-		info.OK = false
-		info.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") +
+		result.Outcome = ReloadAppliedDegraded
+		result.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") +
 			"; stream reload: " + onReloadErr.Error()
 		s.log.Warn("reload completed with errors", "cert_errors", strings.Join(certErrs, "; "),
-			"stream_error", onReloadErr)
+			"stream_error", onReloadErr, "reload_id", req.ID)
 	case len(certErrs) > 0:
-		info.OK = false
-		info.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") + "; old certificate(s) remain active"
-		s.log.Warn("reload completed with certificate errors", "errors", strings.Join(certErrs, "; "))
+		result.Outcome = ReloadAppliedDegraded
+		result.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") + "; old certificate(s) remain active"
+		s.log.Warn("reload completed with certificate errors", "errors", strings.Join(certErrs, "; "), "reload_id", req.ID)
 	case onReloadErr != nil:
-		info.OK = false
-		info.Error = "degraded: stream reload: " + onReloadErr.Error()
-		s.log.Warn("reload completed with stream error", "error", onReloadErr)
+		result.Outcome = ReloadAppliedDegraded
+		result.Error = "degraded: stream reload: " + onReloadErr.Error()
+		s.log.Warn("reload completed with stream error", "error", onReloadErr, "reload_id", req.ID)
 	default:
-		info.OK = true
-		s.log.Info("configuration reloaded", "duration", info.Duration)
+		result.Outcome = ReloadAppliedLive
+		s.log.Info("configuration reloaded", "duration_ms", result.DurationMS, "reload_id", req.ID)
 	}
-	s.lastReload.Store(info)
+}
+
+// sendReloadResult sends r to ch without blocking. A nil or full channel is
+// treated as a discarded result; the result is still stored in lastReload.
+func (s *Server) sendReloadResult(ch chan<- ReloadResult, r *ReloadResult) {
+	s.lastReload.Store(r)
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- *r:
+	default:
+		s.log.Warn("reload result channel was full; result discarded for caller", "reload_id", r.ID)
+	}
 }
 
 // reloadCertificates is now a no-op: TLS certificate rotation is restart-only
