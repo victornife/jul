@@ -94,8 +94,9 @@ func (m *Manager) Close() error {
 
 // Build compiles and instantiates every declared plugin into a Set for one
 // configuration generation. On any error the partially built Set is closed and
-// the error returned, so a rejected reload leaks no runtimes.
-func (m *Manager) Build(cfg map[string]config.PluginConfig) (*Set, error) {
+// the error returned, so a rejected reload leaks no runtimes. ctx bounds the
+// build and is checked between plugins so a cancelled reload stops promptly.
+func (m *Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig) (*Set, error) {
 	s := &Set{plugins: make(map[string]*plugin, len(cfg))}
 	ok := false
 	defer func() {
@@ -104,6 +105,9 @@ func (m *Manager) Build(cfg map[string]config.PluginConfig) (*Set, error) {
 		}
 	}()
 	for name, pc := range cfg {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("plugin %q: %w", name, err)
+		}
 		p, err := m.compilePlugin(name, pc)
 		if err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", name, err)

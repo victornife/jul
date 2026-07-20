@@ -721,18 +721,18 @@ commitments, keyboard-shortcut map, and verification live in
 
 ## Known limitations
 
-- **Single shared admin token (known GA limitation — [#59](https://github.com/victornife/jul/issues/59)).**
-  All Console users share the same `[admin].token`; there is no per-user
-  authentication, authorization scopes, session isolation, or per-operator audit
-  attribution. The token is a shared secret: treat a compromise as a full
-  control-plane compromise. Mitigations: keep the admin listener on loopback,
-  rotate the token on team changes, restrict filesystem access to the config file.
-  The scoped multi-principal replacement (predefined + custom roles, revocable
-  tokens, per-principal audit attribution) is designed in
-  [docs/specs/console-rbac.md](specs/console-rbac.md) ([ADR 0010](adr/0010-console-rbac.md))
-  and tracked in [#59](https://github.com/victornife/jul/issues/59).
-  Token rotation requires editing the configuration file and reloading the server
-  (or applying the change through the Console, itself gated by the current token).
+- **RBAC is opt-in.** When `[admin].rbac.enabled` is `false` (the default for
+  backward compatibility) all Console users share the same `[admin].token`;
+  there is no per-user authentication, authorization scopes, session isolation,
+  or per-operator audit attribution. Enable RBAC per
+  [docs/specs/console-rbac.md](specs/console-rbac.md) to get named principals,
+  predefined and custom roles, and per-principal audit attribution. Disabling
+  RBAC after it was enabled clears the active policy on the next successful hot
+  reload and the server falls back to the configured legacy token (or anonymous
+  loopback access when no token is configured). The admin listener address
+  remains startup-bound; changing it requires a process restart.
+- Token rotation via a hot apply is reflected immediately by the admin server;
+  the Console does not need to be restarted to pick up a new `[admin].token`.
 - The in-console **Operations → Logs** tail is a bounded, privacy-preserving view
   of recent access-log lines (paths redacted, query strings dropped, User-Agents
   reduced to a coarse family); the configured sinks (server log, file, or syslog)

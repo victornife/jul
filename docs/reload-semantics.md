@@ -66,15 +66,18 @@ reload rather than silent mixed state.
   and a reload was triggered. This is what the apply API confirms.
 - **Serving** — the live runtime has finished swapping to the new configuration.
 
-The admin apply path now waits for the live reload outcome up to the configured
-`reload_timeout` plus a small scheduling margin. The response includes a
-`reload` object that carries the correlated result: `outcome`
-(`applied_live`, `applied_degraded`, `not_applied`, or `saved_not_live`),
-`started_at`, `completed_at`, `duration_ms`, per-subsystem status (`http` and
-`stream`), and the `desired_version` / `serving_version` fingerprints. If the
-reload is still in flight when the coordinator's wait expires, the response
-returns `saved_not_live` so the operator knows the config is persisted but the
-live swap has not yet been confirmed.
+The admin apply path waits for the live reload outcome up to the **currently
+serving** config's `reload_timeout` plus a small scheduling margin. A candidate
+that changes `reload_timeout` affects the *next* apply, never the one that
+submits it (R15-01). The response includes a `reload` object that carries the
+correlated result: `outcome` (`applied_live`, `applied_degraded`,
+`not_applied`, or `saved_not_live`), `started_at`, `completed_at`,
+`duration_ms`, `persisted`, per-subsystem status (`http`, `stream`, and
+`admin`), per-phase timings in `phase_durations_ms` (milliseconds), and the
+`desired_version` / `serving_version` fingerprints. If the reload is still in
+flight when the coordinator's wait expires, the response returns
+`saved_not_live` so the operator knows the config is persisted but the live
+swap has not yet been confirmed.
 
 ## Managed apply coordinator
 
@@ -210,9 +213,17 @@ are:
 On any failure before Publish, `Abort()` releases all candidate resources
 without touching live state. On any failure after Publish, the reload is
 recorded as **degraded** (`Outcome=applied_degraded`) but is not rolled back,
-because Publish is the point of no return. Every phase records its wall-clock
-duration; the total `duration_ms` and per-subsystem timings are exposed in the
+because Publish is the point of no return. If the reload deadline expires
+after Publish, the outcome is also reported as `applied_degraded` rather than
+`not_applied`, because the handler generation has already committed and an
+unsafe rollback would risk mixed state. Every phase records its wall-clock
+duration in milliseconds; the total `duration_ms`, per-phase
+`phase_durations_ms`, and per-subsystem timings are exposed in the
 `ReloadResult`.
+
+The `admin` subsystem reports RBAC policy update failures independently of the
+`stream` subsystem, so a policy installation problem does not mask the L4
+stream-proxy reload status.
 
 ### Publish-then-Activate ordering
 

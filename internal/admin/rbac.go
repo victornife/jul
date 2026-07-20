@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"jul/internal/config"
 	"jul/internal/rbac"
 )
 
@@ -23,13 +24,31 @@ type rbacPolicy struct {
 // successful hot reload. The server continues serving with the previous policy
 // until the new one is installed.
 //
-// A nil policy clears RBAC; the server falls back to legacy single-token auth.
+// A nil policy clears RBAC; the server falls back to legacy single-token auth
+// (or anonymous access when no legacy token is configured).
 func (s *Server) UpdatePolicy(p *rbac.Policy) {
 	if p == nil {
 		s.policy.Store(nil)
 		return
 	}
 	s.policy.Store(&rbacPolicy{p: p})
+}
+
+// UpdateLiveAdminConfig stores the latest effective admin config so auth
+// handlers and status endpoints see live token/settings without restarting.
+// The listener address is never updated here; it remains startup-bound.
+func (s *Server) UpdateLiveAdminConfig(cfg config.AdminConfig) {
+	cfg.Listen = s.cfg.Listen // guard against accidental address changes
+	s.liveCfg.Store(&cfg)
+}
+
+// currentAdminConfig returns the most recently applied admin config. It falls
+// back to the startup config when no live config has been stored.
+func (s *Server) currentAdminConfig() config.AdminConfig {
+	if c := s.liveCfg.Load(); c != nil {
+		return *c
+	}
+	return s.cfg
 }
 
 // currentPolicy returns the active RBAC policy, or nil when no policy is set.
@@ -85,11 +104,12 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 			id = authID
 		} else {
 			// ── Legacy single-token path ───────────────────────────────────
-			if s.cfg.Token != "" {
+			adminCfg := s.currentAdminConfig()
+			if adminCfg.Token != "" {
 				const prefix = "Bearer "
 				h := r.Header.Get("Authorization")
 				ok := len(h) > len(prefix) &&
-					subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(s.cfg.Token)) == 1
+					subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(adminCfg.Token)) == 1
 				if !ok {
 					w.Header().Set("WWW-Authenticate", "Bearer")
 					http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
@@ -135,11 +155,12 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 		}
 
 		// RBAC disabled — fall back to legacy single-token constant-time comparison.
-		if s.cfg.Token != "" {
+		adminCfg := s.currentAdminConfig()
+		if adminCfg.Token != "" {
 			const prefix = "Bearer "
 			h := r.Header.Get("Authorization")
 			ok := len(h) > len(prefix) &&
-				subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(s.cfg.Token)) == 1
+				subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(adminCfg.Token)) == 1
 			if !ok {
 				w.Header().Set("WWW-Authenticate", "Bearer")
 				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)

@@ -331,14 +331,16 @@ func (p *ReloadPlan) RefreshCerts() []string {
 }
 
 // PostCommit applies dynamic side effects that must only run on a committed
-// reload: log level, GOMAXPROCS, and stream-proxy reload.
-func (p *ReloadPlan) PostCommit() error {
+// reload: log level, GOMAXPROCS, RBAC policy update, and stream-proxy reload.
+// It returns admin- and stream-specific errors separately so the server can
+// report them in distinct ReloadResult subsystems.
+func (p *ReloadPlan) PostCommit() (adminErr, streamErr error) {
 	start := time.Now()
 	defer func() { p.phaseDurations["post_commit"] = time.Since(start) }()
 	if p.s.OnReloaded != nil {
 		return p.s.OnReloaded(p.Candidate.Effective)
 	}
-	return nil
+	return nil, nil
 }
 
 // Abort releases every candidate resource owned by the plan. It is safe to

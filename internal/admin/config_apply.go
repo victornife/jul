@@ -43,6 +43,7 @@ type ConfigApplyResult struct {
 type PendingRestartStatus struct {
 	Managed          bool     `json:"managed"`
 	Staged           bool     `json:"staged"`
+	External         bool     `json:"external,omitempty"`
 	StagedAt         string   `json:"staged_at,omitempty"`
 	StagedVersion    string   `json:"staged_version,omitempty"`
 	ServingVersion   string   `json:"serving_version,omitempty"`

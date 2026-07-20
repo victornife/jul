@@ -7,6 +7,7 @@ package plugins
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -34,7 +35,7 @@ func FuzzPluginInvoke(f *testing.F) {
 	}
 	defer m.Close()
 
-	s, err := m.Build(map[string]config.PluginConfig{
+	s, err := m.Build(context.Background(), map[string]config.PluginConfig{
 		"test": {
 			Path:        testdataDir + "header-inject.wasm",
 			Type:        "middleware",

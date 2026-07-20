@@ -6,6 +6,7 @@
 package plugins
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -34,7 +35,7 @@ func testManager(t *testing.T) *Manager {
 
 func buildSet(t *testing.T, m *Manager, cfg map[string]config.PluginConfig) *Set {
 	t.Helper()
-	s, err := m.Build(cfg)
+	s, err := m.Build(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -385,7 +386,7 @@ func TestReloadUnderLoad(t *testing.T) {
 
 func TestBuildRejectsMissingModule(t *testing.T) {
 	m := testManager(t)
-	_, err := m.Build(map[string]config.PluginConfig{
+	_, err := m.Build(context.Background(), map[string]config.PluginConfig{
 		"bad": {Path: testdataDir + "does-not-exist.wasm", Type: "middleware"},
 	})
 	if err == nil {

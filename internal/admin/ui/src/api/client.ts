@@ -5,6 +5,40 @@
 
 import { z } from "zod";
 
+// ── Shared reload-result schema ──────────────────────────────────────────────
+//
+// Mirrors server.ReloadResult. The same shape is returned as `reload` in an
+// apply response and as `last_reload` in the runtime overview. Keeping one
+// schema avoids drift between the two consumption paths.
+
+const ReloadSubsystemResultSchema = z.object({
+  status: z.string().optional(),
+  duration_ms: z.number().optional(),
+  error: z.string().optional(),
+});
+
+export const ReloadResultSchema = z.object({
+  id: z.string().optional(),
+  source: z.string().optional(),
+  outcome: z.string().optional(),
+  desired_version: z.string().optional(),
+  serving_version: z.string().optional(),
+  started_at: z.string().optional(),
+  completed_at: z.string().optional(),
+  duration_ms: z.number().optional(),
+  persisted: z.boolean().optional(),
+  published: z.boolean().optional(),
+  timed_out: z.boolean().optional(),
+  timed_out_phase: z.string().optional(),
+  failed_phase: z.string().optional(),
+  phase_durations_ms: z.record(z.number()).optional(),
+  http: ReloadSubsystemResultSchema.optional(),
+  stream: ReloadSubsystemResultSchema.optional(),
+  admin: ReloadSubsystemResultSchema.optional(),
+  error: z.string().optional(),
+});
+export type ReloadResult = z.infer<typeof ReloadResultSchema>;
+
 // ── Design-token helpers ─────────────────────────────────────────────────────
 
 /** Central auth-token store (sessionStorage so it clears on tab close). */
@@ -309,6 +343,7 @@ export const OverviewSchema = z.object({
     .object({
       managed: z.boolean(),
       staged: z.boolean(),
+      external: z.boolean().optional(),
       staged_at: z.string().optional(),
       staged_version: z.string().optional(),
       serving_version: z.string().optional(),
@@ -319,18 +354,7 @@ export const OverviewSchema = z.object({
     .optional(),
   // last_reload is the correlated result of the most recent hot reload (P2-04).
   // Absent when no reload has run since startup.
-  last_reload: z
-    .object({
-      id: z.string().optional(),
-      source: z.string().optional(),
-      outcome: z.string().optional(),
-      persisted: z.boolean().optional(),
-      published: z.boolean().optional(),
-      timed_out: z.boolean().optional(),
-      duration_ms: z.number().optional(),
-      error: z.string().optional(),
-    })
-    .optional(),
+  last_reload: ReloadResultSchema.optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 
@@ -1273,18 +1297,7 @@ export const ApplyResultSchema = z.object({
   // reload is the correlated result of the live reload triggered by this apply
   // (P2-04). Replaces previous_reload for new consumers; both are present
   // during the compatibility window.
-  reload: z
-    .object({
-      id: z.string().optional(),
-      source: z.string().optional(),
-      outcome: z.string().optional(),
-      persisted: z.boolean().optional(),
-      published: z.boolean().optional(),
-      timed_out: z.boolean().optional(),
-      duration_ms: z.number().optional(),
-      error: z.string().optional(),
-    })
-    .optional(),
+  reload: ReloadResultSchema.optional(),
   // pending_restart is set when mode=stage_restart and the staged config is now
   // waiting for a process restart to take effect.
   pending_restart: z

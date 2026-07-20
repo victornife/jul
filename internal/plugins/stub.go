@@ -11,6 +11,7 @@
 package plugins
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -52,7 +53,7 @@ func (*Manager) Close() error { return nil }
 
 // Build returns an empty Set when no plugins are configured, and an error when
 // any are, since this build cannot run them.
-func (*Manager) Build(cfg map[string]config.PluginConfig) (*Set, error) {
+func (*Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig) (*Set, error) {
 	if len(cfg) > 0 {
 		return nil, errors.New("plugins are configured but this build was compiled without the \"wasmplugins\" tag")
 	}

@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"net/http"
@@ -35,7 +36,7 @@ func (h *okHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func newAuth(t *testing.T, cfg config.AuthConfig, onDecision func(string, string)) *Authenticator {
 	t.Helper()
-	a, err := New(cfg, Options{OnDecision: onDecision})
+	a, err := New(context.Background(), cfg, Options{OnDecision: onDecision})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

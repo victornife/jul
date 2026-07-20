@@ -199,6 +199,11 @@ type Server struct {
 	// enabled; legacy single-token auth is used when the pointer is nil or when
 	// the stored policy reports !Enabled().
 	policy atomic.Pointer[rbacPolicy]
+	// liveCfg holds the most recently applied admin config. It is updated
+	// after every successful hot reload so legacy token changes take effect
+	// without requiring a process restart. The listener address remains
+	// startup-bound and is read from cfg.Listen.
+	liveCfg atomic.Pointer[config.AdminConfig]
 	// applyMu serializes config writes (raw apply, structured patch apply, and
 	// history rollback) so optimistic-concurrency checks and the write they guard
 	// are atomic, closing the read-modify-write race between concurrent edits
@@ -229,6 +234,7 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		Handler:           s.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	s.liveCfg.Store(&cfg)
 	return s
 }
 
@@ -238,7 +244,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.log.Info("admin listener started", "addr", s.cfg.Listen, "auth", s.cfg.Token != "")
+	s.log.Info("admin listener started", "addr", s.cfg.Listen, "auth", s.currentAdminConfig().Token != "")
 	// The admin API grants full read/write control of the running server and
 	// uses a single shared bearer token with no RBAC. It is designed for
 	// single-operator, loopback-bound use. Binding to a routable address
@@ -516,14 +522,15 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	adminCfg := s.currentAdminConfig()
 	resp := map[string]any{
 		"product":        s.deps.Product,
 		"version":        s.deps.Version,
 		"path":           s.deps.ConfigPath,
-		"authRequired":   s.cfg.Token != "",
+		"authRequired":   adminCfg.Token != "",
 		"rawEditable":    s.deps.WriteConfigRaw != nil,
 		"formEditable":   s.deps.LoadConfig != nil && s.deps.SaveConfig != nil,
-		"consoleEnabled": consoleV2Compiled && s.cfg.ConsoleEnabled(),
+		"consoleEnabled": consoleV2Compiled && adminCfg.ConsoleEnabled(),
 	}
 	if s.deps.ReadConfigRaw != nil {
 		raw, err := s.deps.ReadConfigRaw()

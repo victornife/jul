@@ -627,15 +627,15 @@ func (m *Metrics) ObserveReload(source, outcome string, durationMs int64) {
 // outcome is the terminal classification string; phaseDurations is the per-phase
 // timing map from ReloadResult.PhaseDurations; timedOut/timedOutPhase come from
 // the ReloadResult.TimedOut/TimedOutPhase fields.
-func (m *Metrics) ObserveReloadResult(outcome string, phaseDurations map[string]time.Duration, timedOut bool, timedOutPhase string) {
+func (m *Metrics) ObserveReloadResult(outcome string, phaseDurations map[string]int64, timedOut bool, timedOutPhase string) {
 	if timedOut {
 		if timedOutPhase == "" {
 			timedOutPhase = "unknown"
 		}
 		m.reloadTimeouts.WithLabelValues(timedOutPhase).Inc()
 	}
-	for phase, d := range phaseDurations {
-		m.reloadPhaseDuration.WithLabelValues(phase, outcome).Observe(d.Seconds())
+	for phase, ms := range phaseDurations {
+		m.reloadPhaseDuration.WithLabelValues(phase, outcome).Observe(float64(ms) / 1000.0)
 	}
 }
 

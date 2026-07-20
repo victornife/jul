@@ -32,7 +32,7 @@ func passDial(ctx context.Context, network, addr string) (net.Conn, error) {
 
 func newAuthWithDial(t *testing.T, cfg config.AuthConfig, dial DialFunc) *Authenticator {
 	t.Helper()
-	a, err := New(cfg, Options{DialContext: dial})
+	a, err := New(context.Background(), cfg, Options{DialContext: dial})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

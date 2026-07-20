@@ -154,7 +154,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// module) fails here, rejecting the reload. The set owns per-plugin wazero
 	// runtimes; register it for generational teardown so the previous set is
 	// closed only after the new handlers are live.
-	pluginSet, err := f.PluginMgr.Build(c.Plugins)
+	pluginSet, err := f.PluginMgr.Build(ctx, c.Plugins)
 	if err != nil {
 		return nil, fmt.Errorf("plugins: %w", err)
 	}
@@ -216,7 +216,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			return withCache(loc, h), nil
 		},
 		router.ActionGRPCTranscode: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
-			h, err := handler.NewGRPCTranscode(srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCTranscode, f.Metrics.ObserveGRPCTranscodeStreamMsg)
+			h, err := handler.NewGRPCTranscode(ctx, srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCTranscode, f.Metrics.ObserveGRPCTranscodeStreamMsg)
 			if err != nil {
 				return nil, err
 			}
@@ -269,7 +269,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				continue
 			}
 			key := AuthScope(c.Servers[i], loc)
-			a, err := auth.New(*loc.Auth, auth.Options{
+			a, err := auth.New(ctx, *loc.Auth, auth.Options{
 				Logger:      f.Log,
 				OnDecision:  f.Metrics.ObserveAuthDecision,
 				DialContext: f.EgressDial,
@@ -305,7 +305,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if !ok {
 				continue
 			}
-			fw, err := waf.New(wcfg, waf.Options{
+			fw, err := waf.New(ctx, wcfg, waf.Options{
 				Logger: f.Log,
 				Hooks:  waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
 			})

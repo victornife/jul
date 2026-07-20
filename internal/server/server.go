@@ -77,6 +77,9 @@ type ReloadRequest struct {
 	// Result receives the structured outcome of this reload. When non-nil the
 	// server sends the result once, non-blockingly, after the reload finishes.
 	Result chan<- ReloadResult
+	// AdminErr, when set by the caller, is reported as a failed admin
+	// subsystem in the reload result. The app layer uses this to surface RBAC
+	// policy update failures independently of stream-proxy reload status.
 }
 
 // HandlerFactory prepares a new handler generation for cfg without committing
@@ -129,10 +132,14 @@ type Server struct {
 
 	// OnReloaded, when set, is invoked after the new HTTP handlers are live
 	// (handler swap and listener changes committed). It applies side-effects that
-	// must not run on an aborted reload: log-level changes, GOMAXPROCS, and the
-	// stream-proxy config update. Errors are reported as a degraded reload result
-	// but do not roll back the handler swap.
-	OnReloaded func(*config.Config) error
+	// must not run on an aborted reload: log-level changes, GOMAXPROCS, RBAC
+	// policy update, and the stream-proxy config update. Errors are reported as
+	// a degraded reload result but do not roll back the handler swap.
+	//
+	// The returned adminErr and streamErr are reported separately in
+	// ReloadResult.Admin and ReloadResult.Stream so RBAC policy failures do
+	// not mask stream-proxy status.
+	OnReloaded func(*config.Config) (adminErr, streamErr error)
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.
@@ -918,6 +925,9 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.Error = "reload source is nil"
 		return
 	}
+	// All reloads operate on the persisted configuration: admin apply writes
+	// the candidate before submitting, and SIGHUP/file-watch load from source.
+	result.Persisted = true
 
 	// Derive a per-request context bounded by the caller's deadline. A zero
 	// deadline means no per-request bound; the process context still governs
@@ -1008,18 +1018,19 @@ func (s *Server) doReload(req ReloadRequest) {
 	plan.RetireRemovedListeners()
 	plan.FinalizeRuntimeState()
 	certErrs := plan.RefreshCerts()
-	onReloadErr := plan.PostCommit()
+	adminErr, onReloadErr := plan.PostCommit()
 
 	result.CompletedAt = time.Now()
 	result.DurationMS = time.Since(plan.start).Milliseconds()
 	result.ServingVersion = CanonicalVersion(plan.Candidate.Effective)
 
 	// Copy per-phase durations into the result so callers can observe them
-	// (M-04: jul_reload_phase_duration_seconds metric).
+	// (M-04: jul_reload_phase_duration_seconds metric). Values are in
+	// milliseconds to match the JSON field name.
 	if len(plan.phaseDurations) > 0 {
-		result.PhaseDurations = make(map[string]time.Duration, len(plan.phaseDurations))
+		result.PhaseDurations = make(map[string]int64, len(plan.phaseDurations))
 		for k, v := range plan.phaseDurations {
-			result.PhaseDurations[k] = v
+			result.PhaseDurations[k] = v.Milliseconds()
 		}
 	}
 
@@ -1040,9 +1051,17 @@ func (s *Server) doReload(req ReloadRequest) {
 		}
 	}
 
-	if reloadCtx.Err() != nil {
-		result.TimedOut = true
-		result.TimedOutPhase = "post_commit"
+	// Admin subsystem result covers RBAC policy update and live admin config
+	// refresh. The OnReloaded hook in the app layer returns admin- and
+	// stream-specific errors separately so a policy issue does not mask
+	// stream status.
+	result.Admin = ReloadSubsystemResult{Status: ReloadSubsystemOK}
+	if adminErr != nil {
+		result.Admin = ReloadSubsystemResult{
+			Status:     ReloadSubsystemFailed,
+			DurationMS: plan.phaseDurationMS("post_commit"),
+			Error:      adminErr.Error(),
+		}
 	}
 
 	switch {
@@ -1063,6 +1082,19 @@ func (s *Server) doReload(req ReloadRequest) {
 	default:
 		result.Outcome = ReloadAppliedLive
 		s.log.Info("configuration reloaded", "duration_ms", result.DurationMS, "reload_id", req.ID)
+	}
+
+	if reloadCtx.Err() != nil {
+		result.TimedOut = true
+		result.TimedOutPhase = "post_commit"
+		// A timeout after Publish cannot roll back safely; report the reload
+		// as degraded so operators know the final side effects are incomplete.
+		if result.Outcome == ReloadAppliedLive {
+			result.Outcome = ReloadAppliedDegraded
+			result.Error = "degraded: reload timed out after Publish; activation/post-commit side effects may be incomplete"
+		} else if result.Error != "" {
+			result.Error += "; reload timed out after Publish"
+		}
 	}
 }
 

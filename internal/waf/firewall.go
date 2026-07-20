@@ -6,6 +6,7 @@
 package waf
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -38,8 +39,12 @@ type Firewall struct {
 // enforcement-mode override), compiles the engine, and wires the per-rule error
 // callback to the supplied metrics/log hooks. It returns an error if the rules
 // fail to compile so a reload surfaces the problem instead of silently serving
-// without protection.
-func New(cfg config.WAFConfig, opts Options) (*Firewall, error) {
+// without protection. ctx bounds the compilation and is checked before and
+// after the most expensive steps.
+func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	directives, err := buildDirectives(cfg)
 	if err != nil {
 		return nil, err

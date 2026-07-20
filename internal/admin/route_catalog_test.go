@@ -166,6 +166,96 @@ func TestRequirePermissionAllowsLegacyToken(t *testing.T) {
 	}
 }
 
+// TestRBACDisableClearsPolicy verifies that disabling RBAC after it was
+// enabled clears the active policy and falls back to legacy token auth.
+func TestRBACDisableClearsPolicy(t *testing.T) {
+	const rbacTok = "rbac-admin-32-chars-padded-------"
+	const legacyTok = "legacy-tok-32-chars-padded-------"
+	pol, err := rbac.Build(true, "admin", nil, []rbac.PrincipalDef{
+		{Name: "admin", Role: rbac.RoleAdmin, Token: rbacTok},
+	}, "", timeNow())
+	if err != nil {
+		t.Fatalf("build policy: %v", err)
+	}
+	s := &Server{cfg: config.AdminConfig{Token: legacyTok}}
+	s.liveCfg.Store(&config.AdminConfig{Token: legacyTok})
+	s.UpdatePolicy(pol)
+
+	// Sanity: RBAC token works while enabled.
+	h := s.requirePermission(rbac.ConfigApply, okHandler())
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", nil)
+	req.Header.Set("Authorization", "Bearer "+rbacTok)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 while RBAC enabled, got %d", rr.Code)
+	}
+
+	// Disable RBAC: policy is cleared.
+	s.UpdatePolicy(nil)
+
+	// The previously valid RBAC token must now be rejected; the legacy token
+	// takes over.
+	req = httptest.NewRequest(http.MethodPost, "/api/config/apply", nil)
+	req.Header.Set("Authorization", "Bearer "+rbacTok)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for old RBAC token after RBAC disabled, got %d", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/config/apply", nil)
+	req.Header.Set("Authorization", "Bearer "+legacyTok)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 for legacy token after RBAC disabled, got %d", rr.Code)
+	}
+}
+
+// TestLiveAdminConfigTokenUpdate verifies that updating the live admin config
+// changes the legacy token checked by auth middleware without restarting.
+func TestLiveAdminConfigTokenUpdate(t *testing.T) {
+	s := &Server{cfg: config.AdminConfig{Token: "old-token-32-chars-padded-------"}}
+	s.liveCfg.Store(&config.AdminConfig{Token: "old-token-32-chars-padded-------"})
+
+	h := s.requirePermission(rbac.ConfigApply, okHandler())
+
+	// Old token works.
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", nil)
+	req.Header.Set("Authorization", "Bearer old-token-32-chars-padded-------")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 with old token, got %d", rr.Code)
+	}
+
+	// Update live config to a new token.
+	s.UpdateLiveAdminConfig(config.AdminConfig{Token: "new-token-32-chars-padded-------"})
+
+	// New token works; old token is rejected.
+	req = httptest.NewRequest(http.MethodPost, "/api/config/apply", nil)
+	req.Header.Set("Authorization", "Bearer new-token-32-chars-padded-------")
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 with new token, got %d", rr.Code)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/config/apply", nil)
+	req.Header.Set("Authorization", "Bearer old-token-32-chars-padded-------")
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 with old token, got %d", rr.Code)
+	}
+}
+
+func okHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
 // TestRequirePermissionReturns403WhenRBACForbids verifies that an authenticated
 // RBAC principal receives 403 when they lack the required permission.
 func TestRequirePermissionReturns403WhenRBACForbids(t *testing.T) {

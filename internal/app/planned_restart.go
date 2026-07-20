@@ -65,6 +65,15 @@ type PlannedRestartMarker struct {
 	StagedAt             time.Time `json:"staged_at"`
 }
 
+// PlannedRestartState is the authoritative store state exposed to callers.
+// It captures both normal pending staged restarts and post-reconciliation
+// inconsistent states so callers can block hot applies and surface recovery
+// banners for either condition.
+type PlannedRestartState struct {
+	Pending      bool
+	Inconsistent bool
+}
+
 // PlannedRestartStore owns the managed planned-restart sidecar state. When
 // ConfigPath is empty the store operates entirely in memory (useful in tests
 // that only need IsPending/Stage/Discard behavior without a real file system).
@@ -84,9 +93,11 @@ type PlannedRestartStore struct {
 
 	// In-memory state (used in both modes for caching and in-memory-only tests).
 	pending      bool
-	raw          []byte
+	raw          []byte // staged candidate raw bytes
+	baseRaw      []byte // original pre-stage raw bytes (used for update diffs)
 	stagedAt     time.Time
 	inconsistent bool // set by Reconcile when sidecar state cannot be repaired
+	external     bool // true when an unmanaged external disk/runtime divergence is present
 }
 
 // NewFilePlannedRestartStore creates a PlannedRestartStore backed by sidecar
@@ -124,6 +135,21 @@ func (s *PlannedRestartStore) IsPending() bool {
 	return s.pending
 }
 
+// State returns the authoritative planned-restart state. Callers should use
+// this for gating hot applies and rendering banners because it includes both
+// managed pending states and post-reconciliation inconsistent states.
+func (s *PlannedRestartStore) State() PlannedRestartState {
+	if s == nil {
+		return PlannedRestartState{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return PlannedRestartState{
+		Pending:      s.pending,
+		Inconsistent: s.inconsistent || s.external,
+	}
+}
+
 // Stage records a planned-restart candidate using in-memory state only. It is
 // the backward-compatible method used by tests that do not require file backing.
 // In production use StageManaged, which writes the crash-consistent sidecar
@@ -136,7 +162,22 @@ func (s *PlannedRestartStore) Stage(raw []byte) {
 	defer s.mu.Unlock()
 	s.pending = true
 	s.raw = raw
+	if s.baseRaw == nil {
+		s.baseRaw = raw
+	}
 	s.stagedAt = time.Now()
+}
+
+// BaseRaw returns the original pre-stage raw config bytes, or nil when no
+// staged restart is pending. This is used to compute lifecycle diffs for staged
+// updates against the original serving config rather than the staged file.
+func (s *PlannedRestartStore) BaseRaw() []byte {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.baseRaw
 }
 
 // StageManaged performs a crash-consistent file-backed stage. It is the
@@ -154,6 +195,10 @@ func (s *PlannedRestartStore) Stage(raw []byte) {
 //  2. Atomically write marker state "prepared" with base/candidate digests.
 //  3. Caller writes the candidate to the active config path (AFTER this call).
 //  4. Atomically update marker state to "staged".
+//
+// This function performs steps 1 and 2 and returns. The caller MUST write the
+// candidate and then call PromoteToStaged to perform step 4. If the candidate
+// write fails, the marker remains "prepared" so Reconcile can clean up safely.
 //
 // When ConfigPath is empty the method falls back to in-memory Stage.
 func (s *PlannedRestartStore) StageManaged(prevRaw, candidateRaw []byte, marker PlannedRestartMarker) error {
@@ -192,6 +237,7 @@ func (s *PlannedRestartStore) StageManaged(prevRaw, candidateRaw []byte, marker 
 			return fmt.Errorf("planned-restart stage: write backup: %w", err)
 		}
 		marker.BaseRawSHA256 = sha256Hex(prevRaw)
+		s.baseRaw = prevRaw
 	}
 
 	// Step 2: write marker in "prepared" state before the candidate is written.
@@ -208,21 +254,37 @@ func (s *PlannedRestartStore) StageManaged(prevRaw, candidateRaw []byte, marker 
 	// Step 3 (write candidate to disk) is performed by the caller AFTER this
 	// function returns so that watcher suppression is registered before the
 	// rename becomes visible.
+	return nil
+}
 
-	// Step 4: promote marker to "staged" only after the caller has written the
-	// candidate. This function sets up the prepared state; the caller must call
-	// PromoteToStaged after the candidate write succeeds.
-	// NOTE: for simplicity, we promote here. The caller is responsible for
-	// ensuring the candidate write succeeded before considering the stage done.
-	// A crash between the candidate write and this promotion is handled by
-	// Reconcile: prepared+disk==staged-digest → promote.
+// PromoteToStaged atomically promotes a previously prepared marker to
+// "staged". It must be called only after the candidate bytes have been
+// successfully written to the active config path. If the marker is not in the
+// "prepared" state, this is a no-op.
+func (s *PlannedRestartStore) PromoteToStaged(candidateRaw []byte) error {
+	if s == nil || s.ConfigPath == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	marker, err := s.loadMarkerLocked()
+	if err != nil || marker == nil {
+		return nil
+	}
+	if marker.State != plannedRestartStatePrepared {
+		return nil
+	}
 	marker.State = plannedRestartStateStaged
-	if err := s.writeMarkerLocked(marker); err != nil {
+	if err := s.writeMarkerLocked(*marker); err != nil {
 		return fmt.Errorf("planned-restart stage: promote to staged: %w", err)
 	}
 
 	s.pending = true
 	s.raw = candidateRaw
+	if s.baseRaw == nil {
+		s.baseRaw = candidateRaw
+	}
 	s.stagedAt = marker.StagedAt
 	return nil
 }
@@ -243,7 +305,10 @@ func (s *PlannedRestartStore) Discard() ([]byte, bool) {
 	raw := s.raw
 	s.pending = false
 	s.raw = nil
+	s.baseRaw = nil
 	s.stagedAt = time.Time{}
+	s.external = false
+	s.inconsistent = false
 	return raw, true
 }
 
@@ -310,8 +375,25 @@ func (s *PlannedRestartStore) DiscardSafe(liveServingVersion string) (restoredBy
 
 	s.pending = false
 	s.raw = nil
+	s.baseRaw = nil
 	s.stagedAt = time.Time{}
+	s.external = false
+	s.inconsistent = false
 	return backupBytes, nil
+}
+
+// SetExternalDivergence marks the store as externally divergent. This is used
+// when the on-disk config differs from the running runtime in an unmanaged
+// way (e.g. an external editor changed the file). The store treats this as a
+// blocking state similar to inconsistency: hot applies are blocked until the
+// divergence is resolved (restart the process or restore the file).
+func (s *PlannedRestartStore) SetExternalDivergence(present bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.external = present
 }
 
 // Reconcile runs the crash-recovery rules from §17.4 on startup. It inspects
@@ -364,6 +446,8 @@ func (s *PlannedRestartStore) Reconcile() error {
 			_ = os.Remove(s.markerPath())
 			_ = os.Remove(s.backupPath())
 			s.pending = false
+			s.raw = nil
+			s.baseRaw = nil
 		case marker.StagedRawSHA256:
 			// Write completed but the state transition to "staged" was lost.
 			// Promote the marker to "staged" so subsequent operations see a
@@ -373,12 +457,19 @@ func (s *PlannedRestartStore) Reconcile() error {
 				return fmt.Errorf("reconcile: promote to staged: %w", werr)
 			}
 			s.pending = true
+			// Load base raw from backup so update diffs can be computed against
+			// the original serving config.
+			if base, rerr := os.ReadFile(s.backupPath()); rerr == nil {
+				s.baseRaw = base
+			}
 			s.stagedAt = marker.StagedAt
 		default:
 			// Inconsistent: disk matches neither the base nor the staged
 			// digest. Preserve the backup, set the inconsistent flag so
 			// Status() can surface it, and report the problem.
 			s.pending = false
+			s.raw = nil
+			s.baseRaw = nil
 			s.inconsistent = true
 			return fmt.Errorf("reconcile: inconsistent state: disk digest %s matches neither base %s nor staged %s; backup preserved at %s",
 				diskDigest, marker.BaseRawSHA256, marker.StagedRawSHA256, s.backupPath())
@@ -390,6 +481,8 @@ func (s *PlannedRestartStore) Reconcile() error {
 			_ = os.Remove(s.markerPath())
 			_ = os.Remove(s.backupPath())
 			s.pending = false
+			s.raw = nil
+			s.baseRaw = nil
 		} else {
 			// Staged digest does not match disk; inconsistent.
 			s.pending = false
@@ -428,9 +521,9 @@ func (s *PlannedRestartStore) Status() pendingRestartStatus {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Return inconsistent status even when !pending so callers know recovery
-	// is required and hot applies should be blocked.
-	if !s.pending && !s.inconsistent {
+	// Return inconsistent/external status even when !pending so callers know
+	// recovery is required and hot applies should be blocked.
+	if !s.pending && !s.inconsistent && !s.external {
 		return pendingRestartStatus{}
 	}
 	if s.inconsistent && !s.pending {
@@ -441,11 +534,20 @@ func (s *PlannedRestartStore) Status() pendingRestartStatus {
 			Inconsistent:     true,
 		}
 	}
+	if s.external && !s.pending {
+		return pendingRestartStatus{
+			Managed:      false,
+			Staged:       false,
+			External:     true,
+			Inconsistent: false,
+		}
+	}
 	st := pendingRestartStatus{
 		Managed:          true,
 		Staged:           true,
 		DiscardAvailable: s.ConfigPath != "",
 		Inconsistent:     s.inconsistent,
+		External:         s.external,
 		StagedAt:         s.stagedAt,
 	}
 	// Load version metadata from the marker when available.
@@ -465,6 +567,7 @@ func (s *PlannedRestartStore) Status() pendingRestartStatus {
 type pendingRestartStatus struct {
 	Managed          bool
 	Staged           bool
+	External         bool
 	StagedAt         time.Time
 	StagedVersion    string
 	ServingVersion   string

@@ -6,6 +6,7 @@
 package waf
 
 import (
+	"context"
 	"errors"
 
 	"jul/internal/config"
@@ -22,7 +23,7 @@ type Firewall struct{}
 
 // New rejects construction in a build without the "waf" tag. The startup-time
 // safety net is Check; this guards any direct construction path.
-func New(_ config.WAFConfig, _ Options) (*Firewall, error) {
+func New(_ context.Context, _ config.WAFConfig, _ Options) (*Firewall, error) {
 	return nil, errors.New("waf requires a build with -tags waf")
 }
 

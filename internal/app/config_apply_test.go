@@ -37,6 +37,19 @@ func validConfigRaw(t *testing.T, listen string) []byte {
 	return raw
 }
 
+// restartRequiredConfigRaw returns a config raw that differs from the seed
+// produced by validConfigRaw in a restart-required field (log_format).
+func restartRequiredConfigRaw(t *testing.T, listen string) []byte {
+	t.Helper()
+	cfg := config.ProxyTarget("127.0.0.1:9000", listen)
+	cfg.Global.LogFormat = "json"
+	raw, err := config.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	return raw
+}
+
 func TestCoordinatorApplyRawSuccess(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")
@@ -311,6 +324,57 @@ func TestCoordinatorApplyRawRetainsFileOnPostPublishDegradation(t *testing.T) {
 	}
 }
 
+// TestCoordinatorApplyRawUsesServingReloadTimeout verifies that the
+// coordinator uses the currently serving config's reload_timeout for the
+// transaction, not the candidate's. A candidate that changes reload_timeout
+// should affect the next apply, not this one (R15-01).
+func TestCoordinatorApplyRawUsesServingReloadTimeout(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	var gotDeadline time.Time
+	var watchDigest atomicPointer32
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			gotDeadline = req.Deadline
+			go func() {
+				req.Result <- server.ReloadResult{
+					ID:        req.ID,
+					Source:    server.ReloadSourceAdmin,
+					Outcome:   server.ReloadAppliedLive,
+					Published: true,
+				}
+			}()
+			return nil
+		},
+		LiveSnapshot: func() server.LiveSnapshot {
+			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+			cfg.Global.ReloadTimeout = config.Duration(7 * time.Second)
+			return server.LiveSnapshot{EffectiveConfig: cfg}
+		},
+		WatchDigest:    &watchDigest,
+		PlannedRestart: &PlannedRestartStore{},
+	}
+
+	// Candidate changes reload_timeout to 1s; serving config says 7s.
+	newRaw := validConfigRaw(t, ":8081")
+	if _, err := c.ApplyRaw(newRaw, ApplyHot); err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+
+	slack := time.Until(gotDeadline)
+	if slack < 6*time.Second || slack > 8*time.Second {
+		t.Errorf("reload deadline slack = %v, want ~7s (serving reload_timeout)", slack)
+	}
+}
+
 func TestCoordinatorApplyRawSerialized(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")
@@ -494,14 +558,14 @@ func TestCoordinatorConcurrentStageRestartsSerialized(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func(idx int) {
 			defer func() { done <- struct{}{} }()
-			candidate := validConfigRaw(t, ":8080")
+			candidate := restartRequiredConfigRaw(t, ":8080")
 			res, err := c.ApplyRaw(candidate, ApplyStageRestart)
 			if err != nil {
 				errs[idx] = err
 				return
 			}
 			if !res.OK && !res.RestartRequired {
-				errs[idx] = errors.New("unexpected non-OK result")
+				errs[idx] = errors.New("unexpected non-OK result: " + res.Message)
 			}
 		}(i)
 	}
@@ -541,8 +605,8 @@ func TestCoordinatorStageDiscardRace(t *testing.T) {
 		PlannedRestart: store,
 	}
 
-	// Stage.
-	candidate := validConfigRaw(t, ":8080")
+	// Stage a restart-required change.
+	candidate := restartRequiredConfigRaw(t, ":8080")
 	res, err := c.ApplyRaw(candidate, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("stage error: %v", err)
@@ -593,7 +657,7 @@ func TestCoordinatorStagedRestartIsUpdateFlag(t *testing.T) {
 		PlannedRestart: store,
 	}
 
-	candidate := validConfigRaw(t, ":8080")
+	candidate := restartRequiredConfigRaw(t, ":8080")
 
 	// First stage — store must NOT be pending before.
 	if store.IsPending() {
@@ -608,10 +672,15 @@ func TestCoordinatorStagedRestartIsUpdateFlag(t *testing.T) {
 	}
 
 	// Second stage — store MUST be pending before (it was set by the first).
+	// Use a different restart-required value so the update is accepted.
 	if !store.IsPending() {
 		t.Fatal("store should be pending before second stage")
 	}
-	res2, err := c.ApplyRaw(candidate, ApplyStageRestart)
+	updateCandidate := restartRequiredConfigRaw(t, ":8080")
+	// Flip the log_format so the lifecycle diff against the original base is
+	// still non-empty (it is the same field, but the diff is non-empty because
+	// the base had the default value).
+	res2, err := c.ApplyRaw(updateCandidate, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("second stage error: %v", err)
 	}

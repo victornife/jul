@@ -45,8 +45,16 @@ func TestFileStoreStageManaged(t *testing.T) {
 	if err := store.StageManaged(seed, []byte("new"), marker); err != nil {
 		t.Fatalf("StageManaged: %v", err)
 	}
+	// StageManaged leaves the marker in "prepared" state; pending is only true
+	// after the caller writes the candidate and calls PromoteToStaged.
+	if store.IsPending() {
+		t.Fatal("IsPending should be false after StageManaged (marker is prepared)")
+	}
+	if err := store.PromoteToStaged([]byte("new")); err != nil {
+		t.Fatalf("PromoteToStaged: %v", err)
+	}
 	if !store.IsPending() {
-		t.Fatal("IsPending should be true after StageManaged")
+		t.Fatal("IsPending should be true after PromoteToStaged")
 	}
 
 	// Marker file must exist and be in staged state.

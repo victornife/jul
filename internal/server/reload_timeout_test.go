@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"sync/atomic"
@@ -241,6 +242,103 @@ func TestReloadDeadlineBoundsCancellation(t *testing.T) {
 
 // TestReloadPhaseTimingRecordsDurations verifies that phase durations are
 // recorded and exposed in the reload result.
+func TestReloadResultIncludesAdminSubsystem(t *testing.T) {
+	addr := freePort(t)
+	src := &stubSource{}
+	src.set(cfgWithReloadTimeout(addr, 5*time.Second), nil)
+
+	tag := &atomic.Pointer[string]{}
+	v1 := "v1"
+	tag.Store(&v1)
+	wantAdminErr := fmt.Errorf("admin policy update failed")
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv.OnReloaded = func(*config.Config) (error, error) {
+		return wantAdminErr, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitDialable(t, addr)
+
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP, Result: resultCh}
+
+	var rr ReloadResult
+	select {
+	case rr = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for reload result")
+	}
+
+	if rr.Outcome != ReloadAppliedLive {
+		t.Fatalf("Outcome = %v, want %v", rr.Outcome, ReloadAppliedLive)
+	}
+	if rr.Admin.Status != ReloadSubsystemFailed {
+		t.Errorf("Admin.Status = %v, want %v", rr.Admin.Status, ReloadSubsystemFailed)
+	}
+	if rr.Admin.Error != wantAdminErr.Error() {
+		t.Errorf("Admin.Error = %q, want %q", rr.Admin.Error, wantAdminErr.Error())
+	}
+	if rr.Stream.Status != ReloadSubsystemOK {
+		t.Errorf("Stream.Status = %v, want %v", rr.Stream.Status, ReloadSubsystemOK)
+	}
+
+	cancel()
+	<-done
+}
+
+// TestReloadPostPublishTimeoutReportsDegraded verifies that a reload which
+// finishes after its deadline still reports degraded rather than not_applied,
+// because Publish is the point of no return.
+func TestReloadPostPublishTimeoutReportsDegraded(t *testing.T) {
+	addr := freePort(t)
+	src := &stubSource{}
+	src.set(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil)
+
+	tag := &atomic.Pointer[string]{}
+	v1 := "v1"
+	tag.Store(&v1)
+	// OnReloaded sleeps past the deadline so the post-commit phase times out.
+	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv.OnReloaded = func(*config.Config) (error, error) {
+		time.Sleep(150 * time.Millisecond)
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitDialable(t, addr)
+
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP, Deadline: time.Now().Add(50 * time.Millisecond), Result: resultCh}
+
+	var rr ReloadResult
+	select {
+	case rr = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for reload result")
+	}
+
+	if rr.Outcome != ReloadAppliedDegraded {
+		t.Errorf("Outcome = %v, want %v", rr.Outcome, ReloadAppliedDegraded)
+	}
+	if !rr.TimedOut {
+		t.Errorf("TimedOut = %v, want true", rr.TimedOut)
+	}
+	if !rr.Published {
+		t.Errorf("Published = %v, want true for post-Publish timeout", rr.Published)
+	}
+
+	cancel()
+	<-done
+}
+
 func TestReloadPhaseTimingRecordsDurations(t *testing.T) {
 	addr := freePort(t)
 	src := &stubSource{}
@@ -283,6 +381,18 @@ func TestReloadPhaseTimingRecordsDurations(t *testing.T) {
 	}
 	if rr.Stream.Status != ReloadSubsystemOK {
 		t.Errorf("Stream.Status = %v, want %v", rr.Stream.Status, ReloadSubsystemOK)
+	}
+	if rr.Admin.Status != ReloadSubsystemOK {
+		t.Errorf("Admin.Status = %v, want %v", rr.Admin.Status, ReloadSubsystemOK)
+	}
+	if !rr.Persisted {
+		t.Error("Persisted = false, want true for a reload that operates on persisted config")
+	}
+	if rr.PhaseDurations == nil {
+		t.Fatal("PhaseDurations = nil, want recorded phase timings")
+	}
+	if _, ok := rr.PhaseDurations["prepare"]; !ok {
+		t.Errorf("PhaseDurations missing 'prepare' phase")
 	}
 
 	cancel()

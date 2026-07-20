@@ -560,7 +560,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Drive L4 stream-proxy reloads from the same validated config as the HTTP
 	// listeners. Stream binding errors are reported as a degraded reload result
 	// but do not roll back the HTTP swap (the listener sets are independent).
-	srv.OnReloaded = func(c *config.Config) error {
+	srv.OnReloaded = func(c *config.Config) (adminErr, streamErr error) {
 		// Hot-reload log level without rebuilding the handler. Log format changes
 		// are restart-required and blocked by lifecycle checks before here.
 		setLogLevel(c.Global.LogLevel)
@@ -572,28 +572,39 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		} else {
 			runtime.GOMAXPROCS(lifecycle.InitialGOMAXPROCS())
 		}
-		// Hot-swap RBAC policy after a successful hot reload. The candidate is the
-		// already-Publish-committed effective config, so secrets are resolved.
-		// This runs after Publish so the new policy never races with handler swap.
-		if adminSrv != nil && c.Admin.RBAC.Enabled {
-			if p, err := buildRBACPolicy(c.Admin); err != nil {
-				log.Warn("RBAC policy rebuild failed on reload; retaining previous policy", "error", err)
+		// Hot-swap RBAC policy and live admin config after a successful hot
+		// reload. The candidate is the already-Publish-committed effective
+		// config, so secrets are resolved. This runs after Publish so the new
+		// policy never races with handler swap.
+		if adminSrv != nil {
+			adminSrv.UpdateLiveAdminConfig(c.Admin)
+			if c.Admin.RBAC.Enabled {
+				if p, err := buildRBACPolicy(c.Admin); err != nil {
+					adminErr = fmt.Errorf("rbac policy update failed: %w", err)
+					log.Warn("RBAC policy rebuild failed on reload; retaining previous policy", "error", err)
+				} else {
+					adminSrv.UpdatePolicy(p)
+				}
 			} else {
-				adminSrv.UpdatePolicy(p)
+				// RBAC explicitly disabled: clear the active policy so the
+				// server falls back to legacy token auth (or anonymous if no
+				// token is configured).
+				adminSrv.UpdatePolicy(nil)
 			}
 		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)
 			msg := "failed: " + err.Error()
 			rt.LastStreamReload.Store(&msg)
-			return err
+			streamErr = err
+			return
 		}
 		ok := ""
 		if len(c.Streams) > 0 {
 			ok = "ok"
 		}
 		rt.LastStreamReload.Store(&ok)
-		return nil
+		return
 	}
 	if err := srv.Run(ctx, reload, startupCand.Redaction); err != nil {
 		log.Error("server exited with error", "error", err)

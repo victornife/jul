@@ -236,7 +236,7 @@ func ValidateRuntimeConfig(c *config.Config) error {
 					if !ok {
 						continue
 					}
-					if _, err := waf.New(wcfg, waf.Options{}); err != nil {
+					if _, err := waf.New(context.Background(), wcfg, waf.Options{}); err != nil {
 						return fmt.Errorf("waf: %w", err)
 					}
 				}
@@ -249,7 +249,7 @@ func ValidateRuntimeConfig(c *config.Config) error {
 					if loc.Auth == nil {
 						continue
 					}
-					if _, err := auth.New(*loc.Auth, auth.Options{}); err != nil {
+					if _, err := auth.New(context.Background(), *loc.Auth, auth.Options{}); err != nil {
 						return fmt.Errorf("auth: %w", err)
 					}
 				}

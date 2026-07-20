@@ -54,8 +54,12 @@ type Authenticator struct {
 
 // New builds an Authenticator from a validated AuthConfig. It returns an error
 // only when a credential method cannot be initialized (for example, an htpasswd
-// file that cannot be read); CIDR-only policies never fail.
-func New(cfg config.AuthConfig, opts Options) (*Authenticator, error) {
+// file that cannot be read); CIDR-only policies never fail. ctx bounds any
+// I/O done during construction (currently file reads; future JWKS fetches).
+func New(ctx context.Context, cfg config.AuthConfig, opts Options) (*Authenticator, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	a := &Authenticator{
 		cidr:       newCIDRGate(cfg.Allow, cfg.Deny),
 		logger:     opts.Logger,

@@ -68,11 +68,13 @@ type ReloadResult struct {
 	TimedOutPhase  string        `json:"timed_out_phase,omitempty"`
 	FailedPhase    string        `json:"failed_phase,omitempty"`
 	// PhaseDurations records wall-clock time spent in each named reload phase
-	// (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate).
-	// Present only when phases ran; absent if the result comes from a cached store.
-	PhaseDurations map[string]time.Duration `json:"phase_durations_ms,omitempty"`
+	// (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate) in
+	// milliseconds. Present only when phases ran; absent if the result comes
+	// from a cached store.
+	PhaseDurations map[string]int64 `json:"phase_durations_ms,omitempty"`
 	HTTP           ReloadSubsystemResult    `json:"http"`
 	Stream         ReloadSubsystemResult    `json:"stream"`
+	Admin          ReloadSubsystemResult    `json:"admin"`
 	Error          string                   `json:"error,omitempty"`
 }
 

@@ -10,6 +10,36 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+### Fixed
+- **Post-audit remediation (reload result contract, RBAC lifecycle, context propagation):**
+  - `server.ReloadResult` now carries `admin` subsystem status so RBAC policy update
+    failures are reported independently of stream-proxy status.
+  - `server.ReloadResult.Persisted` is set for every reload that operates on the
+    persisted configuration.
+  - `server.ReloadResult.PhaseDurations` values are now in milliseconds to match the
+    `phase_durations_ms` JSON field name.
+  - A reload that times out after `Publish` is reported as `applied_degraded` rather
+    than `not_applied`, because Publish is the point of no return.
+  - Admin apply uses the currently serving config's `reload_timeout` for the
+    transaction; a candidate that changes `reload_timeout` affects the next apply.
+  - `ConfigApplyCoordinator` serializes applies with `applyMu` and releases the
+    coordinator mutex before waiting for the reload result, eliminating the
+    deadlock between the synchronous HTTP path and the async restoration finalizer.
+  - Disabling `[admin].rbac.enabled` clears the active policy on the next successful
+    hot reload; the server falls back to the configured legacy token.
+  - The admin server stores a live copy of `AdminConfig` so `[admin].token` changes
+    take effect without restart (the listener address remains startup-bound).
+  - Full context propagation through `plugins.Manager.Build`, `auth.New`, `waf.New`,
+    `handler.NewGRPCTranscode`, and `transcode.New`; cancelled reloads stop promptly
+    during plugin compilation and gRPC reflection.
+  - TypeScript `ReloadResultSchema` added and shared between `ApplyResultSchema.reload`
+    and `OverviewSchema.last_reload`; includes `phase_durations_ms` and `admin` subsystem.
+    `pending_restart_status` schema includes the `external` flag.
+  - Tests: `TestReloadResultIncludesAdminSubsystem`,
+    `TestReloadPostPublishTimeoutReportsDegraded`, `TestReloadPhaseTimingRecordsDurations`
+    (server); `TestCoordinatorApplyRawUsesServingReloadTimeout` (app);
+    `TestRBACDisableClearsPolicy`, `TestLiveAdminConfigTokenUpdate` (admin).
+
 ### Added
 - **Phase 3 — Route catalog and permission-bound authorization** (P3-02, #71):
   - `internal/admin/route_catalog.go` (new): `RouteSpec{Pattern, Methods, Permission, Public, Handler}`

@@ -100,16 +100,20 @@ var retiredConnGrace = 30 * time.Second
 // server reflection at build time. This ensures reflection sees the candidate
 // backend set rather than the previous generation's live backends (R9-06). When
 // nil, the pool's current snapshot is used as a fallback (test convenience).
-func New(cfg config.GRPCTranscodeConfig, pool *upstream.Pool, reflectSnap *upstream.PoolSnapshot, opts Options) (*Transcoder, error) {
+func New(ctx context.Context, cfg config.GRPCTranscodeConfig, pool *upstream.Pool, reflectSnap *upstream.PoolSnapshot, opts Options) (*Transcoder, error) {
 	var routes []*route
 	var err error
+
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("grpc_transcode %s: %w", cfg.Target, err)
+	}
 
 	if cfg.UseReflection {
 		timeout := opts.reflectTimeout
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		reflectCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
 		// Reflection needs one connection to discover methods. Use the candidate
@@ -129,12 +133,15 @@ func New(cfg config.GRPCTranscodeConfig, pool *upstream.Pool, reflectSnap *upstr
 		if derr != nil {
 			return nil, fmt.Errorf("grpc_transcode %s: dial %s for reflection: %w", cfg.Target, b.Address, derr)
 		}
-		routes, err = loadRoutesViaReflection(ctx, conn)
+		routes, err = loadRoutesViaReflection(reflectCtx, conn)
 		_ = conn.Close()
 		if err != nil {
 			return nil, fmt.Errorf("grpc_transcode %s: %w", cfg.Target, err)
 		}
 	} else {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("grpc_transcode %s: %w", cfg.Target, err)
+		}
 		routes, err = loadRoutesFromFile(cfg.DescriptorSet)
 		if err != nil {
 			return nil, fmt.Errorf("grpc_transcode %s: %w", cfg.Target, err)

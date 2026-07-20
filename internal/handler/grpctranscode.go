@@ -6,6 +6,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,8 +21,8 @@ import (
 // the target (named upstream or direct host:port) to a pool for load-balanced
 // per-request backend selection, and returns a handler that maps REST/JSON
 // requests to gRPC calls. The caller closes the handler to release connections
-// when the configuration is replaced.
-func NewGRPCTranscode(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger, onResult func(method, code string), onStreamMsg func(method, direction string)) (http.Handler, error) {
+// when the configuration is replaced. ctx bounds descriptor loading/reflection.
+func NewGRPCTranscode(ctx context.Context, _ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger, onResult func(method, code string), onStreamMsg func(method, direction string)) (http.Handler, error) {
 	cfg := loc.GRPCTranscode
 	if cfg == nil {
 		return nil, fmt.Errorf("grpc_transcode location missing config")
@@ -37,7 +38,7 @@ func NewGRPCTranscode(_ config.ServerConfig, loc config.LocationConfig, upstream
 		reflectSnap = reg.CandidateSnapshot(cfg.Target, "http")
 	}
 
-	return transcode.New(*cfg, pool, reflectSnap, transcode.Options{
+	return transcode.New(ctx, *cfg, pool, reflectSnap, transcode.Options{
 		Logger:      log,
 		OnResult:    onResult,
 		OnStreamMsg: onStreamMsg,
