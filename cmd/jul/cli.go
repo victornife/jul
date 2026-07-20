@@ -427,7 +427,7 @@ func cmdServe(args []string) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	if err := app.ValidateRuntimeConfig(cfg); err != nil {
+	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
 		fmt.Fprintf(stderr, "invalid configuration in %s:\n%v\n", src.Name(), err)
 		return 1
 	}
@@ -476,7 +476,7 @@ func cmdCheck(args []string) int {
 		}
 		return 1
 	} else {
-		if err := app.ValidateRuntimeConfig(cfg); err != nil {
+		if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
 			if *jsonOut {
 				_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
 			} else {

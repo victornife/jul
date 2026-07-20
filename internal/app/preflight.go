@@ -103,7 +103,7 @@ func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Co
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateRuntimeConfig(candidate.Effective); err != nil {
+	if err := ValidateRuntimeConfig(ctx, candidate.Effective); err != nil {
 		return nil, err
 	}
 	// RBAC policy build is part of the reload contract (F-09): validate it

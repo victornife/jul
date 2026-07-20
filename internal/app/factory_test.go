@@ -291,7 +291,7 @@ func TestGenerationScopedPoolSnapshotsViaContext(t *testing.T) {
 		Servers:  []config.UpstreamServer{{Address: "127.0.0.1:8001"}},
 	}
 	f.PoolReg.Begin()
-	pool, err := f.PoolReg.For(up, "http")
+	pool, err := f.PoolReg.For(context.Background(), up, "http")
 	if err != nil {
 		t.Fatalf("PoolReg.For: %v", err)
 	}

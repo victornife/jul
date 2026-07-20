@@ -149,7 +149,7 @@ func (p *ReloadPlan) Validate() error {
 		if p.s.validate == nil {
 			return nil
 		}
-		if err := p.s.validate(p.Candidate.Effective); err != nil {
+		if err := p.s.validate(p.ctx, p.Candidate.Effective); err != nil {
 			return fmt.Errorf("validate: %w", err)
 		}
 		return nil

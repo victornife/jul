@@ -77,7 +77,7 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	if err := app.ValidateRuntimeConfig(cfg); err != nil {
+	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "invalid configuration in %s:\n%v\n", src.Name(), err)
 		return 1
 	}

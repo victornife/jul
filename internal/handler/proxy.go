@@ -31,9 +31,10 @@ import (
 // The extra upstreams/log parameters are bound via a closure in main so the
 // resulting function still satisfies router.Builder.
 //
-// srv is part of the router.Builder signature but is not needed here.
-func NewProxy(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
-	pool, basePath, scheme, err := resolvePool(loc, upstreams, reg)
+// srv is part of the router.Builder signature but is not needed here. ctx
+// bounds the upstream registry lookup, including initial discovery resolution.
+func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
+	pool, basePath, scheme, err := resolvePool(ctx, loc, upstreams, reg)
 	if err != nil {
 		return nil, err
 	}
@@ -77,14 +78,14 @@ func NewProxy(_ config.ServerConfig, loc config.LocationConfig, upstreams map[st
 // concrete URL builds an anonymous pool-of-one outside the registry. When reg is
 // nil (for example in unit tests) named upstreams are built directly without
 // lifecycle management.
-func resolvePool(loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, string, string, error) {
+func resolvePool(ctx context.Context, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, string, string, error) {
 	u, err := url.Parse(loc.ProxyPass)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return nil, "", "", fmt.Errorf("invalid proxy_pass %q (want http(s)://host:port or http://upstream-name)", loc.ProxyPass)
 	}
 	if up, ok := upstreams[u.Host]; ok {
 		if reg != nil {
-			pool, err := reg.For(up, u.Scheme)
+			pool, err := reg.For(ctx, up, u.Scheme)
 			return pool, u.Path, u.Scheme, err
 		}
 		pool, err := upstream.NewPool(up, u.Scheme)

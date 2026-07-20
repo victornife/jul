@@ -28,7 +28,7 @@ func NewGRPCTranscode(ctx context.Context, _ config.ServerConfig, loc config.Loc
 		return nil, fmt.Errorf("grpc_transcode location missing config")
 	}
 
-	pool, err := resolveGRPCTranscodePool(cfg.Target, upstreams, reg)
+	pool, err := resolveGRPCTranscodePool(ctx, cfg.Target, upstreams, reg)
 	if err != nil {
 		return nil, err
 	}
@@ -48,10 +48,10 @@ func NewGRPCTranscode(ctx context.Context, _ config.ServerConfig, loc config.Loc
 // resolveGRPCTranscodePool maps a grpc_transcode target to an upstream.Pool.
 // A name matching a configured upstream resolves through the registry; otherwise
 // the target is treated as a single-host pool.
-func resolveGRPCTranscodePool(target string, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, error) {
+func resolveGRPCTranscodePool(ctx context.Context, target string, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, error) {
 	if up, ok := upstreams[target]; ok {
 		if reg != nil {
-			return reg.For(up, "http")
+			return reg.For(ctx, up, "http")
 		}
 		return upstream.NewPool(up, "http")
 	}

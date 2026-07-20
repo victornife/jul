@@ -277,7 +277,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 
 	// Eagerly instantiate one instance so a broken module fails the build (and
 	// thus the reload) rather than the first request.
-	mod, err := p.instantiate()
+	mod, err := p.instantiate(ctx)
 	if err != nil {
 		return closeOnErr(fmt.Errorf("instantiate module: %w", err))
 	}
@@ -308,8 +308,8 @@ func loadModule(pc config.PluginConfig) ([]byte, error) {
 
 // instantiate creates a fresh module instance, running its _initialize reactor
 // start function. Instantiation uses its own timeout, not the per-call one.
-func (p *plugin) instantiate() (api.Module, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), instantiateTimeout)
+func (p *plugin) instantiate(ctx context.Context) (api.Module, error) {
+	ctx, cancel := context.WithTimeout(ctx, instantiateTimeout)
 	defer cancel()
 	cfg := wazero.NewModuleConfig().
 		WithName("").
@@ -321,7 +321,7 @@ func (p *plugin) acquire() (api.Module, error) {
 	if v := p.pool.Get(); v != nil {
 		return v.(api.Module), nil
 	}
-	return p.instantiate()
+	return p.instantiate(context.Background())
 }
 
 func (p *plugin) release(mod api.Module) { p.pool.Put(mod) }

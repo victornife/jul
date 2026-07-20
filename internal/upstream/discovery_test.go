@@ -214,7 +214,7 @@ func TestRegistryRebuildsPoolOnDiscoveryChange(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	p1, err := r.For(discoveryCfg("dns", "svc.local:80"), "http")
+	p1, err := r.For(context.Background(), discoveryCfg("dns", "svc.local:80"), "http")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestRegistryRebuildsPoolOnDiscoveryChange(t *testing.T) {
 
 	// Same discovery config: pool is reused.
 	r.Begin()
-	p2, err := r.For(discoveryCfg("dns", "svc.local:80"), "http")
+	p2, err := r.For(context.Background(), discoveryCfg("dns", "svc.local:80"), "http")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestRegistryRebuildsPoolOnDiscoveryChange(t *testing.T) {
 
 	// Changed target: pool is rebuilt and the old one closed.
 	r.Begin()
-	p3, err := r.For(discoveryCfg("dns", "other.local:80"), "http")
+	p3, err := r.For(context.Background(), discoveryCfg("dns", "other.local:80"), "http")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}

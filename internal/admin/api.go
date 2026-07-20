@@ -226,7 +226,7 @@ func (s *Server) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
 	// which would briefly apply (and reload) the draft as live configuration.
 	// This keeps /api/config/validate side-effect-free and safe under
 	// concurrent validate/apply requests.
-	if err := validateRaw(body); err != nil {
+	if err := validateRaw(r.Context(), body); err != nil {
 		writeJSON(w, http.StatusOK, validationErrorResponse{
 			OK:      false,
 			Message: "The draft configuration contains errors.",
@@ -241,7 +241,7 @@ func (s *Server) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
 // mutating any runtime state. It mirrors the parse+validate that a write path
 // performs internally, minus persistence and reload, so callers can check a
 // draft safely and idempotently.
-func validateRaw(body []byte) error {
+func validateRaw(ctx context.Context, body []byte) error {
 	cfg, err := config.Parse(body)
 	if err != nil {
 		return err
@@ -260,7 +260,7 @@ func validateRaw(body []byte) error {
 				if !ok {
 					continue
 				}
-				if _, err := waf.New(context.Background(), wcfg, waf.Options{}); err != nil {
+				if _, err := waf.New(ctx, wcfg, waf.Options{}); err != nil {
 					return fmt.Errorf("waf: %w", err)
 				}
 			}
@@ -271,7 +271,7 @@ func validateRaw(body []byte) error {
 				if loc.Auth == nil {
 					continue
 				}
-				if _, err := auth.New(context.Background(), *loc.Auth, auth.Options{}); err != nil {
+				if _, err := auth.New(ctx, *loc.Auth, auth.Options{}); err != nil {
 					return fmt.Errorf("auth: %w", err)
 				}
 			}

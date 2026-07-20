@@ -4,6 +4,7 @@
 package upstream
 
 import (
+	"context"
 	"testing"
 )
 
@@ -14,11 +15,11 @@ func TestRegistryKeysPoolsByNameAndScheme(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	httpPool, err := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	httpPool, err := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	if err != nil {
 		t.Fatalf("For http: %v", err)
 	}
-	httpsPool, err := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:443"), "https")
+	httpsPool, err := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:443"), "https")
 	if err != nil {
 		t.Fatalf("For https: %v", err)
 	}
@@ -33,7 +34,7 @@ func TestRegistryKeysPoolsByNameAndScheme(t *testing.T) {
 
 	// A later build that drops the https reference closes only the https pool.
 	r.Begin()
-	_, err = r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	_, err = r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	if err != nil {
 		t.Fatalf("For http second build: %v", err)
 	}
@@ -53,14 +54,14 @@ func TestRegistryReusesPoolWithSameNameAndScheme(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	p1, err := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "https")
+	p1, err := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "https")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
 	r.Commit()
 
 	r.Begin()
-	p2, err := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80", "10.0.0.2:80"), "https")
+	p2, err := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80", "10.0.0.2:80"), "https")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -75,8 +76,8 @@ func TestRegistryReusesPoolWithSameNameAndScheme(t *testing.T) {
 func TestRegistrySnapshotPoolByScheme(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 	r.Begin()
-	_, _ = r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
-	_, _ = r.For(upstreamCfg("api", "round_robin", "10.0.0.1:443"), "https")
+	_, _ = r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	_, _ = r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:443"), "https")
 	r.Commit()
 
 	if r.SnapshotPool("api", "http") == nil {

@@ -102,7 +102,7 @@ type HandlerFactory func(ctx context.Context, cfg *config.Config) (handlers map[
 type Server struct {
 	log      *slog.Logger
 	source   config.Source              // reload source; nil disables reload
-	validate func(*config.Config) error // validation applied before swapping
+	validate func(context.Context, *config.Config) error // validation applied before swapping
 	factory  HandlerFactory
 
 	// ConnStateHook, when set, is installed as http.Server.ConnState on every
@@ -422,7 +422,7 @@ func copyListenerMapFromEntries(src map[string]*listenerEntry) map[string]BoundL
 // nil from tests that use literal configuration values. startupFP is the
 // authoritative effective startup fingerprint; when empty it is computed from
 // cfg.
-func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.Fingerprint, log *slog.Logger, factory HandlerFactory, source config.Source, validate func(*config.Config) error) *Server {
+func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.Fingerprint, log *slog.Logger, factory HandlerFactory, source config.Source, validate func(context.Context, *config.Config) error) *Server {
 	if len(startupFP.Values) == 0 {
 		if expanded, _, _, err := config.Resolve(cfg); err == nil {
 			startupFP = lifecycle.ComputeFingerprint(expanded)

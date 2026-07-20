@@ -732,7 +732,7 @@ func TestTranscodeReflectionWithDiscoveryUpstream(t *testing.T) {
 	}
 
 	reg.Begin()
-	pool, err := reg.For(up, "http")
+	pool, err := reg.For(context.Background(), up, "http")
 	if err != nil {
 		t.Fatalf("registry.For: %v", err)
 	}
@@ -798,7 +798,7 @@ func TestTranscodeReflectionWithReusedDiscoveryUpstream(t *testing.T) {
 
 	// First build: pool is created and discovery seeds its backends.
 	reg.Begin()
-	pool, err := reg.For(up, "http")
+	pool, err := reg.For(context.Background(), up, "http")
 	if err != nil {
 		t.Fatalf("first registry.For: %v", err)
 	}
@@ -808,7 +808,7 @@ func TestTranscodeReflectionWithReusedDiscoveryUpstream(t *testing.T) {
 	// Second build: the pool is reused. CandidateSnapshot must still contain
 	// the discovered backends, not the empty static servers list.
 	reg.Begin()
-	pool2, err := reg.For(up, "http")
+	pool2, err := reg.For(context.Background(), up, "http")
 	if err != nil {
 		t.Fatalf("second registry.For: %v", err)
 	}

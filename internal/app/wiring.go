@@ -223,7 +223,7 @@ func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-cha
 // config.PreflightClone resolves secrets into a deep-copied clone without
 // mutating the live redaction registry, so no save/restore dance is needed
 // (R6-16).
-func ValidateRuntimeConfig(c *config.Config) error {
+func ValidateRuntimeConfig(ctx context.Context, c *config.Config) error {
 	wafExtra := func(clone *config.Config) error {
 		if err := waf.Check(clone); err != nil {
 			return err
@@ -236,7 +236,7 @@ func ValidateRuntimeConfig(c *config.Config) error {
 					if !ok {
 						continue
 					}
-					if _, err := waf.New(context.Background(), wcfg, waf.Options{}); err != nil {
+					if _, err := waf.New(ctx, wcfg, waf.Options{}); err != nil {
 						return fmt.Errorf("waf: %w", err)
 					}
 				}
@@ -249,7 +249,7 @@ func ValidateRuntimeConfig(c *config.Config) error {
 					if loc.Auth == nil {
 						continue
 					}
-					if _, err := auth.New(context.Background(), *loc.Auth, auth.Options{}); err != nil {
+					if _, err := auth.New(ctx, *loc.Auth, auth.Options{}); err != nil {
 						return fmt.Errorf("auth: %w", err)
 					}
 				}

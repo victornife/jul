@@ -32,8 +32,8 @@ import (
 // HTTP/2 (h2c); https:// dials over HTTP/2 with TLS.
 //
 // onStream, when non-nil, is invoked once per forwarded gRPC call.
-func NewGRPCProxy(_ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger, onStream func()) (http.Handler, error) {
-	pool, basePath, scheme, err := resolvePool(loc, upstreams, reg)
+func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger, onStream func()) (http.Handler, error) {
+	pool, basePath, scheme, err := resolvePool(ctx, loc, upstreams, reg)
 	if err != nil {
 		return nil, err
 	}

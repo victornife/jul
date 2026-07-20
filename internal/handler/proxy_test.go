@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -19,7 +20,7 @@ import (
 
 func newProxy(t *testing.T, loc config.LocationConfig, ups map[string]config.UpstreamConfig) http.Handler {
 	t.Helper()
-	h, err := NewProxy(config.ServerConfig{}, loc, ups, nil, nil)
+	h, err := NewProxy(context.Background(), config.ServerConfig{}, loc, ups, nil, nil)
 	if err != nil {
 		t.Fatalf("NewProxy: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestProxyGatewayTimeout(t *testing.T) {
 }
 
 func TestResolveTargetInvalid(t *testing.T) {
-	if _, _, _, err := resolvePool(config.LocationConfig{ProxyPass: "not-a-url"}, nil, nil); err == nil {
+	if _, _, _, err := resolvePool(context.Background(), config.LocationConfig{ProxyPass: "not-a-url"}, nil, nil); err == nil {
 		t.Fatal("expected error for invalid proxy_pass")
 	}
 }
@@ -310,7 +311,7 @@ func TestProxyRetryStableIdentityAcrossUpdate(t *testing.T) {
 	// Simulate discovery churn: replace the backend with a fresh pointer to the
 	// same address. The stable identity must still be excluded after one failed
 	// attempt within the same request.
-	pool, _, _, _ := resolvePool(config.LocationConfig{ProxyPass: "http://pool"}, ups, nil)
+	pool, _, _, _ := resolvePool(context.Background(), config.LocationConfig{ProxyPass: "http://pool"}, ups, nil)
 	pool.UpdateBackends([]config.UpstreamServer{{Address: liveAddr, Weight: 1}})
 
 	req2 := httptest.NewRequest(http.MethodGet, "http://edge/", nil)

@@ -57,7 +57,7 @@ func TestRedactionGenerationRegistryUnionAndRetire(t *testing.T) {
 func TestDynamicHandlerInstallsGenerationSnapshots(t *testing.T) {
 	reg := upstream.NewRegistry(upstream.RegistryOptions{})
 	reg.Begin()
-	pool, err := reg.For(config.UpstreamConfig{
+	pool, err := reg.For(context.Background(), config.UpstreamConfig{
 		Name:     "api",
 		Strategy: "round_robin",
 		Servers:  []config.UpstreamServer{{Address: "127.0.0.1:8001"}},
@@ -146,7 +146,7 @@ func TestStartupRedactionIsRegistered(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
 
 	initial := redact.NewState([]string{secret}, redact.DefaultMinLen)
 	ctx, cancel := context.WithCancel(context.Background())

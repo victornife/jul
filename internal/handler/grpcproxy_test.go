@@ -101,7 +101,7 @@ func startGRPCProxyFront(t testing.TB, backendAddr string) (string, *atomic.Int6
 		ProxyPass: "http://" + backendAddr,
 		GRPC:      true,
 	}
-	h, err := NewGRPCProxy(config.ServerConfig{}, loc, map[string]config.UpstreamConfig{}, nil, grpcTestLogger(), func() { streams.Add(1) })
+	h, err := NewGRPCProxy(context.Background(), config.ServerConfig{}, loc, map[string]config.UpstreamConfig{}, nil, grpcTestLogger(), func() { streams.Add(1) })
 	if err != nil {
 		t.Fatalf("NewGRPCProxy: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestGRPCProxyZeroBackendDiscoveryNoPanic(t *testing.T) {
 			Discovery: &config.DiscoveryConfig{Type: "dns", Target: "svc.internal:50051"},
 		},
 	}
-	if _, err := NewGRPCProxy(config.ServerConfig{}, loc, ups, nil, grpcTestLogger(), nil); err != nil {
+	if _, err := NewGRPCProxy(context.Background(), config.ServerConfig{}, loc, ups, nil, grpcTestLogger(), nil); err != nil {
 		t.Fatalf("NewGRPCProxy with empty discovery pool: %v", err)
 	}
 }

@@ -241,7 +241,7 @@ func TestCapabilityGrantsAreRevalidatedOnActivation(t *testing.T) {
 	withKV := map[string]config.PluginConfig{
 		"kv": pcfg("kv-counter", func(pc *config.PluginConfig) { pc.KV = true }),
 	}
-	s1, err := m.Build(withKV)
+	s1, err := m.Build(context.Background(), withKV)
 	if err != nil {
 		t.Fatalf("Build with KV: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestCapabilityGrantsAreRevalidatedOnActivation(t *testing.T) {
 	}
 
 	withoutKV := map[string]config.PluginConfig{"kv": pcfg("kv-counter")}
-	s2, err := m.Build(withoutKV)
+	s2, err := m.Build(context.Background(), withoutKV)
 	if err != nil {
 		t.Fatalf("Build without KV: %v", err)
 	}
@@ -278,12 +278,12 @@ func TestReloadReusesManager(t *testing.T) {
 	cfg := map[string]config.PluginConfig{"hi": pcfg("header-inject")}
 
 	// First generation.
-	s1, err := m.Build(cfg)
+	s1, err := m.Build(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Build #1: %v", err)
 	}
 	// Second generation on the same manager (shared compilation cache).
-	s2, err := m.Build(cfg)
+	s2, err := m.Build(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Build #2: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestReloadUnderLoad(t *testing.T) {
 	cfg := map[string]config.PluginConfig{"hi": pcfg("header-inject")}
 
 	// The live generation that serves traffic for the whole test.
-	live, err := m.Build(cfg)
+	live, err := m.Build(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Build live: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestReloadUnderLoad(t *testing.T) {
 	// same manager (shared compilation cache) while traffic flows through the
 	// live generation.
 	for r := 0; r < reloads; r++ {
-		gen, err := m.Build(cfg)
+		gen, err := m.Build(context.Background(), cfg)
 		if err != nil {
 			stop.Store(true)
 			wg.Wait()

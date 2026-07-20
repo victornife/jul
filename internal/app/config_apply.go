@@ -221,7 +221,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	}
 
 	if mode == ApplyStageRestart {
-		return c.applyStageRestart(cfg, prevCfg, data, prevRaw)
+		return c.applyStageRestart(c.BaseCtx, cfg, prevCfg, data, prevRaw)
 	}
 
 	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightHot)

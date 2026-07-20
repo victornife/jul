@@ -313,7 +313,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Construct the server and wire LastReload into deps BEFORE creating the
 	// admin server. admin.New copies deps by value, so any callback assigned
 	// after that call is invisible to the admin server's apply handlers.
-	srv := server.New(cfg, startupCand.Raw, startupFP, log, factory, src, ValidateRuntimeConfig)
+	srv := server.New(cfg, startupCand.Raw, startupFP, log, factory, src, func(ctx context.Context, c *config.Config) error {
+		return ValidateRuntimeConfig(ctx, c)
+	})
 	srv.ConnStateHook = metrics.ConnState
 	srv.OnReloadStart = metrics.ReloadStarted
 	srv.OnReloadComplete = metrics.ObserveReload

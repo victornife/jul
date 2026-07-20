@@ -4,6 +4,7 @@
 package upstream
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,14 +42,14 @@ func TestRegistryReusesUnchangedPool(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	p1, err := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	p1, err := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
 	r.Commit()
 
 	r.Begin()
-	p2, err := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80", "10.0.0.2:80"), "http")
+	p2, err := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80", "10.0.0.2:80"), "http")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -69,11 +70,11 @@ func TestRegistryReplacesPoolOnStrategyChange(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	p1, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	p1, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	r.Commit()
 
 	r.Begin()
-	p2, _ := r.For(upstreamCfg("api", "least_conn", "10.0.0.1:80"), "http")
+	p2, _ := r.For(context.Background(), upstreamCfg("api", "least_conn", "10.0.0.1:80"), "http")
 	r.Commit()
 
 	if p1 == p2 {
@@ -91,7 +92,7 @@ func TestRegistryClosesRemovedPool(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	p1, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	p1, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	r.Commit()
 
 	// A reload that no longer references "api".
@@ -107,12 +108,12 @@ func TestRegistryAbortKeepsLiveClosesStaged(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	p1, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	p1, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	r.Commit()
 
 	// A failed reload that reshapes the pool (new staged pool) then aborts.
 	r.Begin()
-	p2, _ := r.For(upstreamCfg("api", "least_conn", "10.0.0.1:80"), "http")
+	p2, _ := r.For(context.Background(), upstreamCfg("api", "least_conn", "10.0.0.1:80"), "http")
 	r.Abort()
 
 	if closed(p1.Done()) {
@@ -124,7 +125,7 @@ func TestRegistryAbortKeepsLiveClosesStaged(t *testing.T) {
 
 	// The next successful build still reuses the live pool.
 	r.Begin()
-	p3, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	p3, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	r.Commit()
 	if p3 != p1 {
 		t.Fatal("after abort the live pool should still be reusable")
@@ -135,7 +136,7 @@ func TestRegistryAbortDoesNotMutateLiveBackends(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	p1, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	p1, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	r.Commit()
 	if got := len(p1.Backends()); got != 1 {
 		t.Fatalf("initial backends = %d, want 1", got)
@@ -143,7 +144,7 @@ func TestRegistryAbortDoesNotMutateLiveBackends(t *testing.T) {
 
 	// A failed reload that keeps the same shape but adds a backend, then aborts.
 	r.Begin()
-	if _, err := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80", "10.0.0.2:80"), "http"); err != nil {
+	if _, err := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80", "10.0.0.2:80"), "http"); err != nil {
 		t.Fatalf("For: %v", err)
 	}
 	r.Abort()
@@ -158,8 +159,8 @@ func TestRegistryAbortDoesNotMutateLiveBackends(t *testing.T) {
 func TestRegistryDedupsWithinBuild(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 	r.Begin()
-	a, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
-	b, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	a, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	b, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	r.Commit()
 	if a != b {
 		t.Fatal("two references to one upstream in a build should share a pool")
@@ -169,8 +170,8 @@ func TestRegistryDedupsWithinBuild(t *testing.T) {
 func TestRegistryCloseAll(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 	r.Begin()
-	p1, _ := r.For(upstreamCfg("a", "round_robin", "10.0.0.1:80"), "http")
-	p2, _ := r.For(upstreamCfg("b", "round_robin", "10.0.0.2:80"), "http")
+	p1, _ := r.For(context.Background(), upstreamCfg("a", "round_robin", "10.0.0.1:80"), "http")
+	p2, _ := r.For(context.Background(), upstreamCfg("b", "round_robin", "10.0.0.2:80"), "http")
 	r.Commit()
 
 	r.CloseAll()
@@ -195,7 +196,7 @@ func TestRegistryPreflightSeedsDiscoveryPool(t *testing.T) {
 
 	up := discoveryCfg("dns", "svc.local:80")
 	r.Begin()
-	p, err := r.For(up, "http")
+	p, err := r.For(context.Background(), up, "http")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -238,7 +239,7 @@ func TestRegistryStartsHealthChecks(t *testing.T) {
 	}
 
 	r.Begin()
-	if _, err := r.For(up, "http"); err != nil {
+	if _, err := r.For(context.Background(), up, "http"); err != nil {
 		t.Fatalf("For: %v", err)
 	}
 	r.Commit()
@@ -257,8 +258,8 @@ func TestRegistryStartsHealthChecks(t *testing.T) {
 func TestRegistrySnapshot(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 	r.Begin()
-	_, _ = r.For(upstreamCfg("z", "round_robin", "10.0.0.1:80"), "http")
-	_, _ = r.For(upstreamCfg("a", "round_robin", "10.0.0.2:80"), "http")
+	_, _ = r.For(context.Background(), upstreamCfg("z", "round_robin", "10.0.0.1:80"), "http")
+	_, _ = r.For(context.Background(), upstreamCfg("a", "round_robin", "10.0.0.2:80"), "http")
 	r.Commit()
 
 	snap := r.Snapshot()
@@ -290,7 +291,7 @@ func TestRegistryActivationDeferred(t *testing.T) {
 	}
 
 	r.Begin()
-	if _, err := r.For(up, "http"); err != nil {
+	if _, err := r.For(context.Background(), up, "http"); err != nil {
 		t.Fatalf("For: %v", err)
 	}
 	r.Commit()
@@ -324,7 +325,7 @@ func TestRegistryAbortBeforeActivateClosesFreshPool(t *testing.T) {
 	}
 
 	r.Begin()
-	p, err := r.For(up, "http")
+	p, err := r.For(context.Background(), up, "http")
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -339,14 +340,14 @@ func TestRegistryCandidateSnapshotUsesPendingServers(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 
 	r.Begin()
-	p1, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
+	p1, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), "http")
 	r.Commit()
 	r.Activate()
 	defer r.CloseAll()
 
 	// Reuse the pool but change the candidate backend list.
 	r.Begin()
-	p2, _ := r.For(upstreamCfg("api", "round_robin", "10.0.0.2:80"), "http")
+	p2, _ := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.2:80"), "http")
 	if p1 != p2 {
 		t.Fatal("pool should be reused")
 	}
@@ -387,7 +388,7 @@ func TestRegistryActivateSkipsReusedPools(t *testing.T) {
 	}
 
 	r.Begin()
-	if _, err := r.For(up, "http"); err != nil {
+	if _, err := r.For(context.Background(), up, "http"); err != nil {
 		t.Fatalf("For: %v", err)
 	}
 	r.Commit()
@@ -403,7 +404,7 @@ func TestRegistryActivateSkipsReusedPools(t *testing.T) {
 	// Reuse the pool on a subsequent build; Activate must not start a second
 	// health checker (probe rate should stay the same).
 	r.Begin()
-	if _, err := r.For(up, "http"); err != nil {
+	if _, err := r.For(context.Background(), up, "http"); err != nil {
 		t.Fatalf("For: %v", err)
 	}
 	r.Commit()

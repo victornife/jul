@@ -259,9 +259,10 @@ func TestMergeReloadConsumesAdminDigest(t *testing.T) {
 }
 
 func TestValidateRuntimeConfig(t *testing.T) {
+	ctx := context.Background()
 	// A well-formed proxy config passes the runtime preflight.
 	good := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	if err := ValidateRuntimeConfig(good); err != nil {
+	if err := ValidateRuntimeConfig(ctx, good); err != nil {
 		t.Fatalf("ValidateRuntimeConfig(valid) = %v, want nil", err)
 	}
 
@@ -272,7 +273,7 @@ func TestValidateRuntimeConfig(t *testing.T) {
 			Locations: []config.LocationConfig{{Return: 200}},
 		}},
 	}
-	if err := ValidateRuntimeConfig(bad); err == nil {
+	if err := ValidateRuntimeConfig(ctx, bad); err == nil {
 		t.Error("ValidateRuntimeConfig(invalid) = nil, want an error")
 	}
 }

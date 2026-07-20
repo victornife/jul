@@ -51,7 +51,7 @@ func TestReloadTimeout(t *testing.T) {
 		return factoryFor(c, "v1"), 1, commitFn, abortFn, nil
 	}
 
-	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), slowFactory, src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -105,7 +105,7 @@ func TestReloadSubsystemsInitializedToNotRun(t *testing.T) {
 	tag := &atomic.Pointer[string]{}
 	v1 := "v1"
 	tag.Store(&v1)
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return fmt.Errorf("rejected") })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return fmt.Errorf("rejected") })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -145,7 +145,7 @@ func TestReloadRecordsSuccessAndDuration(t *testing.T) {
 	v1 := "v1"
 	tag.Store(&v1)
 
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -186,7 +186,7 @@ func TestReloadResultCorrelation(t *testing.T) {
 	tag := &atomic.Pointer[string]{}
 	v1 := "v1"
 	tag.Store(&v1)
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -246,7 +246,7 @@ func TestReloadDeadlineBoundsCancellation(t *testing.T) {
 		return factoryFor(c, "v1"), 1, commitFn, abortFn, nil
 	}
 
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), slowFactory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), slowFactory, src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -294,7 +294,7 @@ func TestReloadResultIncludesAdminSubsystem(t *testing.T) {
 	v1 := "v1"
 	tag.Store(&v1)
 	wantAdminErr := fmt.Errorf("admin policy update failed")
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 	srv.OnReloaded = func(*config.Config) (error, error) {
 		return wantAdminErr, nil
 	}
@@ -347,7 +347,7 @@ func TestReloadResultAdminFailureDegrades(t *testing.T) {
 	v1 := "v1"
 	tag.Store(&v1)
 	wantAdminErr := fmt.Errorf("rbac policy rebuild failed")
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 	srv.OnReloaded = func(*config.Config) (error, error) {
 		return wantAdminErr, nil
 	}
@@ -401,7 +401,7 @@ func TestReloadPostPublishTimeoutReportsDegraded(t *testing.T) {
 	v1 := "v1"
 	tag.Store(&v1)
 	// OnReloaded sleeps past the deadline so the post-commit phase times out.
-	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 	srv.OnReloaded = func(*config.Config) (error, error) {
 		time.Sleep(150 * time.Millisecond)
 		return nil, nil
@@ -446,7 +446,7 @@ func TestReloadPhaseTimingRecordsDurations(t *testing.T) {
 	tag := &atomic.Pointer[string]{}
 	v1 := "v1"
 	tag.Store(&v1)
-	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

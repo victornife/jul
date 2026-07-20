@@ -6,6 +6,7 @@
 package plugins
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -28,7 +29,7 @@ func benchManager(b *testing.B) *Manager {
 
 func benchSet(b *testing.B, m *Manager, cfg map[string]config.PluginConfig) *Set {
 	b.Helper()
-	s, err := m.Build(cfg)
+	s, err := m.Build(context.Background(), cfg)
 	if err != nil {
 		b.Fatalf("Build: %v", err)
 	}

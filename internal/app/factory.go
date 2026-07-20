@@ -200,9 +200,9 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			// (trailers preserved, no buffering); otherwise it is a plain
 			// HTTP reverse proxy. gRPC passthrough is not cacheable.
 			if loc.GRPC {
-				return handler.NewGRPCProxy(srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCProxyStream)
+				return handler.NewGRPCProxy(ctx, srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCProxyStream)
 			}
-			h, err := handler.NewProxy(srv, loc, upstreams, f.PoolReg, f.Log)
+			h, err := handler.NewProxy(ctx, srv, loc, upstreams, f.PoolReg, f.Log)
 			if err != nil {
 				return nil, err
 			}

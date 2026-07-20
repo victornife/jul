@@ -7,6 +7,7 @@
 package app
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -93,8 +94,9 @@ func TestAdaptCertsMapsCorrectly(t *testing.T) {
 }
 
 func TestValidateRuntimeConfigSmoke(t *testing.T) {
+	ctx := context.Background()
 	good := config.ProxyTarget("127.0.0.1:9000", ":0")
-	if err := ValidateRuntimeConfig(good); err != nil {
+	if err := ValidateRuntimeConfig(ctx, good); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 
@@ -104,7 +106,7 @@ func TestValidateRuntimeConfigSmoke(t *testing.T) {
 			Locations: []config.LocationConfig{{Return: 200}},
 		}},
 	}
-	if err := ValidateRuntimeConfig(bad); err == nil {
+	if err := ValidateRuntimeConfig(ctx, bad); err == nil {
 		t.Fatal("structurally invalid config accepted")
 	}
 }

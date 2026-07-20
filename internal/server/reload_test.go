@@ -183,7 +183,7 @@ func TestReloadSwapsHandler(t *testing.T) {
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
 
-	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -294,7 +294,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -385,7 +385,7 @@ func TestReloadNoGoroutineLeak(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest)
@@ -478,7 +478,7 @@ func TestLiveSnapshotCoherentDuringReload(t *testing.T) {
 	src := &stubSource{}
 	src.set(cfg1, nil)
 
-	srv := New(cfg1, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfg1, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// Use an unbuffered reload channel so the source config is set immediately
@@ -599,7 +599,7 @@ func TestReloadRejectsInvalidConfig(t *testing.T) {
 	src.set(cfgWith(addr), nil)
 
 	validateErr := atomic.Bool{}
-	validate := func(*config.Config) error {
+	validate := func(context.Context, *config.Config) error {
 		if validateErr.Load() {
 			return fmt.Errorf("invalid config")
 		}
@@ -643,7 +643,7 @@ func TestReloadAddsAndRemovesListener(t *testing.T) {
 	oneAddr := cfgWith(addr1)
 
 	src := &stubSource{}
-	srv := New(oneAddr, nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return nil })
+	srv := New(oneAddr, nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -841,7 +841,7 @@ func TestDoReloadBlocksOnRestartRequired(t *testing.T) {
 	tag.Store(&initial)
 	// Pass rawCfg = base (simulates the pre-expansion startup config).
 	srv := New(base, base, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
-		func(*config.Config) error { return nil })
+		func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -890,7 +890,7 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
 	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
-		func(*config.Config) error { return nil })
+		func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -963,7 +963,7 @@ func TestDoReloadReplacementAddressBindFailureKeepsOld(t *testing.T) {
 	src := &stubSource{}
 	src.set(cfgWith(oldAddr), nil)
 	srv := New(cfgWith(oldAddr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
-		func(*config.Config) error { return nil })
+		func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -1036,7 +1036,7 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 	src := &stubSource{}
 	src.set(cfgWith(addr1), nil)
 	srv := New(cfgWith(addr1), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
-		func(*config.Config) error { return nil })
+		func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -1126,7 +1126,7 @@ func TestAdminReloadRequestUsesCandidate(t *testing.T) {
 	src := &stubSource{}
 	src.set(cfgWithReturn(addr, 200), nil)
 
-	srv := New(cfgWithReturn(addr, 200), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgWithReturn(addr, 200), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -1227,7 +1227,7 @@ return = 200
 	src.set(cfgFrom(startData), nil)
 	src.setRaw(startData)
 
-	srv := New(cfgFrom(startData), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfgFrom(startData), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -1328,7 +1328,7 @@ func TestShutdownBoundedByGraceTimeout(t *testing.T) {
 	src.set(cfgWith(addr), nil)
 	cfg := cfgWith(addr)
 	cfg.Global.ShutdownTimeout = config.Duration(100 * time.Millisecond)
-	srv := New(cfg, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv := New(cfg, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)

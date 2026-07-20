@@ -6,6 +6,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -19,6 +20,6 @@ import (
 // trailers, compiled in only with -tags grpc. Returning an error here fails the
 // reload with a clear message when a location sets grpc = true in a build that
 // cannot serve it, instead of silently downgrading it to a plain HTTP proxy.
-func NewGRPCProxy(_ config.ServerConfig, _ config.LocationConfig, _ map[string]config.UpstreamConfig, _ *upstream.Registry, _ *slog.Logger, _ func()) (http.Handler, error) {
+func NewGRPCProxy(_ context.Context, _ config.ServerConfig, _ config.LocationConfig, _ map[string]config.UpstreamConfig, _ *upstream.Registry, _ *slog.Logger, _ func()) (http.Handler, error) {
 	return nil, fmt.Errorf("grpc = true (native gRPC passthrough) requires a build with the \"grpc\" tag")
 }

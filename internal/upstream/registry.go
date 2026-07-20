@@ -152,8 +152,10 @@ func (r *Registry) Begin() {
 // it (and starting its health checker when enabled) on first reference, or
 // reusing the live pool from a previous build when its shape is unchanged. When
 // the shape changed, a fresh pool is staged and the previous one is closed at
-// Commit. The returned pool is ready for Pick immediately.
-func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
+// Commit. The returned pool is ready for Pick immediately. ctx bounds the
+// initial discovery resolution; request-time cancellations do not affect
+// already-built pools.
+func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme string) (*Pool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -201,8 +203,8 @@ func (r *Registry) For(up config.UpstreamConfig, scheme string) (*Pool, error) {
 		// has an initial backend set before it serves traffic. The periodic
 		// refresher started by Activate keeps the set converged afterwards
 		// (R10-03).
-		ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout)
-		targets, resolveErr := d.Resolve(ctx)
+		resolveCtx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+		targets, resolveErr := d.Resolve(resolveCtx)
 		cancel()
 		if resolveErr == nil && len(targets) > 0 {
 			servers := targetsToServers(targets)
