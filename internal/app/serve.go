@@ -458,7 +458,33 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return toAdminConfigApplyResult(res), err
 		}
 		deps.PendingRestart = func() *admin.PendingRestartStatus {
-			return coordinator.PlannedRestartStatus()
+			// First check for a managed staged restart.
+			if managed := coordinator.PlannedRestartStatus(); managed != nil {
+				return managed
+			}
+			// Fall back to external (unmanaged) disk/runtime divergence.
+			// This surfaces a structured managed=false status rather than
+			// only the flat subsystem list, giving the Console enough info
+			// to show the correct banner and recovery instructions (M-03 fix).
+			if deps.PendingRestartCheck != nil && deps.LiveSnapshot != nil {
+				live := deps.LiveSnapshot()
+				subsystems := deps.PendingRestartCheck(live)
+				if len(subsystems) > 0 {
+					var servingVersion string
+					if live.EffectiveConfig != nil {
+						servingVersion = server.CanonicalVersion(live.EffectiveConfig)
+					}
+					return &admin.PendingRestartStatus{
+						Managed:          false,
+						Staged:           false,
+						Subsystems:       subsystems,
+						DiscardAvailable: false,
+						Inconsistent:     false,
+						ServingVersion:   servingVersion,
+					}
+				}
+			}
+			return nil
 		}
 		// Keep legacy closures for external callers during the deprecation
 		// window.

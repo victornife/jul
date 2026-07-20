@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -485,7 +486,16 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.RestartRequired {
-		s.writeRestartRequired(w, r, "config.apply", errors.New(result.Message))
+		// Return the full structured result at 409 so the client receives
+		// can_stage, subsystem list, and version context — not just a
+		// plain message. The TypeScript client already parses restart_required
+		// from this shape.
+		s.recordAudit("config.apply", "config", "failure",
+			"rejected: restart required (can_stage="+strconv.FormatBool(result.CanStage)+")",
+			adminClientIP(r))
+		s.emit("config", "apply_failed", "warn",
+			"Configuration apply needs a restart to take effect; no change was applied.")
+		writeJSON(w, http.StatusConflict, result)
 		return
 	}
 	if len(result.ValidationErrors) > 0 {

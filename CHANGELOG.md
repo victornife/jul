@@ -10,6 +10,21 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Fixed
+- **P2-Remediation Wave 2: H-06, H-04, M-02, M-03** — restore bounded apply correctness and API contract:
+  - **H-06 (restart-required strips can_stage):** `handleConfigApply` and `handleConfigPatchApply`
+    now return the full `ConfigApplyResult` at HTTP 409 on restart-required rejections,
+    including `can_stage`, subsystem list, and version context. TypeScript `ConflictBodySchema`
+    updated to parse these fields.
+  - **H-04 (orphaned pre-Publish restoration):** `applyCandidate` now starts a background
+    goroutine that drains the result channel and restores the previous file if the server
+    aborts pre-Publish after the coordinator has already returned `saved_not_live`. A
+    `sync.Once` ensures exactly one consumer handles restoration.
+  - **M-02 (lifecycle diff wrong baseline):** the previous config is now resolved through
+    `config.NewCandidate` before passing to `lifecycle.DiffConfig`, ensuring effective
+    values are compared on both sides and secret references do not produce false differences.
+  - **M-03 (external pending state missing):** the `PendingRestart` dep now returns a
+    structured `admin.PendingRestartStatus{Managed:false}` for external (unmanaged)
+    disk/runtime divergence, not just the flat subsystem list.
 - **P2-Remediation Wave 1: C-01, C-02, H-01, M-05 (L-01)** — critical correctness fixes for the planned-restart and managed-apply layer:
   - **C-01 (staging backup ordering):** `applyStageRestart` now writes the backup
     and prepared marker BEFORE writing the candidate to disk. `StageManaged` signature

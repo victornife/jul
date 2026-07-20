@@ -96,9 +96,19 @@ func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyRes
 		}, nil
 	}
 
+	// Parse and resolve the previous config so lifecycle.DiffConfig compares
+	// effective values on both sides. Without resolution, secret references
+	// produce false differences when the resolved value happens to match but
+	// the reference string differs (M-02 fix).
 	var prevCfg *config.Config
 	if len(prevRaw) > 0 {
-		prevCfg, _ = config.Parse(prevRaw)
+		if raw, err := config.Parse(prevRaw); err == nil {
+			if cand, err := config.NewCandidate(raw); err == nil {
+				prevCfg = cand.Effective
+			} else {
+				prevCfg = raw // fallback to unresolved on resolution error
+			}
+		}
 	}
 
 	if mode == ApplyStageRestart {
@@ -345,7 +355,9 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 	rawDigest := sha256.Sum256(data)
 
 	id := c.nextID()
-	resultCh := make(chan server.ReloadResult, 1)
+	// resultCh has capacity 2 so neither the server nor the background finalizer
+	// blocks when sending the result, even if the coordinator has already returned.
+	resultCh := make(chan server.ReloadResult, 2)
 	deadline := time.Now().Add(candidate.Effective.Global.ReloadTimeout.Std())
 
 	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
@@ -382,6 +394,33 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 		}, err
 	}
 
+	// restoreOnce ensures exactly one of {coordinator, background goroutine}
+	// performs the pre-Publish restoration, regardless of which sees the result
+	// first. This closes the H-04 gap: if the coordinator times out and returns
+	// saved_not_live, and the server later aborts pre-Publish, the background
+	// goroutine restores the file even though the HTTP response is already gone.
+	var restoreOnce sync.Once
+	restore := func(rr server.ReloadResult) {
+		restoreOnce.Do(func() {
+			if !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded {
+				c.restorePrevious(prevRaw, rawDigest)
+			}
+		})
+	}
+
+	// Background finalizer: drains the result channel if the coordinator times
+	// out waiting. This is the sole owner of the restoration obligation once the
+	// coordinator has returned saved_not_live.
+	go func() {
+		select {
+		case rr := <-resultCh:
+			restore(rr)
+		case <-c.BaseCtx.Done():
+			// Process shutting down; no restoration attempt — startup will
+			// determine the correct state from disk and marker files.
+		}
+	}()
+
 	waitTimeout := time.Until(deadline) + time.Second
 	if waitTimeout <= 0 {
 		waitTimeout = time.Second
@@ -389,11 +428,9 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 
 	select {
 	case rr := <-resultCh:
-		return c.decorateResult(mode, desiredVersion, data, prevRaw, &rr), nil
+		restore(rr)
+		return c.decorateResultNoRestore(mode, desiredVersion, rr), nil
 	case <-c.BaseCtx.Done():
-		// Process is shutting down. We do not restore because we cannot know
-		// whether the reload reached Publish; the operator can inspect the
-		// runtime overview on restart.
 		return ApplyResult{
 			OK:             true,
 			Mode:           mode,
@@ -402,6 +439,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 			Message:        "Configuration saved; the process is shutting down and the reload outcome is unknown.",
 		}, nil
 	case <-time.After(waitTimeout):
+		// Background goroutine now owns the restoration obligation.
 		return ApplyResult{
 			OK:             true,
 			Mode:           mode,
@@ -418,6 +456,30 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 			Message: "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome.",
 		}, nil
 	}
+}
+
+// decorateResultNoRestore builds the ApplyResult from a ReloadResult without
+// calling restorePrevious — restoration is handled by the restore closure in
+// applyCandidate to ensure exactly-once semantics.
+func (c *ConfigApplyCoordinator) decorateResultNoRestore(mode ApplyMode, desiredVersion string, rr server.ReloadResult) ApplyResult {
+	res := ApplyResult{
+		OK:             rr.Outcome == server.ReloadAppliedLive || rr.Outcome == server.ReloadAppliedDegraded,
+		Mode:           mode,
+		Version:        desiredVersion,
+		ServingVersion: rr.ServingVersion,
+		Reload:         &rr,
+	}
+	switch rr.Outcome {
+	case server.ReloadAppliedLive:
+		res.Message = "Configuration validated, saved, and applied live."
+	case server.ReloadAppliedDegraded:
+		res.Message = "Configuration applied live with degradation: " + rr.Error
+	case server.ReloadSavedNotLive:
+		res.Message = "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome."
+	default:
+		res.Message = "Configuration was saved but the live reload did not apply: " + rr.Error
+	}
+	return res
 }
 
 func (c *ConfigApplyCoordinator) decorateResult(mode ApplyMode, desiredVersion string, data, prevRaw []byte, rr *server.ReloadResult) ApplyResult {

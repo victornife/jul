@@ -261,7 +261,13 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if result.RestartRequired {
-		s.writeRestartRequired(w, r, "config.patch", errors.New(result.Message))
+		// Return the full structured result so the client receives can_stage
+		// and subsystem information, not just a plain message.
+		s.recordAudit("config.patch", "config", "failure",
+			"rejected: restart required", adminClientIP(r))
+		s.emit("config", "apply_failed", "warn",
+			"Structured patch apply needs a restart to take effect; no change was applied.")
+		writeJSON(w, http.StatusConflict, result)
 		return
 	}
 	if len(result.ValidationErrors) > 0 {
