@@ -193,7 +193,13 @@ func TestPatchSummaryFormatters(t *testing.T) {
 	if orDefault("  ", "def") != "def" || orDefault("x", "def") != "x" {
 		t.Error("orDefault mapping wrong")
 	}
-	if got := trimNonEmpty([]string{" a ", "", "  ", "b"}); len(got) != 2 || got[0] != "a" || got[1] != "b" {
-		t.Errorf("trimNonEmpty = %v", got)
+	if got := normalizeStringSlice([]string{" a ", "", "  ", "b"}); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("normalizeStringSlice = %v", got)
+	}
+	if got := normalizeStringSlice([]string{"a", " a ", "a", "b", "b"}); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("normalizeStringSlice dedup = %v", got)
+	}
+	if got := normalizeStringSlice([]string{"", "   "}); got != nil {
+		t.Errorf("normalizeStringSlice empty = %v, want nil", got)
 	}
 }

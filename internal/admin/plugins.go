@@ -51,7 +51,7 @@ func buildPlugin(in pluginDef, existing config.PluginConfig) (config.PluginConfi
 		Config:       trimConfigMap(in.Config),
 		KV:           in.KV,
 		Fetch:        in.Fetch,
-		AllowedHosts: trimNonEmpty(in.AllowedHosts),
+		AllowedHosts: normalizeStringSlice(in.AllowedHosts),
 	}
 	switch strings.TrimSpace(in.Source) {
 	case "", "path":

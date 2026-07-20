@@ -149,7 +149,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			Enabled:           req.WAF.Enabled,
 			Mode:              mode,
 			BlockStatus:       req.WAF.BlockStatus,
-			DirectivesFiles:   trimNonEmpty(req.WAF.DirectivesFiles),
+			DirectivesFiles:   normalizeStringSlice(req.WAF.DirectivesFiles),
 			InlineRules:       strings.TrimSpace(req.WAF.InlineRules),
 			CRSEnabled:        req.WAF.CRSEnabled,
 			Paranoia:          req.WAF.Paranoia,
@@ -435,7 +435,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		newNames := trimNonEmpty(req.NewServerNames)
+		newNames := normalizeStringSlice(req.NewServerNames)
 		if stringSetsEqual(srv.ServerNames, newNames) {
 			return "", fmt.Errorf("route_rename: the host names are unchanged")
 		}
@@ -629,7 +629,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		if listen == "" {
 			return "", fmt.Errorf("server_add: listen is required")
 		}
-		names := trimNonEmpty(req.ServerNames)
+		names := normalizeStringSlice(req.ServerNames)
 		// Two server blocks on the same listen with the same host-names set are
 		// indistinguishable, so refuse a create that would duplicate one.
 		if serverNamesTaken(c, listen, names, nil) {

@@ -46,25 +46,9 @@ func buildClientAuth(in clientAuthDef) (*config.ClientAuthConfig, string, error)
 		Mode:      mode,
 		CAFile:    caFile,
 		CRLFile:   strings.TrimSpace(in.CRLFile),
-		VerifySAN: trimSANList(in.VerifySAN),
+		VerifySAN: normalizeStringSlice(in.VerifySAN),
 	}
 	return ca, clientAuthSummary(ca), nil
-}
-
-// trimSANList returns a copy of in with blank entries dropped and the rest
-// trimmed, or nil when nothing remains, so a serialized client_auth omits an
-// empty verify_san list.
-func trimSANList(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s = strings.TrimSpace(s); s != "" {
-			out = append(out, s)
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 // clientAuthSummary renders a client_auth block for an audit summary: its mode

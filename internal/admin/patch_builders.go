@@ -19,8 +19,8 @@ import (
 func buildLocationAuth(a locationAuth) (*config.AuthConfig, string, error) {
 	switch strings.TrimSpace(a.Method) {
 	case "cidr":
-		allow := trimNonEmpty(a.Allow)
-		deny := trimNonEmpty(a.Deny)
+		allow := normalizeStringSlice(a.Allow)
+		deny := normalizeStringSlice(a.Deny)
 		if len(allow) == 0 && len(deny) == 0 {
 			return nil, "", fmt.Errorf("location_set_auth: the cidr method needs at least one allow or deny entry")
 		}
@@ -52,17 +52,6 @@ func buildLocationAuth(a locationAuth) (*config.AuthConfig, string, error) {
 	default:
 		return nil, "", fmt.Errorf("location_set_auth: unknown method %q (want cidr, basic, jwt, or forward)", a.Method)
 	}
-}
-
-// trimNonEmpty returns the non-blank, space-trimmed entries of in.
-func trimNonEmpty(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if t := strings.TrimSpace(s); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 func onOff(b bool) string {
