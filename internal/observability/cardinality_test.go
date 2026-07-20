@@ -107,6 +107,13 @@ func TestMetricLabelPolicy(t *testing.T) {
 		"jul_tls_cert_expiry_seconds":            {"domain"},
 		"jul_acme_renewals_total":                nil,
 		"jul_mtls_handshakes_total":              {"result"},
+		// Reload and staged-restart metrics (P2-05): source/outcome labels are
+		// bounded to 3 source values × 4 outcome values = 12 series maximum.
+		"jul_reload_total":               {"outcome", "source"},
+		"jul_reload_duration_seconds":    {"outcome", "source"},
+		"jul_reload_in_progress":         nil,
+		"jul_config_stage_restart_total": {"result"},
+		"jul_config_pending_restart":     nil,
 	}
 
 	for name, names := range got {
@@ -216,4 +223,10 @@ func exerciseAllMetrics(m *Metrics) {
 	m.StreamUDPEvicted("idle")
 	m.StreamUDPRejected()
 	m.ObserveCertExpiry("example.com", time.Now().Add(24*time.Hour))
+	// Reload and staged-restart metrics (P2-05).
+	m.ReloadStarted()
+	m.ObserveReload("admin", "applied_live", 42)
+	m.ObserveStageRestart("created")
+	m.SetPendingRestart(true)
+	m.SetPendingRestart(false)
 }

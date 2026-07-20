@@ -61,6 +61,13 @@ type Metrics struct {
 	mtlsHandshakes   *prometheus.CounterVec
 	wafEvents        *prometheus.CounterVec
 
+	// Reload and staged-restart metrics (P2-05).
+	reloadTotal      *prometheus.CounterVec
+	reloadDuration   *prometheus.HistogramVec
+	reloadInProgress prometheus.Gauge
+	stageRestarts    *prometheus.CounterVec
+	pendingRestart   prometheus.Gauge
+
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
 	// expiry moved forward) from the steady stream of cache hits that autocert
@@ -231,6 +238,28 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		certSeen: make(map[string]int64),
 		traffic:  newTrafficTracker(),
 
+		reloadTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_reload_total",
+			Help: "Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/not_applied/saved_not_live).",
+		}, []string{"source", "outcome"}),
+		reloadDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "jul_reload_duration_seconds",
+			Help:    "Configuration reload latency in seconds, labeled by source and outcome.",
+			Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+		}, []string{"source", "outcome"}),
+		reloadInProgress: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "jul_reload_in_progress",
+			Help: "1 while a configuration reload transaction is in flight; 0 otherwise.",
+		}),
+		stageRestarts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_config_stage_restart_total",
+			Help: "Staged-restart apply operations, labeled by result (created/updated/discarded/failed).",
+		}, []string{"result"}),
+		pendingRestart: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "jul_config_pending_restart",
+			Help: "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",
+		}),
+
 		samples:       newRequestSampleBuffer(requestSampleCap),
 		routeFailures: newRouteFailureTracker(routeFailureCap),
 		health:        newHealthHistoryTracker(),
@@ -266,6 +295,11 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.certRenewals,
 		m.mtlsHandshakes,
 		m.wafEvents,
+		m.reloadTotal,
+		m.reloadDuration,
+		m.reloadInProgress,
+		m.stageRestarts,
+		m.pendingRestart,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -557,6 +591,41 @@ func (m *Metrics) StreamUDPEvicted(reason string) {
 // max_udp_sessions cap was reached and no session was reclaimable.
 func (m *Metrics) StreamUDPRejected() {
 	m.streamUDPReject.Inc()
+}
+
+// ObserveReload records the outcome and duration of a completed hot reload
+// (P2-05). source is the reload trigger ("admin", "sighup", or "watch");
+// outcome is the terminal classification ("applied_live", "applied_degraded",
+// "not_applied", or "saved_not_live"); durationMs is the reload wall time.
+// inProgress must be decremented by the caller just before calling this.
+func (m *Metrics) ObserveReload(source, outcome string, durationMs int64) {
+	m.reloadTotal.WithLabelValues(source, outcome).Inc()
+	if durationMs > 0 {
+		m.reloadDuration.WithLabelValues(source, outcome).Observe(float64(durationMs) / 1000.0)
+	}
+	m.reloadInProgress.Dec()
+}
+
+// ReloadStarted increments the in-progress gauge at the beginning of a reload
+// transaction. The caller must pair it with ObserveReload (which decrements).
+func (m *Metrics) ReloadStarted() {
+	m.reloadInProgress.Inc()
+}
+
+// ObserveStageRestart records the outcome of a stage_restart apply operation
+// (P2-05). result is one of "created", "updated", "discarded", or "failed".
+func (m *Metrics) ObserveStageRestart(result string) {
+	m.stageRestarts.WithLabelValues(result).Inc()
+}
+
+// SetPendingRestart sets the pending-restart gauge to 1 when a managed staged
+// restart is pending, or 0 when none is active (P2-05).
+func (m *Metrics) SetPendingRestart(pending bool) {
+	if pending {
+		m.pendingRestart.Set(1)
+	} else {
+		m.pendingRestart.Set(0)
+	}
 }
 
 // hostLabel strips the port so metric cardinality stays bounded by hostname.

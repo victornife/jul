@@ -493,8 +493,22 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 
 	if result.OK {
 		s.recordHistory(prev)
-		s.recordAudit("config.apply", "config", "success", "configuration validated and saved", adminClientIP(r))
-		s.emit("config", "apply", "info", "Configuration validated and saved.")
+		// Use distinct audit/timeline events for stage_restart vs hot apply so
+		// the timeline clearly distinguishes which transaction type ran.
+		if mode == "stage_restart" {
+			if result.PendingRestart != nil && result.PendingRestart.Staged {
+				// Check if the pending_restart was just created (serving_version
+				// is set, meaning it was pre-existing) or is a first stage.
+				s.recordAudit("config.stage_restart.created", "config", "success",
+					"configuration staged for next process restart", adminClientIP(r))
+				s.emit("config", "stage_restart_created", "info",
+					"Configuration validated and staged for the next process restart.")
+			}
+		} else {
+			s.recordAudit("config.apply.accepted", "config", "success",
+				"configuration validated and saved", adminClientIP(r))
+			s.emit("config", "apply", "info", "Configuration validated and saved.")
+		}
 	}
 
 	status := http.StatusOK

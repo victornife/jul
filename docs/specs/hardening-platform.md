@@ -29,7 +29,7 @@ to committed roadmap features — notably **HP-02 Console RBAC** feeds
 
 | ID | Item | Precursor to | Phase mapping | Effort |
 | --- | --- | --- | --- | --- |
-| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | — | Partially delivered; Phase 2 completes it | M |
+| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | — | ✅ Delivered (Phase 2, P2-01 through P2-05) | M |
 | HP-02 | Console RBAC + multi-user | [Y3-02](../roadmap/) | Design complete; Phase 3 implements it | L |
 | HP-03 | Metric-cardinality & relabel strategy | — | ✅ Delivered | M |
 | HP-04 | Pre-commit hooks / local gate parity | — | ✅ Delivered | M |

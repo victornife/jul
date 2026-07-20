@@ -96,6 +96,28 @@ redact_min_secret_length = 4
 
 Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`, `512m`, etc.
 
+## Configuration apply modes
+
+The admin API `POST /api/config/apply` accepts an optional `?mode=` query
+parameter that controls how a valid candidate is applied:
+
+| Mode | Description |
+| ---- | ----------- |
+| `hot` (default) | Validates, persists, and immediately triggers a live reload. Restart-required changes are rejected with `restart_required: true` and `can_stage: true`; nothing is written. |
+| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode for changes to startup-bound settings (cache, egress, admin, tracing, access-log, ACME, log format, listener settings). |
+
+When a candidate is staged:
+
+- `GET /api/config/pending-restart` returns the structured staging state
+  (staged version, serving version, pending subsystems, discard availability).
+- `POST /api/config/pending-restart/discard` atomically restores the previous
+  configuration and clears the staged state. The running process is unaffected.
+- Hot applies are refused with `HTTP 409` until the staged candidate is
+  discarded or the process is restarted.
+
+See [reload-semantics.md](reload-semantics.md#planned-restart-staging) for the
+crash-consistent staging order and reconciliation rules.
+
 ---
 
 ## `[[servers]]`

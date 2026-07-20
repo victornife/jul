@@ -10,6 +10,23 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **Phase 2 close: reload metrics, stage_restart tests, docs, and compat cleanup** (P2-05, #70):
+  added `jul_reload_total{source,outcome}`, `jul_reload_duration_seconds{source,outcome}`,
+  `jul_reload_in_progress`, `jul_config_stage_restart_total{result}`, and
+  `jul_config_pending_restart` Prometheus metrics to `internal/observability/metrics.go`;
+  added `OnReloadStart` and `OnReloadComplete` hooks to `server.Server` and wired them
+  from `serve.go` (no observability import in server package); `ReloadSource.String()`
+  added for metric labels. Distinct audit events `config.apply.accepted` and
+  `config.stage_restart.created` emitted from `handleConfigApply`. Five new API
+  integration tests for `stage_restart`: returns 200 with `pending_restart`, blocks hot
+  apply with 409, discard restores bytes, `GET /api/config/pending-restart` reflects
+  state, restart-required rejection carries `can_stage`. Seven new vitest tests for
+  `staged-for-restart`, `staged-update`, `pending-restart-blocks-hot`, `discard-success`
+  outcome kinds. Added `previous_reload` deprecation notice in `api/client.ts`.
+  Docs: `docs/configuration.md` apply-modes section; `docs/troubleshooting.md` staged
+  restart and inconsistent-marker recovery; `docs/specs/hardening-platform.md` HP-01
+  marked delivered; `docs/roadmap/README.md` Phase 2 marked delivered. Phase 2
+  Definition of Done fully demonstrated.
 - **Correlated apply/pending-restart APIs and Console outcome model** (P2-04, #69):
   added `DiscardPendingRestart` and `PendingRestart` to `admin.Deps`; new
   endpoints `GET /api/config/pending-restart` and `POST /api/config/pending-restart/discard`

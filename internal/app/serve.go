@@ -326,6 +326,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// after that call is invisible to the admin server's apply handlers.
 	srv := server.New(cfg, startupCand.Raw, startupFP, log, factory, src, ValidateRuntimeConfig)
 	srv.ConnStateHook = metrics.ConnState
+	srv.OnReloadStart = metrics.ReloadStarted
+	srv.OnReloadComplete = metrics.ObserveReload
 	srv.ACME = rt.ACME
 
 	// Wire the runtime snapshot into preflight after the server exists so
@@ -386,14 +388,40 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 		deps.ApplyConfigRaw = func(data []byte, mode string) (admin.ConfigApplyResult, error) {
 			res, err := coordinator.ApplyRaw(data, ApplyMode(mode))
-			return toAdminConfigApplyResult(res), err
+			result := toAdminConfigApplyResult(res)
+			if mode == string(ApplyStageRestart) {
+				if res.OK {
+					if coordinator.PlannedRestart != nil && coordinator.PlannedRestart.IsPending() {
+						metrics.ObserveStageRestart("updated")
+					} else {
+						metrics.ObserveStageRestart("created")
+					}
+					metrics.SetPendingRestart(true)
+				} else {
+					metrics.ObserveStageRestart("failed")
+				}
+			}
+			return result, err
 		}
 		deps.ApplyConfig = func(c *config.Config, mode string) (admin.ConfigApplyResult, error) {
 			res, err := coordinator.ApplyConfig(c, ApplyMode(mode))
-			return toAdminConfigApplyResult(res), err
+			result := toAdminConfigApplyResult(res)
+			if mode == string(ApplyStageRestart) {
+				if res.OK {
+					metrics.ObserveStageRestart("updated")
+					metrics.SetPendingRestart(true)
+				} else {
+					metrics.ObserveStageRestart("failed")
+				}
+			}
+			return result, err
 		}
 		deps.DiscardPendingRestart = func() (admin.ConfigApplyResult, error) {
 			res, err := coordinator.DiscardPlannedRestart()
+			if err == nil && res.OK {
+				metrics.ObserveStageRestart("discarded")
+				metrics.SetPendingRestart(false)
+			}
 			return toAdminConfigApplyResult(res), err
 		}
 		deps.PendingRestart = func() *admin.PendingRestartStatus {
@@ -434,6 +462,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				"backup", configPath+".pending-restart.bak",
 			)
 		}
+		// Initialise the pending-restart gauge from the reconciled state so the
+		// metric is accurate from the first scrape.
+		metrics.SetPendingRestart(reconcileStore.IsPending())
 	}
 
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta

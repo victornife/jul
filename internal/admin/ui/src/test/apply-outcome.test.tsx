@@ -220,6 +220,106 @@ describe("ApplyOutcomeBanner", () => {
     );
     const el = screen.getByRole("alert");
     expect(el).toHaveAttribute("data-outcome", "reload-timed-out");
+  });
+});
+
+// ── Phase 2 outcome kinds (P2-05 §22.7) ─────────────────────────────────────
+
+describe("deriveApplyOutcome — stage_restart and discard outcomes (P2-05)", () => {
+  it("staged-for-restart: mode=stage_restart, accepted, first stage", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: false,
+      mode: "stage_restart",
+      isStagedUpdate: false,
+    });
+    expect(o.kind).toBe("staged-for-restart");
+    expect(o.severity).toBe("info");
+    expect(o.blocking).toBe(false);
+  });
+
+  it("staged-update: mode=stage_restart, accepted, isStagedUpdate", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: false,
+      mode: "stage_restart",
+      isStagedUpdate: true,
+    });
+    expect(o.kind).toBe("staged-update");
+    expect(o.severity).toBe("info");
+    expect(o.blocking).toBe(false);
+  });
+
+  it("pending-restart-blocks-hot: pendingRestartBlocksHot=true", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: false,
+      pendingRestartBlocksHot: true,
+    });
+    expect(o.kind).toBe("pending-restart-blocks-hot");
+    expect(o.severity).toBe("blocked");
+    expect(o.blocking).toBe(true);
+  });
+
+  it("discard-success: isDiscard=true", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: false,
+      isDiscard: true,
+    });
+    expect(o.kind).toBe("discard-success");
+    expect(o.severity).toBe("success");
+    expect(o.blocking).toBe(false);
+  });
+
+  it("staged-for-restart takes precedence over restart-required check", () => {
+    // Even when accepted=true and mode=stage_restart, no restart-required path.
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: false,
+      mode: "stage_restart",
+    });
+    expect(o.kind).toBe("staged-for-restart");
+  });
+
+  it("restart-required still fires when mode=hot and accepted=false", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: false,
+      mode: "hot",
+      restartMessage: "cache settings changed",
+    });
+    expect(o.kind).toBe("restart-required");
+    expect(o.severity).toBe("blocked");
+    expect(o.blocking).toBe(true);
+    expect(o.message).toContain("cache settings changed");
+  });
+});
+
+describe("ApplyOutcomeBanner — reload-timed-out and capabilities (continued)", () => {
+  function bannerFor(input: Parameters<typeof deriveApplyOutcome>[0]): ApplyOutcome {
+    return deriveApplyOutcome(input);
+  }
+
+  it("the timed-out copy mentions the timeout", () => {
+    render(
+      <ApplyOutcomeBanner
+        outcome={bannerFor({
+          accepted: true,
+          pendingReload: true,
+          runtimeObserved: true,
+          streamStatus: "ok",
+          reloadTimedOut: true,
+        })}
+      />,
+    );
+    const el = screen.getByRole("alert");
     expect(el).toHaveTextContent("reload exceeded");
   });
 

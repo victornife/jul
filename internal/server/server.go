@@ -40,6 +40,20 @@ const (
 	ReloadSourceAdmin
 )
 
+// String returns the lowercase name of the reload source for metric labels.
+func (s ReloadSource) String() string {
+	switch s {
+	case ReloadSourceSIGHUP:
+		return "sighup"
+	case ReloadSourceFileWatch:
+		return "watch"
+	case ReloadSourceAdmin:
+		return "admin"
+	default:
+		return "unknown"
+	}
+}
+
 // ReloadRequest is a typed reload event. It carries the candidate for admin
 // apply paths so the exact preflight-resolved candidate is tied to the event
 // that publishes it (R9-02). File-watch and SIGHUP events carry a nil
@@ -119,6 +133,19 @@ type Server struct {
 	// stream-proxy config update. Errors are reported as a degraded reload result
 	// but do not roll back the handler swap.
 	OnReloaded func(*config.Config) error
+
+	// OnReloadStart, when set, is invoked at the beginning of every reload
+	// transaction so the composition root can increment an in-progress gauge.
+	// It must be paired with OnReloadComplete (which decrements).
+	OnReloadStart func()
+
+	// OnReloadComplete, when set, is invoked once per reload transaction
+	// immediately after the ReloadResult is finalized and stored. It is called
+	// for every outcome (applied_live, applied_degraded, not_applied, etc.) so
+	// the composition root can update Prometheus counters and gauges without this
+	// package importing observability. source, outcome, and durationMs mirror the
+	// corresponding ReloadResult fields.
+	OnReloadComplete func(source, outcome string, durationMs int64)
 
 	lastReload atomic.Pointer[ReloadResult]
 	// baseCtx is the process-level context stored during Run. It is used to
@@ -858,6 +885,9 @@ func (s *Server) doReload(req ReloadRequest) {
 		Source:    req.Source,
 		StartedAt: time.Now(),
 	}
+	if s.OnReloadStart != nil {
+		s.OnReloadStart()
+	}
 	defer s.sendReloadResult(req.Result, &result)
 
 	if s.source == nil {
@@ -1008,6 +1038,10 @@ func (s *Server) doReload(req ReloadRequest) {
 // treated as a discarded result; the result is still stored in lastReload.
 func (s *Server) sendReloadResult(ch chan<- ReloadResult, r *ReloadResult) {
 	s.lastReload.Store(r)
+	if s.OnReloadComplete != nil {
+		source := r.Source.String()
+		s.OnReloadComplete(source, string(r.Outcome), r.DurationMS)
+	}
 	if ch == nil {
 		return
 	}

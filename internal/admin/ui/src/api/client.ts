@@ -1234,6 +1234,12 @@ export class ConfigRejectedError extends Error {
 // timing of the most recent configuration reload. The server includes it in
 // the apply response as previous_reload so the Console can surface a slow
 // reload (timed_out) as a distinct, operator-legible outcome.
+//
+// @deprecated Use the `reload` field in ApplyResultSchema instead. This field
+// carries the correlated result of the reload triggered by the apply and
+// supersedes previous_reload for all new consumers. previous_reload will be
+// removed in the next MINOR release after the structured reload contract has
+// been validated in production.
 export const ReloadSnapshotSchema = z.object({
   ok: z.boolean(),
   timed_out: z.boolean().optional(),

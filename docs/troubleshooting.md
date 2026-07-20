@@ -77,11 +77,60 @@ the exact *applied vs. serving* model and the full restart-required list.
 
 When you apply a config through the admin API/Console that changes one of the
 startup-bound settings above, the write path **refuses it without persisting
-anything** and returns **HTTP 409** with `restart_required: true`. The Console
-shows a distinct *Restart required — not applied* banner. This is deliberate: the
+anything** and returns **HTTP 409** with `restart_required: true` and
+`can_stage: true`. The Console shows a distinct *Restart required — not applied*
+banner and offers a **Save for next restart** action. This is deliberate: the
 alternative — recording the change as applied while the old value keeps serving —
-would be dishonest. Edit the configuration file directly and restart the server.
+would be dishonest.
+
+You have two options:
+
+1. **Save for next restart** (`stage_restart` mode): the valid candidate is
+   persisted and waits for the next process restart. Use
+   `POST /api/config/apply?mode=stage_restart` or the Console button. The
+   running process continues serving the previous config unchanged.
+2. **Edit directly and restart**: edit the configuration file to add the
+   restart-required change, then restart the server process.
+
 See [console.md](console.md#restart-required-changes).
+
+### Hot apply is blocked with "A staged restart is pending"
+
+A previous `stage_restart` apply saved a candidate for the next restart. Hot
+applies are refused until you either:
+
+- **Restart the process** — the staged config takes effect and the staged state
+  is automatically cleared on startup.
+- **Discard the staged config** — `POST /api/config/pending-restart/discard`
+  or the Console *Discard staged configuration* button. The previous
+  configuration is atomically restored and hot applies resume immediately.
+
+If you need to update the staged candidate (add further restart-required changes)
+you can re-apply with `stage_restart` mode while a staged restart is pending;
+this overwrites the staged file but preserves the original rollback base.
+
+### Inconsistent staged-restart marker on startup
+
+On startup, the server attempts to reconcile any pending-restart sidecar files
+left by a previous process. In rare cases (simultaneous crash and disk error) the
+reconciliation may detect an inconsistent state and log a warning like:
+
+```
+planned-restart reconciliation warning: disk digest does not match staged digest;
+backup preserved at server.toml.pending-restart.bak
+```
+
+The backup file (`<config-path>.pending-restart.bak`) contains the exact previous
+raw configuration. To recover:
+
+1. Inspect the backup: `cat server.toml.pending-restart.bak`
+2. If the backup looks correct, restore it: `cp server.toml.pending-restart.bak server.toml`
+3. Remove the sidecar files:
+   `rm server.toml.pending-restart.json server.toml.pending-restart.bak`
+4. Restart the server.
+
+See [reload-semantics.md](reload-semantics.md#planned-restart-staging) for the
+full reconciliation rules.
 
 ### The Console shows "Applied with a degraded subsystem"
 

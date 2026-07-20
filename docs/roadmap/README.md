@@ -34,7 +34,7 @@ releasable increment; later phases build on earlier ones.
 
 | Phase | Focus | Key deliverables | Status |
 | --- | --- | --- | --- |
-| Phase 2 | Reload results, bounded managed applies, and planned restart | Correlated reload results, exact restoration, planned-restart staging/discard/preflight | 🚧 next |
+| Phase 2 | Reload results, bounded managed applies, and planned restart | Correlated reload results, exact restoration, planned-restart staging/discard/preflight | ✅ delivered |
 | Phase 3 | RBAC Phase 1 | Named principals, predefined + custom roles, scoped tokens, deny-by-default admin routes | 🔒 queued |
 | Phase 4 | Egress coverage and hardening | JWKS, forward-auth, discovery, ACME/OCSP, WASM fetch under shared egress policy | 🔒 queued |
 | Phase 5 | Structured CRUD + near-term global-table patch ops | Batch patch preview, entity lifecycle, `global_set`, `compression_set`, `rate_limit_global_set` | 🔒 queued |
@@ -125,7 +125,7 @@ sequence above.
 
 | ID | Item | Description | Impact / what it unlocks | Phase | Effort |
 | --- | --- | --- | --- | --- | --- |
-| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | Add context-deadline to reload + structured per-subsystem result in apply response | Better operator visibility when reload stalls or partial-fails | **Partially delivered**; Phase 2 completes it | M |
+| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | Add context-deadline to reload + structured per-subsystem result in apply response | Better operator visibility when reload stalls or partial-fails | **Delivered** (Phase 2, P2-01..P2-05) | M |
 | HP-02 | Console RBAC + multi-user | Named principals, roles (viewer/operator/admin), scoped revocable tokens; authz at the API boundary; per-principal audit attribution. **Design:** [console-rbac.md](../specs/console-rbac.md) + [ADR 0010](../adr/0010-console-rbac.md). Precursor to [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core). | Multiple operators under least-privilege with attributable audit | **Design complete**; Phase 3 implements it | L |
 | HP-03 | Metric-cardinality & relabel strategy | **Delivered:** full label-cardinality policy table + operator relabel cookbook ([core-http.md](../core-http.md#metrics)); the client-derived `method` label is folded to a fixed set (unknown → `other`) so every client-derived label is bounded by construction (`host` was already opt-in); enforced by `TestMetricLabelPolicy`. | Predictable Prometheus cardinality at scale | ✅ Delivered | M |
 | HP-04 | Pre-commit hooks / local gate parity | **Delivered:** repo-managed hooks running the CI gate's fast path locally (fmt/vet/changed-pkg test + console lint/typecheck), full test + drift/size on push. | Red builds caught before they reach `main` | ✅ Delivered | M |

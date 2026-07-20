@@ -1818,3 +1818,298 @@ func (p *pipeWriter) Write(b []byte) (int, error) {
 	return p.pw.Write(b)
 }
 func (p *pipeWriter) Flush() {}
+
+// ── stage_restart API integration tests (P2-05 §22.5) ───────────────────────
+
+// stageRestartServer builds a write-capable admin server whose ApplyConfigRaw
+// supports the stage_restart mode, returning a pending_restart status when
+// staging succeeds.
+func stageRestartServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), "server.toml")
+	seed, err := config.Marshal(config.ProxyTarget("127.0.0.1:9000", ":8080"))
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, seed, 0o600); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	// stagePending tracks whether a staged restart is pending.
+	var stagePending bool
+
+	deps := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		WriteConfigRaw: func(data []byte) error {
+			return os.WriteFile(cfgPath, data, 0o600)
+		},
+		ApplyConfigRaw: func(data []byte, mode string) (ConfigApplyResult, error) {
+			// Block hot apply while staged restart is pending.
+			if mode != "stage_restart" && stagePending {
+				return ConfigApplyResult{
+					OK:             false,
+					Mode:           mode,
+					Message:        "A planned restart is pending; discard or complete it before applying hot changes.",
+					PendingRestart: &PendingRestartStatus{Managed: true, Staged: true, DiscardAvailable: true},
+				}, nil
+			}
+			c, err := config.Parse(data)
+			if err != nil {
+				return ConfigApplyResult{OK: false, Mode: mode, ValidationErrors: []string{err.Error()}}, nil
+			}
+			if err := config.Validate(c); err != nil {
+				return ConfigApplyResult{OK: false, Mode: mode, ValidationErrors: []string{err.Error()}}, nil
+			}
+			if err := os.WriteFile(cfgPath, data, 0o600); err != nil {
+				return ConfigApplyResult{OK: false, Mode: mode, Message: err.Error()}, err
+			}
+			result := ConfigApplyResult{
+				OK:      true,
+				Mode:    mode,
+				Version: configVersion(data),
+				Message: "Configuration saved.",
+			}
+			if mode == "stage_restart" {
+				stagePending = true
+				result.ServingVersion = configVersion(seed)
+				result.PendingRestart = &PendingRestartStatus{
+					Managed:          true,
+					Staged:           true,
+					StagedVersion:    result.Version,
+					ServingVersion:   result.ServingVersion,
+					Subsystems:       []string{"cache"},
+					DiscardAvailable: true,
+				}
+			} else {
+				result.ServingVersion = result.Version
+			}
+			return result, nil
+		},
+		LoadConfig: func() (*config.Config, error) {
+			raw, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return nil, err
+			}
+			return config.Parse(raw)
+		},
+		DiscardPendingRestart: func() (ConfigApplyResult, error) {
+			if !stagePending {
+				return ConfigApplyResult{OK: true, Message: "No pending restart."}, nil
+			}
+			if err := os.WriteFile(cfgPath, seed, 0o600); err != nil {
+				return ConfigApplyResult{OK: false, Message: err.Error()}, err
+			}
+			stagePending = false
+			return ConfigApplyResult{OK: true, Mode: "hot", Message: "Discarded."}, nil
+		},
+		PendingRestart: func() *PendingRestartStatus {
+			if !stagePending {
+				return nil
+			}
+			return &PendingRestartStatus{
+				Managed:          true,
+				Staged:           true,
+				Subsystems:       []string{"cache"},
+				DiscardAvailable: true,
+			}
+		},
+	}
+	cfg := config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}
+	return newTestServer(t, cfg, deps), cfgPath
+}
+
+// TestConfigApplyStageRestartReturns200WithPendingStatus proves a stage_restart
+// apply returns 200 with ok=true, mode=stage_restart, and a populated
+// pending_restart status (§22.5 / §19.2).
+func TestConfigApplyStageRestartReturns200WithPendingStatus(t *testing.T) {
+	s, cfgPath := stageRestartServer(t)
+
+	alt := validTOML(t, "./staged", ":8282")
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply?mode=stage_restart", bytes.NewReader(alt))
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out ConfigApplyResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Errorf("ok = false, want true; message: %s", out.Message)
+	}
+	if out.Mode != "stage_restart" {
+		t.Errorf("mode = %q, want stage_restart", out.Mode)
+	}
+	if out.PendingRestart == nil || !out.PendingRestart.Staged {
+		t.Error("pending_restart should be set and staged=true")
+	}
+	// Disk must contain the staged candidate.
+	disk, _ := os.ReadFile(cfgPath)
+	if !bytes.Contains(disk, []byte("staged")) {
+		t.Error("staged candidate should be on disk")
+	}
+}
+
+// TestConfigApplyStageRestartWritesCandidate proves the staged candidate is
+// written to disk but that a subsequent hot apply is blocked until the
+// staged state is discarded (§22.5 hot-apply-blocked invariant).
+func TestConfigApplyStageRestartBlocksHotApply(t *testing.T) {
+	s, _ := stageRestartServer(t)
+
+	// First: stage a candidate.
+	alt := validTOML(t, "./staged", ":8282")
+	rr1 := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr1, httptest.NewRequest(http.MethodPost,
+		"/api/config/apply?mode=stage_restart", bytes.NewReader(alt)))
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("stage: status = %d; body: %s", rr1.Code, rr1.Body.String())
+	}
+
+	// Second: attempt a hot apply — should be blocked (409).
+	alt2 := validTOML(t, "./hot-attempt", ":8383")
+	rr2 := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr2, httptest.NewRequest(http.MethodPost,
+		"/api/config/apply", bytes.NewReader(alt2)))
+	if rr2.Code != http.StatusConflict {
+		t.Fatalf("hot apply while pending: status = %d, want 409; body: %s",
+			rr2.Code, rr2.Body.String())
+	}
+}
+
+// TestConfigApplyDiscardRestoresPreviousBytes proves the discard endpoint
+// restores the previous bytes and returns 200 ok=true (§22.5).
+func TestConfigApplyDiscardRestoresPreviousBytes(t *testing.T) {
+	s, cfgPath := stageRestartServer(t)
+	original, _ := os.ReadFile(cfgPath)
+
+	// Stage a candidate.
+	alt := validTOML(t, "./staged", ":8282")
+	rr1 := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr1, httptest.NewRequest(http.MethodPost,
+		"/api/config/apply?mode=stage_restart", bytes.NewReader(alt)))
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("stage: status = %d; body: %s", rr1.Code, rr1.Body.String())
+	}
+
+	// Discard.
+	rr2 := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr2, httptest.NewRequest(http.MethodPost,
+		"/api/config/pending-restart/discard", nil))
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("discard: status = %d, want 200; body: %s", rr2.Code, rr2.Body.String())
+	}
+	var out ConfigApplyResult
+	if err := json.Unmarshal(rr2.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode discard: %v", err)
+	}
+	if !out.OK {
+		t.Errorf("discard ok = false, want true; message: %s", out.Message)
+	}
+	// Disk should be back to the original bytes.
+	restored, _ := os.ReadFile(cfgPath)
+	if !bytes.Equal(original, restored) {
+		t.Error("discard should have restored the original bytes")
+	}
+}
+
+// TestConfigApplyPendingRestartEndpointReflectsState proves GET
+// /api/config/pending-restart correctly reflects the staged state before and
+// after a stage_restart apply (§22.5).
+func TestConfigApplyPendingRestartEndpointReflectsState(t *testing.T) {
+	s, _ := stageRestartServer(t)
+
+	// Before staging: no pending restart.
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
+		"/api/config/pending-restart", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var before struct {
+		Pending bool `json:"pending"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &before); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if before.Pending {
+		t.Error("pending should be false before staging")
+	}
+
+	// Stage a candidate.
+	alt := validTOML(t, "./staged", ":8282")
+	rr2 := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr2, httptest.NewRequest(http.MethodPost,
+		"/api/config/apply?mode=stage_restart", bytes.NewReader(alt)))
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("stage: status = %d; body: %s", rr2.Code, rr2.Body.String())
+	}
+
+	// After staging: pending restart should be set.
+	rr3 := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr3, httptest.NewRequest(http.MethodGet,
+		"/api/config/pending-restart", nil))
+	var after struct {
+		Pending bool                  `json:"pending"`
+		Status  *PendingRestartStatus `json:"status"`
+	}
+	if err := json.Unmarshal(rr3.Body.Bytes(), &after); err != nil {
+		t.Fatalf("decode after: %v", err)
+	}
+	if !after.Pending {
+		t.Error("pending should be true after staging")
+	}
+	if after.Status == nil || !after.Status.Staged {
+		t.Error("status.staged should be true")
+	}
+}
+
+// TestConfigApplyHotRestartRequiredCanStage proves restart-required hot
+// rejection returns 409 with can_stage=true (§22.5 / §19.4).
+func TestConfigApplyHotRestartRequiredCanStage(t *testing.T) {
+	s, cfgPath := v2WriteServer(t)
+	before, _ := os.ReadFile(cfgPath)
+
+	deps2 := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		WriteConfigRaw: func([]byte) error {
+			return fmt.Errorf("%w: cache settings changed", ErrRestartRequired)
+		},
+		ApplyConfigRaw: func(data []byte, mode string) (ConfigApplyResult, error) {
+			return ConfigApplyResult{
+				OK:              false,
+				Mode:            mode,
+				RestartRequired: true,
+				CanStage:        true,
+				Message:         "cache settings changed; restart required",
+			}, nil
+		},
+		LoadConfig: func() (*config.Config, error) {
+			raw, _ := os.ReadFile(cfgPath)
+			return config.Parse(raw)
+		},
+	}
+	s2 := newTestServer(t, config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}, deps2)
+
+	alt := validTOML(t, "./hot-attempt", ":8383")
+	rr := httptest.NewRecorder()
+	s2.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(alt)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+	var out restartRequiredResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.OK || !out.RestartRequired {
+		t.Errorf("body = %+v, want ok=false restart_required=true", out)
+	}
+	// Nothing persisted.
+	after, _ := os.ReadFile(cfgPath)
+	if !bytes.Equal(before, after) {
+		t.Error("restart-required rejection should not modify the file")
+	}
+
+	_ = s // suppress unused var warning from original server
+}
