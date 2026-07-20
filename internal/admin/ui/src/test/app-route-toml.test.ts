@@ -64,4 +64,9 @@ describe("generateAppWithRouteToml (P2-13 mount-on-route)", () => {
     expect(out).not.toContain("h2c = true");
     expect(out).not.toContain("grpc = true");
   });
+
+  it("omits servers when the backend list is empty", () => {
+    const out = generateAppToml({ ...appDraft(), backends: [] });
+    expect(out).not.toContain("servers =");
+  });
 });

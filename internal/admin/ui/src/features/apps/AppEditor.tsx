@@ -139,7 +139,7 @@ export function AppEditor({ initial, existingRoutes, onClose }: AppEditorProps) 
   const [draft, setDraft] = useState<AppDraft>({
     name: initial?.name ?? "",
     strategy: initial?.strategy ?? "round_robin",
-    backends: initial?.backends ?? [{ address: "", weight: 1 }],
+    backends: initial?.backends?.length ? initial.backends : [{ address: "", weight: 1 }],
     healthCheck: initial?.healthCheck ?? false,
     healthCheckPath: initial?.healthCheckPath ?? "/healthz",
     healthCheckInterval: initial?.healthCheckInterval ?? "5s",
