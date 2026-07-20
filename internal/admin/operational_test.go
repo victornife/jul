@@ -462,3 +462,173 @@ func TestConcurrentAdminAppliesSerialize(t *testing.T) {
 		t.Fatalf("timeline apply events = %d, want 2", applyEvents)
 	}
 }
+
+// ── /api/config/pending-restart (P2-04) ──────────────────────────────────────
+
+func TestPendingRestartNoDep(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/config/pending-restart", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if pending, _ := out["pending"].(bool); pending {
+		t.Error("pending should be false when PendingRestart dep is nil")
+	}
+}
+
+func TestPendingRestartNoneActive(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		PendingRestart: func() *PendingRestartStatus { return nil },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/config/pending-restart", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if pending, _ := out["pending"].(bool); pending {
+		t.Error("pending should be false when PendingRestart returns nil")
+	}
+}
+
+func TestPendingRestartActive(t *testing.T) {
+	status := &PendingRestartStatus{
+		Managed:          true,
+		Staged:           true,
+		StagedVersion:    "v2",
+		ServingVersion:   "v1",
+		Subsystems:       []string{"cache"},
+		DiscardAvailable: true,
+		Inconsistent:     false,
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		PendingRestart: func() *PendingRestartStatus { return status },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/config/pending-restart", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out struct {
+		Pending bool                  `json:"pending"`
+		Status  *PendingRestartStatus `json:"status"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.Pending {
+		t.Error("pending should be true when PendingRestart returns a status")
+	}
+	if out.Status == nil {
+		t.Fatal("status should be set")
+	}
+	if out.Status.StagedVersion != "v2" {
+		t.Errorf("staged_version = %q, want v2", out.Status.StagedVersion)
+	}
+}
+
+func TestPendingRestartMethodNotAllowed(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/pending-restart", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rr.Code)
+	}
+}
+
+// ── /api/config/pending-restart/discard (P2-04) ───────────────────────────────
+
+func TestDiscardPendingRestartNoDep(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/pending-restart/discard", nil))
+	if rr.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501 when dep is nil", rr.Code)
+	}
+}
+
+func TestDiscardPendingRestartSuccess(t *testing.T) {
+	called := false
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		DiscardPendingRestart: func() (ConfigApplyResult, error) {
+			called = true
+			return ConfigApplyResult{OK: true, Mode: "hot", Message: "Planned restart discarded."}, nil
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/pending-restart/discard", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	if !called {
+		t.Error("DiscardPendingRestart dep was not called")
+	}
+}
+
+func TestDiscardPendingRestartConflict(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		DiscardPendingRestart: func() (ConfigApplyResult, error) {
+			return ConfigApplyResult{}, errDiscardFailed
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/pending-restart/discard", nil))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 on discard failure", rr.Code)
+	}
+}
+
+var errDiscardFailed = &discardError{"discard check failed"}
+
+type discardError struct{ msg string }
+
+func (e *discardError) Error() string { return e.msg }
+
+func TestDiscardPendingRestartMethodNotAllowed(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/config/pending-restart/discard", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rr.Code)
+	}
+}
+
+// ── /api/runtime/overview pending_restart_status (P2-04) ─────────────────────
+
+func TestRuntimeOverviewIncludesPendingRestartStatus(t *testing.T) {
+	status := &PendingRestartStatus{
+		Managed:          true,
+		Staged:           true,
+		StagedVersion:    "staged-v",
+		Subsystems:       []string{"cache"},
+		DiscardAvailable: true,
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		PendingRestart: func() *PendingRestartStatus { return status },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out struct {
+		PendingRestartStatus *PendingRestartStatus `json:"pending_restart_status"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.PendingRestartStatus == nil {
+		t.Fatal("pending_restart_status should be set when PendingRestart dep returns a value")
+	}
+	if out.PendingRestartStatus.StagedVersion != "staged-v" {
+		t.Errorf("staged_version = %q, want staged-v", out.PendingRestartStatus.StagedVersion)
+	}
+}

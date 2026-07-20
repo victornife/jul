@@ -90,6 +90,9 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/config/history", s.auth(http.HandlerFunc(s.handleConfigHistoryList)))
 	mux.Handle("/api/config/history/{id}", s.auth(http.HandlerFunc(s.handleConfigHistoryGet)))
 	mux.Handle("/api/config/rollback", s.auth(http.HandlerFunc(s.handleConfigRollback)))
+	// Planned-restart status and discard (P2-04).
+	mux.Handle("/api/config/pending-restart", s.auth(http.HandlerFunc(s.handlePendingRestart)))
+	mux.Handle("/api/config/pending-restart/discard", s.auth(http.HandlerFunc(s.handleDiscardPendingRestart)))
 	mux.Handle("/api/wizard/generate", s.auth(http.HandlerFunc(s.handleWizardGenerate)))
 
 	// Runtime profiling endpoints (goroutine, heap, cpu, etc.). Mounted behind

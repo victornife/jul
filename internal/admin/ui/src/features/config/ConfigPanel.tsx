@@ -148,7 +148,7 @@ export function ConfigPanel() {
     mutationFn: (confirmAdmin: boolean) => applyConfig(current, baseVersion, confirmAdmin),
     onSuccess: (res) => {
       setBaseline(current);
-      setApplied({ status: res.status, pendingReload: res.pending_reload ?? true, reloadTimedOut: res.previous_reload?.timed_out ?? false });
+      setApplied({ status: res.status ?? [], pendingReload: res.pending_reload ?? true, reloadTimedOut: res.previous_reload?.timed_out ?? false });
       setConfirming(false);
       // Advance the token to the freshly-applied version so a follow-up edit
       // does not trip a spurious conflict.

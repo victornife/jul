@@ -199,6 +199,14 @@ func (c *ConfigApplyCoordinator) nextID() string {
 	return fmt.Sprintf("rl_%d", c.seq.Add(1))
 }
 
+// PlannedRestartStatus returns the current managed planned-restart status as
+// an admin.PendingRestartStatus, or nil when no staged restart is pending.
+// It is safe to call without holding the coordinator mutex because it delegates
+// to the PlannedRestartStore which guards its own state.
+func (c *ConfigApplyCoordinator) PlannedRestartStatus() *admin.PendingRestartStatus {
+	return c.plannedRestartStatus()
+}
+
 func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 	if c.WatchDigest != nil {
 		c.WatchDigest.Store(&digest)

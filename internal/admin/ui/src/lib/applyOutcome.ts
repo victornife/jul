@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
  * SPDX-License-Identifier: agpl
  */
@@ -7,13 +7,13 @@
  * Apply-outcome taxonomy for the configuration write flow (AUX-02).
  *
  * A config apply is not a single yes/no event. The write path validates and
- * persists synchronously, but the swap into the live runtime — and, for the L4
- * stream proxy, the listener rebind — completes asynchronously; a handful of
+ * persists synchronously, but the swap into the live runtime -' and, for the L4
+ * stream proxy, the listener rebind -' completes asynchronously; a handful of
  * settings (the ACME issued-domain set and issuer) cannot be hot-applied at all
  * and need a process restart. Always painting a green "saved" hides the cases
  * where an apply is accepted but not yet, or not fully, live. This module folds
- * the raw signals — accepted vs restart-required, the server's pending_reload
- * flag, and the post-apply stream_status — into one explicit, severity-tagged
+ * the raw signals -' accepted vs restart-required, the server's pending_reload
+ * flag, and the post-apply stream_status -' into one explicit, severity-tagged
  * outcome so the panel can render every branch consistently and an operator can
  * tell them apart at a glance.
  */
@@ -27,7 +27,7 @@ export type ApplyOutcomeKind =
   // confirmed live yet (the transient state right after an apply).
   | "reload-pending"
   // Accepted and live for HTTP, but a subsystem failed to activate the new
-  // config and is still serving the previous one — a degraded, not failed,
+  // config and is still serving the previous one -' a degraded, not failed,
   // apply that needs operator attention.
   | "partial-reload"
   // Accepted, swap completed, but the reload exceeded the operator-configured
@@ -36,7 +36,19 @@ export type ApplyOutcomeKind =
   | "reload-timed-out"
   // Valid but NOT applied: the change is fixed at process start, so nothing was
   // saved and a restart is required for it to take effect.
-  | "restart-required";
+  | "restart-required"
+  // Configuration saved for the next process restart (first stage). The live
+  // runtime is unchanged; the operator must restart the process.
+  | "staged-for-restart"
+  // Staged configuration updated (a further stage_restart apply while a staged
+  // restart is already pending). Live runtime is unchanged.
+  | "staged-update"
+  // A hot apply was blocked because a managed staged restart is already
+  // pending. The operator must discard or restart before applying hot changes.
+  | "pending-restart-blocks-hot"
+  // The staged restart was successfully discarded and the previous configuration
+  // was restored. The live runtime was already serving the previous config.
+  | "discard-success";
 
 /** One subsystem that did not activate the new config during a partial reload. */
 export interface SubsystemFailure {
@@ -74,6 +86,26 @@ export interface ApplyOutcomeInput {
    * and partial-reload (subsystem failed to activate).
    */
   readonly reloadTimedOut?: boolean;
+  /**
+   * The apply mode returned by the server (P2-04). "stage_restart" means the
+   * config was saved for the next restart; the live runtime is unchanged.
+   */
+  readonly mode?: "hot" | "stage_restart";
+  /**
+   * True when a hot apply was blocked because a staged restart is pending
+   * (P2-04). The server returns ok=false with this flag set.
+   */
+  readonly pendingRestartBlocksHot?: boolean;
+  /**
+   * True when deriving the outcome of a discard operation (P2-04). The server
+   * restores the previous configuration; live runtime was already serving it.
+   */
+  readonly isDiscard?: boolean;
+  /**
+   * True when this is a staged-update (a further stage_restart apply while one
+   * is already pending). Derived from pending_restart.staged in the response.
+   */
+  readonly isStagedUpdate?: boolean;
 }
 
 /**
@@ -90,18 +122,67 @@ export function streamReloadFailure(streamStatus: string | undefined): Subsystem
 
 /**
  * Folds the raw apply signals into a single explicit outcome. Precedence:
- * restart-required (nothing applied) → partial subsystem failure → still
- * reloading → fully live. A subsystem failure outranks the pending state so a
- * degraded apply is never masked by an in-flight reload.
+ * discard > pending-restart-blocks-hot > stage_restart > restart-required
+ * > partial subsystem failure > still reloading > fully live.
  */
 export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
+  // Discard: the staged restart was abandoned and the previous config restored.
+  if (input.isDiscard) {
+    return {
+      kind: "discard-success",
+      severity: "success",
+      blocking: false,
+      title: "Staged configuration discarded",
+      message:
+        "The staged configuration was discarded and the previous configuration was restored. The live runtime was already serving it; no reload was needed.",
+      failures: [],
+    };
+  }
+
+  // Hot apply blocked by pending staged restart.
+  if (input.pendingRestartBlocksHot) {
+    return {
+      kind: "pending-restart-blocks-hot",
+      severity: "blocked",
+      blocking: true,
+      title: "Blocked - a staged restart is pending",
+      message:
+        "A configuration is staged for the next process restart. Hot applies are blocked until it is discarded or the process is restarted. Discard the staged configuration to resume hot applies, or restart the process to apply it.",
+      failures: [],
+    };
+  }
+
+  // stage_restart mode: configuration saved for the next restart.
+  if (input.mode === "stage_restart" && input.accepted) {
+    if (input.isStagedUpdate) {
+      return {
+        kind: "staged-update",
+        severity: "info",
+        blocking: false,
+        title: "Staged configuration updated",
+        message:
+          "The staged configuration was updated. The live runtime is unchanged; restart the process to apply the staged changes.",
+        failures: [],
+      };
+    }
+    return {
+      kind: "staged-for-restart",
+      severity: "info",
+      blocking: false,
+      title: "Saved for next restart",
+      message:
+        "The configuration was validated and saved. It will take effect when you restart the process. The live runtime is unchanged.",
+      failures: [],
+    };
+  }
+
   if (!input.accepted) {
     const msg = input.restartMessage?.trim();
     return {
       kind: "restart-required",
       severity: "blocked",
       blocking: true,
-      title: "Restart required — change not applied",
+      title: "Restart required - change not applied",
       message:
         msg && msg.length > 0
           ? msg
@@ -119,7 +200,7 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
       kind: "reload-timed-out",
       severity: "warning",
       blocking: false,
-      title: "Applied — reload exceeded the configured timeout",
+      title: "Applied -' reload exceeded the configured timeout",
       message:
         "The configuration was saved and is now serving, but the reload took longer than the configured reload_timeout. " +
         "Investigate slow reload paths (WAF rule compilation, WASM plugin loading) or increase reload_timeout in [global].",
@@ -148,7 +229,7 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
       kind: "reload-pending",
       severity: "info",
       blocking: false,
-      title: "Applied — runtime reloading",
+      title: "Applied -' runtime reloading",
       message:
         "The configuration was validated and saved. The live runtime is swapping to it now; this panel confirms once every subsystem reports the new config is live.",
       failures: [],

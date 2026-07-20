@@ -10,6 +10,23 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **Correlated apply/pending-restart APIs and Console outcome model** (P2-04, #69):
+  added `DiscardPendingRestart` and `PendingRestart` to `admin.Deps`; new
+  endpoints `GET /api/config/pending-restart` and `POST /api/config/pending-restart/discard`
+  (handlers in `internal/admin/api_pending_restart.go`); extended `RuntimeOverview`
+  with `PendingRestartStatus *PendingRestartStatus` (structured) and
+  `LastReload *server.ReloadResult`; updated `handleRuntimeOverview` to populate both;
+  wired `DiscardPendingRestart`/`PendingRestart` deps via `coordinator.DiscardPlannedRestart()`
+  and `coordinator.PlannedRestartStatus()` in `internal/app/serve.go`; added public
+  `PlannedRestartStatus()` method on `ConfigApplyCoordinator`.
+  TypeScript: extended `OverviewSchema` with `pending_restart_status` and `last_reload`
+  fields; extended `ApplyResultSchema` with `mode`, `reload`, and `pending_restart`
+  fields; added `ApplyMode` type; updated `applyConfig` to accept `mode` parameter;
+  added `PendingRestartStatusSchema`, `fetchPendingRestart()`, and
+  `discardPendingRestart()` to `api/client.ts`; extended `ApplyOutcomeKind` in
+  `lib/applyOutcome.ts` with `staged-for-restart`, `staged-update`,
+  `pending-restart-blocks-hot`, and `discard-success`; updated `deriveApplyOutcome`
+  to map all new server states.
 - **Planned-restart staging, discard, reconciliation, and startup preflights** (P2-03, #68):
   introduced `PlannedRestartMarker` and file-backed `PlannedRestartStore`
   (`internal/app/planned_restart.go`) using `<config>.pending-restart.json`

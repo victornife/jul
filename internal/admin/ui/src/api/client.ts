@@ -302,6 +302,35 @@ export const OverviewSchema = z.object({
   // no restart is needed. The Console surfaces this as a persistent banner so
   // operators know the saved config is not fully live until restart.
   pending_restart: z.array(z.string()).optional(),
+  // pending_restart_status is the structured managed planned-restart state
+  // (P2-04). Present when a managed staged restart is pending; nil otherwise.
+  // Supersedes the flat pending_restart list for the banner and discard action.
+  pending_restart_status: z
+    .object({
+      managed: z.boolean(),
+      staged: z.boolean(),
+      staged_at: z.string().optional(),
+      staged_version: z.string().optional(),
+      serving_version: z.string().optional(),
+      subsystems: z.array(z.string()).optional(),
+      discard_available: z.boolean(),
+      inconsistent: z.boolean(),
+    })
+    .optional(),
+  // last_reload is the correlated result of the most recent hot reload (P2-04).
+  // Absent when no reload has run since startup.
+  last_reload: z
+    .object({
+      id: z.string().optional(),
+      source: z.string().optional(),
+      outcome: z.string().optional(),
+      persisted: z.boolean().optional(),
+      published: z.boolean().optional(),
+      timed_out: z.boolean().optional(),
+      duration_ms: z.number().optional(),
+      error: z.string().optional(),
+    })
+    .optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 
@@ -783,6 +812,70 @@ export async function rollback(id: string): Promise<void> {
   });
 }
 
+// ── Planned restart (P2-04) ──────────────────────────────────────────────────
+
+/**
+ * PendingRestartStatusSchema mirrors admin.PendingRestartStatus: the structured
+ * state of a managed or external staged restart. Managed restarts have
+ * discard_available=true and carry version/subsystem metadata; external ones
+ * have managed=false and discard_available=false.
+ */
+export const PendingRestartStatusSchema = z.object({
+  managed: z.boolean(),
+  staged: z.boolean(),
+  staged_at: z.string().optional(),
+  staged_version: z.string().optional(),
+  serving_version: z.string().optional(),
+  subsystems: z.array(z.string()).optional(),
+  discard_available: z.boolean(),
+  inconsistent: z.boolean(),
+});
+export type PendingRestartStatus = z.infer<typeof PendingRestartStatusSchema>;
+
+export const PendingRestartResponseSchema = z.object({
+  pending: z.boolean(),
+  status: PendingRestartStatusSchema.optional(),
+});
+export type PendingRestartResponse = z.infer<typeof PendingRestartResponseSchema>;
+
+/**
+ * Fetches the current managed planned-restart status. Returns {pending: false}
+ * when no staged restart exists (never 404).
+ */
+export function fetchPendingRestart(): Promise<PendingRestartResponse> {
+  return api<unknown>("/config/pending-restart").then((d) =>
+    PendingRestartResponseSchema.parse(d),
+  );
+}
+
+/**
+ * Discards the managed staged restart and atomically restores the previous
+ * configuration. Rejects with ApiError (409) when the discard is unsafe
+ * (inconsistent state, disk digest mismatch, or serving version changed).
+ */
+export async function discardPendingRestart(): Promise<ApplyResult> {
+  const headers = new Headers();
+  headers.set("Accept", "application/json");
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/config/pending-restart/discard", { method: "POST", headers });
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
+    let msg = `${String(resp.status)} ${resp.statusText}`;
+    const body = data as { error?: string; message?: string } | null;
+    if (body?.message) msg = body.message;
+    else if (body?.error) msg = body.error;
+    throw new ApiError("/config/pending-restart/discard", resp.status, msg);
+  }
+  return ApplyResultSchema.parse(data);
+}
+
 // ── Raw config ───────────────────────────────────────────────────────────────
 
 export const RawConfigSchema = z.object({
@@ -1152,6 +1245,9 @@ export type ReloadSnapshot = z.infer<typeof ReloadSnapshotSchema>;
 
 export const ApplyResultSchema = z.object({
   ok: z.literal(true),
+  // mode is "hot" or "stage_restart". When absent the response is from the
+  // legacy path (pre-P2-02) and should be treated as "hot".
+  mode: z.enum(["hot", "stage_restart"]).optional(),
   // pending_reload reflects the server's truthfulness contract: the config has
   // been validated and persisted, but the live runtime swap is asynchronous, so
   // the status below is the configuration taking effect, not a confirmation
@@ -1161,14 +1257,50 @@ export const ApplyResultSchema = z.object({
   // the raw editor's optimistic-concurrency token so a follow-up edit does not
   // trip a spurious conflict.
   version: z.string().optional(),
+  serving_version: z.string().optional(),
   message: z.string().optional(),
-  status: z.array(FeatureStatusSchema),
+  status: z.array(FeatureStatusSchema).optional(),
   // previous_reload is the outcome of the most recent reload before this apply.
   // When timed_out is true the prior reload exceeded reload_timeout; the new
   // config is serving but the slow path should be investigated.
   previous_reload: ReloadSnapshotSchema.optional(),
+  // reload is the correlated result of the live reload triggered by this apply
+  // (P2-04). Replaces previous_reload for new consumers; both are present
+  // during the compatibility window.
+  reload: z
+    .object({
+      id: z.string().optional(),
+      source: z.string().optional(),
+      outcome: z.string().optional(),
+      persisted: z.boolean().optional(),
+      published: z.boolean().optional(),
+      timed_out: z.boolean().optional(),
+      duration_ms: z.number().optional(),
+      error: z.string().optional(),
+    })
+    .optional(),
+  // pending_restart is set when mode=stage_restart and the staged config is now
+  // waiting for a process restart to take effect.
+  pending_restart: z
+    .object({
+      managed: z.boolean(),
+      staged: z.boolean(),
+      staged_at: z.string().optional(),
+      staged_version: z.string().optional(),
+      serving_version: z.string().optional(),
+      subsystems: z.array(z.string()).optional(),
+      discard_available: z.boolean(),
+      inconsistent: z.boolean(),
+    })
+    .optional(),
 });
 export type ApplyResult = z.infer<typeof ApplyResultSchema>;
+
+/**
+ * The apply mode: hot applies the configuration live; stage_restart saves it
+ * for the next process restart without changing the live runtime.
+ */
+export type ApplyMode = "hot" | "stage_restart";
 
 /**
  * Applies a candidate config through the authoritative write path and resolves
@@ -1181,6 +1313,7 @@ export async function applyConfig(
   candidate: string,
   baseVersion?: string,
   confirmAdmin = false,
+  mode: ApplyMode = "hot",
 ): Promise<ApplyResult> {
   const headers = new Headers();
   headers.set("Accept", "application/json");
@@ -1190,6 +1323,7 @@ export async function applyConfig(
   const params = new URLSearchParams();
   if (baseVersion) params.set("base_version", baseVersion);
   if (confirmAdmin) params.set("confirm_admin", "true");
+  if (mode !== "hot") params.set("mode", mode);
   const query = params.toString();
   const url = query ? `/api/config/apply?${query}` : "/api/config/apply";
   const resp = await fetch(url, { method: "POST", headers, body: candidate });

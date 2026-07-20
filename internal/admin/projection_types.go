@@ -3,6 +3,8 @@
 
 package admin
 
+import "jul/internal/server"
+
 // This file holds all the Go struct types that form the Console v2 JSON API
 // contract (projection types, DTO view structs, and RuntimeOverview). They were
 // originally in projections.go; keeping them here makes projections.go a pure
@@ -345,5 +347,16 @@ type RuntimeOverview struct {
 	// short lowercase subsystem name ("cache", "egress", "admin", "metrics").
 	// Absent when no restart is needed. The Console surfaces this as a
 	// persistent banner so operators know the saved config is not fully live.
+	// Deprecated: prefer PendingRestartStatus for the structured object.
 	PendingRestart []string `json:"pending_restart,omitempty"`
+	// PendingRestartStatus is the structured managed planned-restart state.
+	// Present when a managed staged restart is pending; nil when none exists or
+	// when only an external (unmanaged) disk/runtime difference is detected.
+	// The Console uses this to drive the banner, discard action, and version
+	// display. PendingRestart (the subsystem list) remains for one compat release.
+	PendingRestartStatus *PendingRestartStatus `json:"pending_restart_status,omitempty"`
+	// LastReload is the correlated result of the most recent hot reload attempt.
+	// Nil when no reload has run since startup. The Console uses it to show the
+	// outcome of the last apply without requiring a separate fetch.
+	LastReload *server.ReloadResult `json:"last_reload,omitempty"`
 }

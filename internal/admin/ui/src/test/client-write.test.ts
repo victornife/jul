@@ -104,7 +104,7 @@ describe("applyConfig", () => {
         ),
     );
     const res = await applyConfig("listen = \":8443\"");
-    expect(res.status[0]?.name).toBe("TLS");
+    expect(res.status?.[0]?.name).toBe("TLS");
     expect(fn.mock.calls[0]?.[0]).toBe("/api/config/apply");
     expect(new Headers(lastInit(fn).headers).get("Content-Type")).toBe("application/toml");
   });

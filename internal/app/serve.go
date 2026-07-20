@@ -392,6 +392,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			res, err := coordinator.ApplyConfig(c, ApplyMode(mode))
 			return toAdminConfigApplyResult(res), err
 		}
+		deps.DiscardPendingRestart = func() (admin.ConfigApplyResult, error) {
+			res, err := coordinator.DiscardPlannedRestart()
+			return toAdminConfigApplyResult(res), err
+		}
+		deps.PendingRestart = func() *admin.PendingRestartStatus {
+			return coordinator.PlannedRestartStatus()
+		}
 		// Keep legacy closures for external callers during the deprecation
 		// window.
 		deps.WriteConfigRaw = func(data []byte) error {

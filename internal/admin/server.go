@@ -160,6 +160,15 @@ type Deps struct {
 	// The mode string is "hot" or "stage_restart". It returns a structured
 	// result correlated with the live reload outcome.
 	ApplyConfig func(*config.Config, string) (ConfigApplyResult, error)
+	// DiscardPendingRestart discards the managed staged restart and atomically
+	// restores the previous configuration. A verification failure (inconsistent
+	// state, disk digest mismatch, or changed serving version) returns a
+	// non-nil error and leaves all files untouched.
+	DiscardPendingRestart func() (ConfigApplyResult, error)
+	// PendingRestart returns the current managed planned-restart status, or nil
+	// when no staged restart is pending. This is the structured source of truth
+	// for the overview banner and the /api/config/pending-restart endpoint.
+	PendingRestart func() *PendingRestartStatus
 }
 
 // ReloadSnapshot is the legacy admin-package view of the most recent reload

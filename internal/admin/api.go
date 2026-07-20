@@ -114,6 +114,15 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 			out.PendingRestart = subsystems
 		}
 	}
+	// Structured managed planned-restart status (P2-04). Present only when a
+	// managed staged restart is pending; supplements the flat subsystem list.
+	if s.deps.PendingRestart != nil {
+		out.PendingRestartStatus = s.deps.PendingRestart()
+	}
+	// Last correlated reload result (P2-04).
+	if s.deps.LastReload != nil {
+		out.LastReload = s.deps.LastReload()
+	}
 	if s.deps.Stats != nil {
 		out.Stats = s.deps.Stats()
 	}
