@@ -81,7 +81,7 @@ function PendingRestartBanner({
       </div>
     );
   }
-  if (!status.managed) {
+  if (status.external || !status.managed) {
     const subs = status.subsystems ?? [];
     return (
       <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-sm">
@@ -178,9 +178,18 @@ export function ConfigPanel() {
   });
   const pendingRestartStatus: PendingRestartStatus | null =
     pendingRestartQuery.data?.status ?? null;
-  // hasPendingRestart is true when either a managed staged restart is active or the
-  // config on disk diverged externally. Both block hot-apply.
+  // hasPendingRestart is true only for a managed staged restart. In that case
+  // the primary action switches from a hot apply to an update of the staged
+  // configuration.
   const hasPendingRestart = pendingRestartStatus !== null && pendingRestartStatus.staged;
+  // restartBlocked is true whenever hot applies are not allowed: managed
+  // staged, external disk/runtime divergence, or inconsistent marker state
+  // (F-04).
+  const restartBlocked =
+    pendingRestartStatus !== null &&
+    (pendingRestartStatus.staged ||
+      pendingRestartStatus.external ||
+      pendingRestartStatus.inconsistent);
 
   // Raw editor state
   const [draft, setDraft] = useState<string | null>(null);
@@ -457,7 +466,7 @@ export function ConfigPanel() {
   return (
     <div className="flex h-full flex-col gap-4">
       {/* Persistent planned-restart banner */}
-      {pendingRestartStatus && (pendingRestartStatus.staged || pendingRestartStatus.inconsistent) && (
+      {restartBlocked && (
         <PendingRestartBanner
           status={pendingRestartStatus}
           onDiscard={() => { discard.mutate(); }}
@@ -511,15 +520,22 @@ export function ConfigPanel() {
           <button
             type="button"
             onClick={() => {
-              // When a pending restart is active, hot apply is blocked — offer
-              // to update the staged configuration instead.
+              // When a managed staged restart is active, hot apply is blocked —
+              // offer to update the staged configuration instead. External
+              // divergence or inconsistency blocks all applies.
               if (hasPendingRestart && !isPatchMode) {
                 setStageConfirming(true);
               } else {
                 setConfirming(true);
               }
             }}
-            disabled={!dirty || !valid || applyActive.isPending || applyStage.isPending}
+            disabled={
+              !dirty ||
+              !valid ||
+              applyActive.isPending ||
+              applyStage.isPending ||
+              (restartBlocked && !hasPendingRestart)
+            }
             className="inline-flex items-center gap-2 rounded-md bg-jul-accent px-3 py-1 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
             {(applyActive.isPending || applyStage.isPending) && <Spinner />}

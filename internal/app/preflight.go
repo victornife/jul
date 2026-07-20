@@ -7,12 +7,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"jul/internal/admin"
 	"jul/internal/cache"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/observability"
+	"jul/internal/rbac"
 	"jul/internal/server"
 )
 
@@ -102,6 +104,12 @@ func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Co
 		return nil, err
 	}
 	if err := ValidateRuntimeConfig(candidate.Effective); err != nil {
+		return nil, err
+	}
+	// RBAC policy build is part of the reload contract (F-09): validate it
+	// now, after secrets expansion, so token/role/permission errors that only
+	// surface during policy construction are caught before persistence.
+	if err := validateAdminRBACPolicy(candidate.Effective.Admin); err != nil {
 		return nil, err
 	}
 	if err := server.PreflightTLS(candidate.Effective.Servers); err != nil {
@@ -213,6 +221,41 @@ func startupResourcePreflight(cfg *config.Config) error {
 	}
 	if err := server.PreflightACMEStartup(cfg.Servers); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateAdminRBACPolicy builds the RBAC policy from the resolved admin
+// config. This catches construction-time failures (duplicate token IDs after
+// secret expansion, custom role permission expansion, missing admin-capable
+// principals, etc.) before the config is persisted (F-09).
+func validateAdminRBACPolicy(a config.AdminConfig) error {
+	if !a.RBAC.Enabled {
+		return nil
+	}
+	customRoles := make(map[string][]string, len(a.RBAC.Roles))
+	for _, r := range a.RBAC.Roles {
+		customRoles[r.Name] = r.Permissions
+	}
+	principals := make([]rbac.PrincipalDef, 0, len(a.RBAC.Principals))
+	for _, p := range a.RBAC.Principals {
+		principals = append(principals, rbac.PrincipalDef{
+			Name:      p.Name,
+			Role:      p.Role,
+			Token:     p.Token,
+			Disabled:  p.Disabled,
+			ExpiresAt: p.ExpiresAt,
+		})
+	}
+	if _, err := rbac.Build(
+		a.RBAC.Enabled,
+		a.RBAC.DefaultRole,
+		customRoles,
+		principals,
+		a.Token,
+		time.Now(),
+	); err != nil {
+		return fmt.Errorf("rbac policy: %w", err)
 	}
 	return nil
 }

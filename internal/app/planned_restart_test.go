@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"jul/internal/config"
@@ -336,6 +337,40 @@ func TestFileStoreDiscardSafeFailsWhenDiskChanged(t *testing.T) {
 	}
 }
 
+// TestPlannedRestartStoreExternalDivergenceState verifies that
+// SetExternalDivergence drives the authoritative State/Status to
+// external_divergence and that clearing it returns to none (F-04).
+func TestPlannedRestartStoreExternalDivergenceState(t *testing.T) {
+	store := &PlannedRestartStore{}
+
+	st := store.State()
+	if st.State != PlannedRestartStateNone {
+		t.Fatalf("initial state = %q, want none", st.State)
+	}
+
+	store.SetExternalDivergence(true)
+	st = store.State()
+	if st.State != PlannedRestartStateExternalDivergence {
+		t.Errorf("state = %q, want external_divergence", st.State)
+	}
+	if !st.External {
+		t.Error("External = false, want true")
+	}
+	status := store.Status()
+	if status.State != string(PlannedRestartStateExternalDivergence) {
+		t.Errorf("status.State = %q, want external_divergence", status.State)
+	}
+	if !status.External {
+		t.Error("status.External should mirror State; got false")
+	}
+
+	store.SetExternalDivergence(false)
+	st = store.State()
+	if st.State != PlannedRestartStateNone {
+		t.Errorf("cleared state = %q, want none", st.State)
+	}
+}
+
 // ─── PreflightStageRestart mode tests ─────────────────────────────────────
 
 func TestPreflightStageRestartAcceptsRestartRequiredChange(t *testing.T) {
@@ -637,10 +672,10 @@ func TestStageDiscardRoundtripRestoresExactBytes(t *testing.T) {
 	_ = liveVersion
 }
 
-// TestStageUpdatePreservesOriginalBackup verifies that a staged update (a
-// second stage_restart while one is already pending) does not overwrite the
-// .bak file — the backup must still contain the pre-stage original.
-func TestStageUpdatePreservesOriginalBackup(t *testing.T) {
+// TestStageRestartRejectsSecondCandidate verifies the F-08 single-candidate
+// invariant: a second stage_restart while one is already pending is rejected
+// and the original backup and staged candidate are left untouched.
+func TestStageRestartRejectsSecondCandidate(t *testing.T) {
 	tmp := t.TempDir()
 	configPath := filepath.Join(tmp, "server.toml")
 	seed := []byte("# original\n[global]\nlog_level = \"info\"\n\n[[servers]]\nlisten = \":8080\"\n[[servers.locations]]\nmatch = { type = \"prefix\", path = \"/\" }\nreturn = 200\n")
@@ -662,7 +697,7 @@ func TestStageUpdatePreservesOriginalBackup(t *testing.T) {
 		PlannedRestart: store,
 	}
 
-	// First stage.
+	// First stage succeeds.
 	v1 := config.ProxyTarget("127.0.0.1:9000", ":8080")
 	v1.Global.LogFormat = "json"
 	v1Raw, _ := config.Marshal(v1)
@@ -670,18 +705,30 @@ func TestStageUpdatePreservesOriginalBackup(t *testing.T) {
 		t.Fatalf("first stage: %v", err)
 	}
 
-	// Second stage (update).
+	// Second stage (update) must be rejected.
 	v2 := config.ProxyTarget("127.0.0.1:9001", ":8080")
 	v2.Global.LogFormat = "json"
 	v2Raw, _ := config.Marshal(v2)
-	if _, err := c.ApplyRaw(v2Raw, ApplyStageRestart); err != nil {
-		t.Fatalf("second stage: %v", err)
+	res, err := c.ApplyRaw(v2Raw, ApplyStageRestart)
+	if err != nil {
+		t.Fatalf("second stage returned error: %v", err)
+	}
+	if res.OK {
+		t.Fatalf("second stage should be rejected under single-candidate invariant")
+	}
+	if !strings.Contains(res.Message, "already pending") {
+		t.Errorf("message should mention pending candidate, got %q", res.Message)
 	}
 
-	// Backup must still equal the original seed, not v1 or v2.
+	// Backup must still equal the original seed, not v2.
 	backup, _ := os.ReadFile(store.backupPath())
 	if string(backup) != string(seed) {
-		t.Errorf("staged update overwrote original backup\ngot:  %q\nwant: %q", backup, seed)
+		t.Errorf("second stage overwrote original backup\ngot:  %q\nwant: %q", backup, seed)
+	}
+	// Active config must still be the first candidate.
+	onDisk, _ := os.ReadFile(configPath)
+	if string(onDisk) != string(v1Raw) {
+		t.Errorf("active config changed after rejected second stage\ngot:  %q\nwant: %q", onDisk, v1Raw)
 	}
 }
 

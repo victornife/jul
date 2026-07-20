@@ -1065,20 +1065,34 @@ func (s *Server) doReload(req ReloadRequest) {
 	}
 
 	switch {
-	case len(certErrs) > 0 && onReloadErr != nil:
+	case len(certErrs) > 0 && (onReloadErr != nil || adminErr != nil):
 		result.Outcome = ReloadAppliedDegraded
-		result.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") +
-			"; stream reload: " + onReloadErr.Error()
+		result.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ")
+		if onReloadErr != nil {
+			result.Error += "; stream reload: " + onReloadErr.Error()
+		}
+		if adminErr != nil {
+			result.Error += "; admin reload: " + adminErr.Error()
+		}
 		s.log.Warn("reload completed with errors", "cert_errors", strings.Join(certErrs, "; "),
-			"stream_error", onReloadErr, "reload_id", req.ID)
+			"stream_error", onReloadErr, "admin_error", adminErr, "reload_id", req.ID)
 	case len(certErrs) > 0:
 		result.Outcome = ReloadAppliedDegraded
 		result.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") + "; old certificate(s) remain active"
 		s.log.Warn("reload completed with certificate errors", "errors", strings.Join(certErrs, "; "), "reload_id", req.ID)
+	case onReloadErr != nil && adminErr != nil:
+		result.Outcome = ReloadAppliedDegraded
+		result.Error = "degraded: stream reload: " + onReloadErr.Error() + "; admin reload: " + adminErr.Error()
+		s.log.Warn("reload completed with stream and admin errors", "stream_error", onReloadErr,
+			"admin_error", adminErr, "reload_id", req.ID)
 	case onReloadErr != nil:
 		result.Outcome = ReloadAppliedDegraded
 		result.Error = "degraded: stream reload: " + onReloadErr.Error()
 		s.log.Warn("reload completed with stream error", "error", onReloadErr, "reload_id", req.ID)
+	case adminErr != nil:
+		result.Outcome = ReloadAppliedDegraded
+		result.Error = "degraded: admin reload: " + adminErr.Error()
+		s.log.Warn("reload completed with admin error", "admin_error", adminErr, "reload_id", req.ID)
 	default:
 		result.Outcome = ReloadAppliedLive
 		s.log.Info("configuration reloaded", "duration_ms", result.DurationMS, "reload_id", req.ID)

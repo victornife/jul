@@ -104,6 +104,12 @@ A `stage_restart` apply mode persists a candidate that contains restart-bound
 changes without triggering a live reload. The staged configuration takes effect
 on the next process restart.
 
+Only one staged candidate may be in flight at a time. A second `stage_restart`
+request received while a candidate is already pending is rejected with a clear
+message; the operator must discard the pending candidate or restart the process
+before staging another. The original pre-stage backup and marker remain
+untouched by such a rejected request.
+
 Two sidecar files are written adjacent to the active config:
 
 - `<config-path>.pending-restart.json` — the marker (state, digests, versions,

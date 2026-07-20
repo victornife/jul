@@ -338,6 +338,10 @@ type RuntimeOverview struct {
 	// whether the compliance trail is actually being persisted; a degraded sink
 	// (open or write failure) is surfaced here rather than silently dropped.
 	AuditSink *AuditSinkStatus `json:"audit_sink,omitempty"`
+	// AdminHealth reports admin subsystem degradation (F-05). It is present only
+	// when the admin subsystem is unhealthy, so the console can show a top-level
+	// degraded banner. A healthy admin subsystem omits the field entirely.
+	AdminHealth *AdminHealthStatus `json:"admin_health,omitempty"`
 	// CertRisk surfaces real certificate health (counts, expiry, errors) so the
 	// Overview "Certificates" card is truthful rather than just reporting TLS
 	// configuration presence. Omitted when no TLS server blocks are configured.

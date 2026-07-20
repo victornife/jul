@@ -310,18 +310,6 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		deps.ReadConfigRaw = func() ([]byte, error) { return os.ReadFile(configPath) }
 	}
 
-	// Wire PendingRestartCheck using the startup config snapshot. It reports
-	// which startup-bound subsystems differ between what we were built from
-	// and what is currently on disk, so the Console can show a persistent
-	// "restart required" banner when saved changes are not yet active. The live
-	// snapshot is supplied by the caller so listener rebind is evaluated against
-	// actually-bound listeners (R9-11).
-	if startupCand.Raw != nil && deps.LoadConfig != nil {
-		deps.PendingRestartCheck = func(live server.LiveSnapshot) []string {
-			return pendingRestartCheck(startupCand, startupFP, live, deps.LoadConfig, log)
-		}
-	}
-
 	// Construct the server and wire LastReload into deps BEFORE creating the
 	// admin server. admin.New copies deps by value, so any callback assigned
 	// after that call is invisible to the admin server's apply handlers.
@@ -367,6 +355,22 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps.LastReload = func() *server.ReloadResult {
 		return srv.LastReload()
 	}
+	// Admin subsystem health: propagate admin-side reload failures and other
+	// runtime-level admin concerns to /readyz and the runtime overview (F-05).
+	deps.AdminHealth = func() error {
+		lr := srv.LastReload()
+		if lr == nil {
+			return nil
+		}
+		if lr.Admin.Status != server.ReloadSubsystemOK {
+			return &admin.AdminHealthStatus{
+				Healthy: false,
+				Reason:  "admin_reload",
+				Detail:  "admin subsystem reload failed: " + lr.Admin.Error,
+			}
+		}
+		return nil
+	}
 
 	// Wire the managed apply path now that srv exists so the coordinator can
 	// read the live serving version and submit correlated reload requests.
@@ -389,6 +393,19 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 		// Single shared store — coordinator and reconciliation use the same instance.
 		sharedStore := NewFilePlannedRestartStore(configPath)
+
+		// Wire PendingRestartCheck using the startup config snapshot. It reports
+		// which startup-bound subsystems differ between what we were built from
+		// and what is currently on disk, and synchronizes the authoritative
+		// external-divergence flag on the shared store so hot applies can be
+		// blocked consistently (F-04).
+		if startupCand.Raw != nil && deps.LoadConfig != nil {
+			deps.PendingRestartCheck = func(live server.LiveSnapshot) []string {
+				subsystems := pendingRestartCheck(startupCand, startupFP, live, deps.LoadConfig, log)
+				sharedStore.SetExternalDivergence(len(subsystems) > 0)
+				return subsystems
+			}
+		}
 
 		coordinator := &ConfigApplyCoordinator{
 			BaseCtx:        ctx,
@@ -422,7 +439,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			res, err := coordinator.ApplyRaw(data, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
-				result.StagedRestartIsUpdate = wasAlreadyPending
+				// With the single-candidate invariant (F-08), a successful
+				// stage_restart can never replace an already-pending candidate.
+				result.StagedRestartIsUpdate = res.OK && wasAlreadyPending
 				if res.OK {
 					if wasAlreadyPending {
 						metrics.ObserveStageRestart("updated")
@@ -441,7 +460,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			res, err := coordinator.ApplyConfig(c, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
-				result.StagedRestartIsUpdate = wasAlreadyPending
+				result.StagedRestartIsUpdate = res.OK && wasAlreadyPending
 				if res.OK {
 					if wasAlreadyPending {
 						metrics.ObserveStageRestart("updated")
@@ -464,33 +483,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return toAdminConfigApplyResult(res), err
 		}
 		deps.PendingRestart = func() *admin.PendingRestartStatus {
-			// First check for a managed staged restart.
-			if managed := coordinator.PlannedRestartStatus(); managed != nil {
-				return managed
-			}
-			// Fall back to external (unmanaged) disk/runtime divergence.
-			// This surfaces a structured managed=false status rather than
-			// only the flat subsystem list, giving the Console enough info
-			// to show the correct banner and recovery instructions (M-03 fix).
+			// Refresh the authoritative store state from the current disk/runtime
+			// divergence check before exposing it. This guarantees that a hot
+			// apply evaluated by the coordinator sees the same state as the UI.
 			if deps.PendingRestartCheck != nil && deps.LiveSnapshot != nil {
-				live := deps.LiveSnapshot()
-				subsystems := deps.PendingRestartCheck(live)
-				if len(subsystems) > 0 {
-					var servingVersion string
-					if live.EffectiveConfig != nil {
-						servingVersion = server.CanonicalVersion(live.EffectiveConfig)
-					}
-					return &admin.PendingRestartStatus{
-						Managed:          false,
-						Staged:           false,
-						Subsystems:       subsystems,
-						DiscardAvailable: false,
-						Inconsistent:     false,
-						ServingVersion:   servingVersion,
-					}
-				}
+				_ = deps.PendingRestartCheck(deps.LiveSnapshot())
 			}
-			return nil
+			return coordinator.PlannedRestartStatus()
 		}
 		// Keep legacy closures for external callers during the deprecation
 		// window.
@@ -617,16 +616,21 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 // API response shape. It is a pure projection: no new policy is added.
 func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 	return admin.ConfigApplyResult{
-		OK:               r.OK,
-		Mode:             string(r.Mode),
-		Version:          r.Version,
-		ServingVersion:   r.ServingVersion,
-		Reload:           r.Reload,
-		PendingRestart:   r.PendingRestart,
-		Message:          r.Message,
-		ValidationErrors: r.ValidationErrors,
-		RestartRequired:  r.RestartRequired,
-		CanStage:         r.CanStage,
+		OK:                  r.OK,
+		Mode:                string(r.Mode),
+		Version:             r.Version,
+		ServingVersion:      r.ServingVersion,
+		Reload:              r.Reload,
+		PendingRestart:      r.PendingRestart,
+		Message:             r.Message,
+		ValidationErrors:    r.ValidationErrors,
+		RestartRequired:     r.RestartRequired,
+		CanStage:            r.CanStage,
+		Persisted:           r.Persisted,
+		Restored:            r.Restored,
+		RestoreError:        r.RestoreError,
+		FinalDiskVersion:    r.FinalDiskVersion,
+		FinalServingVersion: r.FinalServingVersion,
 	}
 }
 

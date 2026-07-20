@@ -27,6 +27,19 @@ type ConfigApplyResult struct {
 	// CanStage is set together with RestartRequired when the candidate can be
 	// staged for the next process restart instead of being rejected outright.
 	CanStage bool `json:"can_stage,omitempty"`
+	// Persisted is true when the candidate bytes were written to disk.
+	Persisted bool `json:"persisted,omitempty"`
+	// Restored is true when a rejected candidate was rolled back to the
+	// previous configuration.
+	Restored bool `json:"restored,omitempty"`
+	// RestoreError is non-empty when restoration was attempted and failed.
+	RestoreError string `json:"restore_error,omitempty"`
+	// FinalDiskVersion is the canonical version of the on-disk file after the
+	// apply completed (including any restoration).
+	FinalDiskVersion string `json:"final_disk_version,omitempty"`
+	// FinalServingVersion is the canonical version of the live serving config
+	// at the time the result was produced.
+	FinalServingVersion string `json:"final_serving_version,omitempty"`
 	// StagedRestartIsUpdate is true when the stage_restart apply succeeded and
 	// replaced an already-pending staged restart (update), false when it created
 	// the first staged restart. The API handler uses this to emit the correct
@@ -41,9 +54,19 @@ type ConfigApplyResult struct {
 // PendingRestartStatus exposes whether a process restart is required before
 // the on-disk configuration becomes fully live.
 type PendingRestartStatus struct {
-	Managed          bool     `json:"managed"`
-	Staged           bool     `json:"staged"`
-	External         bool     `json:"external,omitempty"`
+	// State is the authoritative enum: "none", "managed_staged",
+	// "external_divergence", or "inconsistent". The boolean fields below are
+	// deprecated and retained for backward compatibility.
+	State string `json:"state"`
+	// Managed is true for managed staged restarts and inconsistent states.
+	// Deprecated: use State.
+	Managed bool `json:"managed"`
+	// Staged is true only for managed staged restarts.
+	// Deprecated: use State.
+	Staged bool `json:"staged"`
+	// External is true for external disk/runtime divergence.
+	// Deprecated: use State.
+	External bool `json:"external,omitempty"`
 	StagedAt         string   `json:"staged_at,omitempty"`
 	StagedVersion    string   `json:"staged_version,omitempty"`
 	ServingVersion   string   `json:"serving_version,omitempty"`

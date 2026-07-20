@@ -138,6 +138,8 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	if s.audit != nil {
 		out.AuditSink = s.audit.statusReport()
 	}
+	// Admin subsystem health is surfaced only when degraded (F-05).
+	out.AdminHealth = s.adminHealthProjection()
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -339,7 +341,7 @@ type restartRequiredResponse struct {
 // refusal. action is the audit verb of the calling write path (e.g.
 // "config.apply" or "config.patch").
 func (s *Server) writeRestartRequired(w http.ResponseWriter, r *http.Request, action string, err error) {
-	s.recordAudit(action, "config", "failure", "rejected: restart required", adminClientIP(r))
+	s.recordAudit(r, action, "config", "failure", "rejected: restart required")
 	s.emit("config", "apply_failed", "warn", "Configuration apply needs a restart to take effect; no change was applied.")
 	writeJSON(w, http.StatusConflict, restartRequiredResponse{
 		OK:              false,
@@ -424,7 +426,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
 			if marshaled, merr := config.Marshal(cur); merr == nil {
 				if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-					s.recordAudit("config.apply", "config", "failure", "rejected: base version stale (concurrent change)", adminClientIP(r))
+					s.recordAudit(r, "config.apply", "config", "failure", "rejected: base version stale (concurrent change)")
 					writeJSON(w, http.StatusConflict, conflictResponse{
 						OK:             false,
 						Conflict:       true,
@@ -450,7 +452,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
 			if next, perr := config.Parse(body); perr == nil && next != nil {
 				if changes := adminLockoutChanges(cur.Admin, next.Admin); len(changes) > 0 {
-					s.recordAudit("config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation", adminClientIP(r))
+					s.recordAudit(r, "config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation")
 					s.emit("config", "apply_failed", "warn", "Configuration apply would change admin access and was held for confirmation.")
 					writeJSON(w, http.StatusConflict, adminGuardResponse{
 						OK:          false,
@@ -501,7 +503,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := applyRaw(body, mode)
 	if err != nil {
-		s.recordAudit("config.apply", "config", "failure", "coordinator error: "+err.Error(), adminClientIP(r))
+		s.recordAudit(r, "config.apply", "config", "failure", "coordinator error: "+err.Error())
 		s.emit("config", "apply_failed", "error", "Configuration apply coordinator failed.")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -512,16 +514,15 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		// can_stage, subsystem list, and version context — not just a
 		// plain message. The TypeScript client already parses restart_required
 		// from this shape.
-		s.recordAudit("config.apply", "config", "failure",
-			"rejected: restart required (can_stage="+strconv.FormatBool(result.CanStage)+")",
-			adminClientIP(r))
+		s.recordAudit(r, "config.apply", "config", "failure",
+			"rejected: restart required (can_stage="+strconv.FormatBool(result.CanStage)+")")
 		s.emit("config", "apply_failed", "warn",
 			"Configuration apply needs a restart to take effect; no change was applied.")
 		writeJSON(w, http.StatusConflict, result)
 		return
 	}
 	if len(result.ValidationErrors) > 0 {
-		s.recordAudit("config.apply", "config", "failure", "rejected: validation failed", adminClientIP(r))
+		s.recordAudit(r, "config.apply", "config", "failure", "rejected: validation failed")
 		s.emit("config", "apply_failed", "warn", "Configuration apply rejected: validation failed.")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
 			OK:      false,
@@ -539,22 +540,33 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		// so we get the correct created/updated distinction without re-reading
 		// disk state post-apply (M-04 fix).
 		if mode == "stage_restart" {
+			// With the F-08 single-candidate invariant, a successful stage_restart
+			// cannot replace an already-pending candidate. StagedRestartIsUpdate
+			// is kept for compatibility but is always false on success.
 			if result.StagedRestartIsUpdate {
-				s.recordAudit("config.stage_restart.updated", "config", "success",
-					"staged configuration updated for next process restart", adminClientIP(r))
+				s.recordAudit(r, "config.stage_restart.updated", "config", "success",
+					"staged configuration updated for next process restart")
 				s.emit("config", "stage_restart_updated", "info",
 					"Staged configuration updated; previous staged config replaced.")
 			} else {
-				s.recordAudit("config.stage_restart.created", "config", "success",
-					"configuration staged for next process restart", adminClientIP(r))
+				s.recordAudit(r, "config.stage_restart.created", "config", "success",
+					"configuration staged for next process restart")
 				s.emit("config", "stage_restart_created", "info",
 					"Configuration validated and staged for the next process restart.")
 			}
 		} else {
-			s.recordAudit("config.apply.accepted", "config", "success",
-				"configuration validated and saved", adminClientIP(r))
+			s.recordAudit(r, "config.apply.accepted", "config", "success",
+				"configuration validated and saved")
 			s.emit("config", "apply", "info", "Configuration validated and saved.")
 		}
+	} else if !result.Restored && result.RestoreError != "" {
+		// Restoration was attempted but failed; emit a distinct audit/timeline
+		// event so operators can detect that the rejected candidate remains on
+		// disk (F-03).
+		s.recordAudit(r, "config.apply.restoration_failed", "config", "failure",
+			"candidate rejected but restoration failed: "+result.RestoreError)
+		s.emit("config", "apply_restoration_failed", "error",
+			"Configuration apply was rejected and restoration to the previous configuration failed.")
 	}
 
 	status := http.StatusOK
@@ -617,11 +629,13 @@ func candidateRequiresAdminManage(cur, next *config.Config) bool {
 	if ca.Token != na.Token || ca.Enabled != na.Enabled || ca.Listen != na.Listen {
 		return true
 	}
-	// RBAC changes.
+	// RBAC changes — compare content, not just list lengths, so a same-count
+	// mutation (role escalation, token swap, disabled flip, permission edit)
+	// cannot bypass the admin:manage guard (F-01).
 	if ca.RBAC.Enabled != na.RBAC.Enabled ||
 		ca.RBAC.DefaultRole != na.RBAC.DefaultRole ||
-		len(ca.RBAC.Principals) != len(na.RBAC.Principals) ||
-		len(ca.RBAC.Roles) != len(na.RBAC.Roles) {
+		!rbacPrincipalsEqual(ca.RBAC.Principals, na.RBAC.Principals) ||
+		!rbacRolesEqual(ca.RBAC.Roles, na.RBAC.Roles) {
 		return true
 	}
 	// Audit sink changes.
@@ -640,6 +654,74 @@ func candidateRequiresAdminManage(cur, next *config.Config) bool {
 		return true
 	}
 	return false
+}
+
+// rbacPrincipalsEqual reports whether two principal lists are equivalent
+// regardless of order. It compares role, token, disabled flag, and expiry.
+// A principal whose name appears in only one list makes the lists unequal.
+func rbacPrincipalsEqual(a, b []config.AdminPrincipal) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	byName := make(map[string]config.AdminPrincipal, len(a))
+	for _, p := range a {
+		byName[p.Name] = p
+	}
+	for _, p := range b {
+		existing, ok := byName[p.Name]
+		if !ok {
+			return false
+		}
+		if existing.Role != p.Role ||
+			existing.Token != p.Token ||
+			existing.Disabled != p.Disabled ||
+			!existing.ExpiresAt.Equal(p.ExpiresAt) {
+			return false
+		}
+	}
+	return true
+}
+
+// rbacRolesEqual reports whether two role lists are equivalent regardless of
+// order. It compares permission sets so a same-length role list cannot bypass
+// the admin:manage guard by editing permissions.
+func rbacRolesEqual(a, b []config.AdminRole) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	byName := make(map[string]config.AdminRole, len(a))
+	for _, r := range a {
+		byName[r.Name] = r
+	}
+	for _, r := range b {
+		existing, ok := byName[r.Name]
+		if !ok {
+			return false
+		}
+		if !stringSlicesEqualUnordered(existing.Permissions, r.Permissions) {
+			return false
+		}
+	}
+	return true
+}
+
+// stringSlicesEqualUnordered reports whether two string slices contain the
+// same elements with the same multiplicities, ignoring order.
+func stringSlicesEqualUnordered(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	count := make(map[string]int, len(a))
+	for _, s := range a {
+		count[s]++
+	}
+	for _, s := range b {
+		count[s]--
+		if count[s] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // rbacIdentityFromRequest retrieves the rbac.Identity from the request context.

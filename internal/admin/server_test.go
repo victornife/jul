@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -69,6 +71,61 @@ func TestHealthzAndReadyz(t *testing.T) {
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("readyz (ready) = %d, want 200", rr.Code)
+	}
+}
+
+// TestReadyzDegradedOnAuditSinkFailure verifies that /readyz reports not ready
+// when the durable audit sink is misconfigured, so admin failures propagate to
+// top-level readiness (F-05).
+func TestReadyzDegradedOnAuditSinkFailure(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed blocker: %v", err)
+	}
+	var ready atomic.Bool
+	ready.Store(true)
+	s := newTestServer(t, config.AdminConfig{AuditLogFile: filepath.Join(blocker, "audit.jsonl")}, Deps{Ready: ready.Load})
+	h := s.routes()
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz = %d, want 503", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "audit_sink") {
+		t.Errorf("readyz body should mention audit_sink, got %q", body)
+	}
+}
+
+// TestReadyzDegradedOnAdminHealthHook verifies that /readyz reports not ready
+// when the composition-root admin health hook reports degradation (F-05).
+func TestReadyzDegradedOnAdminHealthHook(t *testing.T) {
+	var ready atomic.Bool
+	ready.Store(true)
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		Ready: ready.Load,
+		AdminHealth: func() error {
+			return &AdminHealthStatus{
+				Healthy: false,
+				Reason:  "admin_reload",
+				Detail:  "admin subsystem reload failed: rbac policy update failed",
+			}
+		},
+	})
+	h := s.routes()
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz = %d, want 503", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "admin_reload") {
+		t.Errorf("readyz body should mention admin_reload, got %q", body)
+	}
+	if !strings.Contains(body, "rbac policy update failed") {
+		t.Errorf("readyz body should include detail, got %q", body)
 	}
 }
 

@@ -5,7 +5,12 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchApps, type AppProjection, type BackendProjection } from "@/api/client.ts";
+import {
+  fetchApps,
+  fetchRoutes,
+  type AppProjection,
+  type BackendProjection,
+} from "@/api/client.ts";
 import { AppDetail } from "@/features/apps/AppDetail.tsx";
 import { AppEditor } from "@/features/apps/AppEditor.tsx";
 import { PageHeader, Button, EmptyState, Loading } from "@/components/ui.tsx";
@@ -135,6 +140,12 @@ export function AppsPanel() {
     queryKey: ["apps"],
     queryFn: fetchApps,
     refetchInterval: 5_000,
+  });
+
+  const routesQuery = useQuery({
+    queryKey: ["routes"],
+    queryFn: fetchRoutes,
+    staleTime: 5000,
   });
 
   const [selected, setSelected] = useState<AppProjection | null>(null);
@@ -276,6 +287,7 @@ export function AppsPanel() {
 
       {creating && (
         <AppEditor
+          existingRoutes={routesQuery.data ?? []}
           onClose={() => {
             setCreating(false);
           }}

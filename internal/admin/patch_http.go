@@ -108,6 +108,85 @@ func configVersion(raw []byte) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// handleConfigPatchPreview previews a batch of structured patch operations
+// without persisting. It applies every op to a freshly-loaded config and
+// returns the generated full diff for review, exactly like handleConfigPatch
+// but for multiple ops. This lets editors that create compound objects (e.g.
+// a new server plus its first location) hand off a single preview to the
+// ConfigPanel (F-06).
+// POST /api/config/patch/preview
+func (s *Server) handleConfigPatchPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.deps.LoadConfig == nil {
+		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
+		return
+	}
+	var req patchApplyRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(req.Ops) == 0 {
+		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
+			OK:      false,
+			Message: "No patch operations were provided.",
+			Errors:  humanizeErr("patch preview: at least one operation is required"),
+		})
+		return
+	}
+
+	cfg, err := s.deps.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	before, err := config.Marshal(cfg)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	summaries := make([]string, 0, len(req.Ops))
+	for i, op := range req.Ops {
+		summary, aerr := applyPatch(cfg, op)
+		if aerr != nil {
+			writeJSON(w, http.StatusBadRequest, validationErrorResponse{
+				OK:      false,
+				Message: fmt.Sprintf("Operation %d could not be applied; no change was made.", i+1),
+				Errors:  humanizeErr(aerr.Error()),
+			})
+			return
+		}
+		summaries = append(summaries, summary)
+	}
+
+	candidate, err := config.Marshal(cfg)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	beforeCfg, err := config.Parse(before)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	resp := map[string]any{
+		"ok":           true,
+		"summary":      strings.Join(summaries, "; "),
+		"candidate":    string(candidate),
+		"diff":         diffConfigs(beforeCfg, cfg),
+		"base_version": configVersion(before),
+	}
+	if verr := validateRaw(candidate); verr != nil {
+		resp["validation_errors"] = humanizeErr(verr.Error())
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // patchApplyRequest is a server-side, atomic, conflict-checked batch of patch
 // operations. Unlike the preview endpoint it persists the result: every op is
 // applied to a single freshly-loaded config under a lock, and the result is
@@ -210,7 +289,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	}
 	currentVersion := configVersion(before)
 	if req.BaseVersion != "" && req.BaseVersion != currentVersion {
-		s.recordAudit("config.patch", "config", "failure", "rejected: base version stale (concurrent change)", adminClientIP(r))
+		s.recordAudit(r, "config.patch", "config", "failure", "rejected: base version stale (concurrent change)")
 		writeJSON(w, http.StatusConflict, conflictResponse{
 			OK:             false,
 			Conflict:       true,
@@ -254,7 +333,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	}
 	result, err := applyConfig(cfg, mode)
 	if err != nil {
-		s.recordAudit("config.patch", "config", "failure", "coordinator error: "+err.Error(), adminClientIP(r))
+		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+err.Error())
 		s.emit("config", "apply_failed", "error", "Structured patch apply coordinator failed.")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -263,15 +342,15 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	if result.RestartRequired {
 		// Return the full structured result so the client receives can_stage
 		// and subsystem information, not just a plain message.
-		s.recordAudit("config.patch", "config", "failure",
-			"rejected: restart required", adminClientIP(r))
+		s.recordAudit(r, "config.patch", "config", "failure",
+			"rejected: restart required")
 		s.emit("config", "apply_failed", "warn",
 			"Structured patch apply needs a restart to take effect; no change was applied.")
 		writeJSON(w, http.StatusConflict, result)
 		return
 	}
 	if len(result.ValidationErrors) > 0 {
-		s.recordAudit("config.patch", "config", "failure", "rejected: validation failed", adminClientIP(r))
+		s.recordAudit(r, "config.patch", "config", "failure", "rejected: validation failed")
 		s.emit("config", "apply_failed", "warn", "Structured patch apply rejected: validation failed.")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
 			OK:      false,
@@ -283,7 +362,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 
 	if result.OK {
 		s.recordHistory(prev)
-		s.recordAudit("config.patch", "config", "success", strings.Join(summaries, "; "), adminClientIP(r))
+		s.recordAudit(r, "config.patch", "config", "success", strings.Join(summaries, "; "))
 		s.emit("config", "apply", "info", "Structured patch validated and saved.")
 	}
 

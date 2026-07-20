@@ -44,6 +44,12 @@ var ErrInconsistentState = errors.New("planned restart state is inconsistent; ma
 // pending.
 var ErrServingVersionChanged = errors.New("live serving version changed since the restart was staged; discard is unsafe")
 
+// ErrStageRestartAlreadyPending is returned by StageManaged when a staged
+// restart is already pending. Only one candidate may be tracked at a time
+// (F-08); the operator must discard or complete the existing candidate before
+// staging another.
+var ErrStageRestartAlreadyPending = errors.New("a staged restart is already pending; discard or complete it before staging a new candidate")
+
 // PlannedRestartMarker is the JSON sidecar written adjacent to the active
 // config file when a staged restart is pending. It is the crash-recovery
 // anchor: any process that starts up with this file present can determine
@@ -65,13 +71,37 @@ type PlannedRestartMarker struct {
 	StagedAt             time.Time `json:"staged_at"`
 }
 
+// PlannedRestartStateEnum is the authoritative single enum representing the
+// planned-restart/divergence state. It is derived from on-disk markers plus a
+// runtime/disk comparison and is used to block hot applies and surface UI
+// banners.
+type PlannedRestartStateEnum string
+
+const (
+	// PlannedRestartStateNone means no pending restart, no external divergence,
+	// and no inconsistency.
+	PlannedRestartStateNone PlannedRestartStateEnum = "none"
+	// PlannedRestartStateManagedStaged means a managed staged restart is
+	// pending and the on-disk config is consistent with the marker.
+	PlannedRestartStateManagedStaged PlannedRestartStateEnum = "managed_staged"
+	// PlannedRestartStateExternalDivergence means the on-disk config differs
+	// from the running runtime in an unmanaged way (e.g. external editor).
+	// Hot applies are blocked until the divergence is resolved.
+	PlannedRestartStateExternalDivergence PlannedRestartStateEnum = "external_divergence"
+	// PlannedRestartStateInconsistent means the on-disk marker and config are
+	// in an inconsistent state that cannot be repaired automatically.
+	PlannedRestartStateInconsistent PlannedRestartStateEnum = "inconsistent"
+)
+
 // PlannedRestartState is the authoritative store state exposed to callers.
-// It captures both normal pending staged restarts and post-reconciliation
-// inconsistent states so callers can block hot applies and surface recovery
-// banners for either condition.
+// It captures managed pending staged restarts, external disk/runtime
+// divergence, and post-reconciliation inconsistent states so callers can
+// block hot applies and surface recovery banners for any of them.
 type PlannedRestartState struct {
 	Pending      bool
 	Inconsistent bool
+	External     bool
+	State        PlannedRestartStateEnum
 }
 
 // PlannedRestartStore owns the managed planned-restart sidecar state. When
@@ -94,7 +124,7 @@ type PlannedRestartStore struct {
 	// In-memory state (used in both modes for caching and in-memory-only tests).
 	pending      bool
 	raw          []byte // staged candidate raw bytes
-	baseRaw      []byte // original pre-stage raw bytes (used for update diffs)
+	baseRaw      []byte // original pre-stage raw bytes (used for diagnostics)
 	stagedAt     time.Time
 	inconsistent bool // set by Reconcile when sidecar state cannot be repaired
 	external     bool // true when an unmanaged external disk/runtime divergence is present
@@ -136,17 +166,27 @@ func (s *PlannedRestartStore) IsPending() bool {
 }
 
 // State returns the authoritative planned-restart state. Callers should use
-// this for gating hot applies and rendering banners because it includes both
-// managed pending states and post-reconciliation inconsistent states.
+// this for gating hot applies and rendering banners because it includes
+// managed pending states, external divergence, and inconsistent states.
 func (s *PlannedRestartStore) State() PlannedRestartState {
 	if s == nil {
-		return PlannedRestartState{}
+		return PlannedRestartState{State: PlannedRestartStateNone}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return PlannedRestartState{
-		Pending:      s.pending,
-		Inconsistent: s.inconsistent || s.external,
+	return s.stateLocked()
+}
+
+func (s *PlannedRestartStore) stateLocked() PlannedRestartState {
+	switch {
+	case s.inconsistent:
+		return PlannedRestartState{Pending: false, Inconsistent: true, External: false, State: PlannedRestartStateInconsistent}
+	case s.external:
+		return PlannedRestartState{Pending: false, Inconsistent: false, External: true, State: PlannedRestartStateExternalDivergence}
+	case s.pending:
+		return PlannedRestartState{Pending: true, Inconsistent: false, External: false, State: PlannedRestartStateManagedStaged}
+	default:
+		return PlannedRestartState{Pending: false, Inconsistent: false, External: false, State: PlannedRestartStateNone}
 	}
 }
 
@@ -168,18 +208,6 @@ func (s *PlannedRestartStore) Stage(raw []byte) {
 	s.stagedAt = time.Now()
 }
 
-// BaseRaw returns the original pre-stage raw config bytes, or nil when no
-// staged restart is pending. This is used to compute lifecycle diffs for staged
-// updates against the original serving config rather than the staged file.
-func (s *PlannedRestartStore) BaseRaw() []byte {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.baseRaw
-}
-
 // StageManaged performs a crash-consistent file-backed stage. It is the
 // production staging path. The caller must hold the coordinator mutex before
 // calling this so no concurrent apply can interleave with the staging order.
@@ -191,7 +219,7 @@ func (s *PlannedRestartStore) BaseRaw() []byte {
 //
 // Crash-consistent order (§17.4):
 //
-//  1. Atomically write prevRaw to .bak (first stage only; updates keep original).
+//  1. Atomically write prevRaw to .bak.
 //  2. Atomically write marker state "prepared" with base/candidate digests.
 //  3. Caller writes the candidate to the active config path (AFTER this call).
 //  4. Atomically update marker state to "staged".
@@ -212,33 +240,21 @@ func (s *PlannedRestartStore) StageManaged(prevRaw, candidateRaw []byte, marker 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// For a staged update (already pending), preserve the original .bak and
-	// base fields from the existing marker so the rollback base is never lost.
+	// Only one staged candidate may be tracked at a time (F-08). If a staged
+	// restart is already pending, the operator must discard or complete it
+	// before staging another.
 	if s.pending {
-		existing, err := s.loadMarkerLocked()
-		if err == nil && existing != nil && existing.BaseRawSHA256 != "" {
-			marker.BaseRawSHA256 = existing.BaseRawSHA256
-			marker.BaseCanonicalVersion = existing.BaseCanonicalVersion
-			marker.BaseServingVersion = existing.BaseServingVersion
-			// Keep the original .bak intact — it holds the pre-stage original config.
-		} else {
-			// Existing marker is unreadable: best-effort fallback — write the
-			// prevRaw bytes as the new backup (they are the last known good state).
-			if err := s.writeBackupLocked(prevRaw); err != nil {
-				return fmt.Errorf("planned-restart stage (update): write backup: %w", err)
-			}
-			marker.BaseRawSHA256 = sha256Hex(prevRaw)
-		}
-	} else {
-		// First stage: write the original pre-candidate bytes as the backup.
-		// prevRaw was captured by the coordinator BEFORE writing the candidate,
-		// so it always contains the original configuration.
-		if err := s.writeBackupLocked(prevRaw); err != nil {
-			return fmt.Errorf("planned-restart stage: write backup: %w", err)
-		}
-		marker.BaseRawSHA256 = sha256Hex(prevRaw)
-		s.baseRaw = prevRaw
+		return ErrStageRestartAlreadyPending
 	}
+
+	// Write the original pre-candidate bytes as the backup. prevRaw was captured
+	// by the coordinator BEFORE writing the candidate, so it always contains
+	// the original configuration.
+	if err := s.writeBackupLocked(prevRaw); err != nil {
+		return fmt.Errorf("planned-restart stage: write backup: %w", err)
+	}
+	marker.BaseRawSHA256 = sha256Hex(prevRaw)
+	s.baseRaw = prevRaw
 
 	// Step 2: write marker in "prepared" state before the candidate is written.
 	// If the process crashes between here and when the caller writes the
@@ -521,50 +537,36 @@ func (s *PlannedRestartStore) Status() pendingRestartStatus {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Return inconsistent/external status even when !pending so callers know
-	// recovery is required and hot applies should be blocked.
-	if !s.pending && !s.inconsistent && !s.external {
+	st := s.stateLocked()
+	if st.State == PlannedRestartStateNone {
 		return pendingRestartStatus{}
 	}
-	if s.inconsistent && !s.pending {
-		return pendingRestartStatus{
-			Managed:          true,
-			Staged:           false,
-			DiscardAvailable: false,
-			Inconsistent:     true,
-		}
-	}
-	if s.external && !s.pending {
-		return pendingRestartStatus{
-			Managed:      false,
-			Staged:       false,
-			External:     true,
-			Inconsistent: false,
-		}
-	}
-	st := pendingRestartStatus{
-		Managed:          true,
-		Staged:           true,
-		DiscardAvailable: s.ConfigPath != "",
-		Inconsistent:     s.inconsistent,
-		External:         s.external,
+
+	prs := pendingRestartStatus{
+		State:            string(st.State),
+		Managed:          st.State == PlannedRestartStateManagedStaged,
+		Staged:           st.State == PlannedRestartStateManagedStaged,
+		External:         st.State == PlannedRestartStateExternalDivergence,
+		Inconsistent:     st.State == PlannedRestartStateInconsistent,
+		DiscardAvailable: st.State == PlannedRestartStateManagedStaged && s.ConfigPath != "",
 		StagedAt:         s.stagedAt,
 	}
 	// Load version metadata from the marker when available.
-	if s.ConfigPath != "" {
+	if s.ConfigPath != "" && (st.State == PlannedRestartStateManagedStaged || st.State == PlannedRestartStateInconsistent) {
 		if m, err := s.loadMarkerLocked(); err == nil && m != nil {
-			st.StagedVersion = m.StagedVersion
-			st.ServingVersion = m.BaseServingVersion
-			st.Subsystems = m.PendingSubsystems
+			prs.StagedVersion = m.StagedVersion
+			prs.ServingVersion = m.BaseServingVersion
+			prs.Subsystems = m.PendingSubsystems
 		}
 	}
-	return st
+	return prs
 }
 
 // pendingRestartStatus is the internal representation of pending-restart
 // status. It maps directly to admin.PendingRestartStatus but avoids an import
 // cycle between the app and admin packages.
 type pendingRestartStatus struct {
+	State            string
 	Managed          bool
 	Staged           bool
 	External         bool

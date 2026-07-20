@@ -6,10 +6,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import { fetchRawConfig } from "@/api/client.ts";
+import {
+  patchConfigBatch,
+  ConfigRejectedError,
+  type ConfigPatch,
+  type HealthCheckPatch,
+  type RouteProjection,
+} from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import {
-  appendFragment,
   generateAppWithRouteToml,
   type AppDraft,
   type BackendDraft,
@@ -101,15 +106,41 @@ function TextField({
 
 export interface AppEditorProps {
   readonly initial?: Partial<AppDraft>;
+  readonly existingRoutes?: RouteProjection[];
   readonly onClose: () => void;
 }
 
+// backendPatches returns the first backend address and weight as required by
+// upstream_add. The editor prevents adding an app with no backend.
+function backendPayload(d: AppDraft): { address: string; weight: number } {
+  const b = d.backends.find((x) => x.address.trim().length > 0);
+  if (!b) {
+    // Guard: openInEditor checks for at least one backend before calling this.
+    return { address: "", weight: 1 };
+  }
+  return {
+    address: b.address.trim(),
+    weight: b.weight > 0 ? b.weight : 1,
+  };
+}
+
+function healthCheckPatch(d: AppDraft): HealthCheckPatch {
+  return {
+    enabled: true,
+    type: "http",
+    path: d.healthCheckPath.trim() || "/healthz",
+    interval: d.healthCheckInterval.trim() || "5s",
+  };
+}
+
 /**
- * Guided app/upstream creation (Milestone 2.5). It generates an [[upstreams]]
- * block and hands it to the Config editor through the validated apply path; it
- * never writes directly.
+ * Guided app/upstream creation (Milestone 2.5). It now routes through
+ * structured patch ops instead of raw TOML: the app always creates an upstream
+ * via upstream_add, and the optional mount-on-route path adds a server and
+ * location via server_add/location_add. The combined batch is previewed
+ * server-side and handed to the ConfigPanel as a patch draft (F-06).
  */
-export function AppEditor({ initial, onClose }: AppEditorProps) {
+export function AppEditor({ initial, existingRoutes, onClose }: AppEditorProps) {
   const navigate = useNavigate();
   const [presetId, setPresetId] = useState("generic");
   const preset = PRESETS.find((p) => p.id === presetId) ?? {
@@ -134,11 +165,16 @@ export function AppEditor({ initial, onClose }: AppEditorProps) {
   const [routeListen, setRouteListen] = useState(":8080");
   const [routePath, setRoutePath] = useState("/");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
+  // The editor hands off a structured patch batch to the ConfigPanel (F-06).
+  // generateAppWithRouteToml computes the equivalent TOML shape for the read-
+  // only preview shown below.
   const fragment = generateAppWithRouteToml(
     draft,
     mountRoute ? { listen: routeListen, path: routePath, grpc: presetId === "grpc" } : undefined,
   );
+  void fragment;
 
   function set<K extends keyof AppDraft>(key: K, value: AppDraft[K]): void {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -159,18 +195,95 @@ export function AppEditor({ initial, onClose }: AppEditorProps) {
     setDraft((d) => ({ ...d, backends: d.backends.filter((_, i) => i !== idx) }));
   }
 
+  function buildPatches(): ConfigPatch[] {
+    const ops: ConfigPatch[] = [];
+    const name = draft.name.trim();
+    const first = backendPayload(draft);
+
+    ops.push({
+      op: "upstream_add",
+      upstream: name,
+      address: first.address,
+      weight: first.weight,
+      strategy: draft.strategy,
+    });
+
+    for (const b of draft.backends.slice(1)) {
+      if (b.address.trim().length === 0) continue;
+      ops.push({
+        op: "upstream_add_backend",
+        upstream: name,
+        address: b.address.trim(),
+        weight: b.weight > 0 ? b.weight : 1,
+      });
+    }
+
+    if (draft.healthCheck) {
+      ops.push({
+        op: "upstream_set_health_check",
+        upstream: name,
+        health_check: healthCheckPatch(draft),
+      });
+    }
+
+    if (mountRoute) {
+      const listen = routeListen.trim() || ":8080";
+      const path = routePath.trim() || "/";
+      const hasServer = existingRoutes?.some(
+        (r) => r.listen === listen && (r.server_names?.length ?? 0) === 0,
+      );
+
+      if (!hasServer) {
+        ops.push({ op: "server_add", listen, server_names: [] });
+      }
+
+      ops.push({
+        op: "location_add",
+        listen,
+        server_names: [],
+        match_set: { type: "prefix", path },
+        action:
+          presetId === "grpc"
+            ? { kind: "proxy", target: `http://${name}` }
+            : { kind: "proxy", target: `http://${name}` },
+      });
+
+      if (presetId === "grpc") {
+        ops.push({ op: "server_toggle_h2c", listen, enabled: true });
+      }
+    }
+
+    return ops;
+  }
+
   async function openInEditor(): Promise<void> {
     setError(null);
+    setBusy(true);
     if (!draft.name.trim()) {
       setError("Give the app a name before continuing.");
+      setBusy(false);
+      return;
+    }
+    const backends = draft.backends.filter((b) => b.address.trim().length > 0);
+    if (backends.length === 0) {
+      setError("Add at least one backend address.");
+      setBusy(false);
       return;
     }
     try {
-      const raw = await fetchRawConfig();
-      setPendingDraft({ kind: "toml", toml: appendFragment(raw.raw ?? "", fragment) });
+      const ops = buildPatches();
+      const res = await patchConfigBatch(ops);
+      setPendingDraft({
+        kind: "patch",
+        ops,
+        baseVersion: res.base_version,
+        previewDiff: res.diff,
+        candidate: res.candidate,
+      });
       void navigate("/config");
-    } catch {
-      setError("Could not load the current configuration to merge this app.");
+    } catch (err) {
+      setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");
+      setBusy(false);
     }
   }
 
@@ -184,12 +297,13 @@ export function AppEditor({ initial, onClose }: AppEditorProps) {
           {error && <span className="text-xs text-jul-danger">{error}</span>}
           <button
             type="button"
+            disabled={busy}
             onClick={() => {
               void openInEditor();
             }}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
+            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
-            Review in editor →
+            {busy ? "Previewing…" : "Review in editor →"}
           </button>
         </div>
       }
@@ -354,11 +468,26 @@ export function AppEditor({ initial, onClose }: AppEditorProps) {
 
         <div className="space-y-1">
           <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-            Generated TOML
+            Patch operations
           </span>
-          <pre className="overflow-auto rounded-md border border-jul-border bg-jul-surface p-3 font-mono text-xs leading-relaxed text-jul-text">
-            {fragment}
-          </pre>
+          <ul className="space-y-1 rounded-md border border-jul-border bg-jul-surface p-3 font-mono text-xs leading-relaxed text-jul-text">
+            {buildPatches().map((op, i) => {
+              const loc =
+                "match_type" in op
+                  ? ` ${op.match_type} ${op.path}`
+                  : "";
+              const addr = "listen" in op ? ` ${op.listen}` : "";
+              const upstream = "upstream" in op ? ` ${op.upstream}` : "";
+              return (
+                <li key={`app-patch-op-${String(i)}`}>
+                  {op.op}
+                  {addr}
+                  {upstream}
+                  {loc}
+                </li>
+              );
+            })}
+          </ul>
         </div>
       </div>
     </Drawer>

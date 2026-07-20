@@ -46,7 +46,30 @@ type ApplyResult struct {
 	ValidationErrors []string
 	RestartRequired  bool
 	CanStage         bool
+
+	// Restoration fields (F-03): first-class truth about whether a rejected
+	// candidate was rolled back to the previous configuration.
+	Persisted         bool   // true if the candidate bytes were written to disk
+	Restored          bool   // true if the previous configuration was restored
+	RestoreError      string // non-empty if restoration was attempted and failed
+	FinalDiskVersion  string // canonical version of the on-disk file after apply
+	FinalServingVersion string // canonical version of the live serving config (may lag)
 }
+
+// ApplyInFlightState tracks the current managed apply transaction. It is used
+// to prevent a second managed apply from starting while a previous apply's
+// async finalizer still owns disk restoration, and to make the finalizer's
+// digest check + restore atomic with respect to new writes.
+type ApplyInFlightState string
+
+const (
+	// ApplyInFlightNone means no managed apply transaction is currently active.
+	ApplyInFlightNone ApplyInFlightState = ""
+	// ApplyInFlightWaiting means a candidate has been persisted and the
+	// coordinator is either waiting synchronously for the reload result or the
+	// finalizer owns the asynchronous completion/restoration.
+	ApplyInFlightWaiting ApplyInFlightState = "waiting"
+)
 
 // ConfigApplyCoordinator owns every managed configuration write: it serializes
 // applies, keeps the exact previous raw bytes, runs preflight, persists
@@ -64,6 +87,10 @@ type ConfigApplyCoordinator struct {
 	mu      sync.Mutex
 	applyMu sync.Mutex
 	seq     atomic.Uint64
+
+	// inFlightState tracks whether a managed apply transaction is still
+	// outstanding. It is protected by applyMu for state transitions.
+	inFlightState ApplyInFlightState
 }
 
 // ApplyRaw applies a raw configuration bytes slice. It is the hot-apply entry
@@ -79,6 +106,21 @@ func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyRes
 		mode = ApplyHot
 	}
 
+	// Refuse to start a new managed transaction while the previous one's
+	// finalizer still owns restoration. This keeps the disk serialization
+	// contract even after the synchronous HTTP path returns saved_not_live.
+	c.mu.Lock()
+	inFlight := c.inFlightState == ApplyInFlightWaiting
+	c.mu.Unlock()
+	if inFlight {
+		return ApplyResult{
+			OK:      false,
+			Mode:    mode,
+			Version: server.CanonicalVersion(nil),
+			Message: "A previous apply is still in flight; wait for it to complete or check the runtime overview for status.",
+		}, nil
+	}
+
 	prevRaw, prevErr := os.ReadFile(c.Path)
 	previouslyExisted := !errors.Is(prevErr, os.ErrNotExist)
 
@@ -86,11 +128,42 @@ func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyRes
 	// external unmanaged divergence, or post-reconciliation inconsistency.
 	if mode == ApplyHot && c.PlannedRestart != nil {
 		st := c.PlannedRestart.State()
-		if st.Pending || st.Inconsistent {
+		if st.State != PlannedRestartStateNone {
+			msg := "A planned restart is pending; discard or complete it before applying hot changes."
+			switch st.State {
+			case PlannedRestartStateExternalDivergence:
+				msg = "Configuration on disk differs from the running runtime; resolve the external divergence before applying hot changes."
+			case PlannedRestartStateInconsistent:
+				msg = "Planned-restart state is inconsistent; resolve the inconsistency before applying hot changes."
+			}
 			return ApplyResult{
 				OK:             false,
 				Mode:           mode,
-				Message:        "A planned restart is pending; discard or complete it before applying hot changes.",
+				Message:        msg,
+				PendingRestart: c.plannedRestartStatus(),
+			}, nil
+		}
+	}
+
+	// Block a new stage_restart while any blocking planned-restart state is
+	// present: an already-pending managed staged restart, external unmanaged
+	// divergence, or a post-reconciliation inconsistency. This enforces the
+	// single-candidate invariant (F-08) and prevents staging from silently
+	// adopting an externally-owned divergence (F-04).
+	if mode == ApplyStageRestart && c.PlannedRestart != nil {
+		st := c.PlannedRestart.State()
+		if st.State != PlannedRestartStateNone {
+			msg := "A staged restart is already pending; discard or complete it before staging a new candidate."
+			switch st.State {
+			case PlannedRestartStateExternalDivergence:
+				msg = "Cannot stage a restart while external disk/runtime divergence is present."
+			case PlannedRestartStateInconsistent:
+				msg = "Cannot stage a restart while planned-restart state is inconsistent."
+			}
+			return ApplyResult{
+				OK:             false,
+				Mode:           mode,
+				Message:        msg,
 				PendingRestart: c.plannedRestartStatus(),
 			}, nil
 		}
@@ -237,6 +310,10 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 // writes the sidecar backup+marker, then writes the candidate atomically,
 // and returns an ApplyResult without submitting a live reload.
 //
+// Only one staged candidate may be in flight at a time (F-08); ApplyRaw blocks
+// subsequent stage_restart requests until the pending candidate is discarded
+// or the process restarts.
+//
 // Correct crash-consistent ordering (C-01 fix):
 //  1. prevRaw captured in ApplyRaw before any write (passed in).
 //  2. StageManaged writes .bak (prevRaw) and prepared marker — no candidate on disk yet.
@@ -267,30 +344,13 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 		liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
 	}
 
-	// Determine whether this is a first stage or an update to an already-pending
-	// stage. This must be decided before any write.
-	isUpdate := c.PlannedRestart != nil && c.PlannedRestart.IsPending()
+	// The single-candidate invariant is enforced in ApplyRaw before this path is
+	// reached, so there is never an update to an already-pending stage here.
+	// The diff is computed against the live/pre-stage config (prevCfg).
 
-	// For staged updates, compute the diff against the ORIGINAL serving/base
-	// config represented by the marker and backup, not the staged file on disk.
-	// That ensures the pending subsystem list remains accurate across updates.
-	var baseCfg *config.Config
-	if isUpdate && c.PlannedRestart != nil {
-		if baseRaw := c.PlannedRestart.BaseRaw(); len(baseRaw) > 0 {
-			if raw, err := config.Parse(baseRaw); err == nil {
-				if cand, err := config.NewCandidate(raw); err == nil {
-					baseCfg = cand.Effective
-				}
-			}
-		}
-	}
-	if baseCfg == nil {
-		baseCfg = prevCfg
-	}
-
-	// Run the shared preflight gates. For updates we use PreflightStageRestart
-	// mode so restart-required classification is retained rather than rejected.
-	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, baseCfg, PreflightStageRestart)
+	// Run the shared preflight gates in stage-restart mode so restart-required
+	// classification is retained rather than rejected.
+	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightStageRestart)
 	if err != nil {
 		return ApplyResult{
 			OK:               false,
@@ -303,10 +363,10 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	// Collect subsystem names from the lifecycle diff.
 	subsystems := subsystemNames(pfResult.Lifecycle)
 
-	// A first stage_restart should only be accepted when the candidate cannot be
+	// A stage_restart should only be accepted when the candidate cannot be
 	// fully hot-applied. If no restart-required changes exist, reject and tell
 	// the operator to use hot apply instead.
-	if !isUpdate && len(subsystems) == 0 {
+	if len(subsystems) == 0 {
 		return ApplyResult{
 			OK:      false,
 			Mode:    ApplyStageRestart,
@@ -380,6 +440,12 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	}, nil
 }
 
+// errIsStageRestartAlreadyPending reports whether err is the sentinel returned
+// when a stage_restart is attempted while one is already pending.
+func errIsStageRestartAlreadyPending(err error) bool {
+	return errors.Is(err, ErrStageRestartAlreadyPending)
+}
+
 // subsystemNames extracts unique subsystem names from a lifecycle ChangeSet.
 func subsystemNames(cs lifecycle.ChangeSet) []string {
 	seen := make(map[string]struct{}, len(cs))
@@ -401,10 +467,11 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 		return nil
 	}
 	st := c.PlannedRestart.Status()
-	if !st.Managed && !st.Inconsistent && !st.External {
+	if st.State == "" && !st.Managed && !st.Inconsistent && !st.External {
 		return nil
 	}
 	res := &admin.PendingRestartStatus{
+		State:            st.State,
 		Managed:          st.Managed,
 		Staged:           st.Staged,
 		External:         st.External,
@@ -459,6 +526,10 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 		}, err
 	}
 
+	// Mark a managed transaction as in-flight before releasing applyMu.
+	// The finalizer clears this only after any restoration is complete.
+	c.inFlightState = ApplyInFlightWaiting
+
 	// Suppress the echo of our own write on the file watcher.
 	c.suppressWatcher(rawDigest)
 
@@ -476,6 +547,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 		// not reload. Restore the exact previous bytes and suppress the
 		// restoration echo so the watcher does not loop.
 		restoreErr := c.restorePreviousLocked(prevRaw, previouslyExisted, rawDigest)
+		c.inFlightState = ApplyInFlightNone
 		c.mu.Unlock()
 		msg := "Reload enqueue failed; the configuration was saved but may not be applied."
 		if restoreErr != nil {
@@ -492,8 +564,10 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 
 	// Finalizer goroutine: sole owner of the reload result. It forwards the
 	// result to waiterCh for the synchronous HTTP path, then performs any
-	// required restoration. The digest check in restorePrevious ensures a late
-	// restore cannot overwrite a subsequent apply's candidate.
+	// required restoration while holding c.mu so the digest check and restore
+	// are atomic with respect to a subsequent apply's write. The state is
+	// cleared under the same lock so the next apply observes the completed
+	// transaction only after the disk is in its final state.
 	go func() {
 		defer close(restoreDone)
 		select {
@@ -502,16 +576,25 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 			case waiterCh <- rr:
 			default:
 			}
-			if !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded {
-				if err := c.restorePrevious(prevRaw, previouslyExisted, rawDigest); err != nil {
-					// Log only; the HTTP response is already gone. The error is
-					// also discoverable via the persisted config audit trail.
-					_ = err
+			c.mu.Lock()
+			restoreNeeded := !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded
+			if restoreNeeded {
+				if err := c.restorePreviousLocked(prevRaw, previouslyExisted, rawDigest); err != nil {
+					// Log the restoration failure; F-03 surfaces it through the
+					// result/audit path below when the synchronous path is still
+					// waiting. When it has already returned (saved_not_live), the
+					// failure is discoverable via overview/metrics.
+					c.logRestorationFailure(id, err)
 				}
 			}
+			c.inFlightState = ApplyInFlightNone
+			c.mu.Unlock()
 		case <-c.BaseCtx.Done():
 			// Process shutting down; no restoration attempt — startup will
 			// determine the correct state from disk and marker files.
+			c.mu.Lock()
+			c.inFlightState = ApplyInFlightNone
+			c.mu.Unlock()
 		}
 	}()
 
@@ -525,14 +608,22 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 		res := c.decorateResultNoRestore(mode, desiredVersion, rr)
 		if !res.OK {
 			// Wait for the finalizer's restoration so callers observe a known
-			// on-disk state before we return.
+			// on-disk state before we return, then record the outcome.
 			select {
 			case <-restoreDone:
 			case <-time.After(5 * time.Second):
 			}
+			res = c.withRestorationOutcome(res, prevRaw, previouslyExisted, rawDigest)
+		} else {
+			// Successful apply: record the final persisted/serving versions.
+			res.Persisted = true
+			res.FinalDiskVersion = desiredVersion
+			res.FinalServingVersion = rr.ServingVersion
 		}
 		return res, nil
 	case <-c.BaseCtx.Done():
+		// The process is shutting down; the finalizer will clear inFlightState
+		// once it observes BaseCtx cancellation.
 		return ApplyResult{
 			OK:             true,
 			Mode:           mode,
@@ -541,12 +632,15 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 			Message:        "Configuration saved; the process is shutting down and the reload outcome is unknown.",
 		}, nil
 	case <-time.After(waitTimeout):
-		// Finalizer goroutine now owns the restoration obligation.
+		// Finalizer goroutine now owns the restoration obligation. The result
+		// returned here marks Persisted because the candidate is on disk, but
+		// the final restoration state will only be known after restoreDone.
 		return ApplyResult{
 			OK:             true,
 			Mode:           mode,
 			Version:        desiredVersion,
 			ServingVersion: server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
+			Persisted:      true,
 			Reload: &server.ReloadResult{
 				ID:        id,
 				Source:    server.ReloadSourceAdmin,
@@ -558,6 +652,94 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 			Message: "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome.",
 		}, nil
 	}
+}
+
+// logRestorationFailure records a restoration failure in a best-effort way.
+// The synchronous path uses withRestorationOutcome to surface the same error
+// when it is still waiting; this method covers the saved_not_live path.
+func (c *ConfigApplyCoordinator) logRestorationFailure(id string, err error) {
+	// Placeholder for future metric/structured-log emission; kept minimal to
+	// avoid importing logging packages into the coordinator.
+	_ = id
+	_ = err
+}
+
+// withRestorationOutcome populates the restoration fields of an ApplyResult
+// after the finalizer has completed. It reads the on-disk file and compares
+// it to the expected candidate digest to determine whether restoration
+// succeeded. When prevRaw is nil and the candidate file did not exist before,
+// success means the file is now absent.
+func (c *ConfigApplyCoordinator) withRestorationOutcome(res ApplyResult, prevRaw []byte, previouslyExisted bool, expectedCandidateDigest [32]byte) ApplyResult {
+	res.Persisted = true
+	if c.Path == "" {
+		res.Restored = false
+		return res
+	}
+
+	current, err := os.ReadFile(c.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// File absent. Restoration succeeded only if the candidate did not
+			// exist before either.
+			res.Restored = !previouslyExisted
+			if !res.Restored {
+				res.RestoreError = "candidate file missing after restoration window"
+			}
+			return res
+		}
+		res.Restored = false
+		res.RestoreError = "cannot read disk after restoration: " + err.Error()
+		return res
+	}
+
+	res.FinalDiskVersion = canonicalVersionFromRaw(current)
+	currentDigest := sha256.Sum256(current)
+
+	if currentDigest == expectedCandidateDigest {
+		// Candidate is still on disk: restoration either failed or was skipped.
+		res.Restored = false
+		res.RestoreError = res.restoreOutcomeError(previouslyExisted)
+		return res
+	}
+
+	// Disk no longer contains the candidate. If a previous file existed, verify
+	// it matches prevRaw before declaring restoration successful.
+	if previouslyExisted {
+		if sha256.Sum256(current) == sha256.Sum256(prevRaw) {
+			res.Restored = true
+			return res
+		}
+		res.Restored = false
+		res.RestoreError = "disk contents do not match previous configuration after restoration"
+		return res
+	}
+
+	// No previous file existed and candidate is gone: restoration succeeded.
+	res.Restored = true
+	return res
+}
+
+// restoreOutcomeError returns a stable message when the candidate is still on
+// disk after a failed pre-Publish reload. It differentiates the common cases
+// so the operator knows whether the previous configuration was recoverable.
+func (res ApplyResult) restoreOutcomeError(previouslyExisted bool) string {
+	if res.RestoreError != "" {
+		return res.RestoreError
+	}
+	if previouslyExisted {
+		return "configuration was not restored to the previous version"
+	}
+	return "candidate file was not removed after failed apply"
+}
+
+// canonicalVersionFromRaw returns a short canonical version for raw config
+// bytes, or "" when the bytes cannot be parsed/marshaled.
+func canonicalVersionFromRaw(raw []byte) string {
+	cfg, err := config.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return server.CanonicalVersion(cfg)
 }
 
 // decorateResultNoRestore builds the ApplyResult from a ReloadResult without

@@ -17,8 +17,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/rbac"
 )
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -273,6 +275,57 @@ func TestRuntimeOverviewAuditSinkOmitted(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), "audit_sink") {
 		t.Errorf("audit_sink should be omitted, body = %s", rr.Body.String())
+	}
+}
+
+// TestRuntimeOverviewAdminHealthOmittedWhenHealthy proves the admin_health
+// field is omitted from the overview when the admin subsystem is healthy.
+func TestRuntimeOverviewAdminHealthOmittedWhenHealthy(t *testing.T) {
+	cfg := &config.Config{}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), "admin_health") {
+		t.Errorf("admin_health should be omitted when healthy, body = %s", rr.Body.String())
+	}
+}
+
+// TestRuntimeOverviewAdminHealthSurfacesDegraded proves a composition-root
+// admin health failure is surfaced on the runtime overview (F-05).
+func TestRuntimeOverviewAdminHealthSurfacesDegraded(t *testing.T) {
+	cfg := &config.Config{}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+		AdminHealth: func() error {
+			return &AdminHealthStatus{
+				Healthy: false,
+				Reason:  "admin_reload",
+				Detail:  "admin subsystem reload failed: rbac policy update failed",
+			}
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.AdminHealth == nil {
+		t.Fatal("admin_health should be present when degraded")
+	}
+	if out.AdminHealth.Healthy {
+		t.Error("admin_health.healthy = true, want false")
+	}
+	if out.AdminHealth.Reason != "admin_reload" {
+		t.Errorf("admin_health.reason = %q, want admin_reload", out.AdminHealth.Reason)
 	}
 }
 
@@ -942,6 +995,93 @@ func TestConfigPatchActionSwitchProducesValidCandidate(t *testing.T) {
 	}
 }
 
+// TestConfigPatchPreviewBatch previews a compound edit (server_add +
+// location_add) without persisting. This is the backend support for the
+// RouteEditor patch migration in F-06.
+func TestConfigPatchPreviewBatch(t *testing.T) {
+	var writes int
+	deps := Deps{
+		LoadConfig:     func() (*config.Config, error) { return patchProxyConfig(), nil },
+		WriteConfigRaw: func([]byte) error { writes++; return nil },
+	}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+
+	req := patchApplyRequest{
+		Ops: []patchRequest{
+			{Op: "server_add", Listen: ":9090"},
+			{
+				Op: "location_add", Listen: ":9090",
+				Match:  &locationMatch{Type: "prefix", Path: "/new"},
+				Action: &locationActionPayload{Kind: "proxy", Target: "http://127.0.0.1:9001"},
+			},
+		},
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal batch: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/preview", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		OK        bool   `json:"ok"`
+		Candidate string `json:"candidate"`
+		Summary   string `json:"summary"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Errorf("ok = false, want true")
+	}
+	if !strings.Contains(out.Candidate, ":9090") {
+		t.Errorf("candidate missing new server; got:\n%s", out.Candidate)
+	}
+	if !strings.Contains(out.Candidate, "/new") {
+		t.Errorf("candidate missing new location; got:\n%s", out.Candidate)
+	}
+	if !strings.Contains(out.Summary, "server") || !strings.Contains(out.Summary, "route") {
+		t.Errorf("summary = %q, want both server and route mentions", out.Summary)
+	}
+	if writes != 0 {
+		t.Errorf("WriteConfigRaw called %d times during batch preview; want 0", writes)
+	}
+}
+
+// TestConfigPatchPreviewBatchFailsFast aborts the whole preview on the first
+// invalid op so the operator never sees a partial diff.
+func TestConfigPatchPreviewBatchFailsFast(t *testing.T) {
+	deps := Deps{LoadConfig: func() (*config.Config, error) { return patchProxyConfig(), nil }}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+
+	req := patchApplyRequest{
+		Ops: []patchRequest{
+			{Op: "server_add", Listen: ":9090"},
+			{
+				// The location_add references the just-added server; the second op
+				// should fail because the proxy action requires a non-empty target.
+				Op: "location_add", Listen: ":9090",
+				Match:  &locationMatch{Type: "prefix", Path: "/bad"},
+				Action: &locationActionPayload{Kind: "proxy", Target: ""},
+			},
+		},
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal batch: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/preview", bytes.NewReader(body)))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Operation 2") {
+		t.Errorf("error body should mention the failing op index; got: %s", rr.Body.String())
+	}
+}
+
 // ── /api/config/patch/apply (server-side atomic batch + conflict) ─────────────
 
 // v2ProxyWriteServer is a file-backed harness seeded with a proxy config (one
@@ -1419,6 +1559,358 @@ func TestAdminLockoutChanges(t *testing.T) {
 			got := adminLockoutChanges(tc.prev, tc.next)
 			if (len(got) > 0) != tc.want {
 				t.Errorf("changes = %v, want hasChange=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+// rbacAdminWriteServer seeds a persisted config with RBAC enabled, installs
+// the matching policy on the server, and returns the server, the config path,
+// the operator token (config:apply only), and the admin token (admin:manage).
+func rbacAdminWriteServer(t *testing.T) (*Server, string, string, string) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), "server.toml")
+	operatorTok := "operator-token-32-chars-padded---"
+	adminTok := "admin-token-32-chars-padded--------"
+
+	seed := config.ServeDir("./public", ":8080")
+	seed.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles: []config.AdminRole{
+				{Name: "configwriter", Permissions: []string{"config:apply"}},
+			},
+			Principals: []config.AdminPrincipal{
+				{Name: "op", Role: "configwriter", Token: operatorTok},
+				{Name: "adm", Role: "admin", Token: adminTok},
+			},
+		},
+	}
+	raw, err := config.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, raw, 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	deps := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		WriteConfigRaw: func(data []byte) error {
+			c, err := config.Parse(data)
+			if err != nil {
+				return err
+			}
+			if err := config.Validate(c); err != nil {
+				return err
+			}
+			return os.WriteFile(cfgPath, data, 0o644)
+		},
+		LoadConfig: func() (*config.Config, error) {
+			raw, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return nil, err
+			}
+			return config.Parse(raw)
+		},
+	}
+	cfg := config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}
+	s := newTestServer(t, cfg, deps)
+
+	customRoles := make(map[string][]string, len(seed.Admin.RBAC.Roles))
+	for _, r := range seed.Admin.RBAC.Roles {
+		customRoles[r.Name] = r.Permissions
+	}
+	pol, err := rbac.Build(true, "admin", customRoles, []rbac.PrincipalDef{
+		{Name: "op", Role: "configwriter", Token: operatorTok},
+		{Name: "adm", Role: rbac.RoleAdmin, Token: adminTok},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatalf("build policy: %v", err)
+	}
+	s.UpdatePolicy(pol)
+	return s, cfgPath, operatorTok, adminTok
+}
+
+// TestConfigApplyRBACSameCountRoleEscalationBlocks applies a candidate that
+// keeps the same number of principals but changes one principal's role. The
+// object-level guard must detect the content change and require admin:manage.
+func TestConfigApplyRBACSameCountRoleEscalationBlocks(t *testing.T) {
+	s, cfgPath, opTok, _ := rbacAdminWriteServer(t)
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+
+	candidate := config.ServeDir("./public", ":8080")
+	candidate.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles: []config.AdminRole{
+				{Name: "configwriter", Permissions: []string{"config:apply"}},
+			},
+			Principals: []config.AdminPrincipal{
+				{Name: "op", Role: "admin", Token: opTok}, // escalated
+				{Name: "adm", Role: "admin", Token: "admin-token-32-chars-padded--------"},
+			},
+		},
+	}
+	body, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+opTok)
+	s.routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("RBAC role escalation should not have persisted without admin:manage")
+	}
+}
+
+// TestConfigApplyRBACSameCountTokenSwapBlocks applies a candidate that keeps
+// the same number of principals but rotates another principal's token. The
+// object-level guard must detect the content change and require admin:manage.
+func TestConfigApplyRBACSameCountTokenSwapBlocks(t *testing.T) {
+	s, cfgPath, opTok, _ := rbacAdminWriteServer(t)
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+
+	candidate := config.ServeDir("./public", ":8080")
+	candidate.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles: []config.AdminRole{
+				{Name: "configwriter", Permissions: []string{"config:apply"}},
+			},
+			Principals: []config.AdminPrincipal{
+				{Name: "op", Role: "configwriter", Token: opTok},
+				{Name: "adm", Role: "admin", Token: "compromised-token-32-chars-------"},
+			},
+		},
+	}
+	body, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+opTok)
+	s.routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("RBAC token swap should not have persisted without admin:manage")
+	}
+}
+
+// TestConfigApplyRBACSameCountPermissionEditBlocks applies a candidate that
+// keeps the same number of roles but changes the permissions of an existing
+// role. The object-level guard must detect the content change.
+func TestConfigApplyRBACSameCountPermissionEditBlocks(t *testing.T) {
+	s, cfgPath, opTok, _ := rbacAdminWriteServer(t)
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+
+	candidate := config.ServeDir("./public", ":8080")
+	candidate.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles: []config.AdminRole{
+				{Name: "configwriter", Permissions: []string{"config:apply", "admin:manage"}},
+			},
+			Principals: []config.AdminPrincipal{
+				{Name: "op", Role: "configwriter", Token: opTok},
+				{Name: "adm", Role: "admin", Token: "admin-token-32-chars-padded--------"},
+			},
+		},
+	}
+	body, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+opTok)
+	s.routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("RBAC permission edit should not have persisted without admin:manage")
+	}
+}
+
+// TestConfigApplyRBACIdenticalAllowsConfigApply proves that an operator with
+// only config:apply can still apply a candidate whose RBAC content is
+// identical to the current config; the guard must not over-trigger.
+func TestConfigApplyRBACIdenticalAllowsConfigApply(t *testing.T) {
+	s, cfgPath, opTok, _ := rbacAdminWriteServer(t)
+
+	candidate := config.ServeDir("./changed-root", ":8080")
+	candidate.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles: []config.AdminRole{
+				{Name: "configwriter", Permissions: []string{"config:apply"}},
+			},
+			Principals: []config.AdminPrincipal{
+				{Name: "op", Role: "configwriter", Token: opTok},
+				{Name: "adm", Role: "admin", Token: "admin-token-32-chars-padded--------"},
+			},
+		},
+	}
+	body, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+opTok)
+	s.routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Contains(after, []byte("changed-root")) {
+		t.Error("identical RBAC should not block an ordinary config:apply edit")
+	}
+}
+
+// TestConfigApplyRBACAdminManageAllows proves that an admin:manage holder can
+// apply same-count RBAC content mutations that would be blocked for a
+// config:apply-only operator.
+func TestConfigApplyRBACAdminManageAllows(t *testing.T) {
+	s, cfgPath, _, adminTok := rbacAdminWriteServer(t)
+
+	candidate := config.ServeDir("./public", ":8080")
+	candidate.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles: []config.AdminRole{
+				{Name: "configwriter", Permissions: []string{"config:apply"}},
+			},
+			Principals: []config.AdminPrincipal{
+				{Name: "op", Role: "admin", Token: "operator-token-32-chars-padded---"}, // escalated
+				{Name: "adm", Role: "admin", Token: "admin-token-32-chars-padded--------"},
+			},
+		},
+	}
+	body, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	s.routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if !bytes.Contains(after, []byte("op")) || !bytes.Contains(after, []byte("admin")) {
+		t.Error("admin:manage holder should be able to mutate RBAC content")
+	}
+}
+
+// TestRBACPrincipalsEqual covers the content comparison used by the
+// object-level admin:manage guard, including order independence and every
+// mutable principal field.
+func TestRBACPrincipalsEqual(t *testing.T) {
+	base := config.AdminPrincipal{Name: "alice", Role: "admin", Token: "tok1", Disabled: false}
+	cases := []struct {
+		name string
+		a    []config.AdminPrincipal
+		b    []config.AdminPrincipal
+		want bool
+	}{
+		{"identical", []config.AdminPrincipal{base}, []config.AdminPrincipal{base}, true},
+		{"reordered", []config.AdminPrincipal{base, {Name: "bob", Role: "viewer", Token: "tok2"}}, []config.AdminPrincipal{{Name: "bob", Role: "viewer", Token: "tok2"}, base}, true},
+		{"role changed", []config.AdminPrincipal{base}, []config.AdminPrincipal{{Name: "alice", Role: "viewer", Token: "tok1"}}, false},
+		{"token changed", []config.AdminPrincipal{base}, []config.AdminPrincipal{{Name: "alice", Role: "admin", Token: "tok2"}}, false},
+		{"disabled flipped", []config.AdminPrincipal{base}, []config.AdminPrincipal{{Name: "alice", Role: "admin", Token: "tok1", Disabled: true}}, false},
+		{"expiry changed", []config.AdminPrincipal{base}, []config.AdminPrincipal{{Name: "alice", Role: "admin", Token: "tok1", ExpiresAt: time.Now().Add(time.Hour)}}, false},
+		{"name added", []config.AdminPrincipal{base}, []config.AdminPrincipal{base, {Name: "bob", Role: "viewer", Token: "tok2"}}, false},
+		{"name removed", []config.AdminPrincipal{base, {Name: "bob", Role: "viewer", Token: "tok2"}}, []config.AdminPrincipal{base}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rbacPrincipalsEqual(tc.a, tc.b); got != tc.want {
+				t.Errorf("rbacPrincipalsEqual() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRBACRolesEqual covers content comparison for custom roles, including
+// order independence and permission-set equality.
+func TestRBACRolesEqual(t *testing.T) {
+	base := config.AdminRole{Name: "custom", Permissions: []string{"config:apply"}}
+	cases := []struct {
+		name string
+		a    []config.AdminRole
+		b    []config.AdminRole
+		want bool
+	}{
+		{"identical", []config.AdminRole{base}, []config.AdminRole{base}, true},
+		{"reordered perms", []config.AdminRole{base}, []config.AdminRole{{Name: "custom", Permissions: []string{"config:apply"}}}, true},
+		{"perm added", []config.AdminRole{base}, []config.AdminRole{{Name: "custom", Permissions: []string{"config:apply", "admin:manage"}}}, false},
+		{"perm removed", []config.AdminRole{base}, []config.AdminRole{{Name: "custom", Permissions: []string{}}}, false},
+		{"role name changed", []config.AdminRole{base}, []config.AdminRole{{Name: "other", Permissions: []string{"config:apply"}}}, false},
+		{"count differs", []config.AdminRole{base}, []config.AdminRole{base, {Name: "other", Permissions: []string{"config:apply"}}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rbacRolesEqual(tc.a, tc.b); got != tc.want {
+				t.Errorf("rbacRolesEqual() = %v, want %v", got, tc.want)
 			}
 		})
 	}

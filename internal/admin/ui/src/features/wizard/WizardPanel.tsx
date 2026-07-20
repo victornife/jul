@@ -6,7 +6,14 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { generateConfig, type WizardInput } from "@/api/client.ts";
+import {
+  generateConfig,
+  generateConfigPatches,
+  patchConfigBatch,
+  ConfigRejectedError,
+  type ConfigPatch,
+  type WizardInput,
+} from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 
 type Mode = "serve" | "proxy" | "app";
@@ -66,10 +73,21 @@ export function WizardPanel() {
   const [routePath, setRoutePath] = useState("/");
   const [healthCheck, setHealthCheck] = useState(true);
 
-  const generate = useMutation({
+  const [previewOps, setPreviewOps] = useState<ConfigPatch[] | null>(null);
+
+  const previewTOML = useMutation({
     mutationFn: (input: WizardInput) => generateConfig(input),
     onSuccess: (toml) => {
       setPreview(toml);
+    },
+  });
+
+  const generate = useMutation({
+    mutationFn: (input: WizardInput) => generateConfigPatches(input),
+    onSuccess: (ops, input) => {
+      setPreviewOps(ops);
+      // Keep a TOML preview for operators who still want to read the raw shape.
+      previewTOML.mutate(input);
     },
   });
 
@@ -107,10 +125,28 @@ export function WizardPanel() {
     generate.mutate(input);
   }
 
-  function openInEditor(): void {
-    if (preview === null) return;
-    setPendingDraft({ kind: "toml", toml: preview });
-    void navigate("/config");
+  async function openInEditor(): Promise<void> {
+    if (previewOps === null) return;
+    try {
+      const res = await patchConfigBatch(previewOps);
+      setPendingDraft({
+        kind: "patch",
+        ops: previewOps,
+        baseVersion: res.base_version,
+        previewDiff: res.diff,
+        candidate: res.candidate,
+      });
+      void navigate("/config");
+    } catch (err) {
+      // The patch preview already surfaced errors during generation; this path
+      // is only reached if the server-side preview fails after the fact.
+      generate.reset();
+      if (err instanceof ConfigRejectedError) {
+        generate.error = err;
+      } else if (err instanceof Error) {
+        generate.error = err;
+      }
+    }
   }
 
   return (
@@ -272,7 +308,9 @@ export function WizardPanel() {
             </span>
             <button
               type="button"
-              onClick={openInEditor}
+              onClick={() => {
+                void openInEditor();
+              }}
               className="rounded-md bg-jul-accent px-3 py-1 text-xs font-medium text-jul-bg hover:brightness-110"
             >
               Open in editor →

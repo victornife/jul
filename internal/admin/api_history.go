@@ -193,12 +193,12 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	code, err := s.rollbackToSnapshot(req.ID)
 	if err != nil {
 		if code == http.StatusBadRequest {
-			s.recordAudit("config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID, adminClientIP(r))
+			s.recordAudit(r, "config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID)
 		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
-	s.recordAudit("config.rollback", "config", "success", "rolled back to snapshot "+req.ID, adminClientIP(r))
+	s.recordAudit(r, "config.rollback", "config", "success", "rolled back to snapshot "+req.ID)
 
 	s.emit("config", "rollback", "warning", "Configuration rolled back to a previous snapshot.")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled back", "id": req.ID})

@@ -18,6 +18,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/observability"
+	"jul/internal/rbac"
 )
 
 // ── /api/admin/health (Milestone 5.7) ────────────────────────────────────────
@@ -214,8 +215,8 @@ func TestTimelineMergesAdminAndRuntimeEvents(t *testing.T) {
 
 func TestAuditRecordAndFilter(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
-	s.recordAudit("config.apply", "config", "success", "ok", "10.0.0.1")
-	s.recordAudit("config.rollback", "config", "failure", "boom", "10.0.0.2")
+	s.recordAudit(newAuditTestRequest("10.0.0.1"), "config.apply", "config", "success", "ok")
+	s.recordAudit(newAuditTestRequest("10.0.0.2"), "config.rollback", "config", "failure", "boom")
 
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/audit?result=failure", nil))
@@ -233,7 +234,7 @@ func TestAuditRecordAndFilter(t *testing.T) {
 
 func TestAuditRedactsSensitiveDetail(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
-	s.recordAudit("auth.fail", "", "failure", "Authorization: Bearer sekret", "10.0.0.3")
+	s.recordAudit(newAuditTestRequest("10.0.0.3"), "auth.fail", "", "failure", "Authorization: Bearer sekret")
 	events := s.audit.snapshot("", "", 0)
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
@@ -245,7 +246,7 @@ func TestAuditRedactsSensitiveDetail(t *testing.T) {
 
 func TestAuditExportCSV(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
-	s.recordAudit("config.apply", "config", "success", "applied", "10.0.0.4")
+	s.recordAudit(newAuditTestRequest("10.0.0.4"), "config.apply", "config", "success", "applied")
 
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/audit/export?format=csv", nil))
@@ -269,7 +270,7 @@ func TestAuditExportCSV(t *testing.T) {
 
 func TestAuditExportJSONDefault(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
-	s.recordAudit("config.reload", "config", "success", "", "10.0.0.5")
+	s.recordAudit(newAuditTestRequest("10.0.0.5"), "config.reload", "config", "success", "")
 
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/audit/export", nil))
@@ -286,6 +287,17 @@ func TestAuditExportJSONDefault(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
+}
+
+// newAuditTestRequest builds a request carrying the given X-Forwarded-For IP
+// so recordAudit can extract sourceIP without going through the real handler
+// chain. It also includes a synthetic RBAC identity so actor/token extraction
+// is exercised.
+func newAuditTestRequest(ip string) *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	r.Header.Set("X-Forwarded-For", ip)
+	id := rbac.Identity{Principal: "tester", Role: "admin", TokenID: "tok-test"}
+	return r.WithContext(rbac.WithIdentity(r.Context(), id))
 }
 
 // ── apply/rollback/reload emit timeline + audit (Milestones 5.4 + 6.6) ───────

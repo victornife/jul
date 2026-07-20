@@ -63,8 +63,8 @@ func (s *Server) handleDiscardPendingRestart(w http.ResponseWriter, r *http.Requ
 
 	result, err := s.deps.DiscardPendingRestart()
 	if err != nil {
-		s.recordAudit("config.stage_restart.discarded", "config", "failure",
-			"discard failed: "+err.Error(), adminClientIP(r))
+		s.recordAudit(r, "config.stage_restart.discarded", "config", "failure",
+			"discard failed: "+err.Error())
 		s.emit("config", "stage_restart_discard_failed", "warn",
 			"Planned-restart discard failed: "+err.Error())
 		writeJSON(w, http.StatusConflict, map[string]any{
@@ -74,13 +74,13 @@ func (s *Server) handleDiscardPendingRestart(w http.ResponseWriter, r *http.Requ
 		})
 		return
 	}
-	s.recordAudit("config.stage_restart.discarded", "config", "success",
-		"staged restart discarded; previous configuration restored", adminClientIP(r))
+	s.recordAudit(r, "config.stage_restart.discarded", "config", "success",
+		"staged restart discarded; previous configuration restored")
 	s.emit("config", "stage_restart_discarded", "info",
 		"Staged configuration discarded and previous configuration restored.")
 	// Also emit a config.restored event so the history timeline shows a restore
 	// action separate from the discard (M-04 fix: restored event).
-	s.recordAudit("config.restored", "config", "success",
-		"configuration restored from pre-stage backup", adminClientIP(r))
+	s.recordAudit(r, "config.restored", "config", "success",
+		"configuration restored from pre-stage backup")
 	writeJSON(w, http.StatusOK, result)
 }

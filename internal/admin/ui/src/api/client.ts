@@ -341,6 +341,7 @@ export const OverviewSchema = z.object({
   // Supersedes the flat pending_restart list for the banner and discard action.
   pending_restart_status: z
     .object({
+      state: z.enum(["none", "managed_staged", "external_divergence", "inconsistent"]),
       managed: z.boolean(),
       staged: z.boolean(),
       external: z.boolean().optional(),
@@ -845,8 +846,10 @@ export async function rollback(id: string): Promise<void> {
  * have managed=false and discard_available=false.
  */
 export const PendingRestartStatusSchema = z.object({
+  state: z.enum(["none", "managed_staged", "external_divergence", "inconsistent"]),
   managed: z.boolean(),
   staged: z.boolean(),
+  external: z.boolean().optional(),
   staged_at: z.string().optional(),
   staged_version: z.string().optional(),
   serving_version: z.string().optional(),
@@ -1114,10 +1117,15 @@ export type ConfigPatch =
   | { op: "upstream_set_strategy"; upstream: string; strategy: string }
   | { op: "upstream_set_health_check"; upstream: string; health_check: HealthCheckPatch }
   | { op: "upstream_set_discovery"; upstream: string; discovery: DiscoveryPatch }
+  | { op: "server_add"; listen: string; server_names?: string[] }
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch }
   | { op: "server_toggle_http3"; listen: string; enabled: boolean }
   | { op: "server_toggle_h2c"; listen: string; enabled: boolean }
   | { op: "server_set_client_auth"; listen: string; server_names: string[]; client_auth: ClientAuthPatch }
+  | { op: "location_add"; listen: string; server_names?: string[]; match_set: LocationMatchPatch; action: LocationActionPatch }
+  | { op: "location_remove"; listen: string; server_names?: string[]; match_type: string; path: string }
+  | { op: "upstream_add"; upstream: string; address: string; weight?: number; strategy?: string }
+  | { op: "upstream_remove"; upstream: string }
   | ({ op: "location_toggle_require_client_cert"; enabled: boolean } & RouteTarget);
 
 // HealthCheckPatch is the upstream active health-check block the guided Apps
@@ -1220,6 +1228,47 @@ export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
       );
     }
     throw new ApiError("/config/patch", resp.status, `${String(resp.status)} ${resp.statusText}`);
+  }
+  return PatchResultSchema.parse(data);
+}
+
+/**
+ * Previews a batch of structured patch operations server-side without
+ * persisting. The ops are applied in order to a freshly-loaded config; the
+ * returned candidate and diff represent the combined effect. This lets editors
+ * that create compound objects (e.g. a new server plus its first location)
+ * hand off a single preview to the ConfigPanel (F-06).
+ */
+export async function patchConfigBatch(
+  ops: ConfigPatch[],
+  baseVersion?: string,
+): Promise<PatchResult> {
+  const headers = new Headers();
+  headers.set("Accept", "application/json");
+  headers.set("Content-Type", "application/json");
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/config/patch/preview", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ base_version: baseVersion, ops }),
+  });
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
+    const rejected = ValidationResultSchema.safeParse(data);
+    if (rejected.success) {
+      throw new ConfigRejectedError(
+        rejected.data.message ?? "The edit was rejected.",
+        rejected.data.errors ?? [],
+      );
+    }
+    throw new ApiError("/config/patch/preview", resp.status, `${String(resp.status)} ${resp.statusText}`);
   }
   return PatchResultSchema.parse(data);
 }
@@ -1550,7 +1599,10 @@ export const WizardInputSchema = z.object({
 });
 export type WizardInput = z.infer<typeof WizardInputSchema>;
 
-const WizardResultSchema = z.object({ toml: z.string() });
+const WizardResultSchema = z.object({
+  toml: z.string().optional(),
+  ops: z.array(z.unknown()).optional(),
+});
 
 /** Generates a starter TOML document from wizard inputs (non-mutating). */
 export async function generateConfig(input: WizardInput): Promise<string> {
@@ -1559,7 +1611,23 @@ export async function generateConfig(input: WizardInput): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-  return WizardResultSchema.parse(data).toml;
+  return WizardResultSchema.parse(data).toml ?? "";
+}
+
+/** Generates a structured patch batch from wizard inputs (F-06). */
+export async function generateConfigPatches(input: WizardInput): Promise<ConfigPatch[]> {
+  const data = await api<unknown>("/wizard/generate?format=patch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const parsed = WizardResultSchema.parse(data);
+  if (!Array.isArray(parsed.ops)) {
+    throw new Error("The server did not return patch operations.");
+  }
+  // Each op was returned as a generic JSON object; re-encode/decode through the
+  // discriminated ConfigPatch type to validate shapes without a second round-trip.
+  return parsed.ops.map((op) => JSON.parse(JSON.stringify(op)) as ConfigPatch);
 }
 
 // ── Search & discovery (/api/search) ─────────────────────────────────────────

@@ -168,6 +168,11 @@ type Deps struct {
 	// when no staged restart is pending. This is the structured source of truth
 	// for the overview banner and the /api/config/pending-restart endpoint.
 	PendingRestart func() *PendingRestartStatus
+	// AdminHealth reports the health of admin-subsystem concerns that are owned
+	// by the composition root (e.g., the most recent reload's admin subsystem
+	// result). It returns nil when healthy. When it returns an error, /readyz
+	// reports not ready and the runtime overview surfaces the degradation.
+	AdminHealth func() error
 }
 
 // ReloadSnapshot is the legacy admin-package view of the most recent reload
@@ -298,34 +303,6 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleReadyz reports readiness to serve traffic.
-func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	ready := true
-	if s.deps.Ready != nil {
-		ready = s.deps.Ready()
-	}
-	if !ready {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not ready"})
-		return
-	}
-	// Readiness gate: any expired certificate prevents traffic serving.
-	if s.deps.LoadConfig != nil && s.deps.Certs != nil {
-		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
-			certs := projectTLS(cfg, s.deps.Certs())
-			for _, c := range certs {
-				if c.DaysLeft < 0 {
-					writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-						"status": "not ready",
-						"reason": "certificate expired for " + c.ServerNames[0],
-					})
-					return
-				}
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
-}
-
 // handleMetrics serves Prometheus metrics, or 404 when metrics are disabled.
 func (s *Server) handleMetrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -372,11 +349,11 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.deps.Reload(); err != nil {
-		s.recordAudit("config.reload", "config", "failure", err.Error(), adminClientIP(r))
+		s.recordAudit(r, "config.reload", "config", "failure", err.Error())
 		http.Error(w, "503 Service Unavailable: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	s.recordAudit("config.reload", "config", "success", "reload triggered via admin API", adminClientIP(r))
+	s.recordAudit(r, "config.reload", "config", "success", "reload triggered via admin API")
 	// Notify SSE subscribers and the timeline so the Console updates live.
 	s.emit("config", "reload", "info", "Configuration reload triggered.")
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "reload triggered"})
@@ -589,7 +566,7 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
 			if marshaled, merr := config.Marshal(cur); merr == nil {
 				if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-					s.recordAudit("config.raw", "config", "failure", "rejected: base version stale (concurrent change)", adminClientIP(r))
+					s.recordAudit(r, "config.raw", "config", "failure", "rejected: base version stale (concurrent change)")
 					writeJSON(w, http.StatusConflict, conflictResponse{
 						OK:             false,
 						Conflict:       true,
@@ -604,12 +581,12 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 
 	prev := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(body); err != nil {
-		s.recordAudit("config.raw", "config", "failure", "rejected: invalid configuration", adminClientIP(r))
+		s.recordAudit(r, "config.raw", "config", "failure", "rejected: invalid configuration")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	s.recordHistory(prev)
-	s.recordAudit("config.raw", "config", "success", "configuration validated and saved; live runtime reloading", adminClientIP(r))
+	s.recordAudit(r, "config.raw", "config", "success", "configuration validated and saved; live runtime reloading")
 	var version string
 	if s.deps.LoadConfig != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
@@ -648,7 +625,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	// Load the current config inside the lock so the read-modify-write is atomic.
 	cfg, err := s.deps.LoadConfig()
 	if err != nil {
-		s.recordAudit("config.settings", "config", "failure", "cannot load current config: "+err.Error(), adminClientIP(r))
+		s.recordAudit(r, "config.settings", "config", "failure", "cannot load current config: "+err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -659,7 +636,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
 		if marshaled, merr := config.Marshal(cfg); merr == nil {
 			if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-				s.recordAudit("config.settings", "config", "failure", "rejected: base version stale (concurrent change)", adminClientIP(r))
+				s.recordAudit(r, "config.settings", "config", "failure", "rejected: base version stale (concurrent change)")
 				writeJSON(w, http.StatusConflict, conflictResponse{
 					OK:             false,
 					Conflict:       true,
@@ -672,18 +649,18 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := applySettings(cfg, in); err != nil {
-		s.recordAudit("config.settings", "config", "failure", "rejected: invalid settings", adminClientIP(r))
+		s.recordAudit(r, "config.settings", "config", "failure", "rejected: invalid settings")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	prev := s.currentRaw()
 	if err := s.deps.SaveConfig(cfg); err != nil {
-		s.recordAudit("config.settings", "config", "failure", "rejected: cannot save config", adminClientIP(r))
+		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot save config")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	s.recordHistory(prev)
-	s.recordAudit("config.settings", "config", "success", "settings applied and saved; live runtime reloading", adminClientIP(r))
+	s.recordAudit(r, "config.settings", "config", "success", "settings applied and saved; live runtime reloading")
 	var version string
 	if s.deps.LoadConfig != nil {
 		if cfg2, err := s.deps.LoadConfig(); err == nil && cfg2 != nil {

@@ -215,6 +215,12 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatch) },
 	},
 	{
+		Pattern:    "/api/config/patch/preview",
+		Methods:    []string{http.MethodPost},
+		Permission: rbac.ConfigWrite,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatchPreview) },
+	},
+	{
 		Pattern:    "/api/routes/test",
 		Methods:    []string{http.MethodPost},
 		Permission: rbac.ConfigWrite,

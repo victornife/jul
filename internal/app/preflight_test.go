@@ -60,6 +60,34 @@ func TestPreflightApplyInvalidConfigFailsFast(t *testing.T) {
 	}
 }
 
+func TestPreflightApplyInvalidRBACPolicyFailsFast(t *testing.T) {
+	cfg := config.ProxyTarget(":9000", ":0")
+	cfg.Admin.RBAC.Enabled = true
+	// Unknown role causes rbac.Build to fail. This should be caught before
+	// BuildHandlers (and before persistence) so the operator gets an early,
+	// reload-safe error.
+	cfg.Admin.RBAC.Principals = []config.AdminPrincipal{{
+		Name:  "ops",
+		Role:  "unknown-role",
+		Token: "${env:TEST_RBAC_TOKEN}",
+	}}
+	t.Setenv("TEST_RBAC_TOKEN", "super-secret-token-value-that-is-long-enough")
+	p := Preflight{
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			t.Fatal("BuildHandlers should not be called for invalid RBAC policy")
+			return nil, nil, nil
+		},
+		Stream: &mockStreamPreflighter{},
+	}
+	_, err := p.Apply(context.Background(), cfg, nil, PreflightHot)
+	if err == nil {
+		t.Fatal("invalid RBAC policy accepted")
+	}
+	if !strings.Contains(err.Error(), "unknown role") {
+		t.Fatalf("error should mention unknown role, got: %v", err)
+	}
+}
+
 func TestPreflightApplyPanicCaught(t *testing.T) {
 	cfg := config.ProxyTarget(":9000", ":0")
 	p := Preflight{

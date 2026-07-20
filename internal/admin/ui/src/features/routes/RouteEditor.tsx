@@ -6,14 +6,21 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import { fetchRawConfig } from "@/api/client.ts";
+import {
+  patchConfigBatch,
+  ConfigRejectedError,
+  type ConfigPatch,
+  type LocationActionPatch,
+  type LocationAuthPatch,
+  type RateLimitPatch,
+  type RouteProjection,
+  type RouteTarget,
+} from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import {
-  appendFragment,
   authWarnings,
   AUTH_METHODS,
   emptyAuthDraft,
-  generateRouteToml,
   type AuthDraft,
   type AuthMethod,
   type RouteAction,
@@ -210,8 +217,110 @@ function targetHint(action: RouteAction): { label: string; placeholder: string }
   }
 }
 
+// splitList mirrors the backend: split on commas/whitespace into trimmed,
+// non-empty entries.
+function splitList(s: string): string[] {
+  return s
+    .split(/[\s,]+/)
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0);
+}
+
+// serverNames parses the comma-separated host names input into the array the
+// patch ops expect. Empty input becomes an empty list (catch-all server block).
+function serverNames(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+// routeTarget returns the location coordinates for the draft.
+function routeTarget(d: RouteDraft): RouteTarget {
+  return {
+    listen: d.listen.trim() || ":8080",
+    server_names: serverNames(d.serverNames),
+    match_type: d.matchType,
+    path: d.path.trim() || "/",
+  };
+}
+
+// actionPatch maps the draft action + target to the structured location action
+// payload used by the location_add / location_set_action ops.
+function actionPatch(d: RouteDraft): LocationActionPatch {
+  const target = d.target.trim();
+  switch (d.action) {
+    case "static":
+      return { kind: "static", target };
+    case "proxy":
+      return { kind: "proxy", target };
+    case "redirect":
+      return { kind: "redirect", target };
+    case "return":
+      return { kind: "return", status: Number(target) || 200 };
+    case "deny":
+      return { kind: "deny" };
+  }
+}
+
+// authPatch maps the draft to the location_set_auth payload. Returns null when
+// the operator explicitly chose "none".
+function authPatch(d: AuthDraft): LocationAuthPatch | null {
+  switch (d.method) {
+    case "none":
+      return null;
+    case "basic": {
+      const realm = d.basicRealm.trim();
+      return {
+        method: "basic",
+        basic_file: d.basicFile.trim(),
+        ...(realm ? { basic_realm: realm } : {}),
+      };
+    }
+    case "jwt": {
+      const issuer = d.jwtIssuer.trim();
+      const audience = d.jwtAudience.trim();
+      return {
+        method: "jwt",
+        jwt_jwks_url: d.jwtJwksUrl.trim(),
+        ...(issuer ? { jwt_issuer: issuer } : {}),
+        ...(audience ? { jwt_audience: audience } : {}),
+      };
+    }
+    case "forward":
+      return { method: "forward", forward_url: d.forwardUrl.trim() };
+    case "cidr":
+    default:
+      return { method: "cidr", allow: splitList(d.allow), deny: splitList(d.deny) };
+  }
+}
+
+// rateLimitPatch builds the default rate-limit payload used when the toggle is
+// on in the route-creation form.
+function rateLimitPatch(): RateLimitPatch {
+  return { enabled: true, rate: 100, burst: 100, key: "ip" };
+}
+
+// serverExists checks whether a server block with the same listen + server_names
+// already exists in the running config projection.
+function serverExists(d: RouteDraft, existing: RouteProjection[] | undefined): boolean {
+  const listen = d.listen.trim() || ":8080";
+  const names = serverNames(d.serverNames);
+  return (
+    existing?.some((r) => {
+      const sameListen = r.listen === listen;
+      const existingNames = r.server_names ?? [];
+      const sameNames =
+        names.length === existingNames.length &&
+        names.every((n, i) => n === existingNames[i]);
+      return sameListen && sameNames;
+    }) ?? false
+  );
+}
+
 export interface RouteEditorProps {
   readonly initial?: Partial<RouteDraft>;
+  readonly existingRoutes?: RouteProjection[];
   readonly serverHasTls?: boolean | undefined;
   readonly onReview?: () => void;
   readonly closeLabel?: string;
@@ -224,7 +333,14 @@ export interface RouteEditorProps {
  * and hands the draft to the Config editor where it flows through
  * Validate → Diff → Apply → Rollback.
  */
-export function RouteEditor({ initial, serverHasTls, onReview, closeLabel, onClose }: RouteEditorProps) {
+export function RouteEditor({
+  initial,
+  existingRoutes,
+  serverHasTls,
+  onReview,
+  closeLabel,
+  onClose,
+}: RouteEditorProps) {
   const navigate = useNavigate();
   const [draft, setDraft] = useState<RouteDraft>({
     listen: initial?.listen ?? ":8080",
@@ -239,8 +355,8 @@ export function RouteEditor({ initial, serverHasTls, onReview, closeLabel, onClo
     rateLimit: initial?.rateLimit ?? false,
   });
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const fragment = generateRouteToml(draft);
   const th = targetHint(draft.action);
   const authWarn = authWarnings(draft.auth);
 
@@ -248,18 +364,63 @@ export function RouteEditor({ initial, serverHasTls, onReview, closeLabel, onClo
     setDraft((d) => ({ ...d, [key]: value }));
   }
 
+  function buildPatches(): ConfigPatch[] {
+    const target = routeTarget(draft);
+    const ops: ConfigPatch[] = [];
+
+    if (!serverExists(draft, existingRoutes)) {
+      ops.push({
+        op: "server_add",
+        listen: target.listen,
+        server_names: target.server_names,
+      });
+    }
+
+    ops.push({
+      op: "location_add",
+      listen: target.listen,
+      server_names: target.server_names,
+      match_set: { type: draft.matchType, path: draft.path.trim() || "/" },
+      action: actionPatch(draft),
+    });
+
+    const auth = authPatch(draft.auth);
+    if (auth) {
+      ops.push({ op: "location_set_auth", ...target, auth });
+    }
+
+    if (draft.cache) {
+      ops.push({ op: "route_toggle_cache", ...target, enabled: true });
+    }
+
+    if (draft.rateLimit) {
+      ops.push({ op: "route_set_rate_limit", ...target, rate_limit: rateLimitPatch() });
+    }
+
+    return ops;
+  }
+
   async function openInEditor(): Promise<void> {
     setError(null);
+    setBusy(true);
     try {
-      const raw = await fetchRawConfig();
-      setPendingDraft({ kind: "toml", toml: appendFragment(raw.raw ?? "", fragment) });
+      const ops = buildPatches();
+      const res = await patchConfigBatch(ops);
+      setPendingDraft({
+        kind: "patch",
+        ops,
+        baseVersion: res.base_version,
+        previewDiff: res.diff,
+        candidate: res.candidate,
+      });
       if (onReview) {
         onReview();
       } else {
         void navigate("/config");
       }
-    } catch {
-      setError("Could not load the current configuration to merge this route.");
+    } catch (err) {
+      setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");
+      setBusy(false);
     }
   }
 
@@ -274,12 +435,13 @@ export function RouteEditor({ initial, serverHasTls, onReview, closeLabel, onClo
           {error && <span className="text-xs text-jul-danger">{error}</span>}
           <button
             type="button"
+            disabled={busy || authWarn.length > 0}
             onClick={() => {
               void openInEditor();
             }}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
+            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
-            Review in editor →
+            {busy ? "Previewing…" : "Review in editor →"}
           </button>
         </div>
       }
@@ -467,11 +629,24 @@ export function RouteEditor({ initial, serverHasTls, onReview, closeLabel, onClo
 
         <div className="space-y-1">
           <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-            Generated TOML
+            Patch operations
           </span>
-          <pre className="overflow-auto rounded-md border border-jul-border bg-jul-surface p-3 font-mono text-xs leading-relaxed text-jul-text">
-            {fragment}
-          </pre>
+          <ul className="space-y-1 rounded-md border border-jul-border bg-jul-surface p-3 font-mono text-xs leading-relaxed text-jul-text">
+            {buildPatches().map((op, i) => {
+              const loc =
+                "match_type" in op
+                  ? ` ${op.match_type} ${op.path}`
+                  : "";
+              const addr = "listen" in op ? ` ${op.listen}` : "";
+              return (
+                <li key={`patch-op-${String(i)}`}>
+                  {op.op}
+                  {addr}
+                  {loc}
+                </li>
+              );
+            })}
+          </ul>
         </div>
       </div>
     </Drawer>

@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"jul/internal/rbac"
+
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -31,7 +33,8 @@ const auditCap = 10000
 type AuditEvent struct {
 	ID        int64     `json:"id"`
 	Time      time.Time `json:"time"`
-	Actor     string    `json:"actor"`              // redacted auth subject or "anonymous"
+	Actor     string    `json:"actor"`              // authenticated principal or "anonymous"
+	TokenID   string    `json:"token_id,omitempty"` // public credential identifier, if known
 	Operation string    `json:"operation"`          // e.g. config.apply, config.rollback, auth.fail
 	Resource  string    `json:"resource,omitempty"` // affected resource, if any
 	Result    string    `json:"result"`             // success | failure
@@ -234,20 +237,29 @@ func (a *auditLog) snapshot(opFilter, resultFilter string, limit int) []AuditEve
 	return out
 }
 
-// recordAudit appends an audit event. It is best-effort and never blocks
-// request handling. actor/detail are redacted inside auditLog.record.
-func (s *Server) recordAudit(operation, resource, result, detail, sourceIP string) {
+// recordAudit appends an audit event from an admin HTTP request. It is
+// best-effort and never blocks request handling. actor/detail are redacted
+// inside auditLog.record. Identity is extracted from the request context when
+// RBAC or legacy auth has populated it; otherwise actor falls back to
+// "anonymous".
+func (s *Server) recordAudit(r *http.Request, operation, resource, result, detail string) {
 	if s.audit == nil {
 		return
 	}
+	var actor, tokenID string
+	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
+		actor = id.Principal
+		tokenID = id.TokenID
+	}
 	s.audit.record(AuditEvent{
 		Time:      time.Now().UTC(),
-		Actor:     "operator", // single shared bearer token model; no per-user identity yet
+		Actor:     actor,
+		TokenID:   tokenID,
 		Operation: operation,
 		Resource:  resource,
 		Result:    result,
 		Detail:    detail,
-		SourceIP:  sourceIP,
+		SourceIP:  adminClientIP(r),
 	})
 }
 

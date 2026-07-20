@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -231,6 +232,65 @@ func TestCoordinatorApplyRawRestoresOnSubmitFailure(t *testing.T) {
 	}
 }
 
+// TestApplyResultReportsRestorationSuccess verifies that a pre-Publish failure
+// populates the restoration outcome fields (F-03).
+func TestApplyResultReportsRestorationSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			go func() {
+				req.Result <- server.ReloadResult{
+					ID:        req.ID,
+					Source:    server.ReloadSourceAdmin,
+					Outcome:   server.ReloadNotApplied,
+					Published: false,
+					Error:     "bind failed",
+				}
+			}()
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+	}
+
+	res, err := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+	if res.OK {
+		t.Fatal("ok = true, want false")
+	}
+	if !res.Persisted {
+		t.Error("Persisted = false, want true")
+	}
+	if !res.Restored {
+		t.Errorf("Restored = false, want true")
+	}
+	if res.RestoreError != "" {
+		t.Errorf("RestoreError = %q, want empty", res.RestoreError)
+	}
+	if res.FinalDiskVersion == "" {
+		t.Error("FinalDiskVersion should be set")
+	}
+	if res.FinalDiskVersion == server.CanonicalVersion(nil) {
+		t.Error("FinalDiskVersion should not match rejected candidate")
+	}
+
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(seed) {
+		t.Error("previous bytes should be restored")
+	}
+}
+
 func TestCoordinatorApplyRawRestoresOnPrePublishFailure(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")
@@ -375,6 +435,196 @@ func TestCoordinatorApplyRawUsesServingReloadTimeout(t *testing.T) {
 	}
 }
 
+// TestApplyTimeoutRestoresAndBlocksConcurrentApply verifies that a timed-out
+// managed apply holds the in-flight transaction until the finalizer completes,
+// that the finalizer restores the previous bytes, and that a second managed
+// apply receives a conflict rather than overlapping.
+func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	var submitted atomic.Bool
+	finalizerStarted := make(chan struct{})
+	finalizerContinue := make(chan struct{})
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			submitted.Store(true)
+			// Never send a result until released; the synchronous path times out.
+			go func() {
+				close(finalizerStarted)
+				<-finalizerContinue
+				req.Result <- server.ReloadResult{
+					ID:        req.ID,
+					Source:    server.ReloadSourceAdmin,
+					Outcome:   server.ReloadNotApplied,
+					Published: false,
+					Error:     "intentional timeout",
+				}
+			}()
+			return nil
+		},
+		LiveSnapshot: func() server.LiveSnapshot {
+			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+			cfg.Global.ReloadTimeout = config.Duration(50 * time.Millisecond)
+			return server.LiveSnapshot{EffectiveConfig: cfg}
+		},
+		PlannedRestart: &PlannedRestartStore{},
+	}
+
+	// First apply times out synchronously; the finalizer goroutine is started.
+	res1Ch := make(chan ApplyResult, 1)
+	go func() {
+		res, _ := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+		res1Ch <- res
+	}()
+
+	<-finalizerStarted
+	res1 := <-res1Ch
+	if !res1.OK {
+		t.Fatalf("ok = false, want true for timed-out apply; message: %s", res1.Message)
+	}
+	if res1.Reload == nil || res1.Reload.Outcome != server.ReloadSavedNotLive || !res1.Reload.TimedOut {
+		t.Fatalf("expected saved_not_live timed-out result, got %+v", res1.Reload)
+	}
+	if !submitted.Load() {
+		t.Fatal("reload was not submitted")
+	}
+
+	// Second apply should be rejected while the first finalizer is still in-flight.
+	res2, err := c.ApplyRaw(validConfigRaw(t, ":8082"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+	if res2.OK {
+		t.Fatal("ok = true, want false for overlapping apply")
+	}
+	if !strings.Contains(res2.Message, "still in flight") {
+		t.Fatalf("expected in-flight conflict, got: %s", res2.Message)
+	}
+
+	// Allow the first finalizer to finish restoring.
+	close(finalizerContinue)
+	time.Sleep(100 * time.Millisecond)
+
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(seed) {
+		t.Error("finalizer should have restored previous bytes")
+	}
+}
+
+// TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply verifies that a late
+// finalizer from apply A cannot overwrite a subsequent apply B because it
+// holds the coordinator mutex around digest check + restore.
+func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	finalizerBlock := make(chan struct{})
+	finalizerEntered := make(chan struct{}, 1)
+	submitCount := atomic.Int32{}
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			n := submitCount.Add(1)
+			go func() {
+				if n == 1 {
+					finalizerEntered <- struct{}{}
+					<-finalizerBlock
+				}
+				outcome := server.ReloadAppliedLive
+				if n == 1 {
+					outcome = server.ReloadNotApplied
+				}
+				req.Result <- server.ReloadResult{
+					ID:        req.ID,
+					Source:    server.ReloadSourceAdmin,
+					Outcome:   outcome,
+					Published: outcome == server.ReloadAppliedLive,
+					Error:     "intentional failure",
+				}
+			}()
+			return nil
+		},
+		LiveSnapshot: func() server.LiveSnapshot {
+			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+			cfg.Global.ReloadTimeout = config.Duration(50 * time.Millisecond)
+			return server.LiveSnapshot{EffectiveConfig: cfg}
+		},
+		PlannedRestart: &PlannedRestartStore{},
+	}
+
+	// Apply A times out. Its SubmitReload goroutine has entered the finalizer
+	// body and is blocked before sending the result, so inFlightState is still
+	// waiting and apply B must be rejected. The audit point is that once B
+	// completes, a later apply C can proceed, and the late finalizer from A
+	// cannot overwrite C's candidate.
+	resACh := make(chan ApplyResult, 1)
+	go func() {
+		res, _ := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+		resACh <- res
+	}()
+	<-finalizerEntered
+
+	// Wait for A to time out and release applyMu.
+	resA := <-resACh
+	if !resA.OK {
+		t.Fatalf("apply A should have timed out with ok=true, got: %s", resA.Message)
+	}
+	if resA.Reload == nil || resA.Reload.Outcome != server.ReloadSavedNotLive {
+		t.Fatalf("apply A expected saved_not_live, got %+v", resA.Reload)
+	}
+
+	// Apply B must be rejected because A's finalizer is still in-flight.
+	resB, err := c.ApplyRaw(validConfigRaw(t, ":8082"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply B error: %v", err)
+	}
+	if resB.OK {
+		t.Fatal("ok = true, want false for overlapping apply B")
+	}
+	if !strings.Contains(resB.Message, "still in flight") {
+		t.Fatalf("expected in-flight conflict, got: %s", resB.Message)
+	}
+
+	// Allow A's finalizer to finish; this clears inFlightState and restores
+	// the previous (seed) bytes.
+	close(finalizerBlock)
+	time.Sleep(100 * time.Millisecond)
+
+	onDiskAfterA, _ := os.ReadFile(path)
+	if string(onDiskAfterA) != string(seed) {
+		t.Errorf("finalizer from A should have restored seed, got %q", onDiskAfterA)
+	}
+
+	// Apply C can now proceed. It uses the same SubmitReload callback; submit
+	// count is now 2 so it returns applied_live.
+	resC, err := c.ApplyRaw(validConfigRaw(t, ":8083"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply C error: %v", err)
+	}
+	if !resC.OK {
+		t.Fatalf("apply C should succeed, got: %s", resC.Message)
+	}
+
+	onDiskC, _ := os.ReadFile(path)
+	if string(onDiskC) != string(validConfigRaw(t, ":8083")) {
+		t.Fatal("apply C's candidate should be on disk")
+	}
+}
+
 func TestCoordinatorApplyRawSerialized(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")
@@ -458,6 +708,85 @@ func TestCoordinatorApplyRawBlocksHotWhenPlannedRestartPending(t *testing.T) {
 	onDisk, _ := os.ReadFile(path)
 	if string(onDisk) != string(seed) {
 		t.Error("blocked hot apply should not change the file")
+	}
+}
+
+// TestCoordinatorApplyRawBlocksHotWhenExternalDivergenceSet verifies that a
+// hot apply is rejected when the authoritative store reports external
+// disk/runtime divergence (F-04).
+func TestCoordinatorApplyRawBlocksHotWhenExternalDivergenceSet(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := &PlannedRestartStore{}
+	store.SetExternalDivergence(true)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      testPreflight(),
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	res, err := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+	if res.OK {
+		t.Fatal("ok = true, want false")
+	}
+	if res.PendingRestart == nil || !res.PendingRestart.External {
+		t.Errorf("expected external pending_restart status, got %+v", res.PendingRestart)
+	}
+	if !strings.Contains(res.Message, "external divergence") {
+		t.Errorf("message should mention external divergence, got %q", res.Message)
+	}
+
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(seed) {
+		t.Error("blocked hot apply should not change the file")
+	}
+}
+
+// TestCoordinatorApplyStageBlocksWhenExternalDivergenceSet verifies that a
+// stage_restart apply is also rejected while external divergence is present,
+// so staging does not silently adopt an externally-owned change (F-04).
+func TestCoordinatorApplyStageBlocksWhenExternalDivergenceSet(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := restartRequiredConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := &PlannedRestartStore{}
+	store.SetExternalDivergence(true)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      testPreflight(),
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	res, err := c.ApplyRaw(restartRequiredConfigRaw(t, ":8080"), ApplyStageRestart)
+	if err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+	if res.OK {
+		t.Fatal("ok = true, want false")
+	}
+	if res.PendingRestart == nil || !res.PendingRestart.External {
+		t.Errorf("expected external pending_restart status, got %+v", res.PendingRestart)
+	}
+
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(seed) {
+		t.Error("blocked stage_restart should not change the file")
 	}
 }
 
@@ -564,7 +893,10 @@ func TestCoordinatorConcurrentStageRestartsSerialized(t *testing.T) {
 				errs[idx] = err
 				return
 			}
-			if !res.OK && !res.RestartRequired {
+			// With the F-08 single-candidate invariant, exactly one worker
+			// succeeds and the rest are rejected because a candidate is
+			// already pending.
+			if !res.OK && !res.RestartRequired && !strings.Contains(res.Message, "already pending") {
 				errs[idx] = errors.New("unexpected non-OK result: " + res.Message)
 			}
 		}(i)
@@ -636,10 +968,11 @@ func TestCoordinatorStageDiscardRace(t *testing.T) {
 	}
 }
 
-// TestCoordinatorStagedRestartIsUpdateFlag verifies that wasPendingBefore is
-// false on the first stage and true on a subsequent update stage (M-04 fix:
-// created/updated audit event distinction relies on this ordering).
-func TestCoordinatorStagedRestartIsUpdateFlag(t *testing.T) {
+// TestCoordinatorStageRestartRejectsWhilePending verifies the F-08
+// single-candidate invariant: a stage_restart applied while another staged
+// restart is already pending is rejected and leaves the existing candidate in
+// place.
+func TestCoordinatorStageRestartRejectsWhilePending(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")
 	original := validConfigRaw(t, ":8080")
@@ -659,7 +992,6 @@ func TestCoordinatorStagedRestartIsUpdateFlag(t *testing.T) {
 
 	candidate := restartRequiredConfigRaw(t, ":8080")
 
-	// First stage — store must NOT be pending before.
 	if store.IsPending() {
 		t.Fatal("store should not be pending before first stage")
 	}
@@ -670,22 +1002,24 @@ func TestCoordinatorStagedRestartIsUpdateFlag(t *testing.T) {
 	if !res1.OK {
 		t.Fatalf("first stage ok=false: %s", res1.Message)
 	}
-
-	// Second stage — store MUST be pending before (it was set by the first).
-	// Use a different restart-required value so the update is accepted.
 	if !store.IsPending() {
-		t.Fatal("store should be pending before second stage")
+		t.Fatal("store should be pending after first stage")
 	}
+
+	// Second stage must be rejected while the first candidate is pending.
 	updateCandidate := restartRequiredConfigRaw(t, ":8080")
-	// Flip the log_format so the lifecycle diff against the original base is
-	// still non-empty (it is the same field, but the diff is non-empty because
-	// the base had the default value).
 	res2, err := c.ApplyRaw(updateCandidate, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("second stage error: %v", err)
 	}
-	if !res2.OK {
-		t.Fatalf("second stage ok=false: %s", res2.Message)
+	if res2.OK {
+		t.Fatalf("second stage should be rejected while pending")
+	}
+	if !strings.Contains(res2.Message, "already pending") {
+		t.Errorf("message should mention pending candidate, got %q", res2.Message)
+	}
+	if !store.IsPending() {
+		t.Error("store should still be pending after rejected second stage")
 	}
 }
 

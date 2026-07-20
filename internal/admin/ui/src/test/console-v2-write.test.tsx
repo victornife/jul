@@ -104,6 +104,32 @@ function installRouter(): Counters {
     if (url === "/api/wizard/generate") {
       return Promise.resolve(json({ toml: 'listen = ":80"\n' }));
     }
+    if (url === "/api/wizard/generate?format=patch") {
+      return Promise.resolve(
+        json({
+          ops: [
+            { op: "server_add", listen: ":80" },
+            {
+              op: "location_add",
+              listen: ":80",
+              match_set: { type: "prefix", path: "/" },
+              action: { kind: "static", target: "/srv/site" },
+            },
+          ],
+        }),
+      );
+    }
+    if (url === "/api/config/patch/preview") {
+      return Promise.resolve(
+        json({
+          ok: true,
+          summary: "server :80 added; route / added",
+          candidate: 'listen = ":80"\n',
+          diff: { summary: "1 change", additions: [{ kind: "server", name: ":80" }] },
+          base_version: "base",
+        }),
+      );
+    }
     throw new Error(`unexpected fetch: ${url}`);
   }) as unknown as typeof fetch;
   return counters;
@@ -381,6 +407,56 @@ describe("ConfigPanel apply flow", () => {
       expect(rawApplyBaseVersion).toBe("v2");
     });
   });
+
+  it("blocks hot apply and shows a banner when external disk divergence is reported", async () => {
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml" }));
+      }
+      if (url === "/api/config/pending-restart") {
+        return Promise.resolve(
+          json({
+            pending: true,
+            status: {
+              state: "external_divergence",
+              managed: false,
+              staged: false,
+              external: true,
+              subsystems: ["listener"],
+              discard_available: false,
+              inconsistent: false,
+            },
+          }),
+        );
+      }
+      if (url === "/api/config/validate") {
+        return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+
+    // The external-divergence banner is shown.
+    expect(
+      await screen.findByText(/Configuration on disk differs from runtime/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/listener/)).toBeInTheDocument();
+
+    // Apply is disabled because hot applies are blocked by external divergence.
+    const applyBtn = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyBtn).toBeDisabled();
+    });
+  });
 });
 
 describe("HistoryPanel rollback flow", () => {
@@ -438,9 +514,14 @@ describe("WizardPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate config" }));
 
     const open = await screen.findByRole("button", { name: /Open in editor/ });
+    await waitFor(() => {
+      expect(open).toBeEnabled();
+    });
     fireEvent.click(open);
-    const draft = takePendingDraft();
-    expect(draft?.kind).toBe("toml");
-    expect((draft as { kind: "toml"; toml: string }).toml).toContain('listen = ":80"');
+    await waitFor(() => {
+      const draft = takePendingDraft();
+      expect(draft?.kind).toBe("patch");
+      expect(draft && draft.kind === "patch" ? draft.ops : []).toHaveLength(2);
+    });
   });
 });

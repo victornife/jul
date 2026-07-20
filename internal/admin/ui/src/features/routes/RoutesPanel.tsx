@@ -452,6 +452,7 @@ export function RoutesPanel() {
       {creating && (
         <RouteEditor
           initial={creating}
+          existingRoutes={data}
           serverHasTls={selected?.route.tls?.enabled}
           closeLabel={selected ? "Back" : "Close"}
           onReview={() => {
