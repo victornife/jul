@@ -65,14 +65,15 @@ export function matchToPatch(d: MatchDraft): LocationMatchPatch {
 
 // ── Action ───────────────────────────────────────────────────────────────────
 
-export type EditableActionKind = "proxy" | "static" | "redirect" | "return" | "deny";
+export type EditableActionKind = "proxy" | "grpc" | "static" | "redirect" | "return" | "deny";
 
-// EDITABLE_ACTIONS are the tag-free actions the console can switch between
-// structurally. Richer actions (gRPC, transcode, FastCGI/uWSGI, handler plugin)
-// are left to raw [config] editing, so the editor is offered only when the
-// location's current action is one of these.
+// EDITABLE_ACTIONS are the actions the console can switch between structurally.
+// Richer actions (transcode, FastCGI/uWSGI, handler plugin) are left to raw
+// [config] editing, so the editor is offered only when the location's current
+// action is one of these.
 export const EDITABLE_ACTIONS: EditableActionKind[] = [
   "proxy",
+  "grpc",
   "static",
   "redirect",
   "return",
@@ -85,7 +86,7 @@ export function isEditableAction(action: string): action is EditableActionKind {
 
 export interface ActionDraft {
   kind: EditableActionKind;
-  target: string; // proxy_pass / root / redirect URL
+  target: string; // proxy_pass / gRPC backend / root / redirect URL
   status: string; // return status, or optional redirect code
 }
 
@@ -107,8 +108,9 @@ export function actionWarnings(d: ActionDraft): string[] {
   const w: string[] = [];
   switch (d.kind) {
     case "proxy":
+    case "grpc":
       if (d.target.trim() === "") {
-        w.push("The proxy action needs a target (an upstream reference or URL).");
+        w.push(`The ${d.kind} action needs a target (an upstream reference or URL).`);
       }
       break;
     case "static":
@@ -147,6 +149,8 @@ export function actionToPatch(d: ActionDraft): LocationActionPatch {
   switch (d.kind) {
     case "proxy":
       return { kind: "proxy", target: d.target.trim() };
+    case "grpc":
+      return { kind: "grpc", target: d.target.trim() };
     case "static":
       return { kind: "static", target: d.target.trim() };
     case "redirect": {

@@ -121,13 +121,13 @@ type locationMatch struct {
 
 // locationActionPayload is the new action for location_set_action. Kind selects
 // which action the location performs; the op clears every other action field so
-// exactly one remains, then sets the chosen one. It covers the tag-free actions
-// the console edits structurally (proxy / static / redirect / return / deny);
-// richer actions (gRPC, transcode, FastCGI/uWSGI, handler plugin) stay raw and
-// the editor leaves them read-only.
+// exactly one remains, then sets the chosen one. It covers the actions the
+// console edits structurally (proxy / gRPC / static / redirect / return / deny);
+// richer actions (transcode, FastCGI/uWSGI, handler plugin) stay raw and the
+// editor leaves them read-only.
 type locationActionPayload struct {
-	Kind   string `json:"kind"`             // proxy | static | redirect | return | deny
-	Target string `json:"target,omitempty"` // proxy_pass / root / redirect URL
+	Kind   string `json:"kind"`             // proxy | grpc | static | redirect | return | deny
+	Target string `json:"target,omitempty"` // proxy_pass / gRPC backend / root / redirect URL
 	Status int    `json:"status,omitempty"` // return status, or optional redirect code
 }
 

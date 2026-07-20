@@ -294,12 +294,12 @@ func locationMatchTaken(c *config.Config, listen string, serverNames []string, m
 // setLocationAction replaces a location's action wholesale: it clears every
 // action discriminator (and the action-specific helper fields) so no
 // conflicting leftover remains, then sets the chosen one. It covers the
-// tag-free actions the console edits structurally — proxy / static / redirect /
-// return / deny. Richer actions (gRPC, transcode, FastCGI/uWSGI, handler
-// plugin) are left to raw editing, so the editor offers this op only when the
-// current action is already one of these. The validated re-parse still has the
-// final say (e.g. proxy_pass must reference a known upstream). It returns the
-// action label for the audit summary.
+// actions the console edits structurally — proxy / gRPC / static / redirect /
+// return / deny. Richer actions (transcode, FastCGI/uWSGI, handler plugin) are
+// left to raw editing, so the editor offers this op only when the current
+// action is already one of the supported ones. The validated re-parse still
+// has the final say (e.g. proxy_pass must reference a known upstream). It
+// returns the action label for the audit summary.
 func setLocationAction(loc *config.LocationConfig, a locationActionPayload) (string, error) {
 	kind := strings.ToLower(strings.TrimSpace(a.Kind))
 	target := strings.TrimSpace(a.Target)

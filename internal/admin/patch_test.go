@@ -776,6 +776,22 @@ func TestApplyPatchLocationSetAction(t *testing.T) {
 		t.Errorf("deny switch = proxy=%q deny=%v", loc.ProxyPass, loc.Deny)
 	}
 
+	// grpc passthrough sets proxy_pass, marks the location as GRPC, and clears
+	// any conflicting action discriminator.
+	c = patchTestConfig()
+	c.Servers[0].Locations[0].Redirect = "https://old"
+	c.Servers[0].Locations[0].Return = 302
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
+		Action: &locationActionPayload{Kind: "grpc", Target: "http://backend:9000"},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	loc = &c.Servers[0].Locations[0]
+	if loc.ProxyPass != "http://backend:9000" || !loc.GRPC || loc.Redirect != "" || loc.Return != 0 {
+		t.Errorf("grpc switch = proxy=%q grpc=%v redirect=%q return=%d", loc.ProxyPass, loc.GRPC, loc.Redirect, loc.Return)
+	}
+
 	// Invalid payloads are rejected: unknown kind, proxy without a target, return
 	// without a status, and a redirect status outside the 3xx range.
 	for _, a := range []*locationActionPayload{

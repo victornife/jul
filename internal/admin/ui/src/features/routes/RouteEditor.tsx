@@ -84,6 +84,7 @@ function Toggle({
 const ACTIONS: { value: RouteAction; label: string }[] = [
   { value: "static", label: "Serve static files" },
   { value: "proxy", label: "Reverse proxy" },
+  { value: "grpc", label: "gRPC passthrough" },
   { value: "redirect", label: "Redirect" },
   { value: "deny", label: "Deny (403)" },
   { value: "return", label: "Return status" },
@@ -208,6 +209,8 @@ function targetHint(action: RouteAction): { label: string; placeholder: string }
       return { label: "Root directory", placeholder: "/var/www/site" };
     case "proxy":
       return { label: "Upstream target", placeholder: "http://app or http://127.0.0.1:3000" };
+    case "grpc":
+      return { label: "gRPC backend", placeholder: "http://app or https://app:443" };
     case "redirect":
       return { label: "Redirect URL", placeholder: "https://example.com/new" };
     case "return":
@@ -254,6 +257,8 @@ function actionPatch(d: RouteDraft): LocationActionPatch {
       return { kind: "static", target };
     case "proxy":
       return { kind: "proxy", target };
+    case "grpc":
+      return { kind: "grpc", target };
     case "redirect":
       return { kind: "redirect", target };
     case "return":

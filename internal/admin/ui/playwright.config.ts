@@ -14,7 +14,9 @@ const baseURL = `http://localhost:${String(PREVIEW_PORT)}`;
 // Real-server project: a real jul binary serves the admin API on loopback so
 // real-server.spec.ts can validate that the Go admin API response shapes match
 // the Zod schemas in client.ts without any mocking. The binary must be
-// pre-built before running: go build -tags console -o jul ./cmd/jul
+// pre-built before running. Include the "grpc" tag so the gRPC passthrough
+// tests can hot-reload:
+//   go build -tags "console grpc" -o jul ./cmd/jul
 const REAL_SERVER_PORT = 9291;
 const realServerURL = `http://127.0.0.1:${String(REAL_SERVER_PORT)}`;
 
