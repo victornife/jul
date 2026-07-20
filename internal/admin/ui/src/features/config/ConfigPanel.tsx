@@ -10,7 +10,9 @@ import {
   applyConfig,
   applyPatchBatch,
   diffConfig,
+  discardPendingRestart,
   fetchOverview,
+  fetchPendingRestart,
   fetchRawConfig,
   validateConfig,
   ConfigRejectedError,
@@ -19,6 +21,7 @@ import {
   ConfigAdminChangeError,
   type FeatureStatus,
   type ConfigDiff,
+  type PendingRestartStatus,
 } from "@/api/client.ts";
 import type { PendingDraft } from "@/lib/configDraftHandoff.ts";
 import { deriveApplyOutcome, type ApplyOutcome } from "@/lib/applyOutcome.ts";
@@ -53,6 +56,111 @@ function ValidationPill({ state }: { readonly state: "idle" | "checking" | "vali
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{label}</span>;
 }
 
+/** Persistent banner shown at the top of the editor when a planned restart is pending. */
+function PendingRestartBanner({
+  status,
+  onDiscard,
+  discarding,
+  discardError,
+}: {
+  readonly status: PendingRestartStatus;
+  readonly onDiscard: () => void;
+  readonly discarding: boolean;
+  readonly discardError: Error | null;
+}) {
+  if (status.inconsistent) {
+    return (
+      <div className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm">
+        <p className="font-semibold text-jul-danger">
+          Inconsistent staged-restart state — manual recovery required
+        </p>
+        <p className="mt-1 text-xs text-jul-muted">
+          The staged configuration and backup files are in an inconsistent state. Hot applies are
+          blocked. See the server logs for details.
+        </p>
+      </div>
+    );
+  }
+  if (!status.managed) {
+    const subs = status.subsystems ?? [];
+    return (
+      <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-sm">
+        <p className="font-semibold text-jul-warning">
+          Configuration on disk differs from runtime — restart required
+        </p>
+        {subs.length > 0 && (
+          <p className="mt-1 text-xs text-jul-muted">
+            Affected: <span className="font-mono">{subs.join(", ")}</span>
+          </p>
+        )}
+      </div>
+    );
+  }
+  const subs = status.subsystems ?? [];
+  return (
+    <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-jul-warning">Restart required — configuration staged</p>
+          {subs.length > 0 && (
+            <p className="mt-1 text-xs text-jul-muted">
+              Pending: <span className="font-mono">{subs.join(", ")}</span>
+            </p>
+          )}
+          {status.staged_version && (
+            <p className="mt-0.5 text-xs text-jul-muted">
+              Staged: <span className="font-mono">{status.staged_version}</span>
+              {status.serving_version && (
+                <>
+                  {" "}· Serving: <span className="font-mono">{status.serving_version}</span>
+                </>
+              )}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-jul-muted">
+            Hot applies are blocked until this is discarded or the process is restarted.
+          </p>
+        </div>
+        {status.discard_available && (
+          <button
+            type="button"
+            onClick={onDiscard}
+            disabled={discarding}
+            className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+          >
+            {discarding && (
+              <svg
+                className="h-3 w-3 animate-spin"
+                fill="none"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+            )}
+            {discarding ? "Discarding…" : "Discard staged configuration"}
+          </button>
+        )}
+      </div>
+      {discardError && (
+        <p className="mt-2 text-xs text-jul-danger">Discard failed: {discardError.message}</p>
+      )}
+    </div>
+  );
+}
+
 export function ConfigPanel() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -61,20 +169,38 @@ export function ConfigPanel() {
     queryFn: fetchRawConfig,
   });
 
+  // Pending-restart state: surfaced as a persistent banner and changes primary action.
+  const pendingRestartQuery = useQuery({
+    queryKey: ["pending-restart"],
+    queryFn: fetchPendingRestart,
+    staleTime: 5000,
+    refetchOnWindowFocus: true,
+  });
+  const pendingRestartStatus: PendingRestartStatus | null =
+    pendingRestartQuery.data?.status ?? null;
+  // hasPendingRestart is true when either a managed staged restart is active or the
+  // config on disk diverged externally. Both block hot-apply.
+  const hasPendingRestart = pendingRestartStatus !== null && pendingRestartStatus.staged;
+
   // Raw editor state
   const [draft, setDraft] = useState<string | null>(null);
   const [baseline, setBaseline] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [stageConfirming, setStageConfirming] = useState(false);
   // applied holds the accepted-apply result: the post-apply capability status,
   // the server's pending_reload flag, and whether the previous reload exceeded
   // the configured reload_timeout (surfaced via previous_reload.timed_out). The
   // live outcome (fully live, still reloading, partial subsystem failure, or a
   // timed-out reload) is derived from these signals plus the post-apply runtime
   // snapshot below, so the operator sees an explicit outcome rather than an
-  // unconditional "saved" (AUX-02).
-  const [applied, setApplied] = useState<{ status: FeatureStatus[]; pendingReload: boolean; reloadTimedOut: boolean } | null>(
-    null,
-  );
+  // unconditional "saved" (AUX-02). mode tracks how it was applied.
+  const [applied, setApplied] = useState<{
+    status: FeatureStatus[];
+    pendingReload: boolean;
+    reloadTimedOut: boolean;
+    mode: "hot" | "stage_restart";
+    isStagedUpdate: boolean;
+  } | null>(null);
 
   // Patch draft state: when a structured patch is handed off, the editor shows
   // the candidate read-only and the diff is pre-computed; applying uses the
@@ -145,15 +271,22 @@ export function ConfigPanel() {
   );
 
   const applyRaw = useMutation({
-    mutationFn: (confirmAdmin: boolean) => applyConfig(current, baseVersion, confirmAdmin),
+    mutationFn: (confirmAdmin: boolean) => applyConfig(current, baseVersion, confirmAdmin, "hot"),
     onSuccess: (res) => {
       setBaseline(current);
-      setApplied({ status: res.status ?? [], pendingReload: res.pending_reload ?? true, reloadTimedOut: res.previous_reload?.timed_out ?? false });
+      setApplied({
+        status: res.status ?? [],
+        pendingReload: res.pending_reload ?? true,
+        reloadTimedOut: res.previous_reload?.timed_out ?? false,
+        mode: "hot",
+        isStagedUpdate: false,
+      });
       setConfirming(false);
       // Advance the token to the freshly-applied version so a follow-up edit
       // does not trip a spurious conflict.
       setBaseVersion(res.version ?? undefined);
       setConflictVersion(undefined);
+      void qc.invalidateQueries({ queryKey: ["pending-restart"] });
       void qc.invalidateQueries();
     },
     onError: (err) => {
@@ -179,15 +312,59 @@ export function ConfigPanel() {
       setBaseline(candidate);
       setDraft(candidate);
       setBaseVersion(res.version ?? undefined);
-      setApplied({ status: res.status ?? [], pendingReload: res.pending_reload ?? true, reloadTimedOut: res.previous_reload?.timed_out ?? false });
+      setApplied({
+        status: res.status ?? [],
+        pendingReload: res.pending_reload ?? true,
+        reloadTimedOut: res.previous_reload?.timed_out ?? false,
+        mode: "hot",
+        isStagedUpdate: false,
+      });
       setConfirming(false);
       setConflictVersion(undefined);
+      void qc.invalidateQueries({ queryKey: ["pending-restart"] });
       void qc.invalidateQueries();
     },
     onError: (err) => {
       if (err instanceof ConfigConflictError) {
         setConflictVersion(err.currentVersion);
       }
+    },
+  });
+
+  // Stage-restart apply: sends mode=stage_restart; no live reload, just saves for next boot.
+  const applyStage = useMutation({
+    mutationFn: () => applyConfig(current, baseVersion, false, "stage_restart"),
+    onSuccess: (res) => {
+      setBaseline(current);
+      setApplied({
+        status: res.status ?? [],
+        pendingReload: false,
+        reloadTimedOut: false,
+        mode: "stage_restart",
+        isStagedUpdate: hasPendingRestart,
+      });
+      setStageConfirming(false);
+      setBaseVersion(res.version ?? undefined);
+      setConflictVersion(undefined);
+      void qc.invalidateQueries({ queryKey: ["pending-restart"] });
+      void qc.invalidateQueries();
+    },
+    onError: (err) => {
+      if (err instanceof ConfigConflictError) {
+        setConflictVersion(err.currentVersion);
+      }
+      setStageConfirming(false);
+    },
+  });
+
+  // Discard the staged restart (returns the live config, not the staged one).
+  const discard = useMutation({
+    mutationFn: discardPendingRestart,
+    onSuccess: () => {
+      setApplied(null);
+      void qc.invalidateQueries({ queryKey: ["pending-restart"] });
+      void qc.invalidateQueries({ queryKey: ["raw-config"] });
+      void qc.invalidateQueries();
     },
   });
 
@@ -201,19 +378,17 @@ export function ConfigPanel() {
     applyError instanceof ConfigRestartRequiredError ? applyError : null;
 
   // After an accepted apply, poll the runtime overview a few times so the
-  // asynchronous stream (L4) reload has a chance to report its outcome. A
-  // rejected stream reload flips the outcome banner from "reloading" to a
-  // partial-reload warning; a clean snapshot settles it to fully live. The poll
-  // is bounded (it stops after a few snapshots) so it does not run forever.
+  // asynchronous stream (L4) reload has a chance to report its outcome. Only
+  // meaningful for hot applies; stage_restart does not trigger a reload.
   const postApply = useQuery({
     queryKey: ["config-apply-overview"],
     queryFn: fetchOverview,
-    enabled: applied !== null,
+    enabled: applied !== null && applied.mode === "hot",
     staleTime: 0,
     gcTime: 0,
     refetchOnWindowFocus: false,
     refetchInterval: (query) =>
-      applied !== null && query.state.dataUpdateCount < 3 ? 1500 : false,
+      applied !== null && applied.mode === "hot" && query.state.dataUpdateCount < 3 ? 1500 : false,
   });
 
   // Fold the raw apply signals into one explicit, severity-tagged outcome so the
@@ -230,6 +405,15 @@ export function ConfigPanel() {
       });
     }
     if (applied) {
+      if (applied.mode === "stage_restart") {
+        return deriveApplyOutcome({
+          accepted: true,
+          pendingReload: false,
+          runtimeObserved: false,
+          mode: "stage_restart",
+          isStagedUpdate: applied.isStagedUpdate,
+        });
+      }
       const streamStatus = postApply.data?.stream_status;
       return deriveApplyOutcome({
         accepted: true,
@@ -272,6 +456,16 @@ export function ConfigPanel() {
 
   return (
     <div className="flex h-full flex-col gap-4">
+      {/* Persistent planned-restart banner */}
+      {pendingRestartStatus && (pendingRestartStatus.staged || pendingRestartStatus.inconsistent) && (
+        <PendingRestartBanner
+          status={pendingRestartStatus}
+          onDiscard={() => { discard.mutate(); }}
+          discarding={discard.isPending}
+          discardError={discard.error instanceof Error ? discard.error : null}
+        />
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold">Configuration</h1>
@@ -307,8 +501,9 @@ export function ConfigPanel() {
               setConflictVersion(undefined);
               applyRaw.reset();
               applyPatch.reset();
+              applyStage.reset();
             }}
-            disabled={!dirty || applyActive.isPending}
+            disabled={!dirty || applyActive.isPending || applyStage.isPending}
             className="rounded-md border border-jul-border px-3 py-1 text-sm text-jul-muted hover:text-jul-text disabled:opacity-40"
           >
             Reset
@@ -316,17 +511,25 @@ export function ConfigPanel() {
           <button
             type="button"
             onClick={() => {
-              setConfirming(true);
+              // When a pending restart is active, hot apply is blocked — offer
+              // to update the staged configuration instead.
+              if (hasPendingRestart && !isPatchMode) {
+                setStageConfirming(true);
+              } else {
+                setConfirming(true);
+              }
             }}
-            disabled={!dirty || !valid || applyActive.isPending}
+            disabled={!dirty || !valid || applyActive.isPending || applyStage.isPending}
             className="inline-flex items-center gap-2 rounded-md bg-jul-accent px-3 py-1 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
-            {applyActive.isPending && <Spinner />}
-            {applyActive.isPending
+            {(applyActive.isPending || applyStage.isPending) && <Spinner />}
+            {applyActive.isPending || applyStage.isPending
               ? "Applying…"
-              : isPatchMode
-                ? "Apply patch"
-                : "Apply changes"}
+              : hasPendingRestart && !isPatchMode
+                ? "Update staged configuration"
+                : isPatchMode
+                  ? "Apply patch"
+                  : "Apply changes"}
           </button>
         </div>
       </div>
@@ -353,6 +556,36 @@ export function ConfigPanel() {
               outcome={outcome}
               {...(appliedCapabilities ? { capabilities: appliedCapabilities } : {})}
             />
+          )}
+
+          {/* Inline offer to stage the change after a restart-required rejection. */}
+          {restartError && restartError.canStage && (
+            <div className="rounded-md border border-jul-warning/40 bg-jul-warning/5 p-3 text-sm">
+              <p className="font-medium text-jul-warning">Save for next restart?</p>
+              {restartError.subsystems.length > 0 && (
+                <p className="mt-1 text-xs text-jul-muted">
+                  Affected: <span className="font-mono">{restartError.subsystems.join(", ")}</span>
+                </p>
+              )}
+              <p className="mt-1 text-xs text-jul-muted">
+                This change is valid but cannot be applied live. Save it now and it will take effect
+                on the next process restart; the running server will not change.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setStageConfirming(true); }}
+                disabled={applyStage.isPending}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+              >
+                {applyStage.isPending && <Spinner />}
+                {applyStage.isPending ? "Saving…" : "Save for next restart"}
+              </button>
+              {applyStage.isError && (
+                <p className="mt-1 text-xs text-jul-danger">
+                  {applyStage.error instanceof Error ? applyStage.error.message : "Stage failed."}
+                </p>
+              )}
+            </div>
           )}
 
           {applyError && !adminChangeError && !restartError && (
@@ -507,6 +740,46 @@ export function ConfigPanel() {
                 runtime happens moments later. The current configuration is snapshotted first, so
                 you can roll back from the History panel.
               </p>
+            </>
+          )}
+          {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
+        </ConfirmDialog>
+      )}
+
+      {/* Stage-restart confirm dialog */}
+      {stageConfirming && (
+        <ConfirmDialog
+          title={
+            hasPendingRestart ? "Update staged configuration?" : "Save for next restart?"
+          }
+          confirmLabel={hasPendingRestart ? "Update staged config" : "Save for next restart"}
+          busy={applyStage.isPending}
+          onConfirm={() => {
+            applyStage.mutate();
+          }}
+          onCancel={() => {
+            setStageConfirming(false);
+            applyStage.reset();
+          }}
+        >
+          {hasPendingRestart ? (
+            <p>
+              The staged configuration will be replaced with this draft. The running server will
+              remain unchanged until the process is restarted.
+            </p>
+          ) : (
+            <>
+              <p>
+                The configuration will be validated and saved. The running server will not change
+                until the process is restarted. You can discard this staged change at any time from
+                the Overview panel.
+              </p>
+              {restartError?.subsystems && restartError.subsystems.length > 0 && (
+                <p className="mt-2 text-xs text-jul-muted">
+                  Affected subsystems:{" "}
+                  <span className="font-mono">{restartError.subsystems.join(", ")}</span>
+                </p>
+              )}
             </>
           )}
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}

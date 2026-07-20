@@ -407,6 +407,73 @@ export function OverviewPanel() {
         </div>
       )}
 
+      {/* Managed planned-restart banner (P2-04 / H-05): surfaced whenever the
+          staged configuration on disk differs from what the running process was
+          built from. Inconsistent state is shown as a blocking error (manual
+          recovery); external divergence and managed staged restarts as warnings. */}
+      {data.pending_restart_status?.inconsistent && (
+        <div
+          role="alert"
+          className="rounded-lg border border-jul-danger/40 bg-jul-danger/10 px-4 py-3 text-sm text-jul-danger"
+        >
+          <span className="font-semibold">Inconsistent staged-restart state.</span>{" "}
+          The staged configuration and backup files are in an inconsistent state. Hot applies are
+          blocked. Check the server logs and see the troubleshooting guide for recovery steps.
+        </div>
+      )}
+      {!data.pending_restart_status?.inconsistent &&
+        data.pending_restart_status?.staged &&
+        !data.pending_restart_status.managed && (
+          <div
+            role="alert"
+            className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm text-jul-warning"
+          >
+            <span className="font-semibold">Configuration on disk differs from runtime.</span>{" "}
+            The process was not built from the current on-disk config. Restart the server to apply
+            the changes.
+            {(data.pending_restart_status.subsystems?.length ?? 0) > 0 && (
+              <span className="ml-1 text-jul-muted">
+                Affected: <span className="font-mono">{data.pending_restart_status.subsystems?.join(", ")}</span>.
+              </span>
+            )}
+          </div>
+        )}
+      {!data.pending_restart_status?.inconsistent &&
+        data.pending_restart_status?.staged &&
+        data.pending_restart_status.managed && (
+          <div
+            role="alert"
+            className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <span className="font-semibold text-jul-warning">
+                  Restart required — configuration staged.
+                </span>{" "}
+                <span className="text-jul-muted">
+                  A configuration requiring a process restart has been saved. The running server
+                  will continue serving the previous config until restarted.
+                </span>
+                {(data.pending_restart_status.subsystems?.length ?? 0) > 0 && (
+                  <span className="ml-1 text-jul-muted">
+                    Pending:{" "}
+                    <span className="font-mono">
+                      {data.pending_restart_status.subsystems?.join(", ")}
+                    </span>
+                    .
+                  </span>
+                )}
+              </div>
+              <a
+                href="/config"
+                className="flex-shrink-0 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-surface"
+              >
+                Open Config editor →
+              </a>
+            </div>
+          </div>
+        )}
+
       {/* At-a-glance health summary (P3-14): coarse signals first, raw metric
           grids below for progressive disclosure. */}
       {summary.length > 0 && (

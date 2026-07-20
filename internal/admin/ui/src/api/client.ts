@@ -1346,6 +1346,8 @@ export async function applyConfig(
       if (conflict.success && conflict.data.restart_required) {
         throw new ConfigRestartRequiredError(
           conflict.data.message ?? "This change requires a server restart to take effect.",
+          conflict.data.can_stage ?? false,
+          conflict.data.pending_restart?.subsystems ?? [],
         );
       }
       if (conflict.success && conflict.data.admin_change) {
@@ -1392,9 +1394,15 @@ export class ConfigConflictError extends Error {
 // ACME issued-domain set and issuer). The server did NOT write the change, so
 // the live config is unchanged; the operator must restart for it to take effect.
 // It is distinguished from ConfigConflictError by the restart_required body flag
-// on the shared 409 response.
+// on the shared 409 response. canStage is true when the candidate can be saved
+// for the next restart via mode=stage_restart; subsystems lists the affected
+// startup-bound settings.
 export class ConfigRestartRequiredError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    public readonly canStage: boolean = false,
+    public readonly subsystems: string[] = [],
+  ) {
     super(message);
     this.name = "ConfigRestartRequiredError";
   }
@@ -1418,10 +1426,18 @@ export class ConfigAdminChangeError extends Error {
 const ConflictBodySchema = z.object({
   conflict: z.boolean().optional(),
   restart_required: z.boolean().optional(),
+  can_stage: z.boolean().optional(),
   admin_change: z.boolean().optional(),
   changes: z.array(z.string()).optional(),
   message: z.string().optional(),
   current_version: z.string().optional(),
+  // pending_restart carries subsystem info when restart_required is true
+  // (H-06 fix: full ConfigApplyResult returned at 409).
+  pending_restart: z
+    .object({
+      subsystems: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 export const PatchApplyResultSchema = z.object({
@@ -1478,6 +1494,8 @@ export async function applyPatchBatch(
       if (conflict.success && conflict.data.restart_required) {
         throw new ConfigRestartRequiredError(
           conflict.data.message ?? "This change requires a server restart to take effect.",
+          conflict.data.can_stage ?? false,
+          conflict.data.pending_restart?.subsystems ?? [],
         );
       }
       throw new ConfigConflictError(
