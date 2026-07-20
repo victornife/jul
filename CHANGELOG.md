@@ -10,6 +10,17 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **Managed hot-apply coordinator with exact restoration** (P2-02, #67):
+  introduced `ConfigApplyCoordinator` (`internal/app/config_apply.go`) that
+  serializes every managed config write, keeps exact previous raw bytes, runs
+  preflight, persists atomically, suppresses file-watcher echoes, submits
+  correlated reloads, waits for results, and restores the exact previous bytes
+  (including comments/formatting) when the reload fails before `Publish`.
+  Hot applies are refused while a planned restart is pending; restart-required
+  changes return `restart_required: true` with `can_stage: true`. Added
+  `PlannedRestartStore` and `ApplyResult` types; moved orchestration out of
+  anonymous `serve.go` closures. Added focused tests in
+  `internal/app/config_apply_test.go`. Updated `docs/reload-semantics.md`.
 - **Correlated reload results, deadlines, phase timing, and bounded cancellation** (P2-01, #66):
   introduced structured `ReloadResult` (`internal/server/reload_result.go`) with
   transaction ID, source, desired/serving version fingerprints, per-phase

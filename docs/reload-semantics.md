@@ -74,6 +74,25 @@ reload is still in flight when the coordinator's wait expires, the response
 returns `saved_not_live` so the operator knows the config is persisted but the
 live swap has not yet been confirmed.
 
+## Managed apply coordinator
+
+The admin write path is implemented by `ConfigApplyCoordinator` in
+[`internal/app/config_apply.go`](../internal/app/config_apply.go). The
+coordinator serializes every managed write, keeps the exact previous raw bytes,
+runs preflight, persists atomically, suppresses file-watcher echoes, submits a
+correlated reload, waits for the result, and — when the reload fails before
+`Publish` — restores the exact previous bytes including comments and formatting.
+
+The restoration guarantee applies only to managed admin writes. SIGHUP and
+file-watch are external sources: they never rewrite the file, so a failed
+external reload leaves the previous runtime serving while the disk may differ.
+The Console offers retry or file repair for external failures.
+
+A managed hot apply is refused while a planned restart is pending; the response
+includes `pending_restart` and the operator must discard or complete the staged
+restart first. Restart-required changes return `restart_required: true` with
+`can_stage: true` so the UI can offer staging instead of a flat rejection.
+
 ## The apply preflight (truthfulness gate)
 
 Before a configuration is written to disk, the admin write path runs a full

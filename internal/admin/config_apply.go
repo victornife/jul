@@ -24,6 +24,9 @@ type ConfigApplyResult struct {
 	// startup-bound setting. The handler maps this field to a 409 Conflict
 	// carrying restart_required:true.
 	RestartRequired bool `json:"restart_required,omitempty"`
+	// CanStage is set together with RestartRequired when the candidate can be
+	// staged for the next process restart instead of being rejected outright.
+	CanStage bool `json:"can_stage,omitempty"`
 	// Summary and Diff are populated by the structured-patch apply path.
 	Summary []string   `json:"summary,omitempty"`
 	Diff    ConfigDiff `json:"diff,omitempty"`
