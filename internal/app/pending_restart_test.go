@@ -194,3 +194,41 @@ func TestPendingRestartCheckDetectsFileBackedSecretRotation(t *testing.T) {
 		t.Fatalf("file-backed secret rotation should report admin subsystem, got %v", got)
 	}
 }
+
+func TestPendingRestartCheckACMEWithSecretReferenceNotPendingOnStartup(t *testing.T) {
+	tmp := t.TempDir()
+	secretPath := filepath.Join(tmp, "acme-email.txt")
+	if err := os.WriteFile(secretPath, []byte("ops@example.com"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+
+	startupRaw := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen:      freePort(t),
+			ServerNames: []string{"localhost"},
+			TLS: &config.TLSConfig{
+				ACME: &config.ACMEConfig{
+					Enabled:   true,
+					Email:     "${file:" + secretPath + "}",
+					CA:        "letsencrypt-staging",
+					Challenge: "http-01",
+					CacheDir:  tmp,
+				},
+			},
+		}},
+	}
+	startup, err := config.NewCandidate(startupRaw)
+	if err != nil {
+		t.Fatalf("resolve startup candidate: %v", err)
+	}
+	startupFP := lifecycle.ComputeFingerprint(startup.Effective)
+
+	// Reloading the same raw config should not flag ACME as needing a restart
+	// just because the effective config resolves the secret reference.
+	loadFn := func() (*config.Config, error) { return startupRaw, nil }
+
+	got := pendingRestartCheck(startup, startupFP, server.LiveSnapshot{}, loadFn, testLogger(t))
+	if slices.Contains(got, "acme") {
+		t.Fatalf("unresolved ACME secret reference must not cause false pending restart on startup, got %v", got)
+	}
+}

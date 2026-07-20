@@ -737,7 +737,11 @@ func pendingRestartCheck(startupCand *config.Candidate, startupFP lifecycle.Fing
 	if _, need := server.PreflightRebindRequired(live, candidate.Effective); need {
 		pendingSet["listener"] = struct{}{}
 	}
-	if _, need := server.ACMERestartRequired(startupCand.Raw.Servers, candidate.Effective.Servers); need {
+	// Compare effective configs on both sides: startupCand.Raw may still
+	// contain unresolved secret references (e.g. ${file:...} in ACME email),
+	// while candidate.Effective is fully resolved. Using the effective startup
+	// config avoids a false "acme" pending-restart warning right after boot.
+	if _, need := server.ACMERestartRequired(startupCand.Effective.Servers, candidate.Effective.Servers); need {
 		pendingSet["acme"] = struct{}{}
 	}
 
