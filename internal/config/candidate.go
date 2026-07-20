@@ -3,7 +3,27 @@
 
 package config
 
-import "jul/internal/redact"
+import (
+	"jul/internal/redact"
+)
+
+// LifecycleChangeSet mirrors lifecycle.ChangeSet without forcing config to
+// import lifecycle. Preflight.Apply assigns this slice to Candidate.Lifecycle
+// so the coordinator can build the pending-restart marker from the same
+// resolved candidate used for validation (M-02).
+type LifecycleChangeSet = []LifecycleDiffEntry
+
+// LifecycleDiffEntry mirrors lifecycle.DiffEntry. It describes one
+// configuration field whose effective value changed between two resolved
+// configs, according to the lifecycle registry.
+type LifecycleDiffEntry struct {
+	Path      string
+	Class     string
+	Subsystem string
+	Reason    string
+	Before    any
+	After     any
+}
 
 // Candidate is the single immutable configuration object for a startup,
 // preflight, or reload transaction. It carries the raw (on-disk/admin-facing)
@@ -29,6 +49,13 @@ type Candidate struct {
 	// actually consumed, so file-content rotation can be detected even when
 	// the configured path is unchanged.
 	Digests map[string]string
+
+	// Lifecycle is an optional change-set attached by Preflight.Apply in
+	// stage-restart mode. It lets the coordinator build the pending-restart
+	// marker from the same resolved candidate used for validation, avoiding a
+	// second resolution (M-02). The concrete lifecycle types live in
+	// internal/lifecycle; config defines local mirrors to avoid an import cycle.
+	Lifecycle LifecycleChangeSet
 }
 
 // NewCandidate builds a Candidate from raw. It resolves secret references

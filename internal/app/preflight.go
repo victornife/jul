@@ -147,6 +147,21 @@ func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Co
 		// Classify lifecycle changes; do not reject them.
 		if prev != nil {
 			result.Lifecycle = lifecycle.DiffConfig(prev, candidate.Effective)
+			// Attach the lifecycle diff to the candidate so the stage_restart
+			// path can use the same resolved candidate for the marker without
+			// re-resolving (M-02). Candidate.Lifecycle is the mirror type in
+			// config to avoid an import cycle between config and lifecycle.
+			candidate.Lifecycle = make(config.LifecycleChangeSet, len(result.Lifecycle))
+			for i, e := range result.Lifecycle {
+				candidate.Lifecycle[i] = config.LifecycleDiffEntry{
+					Path:      e.Path,
+					Class:     e.Class.String(),
+					Subsystem: e.Subsystem,
+					Reason:    e.Reason,
+					Before:    e.Before,
+					After:     e.After,
+				}
+			}
 		}
 		// Validate that startup-consumed resources can be applied at the next
 		// restart. These checks are side-effect-minimized: they create and

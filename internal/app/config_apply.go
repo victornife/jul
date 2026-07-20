@@ -195,16 +195,6 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		}
 	}
 
-	cfg, err := config.Parse(data)
-	if err != nil {
-		return ApplyResult{
-			OK:               false,
-			Mode:             mode,
-			Message:          "The configuration could not be parsed.",
-			ValidationErrors: []string{err.Error()},
-		}, nil
-	}
-
 	// Parse and resolve the previous config so lifecycle.DiffConfig compares
 	// effective values on both sides. Without resolution, secret references
 	// produce false differences when the resolved value happens to match but
@@ -220,8 +210,45 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		}
 	}
 
+	cfg, err := config.Parse(data)
+	if err != nil {
+		return ApplyResult{
+			OK:               false,
+			Mode:             mode,
+			Message:          "The configuration could not be parsed.",
+			ValidationErrors: []string{err.Error()},
+		}, nil
+	}
+
 	if mode == ApplyStageRestart {
-		return c.applyStageRestart(c.BaseCtx, cfg, prevCfg, data, prevRaw)
+		// For staged updates the diff base is the original serving config stored
+		// in the planned-restart sidecar, not the currently staged candidate on
+		// disk. Fresh stages diff against the previous config.
+		diffBase := prevCfg
+		if c.PlannedRestart != nil && c.PlannedRestart.IsPending() {
+			if baseRaw := c.PlannedRestart.BaseRaw(); len(baseRaw) > 0 {
+				if raw, err := config.Parse(baseRaw); err == nil {
+					if cand, err := config.NewCandidate(raw); err == nil {
+						diffBase = cand.Effective
+					} else {
+						diffBase = raw
+					}
+				}
+			}
+		}
+		// Run the shared preflight gates in stage-restart mode so restart-required
+		// classification is retained rather than rejected. This yields the single
+		// resolved candidate used for validation, diffing, and the marker.
+		pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, diffBase, PreflightStageRestart)
+		if err != nil {
+			return ApplyResult{
+				OK:               false,
+				Mode:             ApplyStageRestart,
+				Message:          "The configuration contains errors; no change was staged.",
+				ValidationErrors: []string{err.Error()},
+			}, nil
+		}
+		return c.applyStageRestart(c.BaseCtx, data, prevRaw, pfResult.Candidate)
 	}
 
 	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightHot)
@@ -360,9 +387,10 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 	}
 }
 
-// applyStageRestart runs the stage_restart path: validates via stage preflight,
-// writes the sidecar backup+marker, then writes the candidate atomically,
-// and returns an ApplyResult without submitting a live reload.
+// applyStageRestart runs the stage_restart path: the candidate is already
+// validated and resolved by Preflight.Apply. This function writes the sidecar
+// backup+marker, then writes the candidate atomically, and returns an
+// ApplyResult without submitting a live reload.
 //
 // If a managed staged restart is already pending, this path replaces it with
 // the new candidate while preserving the original serving config as the
@@ -381,21 +409,10 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	isUpdate := c.PlannedRestart != nil && c.PlannedRestart.IsPending()
 
 	var baseRaw []byte
-	var diffBaseCfg *config.Config
 	if isUpdate {
 		baseRaw = c.PlannedRestart.BaseRaw()
-		if len(baseRaw) > 0 {
-			if raw, err := config.Parse(baseRaw); err == nil {
-				if cand, err := config.NewCandidate(raw); err == nil {
-					diffBaseCfg = cand.Effective
-				} else {
-					diffBaseCfg = raw
-				}
-			}
-		}
 	} else {
 		baseRaw = prevRaw
-		diffBaseCfg = prevCfg
 	}
 
 	// Run the shared preflight gates in stage-restart mode so restart-required
@@ -506,8 +523,24 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	}, nil
 }
 
-// subsystemNames extracts unique subsystem names from a lifecycle ChangeSet.
-func subsystemNames(cs lifecycle.ChangeSet) []string {
+// subsystemNames extracts unique subsystem names from a lifecycle ChangeSet
+// or the config-local mirror type attached to a Candidate.
+func subsystemNamesLifecycle(cs lifecycle.ChangeSet) []string {
+	seen := make(map[string]struct{}, len(cs))
+	var out []string
+	for _, e := range cs {
+		if e.Subsystem == "" {
+			continue
+		}
+		if _, ok := seen[e.Subsystem]; !ok {
+			seen[e.Subsystem] = struct{}{}
+			out = append(out, e.Subsystem)
+		}
+	}
+	return out
+}
+
+func subsystemNamesCandidate(cs config.LifecycleChangeSet) []string {
 	seen := make(map[string]struct{}, len(cs))
 	var out []string
 	for _, e := range cs {
