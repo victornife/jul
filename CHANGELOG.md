@@ -10,6 +10,17 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Fixed
+- **P2-Remediation Wave 2b: H-02 full context propagation** — context threading through factory and builders:
+  - `HandlerFactory` type in `internal/server/server.go` changed to accept `context.Context`
+    as first parameter; `server.Run` and `reload_plan.Prepare` pass the reload context.
+  - `HandlerFactory.Build` and `HandlerFactory.Prepare` in `internal/app/factory.go` accept
+    `context.Context`; `buildHandlers` checks `ctx.Err()` before and after plugin compilation
+    (the most expensive pre-Publish step) so a cancelled context is detected promptly.
+  - `Preflight.BuildHandlers` field type updated; `Preflight.Apply` now propagates `ctx` to
+    `dryRun`; `dryRun` passes it to both `BuildHandlers` and `Stream.PreflightBuild`.
+  - `StreamPreflighter` interface methods `PreflightBuild` and `PreflightListeners` both
+    receive `context.Context`; implemented in `internal/stream/server.go` and `stub.go`.
+  - All test mocks and callers updated.
 - **P2-Remediation Wave 2: H-06, H-04, M-02, M-03** — restore bounded apply correctness and API contract:
   - **H-06 (restart-required strips can_stage):** `handleConfigApply` and `handleConfigPatchApply`
     now return the full `ConfigApplyResult` at HTTP 409 on restart-required rejections,

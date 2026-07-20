@@ -178,7 +178,7 @@ func (p *ReloadPlan) Lifecycle() error {
 // It does not commit anything; Publish/Abort must follow.
 func (p *ReloadPlan) Prepare() error {
 	return p.runPhase("prepare", func() error {
-		handlers, genID, commit, abort, err := p.s.factory(p.Candidate.Effective)
+		handlers, genID, commit, abort, err := p.s.factory(p.ctx, p.Candidate.Effective)
 		if err != nil {
 			return fmt.Errorf("build: %w", err)
 		}

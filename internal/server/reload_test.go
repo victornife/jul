@@ -79,7 +79,7 @@ func cfgWithReturn(addr string, code int) *config.Config {
 }
 
 func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
-	return func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	return func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		current := *tag.Load()
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, current)
@@ -247,7 +247,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 	var enterOnce, retireOnce sync.Once
 	var builds atomic.Int32
 
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		n := builds.Add(1)
 		var h http.Handler
 		switch n {
@@ -369,7 +369,7 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 func TestReloadNoGoroutineLeak(t *testing.T) {
 	addr := freePort(t)
 
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, "ok")
 		})
@@ -448,7 +448,7 @@ func TestLiveSnapshotCoherentDuringReload(t *testing.T) {
 	addr := freePort(t)
 
 	var builds atomic.Uint64
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		gen := builds.Add(1)
 		code := c.Servers[0].Locations[0].Return
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1111,7 +1111,7 @@ func TestAdminReloadRequestUsesCandidate(t *testing.T) {
 	addr := freePort(t)
 
 	var genIDCounter atomic.Uint64
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		genID := genIDCounter.Add(1)
 		body := fmt.Sprintf("return-%d", c.Servers[0].Locations[0].Return)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1191,7 +1191,7 @@ func TestAdminReloadRawDigestMatchesRawBytes(t *testing.T) {
 	addr := freePort(t)
 
 	var genIDCounter atomic.Uint64
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		genID := genIDCounter.Add(1)
 		body := fmt.Sprintf("return-%d", c.Servers[0].Locations[0].Return)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1301,7 +1301,7 @@ func TestShutdownBoundedByGraceTimeout(t *testing.T) {
 	blocking := make(chan struct{}) // never closed
 
 	var genIDCounter atomic.Uint64
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		genID := genIDCounter.Add(1)
 		var h http.Handler
 		if genID == 1 {
@@ -1372,3 +1372,4 @@ func TestShutdownBoundedByGraceTimeout(t *testing.T) {
 	// Release the blocked handler goroutine so goleak does not flag it.
 	close(blocking)
 }
+

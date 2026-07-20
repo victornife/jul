@@ -115,3 +115,4 @@ func TestCheckHTTP3(t *testing.T) {
 		t.Errorf("disabled HTTP/3 block must be accepted: %v", err)
 	}
 }
+

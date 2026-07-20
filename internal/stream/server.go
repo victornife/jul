@@ -6,6 +6,7 @@
 package stream
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -189,7 +190,7 @@ func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]conf
 // bind can still fail, and Reload performs that under the lock without touching
 // the live set until it succeeds. PreflightBuild does not take s.mu because it
 // neither reads nor writes the live listener set.
-func (s *Server) PreflightBuild(streams []config.StreamServer, upstreams map[string]config.UpstreamConfig) error {
+func (s *Server) PreflightBuild(_ context.Context, streams []config.StreamServer, upstreams map[string]config.UpstreamConfig) error {
 	seen := make(map[string]struct{}, len(streams))
 	var built []*route
 	for i := range streams {
@@ -224,7 +225,7 @@ func (s *Server) PreflightBuild(streams []config.StreamServer, upstreams map[str
 // the subsequent Reload performs the authoritative bind under the lock and
 // rolls back on failure. A probe-then-bind race is possible but matches the
 // established HTTP gate's semantics.
-func (s *Server) PreflightListeners(boundKeys map[string]struct{}, next []config.StreamServer) error {
+func (s *Server) PreflightListeners(_ context.Context, boundKeys map[string]struct{}, next []config.StreamServer) error {
 	probed := make(map[string]struct{}, len(next))
 	for i := range next {
 		proto := normProto(next[i].Protocol)

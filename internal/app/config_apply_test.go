@@ -20,7 +20,7 @@ import (
 
 func testPreflight() *Preflight {
 	return &Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},

@@ -133,7 +133,7 @@ func TestStartupRedactionIsRegistered(t *testing.T) {
 	secret := "startup-secret-" + addr
 
 	var genIDCounter atomic.Uint64
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		genID := genIDCounter.Add(1)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, redact.Apply(secret))
@@ -289,3 +289,4 @@ func TestRedactionMovedToTombstoneOnGraceTimeout(t *testing.T) {
 		t.Fatal("new-secret not masked after drain")
 	}
 }
+

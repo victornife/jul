@@ -31,7 +31,7 @@ func TestServerConnectionCap(t *testing.T) {
 	var releaseOnce sync.Once
 	doRelease := func() { releaseOnce.Do(func() { close(release) }) }
 
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&entered, 1)
 			<-release
@@ -144,3 +144,4 @@ func waitForCount(p *int32, want int32) bool {
 	}
 	return false
 }
+

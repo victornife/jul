@@ -8,6 +8,7 @@ package stream
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"io"
 	"log/slog"
@@ -198,7 +199,7 @@ func TestPreflightBuildDoesNotBind(t *testing.T) {
 	addr := freeTCPAddr(t)
 
 	s := newTestServer(t, Hooks{})
-	if err := s.PreflightBuild([]config.StreamServer{{
+	if err := s.PreflightBuild(context.Background(), []config.StreamServer{{
 		Listen: addr, Protocol: "tcp", ProxyPass: backend,
 	}}, nil); err != nil {
 		t.Fatalf("preflight valid config: %v", err)
@@ -225,7 +226,7 @@ func TestPreflightBuildRejectsDuplicate(t *testing.T) {
 	addr := freeTCPAddr(t)
 
 	s := newTestServer(t, Hooks{})
-	err := s.PreflightBuild([]config.StreamServer{
+	err := s.PreflightBuild(context.Background(), []config.StreamServer{
 		{Listen: addr, Protocol: "tcp", ProxyPass: backend},
 		{Listen: addr, Protocol: "tcp", ProxyPass: backend},
 	}, nil)
@@ -247,7 +248,7 @@ func TestPreflightListenersDetectsBusyPort(t *testing.T) {
 	busyAddr := busy.Addr().String()
 
 	s := newTestServer(t, Hooks{})
-	err = s.PreflightListeners(nil, []config.StreamServer{
+	err = s.PreflightListeners(context.Background(), nil, []config.StreamServer{
 		{Listen: busyAddr, Protocol: "tcp", ProxyPass: "127.0.0.1:1"},
 	})
 	if err == nil {
@@ -269,7 +270,7 @@ func TestPreflightListenersSkipsExisting(t *testing.T) {
 	s := newTestServer(t, Hooks{})
 	bound := map[string]struct{}{"tcp|" + addr: {}}
 	next := []config.StreamServer{{Listen: addr, Protocol: "tcp", ProxyPass: "127.0.0.1:2"}}
-	if err := s.PreflightListeners(bound, next); err != nil {
+	if err := s.PreflightListeners(context.Background(), bound, next); err != nil {
 		t.Fatalf("preflight re-probed an existing listener: %v", err)
 	}
 }
@@ -279,7 +280,7 @@ func TestPreflightListenersSkipsExisting(t *testing.T) {
 func TestPreflightListenersReleasesSocket(t *testing.T) {
 	addr := freeTCPAddr(t)
 	s := newTestServer(t, Hooks{})
-	if err := s.PreflightListeners(nil, []config.StreamServer{
+	if err := s.PreflightListeners(context.Background(), nil, []config.StreamServer{
 		{Listen: addr, Protocol: "tcp", ProxyPass: "127.0.0.1:1"},
 	}); err != nil {
 		t.Fatalf("preflight free addr: %v", err)
@@ -301,7 +302,7 @@ func TestPreflightListenersUDP(t *testing.T) {
 	busyAddr := pc.LocalAddr().String()
 
 	s := newTestServer(t, Hooks{})
-	err = s.PreflightListeners(nil, []config.StreamServer{
+	err = s.PreflightListeners(context.Background(), nil, []config.StreamServer{
 		{Listen: busyAddr, Protocol: "udp", ProxyPass: "127.0.0.1:1"},
 	})
 	if err == nil {
@@ -685,3 +686,4 @@ func TestCheckEmpty(t *testing.T) {
 		t.Fatalf("Check(empty): %v", err)
 	}
 }
+

@@ -347,7 +347,7 @@ func TestPreflightStageRestartAcceptsRestartRequiredChange(t *testing.T) {
 	next.Global.LogFormat = "json"
 
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream:    &mockStreamPreflighter{},
@@ -388,7 +388,7 @@ func TestPreflightStageRestartRejectsStructuralErrors(t *testing.T) {
 		}},
 	}
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},
@@ -401,7 +401,7 @@ func TestPreflightStageRestartRejectsStructuralErrors(t *testing.T) {
 func TestPreflightStageRestartLifecycleEmptyWhenNoPrev(t *testing.T) {
 	cfg := config.ProxyTarget(":9000", ":0")
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},
@@ -711,3 +711,4 @@ func TestInconsistentMarkerSetsFlag(t *testing.T) {
 		t.Error("Status().Inconsistent should be true after Reconcile detects inconsistency")
 	}
 }
+

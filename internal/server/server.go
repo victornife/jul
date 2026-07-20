@@ -92,7 +92,7 @@ type ReloadRequest struct {
 // during the build so concurrent builds are serialised without holding a lock
 // across the bind-attempt window. When commit or abort is nil (e.g. in tests),
 // the caller may skip the call safely.
-type HandlerFactory func(cfg *config.Config) (handlers map[string]http.Handler, genID uint64, commit func() (snapshots upstream.SnapshotMap, retirePrev func()), abort func(), err error)
+type HandlerFactory func(ctx context.Context, cfg *config.Config) (handlers map[string]http.Handler, genID uint64, commit func() (snapshots upstream.SnapshotMap, retirePrev func()), abort func(), err error)
 
 // Server runs one http.Server per unique listen address and coordinates
 // graceful shutdown and configuration reload.
@@ -442,7 +442,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 	// The startup effective config is already resolved by the composition root
 	// and passed as s.cfg. The factory receives the same candidate that will be
 	// served, so there is no second secret resolution at startup (R7-05).
-	handlers, genID, commit, _, err := s.factory(s.cfg)
+	handlers, genID, commit, _, err := s.factory(ctx, s.cfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
 	}

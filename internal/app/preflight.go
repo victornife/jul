@@ -45,8 +45,8 @@ type PreflightResult struct {
 // the Preflight struct can work with both the real stream.Server and the
 // no-op stub in lean builds.
 type StreamPreflighter interface {
-	PreflightBuild(streams []config.StreamServer, upstreams map[string]config.UpstreamConfig) error
-	PreflightListeners(boundKeys map[string]struct{}, next []config.StreamServer) error
+	PreflightBuild(ctx context.Context, streams []config.StreamServer, upstreams map[string]config.UpstreamConfig) error
+	PreflightListeners(ctx context.Context, boundKeys map[string]struct{}, next []config.StreamServer) error
 	BoundKeys() []string
 }
 
@@ -56,7 +56,7 @@ type StreamPreflighter interface {
 type Preflight struct {
 	// BuildHandlers dry-runs the full HTTP handler composition on a config.
 	// The bool is commit; for preflight it is always false.
-	BuildHandlers func(*config.Config, bool) (map[string]http.Handler, func(), error)
+	BuildHandlers func(context.Context, *config.Config, bool) (map[string]http.Handler, func(), error)
 
 	// Stream validates stream (L4) configuration without binding sockets.
 	Stream StreamPreflighter
@@ -96,7 +96,7 @@ type Preflight struct {
 //  8. Lifecycle diff classification (populates PreflightResult.Lifecycle).
 //
 // Any error aborts the write; the caller must not persist the config.
-func (p *Preflight) Apply(_ context.Context, c *config.Config, prev *config.Config, mode PreflightMode) (*PreflightResult, error) {
+func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Config, mode PreflightMode) (*PreflightResult, error) {
 	candidate, err := config.NewCandidate(c)
 	if err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func (p *Preflight) Apply(_ context.Context, c *config.Config, prev *config.Conf
 	if err := server.PreflightTLS(candidate.Effective.Servers); err != nil {
 		return nil, err
 	}
-	if err := p.dryRun(candidate.Effective); err != nil {
+	if err := p.dryRun(ctx, candidate.Effective); err != nil {
 		return nil, err
 	}
 
@@ -129,7 +129,7 @@ func (p *Preflight) Apply(_ context.Context, c *config.Config, prev *config.Conf
 	if err := server.PreflightListeners(httpBound, http3Bound, candidate.Effective.Servers); err != nil {
 		return nil, err
 	}
-	if err := p.Stream.PreflightListeners(streamBound, candidate.Effective.Streams); err != nil {
+	if err := p.Stream.PreflightListeners(ctx, streamBound, candidate.Effective.Streams); err != nil {
 		return nil, err
 	}
 
@@ -248,14 +248,14 @@ func streamBoundKeys(sp StreamPreflighter) map[string]struct{} {
 // config and validates the stream configuration. A panic during handler
 // construction is recovered and returned as an error so a malformed config
 // cannot crash the admin goroutine.
-func (p *Preflight) dryRun(c *config.Config) (err error) {
+func (p *Preflight) dryRun(ctx context.Context, c *config.Config) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("configuration rejected: building it panicked: %v", r)
 		}
 	}()
-	if _, _, err = p.BuildHandlers(c, false); err != nil {
+	if _, _, err = p.BuildHandlers(ctx, c, false); err != nil {
 		return err
 	}
-	return p.Stream.PreflightBuild(c.Streams, IndexUpstreams(c.Upstreams))
+	return p.Stream.PreflightBuild(ctx, c.Streams, IndexUpstreams(c.Upstreams))
 }

@@ -220,8 +220,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// redact.State; the server receives the startup candidate's redaction
 	// directly so the initial generation masks exactly the secrets resolved at
 	// startup (R7-05, R9-01).
-	factory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
-		return f.Prepare(c)
+	factory := func(ctx context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		return f.Prepare(ctx, c)
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)

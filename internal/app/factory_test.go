@@ -77,7 +77,7 @@ func TestHandlerFactoryBuildMinimalConfigDryRun(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	handlers, retire, err := f.Build(cfg, false /* dry-run */)
+	handlers, retire, err := f.Build(context.Background(), cfg, false /* dry-run */)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestHandlerFactoryBuildCommitReturnsRetire(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	handlers, retire, err := f.Build(cfg, true /* commit */)
+	handlers, retire, err := f.Build(context.Background(), cfg, true /* commit */)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestHandlerFactoryBuildTwoListenersReturnsTwo(t *testing.T) {
 		},
 	})
 
-	handlers, _, err := f.Build(cfg, false)
+	handlers, _, err := f.Build(context.Background(), cfg, false)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestHandlerFactoryBuildInvalidCompressionFails(t *testing.T) {
 	cfg.Compression.Enabled = config.Bool(true)
 	cfg.Compression.Encoders = []string{"notarealencoder"}
 
-	_, _, err := f.Build(cfg, false)
+	_, _, err := f.Build(context.Background(), cfg, false)
 	if err == nil {
 		t.Fatal("Build with invalid compression encoder succeeded; expected an error")
 	}
@@ -156,14 +156,14 @@ func TestHandlerFactoryBuildErrorAbortsGeneration(t *testing.T) {
 	cfg.Servers[0].Locations[0].Plugin = "not-a-real-plugin"
 	cfg.Servers[0].Locations[0].ProxyPass = ""
 
-	_, _, err := f.Build(cfg, true /* commit */)
+	_, _, err := f.Build(context.Background(), cfg, true /* commit */)
 	if err == nil {
 		t.Fatal("Build with bad plugin reference succeeded; expected an error")
 	}
 	// A subsequent dry-run build on a valid config must succeed, proving the
 	// generation was aborted (not left in a committed/partial state) on error.
 	good := config.ProxyTarget("127.0.0.1:9001", ":0")
-	_, _, err = f.Build(good, false)
+	_, _, err = f.Build(context.Background(), good, false)
 	if err != nil {
 		t.Errorf("Build after aborted generation failed: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	handlers, genID, commitFn, abortFn, err := f.Prepare(cfg)
+	handlers, genID, commitFn, abortFn, err := f.Prepare(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestHandlerFactoryPrepareCommit(t *testing.T) {
 	abortFn()
 	// A subsequent Build must succeed, proving the mutex was released by commitFn.
 	good := config.ProxyTarget("127.0.0.1:9001", ":0")
-	_, _, err = f.Build(good, false)
+	_, _, err = f.Build(context.Background(), good, false)
 	if err != nil {
 		t.Errorf("Build after Prepare+commit failed: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestHandlerFactoryPrepareAbort(t *testing.T) {
 	defer cleanup()
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
-	_, _, _, abortFn, err := f.Prepare(cfg)
+	_, _, _, abortFn, err := f.Prepare(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestHandlerFactoryPrepareAbort(t *testing.T) {
 	// After abort, commitFn must be a safe no-op (but we don't have it; verify
 	// the mutex was released by successfully starting another build).
 	good := config.ProxyTarget("127.0.0.1:9001", ":0")
-	_, _, err = f.Build(good, false)
+	_, _, err = f.Build(context.Background(), good, false)
 	if err != nil {
 		t.Errorf("Build after Prepare+abort failed: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestHandlerFactoryPrepareAbortDoesNotInstallRedaction(t *testing.T) {
 	if candidate.Redaction.Apply("candidate-secret-value") != "***" {
 		t.Fatal("candidate redaction does not mask the secret")
 	}
-	_, _, _, abortFn, err := f.Prepare(candidate.Effective)
+	_, _, _, abortFn, err := f.Prepare(context.Background(), candidate.Effective)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestHandlerFactoryPrepareDoesNotReturnRedactionState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCandidate: %v", err)
 	}
-	_, _, commitFn, abortFn, err := f.Prepare(candidate.Effective)
+	_, _, commitFn, abortFn, err := f.Prepare(context.Background(), candidate.Effective)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestPrepareCapturesSnapshotsAfterCommit(t *testing.T) {
 		}},
 	}
 
-	_, _, commitFn, abortFn, err := f.Prepare(cfg)
+	_, _, commitFn, abortFn, err := f.Prepare(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestPrepareCapturesSnapshotsAfterCommit(t *testing.T) {
 
 	// A second Prepare+commit must capture the new generation's backend view.
 	cfg.Upstreams[0].Servers = append(cfg.Upstreams[0].Servers, config.UpstreamServer{Address: "127.0.0.1:8002"})
-	_, _, commitFn2, abortFn2, err := f.Prepare(cfg)
+	_, _, commitFn2, abortFn2, err := f.Prepare(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("second Prepare: %v", err)
 	}
@@ -392,3 +392,4 @@ func TestPrepareCapturesSnapshotsAfterCommit(t *testing.T) {
 		t.Errorf("second snapshot has %d backends, want 2", len(snapshots2[key].Backends()))
 	}
 }
+

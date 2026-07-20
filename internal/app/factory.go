@@ -62,7 +62,7 @@ type HandlerFactory struct {
 //
 // c is expected to be the secret-expanded effective configuration; Build does
 // not resolve secrets again (R7-05).
-func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.Handler, func(), error) {
+func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit bool) (map[string]http.Handler, func(), error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -70,15 +70,13 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 	gen := f.GenRes.Begin()
 	defer gen.Abort()
 
-	handlers, err := f.buildHandlers(c, gen, upstreams)
+	handlers, err := f.buildHandlers(ctx, c, gen, upstreams)
 	if err != nil {
 		return nil, nil, err
 	}
 	var retirePrev func()
 	if commit {
 		retirePrev = gen.Commit()
-		// Background workers start only after Commit so the legacy Build path
-		// also respects the staged-activation lifecycle (R9-07).
 		f.PoolReg.Activate()
 	}
 	return handlers, retirePrev, nil
@@ -96,17 +94,14 @@ func (f *HandlerFactory) Build(c *config.Config, commit bool) (map[string]http.H
 // (R7-05, R9-01).
 // Exactly one of commitFn or abortFn must be called; both release the factory
 // mutex so no concurrent build can start while a staged generation is pending.
-func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Handler, genID uint64, commitFn func() (upstream.SnapshotMap, func()), abortFn func(), err error) {
+func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handlers map[string]http.Handler, genID uint64, commitFn func() (upstream.SnapshotMap, func()), abortFn func(), err error) {
 	f.mu.Lock()
 	// Mutex is NOT deferred here: it is released by commitFn or abortFn.
 
-	// c is the secret-expanded effective configuration. The caller (Serve,
-	// ReloadPlan, or tests) is responsible for resolving secrets exactly once.
 	upstreams := IndexUpstreams(c.Upstreams)
 	gen := f.GenRes.Begin()
-	// No deferred gen.Abort: lifecycle is caller-controlled via commitFn/abortFn.
 
-	handlers, err = f.buildHandlers(c, gen, upstreams)
+	handlers, err = f.buildHandlers(ctx, c, gen, upstreams)
 	if err != nil {
 		gen.Abort()
 		f.mu.Unlock()
@@ -148,7 +143,12 @@ func (f *HandlerFactory) Prepare(c *config.Config) (handlers map[string]http.Han
 // all closeable resources (plugin runtimes, static-file roots, gRPC connections)
 // into gen. It neither commits nor aborts gen; resource lifecycle is the
 // caller's responsibility. upstreams must be IndexUpstreams(c.Upstreams).
-func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, error) {
+func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, error) {
+
+	// Check context before starting a potentially slow plugin compilation.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("build aborted before plugin compilation: %w", err)
+	}
 
 	// Build this generation's WASM plugin set. A lean build (or a malformed
 	// module) fails here, rejecting the reload. The set owns per-plugin wazero
@@ -159,6 +159,11 @@ func (f *HandlerFactory) buildHandlers(c *config.Config, gen *Generation, upstre
 		return nil, fmt.Errorf("plugins: %w", err)
 	}
 	gen.Stage(pluginSet)
+
+	// Check context after plugin compilation — the most expensive step.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("build aborted after plugin compilation: %w", err)
+	}
 
 	withCache := func(loc config.LocationConfig, h http.Handler) http.Handler {
 		if loc.Cache && f.Cache != nil {

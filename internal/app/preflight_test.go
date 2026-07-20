@@ -20,10 +20,10 @@ import (
 
 type mockStreamPreflighter struct{}
 
-func (m *mockStreamPreflighter) PreflightBuild(_ []config.StreamServer, _ map[string]config.UpstreamConfig) error {
+func (m *mockStreamPreflighter) PreflightBuild(_ context.Context, _ []config.StreamServer, _ map[string]config.UpstreamConfig) error {
 	return nil
 }
-func (m *mockStreamPreflighter) PreflightListeners(_ map[string]struct{}, _ []config.StreamServer) error {
+func (m *mockStreamPreflighter) PreflightListeners(_ context.Context, _ map[string]struct{}, _ []config.StreamServer) error {
 	return nil
 }
 func (m *mockStreamPreflighter) BoundKeys() []string { return nil }
@@ -31,7 +31,7 @@ func (m *mockStreamPreflighter) BoundKeys() []string { return nil }
 func TestPreflightApplyValidConfigOK(t *testing.T) {
 	cfg := config.ProxyTarget(":9000", ":0")
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},
@@ -49,7 +49,7 @@ func TestPreflightApplyInvalidConfigFailsFast(t *testing.T) {
 		}},
 	}
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			t.Fatal("BuildHandlers should not be called for structurally invalid config")
 			return nil, nil, nil
 		},
@@ -63,7 +63,7 @@ func TestPreflightApplyInvalidConfigFailsFast(t *testing.T) {
 func TestPreflightApplyPanicCaught(t *testing.T) {
 	cfg := config.ProxyTarget(":9000", ":0")
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			panic("simulated panic in handler build")
 		},
 		Stream: &mockStreamPreflighter{},
@@ -80,7 +80,7 @@ func TestPreflightApplyPanicCaught(t *testing.T) {
 func TestPreflightApplyWithIdenticalPrevOK(t *testing.T) {
 	cfg := config.ProxyTarget(":9000", ":0")
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},
@@ -103,7 +103,7 @@ func TestPreflightApplyReturnsCandidate(t *testing.T) {
 		}},
 	}
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},
@@ -156,7 +156,7 @@ func TestPreflightApplyUsesLiveSnapshotForRebind(t *testing.T) {
 	next.Servers[0].ReadHeaderTimeout = config.Duration(9 * time.Second)
 
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},
@@ -201,7 +201,7 @@ func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
 	defer ln.Close()
 
 	p := Preflight{
-		BuildHandlers: func(_ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
 			return map[string]http.Handler{}, nil, nil
 		},
 		Stream: &mockStreamPreflighter{},
@@ -256,3 +256,4 @@ func freePort(t *testing.T) string {
 	defer ln.Close()
 	return ln.Addr().String()
 }
+

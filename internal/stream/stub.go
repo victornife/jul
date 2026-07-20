@@ -6,6 +6,7 @@
 package stream
 
 import (
+	"context"
 	"errors"
 
 	"jul/internal/config"
@@ -34,7 +35,7 @@ func (s *Server) Reload(streams []config.StreamServer, _ map[string]config.Upstr
 // PreflightBuild mirrors Reload's contract for the stub: a non-empty stream set
 // cannot be built without the "stream" tag, so it is rejected; an empty set is a
 // no-op success. This keeps the apply-time preflight gate honest in lean builds.
-func (s *Server) PreflightBuild(streams []config.StreamServer, _ map[string]config.UpstreamConfig) error {
+func (s *Server) PreflightBuild(_ context.Context, streams []config.StreamServer, _ map[string]config.UpstreamConfig) error {
 	if len(streams) > 0 {
 		return errors.New("stream proxy requires a build with -tags stream")
 	}
@@ -44,7 +45,9 @@ func (s *Server) PreflightBuild(streams []config.StreamServer, _ map[string]conf
 // PreflightListeners is a no-op for the stub: a non-empty stream set is already
 // rejected by PreflightBuild before any bind-probe would run, so there is
 // nothing to probe in a lean build.
-func (s *Server) PreflightListeners(_ map[string]struct{}, _ []config.StreamServer) error { return nil }
+func (s *Server) PreflightListeners(_ context.Context, _ map[string]struct{}, _ []config.StreamServer) error {
+	return nil
+}
 
 // BoundKeys is a no-op for the stub.
 func (s *Server) BoundKeys() []string { return nil }

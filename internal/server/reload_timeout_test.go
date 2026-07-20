@@ -42,7 +42,7 @@ func TestReloadTimeout(t *testing.T) {
 	src.set(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil)
 
 	// Factory that sleeps longer than the reload timeout.
-	slowFactory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	slowFactory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		time.Sleep(200 * time.Millisecond)
 		commitFn := func() (upstream.SnapshotMap, func()) { return nil, nil }
 		abortFn := func() {}
@@ -195,7 +195,7 @@ func TestReloadDeadlineBoundsCancellation(t *testing.T) {
 	// shorter and should govern cancellation.
 	src.set(cfgWithReloadTimeout(addr, 5*time.Second), nil)
 
-	slowFactory := func(c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+	slowFactory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		time.Sleep(200 * time.Millisecond)
 		commitFn := func() (upstream.SnapshotMap, func()) { return nil, nil }
 		abortFn := func() {}
@@ -287,3 +287,4 @@ func TestReloadPhaseTimingRecordsDurations(t *testing.T) {
 	cancel()
 	<-done
 }
+
