@@ -10,6 +10,32 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+### Added
+- **Phase 3 — Route catalog and permission-bound authorization** (P3-02, #71):
+  - `internal/admin/route_catalog.go` (new): `RouteSpec{Pattern, Methods, Permission, Public, Handler}`
+    type; authoritative `Catalog` slice listing every admin route with its permission.
+    Public routes (`/healthz`, `/readyz`, `/`); all other routes carry an explicit `rbac.Permission`.
+    Permission groups: `status:read` (projections, events), `metrics:read` (/metrics),
+    `config:read` (raw/settings/pending-restart/history list-get),
+    `config:write` (validate/diff/patch/wizard/transcode),
+    `config:apply` (apply/patch-apply/discard), `history:rollback` (rollback),
+    `plugins:upload`, `observability:read`, `audit:read`, `audit:export`, `cache:purge`,
+    `reload:trigger`, `admin:manage` (pprof).
+  - `internal/admin/routes.go`: mux generated from `Catalog` via `requirePermission` or
+    public; legacy ad-hoc `s.auth(...)` calls removed; `handleConsoleOrRoot` helper.
+  - `internal/admin/rbac.go`: `requirePermission(perm, next)` — full 4-step authn+authz stack
+    (parse Bearer → authenticate → store Identity → authorize permission); 401 for
+    unauthenticated/expired; 403 structured JSON for forbidden; identity stored in context
+    for both RBAC and legacy paths. `writeForbidden` helper with `error/required/principal/role`
+    body (does not reveal existence of other principals).
+  - `internal/admin/api.go`: object-level `admin:manage` guard in `handleConfigApply`;
+    `candidateRequiresAdminManage` detects token/RBAC/audit/plugin-upload changes;
+    `rbacIdentityFromRequest` helper; `rbac` added to imports.
+  - Guard tests (`route_catalog_test.go`): 12 tests — no non-public route without permission,
+    all permissions in catalog, no duplicate patterns, all specs have handlers and methods,
+    planned-restart routes carry correct permissions, only approved routes are public,
+    requirePermission 401/403 behavior, RBAC allow/deny, pprof requires admin:manage.
+
 - **Phase 3 — RBAC schema, permission catalog, roles, tokens, and policy core** (P3-01, #59):
   - New package `internal/rbac`: `Permission` catalog + `Known`/`Matches` helpers;
     predefined roles `viewer`/`operator`/`admin`/`auditor` with stable permission sets;

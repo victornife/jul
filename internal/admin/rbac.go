@@ -5,6 +5,7 @@ package admin
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -23,7 +24,6 @@ type rbacPolicy struct {
 // until the new one is installed.
 //
 // A nil policy clears RBAC; the server falls back to legacy single-token auth.
-// Pass Build(...) result from serve.go after config Publish.
 func (s *Server) UpdatePolicy(p *rbac.Policy) {
 	if p == nil {
 		s.policy.Store(nil)
@@ -40,11 +40,78 @@ func (s *Server) currentPolicy() *rbac.Policy {
 	return nil
 }
 
-// authWithRBAC wraps the auth middleware with RBAC-aware identity resolution.
-// When RBAC is enabled in the current policy it stores the authenticated
-// Identity in the request context so downstream handlers can call
-// rbac.IdentityFromContext. When RBAC is disabled or no policy is installed it
-// falls back to legacy single-token auth and stores a synthetic Legacy Identity.
+// requirePermission is the canonical authn+authz middleware for the admin API.
+// It implements the full 4-step stack defined in P3-02:
+//
+//  1. Parse Bearer header.
+//  2. Authenticate against current immutable policy.
+//  3. Store Identity in request context.
+//  4. Authorize required permission → 403 JSON if denied.
+//
+// When RBAC is disabled it falls back to legacy single-token constant-time
+// comparison and synthesises a wildcard Identity so downstream handlers can
+// always use rbac.IdentityFromContext uniformly.
+//
+// Return values:
+//   - 401 + WWW-Authenticate for absent/invalid/expired credentials.
+//   - 403 JSON for authenticated but unauthorized.
+func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pol := s.currentPolicy()
+		bearer := r.Header.Get("Authorization")
+		now := time.Now()
+
+		var id rbac.Identity
+		if pol != nil && pol.Enabled() {
+			// ── RBAC path ─────────────────────────────────────────────────
+			authID, err := pol.Authenticate(bearer, now)
+			if err == rbac.ErrDisabled {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				writeJSON(w, http.StatusForbidden, map[string]string{
+					"error":   "forbidden",
+					"message": "principal is disabled or expired",
+				})
+				return
+			}
+			if err != nil {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if !pol.Authorize(authID, perm) {
+				writeForbidden(w, perm, authID)
+				return
+			}
+			id = authID
+		} else {
+			// ── Legacy single-token path ───────────────────────────────────
+			if s.cfg.Token != "" {
+				const prefix = "Bearer "
+				h := r.Header.Get("Authorization")
+				ok := len(h) > len(prefix) &&
+					subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(s.cfg.Token)) == 1
+				if !ok {
+					w.Header().Set("WWW-Authenticate", "Bearer")
+					http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+					return
+				}
+			}
+			// Legacy mode grants all permissions (wildcard Identity).
+			id = rbac.Identity{
+				Principal:   "shared",
+				Role:        "admin",
+				TokenID:     "(legacy)",
+				Permissions: []rbac.Permission{rbac.Wildcard},
+				Legacy:      true,
+			}
+		}
+		next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), id)))
+	})
+}
+
+// authWithRBAC provides the same authn+authz stack but without a specific
+// permission requirement (used by auth() which delegates to this). Routes
+// that need per-route permission gates use requirePermission instead.
 func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pol := s.currentPolicy()
@@ -60,7 +127,7 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 			}
 			if err != nil {
 				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, `{"error":"unauthorized","message":"invalid or missing credentials"}`, http.StatusUnauthorized)
+				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), id)))
@@ -94,4 +161,19 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 		// No auth configured — allow (loopback-only deployments).
 		next.ServeHTTP(w, r)
 	})
+}
+
+// writeForbidden writes a structured 403 JSON response. It does NOT reveal
+// whether another principal/token exists; it only reports the required
+// permission and the authenticated principal's role.
+func writeForbidden(w http.ResponseWriter, required rbac.Permission, id rbac.Identity) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	body := map[string]string{
+		"error":     "forbidden",
+		"required":  string(required),
+		"principal": id.Principal,
+		"role":      id.Role,
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }

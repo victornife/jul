@@ -14,6 +14,7 @@ import (
 
 	"jul/internal/auth"
 	"jul/internal/config"
+	"jul/internal/rbac"
 	"jul/internal/server"
 	"jul/internal/waf"
 )
@@ -462,6 +463,26 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Object-level admin:manage guard (P3-02): if the candidate touches
+	// admin settings, RBAC roles/principals, audit sink, or plugin-upload
+	// configuration, the caller must hold admin:manage even when the route
+	// only requires config:apply. This prevents a viewer-with-config:apply
+	// from sneaking in a new principal via a raw edit.
+	if s.deps.LoadConfig != nil {
+		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
+			if next, perr := config.Parse(body); perr == nil && next != nil {
+				if candidateRequiresAdminManage(cur, next) {
+					if id, ok := rbacIdentityFromRequest(r); ok && !id.Legacy {
+						if !id.Has(rbac.AdminManage) {
+							writeForbidden(w, rbac.AdminManage, id)
+							return
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Snapshot the current config before applying so the apply is reversible.
 	prev := s.currentRaw()
 
@@ -581,4 +602,48 @@ func adminLockoutChanges(prev, next config.AdminConfig) []string {
 		changes = append(changes, "the web console would be disabled (only the basic config page would remain)")
 	}
 	return changes
+}
+
+// candidateRequiresAdminManage reports whether the proposed config change
+// touches admin/RBAC/audit/plugin-upload settings that require admin:manage
+// beyond the baseline config:apply permission (P3-02 object-level guard).
+func candidateRequiresAdminManage(cur, next *config.Config) bool {
+	if cur == nil || next == nil {
+		return false
+	}
+	ca, na := cur.Admin, next.Admin
+	// Token rotation or admin enabled/disabled.
+	if ca.Token != na.Token || ca.Enabled != na.Enabled || ca.Listen != na.Listen {
+		return true
+	}
+	// RBAC changes.
+	if ca.RBAC.Enabled != na.RBAC.Enabled ||
+		ca.RBAC.DefaultRole != na.RBAC.DefaultRole ||
+		len(ca.RBAC.Principals) != len(na.RBAC.Principals) ||
+		len(ca.RBAC.Roles) != len(na.RBAC.Roles) {
+		return true
+	}
+	// Audit sink changes.
+	if ca.AuditLogFile != na.AuditLogFile {
+		return true
+	}
+	// Plugin upload security changes.
+	if ca.PluginUploadDir != na.PluginUploadDir {
+		return true
+	}
+	if (ca.PluginUploadEnabled == nil) != (na.PluginUploadEnabled == nil) {
+		return true
+	}
+	if ca.PluginUploadEnabled != nil && na.PluginUploadEnabled != nil &&
+		*ca.PluginUploadEnabled != *na.PluginUploadEnabled {
+		return true
+	}
+	return false
+}
+
+// rbacIdentityFromRequest retrieves the rbac.Identity from the request context.
+// Returns false when no identity is present (unauthenticated request or legacy
+// caller that has not yet been migrated to the new stack).
+func rbacIdentityFromRequest(r *http.Request) (rbac.Identity, bool) {
+	return rbac.IdentityFromContext(r.Context())
 }
