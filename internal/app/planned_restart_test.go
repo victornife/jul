@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"jul/internal/config"
@@ -672,10 +671,10 @@ func TestStageDiscardRoundtripRestoresExactBytes(t *testing.T) {
 	_ = liveVersion
 }
 
-// TestStageRestartRejectsSecondCandidate verifies the F-08 single-candidate
-// invariant: a second stage_restart while one is already pending is rejected
-// and the original backup and staged candidate are left untouched.
-func TestStageRestartRejectsSecondCandidate(t *testing.T) {
+// TestStageRestartUpdatesSecondCandidate verifies H-03: a second stage_restart
+// while one is already pending replaces the pending candidate while preserving
+// the original backup and base metadata.
+func TestStageRestartUpdatesSecondCandidate(t *testing.T) {
 	tmp := t.TempDir()
 	configPath := filepath.Join(tmp, "server.toml")
 	seed := []byte("# original\n[global]\nlog_level = \"info\"\n\n[[servers]]\nlisten = \":8080\"\n[[servers.locations]]\nmatch = { type = \"prefix\", path = \"/\" }\nreturn = 200\n")
@@ -705,7 +704,7 @@ func TestStageRestartRejectsSecondCandidate(t *testing.T) {
 		t.Fatalf("first stage: %v", err)
 	}
 
-	// Second stage (update) must be rejected.
+	// Second stage (update) replaces the pending candidate.
 	v2 := config.ProxyTarget("127.0.0.1:9001", ":8080")
 	v2.Global.LogFormat = "json"
 	v2Raw, _ := config.Marshal(v2)
@@ -713,22 +712,22 @@ func TestStageRestartRejectsSecondCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second stage returned error: %v", err)
 	}
-	if res.OK {
-		t.Fatalf("second stage should be rejected under single-candidate invariant")
+	if !res.OK {
+		t.Fatalf("second stage should succeed as an update: %s", res.Message)
 	}
-	if !strings.Contains(res.Message, "already pending") {
-		t.Errorf("message should mention pending candidate, got %q", res.Message)
+	if !res.StagedRestartIsUpdate {
+		t.Error("second stage should be marked as an update")
 	}
 
 	// Backup must still equal the original seed, not v2.
 	backup, _ := os.ReadFile(store.backupPath())
 	if string(backup) != string(seed) {
-		t.Errorf("second stage overwrote original backup\ngot:  %q\nwant: %q", backup, seed)
+		t.Errorf("update overwrote original backup\ngot:  %q\nwant: %q", backup, seed)
 	}
-	// Active config must still be the first candidate.
+	// Active config must now be the updated candidate.
 	onDisk, _ := os.ReadFile(configPath)
-	if string(onDisk) != string(v1Raw) {
-		t.Errorf("active config changed after rejected second stage\ngot:  %q\nwant: %q", onDisk, v1Raw)
+	if string(onDisk) != string(v2Raw) {
+		t.Errorf("active config should be the updated candidate\ngot:  %q\nwant: %q", onDisk, v2Raw)
 	}
 }
 

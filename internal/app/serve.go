@@ -432,18 +432,23 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			metrics.SetPendingRestart(sharedStore.IsPending())
 		}
 
+		coordinator.RefreshState = func() error {
+			if err := sharedStore.Refresh(); err != nil {
+				return err
+			}
+			if deps.PendingRestartCheck != nil && deps.LiveSnapshot != nil {
+				_ = deps.PendingRestartCheck(deps.LiveSnapshot())
+			}
+			return nil
+		}
+
 		deps.ApplyConfigRaw = func(data []byte, mode string) (admin.ConfigApplyResult, error) {
-			// Capture whether a staged restart was already pending BEFORE the apply
-			// so we can emit the correct created/updated metric.
-			wasAlreadyPending := sharedStore.IsPending()
 			res, err := coordinator.ApplyRaw(data, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
-				// With the single-candidate invariant (F-08), a successful
-				// stage_restart can never replace an already-pending candidate.
-				result.StagedRestartIsUpdate = res.OK && wasAlreadyPending
+				result.StagedRestartIsUpdate = res.StagedRestartIsUpdate
 				if res.OK {
-					if wasAlreadyPending {
+					if res.StagedRestartIsUpdate {
 						metrics.ObserveStageRestart("updated")
 					} else {
 						metrics.ObserveStageRestart("created")
@@ -456,13 +461,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return result, err
 		}
 		deps.ApplyConfig = func(c *config.Config, mode string) (admin.ConfigApplyResult, error) {
-			wasAlreadyPending := sharedStore.IsPending()
 			res, err := coordinator.ApplyConfig(c, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
-				result.StagedRestartIsUpdate = res.OK && wasAlreadyPending
+				result.StagedRestartIsUpdate = res.StagedRestartIsUpdate
 				if res.OK {
-					if wasAlreadyPending {
+					if res.StagedRestartIsUpdate {
 						metrics.ObserveStageRestart("updated")
 					} else {
 						metrics.ObserveStageRestart("created")
@@ -483,12 +487,6 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return toAdminConfigApplyResult(res), err
 		}
 		deps.PendingRestart = func() *admin.PendingRestartStatus {
-			// Refresh the authoritative store state from the current disk/runtime
-			// divergence check before exposing it. This guarantees that a hot
-			// apply evaluated by the coordinator sees the same state as the UI.
-			if deps.PendingRestartCheck != nil && deps.LiveSnapshot != nil {
-				_ = deps.PendingRestartCheck(deps.LiveSnapshot())
-			}
 			return coordinator.PlannedRestartStatus()
 		}
 		// Keep legacy closures for external callers during the deprecation
@@ -616,21 +614,22 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 // API response shape. It is a pure projection: no new policy is added.
 func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 	return admin.ConfigApplyResult{
-		OK:                  r.OK,
-		Mode:                string(r.Mode),
-		Version:             r.Version,
-		ServingVersion:      r.ServingVersion,
-		Reload:              r.Reload,
-		PendingRestart:      r.PendingRestart,
-		Message:             r.Message,
-		ValidationErrors:    r.ValidationErrors,
-		RestartRequired:     r.RestartRequired,
-		CanStage:            r.CanStage,
-		Persisted:           r.Persisted,
-		Restored:            r.Restored,
-		RestoreError:        r.RestoreError,
-		FinalDiskVersion:    r.FinalDiskVersion,
-		FinalServingVersion: r.FinalServingVersion,
+		OK:                    r.OK,
+		Mode:                  string(r.Mode),
+		Version:               r.Version,
+		ServingVersion:        r.ServingVersion,
+		Reload:                r.Reload,
+		PendingRestart:        r.PendingRestart,
+		Message:               r.Message,
+		ValidationErrors:      r.ValidationErrors,
+		RestartRequired:       r.RestartRequired,
+		CanStage:              r.CanStage,
+		Persisted:             r.Persisted,
+		Restored:              r.Restored,
+		RestoreError:          r.RestoreError,
+		FinalDiskVersion:      r.FinalDiskVersion,
+		FinalServingVersion:   r.FinalServingVersion,
+		StagedRestartIsUpdate: r.StagedRestartIsUpdate,
 	}
 }
 

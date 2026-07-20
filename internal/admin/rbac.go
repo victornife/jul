@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"jul/internal/config"
@@ -57,6 +58,27 @@ func (s *Server) currentPolicy() *rbac.Policy {
 		return w.p
 	}
 	return nil
+}
+
+// requirePermissionForMethods wraps a handler with per-method authorization.
+// It selects the required rbac.Permission from the supplied map based on the
+// incoming request method. Unlisted methods receive 405 before authentication.
+// This is the method-aware variant used by routes whose catalog entry declares
+// different permissions for different methods (e.g. GET /api/config/raw vs
+// POST /api/config/raw).
+func (s *Server) requirePermissionForMethods(perms map[string]rbac.Permission, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		perm, ok := perms[r.Method]
+		if !ok {
+			allowed := make([]string, 0, len(perms))
+			for m := range perms {
+				allowed = append(allowed, m)
+			}
+			methodNotAllowed(w, strings.Join(allowed, ", "))
+			return
+		}
+		s.requirePermission(perm, next).ServeHTTP(w, r)
+	})
 }
 
 // requirePermission is the canonical authn+authz middleware for the admin API.

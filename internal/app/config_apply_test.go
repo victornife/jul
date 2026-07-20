@@ -968,11 +968,11 @@ func TestCoordinatorStageDiscardRace(t *testing.T) {
 	}
 }
 
-// TestCoordinatorStageRestartRejectsWhilePending verifies the F-08
-// single-candidate invariant: a stage_restart applied while another staged
-// restart is already pending is rejected and leaves the existing candidate in
-// place.
-func TestCoordinatorStageRestartRejectsWhilePending(t *testing.T) {
+// TestCoordinatorStageRestartUpdatesPendingCandidate verifies H-03: a
+// stage_restart applied while another staged restart is already pending
+// replaces the pending candidate while preserving the original serving config
+// as the rollback base.
+func TestCoordinatorStageRestartUpdatesPendingCandidate(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")
 	original := validConfigRaw(t, ":8080")
@@ -1002,24 +1002,50 @@ func TestCoordinatorStageRestartRejectsWhilePending(t *testing.T) {
 	if !res1.OK {
 		t.Fatalf("first stage ok=false: %s", res1.Message)
 	}
+	if res1.StagedRestartIsUpdate {
+		t.Error("first stage should not be marked as an update")
+	}
 	if !store.IsPending() {
 		t.Fatal("store should be pending after first stage")
 	}
 
-	// Second stage must be rejected while the first candidate is pending.
+	// Second stage replaces the pending candidate.
 	updateCandidate := restartRequiredConfigRaw(t, ":8080")
 	res2, err := c.ApplyRaw(updateCandidate, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("second stage error: %v", err)
 	}
-	if res2.OK {
-		t.Fatalf("second stage should be rejected while pending")
+	if !res2.OK {
+		t.Fatalf("second stage should succeed as an update: %s", res2.Message)
 	}
-	if !strings.Contains(res2.Message, "already pending") {
-		t.Errorf("message should mention pending candidate, got %q", res2.Message)
+	if !res2.StagedRestartIsUpdate {
+		t.Error("second stage should be marked as an update")
 	}
 	if !store.IsPending() {
-		t.Error("store should still be pending after rejected second stage")
+		t.Error("store should still be pending after update")
+	}
+
+	// Backup must still equal the original seed, not the update candidate.
+	backup, _ := os.ReadFile(store.backupPath())
+	if string(backup) != string(original) {
+		t.Errorf("update overwrote original backup\ngot:  %q\nwant: %q", backup, original)
+	}
+	// Active config must now be the updated candidate.
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(updateCandidate) {
+		t.Errorf("active config should be the updated candidate\ngot:  %q\nwant: %q", onDisk, updateCandidate)
+	}
+
+	// Marker base metadata must still refer to the original serving version.
+	marker, err := store.LoadMarker()
+	if err != nil {
+		t.Fatalf("load marker: %v", err)
+	}
+	if marker == nil {
+		t.Fatal("marker missing after update")
+	}
+	if marker.BaseRawSHA256 != sha256Hex(original) {
+		t.Error("marker base digest changed after update")
 	}
 }
 

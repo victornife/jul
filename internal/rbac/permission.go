@@ -17,14 +17,19 @@ const (
 	StatusRead Permission = "status:read"
 	// MetricsRead allows scraping the Prometheus /metrics endpoint.
 	MetricsRead Permission = "metrics:read"
-	// ConfigRead allows reading the current and history configuration.
+	// ConfigRead allows reading structured, secret-free configuration projections.
 	ConfigRead Permission = "config:read"
+	// ConfigRaw allows reading the complete raw TOML configuration, which may
+	// contain literal bearer tokens and other secrets. Reserved for admin roles.
+	ConfigRaw Permission = "config:raw"
 	// ConfigWrite allows writing/saving the configuration (without triggering a reload).
 	ConfigWrite Permission = "config:write"
 	// ConfigApply allows applying/reloading or staging a configuration change.
 	ConfigApply Permission = "config:apply"
-	// HistoryRead allows listing and reading configuration history snapshots.
+	// HistoryRead allows listing configuration history metadata.
 	HistoryRead Permission = "history:read"
+	// HistoryReadRaw allows reading the raw TOML body of a historical snapshot.
+	HistoryReadRaw Permission = "history:raw"
 	// HistoryRollback allows rolling back to a previous configuration snapshot.
 	HistoryRollback Permission = "history:rollback"
 	// PluginsUpload allows uploading WASM plugin modules via the admin console.
@@ -53,9 +58,11 @@ var catalog = []Permission{
 	StatusRead,
 	MetricsRead,
 	ConfigRead,
+	ConfigRaw,
 	ConfigWrite,
 	ConfigApply,
 	HistoryRead,
+	HistoryReadRaw,
 	HistoryRollback,
 	PluginsUpload,
 	ObservabilityRead,

@@ -44,12 +44,6 @@ var ErrInconsistentState = errors.New("planned restart state is inconsistent; ma
 // pending.
 var ErrServingVersionChanged = errors.New("live serving version changed since the restart was staged; discard is unsafe")
 
-// ErrStageRestartAlreadyPending is returned by StageManaged when a staged
-// restart is already pending. Only one candidate may be tracked at a time
-// (F-08); the operator must discard or complete the existing candidate before
-// staging another.
-var ErrStageRestartAlreadyPending = errors.New("a staged restart is already pending; discard or complete it before staging a new candidate")
-
 // PlannedRestartMarker is the JSON sidecar written adjacent to the active
 // config file when a staged restart is pending. It is the crash-recovery
 // anchor: any process that starts up with this file present can determine
@@ -208,18 +202,31 @@ func (s *PlannedRestartStore) Stage(raw []byte) {
 	s.stagedAt = time.Now()
 }
 
+// BaseRaw returns the original serving configuration bytes preserved as the
+// rollback base. It is used when computing preflight diffs for a staged update.
+func (s *PlannedRestartStore) BaseRaw() []byte {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.baseRaw
+}
+
 // StageManaged performs a crash-consistent file-backed stage. It is the
 // production staging path. The caller must hold the coordinator mutex before
 // calling this so no concurrent apply can interleave with the staging order.
 //
-// prevRaw are the exact bytes that were on disk BEFORE the candidate was
-// written. The caller reads them before any write and supplies them here so
-// the backup is always the original, pre-stage configuration — never the
-// candidate that was just written to disk.
+// baseRaw are the original serving config bytes that must be preserved as the
+// rollback base. For a fresh stage this is the config on disk before the
+// candidate is written. For a staged update this is the base from the existing
+// marker/backup so the operator can still roll back to the live config that
+// was serving when the first stage happened.
 //
 // Crash-consistent order (§17.4):
 //
-//  1. Atomically write prevRaw to .bak.
+//  1. Atomically write baseRaw to .bak (only on a fresh stage; updates keep the
+//     existing backup).
 //  2. Atomically write marker state "prepared" with base/candidate digests.
 //  3. Caller writes the candidate to the active config path (AFTER this call).
 //  4. Atomically update marker state to "staged".
@@ -229,7 +236,7 @@ func (s *PlannedRestartStore) Stage(raw []byte) {
 // write fails, the marker remains "prepared" so Reconcile can clean up safely.
 //
 // When ConfigPath is empty the method falls back to in-memory Stage.
-func (s *PlannedRestartStore) StageManaged(prevRaw, candidateRaw []byte, marker PlannedRestartMarker) error {
+func (s *PlannedRestartStore) StageManaged(baseRaw, candidateRaw []byte, marker PlannedRestartMarker) error {
 	if s == nil {
 		return nil
 	}
@@ -240,21 +247,32 @@ func (s *PlannedRestartStore) StageManaged(prevRaw, candidateRaw []byte, marker 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Only one staged candidate may be tracked at a time (F-08). If a staged
-	// restart is already pending, the operator must discard or complete it
-	// before staging another.
-	if s.pending {
-		return ErrStageRestartAlreadyPending
-	}
+	// Load any existing marker to detect a staged update. A staged update
+	// preserves the original base metadata and backup so the operator can
+	// still roll back to the live config that was serving when the first
+	// stage happened.
+	existing, _ := s.loadMarkerLocked()
+	isUpdate := existing != nil && existing.State == plannedRestartStateStaged
 
-	// Write the original pre-candidate bytes as the backup. prevRaw was captured
-	// by the coordinator BEFORE writing the candidate, so it always contains
-	// the original configuration.
-	if err := s.writeBackupLocked(prevRaw); err != nil {
-		return fmt.Errorf("planned-restart stage: write backup: %w", err)
+	if isUpdate {
+		// Preserve the original base metadata and backup.
+		marker.BaseRawSHA256 = existing.BaseRawSHA256
+		marker.BaseCanonicalVersion = existing.BaseCanonicalVersion
+		marker.BaseServingVersion = existing.BaseServingVersion
+		if s.baseRaw == nil {
+			// Load base raw from backup if in-memory cache was lost.
+			if base, err := os.ReadFile(s.backupPath()); err == nil {
+				s.baseRaw = base
+			}
+		}
+	} else {
+		// Fresh stage: baseRaw is the original serving config on disk.
+		if err := s.writeBackupLocked(baseRaw); err != nil {
+			return fmt.Errorf("planned-restart stage: write backup: %w", err)
+		}
+		marker.BaseRawSHA256 = sha256Hex(baseRaw)
+		s.baseRaw = baseRaw
 	}
-	marker.BaseRawSHA256 = sha256Hex(prevRaw)
-	s.baseRaw = prevRaw
 
 	// Step 2: write marker in "prepared" state before the candidate is written.
 	// If the process crashes between here and when the caller writes the
@@ -270,6 +288,114 @@ func (s *PlannedRestartStore) StageManaged(prevRaw, candidateRaw []byte, marker 
 	// Step 3 (write candidate to disk) is performed by the caller AFTER this
 	// function returns so that watcher suppression is registered before the
 	// rename becomes visible.
+	return nil
+}
+
+// Refresh reloads the marker from disk and reconciles it with the current
+// disk content, updating the in-memory state. It does NOT check runtime
+// divergence; call SetExternalDivergence separately for that. Failures mark
+// the store inconsistent (fail-closed) and return an error.
+func (s *PlannedRestartStore) Refresh() error {
+	if s == nil || s.ConfigPath == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	marker, err := s.loadMarkerLocked()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No marker file: clear managed state. External divergence is set
+			// separately by the coordinator's RefreshState hook.
+			s.pending = false
+			s.raw = nil
+			s.baseRaw = nil
+			s.inconsistent = false
+			return nil
+		}
+		s.inconsistent = true
+		return fmt.Errorf("planned-restart refresh: load marker: %w", err)
+	}
+	if marker == nil {
+		s.pending = false
+		s.raw = nil
+		s.baseRaw = nil
+		s.inconsistent = false
+		return nil
+	}
+
+	diskBytes, err := os.ReadFile(s.ConfigPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.inconsistent = true
+		return fmt.Errorf("planned-restart refresh: read config: %w", err)
+	}
+	diskDigest := sha256Hex(diskBytes)
+
+	switch marker.State {
+	case plannedRestartStatePrepared:
+		switch diskDigest {
+		case marker.BaseRawSHA256:
+			// Write never completed; config is the original base. Remove marker
+			// and backup: the process is starting clean.
+			_ = os.Remove(s.markerPath())
+			_ = os.Remove(s.backupPath())
+			s.pending = false
+			s.raw = nil
+			s.baseRaw = nil
+			s.inconsistent = false
+		case marker.StagedRawSHA256:
+			// Write completed but the state transition to "staged" was lost.
+			// Promote the marker to "staged" so subsequent operations see a
+			// consistent state.
+			marker.State = plannedRestartStateStaged
+			if werr := s.writeMarkerLocked(*marker); werr != nil {
+				s.inconsistent = true
+				return fmt.Errorf("planned-restart refresh: promote to staged: %w", werr)
+			}
+			s.pending = true
+			if s.baseRaw == nil {
+				if base, rerr := os.ReadFile(s.backupPath()); rerr == nil {
+					s.baseRaw = base
+				}
+			}
+			s.stagedAt = marker.StagedAt
+			s.inconsistent = false
+		default:
+			s.pending = false
+			s.raw = nil
+			s.baseRaw = nil
+			s.inconsistent = true
+			return fmt.Errorf("planned-restart refresh: inconsistent state: disk digest %s matches neither base %s nor staged %s",
+				diskDigest, marker.BaseRawSHA256, marker.StagedRawSHA256)
+		}
+
+	case plannedRestartStateStaged:
+		if diskDigest == marker.StagedRawSHA256 {
+			s.pending = true
+			if s.baseRaw == nil {
+				if base, rerr := os.ReadFile(s.backupPath()); rerr == nil {
+					s.baseRaw = base
+				}
+			}
+			s.stagedAt = marker.StagedAt
+			s.inconsistent = false
+		} else {
+			s.pending = false
+			s.raw = nil
+			s.baseRaw = nil
+			s.inconsistent = true
+			return fmt.Errorf("planned-restart refresh: staged marker present but disk digest %s does not match staged digest %s",
+				diskDigest, marker.StagedRawSHA256)
+		}
+
+	default:
+		s.pending = false
+		s.raw = nil
+		s.baseRaw = nil
+		s.inconsistent = true
+		return fmt.Errorf("planned-restart refresh: unknown marker state %q", marker.State)
+	}
+
 	return nil
 }
 

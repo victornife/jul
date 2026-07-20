@@ -10,16 +10,23 @@ import (
 )
 
 // RouteSpec declares the authorization metadata for a single admin route.
-// Every non-public route MUST have a Permission so the guard test can assert
-// completeness — there is no implicit default.
+// Every non-public route MUST declare permissions for every method it accepts
+// so the guard test can assert completeness — there is no implicit default.
 type RouteSpec struct {
 	// Pattern is the mux path pattern registered with http.ServeMux.
 	Pattern string
 	// Methods is the set of HTTP methods this route accepts. Used by the guard
 	// test to assert that the handler only accepts declared methods.
 	Methods []string
-	// Permission is the rbac.Permission required to access this route.
-	// Exactly one of Permission or Public must be set.
+	// Permissions maps each accepted method to the rbac.Permission required to
+	// invoke it. A nil map is treated as a single Permission applied to every
+	// method, preserving compatibility while the catalog is migrated.
+	//
+	// Exactly one of Permissions or Public must be set, and every method in
+	// Methods must have a corresponding entry in Permissions.
+	Permissions map[string]rbac.Permission
+	// Permission is the legacy single permission applied to all Methods when
+	// Permissions is nil. New entries should use Permissions.
 	Permission rbac.Permission
 	// Public, when true, skips authentication entirely. Only use this for
 	// truly public endpoints (health, readiness, and console static shell).
@@ -157,24 +164,36 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleEvents) },
 	},
 
-	// ── Config read (config:read) ─────────────────────────────────────────────
+	// ── Config read (config:read / config:raw) ───────────────────────────────
+	// /api/config returns the raw TOML body plus metadata; the raw body may
+	// contain literal secrets, so the entire endpoint requires config:raw.
+	// Secret-free structured projections are available through /api/routes,
+	// /api/apps, /api/security, etc. under status:read/config:read.
 	{
 		Pattern:    "/api/config",
 		Methods:    []string{http.MethodGet},
-		Permission: rbac.ConfigRead,
+		Permission: rbac.ConfigRaw,
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigGet) },
 	},
 	{
-		Pattern:    "/api/config/raw",
-		Methods:    []string{http.MethodGet},
-		Permission: rbac.ConfigRead,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigRaw) },
+		Pattern: "/api/config/raw",
+		Methods: []string{http.MethodGet, http.MethodPost, http.MethodPut},
+		Permissions: map[string]rbac.Permission{
+			http.MethodGet:  rbac.ConfigRaw,
+			http.MethodPost: rbac.ConfigApply,
+			http.MethodPut:  rbac.ConfigApply,
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigRaw) },
 	},
 	{
-		Pattern:    "/api/config/settings",
-		Methods:    []string{http.MethodGet},
-		Permission: rbac.ConfigRead,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigSettings) },
+		Pattern: "/api/config/settings",
+		Methods: []string{http.MethodGet, http.MethodPost, http.MethodPut},
+		Permissions: map[string]rbac.Permission{
+			http.MethodGet:  rbac.ConfigRead,
+			http.MethodPost: rbac.ConfigApply,
+			http.MethodPut:  rbac.ConfigApply,
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigSettings) },
 	},
 	{
 		Pattern:    "/api/config/pending-restart",
@@ -189,10 +208,12 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigHistoryList) },
 	},
 	{
-		Pattern:    "/api/config/history/{id}",
-		Methods:    []string{http.MethodGet},
-		Permission: rbac.HistoryRead,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigHistoryGet) },
+		Pattern: "/api/config/history/{id}",
+		Methods: []string{http.MethodGet},
+		Permissions: map[string]rbac.Permission{
+			http.MethodGet: rbac.HistoryReadRaw,
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigHistoryGet) },
 	},
 
 	// ── Config write/preview (config:write) ───────────────────────────────────
@@ -273,10 +294,14 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleHistoryList) },
 	},
 	{
-		Pattern:    "/api/history/get",
-		Methods:    []string{http.MethodGet, http.MethodPost},
-		Permission: rbac.HistoryRead,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleHistoryGet) },
+		Pattern: "/api/history/get",
+		Methods: []string{http.MethodGet, http.MethodPost},
+		Permissions: map[string]rbac.Permission{
+			// Both GET and POST retrieve the raw TOML body of a snapshot.
+			http.MethodGet:  rbac.HistoryReadRaw,
+			http.MethodPost: rbac.HistoryReadRaw,
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleHistoryGet) },
 	},
 	{
 		Pattern:    "/api/history/rollback",

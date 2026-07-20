@@ -54,6 +54,12 @@ type ApplyResult struct {
 	RestoreError      string // non-empty if restoration was attempted and failed
 	FinalDiskVersion  string // canonical version of the on-disk file after apply
 	FinalServingVersion string // canonical version of the live serving config (may lag)
+
+	// StagedRestartIsUpdate is true when a stage_restart apply replaced an
+	// already-pending staged candidate. It is computed inside ApplyRaw (after
+	// applyMu is acquired) so concurrent stage applies cannot misclassify the
+	// first stage as an update.
+	StagedRestartIsUpdate bool
 }
 
 // ApplyInFlightState tracks the current managed apply transaction. It is used
@@ -84,6 +90,12 @@ type ConfigApplyCoordinator struct {
 	WatchDigest    *atomic.Pointer[[32]byte]
 	PlannedRestart *PlannedRestartStore
 
+	// RefreshState is called while applyMu is held before any state-dependent
+	// decision. It must reconcile the planned-restart marker with disk and
+	// update any runtime/disk divergence flags. Failures are treated as
+	// inconsistent (fail-closed).
+	RefreshState func() error
+
 	mu      sync.Mutex
 	applyMu sync.Mutex
 	seq     atomic.Uint64
@@ -104,6 +116,18 @@ func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyRes
 
 	if mode == "" {
 		mode = ApplyHot
+	}
+
+	// H-02: refresh authoritative planned-restart state from disk/runtime
+	// before any state-dependent decision. Failures mark the store inconsistent
+	// and block the operation.
+	if err := c.refreshStateLocked(); err != nil {
+		return ApplyResult{
+			OK:             false,
+			Mode:           mode,
+			Message:        "Planned-restart state refresh failed: " + err.Error(),
+			PendingRestart: c.plannedRestartStatus(),
+		}, nil
 	}
 
 	// Refuse to start a new managed transaction while the previous one's
@@ -145,19 +169,15 @@ func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyRes
 		}
 	}
 
-	// Block a new stage_restart while any blocking planned-restart state is
-	// present: an already-pending managed staged restart, external unmanaged
-	// divergence, or a post-reconciliation inconsistency. This enforces the
-	// single-candidate invariant (F-08) and prevents staging from silently
-	// adopting an externally-owned divergence (F-04).
+	// Block a new stage_restart when the planned-restart state would make it
+	// unsafe: external unmanaged divergence or post-reconciliation
+	// inconsistency. A managed_staged state is allowed and treated as a staged
+	// update (H-03).
 	if mode == ApplyStageRestart && c.PlannedRestart != nil {
 		st := c.PlannedRestart.State()
-		if st.State != PlannedRestartStateNone {
-			msg := "A staged restart is already pending; discard or complete it before staging a new candidate."
-			switch st.State {
-			case PlannedRestartStateExternalDivergence:
-				msg = "Cannot stage a restart while external disk/runtime divergence is present."
-			case PlannedRestartStateInconsistent:
+		if st.State == PlannedRestartStateExternalDivergence || st.State == PlannedRestartStateInconsistent {
+			msg := "Cannot stage a restart while external disk/runtime divergence is present."
+			if st.State == PlannedRestartStateInconsistent {
 				msg = "Cannot stage a restart while planned-restart state is inconsistent."
 			}
 			return ApplyResult{
@@ -238,6 +258,21 @@ func (c *ConfigApplyCoordinator) ApplyConfig(cfg *config.Config, mode ApplyMode)
 // marker consistency, disk digest, and live serving version before restoring
 // the backup. On success the watcher echo of the restoration is suppressed.
 func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
+	// Serialize with applyMu so refresh, discard, and apply cannot interleave.
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+
+	// H-02: refresh authoritative state before deciding whether a discard is
+	// safe and what the marker contains.
+	if err := c.refreshStateLocked(); err != nil {
+		return ApplyResult{
+			OK:             false,
+			Mode:           ApplyHot,
+			Message:        "Planned-restart state refresh failed: " + err.Error(),
+			PendingRestart: c.plannedRestartStatus(),
+		}, nil
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -288,15 +323,28 @@ func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
 	}, nil
 }
 
+// refreshStateLocked calls the RefreshState hook if configured. It must be
+// called while applyMu is held. Errors are logged and returned so the caller
+// can fail closed.
+func (c *ConfigApplyCoordinator) refreshStateLocked() error {
+	if c.RefreshState == nil {
+		return nil
+	}
+	return c.RefreshState()
+}
+
 func (c *ConfigApplyCoordinator) nextID() string {
 	return fmt.Sprintf("rl_%d", c.seq.Add(1))
 }
 
 // PlannedRestartStatus returns the current managed planned-restart status as
 // an admin.PendingRestartStatus, or nil when no staged restart is pending.
-// It is safe to call without holding the coordinator mutex because it delegates
-// to the PlannedRestartStore which guards its own state.
+// It refreshes authoritative state under applyMu before exposing the status so
+// status responses never return stale state (H-02).
 func (c *ConfigApplyCoordinator) PlannedRestartStatus() *admin.PendingRestartStatus {
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+	_ = c.refreshStateLocked() // fail-closed: errors leave inconsistent flag set
 	return c.plannedRestartStatus()
 }
 
@@ -310,13 +358,14 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 // writes the sidecar backup+marker, then writes the candidate atomically,
 // and returns an ApplyResult without submitting a live reload.
 //
-// Only one staged candidate may be in flight at a time (F-08); ApplyRaw blocks
-// subsequent stage_restart requests until the pending candidate is discarded
-// or the process restarts.
+// If a managed staged restart is already pending, this path replaces it with
+// the new candidate while preserving the original serving config as the
+// rollback base (H-03 staged update).
 //
 // Correct crash-consistent ordering (C-01 fix):
-//  1. prevRaw captured in ApplyRaw before any write (passed in).
-//  2. StageManaged writes .bak (prevRaw) and prepared marker — no candidate on disk yet.
+//  1. baseRaw is the original serving config (from disk for fresh stage, from
+//     the existing marker/backup for a staged update).
+//  2. StageManaged writes .bak (fresh stage only) and prepared marker.
 //  3. atomicfile.Write writes the candidate.
 //  4. PromoteToStaged promotes the marker to "staged" only after the candidate write succeeds.
 func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, data, prevRaw []byte) (ApplyResult, error) {
@@ -344,13 +393,34 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 		liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
 	}
 
-	// The single-candidate invariant is enforced in ApplyRaw before this path is
-	// reached, so there is never an update to an already-pending stage here.
-	// The diff is computed against the live/pre-stage config (prevCfg).
+	// H-03: determine whether this is a staged update. If a managed staged
+	// restart is already pending, the new candidate replaces it but the
+	// original serving config remains the rollback base and the diff base.
+	isUpdate := c.PlannedRestart != nil && c.PlannedRestart.IsPending()
+
+	var baseRaw []byte
+	var diffBaseCfg *config.Config
+	if isUpdate {
+		baseRaw = c.PlannedRestart.BaseRaw()
+		if len(baseRaw) > 0 {
+			if raw, err := config.Parse(baseRaw); err == nil {
+				if cand, err := config.NewCandidate(raw); err == nil {
+					diffBaseCfg = cand.Effective
+				} else {
+					diffBaseCfg = raw
+				}
+			}
+		}
+	} else {
+		baseRaw = prevRaw
+		diffBaseCfg = prevCfg
+	}
 
 	// Run the shared preflight gates in stage-restart mode so restart-required
-	// classification is retained rather than rejected.
-	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightStageRestart)
+	// classification is retained rather than rejected. For updates the diff is
+	// computed against the original serving config, not the previously staged
+	// candidate.
+	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, diffBaseCfg, PreflightStageRestart)
 	if err != nil {
 		return ApplyResult{
 			OK:               false,
@@ -376,7 +446,8 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	}
 
 	// Build the marker. BaseCanonicalVersion and BaseServingVersion describe the
-	// originally-serving config, not the candidate.
+	// originally-serving config, not the candidate. For updates StageManaged
+	// preserves the existing base fields; for fresh stages it uses these values.
 	marker := PlannedRestartMarker{
 		BaseServingVersion:   liveVersion,
 		BaseCanonicalVersion: liveVersion, // version of the live config, not the candidate
@@ -385,11 +456,11 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 		PendingSubsystems:    subsystems,
 	}
 
-	// Step 1+2: Write backup (prevRaw) and prepared marker BEFORE writing the
-	// candidate to disk. StageManaged uses prevRaw for the .bak file so it
-	// always contains the pre-stage original configuration, not the candidate.
+	// Step 1+2: Write backup (baseRaw, fresh stage only) and prepared marker
+	// BEFORE writing the candidate to disk. StageManaged preserves the existing
+	// backup and base metadata when this is an update.
 	if c.PlannedRestart != nil {
-		if err := c.PlannedRestart.StageManaged(prevRaw, data, marker); err != nil {
+		if err := c.PlannedRestart.StageManaged(baseRaw, data, marker); err != nil {
 			// Sidecar write failed; nothing has changed on disk yet. Return error.
 			return ApplyResult{
 				OK:      false,
@@ -430,20 +501,18 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	}
 
 	msg := "Configuration staged for the next process restart; the live runtime is unchanged."
+	if isUpdate {
+		msg = "Staged configuration updated for the next process restart; the live runtime is unchanged."
+	}
 	return ApplyResult{
-		OK:             true,
-		Mode:           ApplyStageRestart,
-		Version:        desiredVersion,
-		ServingVersion: liveVersion,
-		PendingRestart: c.plannedRestartStatus(),
-		Message:        msg,
+		OK:                    true,
+		Mode:                  ApplyStageRestart,
+		Version:               desiredVersion,
+		ServingVersion:        liveVersion,
+		PendingRestart:        c.plannedRestartStatus(),
+		Message:               msg,
+		StagedRestartIsUpdate: isUpdate,
 	}, nil
-}
-
-// errIsStageRestartAlreadyPending reports whether err is the sentinel returned
-// when a stage_restart is attempted while one is already pending.
-func errIsStageRestartAlreadyPending(err error) bool {
-	return errors.Is(err, ErrStageRestartAlreadyPending)
 }
 
 // subsystemNames extracts unique subsystem names from a lifecycle ChangeSet.

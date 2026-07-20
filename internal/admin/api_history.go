@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"jul/internal/config"
 )
 
 // This file holds the configuration-history and rollback handlers, split out of
@@ -58,6 +60,9 @@ func (s *Server) handleHistoryGet(w http.ResponseWriter, r *http.Request) {
 // here so the serialization can never be applied to one endpoint but not the
 // other (Finding REG-1). It returns the HTTP status to send plus a non-nil error
 // on failure.
+//
+// The caller must already have enforced the admin-subtree guard; this function
+// performs no authorization itself.
 func (s *Server) rollbackToSnapshot(id string) (int, error) {
 	raw, err := s.hist.get(id)
 	if err != nil {
@@ -98,6 +103,9 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !s.authorizeRollback(w, r, req.ID) {
 		return
 	}
 	code, err := s.rollbackToSnapshot(req.ID)
@@ -190,6 +198,9 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if !s.authorizeRollback(w, r, req.ID) {
+		return
+	}
 	code, err := s.rollbackToSnapshot(req.ID)
 	if err != nil {
 		if code == http.StatusBadRequest {
@@ -202,4 +213,24 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 
 	s.emit("config", "rollback", "warning", "Configuration rolled back to a previous snapshot.")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled back", "id": req.ID})
+}
+
+// authorizeRollback checks whether the request identity may roll back to the
+// named snapshot. Ordinary snapshot content requires only history:rollback;
+// if the snapshot changes anything under [admin], admin:manage is also required.
+func (s *Server) authorizeRollback(w http.ResponseWriter, r *http.Request, id string) bool {
+	if s.deps.LoadConfig == nil {
+		return true
+	}
+	raw, err := s.hist.get(id)
+	if err != nil {
+		// Snapshot not found; let the handler return 404.
+		return true
+	}
+	next, err := config.Parse(raw)
+	if err != nil {
+		// Invalid snapshot; let the write path report the validation failure.
+		return true
+	}
+	return s.requireAdminManageForCandidate(w, r, "config.rollback", next)
 }

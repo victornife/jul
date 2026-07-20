@@ -555,6 +555,14 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// Object-level guard: even though the route now requires config:apply for
+	// mutations, a caller with config:apply still must hold admin:manage to
+	// change anything under [admin].
+	if next, perr := config.Parse(body); perr == nil && next != nil {
+		if !s.authorizeConfigCandidate(w, r, "config.raw", next) {
+			return
+		}
+	}
 	// Serialize with the apply path so concurrent writes cannot interleave (P2-12).
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
@@ -618,11 +626,10 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// Serialize with the apply path so concurrent writes cannot interleave (P2-12).
+	// Load the current config inside the lock so the read-modify-write is atomic.
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	// Load the current config inside the lock so the read-modify-write is atomic.
 	cfg, err := s.deps.LoadConfig()
 	if err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "cannot load current config: "+err.Error())
@@ -651,6 +658,11 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	if err := applySettings(cfg, in); err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: invalid settings")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	// Object-level guard: the settings form can mutate [admin].listen, so any
+	// change in the [admin] subtree requires admin:manage.
+	if !s.authorizeConfigCandidate(w, r, "config.settings", cfg) {
 		return
 	}
 	prev := s.currentRaw()

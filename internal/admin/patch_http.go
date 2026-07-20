@@ -314,7 +314,12 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		}
 		summaries = append(summaries, summary)
 	}
-
+	// Object-level guard: a structured patch may target [admin] fields (e.g.
+	// rate limits via future ops). Any change in the [admin] subtree requires
+	// admin:manage in addition to config:apply.
+	if !s.authorizeConfigCandidate(w, r, "config.patch", cfg) {
+		return
+	}
 	// Snapshot the prior config, then persist through the authoritative apply
 	// preflight. A rejection here means nothing was written, preserving the
 	// all-or-nothing guarantee.

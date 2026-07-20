@@ -51,6 +51,22 @@ var predefinedRoles = map[string][]Permission{
 	},
 }
 
+// RoleHas reports whether the named predefined role (or the wildcard admin
+// role) is granted permission p. It is a convenience for authorization checks
+// that need to know the role-level default without building a full Policy.
+func RoleHas(role string, p Permission) bool {
+	perms, ok := predefinedRoles[role]
+	if !ok {
+		return false
+	}
+	for _, g := range perms {
+		if Matches(g, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsPredefined reports whether name is a built-in role that cannot be
 // redefined by operators.
 func IsPredefined(name string) bool {

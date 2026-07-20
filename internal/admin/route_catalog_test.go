@@ -17,15 +17,15 @@ import (
 // ── Catalog completeness guards ───────────────────────────────────────────────
 
 // TestCatalogNoRouteDefaultsToPublic fails if any new non-public route is
-// added to the catalog without a Permission. Every non-public route MUST have
-// a permission declared; there is no implicit default-allow.
+// added to the catalog without permissions. Every non-public route MUST have
+// either Permissions or Permission declared; there is no implicit default-allow.
 func TestCatalogNoRouteDefaultsToPublic(t *testing.T) {
 	for _, spec := range Catalog {
 		if spec.Public {
 			continue // public routes don't need a permission
 		}
-		if spec.Permission == "" {
-			t.Errorf("route %q is non-public but has no Permission declared; add a permission to route_catalog.go", spec.Pattern)
+		if spec.Permission == "" && len(spec.Permissions) == 0 {
+			t.Errorf("route %q is non-public but has no Permission/Permissions declared; add permissions to route_catalog.go", spec.Pattern)
 		}
 	}
 }
@@ -34,11 +34,16 @@ func TestCatalogNoRouteDefaultsToPublic(t *testing.T) {
 // that is not in the rbac package's permission catalog.
 func TestCatalogPermissionsInCatalog(t *testing.T) {
 	for _, spec := range Catalog {
-		if spec.Public || spec.Permission == "" {
+		if spec.Public {
 			continue
 		}
-		if !rbac.Known(spec.Permission) {
+		if spec.Permission != "" && !rbac.Known(spec.Permission) {
 			t.Errorf("route %q uses permission %q which is not in the rbac catalog", spec.Pattern, spec.Permission)
+		}
+		for _, p := range spec.Permissions {
+			if !rbac.Known(p) {
+				t.Errorf("route %q uses permission %q which is not in the rbac catalog", spec.Pattern, p)
+			}
 		}
 	}
 }
@@ -95,9 +100,73 @@ func TestCatalogPlannedRestartHasPermissions(t *testing.T) {
 		if spec.Public {
 			t.Errorf("planned-restart route %q must not be public", pattern)
 		}
-		if spec.Permission != perm {
-			t.Errorf("planned-restart route %q: got permission %q, want %q", pattern, spec.Permission, perm)
+		got := spec.Permission
+		if len(spec.Permissions) > 0 {
+			got = spec.Permissions[http.MethodGet]
+			if got == "" {
+				got = spec.Permissions[http.MethodPost]
+			}
 		}
+		if got != perm {
+			t.Errorf("planned-restart route %q: got permission %q, want %q", pattern, got, perm)
+		}
+	}
+}
+
+// TestCatalogMethodPermissionsCoverAllMethods fails if a route declares a
+// per-method permission map that is missing any of its advertised methods.
+func TestCatalogMethodPermissionsCoverAllMethods(t *testing.T) {
+	for _, spec := range Catalog {
+		if spec.Public || len(spec.Permissions) == 0 {
+			continue
+		}
+		for _, m := range spec.Methods {
+			if _, ok := spec.Permissions[m]; !ok {
+				t.Errorf("route %q advertises method %q but has no Permissions entry for it", spec.Pattern, m)
+			}
+		}
+	}
+}
+
+// TestCatalogHandlerMethodsMatchCatalog fails if a handler accepts methods that
+// are not declared in the catalog for that route.
+func TestCatalogHandlerMethodsMatchCatalog(t *testing.T) {
+	byPattern := make(map[string]RouteSpec, len(Catalog))
+	for _, spec := range Catalog {
+		byPattern[spec.Pattern] = spec
+	}
+
+	tests := []struct {
+		pattern string
+		method  string
+		want    int // expected status when method is not in catalog
+	}{
+		{"/api/config/raw", http.MethodDelete, http.StatusMethodNotAllowed},
+		{"/api/config/settings", http.MethodDelete, http.StatusMethodNotAllowed},
+		{"/api/config/history/{id}", http.MethodPost, http.StatusMethodNotAllowed},
+		{"/api/history/get", http.MethodPut, http.StatusMethodNotAllowed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pattern+"_"+tt.method, func(t *testing.T) {
+			spec, ok := byPattern[tt.pattern]
+			if !ok {
+				t.Fatalf("route %q missing from catalog", tt.pattern)
+			}
+			if !spec.Public {
+				// To reach the handler we need a valid legacy token; the legacy
+				// path grants all permissions so authorization will pass once the
+				// method is allowed.
+				s := &Server{cfg: minimalAdminCfgWithToken("secret-test-token-32-chars-padding")}
+				req := httptest.NewRequest(tt.method, tt.pattern, nil)
+				req.Header.Set("Authorization", "Bearer secret-test-token-32-chars-padding")
+				rr := httptest.NewRecorder()
+				s.routes().ServeHTTP(rr, req)
+				if rr.Code != tt.want {
+					t.Errorf("got status %d, want %d", rr.Code, tt.want)
+				}
+			}
+		})
 	}
 }
 

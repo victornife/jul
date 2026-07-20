@@ -6,14 +6,17 @@ package admin
 import "net/http"
 
 // routes builds the admin mux from the authoritative Catalog. Every entry is
-// either public (no auth) or wrapped with requirePermission so authorization
-// is explicit and complete — there is no implicit default access level.
+// either public (no auth) or wrapped with method-aware authorization so
+// authorization is explicit and complete — there is no implicit default access
+// level.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	for _, spec := range Catalog {
 		var h http.Handler
 		if spec.Public {
 			h = spec.Handler(s)
+		} else if spec.Permissions != nil {
+			h = s.requirePermissionForMethods(spec.Permissions, spec.Handler(s))
 		} else {
 			h = s.requirePermission(spec.Permission, spec.Handler(s))
 		}

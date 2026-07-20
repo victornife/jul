@@ -466,23 +466,11 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Object-level admin:manage guard (P3-02): if the candidate touches
-	// admin settings, RBAC roles/principals, audit sink, or plugin-upload
-	// configuration, the caller must hold admin:manage even when the route
-	// only requires config:apply. This prevents a viewer-with-config:apply
-	// from sneaking in a new principal via a raw edit.
-	if s.deps.LoadConfig != nil {
-		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
-			if next, perr := config.Parse(body); perr == nil && next != nil {
-				if candidateRequiresAdminManage(cur, next) {
-					if id, ok := rbacIdentityFromRequest(r); ok && !id.Legacy {
-						if !id.Has(rbac.AdminManage) {
-							writeForbidden(w, rbac.AdminManage, id)
-							return
-						}
-					}
-				}
-			}
+	// Object-level admin:manage guard (P3-02 / Wave 1): any change in the
+	// [admin] subtree requires admin:manage in addition to config:apply.
+	if next, perr := config.Parse(body); perr == nil && next != nil {
+		if !s.authorizeConfigCandidate(w, r, "config.apply", next) {
+			return
 		}
 	}
 
@@ -540,9 +528,8 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		// so we get the correct created/updated distinction without re-reading
 		// disk state post-apply (M-04 fix).
 		if mode == "stage_restart" {
-			// With the F-08 single-candidate invariant, a successful stage_restart
-			// cannot replace an already-pending candidate. StagedRestartIsUpdate
-			// is kept for compatibility but is always false on success.
+			// StagedRestartIsUpdate is set by the coordinator based on whether a
+			// managed staged restart was already pending when the apply ran (H-03).
 			if result.StagedRestartIsUpdate {
 				s.recordAudit(r, "config.stage_restart.updated", "config", "success",
 					"staged configuration updated for next process restart")
@@ -618,42 +605,17 @@ func adminLockoutChanges(prev, next config.AdminConfig) []string {
 }
 
 // candidateRequiresAdminManage reports whether the proposed config change
-// touches admin/RBAC/audit/plugin-upload settings that require admin:manage
-// beyond the baseline config:apply permission (P3-02 object-level guard).
+// touches any setting under the [admin] subtree.
+//
+// Deprecated: use adminConfigEqual directly. This function is retained only
+// for compatibility with tests that assert the old allow-list behavior; the
+// Wave 1 object-level guard now treats any [admin] difference as requiring
+// admin:manage.
 func candidateRequiresAdminManage(cur, next *config.Config) bool {
 	if cur == nil || next == nil {
 		return false
 	}
-	ca, na := cur.Admin, next.Admin
-	// Token rotation or admin enabled/disabled.
-	if ca.Token != na.Token || ca.Enabled != na.Enabled || ca.Listen != na.Listen {
-		return true
-	}
-	// RBAC changes — compare content, not just list lengths, so a same-count
-	// mutation (role escalation, token swap, disabled flip, permission edit)
-	// cannot bypass the admin:manage guard (F-01).
-	if ca.RBAC.Enabled != na.RBAC.Enabled ||
-		ca.RBAC.DefaultRole != na.RBAC.DefaultRole ||
-		!rbacPrincipalsEqual(ca.RBAC.Principals, na.RBAC.Principals) ||
-		!rbacRolesEqual(ca.RBAC.Roles, na.RBAC.Roles) {
-		return true
-	}
-	// Audit sink changes.
-	if ca.AuditLogFile != na.AuditLogFile {
-		return true
-	}
-	// Plugin upload security changes.
-	if ca.PluginUploadDir != na.PluginUploadDir {
-		return true
-	}
-	if (ca.PluginUploadEnabled == nil) != (na.PluginUploadEnabled == nil) {
-		return true
-	}
-	if ca.PluginUploadEnabled != nil && na.PluginUploadEnabled != nil &&
-		*ca.PluginUploadEnabled != *na.PluginUploadEnabled {
-		return true
-	}
-	return false
+	return !adminConfigEqual(cur.Admin, next.Admin)
 }
 
 // rbacPrincipalsEqual reports whether two principal lists are equivalent
@@ -729,4 +691,123 @@ func stringSlicesEqualUnordered(a, b []string) bool {
 // caller that has not yet been migrated to the new stack).
 func rbacIdentityFromRequest(r *http.Request) (rbac.Identity, bool) {
 	return rbac.IdentityFromContext(r.Context())
+}
+
+// authorizeConfigCandidate enforces the authorization required to mutate the
+// running configuration to next. It is the single chokepoint for the object-
+// level guard (P3-02 / Wave 1):
+//
+//   - any configuration mutation requires config:apply;
+//   - any change in the [admin] subtree additionally requires admin:manage.
+//
+// The function writes a 403 and returns false when the identity lacks a
+// required permission. Callers must return immediately on false.
+func (s *Server) authorizeConfigCandidate(w http.ResponseWriter, r *http.Request, action string, next *config.Config) bool {
+	id, ok := rbacIdentityFromRequest(r)
+	if ok && !id.Legacy && !id.Has(rbac.ConfigApply) {
+		s.recordAudit(r, action, "config", "failure", "rejected: lacks config:apply")
+		writeForbidden(w, rbac.ConfigApply, id)
+		return false
+	}
+	return s.requireAdminManageForCandidate(w, r, action, next)
+}
+
+// requireAdminManageForCandidate enforces only the admin-subtree guard. It is
+// used by write paths whose route-level permission is not config:apply (e.g.
+// history:rollback) but whose candidate may still affect admin settings.
+func (s *Server) requireAdminManageForCandidate(w http.ResponseWriter, r *http.Request, action string, next *config.Config) bool {
+	if s.deps.LoadConfig == nil || next == nil {
+		return true
+	}
+	cur, err := s.deps.LoadConfig()
+	if err != nil || cur == nil {
+		return true
+	}
+	if adminConfigEqual(cur.Admin, next.Admin) {
+		return true
+	}
+	id, ok := rbacIdentityFromRequest(r)
+	if !ok {
+		s.recordAudit(r, action, "config", "failure", "rejected: admin change without identity")
+		writeForbidden(w, rbac.AdminManage, rbac.Identity{})
+		return false
+	}
+	if !id.Has(rbac.AdminManage) {
+		s.recordAudit(r, action, "config", "failure", "rejected: admin change lacks admin:manage")
+		writeForbidden(w, rbac.AdminManage, id)
+		return false
+	}
+	return true
+}
+
+// authorizeRawCandidate parses body as a candidate config and runs the same
+// object-level authorization as authorizeConfigCandidate. It returns the parsed
+// config on success, or nil when it has already written an HTTP response.
+func (s *Server) authorizeRawCandidate(w http.ResponseWriter, r *http.Request, action string, body []byte) *config.Config {
+	next, err := config.Parse(body)
+	if err != nil {
+		// Caller will handle parse/validation errors.
+		return nil
+	}
+	if !s.authorizeConfigCandidate(w, r, action, next) {
+		return nil
+	}
+	return next
+}
+
+// adminConfigEqual reports whether two AdminConfig values are semantically
+// equivalent for authorization purposes. Any difference in the [admin]
+// subtree means the candidate requires admin:manage, regardless of whether
+// the field is restart-required or hot-swappable.
+func adminConfigEqual(a, b config.AdminConfig) bool {
+	if a.Enabled != b.Enabled ||
+		a.Listen != b.Listen ||
+		a.Token != b.Token {
+		return false
+	}
+	if !adminRBACEqual(a.RBAC, b.RBAC) {
+		return false
+	}
+	if a.ConsoleEnabled() != b.ConsoleEnabled() {
+		return false
+	}
+	if a.HistoryDir != b.HistoryDir || a.HistoryKeep != b.HistoryKeep {
+		return false
+	}
+	if a.RateLimitReadPerMin != b.RateLimitReadPerMin ||
+		a.RateLimitWritePerMin != b.RateLimitWritePerMin ||
+		a.RateLimitApplyPerMin != b.RateLimitApplyPerMin ||
+		a.MaxEventConns != b.MaxEventConns {
+		return false
+	}
+	if a.AuditLogFile != b.AuditLogFile ||
+		a.AuditLogRotateMaxMB != b.AuditLogRotateMaxMB ||
+		a.AuditLogRotateKeep != b.AuditLogRotateKeep {
+		return false
+	}
+	if a.PluginUploadDir != b.PluginUploadDir ||
+		a.PluginUploadMaxSize != b.PluginUploadMaxSize {
+		return false
+	}
+	if (a.PluginUploadEnabled == nil) != (b.PluginUploadEnabled == nil) {
+		return false
+	}
+	if a.PluginUploadEnabled != nil && b.PluginUploadEnabled != nil &&
+		*a.PluginUploadEnabled != *b.PluginUploadEnabled {
+		return false
+	}
+	return true
+}
+
+// adminRBACEqual compares two AdminRBACConfig values, including role and
+// principal contents.
+func adminRBACEqual(a, b config.AdminRBACConfig) bool {
+	if a.Enabled != b.Enabled || a.DefaultRole != b.DefaultRole {
+		return false
+	}
+	if !rbacPrincipalsEqual(a.Principals, b.Principals) ||
+		!rbacRolesEqual(a.Roles, b.Roles) {
+		return false
+	}
+	return true
 }
