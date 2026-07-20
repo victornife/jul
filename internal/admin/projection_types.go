@@ -363,4 +363,9 @@ type RuntimeOverview struct {
 	// Nil when no reload has run since startup. The Console uses it to show the
 	// outcome of the last apply without requiring a separate fetch.
 	LastReload *server.ReloadResult `json:"last_reload,omitempty"`
+	// LastManagedApply is the terminal outcome of the most recent managed
+	// apply, including async restoration state (H-05). It is nil until an
+	// apply finalizes. It supplements LastReload for the saved_not_live path
+	// where the terminal state is only known after the async finalizer completes.
+	LastManagedApply *ManagedApplyOutcome `json:"last_managed_apply,omitempty"`
 }

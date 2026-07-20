@@ -112,8 +112,9 @@ func TestMetricLabelPolicy(t *testing.T) {
 		"jul_reload_total":               {"outcome", "source"},
 		"jul_reload_duration_seconds":    {"outcome", "source"},
 		"jul_reload_in_progress":         nil,
-		"jul_config_stage_restart_total": {"result"},
-		"jul_config_pending_restart":     nil,
+		"jul_config_stage_restart_total":   {"result"},
+		"jul_config_pending_restart":       nil,
+		"jul_managed_apply_finalized_total": {"outcome", "restored"},
 	}
 
 	for name, names := range got {
@@ -229,4 +230,5 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveStageRestart("created")
 	m.SetPendingRestart(true)
 	m.SetPendingRestart(false)
+	m.ObserveManagedApplyFinalized("not_applied", "true")
 }

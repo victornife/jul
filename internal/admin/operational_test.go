@@ -365,7 +365,7 @@ func TestConcurrentAdminAppliesSerialize(t *testing.T) {
 
 	deps := Deps{
 		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
-		ApplyConfigRaw: func(data []byte, mode string) (ConfigApplyResult, error) {
+		ApplyConfigRaw: func(_ ApplyRequestContext, data []byte, mode string) (ConfigApplyResult, error) {
 			c, err := config.Parse(data)
 			if err != nil {
 				return ConfigApplyResult{OK: false, Mode: mode}, err

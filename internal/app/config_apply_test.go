@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"jul/internal/admin"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/server"
@@ -82,7 +83,7 @@ func TestCoordinatorApplyRawSuccess(t *testing.T) {
 	}
 
 	newRaw := validConfigRaw(t, ":8081")
-	res, err := c.ApplyRaw(newRaw, ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestCoordinatorApplyRawValidationFailureNoWrite(t *testing.T) {
 		PlannedRestart: &PlannedRestartStore{},
 	}
 
-	res, err := c.ApplyRaw([]byte("{bad toml"), ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, []byte("{bad toml"), ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -175,7 +176,7 @@ func TestCoordinatorApplyRawRestartRequiredCanStage(t *testing.T) {
 		t.Fatalf("marshal next: %v", err)
 	}
 
-	res, err := c.ApplyRaw(nextRaw, ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, nextRaw, ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -215,7 +216,7 @@ func TestCoordinatorApplyRawRestoresOnSubmitFailure(t *testing.T) {
 	}
 
 	newRaw := validConfigRaw(t, ":8081")
-	res, err := c.ApplyRaw(newRaw, ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
 	if err == nil {
 		t.Fatal("expected enqueue error")
 	}
@@ -262,7 +263,7 @@ func TestApplyResultReportsRestorationSuccess(t *testing.T) {
 		PlannedRestart: &PlannedRestartStore{},
 	}
 
-	res, err := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -323,7 +324,7 @@ func TestCoordinatorApplyRawRestoresOnPrePublishFailure(t *testing.T) {
 	}
 
 	newRaw := validConfigRaw(t, ":8081")
-	res, err := c.ApplyRaw(newRaw, ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -367,7 +368,7 @@ func TestCoordinatorApplyRawRetainsFileOnPostPublishDegradation(t *testing.T) {
 	}
 
 	newRaw := validConfigRaw(t, ":8081")
-	res, err := c.ApplyRaw(newRaw, ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -425,7 +426,7 @@ func TestCoordinatorApplyRawUsesServingReloadTimeout(t *testing.T) {
 
 	// Candidate changes reload_timeout to 1s; serving config says 7s.
 	newRaw := validConfigRaw(t, ":8081")
-	if _, err := c.ApplyRaw(newRaw, ApplyHot); err != nil {
+	if _, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot); err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
 
@@ -481,7 +482,7 @@ func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
 	// First apply times out synchronously; the finalizer goroutine is started.
 	res1Ch := make(chan ApplyResult, 1)
 	go func() {
-		res, _ := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+		res, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 		res1Ch <- res
 	}()
 
@@ -498,7 +499,7 @@ func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
 	}
 
 	// Second apply should be rejected while the first finalizer is still in-flight.
-	res2, err := c.ApplyRaw(validConfigRaw(t, ":8082"), ApplyHot)
+	res2, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8082"), ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -573,7 +574,7 @@ func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
 	// cannot overwrite C's candidate.
 	resACh := make(chan ApplyResult, 1)
 	go func() {
-		res, _ := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+		res, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 		resACh <- res
 	}()
 	<-finalizerEntered
@@ -588,7 +589,7 @@ func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
 	}
 
 	// Apply B must be rejected because A's finalizer is still in-flight.
-	resB, err := c.ApplyRaw(validConfigRaw(t, ":8082"), ApplyHot)
+	resB, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8082"), ApplyHot)
 	if err != nil {
 		t.Fatalf("apply B error: %v", err)
 	}
@@ -611,7 +612,7 @@ func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
 
 	// Apply C can now proceed. It uses the same SubmitReload callback; submit
 	// count is now 2 so it returns applied_live.
-	resC, err := c.ApplyRaw(validConfigRaw(t, ":8083"), ApplyHot)
+	resC, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8083"), ApplyHot)
 	if err != nil {
 		t.Fatalf("apply C error: %v", err)
 	}
@@ -622,6 +623,132 @@ func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
 	onDiskC, _ := os.ReadFile(path)
 	if string(onDiskC) != string(validConfigRaw(t, ":8083")) {
 		t.Fatal("apply C's candidate should be on disk")
+	}
+}
+
+// TestSuccessApplyClearsInFlightStateEarly verifies the M-08 fix: after a
+// successful apply returns, a subsequent apply is not blocked because the
+// finalizer cleared inFlightState before forwarding the terminal result.
+func TestSuccessApplyClearsInFlightStateEarly(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			go func() {
+				req.Result <- server.ReloadResult{
+					ID:             req.ID,
+					Source:         server.ReloadSourceAdmin,
+					Outcome:        server.ReloadAppliedLive,
+					Published:      true,
+					ServingVersion: "v2",
+				}
+			}()
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+	}
+
+	res1, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply 1 error: %v", err)
+	}
+	if !res1.OK {
+		t.Fatalf("apply 1 should succeed: %s", res1.Message)
+	}
+
+	res2, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8082"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply 2 error: %v", err)
+	}
+	if !res2.OK {
+		t.Fatalf("apply 2 should succeed immediately after a successful apply; got: %s", res2.Message)
+	}
+}
+
+// TestManagedApplyOutcomeCallbackFired verifies H-05: the coordinator calls
+// OnManagedApplyComplete after the async finalizer reaches a terminal state,
+// carrying the original request context and the final restoration status.
+func TestManagedApplyOutcomeCallbackFired(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	finalizerContinue := make(chan struct{})
+	gotCallback := make(chan admin.ConfigApplyResult, 1)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			go func() {
+				<-finalizerContinue
+				req.Result <- server.ReloadResult{
+					ID:        req.ID,
+					Source:    server.ReloadSourceAdmin,
+					Outcome:   server.ReloadNotApplied,
+					Published: false,
+					Error:     "intentional failure",
+				}
+			}()
+			return nil
+		},
+		LiveSnapshot: func() server.LiveSnapshot {
+			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+			cfg.Global.ReloadTimeout = config.Duration(50 * time.Millisecond)
+			return server.LiveSnapshot{EffectiveConfig: cfg}
+		},
+		PlannedRestart: &PlannedRestartStore{},
+		OnManagedApplyComplete: func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
+			if ctx.Actor != "alice" {
+				t.Errorf("callback actor = %q, want alice", ctx.Actor)
+			}
+			gotCallback <- res
+		},
+	}
+
+	ctx := admin.ApplyRequestContext{Actor: "alice", SourceIP: "127.0.0.1"}
+	resCh := make(chan ApplyResult, 1)
+	go func() {
+		res, _ := c.ApplyRaw(ctx, validConfigRaw(t, ":8081"), ApplyHot)
+		resCh <- res
+	}()
+
+	// Wait for the synchronous path to time out.
+	res := <-resCh
+	if !res.OK || res.Reload == nil || res.Reload.Outcome != server.ReloadSavedNotLive {
+		t.Fatalf("expected saved_not_live timeout result, got %+v", res.Reload)
+	}
+
+	// Allow the finalizer to finish and invoke the callback.
+	close(finalizerContinue)
+	select {
+	case terminal := <-gotCallback:
+		if terminal.OK {
+			t.Errorf("terminal outcome ok = true, want false")
+		}
+		if terminal.RestoreError != "" {
+			t.Errorf("unexpected restore error: %s", terminal.RestoreError)
+		}
+		if !terminal.Restored {
+			t.Errorf("terminal restored = false, want true")
+		}
+		if terminal.Reload == nil || terminal.Reload.Outcome != server.ReloadNotApplied {
+			t.Errorf("terminal outcome = %v, want not_applied", terminal.Reload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnManagedApplyComplete was not called")
 	}
 }
 
@@ -664,7 +791,7 @@ func TestCoordinatorApplyRawSerialized(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			_, _ = c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+			_, _ = c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 		}()
 	}
 	for i := 0; i < 2; i++ {
@@ -694,7 +821,7 @@ func TestCoordinatorApplyRawBlocksHotWhenPlannedRestartPending(t *testing.T) {
 		PlannedRestart: store,
 	}
 
-	res, err := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -732,7 +859,7 @@ func TestCoordinatorApplyRawBlocksHotWhenExternalDivergenceSet(t *testing.T) {
 		PlannedRestart: store,
 	}
 
-	res, err := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -773,7 +900,7 @@ func TestCoordinatorApplyStageBlocksWhenExternalDivergenceSet(t *testing.T) {
 		PlannedRestart: store,
 	}
 
-	res, err := c.ApplyRaw(restartRequiredConfigRaw(t, ":8080"), ApplyStageRestart)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, restartRequiredConfigRaw(t, ":8080"), ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -819,7 +946,7 @@ func TestCoordinatorApplyConfigMarshalsAndApplies(t *testing.T) {
 	}
 
 	cfg := config.ProxyTarget("127.0.0.1:9001", ":8081")
-	res, err := c.ApplyConfig(cfg, ApplyHot)
+	res, err := c.ApplyConfig(admin.ApplyRequestContext{}, cfg, ApplyHot)
 	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
@@ -888,7 +1015,7 @@ func TestCoordinatorConcurrentStageRestartsSerialized(t *testing.T) {
 		go func(idx int) {
 			defer func() { done <- struct{}{} }()
 			candidate := restartRequiredConfigRaw(t, ":8080")
-			res, err := c.ApplyRaw(candidate, ApplyStageRestart)
+			res, err := c.ApplyRaw(admin.ApplyRequestContext{}, candidate, ApplyStageRestart)
 			if err != nil {
 				errs[idx] = err
 				return
@@ -939,7 +1066,7 @@ func TestCoordinatorStageDiscardRace(t *testing.T) {
 
 	// Stage a restart-required change.
 	candidate := restartRequiredConfigRaw(t, ":8080")
-	res, err := c.ApplyRaw(candidate, ApplyStageRestart)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, candidate, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("stage error: %v", err)
 	}
@@ -995,7 +1122,7 @@ func TestCoordinatorStageRestartUpdatesPendingCandidate(t *testing.T) {
 	if store.IsPending() {
 		t.Fatal("store should not be pending before first stage")
 	}
-	res1, err := c.ApplyRaw(candidate, ApplyStageRestart)
+	res1, err := c.ApplyRaw(admin.ApplyRequestContext{}, candidate, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("first stage error: %v", err)
 	}
@@ -1011,7 +1138,7 @@ func TestCoordinatorStageRestartUpdatesPendingCandidate(t *testing.T) {
 
 	// Second stage replaces the pending candidate.
 	updateCandidate := restartRequiredConfigRaw(t, ":8080")
-	res2, err := c.ApplyRaw(updateCandidate, ApplyStageRestart)
+	res2, err := c.ApplyRaw(admin.ApplyRequestContext{}, updateCandidate, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("second stage error: %v", err)
 	}

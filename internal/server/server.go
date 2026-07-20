@@ -914,6 +914,9 @@ func (s *Server) doReload(req ReloadRequest) {
 		ID:        req.ID,
 		Source:    req.Source,
 		StartedAt: time.Now(),
+		HTTP:      ReloadSubsystemResult{Status: ReloadSubsystemNotRun},
+		Stream:    ReloadSubsystemResult{Status: ReloadSubsystemNotRun},
+		Admin:     ReloadSubsystemResult{Status: ReloadSubsystemNotRun},
 	}
 	if s.OnReloadStart != nil {
 		s.OnReloadStart()

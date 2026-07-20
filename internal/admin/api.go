@@ -126,6 +126,10 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	if s.deps.LastReload != nil {
 		out.LastReload = s.deps.LastReload()
 	}
+	// Terminal managed-apply outcome including async restoration (H-05).
+	if s.deps.LastManagedApply != nil {
+		out.LastManagedApply = s.deps.LastManagedApply()
+	}
 	if s.deps.Stats != nil {
 		out.Stats = s.deps.Stats()
 	}
@@ -375,16 +379,29 @@ func restartRequiredMessage(err error) string {
 // "reloaded" so the operator is not told the live runtime switched at a moment
 // when the swap may still be in flight. See docs/reload-semantics.md.
 // POST /api/config/apply
+// applyRequestContext extracts the authenticated identity and source IP from
+// an admin request so it can be threaded through to the coordinator's async
+// finalizer for attribution in the terminal audit event (H-05).
+func applyRequestContext(r *http.Request) ApplyRequestContext {
+	ctx := ApplyRequestContext{SourceIP: adminClientIP(r)}
+	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
+		ctx.Actor = id.Principal
+		ctx.TokenID = id.TokenID
+	}
+	return ctx
+}
+
 func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
+	reqCtx := applyRequestContext(r)
 	// Prefer the new correlated apply path; fall back to the legacy
 	// WriteConfigRaw closure for tests and callers that have not migrated.
 	applyRaw := s.deps.ApplyConfigRaw
 	if applyRaw == nil && s.deps.WriteConfigRaw != nil {
-		applyRaw = func(data []byte, mode string) (ConfigApplyResult, error) {
+		applyRaw = func(_ ApplyRequestContext, data []byte, mode string) (ConfigApplyResult, error) {
 			if err := s.deps.WriteConfigRaw(data); err != nil {
 				result := ConfigApplyResult{OK: false, Mode: mode, Message: err.Error()}
 				if errors.Is(err, ErrRestartRequired) {
@@ -489,7 +506,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	result, err := applyRaw(body, mode)
+	result, err := applyRaw(reqCtx, body, mode)
 	if err != nil {
 		s.recordAudit(r, "config.apply", "config", "failure", "coordinator error: "+err.Error())
 		s.emit("config", "apply_failed", "error", "Configuration apply coordinator failed.")

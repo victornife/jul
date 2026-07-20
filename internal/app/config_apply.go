@@ -96,6 +96,12 @@ type ConfigApplyCoordinator struct {
 	// inconsistent (fail-closed).
 	RefreshState func() error
 
+	// OnManagedApplyComplete is called by the async finalizer after the
+	// managed apply has reached a terminal state (including any restoration).
+	// It receives the original request context so the terminal audit event can
+	// be attributed to the caller (H-05).
+	OnManagedApplyComplete func(admin.ApplyRequestContext, admin.ConfigApplyResult)
+
 	mu      sync.Mutex
 	applyMu sync.Mutex
 	seq     atomic.Uint64
@@ -107,7 +113,7 @@ type ConfigApplyCoordinator struct {
 
 // ApplyRaw applies a raw configuration bytes slice. It is the hot-apply entry
 // point for the admin /api/config/apply path.
-func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []byte, mode ApplyMode) (ApplyResult, error) {
 	// applyMu serializes applies so only one candidate is in flight at a time.
 	// c.mu protects coordinator state and is not held across the reload wait so
 	// the async finalizer can safely restore without deadlocking.
@@ -235,13 +241,13 @@ func (c *ConfigApplyCoordinator) ApplyRaw(data []byte, mode ApplyMode) (ApplyRes
 		return result, nil
 	}
 
-	return c.applyCandidate(data, pfResult.Candidate, prevRaw, previouslyExisted, mode)
+	return c.applyCandidate(ctx, data, pfResult.Candidate, prevRaw, previouslyExisted, mode)
 }
 
 // ApplyConfig applies a parsed configuration. It marshals the config and
 // delegates to ApplyRaw so the same preflight, persistence, and restoration
 // path is used for structured edits.
-func (c *ConfigApplyCoordinator) ApplyConfig(cfg *config.Config, mode ApplyMode) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) ApplyConfig(ctx admin.ApplyRequestContext, cfg *config.Config, mode ApplyMode) (ApplyResult, error) {
 	data, err := config.Marshal(cfg)
 	if err != nil {
 		return ApplyResult{
@@ -250,7 +256,7 @@ func (c *ConfigApplyCoordinator) ApplyConfig(cfg *config.Config, mode ApplyMode)
 			Message: "Failed to marshal configuration.",
 		}, err
 	}
-	return c.ApplyRaw(data, mode)
+	return c.ApplyRaw(ctx, data, mode)
 }
 
 // DiscardPlannedRestart clears any staged planned restart. When the store is
@@ -556,7 +562,7 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 	return res
 }
 
-func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.Candidate, prevRaw []byte, previouslyExisted bool, mode ApplyMode) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, data []byte, candidate *config.Candidate, prevRaw []byte, previouslyExisted bool, mode ApplyMode) (ApplyResult, error) {
 	desiredVersion := server.CanonicalVersion(candidate.Effective)
 	rawDigest := sha256.Sum256(data)
 
@@ -634,20 +640,34 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 	// Finalizer goroutine: sole owner of the reload result. It forwards the
 	// result to waiterCh for the synchronous HTTP path, then performs any
 	// required restoration while holding c.mu so the digest check and restore
-	// are atomic with respect to a subsequent apply's write. The state is
-	// cleared under the same lock so the next apply observes the completed
-	// transaction only after the disk is in its final state.
+	// are atomic with respect to a subsequent apply's write. For successful
+	// applies (no restoration needed) inFlightState is cleared before
+	// forwarding so the synchronous path cannot return while the transaction
+	// is still marked in-flight (M-08). The terminal managed outcome is
+	// emitted after the disk is in its final state (H-05).
 	go func() {
 		defer close(restoreDone)
+		var terminal ApplyResult
+		var terminalRR server.ReloadResult
 		select {
 		case rr := <-resultCh:
+			terminalRR = rr
+			restoreNeeded := !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded
+
+			// M-08: clear in-flight state early when no restoration is needed.
+			if !restoreNeeded {
+				c.mu.Lock()
+				c.inFlightState = ApplyInFlightNone
+				c.mu.Unlock()
+			}
+
 			select {
 			case waiterCh <- rr:
 			default:
 			}
-			c.mu.Lock()
-			restoreNeeded := !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded
+
 			if restoreNeeded {
+				c.mu.Lock()
 				if err := c.restorePreviousLocked(prevRaw, previouslyExisted, rawDigest); err != nil {
 					// Log the restoration failure; F-03 surfaces it through the
 					// result/audit path below when the synchronous path is still
@@ -655,15 +675,22 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 					// failure is discoverable via overview/metrics.
 					c.logRestorationFailure(id, err)
 				}
+				c.inFlightState = ApplyInFlightNone
+				c.mu.Unlock()
 			}
-			c.inFlightState = ApplyInFlightNone
-			c.mu.Unlock()
+
+			// H-05: build and emit the terminal managed outcome.
+			terminal = c.buildTerminalResult(mode, desiredVersion, terminalRR, prevRaw, previouslyExisted, rawDigest)
 		case <-c.BaseCtx.Done():
 			// Process shutting down; no restoration attempt — startup will
 			// determine the correct state from disk and marker files.
 			c.mu.Lock()
 			c.inFlightState = ApplyInFlightNone
 			c.mu.Unlock()
+		}
+
+		if c.OnManagedApplyComplete != nil && terminal.Reload != nil {
+			c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(terminal))
 		}
 	}()
 
@@ -674,22 +701,17 @@ func (c *ConfigApplyCoordinator) applyCandidate(data []byte, candidate *config.C
 
 	select {
 	case rr := <-waiterCh:
+		// Wait for restoration on failure so callers observe a known on-disk
+		// state before we return. On success buildTerminalResult is a no-op
+		// wait because inFlightState was already cleared.
 		res := c.decorateResultNoRestore(mode, desiredVersion, rr)
 		if !res.OK {
-			// Wait for the finalizer's restoration so callers observe a known
-			// on-disk state before we return, then record the outcome.
 			select {
 			case <-restoreDone:
 			case <-time.After(5 * time.Second):
 			}
-			res = c.withRestorationOutcome(res, prevRaw, previouslyExisted, rawDigest)
-		} else {
-			// Successful apply: record the final persisted/serving versions.
-			res.Persisted = true
-			res.FinalDiskVersion = desiredVersion
-			res.FinalServingVersion = rr.ServingVersion
 		}
-		return res, nil
+		return c.buildTerminalResult(mode, desiredVersion, rr, prevRaw, previouslyExisted, rawDigest), nil
 	case <-c.BaseCtx.Done():
 		// The process is shutting down; the finalizer will clear inFlightState
 		// once it observes BaseCtx cancellation.
@@ -809,6 +831,21 @@ func canonicalVersionFromRaw(raw []byte) string {
 		return ""
 	}
 	return server.CanonicalVersion(cfg)
+}
+
+// buildTerminalResult constructs the final ApplyResult after the finalizer has
+// finished any restoration. It is used both for the synchronous success path
+// and for the async terminal outcome callback (H-05).
+func (c *ConfigApplyCoordinator) buildTerminalResult(mode ApplyMode, desiredVersion string, rr server.ReloadResult, prevRaw []byte, previouslyExisted bool, expectedCandidateDigest [32]byte) ApplyResult {
+	res := c.decorateResultNoRestore(mode, desiredVersion, rr)
+	if res.OK {
+		res.Persisted = true
+		res.FinalDiskVersion = desiredVersion
+		res.FinalServingVersion = rr.ServingVersion
+	} else {
+		res = c.withRestorationOutcome(res, prevRaw, previouslyExisted, expectedCandidateDigest)
+	}
+	return res
 }
 
 // decorateResultNoRestore builds the ApplyResult from a ReloadResult without

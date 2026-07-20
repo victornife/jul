@@ -93,6 +93,48 @@ func TestReloadTimeout(t *testing.T) {
 	<-done
 }
 
+// TestReloadSubsystemsInitializedToNotRun verifies H-04: a reload result that
+// fails before any subsystem runs leaves HTTP/Stream/Admin initialized to
+// not_run rather than empty/zero.
+func TestReloadSubsystemsInitializedToNotRun(t *testing.T) {
+	addr := freePort(t)
+
+	src := &stubSource{}
+	src.set(cfgWithReloadTimeout(addr, 5*time.Second), nil)
+
+	tag := &atomic.Pointer[string]{}
+	v1 := "v1"
+	tag.Store(&v1)
+	srv := New(cfgWithReloadTimeout(addr, 5*time.Second), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(*config.Config) error { return fmt.Errorf("rejected") })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }() //nolint:errcheck
+	waitDialable(t, addr)
+
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
+	time.Sleep(50 * time.Millisecond)
+
+	li := srv.LastReload()
+	if li == nil {
+		t.Fatal("expected LastReload after reload")
+	}
+	if li.HTTP.Status != ReloadSubsystemNotRun {
+		t.Errorf("HTTP status = %q, want %q", li.HTTP.Status, ReloadSubsystemNotRun)
+	}
+	if li.Stream.Status != ReloadSubsystemNotRun {
+		t.Errorf("Stream status = %q, want %q", li.Stream.Status, ReloadSubsystemNotRun)
+	}
+	if li.Admin.Status != ReloadSubsystemNotRun {
+		t.Errorf("Admin status = %q, want %q", li.Admin.Status, ReloadSubsystemNotRun)
+	}
+
+	cancel()
+	<-done
+}
+
 func TestReloadRecordsSuccessAndDuration(t *testing.T) {
 	addr := freePort(t)
 

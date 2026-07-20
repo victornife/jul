@@ -226,11 +226,12 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
+	reqCtx := applyRequestContext(r)
 	// Prefer the new correlated apply path; fall back to the legacy
 	// WriteConfigRaw closure for tests and callers that have not migrated.
 	applyConfig := s.deps.ApplyConfig
 	if applyConfig == nil && s.deps.WriteConfigRaw != nil {
-		applyConfig = func(cfg *config.Config, mode string) (ConfigApplyResult, error) {
+		applyConfig = func(_ ApplyRequestContext, cfg *config.Config, mode string) (ConfigApplyResult, error) {
 			data, err := config.Marshal(cfg)
 			if err != nil {
 				return ConfigApplyResult{OK: false, Mode: mode}, err
@@ -336,7 +337,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	result, err := applyConfig(cfg, mode)
+	result, err := applyConfig(reqCtx, cfg, mode)
 	if err != nil {
 		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+err.Error())
 		s.emit("config", "apply_failed", "error", "Structured patch apply coordinator failed.")

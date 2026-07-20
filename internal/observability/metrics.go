@@ -71,6 +71,10 @@ type Metrics struct {
 	reloadTimeouts *prometheus.CounterVec
 	stageRestarts  *prometheus.CounterVec
 	pendingRestart prometheus.Gauge
+	// managedApplyFinalized counts terminal async managed-apply outcomes
+	// (H-05: jul_managed_apply_finalized_total). outcome is the terminal
+	// reload classification; restored is "true", "false", or "n/a".
+	managedApplyFinalized *prometheus.CounterVec
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -263,6 +267,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_config_pending_restart",
 			Help: "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",
 		}),
+		managedApplyFinalized: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_managed_apply_finalized_total",
+			Help: "Terminal async managed-apply outcomes, labeled by outcome and whether restoration succeeded (true/false/n/a).",
+		}, []string{"outcome", "restored"}),
 		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_phase_duration_seconds",
 			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
@@ -315,6 +323,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.reloadTimeouts,
 		m.stageRestarts,
 		m.pendingRestart,
+		m.managedApplyFinalized,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -649,6 +658,13 @@ func (m *Metrics) ReloadStarted() {
 // (P2-05). result is one of "created", "updated", "discarded", or "failed".
 func (m *Metrics) ObserveStageRestart(result string) {
 	m.stageRestarts.WithLabelValues(result).Inc()
+}
+
+// ObserveManagedApplyFinalized records the terminal async outcome of a managed
+// apply (H-05). outcome is the terminal reload classification; restored is
+// "true", "false", or "n/a" when restoration was not applicable.
+func (m *Metrics) ObserveManagedApplyFinalized(outcome, restored string) {
+	m.managedApplyFinalized.WithLabelValues(outcome, restored).Inc()
 }
 
 // SetPendingRestart sets the pending-restart gauge to 1 when a managed staged

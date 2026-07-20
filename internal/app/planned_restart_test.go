@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"jul/internal/admin"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/server"
@@ -493,7 +494,7 @@ func TestCoordinatorApplyStageRestartStagesFile(t *testing.T) {
 		t.Fatalf("marshal next: %v", err)
 	}
 
-	res, err := c.ApplyRaw(nextRaw, ApplyStageRestart)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, nextRaw, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("ApplyRaw stage_restart: %v", err)
 	}
@@ -539,7 +540,7 @@ func TestCoordinatorHotApplyBlockedWhileStagePending(t *testing.T) {
 		PlannedRestart: store,
 	}
 
-	res, err := c.ApplyRaw(validConfigRaw(t, ":8081"), ApplyHot)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -589,7 +590,7 @@ func TestStageFirstBackupEqualsOriginal(t *testing.T) {
 	next.Global.LogFormat = "json"
 	nextRaw, _ := config.Marshal(next)
 
-	res, err := c.ApplyRaw(nextRaw, ApplyStageRestart)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, nextRaw, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("ApplyRaw stage_restart: %v", err)
 	}
@@ -643,7 +644,7 @@ func TestStageDiscardRoundtripRestoresExactBytes(t *testing.T) {
 	next.Global.LogFormat = "json"
 	nextRaw, _ := config.Marshal(next)
 
-	if _, err := c.ApplyRaw(nextRaw, ApplyStageRestart); err != nil {
+	if _, err := c.ApplyRaw(admin.ApplyRequestContext{}, nextRaw, ApplyStageRestart); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 
@@ -700,7 +701,7 @@ func TestStageRestartUpdatesSecondCandidate(t *testing.T) {
 	v1 := config.ProxyTarget("127.0.0.1:9000", ":8080")
 	v1.Global.LogFormat = "json"
 	v1Raw, _ := config.Marshal(v1)
-	if _, err := c.ApplyRaw(v1Raw, ApplyStageRestart); err != nil {
+	if _, err := c.ApplyRaw(admin.ApplyRequestContext{}, v1Raw, ApplyStageRestart); err != nil {
 		t.Fatalf("first stage: %v", err)
 	}
 
@@ -708,7 +709,7 @@ func TestStageRestartUpdatesSecondCandidate(t *testing.T) {
 	v2 := config.ProxyTarget("127.0.0.1:9001", ":8080")
 	v2.Global.LogFormat = "json"
 	v2Raw, _ := config.Marshal(v2)
-	res, err := c.ApplyRaw(v2Raw, ApplyStageRestart)
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, v2Raw, ApplyStageRestart)
 	if err != nil {
 		t.Fatalf("second stage returned error: %v", err)
 	}

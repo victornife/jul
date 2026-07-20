@@ -36,6 +36,32 @@ type Purger interface {
 	Delete(key string)
 }
 
+// ApplyRequestContext carries the authenticated caller from an admin HTTP
+// request through to the managed apply coordinator so async finalizers can
+// emit an audit event attributed to the original actor (H-05).
+type ApplyRequestContext struct {
+	Actor    string
+	TokenID  string
+	SourceIP string
+}
+
+// ManagedApplyOutcome is the terminal result of a managed configuration apply,
+// including any async restoration. It is exposed in RuntimeOverview so the
+// console can show the final state of a previously timed-out apply.
+type ManagedApplyOutcome struct {
+	ID                  string    `json:"id"`
+	Mode                string    `json:"mode"`
+	OK                  bool      `json:"ok"`
+	Outcome             string    `json:"outcome"` // server.ReloadOutcome string
+	Restored            bool      `json:"restored,omitempty"`
+	RestoreError        string    `json:"restore_error,omitempty"`
+	FinalDiskVersion    string    `json:"final_disk_version,omitempty"`
+	FinalServingVersion string    `json:"final_serving_version,omitempty"`
+	CompletedAt         time.Time `json:"completed_at"`
+	Actor               string    `json:"actor,omitempty"`
+	SourceIP            string    `json:"source_ip,omitempty"`
+}
+
 // Deps wires the admin server to runtime components owned by the composition
 // root. All fields are optional; endpoints degrade gracefully when a
 // dependency is nil.
@@ -154,20 +180,24 @@ type Deps struct {
 	// ApplyConfigRaw validates, persists, and reloads raw configuration bytes.
 	// The mode string is "hot" or "stage_restart". It returns a structured
 	// result correlated with the live reload outcome.
-	ApplyConfigRaw func([]byte, string) (ConfigApplyResult, error)
+	ApplyConfigRaw func(ApplyRequestContext, []byte, string) (ConfigApplyResult, error)
 	// ApplyConfig validates, persists, and reloads a structured config object.
 	// The mode string is "hot" or "stage_restart". It returns a structured
 	// result correlated with the live reload outcome.
-	ApplyConfig func(*config.Config, string) (ConfigApplyResult, error)
+	ApplyConfig func(ApplyRequestContext, *config.Config, string) (ConfigApplyResult, error)
 	// DiscardPendingRestart discards the managed staged restart and atomically
 	// restores the previous configuration. A verification failure (inconsistent
 	// state, disk digest mismatch, or changed serving version) returns a
 	// non-nil error and leaves all files untouched.
 	DiscardPendingRestart func() (ConfigApplyResult, error)
 	// PendingRestart returns the current managed planned-restart status, or nil
-	// when no staged restart is pending. This is the structured source of truth
+	// when a staged restart is pending. This is the structured source of truth
 	// for the overview banner and the /api/config/pending-restart endpoint.
 	PendingRestart func() *PendingRestartStatus
+	// LastManagedApply returns the terminal outcome of the most recent managed
+	// apply, including async restoration state (H-05). Nil when no apply has
+	// finalized since startup.
+	LastManagedApply func() *ManagedApplyOutcome
 	// AdminHealth reports the health of admin-subsystem concerns that are owned
 	// by the composition root (e.g., the most recent reload's admin subsystem
 	// result). It returns nil when healthy. When it returns an error, /readyz
@@ -214,6 +244,50 @@ type Server struct {
 	// are atomic, closing the read-modify-write race between concurrent edits
 	// (P2-12).
 	applyMu sync.Mutex
+}
+
+// RecordManagedApplyOutcome records the terminal async outcome of a managed
+// apply in the audit log (H-05). The actor is the original request identity
+// captured by the caller; when no identity is available it falls back to
+// "system".
+func (s *Server) RecordManagedApplyOutcome(ctx ApplyRequestContext, o ManagedApplyOutcome) {
+	if s.audit == nil {
+		return
+	}
+	result := "success"
+	if !o.OK {
+		if o.RestoreError != "" {
+			result = "failure"
+		} else if o.Restored {
+			result = "success"
+		} else {
+			result = "failure"
+		}
+	}
+	detail := fmt.Sprintf("outcome=%s restored=%t", o.Outcome, o.Restored)
+	if o.RestoreError != "" {
+		detail += " restore_error=" + o.RestoreError
+	}
+	if o.FinalDiskVersion != "" {
+		detail += " final_disk_version=" + o.FinalDiskVersion
+	}
+	if o.FinalServingVersion != "" {
+		detail += " final_serving_version=" + o.FinalServingVersion
+	}
+	actor := ctx.Actor
+	if actor == "" {
+		actor = "system"
+	}
+	s.audit.record(AuditEvent{
+		Time:      time.Now().UTC(),
+		Actor:     actor,
+		TokenID:   ctx.TokenID,
+		Operation: "config.apply.finalized",
+		Resource:  "config",
+		Result:    result,
+		Detail:    detail,
+		SourceIP:  ctx.SourceIP,
+	})
 }
 
 // New builds an admin Server from config. It returns nil when admin is

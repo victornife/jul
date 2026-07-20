@@ -46,7 +46,7 @@ func v2WriteServer(t *testing.T) (*Server, string) {
 			}
 			return os.WriteFile(cfgPath, data, 0o644)
 		},
-		ApplyConfigRaw: func(data []byte, mode string) (ConfigApplyResult, error) {
+		ApplyConfigRaw: func(_ ApplyRequestContext, data []byte, mode string) (ConfigApplyResult, error) {
 			c, err := config.Parse(data)
 			if err != nil {
 				return ConfigApplyResult{
@@ -75,7 +75,7 @@ func v2WriteServer(t *testing.T) (*Server, string) {
 				Message:        "Configuration validated, saved, and applied live.",
 			}, nil
 		},
-		ApplyConfig: func(c *config.Config, mode string) (ConfigApplyResult, error) {
+		ApplyConfig: func(_ ApplyRequestContext, c *config.Config, mode string) (ConfigApplyResult, error) {
 			data, err := config.Marshal(c)
 			if err != nil {
 				return ConfigApplyResult{OK: false, Mode: mode, Message: "marshal error"}, err
@@ -2335,7 +2335,7 @@ func stageRestartServer(t *testing.T) (*Server, string) {
 		WriteConfigRaw: func(data []byte) error {
 			return os.WriteFile(cfgPath, data, 0o600)
 		},
-		ApplyConfigRaw: func(data []byte, mode string) (ConfigApplyResult, error) {
+		ApplyConfigRaw: func(_ ApplyRequestContext, data []byte, mode string) (ConfigApplyResult, error) {
 			// Block hot apply while staged restart is pending.
 			if mode != "stage_restart" && stagePending {
 				return ConfigApplyResult{
@@ -2568,7 +2568,7 @@ func TestConfigApplyHotRestartRequiredCanStage(t *testing.T) {
 		WriteConfigRaw: func([]byte) error {
 			return fmt.Errorf("%w: cache settings changed", ErrRestartRequired)
 		},
-		ApplyConfigRaw: func(data []byte, mode string) (ConfigApplyResult, error) {
+		ApplyConfigRaw: func(_ ApplyRequestContext, data []byte, mode string) (ConfigApplyResult, error) {
 			return ConfigApplyResult{
 				OK:              false,
 				Mode:            mode,

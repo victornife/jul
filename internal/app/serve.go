@@ -357,12 +357,15 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	}
 	// Admin subsystem health: propagate admin-side reload failures and other
 	// runtime-level admin concerns to /readyz and the runtime overview (F-05).
+	// H-04: only fail readiness for post-Publish admin subsystem failure or
+	// timeout. Pre-publish failures, skipped phases, and not_run do not block
+	// readiness because the previous runtime state is still serving.
 	deps.AdminHealth = func() error {
 		lr := srv.LastReload()
 		if lr == nil {
 			return nil
 		}
-		if lr.Admin.Status != server.ReloadSubsystemOK {
+		if lr.Published && (lr.Admin.Status == server.ReloadSubsystemFailed || lr.Admin.Status == server.ReloadSubsystemTimedOut) {
 			return &admin.AdminHealthStatus{
 				Healthy: false,
 				Reason:  "admin_reload",
@@ -381,6 +384,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// that the coordinator and API see, preventing the split-brain defect where
 	// a second store reconciles sidecar files but the coordinator's store still
 	// reports pending=true (C-02 fix).
+	var coordinator *ConfigApplyCoordinator
 	if configPath != "" {
 		submitReload := func(req server.ReloadRequest) error {
 			select {
@@ -407,7 +411,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 		}
 
-		coordinator := &ConfigApplyCoordinator{
+		coordinator = &ConfigApplyCoordinator{
 			BaseCtx:        ctx,
 			Path:           configPath,
 			Preflight:      &pf,
@@ -442,8 +446,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 
-		deps.ApplyConfigRaw = func(data []byte, mode string) (admin.ConfigApplyResult, error) {
-			res, err := coordinator.ApplyRaw(data, ApplyMode(mode))
+		deps.ApplyConfigRaw = func(ctx admin.ApplyRequestContext, data []byte, mode string) (admin.ConfigApplyResult, error) {
+			res, err := coordinator.ApplyRaw(ctx, data, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
 				result.StagedRestartIsUpdate = res.StagedRestartIsUpdate
@@ -460,8 +464,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 			return result, err
 		}
-		deps.ApplyConfig = func(c *config.Config, mode string) (admin.ConfigApplyResult, error) {
-			res, err := coordinator.ApplyConfig(c, ApplyMode(mode))
+		deps.ApplyConfig = func(ctx admin.ApplyRequestContext, c *config.Config, mode string) (admin.ConfigApplyResult, error) {
+			res, err := coordinator.ApplyConfig(ctx, c, ApplyMode(mode))
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
 				result.StagedRestartIsUpdate = res.StagedRestartIsUpdate
@@ -490,9 +494,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return coordinator.PlannedRestartStatus()
 		}
 		// Keep legacy closures for external callers during the deprecation
-		// window.
+		// window. They pass an empty request context because they are not
+		// tied to an authenticated HTTP request.
 		deps.WriteConfigRaw = func(data []byte) error {
-			result, err := deps.ApplyConfigRaw(data, string(ApplyHot))
+			result, err := deps.ApplyConfigRaw(admin.ApplyRequestContext{}, data, string(ApplyHot))
 			if err != nil {
 				return err
 			}
@@ -513,7 +518,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 		deps.SaveConfig = func(c *config.Config) error {
-			result, err := deps.ApplyConfig(c, string(ApplyHot))
+			result, err := deps.ApplyConfig(admin.ApplyRequestContext{}, c, string(ApplyHot))
 			if err != nil {
 				return err
 			}
@@ -524,6 +529,16 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				return fmt.Errorf("apply rejected: %s", result.Message)
 			}
 			return nil
+		}
+	}
+
+	// H-05: reserve storage and register the LastManagedApply dep before
+	// admin.New copies deps, so the overview can read it. The actual callback
+	// that populates the pointer is wired after adminSrv exists.
+	var lastManagedApply atomic.Pointer[admin.ManagedApplyOutcome]
+	if coordinator != nil {
+		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
+			return lastManagedApply.Load()
 		}
 	}
 
@@ -545,6 +560,46 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				log.Error("admin listener failed", "error", err)
 			}
 		}()
+	}
+
+	// H-05: after adminSrv exists, wire the coordinator's async terminal
+	// outcome callback so it records audit/metrics and exposes the result in
+	// the runtime overview.
+	if coordinator != nil && adminSrv != nil {
+		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
+			outcome := ""
+			if res.Reload != nil {
+				outcome = string(res.Reload.Outcome)
+			}
+			restoredLabel := "n/a"
+			if outcome != "" && outcome != string(server.ReloadAppliedLive) && outcome != string(server.ReloadSavedNotLive) {
+				if res.Restored {
+					restoredLabel = "true"
+				} else {
+					restoredLabel = "false"
+				}
+			}
+			metrics.ObserveManagedApplyFinalized(outcome, restoredLabel)
+
+			o := &admin.ManagedApplyOutcome{
+				ID:                  res.Reload.ID,
+				Mode:                res.Mode,
+				OK:                  res.OK,
+				Outcome:             outcome,
+				Restored:            res.Restored,
+				RestoreError:        res.RestoreError,
+				FinalDiskVersion:    res.FinalDiskVersion,
+				FinalServingVersion: res.FinalServingVersion,
+				CompletedAt:         time.Now().UTC(),
+				Actor:               ctx.Actor,
+				SourceIP:            ctx.SourceIP,
+			}
+			lastManagedApply.Store(o)
+			adminSrv.RecordManagedApplyOutcome(ctx, *o)
+		}
+		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
+			return lastManagedApply.Load()
+		}
 	}
 
 	readyFlag.Set(true)

@@ -18,6 +18,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/observability"
+	"jul/internal/server"
 )
 
 // fakePurger records purge operations for assertions.
@@ -71,6 +72,156 @@ func TestHealthzAndReadyz(t *testing.T) {
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("readyz (ready) = %d, want 200", rr.Code)
+	}
+}
+
+// TestReadyzOnlyFailsForPostPublishAdminFailure verifies H-04: /readyz fails
+// only when the most recent reload Published and the admin subsystem failed or
+// timed out. Pre-publish admin failures, skipped phases, and not_run must not
+// block readiness.
+func TestReadyzOnlyFailsForPostPublishAdminFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		lr       server.ReloadResult
+		wantCode int
+	}{
+		{
+			name:     "published admin failed",
+			lr:       server.ReloadResult{Published: true, Admin: server.ReloadSubsystemResult{Status: server.ReloadSubsystemFailed, Error: "boom"}},
+			wantCode: http.StatusServiceUnavailable,
+		},
+		{
+			name:     "published admin timed out",
+			lr:       server.ReloadResult{Published: true, Admin: server.ReloadSubsystemResult{Status: server.ReloadSubsystemTimedOut, Error: "timeout"}},
+			wantCode: http.StatusServiceUnavailable,
+		},
+		{
+			name:     "pre-publish admin failed",
+			lr:       server.ReloadResult{Published: false, Admin: server.ReloadSubsystemResult{Status: server.ReloadSubsystemFailed, Error: "boom"}},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:     "admin not_run",
+			lr:       server.ReloadResult{Admin: server.ReloadSubsystemResult{Status: server.ReloadSubsystemNotRun}},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:     "admin skipped",
+			lr:       server.ReloadResult{Admin: server.ReloadSubsystemResult{Status: server.ReloadSubsystemSkipped}},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:     "published admin ok",
+			lr:       server.ReloadResult{Published: true, Admin: server.ReloadSubsystemResult{Status: server.ReloadSubsystemOK}},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:     "published stream failed admin ok",
+			lr:       server.ReloadResult{Published: true, Admin: server.ReloadSubsystemResult{Status: server.ReloadSubsystemOK}, Stream: server.ReloadSubsystemResult{Status: server.ReloadSubsystemFailed, Error: "stream boom"}},
+			wantCode: http.StatusOK,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var last atomic.Pointer[server.ReloadResult]
+			last.Store(&tc.lr)
+			s := newTestServer(t, config.AdminConfig{}, Deps{
+				Ready:      func() bool { return true },
+				LastReload: last.Load,
+				AdminHealth: func() error {
+					lr := last.Load()
+					if lr == nil {
+						return nil
+					}
+					if lr.Published && (lr.Admin.Status == server.ReloadSubsystemFailed || lr.Admin.Status == server.ReloadSubsystemTimedOut) {
+						return &AdminHealthStatus{Healthy: false, Reason: "admin_reload", Detail: lr.Admin.Error}
+					}
+					return nil
+				},
+			})
+			rr := httptest.NewRecorder()
+			s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+			if rr.Code != tc.wantCode {
+				t.Fatalf("readyz = %d, want %d; body: %s", rr.Code, tc.wantCode, rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestReadyzClearsAdminDegradationAfterSuccessfulReload verifies the second
+// half of H-04: once the most recent reload has admin OK, readiness passes
+// again.
+func TestReadyzClearsAdminDegradationAfterSuccessfulReload(t *testing.T) {
+	var last atomic.Pointer[server.ReloadResult]
+	last.Store(&server.ReloadResult{
+		Published: true,
+		Admin:     server.ReloadSubsystemResult{Status: server.ReloadSubsystemFailed, Error: "bad"},
+	})
+	adminHealth := func() error {
+		lr := last.Load()
+		if lr == nil {
+			return nil
+		}
+		if lr.Published && (lr.Admin.Status == server.ReloadSubsystemFailed || lr.Admin.Status == server.ReloadSubsystemTimedOut) {
+			return &AdminHealthStatus{Healthy: false, Reason: "admin_reload", Detail: lr.Admin.Error}
+		}
+		return nil
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		Ready:       func() bool { return true },
+		LastReload:  last.Load,
+		AdminHealth: adminHealth,
+	})
+
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz (degraded) = %d, want 503", rr.Code)
+	}
+
+	last.Store(&server.ReloadResult{
+		Published: true,
+		Admin:     server.ReloadSubsystemResult{Status: server.ReloadSubsystemOK},
+	})
+	rr = httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("readyz (recovered) = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestRuntimeOverviewExposesLastManagedApply verifies H-05: the runtime
+// overview includes the terminal async managed-apply outcome when available.
+func TestRuntimeOverviewExposesLastManagedApply(t *testing.T) {
+	want := &ManagedApplyOutcome{
+		ID:       "rl_42",
+		Mode:     "hot",
+		OK:       false,
+		Outcome:  "not_applied",
+		Restored: true,
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		Product:          "Jul.IA",
+		Version:          "test",
+		LastManagedApply: func() *ManagedApplyOutcome { return want },
+	})
+
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("overview = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode overview: %v", err)
+	}
+	if out.LastManagedApply == nil {
+		t.Fatal("overview missing last_managed_apply")
+	}
+	if out.LastManagedApply.ID != want.ID {
+		t.Errorf("last_managed_apply.id = %q, want %q", out.LastManagedApply.ID, want.ID)
+	}
+	if out.LastManagedApply.Restored != want.Restored {
+		t.Errorf("last_managed_apply.restored = %v, want %v", out.LastManagedApply.Restored, want.Restored)
 	}
 }
 
