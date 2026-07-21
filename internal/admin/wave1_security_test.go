@@ -119,19 +119,26 @@ func TestWave1_ViewerCannotMutateSettingsForm(t *testing.T) {
 }
 
 // TestWave1_ViewerCannotReadRawConfig verifies C-02: a viewer cannot read the
-// raw TOML body from /api/config or /api/config/raw.
+// raw TOML body from /api/config. /api/config/raw no longer accepts GET (N-07);
+// mutation methods are blocked by the route permission.
 func TestWave1_ViewerCannotReadRawConfig(t *testing.T) {
 	cfg := wave1Config(t)
 	s, _, _, viewTok := wave1Server(t, cfg)
 
-	for _, path := range []string{"/api/config", "/api/config/raw"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.Header.Set("Authorization", "Bearer "+viewTok)
-		rr := httptest.NewRecorder()
-		s.routes().ServeHTTP(rr, req)
-		if rr.Code != http.StatusForbidden {
-			t.Errorf("viewer GET %s got %d, want 403", path, rr.Code)
-		}
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.Header.Set("Authorization", "Bearer "+viewTok)
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("viewer GET /api/config got %d, want 403", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/config/raw", nil)
+	req.Header.Set("Authorization", "Bearer "+viewTok)
+	rr = httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("viewer POST /api/config/raw got %d, want 403", rr.Code)
 	}
 }
 

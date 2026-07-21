@@ -629,17 +629,26 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// Object-level guard: even though the route now requires config:apply for
-	// mutations, a caller with config:apply still must hold admin:manage to
-	// change anything under [admin].
-	if next, perr := config.Parse(body); perr == nil && next != nil {
-		if !s.authorizeConfigCandidate(w, r, "config.raw", next) {
-			return
-		}
+	// Pre-parse the candidate once for validation and authorization. The
+	// actual authorization against the current config happens inside applyMu so
+	// a concurrent admin change cannot invalidate the decision (N-02).
+	next, parseErr := config.Parse(body)
+	if parseErr != nil {
+		// Invalid candidate; fall through to the normal validation path below
+		// which reports the parse error without persisting anything.
+		next = nil
 	}
+
 	// Serialize with the apply path so concurrent writes cannot interleave (P2-12).
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
+
+	// Object-level guard: a caller with config:apply still must hold admin:manage
+	// to change anything under [admin]. This check runs inside the write lock so
+	// the current config cannot change between authorization and write (N-02).
+	if next != nil && !s.authorizeConfigCandidate(w, r, "config.raw", next) {
+		return
+	}
 
 	// Optimistic concurrency: reject stale writes. An empty base_version skips
 	// the check (explicit force-apply). The version basis matches /api/config/apply

@@ -408,6 +408,62 @@ describe("ConfigPanel apply flow", () => {
     });
   });
 
+  it("allows structured patch review when raw config is forbidden", async () => {
+    takePendingDraft(); // clear any leftover handoff state
+    let patchApplies = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        // Operator lacks config:raw.
+        return Promise.resolve(json({ error: "forbidden" }, 403));
+      }
+      if (url === "/api/config/patch/apply") {
+        patchApplies += 1;
+        return Promise.resolve(
+          json({
+            ok: true,
+            version: "v2",
+            summary: ["1 change"],
+            diff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+            status: [{ group: "Traffic", name: "TLS", active: true }],
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    setPendingDraft({
+      kind: "patch",
+      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+      baseVersion: "v1",
+      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+      // No candidate: the backend omits it for operators without config:raw.
+    });
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    // The raw editor is replaced by a permission notice; the diff is still shown.
+    expect(
+      await screen.findByText(/Raw configuration preview is hidden/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/1 change/)).toBeInTheDocument();
+
+    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(patchBtn).toBeEnabled();
+    });
+
+    fireEvent.click(patchBtn);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await waitFor(() => {
+      expect(patchApplies).toBe(1);
+    });
+  });
+
   it("blocks hot apply and shows a banner when external disk divergence is reported", async () => {
     globalThis.fetch = vi.fn((input: string) => {
       const url = input;

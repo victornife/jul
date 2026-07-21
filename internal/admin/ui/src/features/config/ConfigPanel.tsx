@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { Suspense, lazy, useEffect, useState, useMemo } from "react";
+import { Suspense, lazy, useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,6 +15,7 @@ import {
   fetchPendingRestart,
   fetchRawConfig,
   validateConfig,
+  ApiError,
   ConfigRejectedError,
   ConfigConflictError,
   ConfigRestartRequiredError,
@@ -164,10 +165,19 @@ function PendingRestartBanner({
 export function ConfigPanel() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  // rawForbidden is true when the current principal is authenticated but lacks
+  // config:raw. Structured patch review (config:write) must still work in that
+  // case, so the panel degrades gracefully instead of failing outright.
+  const [rawForbidden, setRawForbidden] = useState(false);
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["raw-config"],
     queryFn: fetchRawConfig,
   });
+  useEffect(() => {
+    if (isError && error instanceof ApiError && error.status === 403) {
+      setRawForbidden(true);
+    }
+  }, [isError, error]);
 
   // Pending-restart state: surfaced as a persistent banner and changes primary action.
   const pendingRestartQuery = useQuery({
@@ -222,12 +232,24 @@ export function ConfigPanel() {
   const [baseVersion, setBaseVersion] = useState<string | undefined>();
 
   // Seed the editor once the raw config arrives. A pending handoff, if present,
-  // becomes the draft so the operator lands on a ready-to-review diff.
+  // becomes the draft so the operator lands on a ready-to-review diff. When the
+  // principal lacks config:raw, raw config is absent but a structured patch
+  // handoff can still be reviewed and applied.
+  // Seed the editor once the raw config arrives. A pending handoff, if present,
+  // becomes the draft so the operator lands on a ready-to-review diff. When the
+  // principal lacks config:raw, raw config is absent but a structured patch
+  // handoff can still be reviewed and applied. The initialized ref prevents the
+  // effect from re-taking the handoff if React re-runs it before state updates
+  // have committed.
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (data && draft === null && patchDraft === null) {
+    if (initializedRef.current) return;
+    if (!data && !rawForbidden) return;
+    initializedRef.current = true;
+    const handoff = takePendingDraft();
+    if (data) {
       const raw = data.raw ?? "";
       setBaseVersion(data.base_version);
-      const handoff = takePendingDraft();
       if (handoff) {
         if (handoff.kind === "toml") {
           setBaseline(raw);
@@ -243,8 +265,12 @@ export function ConfigPanel() {
         setBaseline(raw);
         setDraft(raw);
       }
+    } else if (rawForbidden && handoff?.kind === "patch") {
+      setPatchDraft(handoff);
+      setBaseline("");
+      setDraft(handoff.candidate ?? "");
     }
-  }, [data, draft, patchDraft]);
+  }, [data, rawForbidden]);
 
   const current = draft ?? "";
   const isPatchMode = patchDraft !== null;
@@ -440,10 +466,10 @@ export function ConfigPanel() {
     : undefined;
 
   if (isLoading) return <Loading label="Loading configuration…" />;
-  if (isError || !data)
+  if ((isError || !data) && !(rawForbidden && isPatchMode))
     return <PanelError error={error} resource="the configuration" onRetry={() => void refetch()} />;
 
-  if (data.raw === undefined && draft === null) {
+  if (data?.raw === undefined && draft === null && !rawForbidden) {
     return (
       <div className="space-y-2">
         <h1 className="text-xl font-semibold">Configuration</h1>
@@ -483,7 +509,7 @@ export function ConfigPanel() {
             Review every change before it is applied to make sure the configuration remains sound.
           </p>
         </div>
-        {data.path && <span className="font-mono text-xs text-jul-muted">{data.path}</span>}
+        {data?.path && <span className="font-mono text-xs text-jul-muted">{data.path}</span>}
         <ValidationPill state={pill} />
         {dirty && <span className="text-xs text-jul-warning">● unsaved changes</span>}
         {isPatchMode && (
@@ -522,8 +548,9 @@ export function ConfigPanel() {
             onClick={() => {
               // When a managed staged restart is active, hot apply is blocked —
               // offer to update the staged configuration instead. External
-              // divergence or inconsistency blocks all applies.
-              if (hasPendingRestart && !isPatchMode) {
+              // divergence or inconsistency blocks all applies. Operators who
+              // lack config:raw cannot author raw staged updates.
+              if (hasPendingRestart && !isPatchMode && !rawForbidden) {
                 setStageConfirming(true);
               } else {
                 setConfirming(true);
@@ -534,14 +561,15 @@ export function ConfigPanel() {
               !valid ||
               applyActive.isPending ||
               applyStage.isPending ||
-              (restartBlocked && !hasPendingRestart)
+              (restartBlocked && !hasPendingRestart) ||
+              (rawForbidden && !isPatchMode)
             }
             className="inline-flex items-center gap-2 rounded-md bg-jul-accent px-3 py-1 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
             {(applyActive.isPending || applyStage.isPending) && <Spinner />}
             {applyActive.isPending || applyStage.isPending
               ? "Applying…"
-              : hasPendingRestart && !isPatchMode
+              : hasPendingRestart && !isPatchMode && !rawForbidden
                 ? "Update staged configuration"
                 : isPatchMode
                   ? "Apply patch"
@@ -553,15 +581,24 @@ export function ConfigPanel() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
         <div className="min-h-0 overflow-hidden rounded-lg border border-jul-border bg-jul-surface">
           <Suspense fallback={<EditorFallback />}>
-            {draft !== null && (
+            {draft !== null && !(rawForbidden && isPatchMode && !patchDraft?.candidate) && (
               <CodeEditor
                 value={draft}
-                readOnly={isPatchMode}
+                readOnly={isPatchMode || rawForbidden}
                 onChange={(next) => {
                   setDraft(next);
                   if (applied) setApplied(null);
                 }}
               />
+            )}
+            {rawForbidden && isPatchMode && !patchDraft?.candidate && (
+              <div className="flex h-full items-center justify-center p-6 text-sm text-jul-muted">
+                <p>
+                  Raw configuration preview is hidden because you do not have the{" "}
+                  <span className="font-mono">config:raw</span> permission. The diff and a summary
+                  of the structured change are shown on the right.
+                </p>
+              </div>
             )}
           </Suspense>
         </div>

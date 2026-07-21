@@ -177,9 +177,8 @@ var Catalog = []RouteSpec{
 	},
 	{
 		Pattern: "/api/config/raw",
-		Methods: []string{http.MethodGet, http.MethodPost, http.MethodPut},
+		Methods: []string{http.MethodPost, http.MethodPut},
 		Permissions: map[string]rbac.Permission{
-			http.MethodGet:  rbac.ConfigRaw,
 			http.MethodPost: rbac.ConfigApply,
 			http.MethodPut:  rbac.ConfigApply,
 		},
@@ -187,9 +186,8 @@ var Catalog = []RouteSpec{
 	},
 	{
 		Pattern: "/api/config/settings",
-		Methods: []string{http.MethodGet, http.MethodPost, http.MethodPut},
+		Methods: []string{http.MethodPost, http.MethodPut},
 		Permissions: map[string]rbac.Permission{
-			http.MethodGet:  rbac.ConfigRead,
 			http.MethodPost: rbac.ConfigApply,
 			http.MethodPut:  rbac.ConfigApply,
 		},
@@ -240,6 +238,12 @@ var Catalog = []RouteSpec{
 		Methods:    []string{http.MethodPost},
 		Permission: rbac.ConfigWrite,
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatchPreview) },
+	},
+	{
+		Pattern:    "/api/config/patch/candidate",
+		Methods:    []string{http.MethodPost},
+		Permission: rbac.ConfigRaw,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatchCandidate) },
 	},
 	{
 		Pattern:    "/api/routes/test",

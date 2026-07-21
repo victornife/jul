@@ -6,6 +6,7 @@ package admin
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -61,15 +62,29 @@ func (s *Server) handleHistoryGet(w http.ResponseWriter, r *http.Request) {
 // other (Finding REG-1). It returns the HTTP status to send plus a non-nil error
 // on failure.
 //
-// The caller must already have enforced the admin-subtree guard; this function
-// performs no authorization itself.
-func (s *Server) rollbackToSnapshot(id string) (int, error) {
+// The admin-subtree guard is enforced inside the lock after loading the
+// snapshot and the current config, so a concurrent admin change cannot
+// invalidate the authorization decision (N-02).
+func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Request) (int, error) {
 	raw, err := s.hist.get(id)
 	if err != nil {
 		return http.StatusNotFound, err
 	}
+	next, err := config.Parse(raw)
+	if err != nil {
+		return http.StatusBadRequest, fmt.Errorf("rollback snapshot is not valid configuration: %w", err)
+	}
+
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
+
+	// Object-level guard: rolling back to a snapshot that changes [admin]
+	// requires admin:manage. This runs inside the lock so the current config
+	// cannot change between the authorization check and the write (N-02).
+	if !s.authorizeConfigCandidate(w, r, "config.rollback", next) {
+		return http.StatusForbidden, errors.New("rollback not authorized")
+	}
+
 	prev := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(raw); err != nil {
 		// Map coordinator rejections to the correct HTTP status so the handler
@@ -105,10 +120,7 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if !s.authorizeRollback(w, r, req.ID) {
-		return
-	}
-	code, err := s.rollbackToSnapshot(req.ID)
+	code, err := s.rollbackToSnapshot(req.ID, w, r)
 	if err != nil {
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
@@ -198,10 +210,7 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if !s.authorizeRollback(w, r, req.ID) {
-		return
-	}
-	code, err := s.rollbackToSnapshot(req.ID)
+	code, err := s.rollbackToSnapshot(req.ID, w, r)
 	if err != nil {
 		if code == http.StatusBadRequest {
 			s.recordAudit(r, "config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID)
@@ -213,24 +222,4 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 
 	s.emit("config", "rollback", "warning", "Configuration rolled back to a previous snapshot.")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled back", "id": req.ID})
-}
-
-// authorizeRollback checks whether the request identity may roll back to the
-// named snapshot. Ordinary snapshot content requires only history:rollback;
-// if the snapshot changes anything under [admin], admin:manage is also required.
-func (s *Server) authorizeRollback(w http.ResponseWriter, r *http.Request, id string) bool {
-	if s.deps.LoadConfig == nil {
-		return true
-	}
-	raw, err := s.hist.get(id)
-	if err != nil {
-		// Snapshot not found; let the handler return 404.
-		return true
-	}
-	next, err := config.Parse(raw)
-	if err != nil {
-		// Invalid snapshot; let the write path report the validation failure.
-		return true
-	}
-	return s.requireAdminManageForCandidate(w, r, "config.rollback", next)
 }

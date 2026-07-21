@@ -529,9 +529,17 @@ func TestConfigEndpointsRequireAuth(t *testing.T) {
 	})
 	h := s.routes()
 
-	for _, path := range []string{"/api/config", "/api/config/raw", "/api/config/settings"} {
+	for _, path := range []string{"/api/config"} {
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s without token = %d, want 401", path, rr.Code)
+		}
+	}
+	// /api/config/raw and /api/config/settings accept only POST/PUT (N-07).
+	for _, path := range []string{"/api/config/raw", "/api/config/settings"} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, path, nil))
 		if rr.Code != http.StatusUnauthorized {
 			t.Fatalf("%s without token = %d, want 401", path, rr.Code)
 		}

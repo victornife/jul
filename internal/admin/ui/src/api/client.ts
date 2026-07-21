@@ -1183,7 +1183,9 @@ export type ValidationIssue = z.infer<typeof ValidationIssueSchema>;
 export const PatchResultSchema = z.object({
   ok: z.literal(true),
   summary: z.string(),
-  candidate: z.string(),
+  // Candidate TOML is omitted from /api/config/patch/preview for operators who
+  // lack config:raw, so the UI must not depend on it for structured review.
+  candidate: z.string().optional(),
   diff: ConfigDiffSchema,
   // base_version fingerprints the config this candidate was computed from. The
   // UI echoes it back to applyPatchBatch so a stale edit is rejected (409)

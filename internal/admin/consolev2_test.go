@@ -887,7 +887,7 @@ func TestConfigPatchPreviewSurfacesValidationErrors(t *testing.T) {
 	}
 	var out struct {
 		OK               bool              `json:"ok"`
-		Candidate        string            `json:"candidate"`
+		Diff             any               `json:"diff"`
 		ValidationErrors []validationError `json:"validation_errors"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
@@ -896,8 +896,8 @@ func TestConfigPatchPreviewSurfacesValidationErrors(t *testing.T) {
 	if !out.OK {
 		t.Error("ok = false, want true (the patch still applied to the model)")
 	}
-	if out.Candidate == "" {
-		t.Error("candidate should still be returned so the operator sees the diff")
+	if out.Diff == nil {
+		t.Error("diff should be returned so the operator sees the change")
 	}
 	if len(out.ValidationErrors) == 0 {
 		t.Error("validation_errors should be present for an unbuildable candidate")
@@ -943,7 +943,9 @@ func TestConfigPatchPreviewValidCandidateHasNoErrors(t *testing.T) {
 // TestConfigPatchActionSwitchProducesValidCandidate proves switching a cached
 // proxy route to a static action through the patch preview re-parses cleanly:
 // the op clears the cache toggle (cache + root is rejected by validation), so
-// the candidate carries no validation_errors and is never persisted.
+// the candidate carries no validation_errors and is never persisted. The full
+// candidate TOML is only available through the config:raw-gated candidate
+// endpoint (N-01).
 func TestConfigPatchActionSwitchProducesValidCandidate(t *testing.T) {
 	var writes int
 	deps := Deps{
@@ -964,34 +966,57 @@ func TestConfigPatchActionSwitchProducesValidCandidate(t *testing.T) {
 	}
 	s := newTestServer(t, config.AdminConfig{}, deps)
 
-	body, err := json.Marshal(patchRequest{
+	op := patchRequest{
 		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
 		Action: &locationActionPayload{Kind: "static", Target: "/var/www"},
-	})
+	}
+	body, err := json.Marshal(op)
 	if err != nil {
 		t.Fatalf("marshal patch: %v", err)
 	}
+
+	// Preview endpoint no longer returns the full candidate TOML.
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch", bytes.NewReader(body)))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+		t.Fatalf("preview status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
-	var out struct {
+	var preview struct {
 		OK               bool              `json:"ok"`
-		Candidate        string            `json:"candidate"`
 		ValidationErrors []validationError `json:"validation_errors"`
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode: %v", err)
+	if err := json.Unmarshal(rr.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
 	}
-	if !out.OK || len(out.ValidationErrors) != 0 {
-		t.Errorf("ok=%v errors=%+v, want ok with no validation errors", out.OK, out.ValidationErrors)
+	if !preview.OK || len(preview.ValidationErrors) != 0 {
+		t.Errorf("preview ok=%v errors=%+v, want ok with no validation errors", preview.OK, preview.ValidationErrors)
+	}
+
+	// The raw candidate endpoint returns the full TOML for callers with config:raw.
+	batchBody, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{op}})
+	if err != nil {
+		t.Fatalf("marshal batch: %v", err)
+	}
+	rr = httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/candidate", bytes.NewReader(batchBody)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("candidate status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		OK        bool   `json:"ok"`
+		Candidate string `json:"candidate"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode candidate: %v", err)
+	}
+	if !out.OK {
+		t.Error("candidate ok = false, want true")
 	}
 	if !strings.Contains(out.Candidate, "/var/www") || strings.Contains(out.Candidate, "127.0.0.1:9000") {
 		t.Errorf("candidate did not switch to a clean static action:\n%s", out.Candidate)
 	}
 	if writes != 0 {
-		t.Errorf("WriteConfigRaw called %d times during preview; want 0", writes)
+		t.Errorf("WriteConfigRaw called %d times during preview/candidate; want 0", writes)
 	}
 }
 
@@ -1023,18 +1048,37 @@ func TestConfigPatchPreviewBatch(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/preview", bytes.NewReader(body)))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+		t.Fatalf("preview status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var preview struct {
+		OK      bool   `json:"ok"`
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if !preview.OK {
+		t.Errorf("preview ok = false, want true")
+	}
+	if !strings.Contains(preview.Summary, "server") || !strings.Contains(preview.Summary, "route") {
+		t.Errorf("summary = %q, want both server and route mentions", preview.Summary)
+	}
+
+	// The full candidate TOML is only available through the config:raw-gated endpoint.
+	rr = httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/candidate", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("candidate status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	var out struct {
 		OK        bool   `json:"ok"`
 		Candidate string `json:"candidate"`
-		Summary   string `json:"summary"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatalf("decode candidate: %v", err)
 	}
 	if !out.OK {
-		t.Errorf("ok = false, want true")
+		t.Errorf("candidate ok = false, want true")
 	}
 	if !strings.Contains(out.Candidate, ":9090") {
 		t.Errorf("candidate missing new server; got:\n%s", out.Candidate)
@@ -1042,11 +1086,8 @@ func TestConfigPatchPreviewBatch(t *testing.T) {
 	if !strings.Contains(out.Candidate, "/new") {
 		t.Errorf("candidate missing new location; got:\n%s", out.Candidate)
 	}
-	if !strings.Contains(out.Summary, "server") || !strings.Contains(out.Summary, "route") {
-		t.Errorf("summary = %q, want both server and route mentions", out.Summary)
-	}
 	if writes != 0 {
-		t.Errorf("WriteConfigRaw called %d times during batch preview; want 0", writes)
+		t.Errorf("WriteConfigRaw called %d times during batch preview/candidate; want 0", writes)
 	}
 }
 
