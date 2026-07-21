@@ -583,9 +583,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	adminSrv := admin.New(cfg.Admin, log, deps)
 	if adminSrv != nil {
 		// Install the initial RBAC policy from the startup candidate.
+		// H-01: Fail-closed when RBAC is enabled but policy build fails.
+		// Never silently fall back to legacy or anonymous auth.
 		if cfg.Admin.RBAC.Enabled {
 			if p, err := buildRBACPolicy(startupCand.Effective.Admin); err != nil {
-				log.Warn("RBAC policy build failed at startup; falling back to legacy auth", "error", err)
+				log.Error("RBAC policy build failed at startup; admin listener will not start", "error", err)
+				return 1
 			} else {
 				adminSrv.UpdatePolicy(p)
 			}

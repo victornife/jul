@@ -622,6 +622,11 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			Message: msg,
 		}
 		terminal := c.withRestorationOutcome(baseRes, prevRaw, previouslyExisted, rawDigest)
+		// M-05: emit terminal callback on enqueue failure so the outcome is
+		// recorded in last_managed_apply, metrics, and audit.
+		if c.OnManagedApplyComplete != nil {
+			c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(terminal))
+		}
 		c.mu.Unlock()
 		return terminal, err
 	}

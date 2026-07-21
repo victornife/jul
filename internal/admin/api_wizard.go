@@ -227,6 +227,8 @@ func wizardPatchOps(cfg *config.Config, existing *config.Config) ([]patchRequest
 
 func locationActionFromConfig(loc config.LocationConfig) (*locationActionPayload, error) {
 	switch {
+	case loc.GRPC && loc.ProxyPass != "":
+		return &locationActionPayload{Kind: "grpc_proxy", Target: loc.ProxyPass}, nil
 	case loc.ProxyPass != "":
 		return &locationActionPayload{Kind: "proxy", Target: loc.ProxyPass}, nil
 	case loc.Root != "":

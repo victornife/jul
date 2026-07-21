@@ -323,14 +323,17 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	s.log.Info("admin listener started", "addr", s.cfg.Listen, "auth", s.currentAdminConfig().Token != "")
-	// The admin API grants full read/write control of the running server and
-	// uses a single shared bearer token with no RBAC. It is designed for
-	// single-operator, loopback-bound use. Binding to a routable address
-	// without an external firewall, VPN, or mTLS layer is unsafe.
+	// The admin API grants full read/write control of the running server. It is
+	// designed for single-operator, loopback-bound use. Binding to a routable
+	// address without an external firewall, VPN, or mTLS layer is unsafe.
 	if !adminIsLoopback(s.cfg.Listen) {
+		security := "single shared bearer token; full read/write access"
+		if pol := s.currentPolicy(); pol != nil && pol.Enabled() {
+			security = "RBAC enabled; full read/write access"
+		}
 		s.log.Warn("admin listener bound to a non-loopback address — restrict access with firewall rules or a private network",
 			"addr", s.cfg.Listen,
-			"security", "single shared bearer token; no RBAC; full read/write access")
+			"security", security)
 	}
 
 	errCh := make(chan error, 1)

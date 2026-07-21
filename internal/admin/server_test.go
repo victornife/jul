@@ -506,6 +506,7 @@ func TestConfigSettingsBadInput(t *testing.T) {
 func TestConfigRawValidatesBeforeSaving(t *testing.T) {
 	var written []byte
 	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig:     func() (*config.Config, error) { return &config.Config{}, nil },
 		WriteConfigRaw: func(b []byte) error { written = b; return nil },
 	})
 	h := s.routes()

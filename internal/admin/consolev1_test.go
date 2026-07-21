@@ -245,6 +245,9 @@ func historyTestServer(t *testing.T) (*Server, string) {
 	}
 	deps := Deps{
 		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		LoadConfig: func() (*config.Config, error) {
+			return config.Parse(initial)
+		},
 		WriteConfigRaw: func(data []byte) error {
 			c, err := config.Parse(data)
 			if err != nil {

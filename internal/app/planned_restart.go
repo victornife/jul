@@ -76,9 +76,14 @@ type PlannedRestartMarker struct {
 	// records the digest of the previous staged content so that crash recovery
 	// can distinguish a failed update write (disk == previous staged) from a
 	// genuine inconsistency (N-03).
-	PreviousStagedRawSHA256 string    `json:"previous_staged_raw_sha256,omitempty"`
-	PendingSubsystems       []string  `json:"pending_subsystems"`
-	StagedAt                time.Time `json:"staged_at"`
+	PreviousStagedRawSHA256 string `json:"previous_staged_raw_sha256,omitempty"`
+	// M-01: Preserve the previous staged version and subsystems for recovery.
+	// When a staged-update fails, these fields let the API report the correct
+	// metadata instead of showing the failed candidate's values.
+	PreviousStagedVersion string   `json:"previous_staged_version,omitempty"`
+	PreviousSubsystems    []string `json:"previous_subsystems,omitempty"`
+	PendingSubsystems     []string `json:"pending_subsystems"`
+	StagedAt              time.Time `json:"staged_at"`
 }
 
 // PlannedRestartStateEnum is the authoritative single enum representing the
@@ -282,6 +287,9 @@ func (s *PlannedRestartStore) StageManaged(baseRaw, candidateRaw []byte, marker 
 		// distinguish a failed update write (disk == previous staged) from a true
 		// inconsistency (N-03).
 		marker.PreviousStagedRawSHA256 = existing.StagedRawSHA256
+		// M-01: Preserve the previous staged version and subsystems for recovery.
+		marker.PreviousStagedVersion = existing.StagedVersion
+		marker.PreviousSubsystems = existing.PendingSubsystems
 		if s.baseRaw == nil {
 			// Load base raw from backup if in-memory cache was lost.
 			if base, err := os.ReadFile(s.backupPath()); err == nil {
@@ -392,7 +400,12 @@ func (s *PlannedRestartStore) Refresh() error {
 				// content. Restore the marker to a clean staged state.
 				marker.State = plannedRestartStateStaged
 				marker.StagedRawSHA256 = marker.PreviousStagedRawSHA256
+				// M-01: Restore the previous staged version and subsystems.
+				marker.StagedVersion = marker.PreviousStagedVersion
+				marker.PendingSubsystems = marker.PreviousSubsystems
 				marker.PreviousStagedRawSHA256 = ""
+				marker.PreviousStagedVersion = ""
+				marker.PreviousSubsystems = nil
 				if werr := s.writeMarkerLocked(*marker); werr != nil {
 					s.inconsistent = true
 					return fmt.Errorf("planned-restart refresh: restore previous staged after update crash: %w", werr)
@@ -663,7 +676,12 @@ func (s *PlannedRestartStore) Reconcile() error {
 				// operator can still restart with the previous candidate.
 				marker.State = plannedRestartStateStaged
 				marker.StagedRawSHA256 = marker.PreviousStagedRawSHA256
+				// M-01: Restore the previous staged version and subsystems.
+				marker.StagedVersion = marker.PreviousStagedVersion
+				marker.PendingSubsystems = marker.PreviousSubsystems
 				marker.PreviousStagedRawSHA256 = ""
+				marker.PreviousStagedVersion = ""
+				marker.PreviousSubsystems = nil
 				if werr := s.writeMarkerLocked(*marker); werr != nil {
 					s.inconsistent = true
 					return fmt.Errorf("reconcile: restore previous staged after update crash: %w", werr)

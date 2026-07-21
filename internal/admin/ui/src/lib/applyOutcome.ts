@@ -53,7 +53,7 @@ export type ApplyOutcomeKind =
 /** One subsystem that did not activate the new config during a partial reload. */
 export interface SubsystemFailure {
   readonly name: string;
-  readonly detail?: string;
+  readonly detail: string | undefined;
 }
 
 export interface ApplyOutcome {
@@ -65,6 +65,13 @@ export interface ApplyOutcome {
   readonly message: string;
   /** The subsystems that failed to reload; non-empty only for "partial-reload". */
   readonly failures: readonly SubsystemFailure[];
+}
+
+/** Per-subsystem reload result from the backend. */
+export interface SubsystemReloadResult {
+  readonly status?: string;
+  readonly error?: string;
+  readonly duration_ms?: number;
 }
 
 export interface ApplyOutcomeInput {
@@ -81,9 +88,9 @@ export interface ApplyOutcomeInput {
   /**
    * True when the server's previous_reload.timed_out flag was set: the swap
    * completed but exceeded the configured reload_timeout. The new config is
-   * serving; the slow reload should be investigated and the timeout raised if
-   * the config has grown. Distinct from restart-required (config not saved)
-   * and partial-reload (subsystem failed to activate).
+   * serving; the timeout is advisory and a slow reload should be investigated.
+   * Distinct from restart-required (config not saved) and partial-reload
+   * (subsystem failed to activate).
    */
   readonly reloadTimedOut?: boolean;
   /**
@@ -106,6 +113,17 @@ export interface ApplyOutcomeInput {
    * is already pending). Derived from pending_restart.staged in the response.
    */
   readonly isStagedUpdate?: boolean;
+  /**
+   * M-03: Per-subsystem reload results from reload.outcome for complete outcome.
+   */
+  readonly http?: SubsystemReloadResult;
+  readonly stream?: SubsystemReloadResult;
+  readonly admin?: SubsystemReloadResult;
+  /** M-03: Whether the reload was persisted (saved to disk) vs published to runtime. */
+  readonly persisted?: boolean;
+  /** M-03: The reload phase that failed or timed out. */
+  readonly failedPhase?: string;
+  readonly timedOutPhase?: string;
 }
 
 /**
@@ -117,7 +135,7 @@ export interface ApplyOutcomeInput {
 export function streamReloadFailure(streamStatus: string | undefined): SubsystemFailure | null {
   if (streamStatus === undefined || !streamStatus.startsWith("failed:")) return null;
   const detail = streamStatus.replace(/^failed:\s*/, "").trim();
-  return detail.length > 0 ? { name: "L4 stream proxy", detail } : { name: "L4 stream proxy" };
+  return detail.length > 0 ? { name: "L4 stream proxy", detail: detail } : { name: "L4 stream proxy", detail: undefined };
 }
 
 /**
@@ -195,20 +213,34 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
   // exceeded the configured reload_timeout. The new config is serving. Surface
   // this as a warning so the operator investigates slow reload paths or raises
   // the timeout. Takes precedence over partial-reload and reload-pending.
-  if (input.reloadTimedOut) {
+  // M-03: Also surface the timed-out phase.
+  if (input.reloadTimedOut || input.timedOutPhase) {
+    const phaseInfo = input.timedOutPhase ? ` (phase: ${input.timedOutPhase})` : "";
     return {
       kind: "reload-timed-out",
       severity: "warning",
       blocking: false,
       title: "Applied -' reload exceeded the configured timeout",
       message:
-        "The configuration was saved and is now serving, but the reload took longer than the configured reload_timeout. " +
-        "Investigate slow reload paths (WAF rule compilation, WASM plugin loading) or increase reload_timeout in [global].",
+        "The configuration was saved and is now serving, but the reload took longer than the configured reload_timeout" +
+        phaseInfo + ". Investigate slow reload paths (WAF rule compilation, WASM plugin loading) or increase reload_timeout in [global].",
       failures: [],
     };
   }
 
   const failures: SubsystemFailure[] = [];
+  // M-03: Extract per-subsystem failures from the correlated reload result.
+  if (input.http?.status === "failed") {
+    failures.push({ name: "HTTP runtime", detail: input.http.error ?? undefined });
+  }
+  if (input.stream?.status === "failed") {
+    failures.push({ name: "L4 stream proxy", detail: input.stream.error ?? undefined });
+  }
+  if (input.admin?.status === "failed") {
+    failures.push({ name: "admin subsystem", detail: input.admin.error ?? undefined });
+  }
+
+  // M-03: Also include stream status from legacy polling for backward compat.
   const streamFailure = streamReloadFailure(input.streamStatus);
   if (streamFailure) failures.push(streamFailure);
 

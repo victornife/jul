@@ -62,10 +62,10 @@ posture.
 
 | Concern | Today |
 | --- | --- |
-| AuthN | One constant-time-compared bearer token (`internal/admin/server.go` `auth()`). No token ⇒ open (loopback-bound). |
-| AuthZ | None — the token is all-or-nothing. |
-| Identity | None. Audit `Actor` is hard-coded to `"operator"` (`internal/admin/audit.go`). |
-| Token lifecycle | Static config value; rotation = edit config + reload; no revocation list, no expiry. |
+| AuthN | One constant-time-compared bearer token (`[admin].token`) or RBAC tokens (`[[admin.principals]]`, `[[admin.rbac.tokens]]`). Zero-token on loopback ⇒ open. |
+| AuthZ | RBAC enforced at the API boundary (`admin:manage`, `config:apply`, etc.). Legacy shared token maps to `shared` principal with `default_role`. |
+| Identity | Principal name (e.g., `alice` or `shared`) assigned per-request; audit `Actor` reflects the authenticated principal. |
+| Token lifecycle | Legacy token: static config; RBAC tokens: issuance via API, immediate revocation, optional expiry. |
 
 ## Model overview
 

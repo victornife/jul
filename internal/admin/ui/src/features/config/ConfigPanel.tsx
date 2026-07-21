@@ -219,6 +219,13 @@ export function ConfigPanel() {
     reloadTimedOut: boolean;
     mode: "hot" | "stage_restart";
     isStagedUpdate: boolean;
+    // M-03: Full reload metadata for complete outcome representation.
+    http: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
+    stream: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
+    admin: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
+    persisted?: boolean | undefined;
+    failedPhase?: string | undefined;
+    timedOutPhase?: string | undefined;
   } | null>(null);
 
   // Patch draft state: when a structured patch is handed off, the editor shows
@@ -321,6 +328,13 @@ export function ConfigPanel() {
         reloadTimedOut: res.reload?.timed_out === true || reloadOutcome === "applied_degraded",
         mode: "hot",
         isStagedUpdate: false,
+        // M-03: Pass full reload metadata for complete outcome representation.
+        http: res.reload?.http ?? undefined,
+        stream: res.reload?.stream ?? undefined,
+        admin: res.reload?.admin ?? undefined,
+        persisted: res.reload?.persisted ?? undefined,
+        failedPhase: res.reload?.failed_phase ?? undefined,
+        timedOutPhase: res.reload?.timed_out_phase ?? undefined,
       });
       setConfirming(false);
       // Advance the token to the freshly-applied version so a follow-up edit
@@ -340,7 +354,10 @@ export function ConfigPanel() {
   const applyPatch = useMutation({
     mutationFn: () => {
       if (!patchDraft) throw new Error("no patch draft to apply");
-      return applyPatchBatch(patchDraft.ops, patchDraft.baseVersion ?? conflictVersion);
+      // H-03: If a managed staged restart is pending, patch applies should
+      // update the staged configuration instead of hot apply.
+      const mode = hasPendingRestart ? "stage_restart" : "hot";
+      return applyPatchBatch(patchDraft.ops, patchDraft.baseVersion ?? conflictVersion, mode);
     },
     onSuccess: (res) => {
       // Reconcile the raw-editor state with the freshly-applied patch: the
@@ -361,11 +378,23 @@ export function ConfigPanel() {
           ? reloadOutcome === "saved_not_live"
           : (res.pending_reload ?? true),
         reloadTimedOut: res.reload?.timed_out === true || reloadOutcome === "applied_degraded",
-        mode: res.mode ?? "hot",
-        isStagedUpdate: false,
+        mode: res.mode ?? (hasPendingRestart ? "stage_restart" : "hot"),
+        isStagedUpdate: hasPendingRestart && res.mode === "stage_restart",
+        // M-03: Pass full reload metadata for complete outcome representation.
+        http: res.reload?.http ?? undefined,
+        stream: res.reload?.stream ?? undefined,
+        admin: res.reload?.admin ?? undefined,
+        persisted: res.reload?.persisted ?? undefined,
+        failedPhase: res.reload?.failed_phase ?? undefined,
+        timedOutPhase: res.reload?.timed_out_phase ?? undefined,
       });
       setConfirming(false);
       setConflictVersion(undefined);
+      // M-02: After a successful patch apply, navigate away if the user lacks
+      // config:raw. This prevents landing in the raw-editor error state.
+      if (rawForbidden && isPatchMode) {
+        void navigate("/routes");
+      }
       void qc.invalidateQueries({ queryKey: ["pending-restart"] });
       void qc.invalidateQueries();
     },
@@ -387,6 +416,13 @@ export function ConfigPanel() {
         reloadTimedOut: false,
         mode: "stage_restart",
         isStagedUpdate: hasPendingRestart,
+        // M-03: Pass full reload metadata for complete outcome representation.
+        http: res.reload?.http ?? undefined,
+        stream: res.reload?.stream ?? undefined,
+        admin: res.reload?.admin ?? undefined,
+        persisted: res.reload?.persisted ?? undefined,
+        failedPhase: res.reload?.failed_phase ?? undefined,
+        timedOutPhase: res.reload?.timed_out_phase ?? undefined,
       });
       setStageConfirming(false);
       setBaseVersion(res.version ?? undefined);
