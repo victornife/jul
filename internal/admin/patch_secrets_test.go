@@ -186,3 +186,110 @@ func TestRawAndHistoryEndpointsRequireRawPermission(t *testing.T) {
 		t.Errorf("operator GET /api/config status = %d, want 403", rr.Code)
 	}
 }
+
+// TestDisabledCredentialReturns401 verifies E5 (M-04): a principal whose token
+// is correct but whose account is disabled or expired must receive HTTP 401
+// Unauthorized, not 403 Forbidden. A disabled credential is a re-authentication
+// problem (the client must obtain a new token), not an authorisation problem.
+func TestDisabledCredentialReturns401(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "server.toml")
+	disabledTok := "disabled-token-32-chars-padded----"
+	activeTok := "active-admin-token-32-chars-padded"
+
+	seed := secretBearerConfig()
+	seed.Admin.RBAC.Principals = []config.AdminPrincipal{
+		{Name: "disabled-op", Role: "configwriter", Token: disabledTok, Disabled: true},
+		{Name: "active-adm", Role: "admin", Token: activeTok},
+	}
+	raw, err := config.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, raw, 0o644); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	deps := Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(cfgPath) },
+		WriteConfigRaw: func(data []byte) error {
+			return os.WriteFile(cfgPath, data, 0o644)
+		},
+		LoadConfig: func() (*config.Config, error) {
+			b, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return nil, err
+			}
+			return config.Parse(b)
+		},
+	}
+	s := newTestServer(t, config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}, deps)
+
+	customRoles := map[string][]string{"configwriter": {"config:write"}}
+	pol, err := rbac.Build(true, "admin", customRoles, []rbac.PrincipalDef{
+		{Name: "disabled-op", Role: "configwriter", Token: disabledTok, Disabled: true},
+		{Name: "active-adm", Role: rbac.RoleAdmin, Token: activeTok},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatalf("build policy: %v", err)
+	}
+	s.UpdatePolicy(pol)
+
+	// A valid token for a disabled account must return 401, not 403.
+	for _, path := range []string{"/api/runtime/overview", "/api/config/pending-restart"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+disabledTok)
+		rr := httptest.NewRecorder()
+		s.routes().ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("%s: disabled credential status = %d, want 401", path, rr.Code)
+		}
+		if rr.Code == http.StatusForbidden {
+			t.Errorf("%s: disabled credential returned 403 instead of 401 (E5/M-04 regression)", path)
+		}
+	}
+}
+
+// TestLocationSetActionGRPCProxy verifies E1 (H-07): the grpc_proxy kind sets
+// both ProxyPass (the upstream target) and GRPC=true on the location, while
+// clearing all other action discriminators. Before E1 this kind was unknown and
+// the AppEditor fell back to plain proxy (GRPC=false), so h2c framing was never
+// applied and the upstream received HTTP/1.1 instead of h2c.
+func TestLocationSetActionGRPCProxy(t *testing.T) {
+	loc := &config.LocationConfig{
+		Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+		ProxyPass: "http://old-target",
+		Cache:     true, // must be cleared after action switch
+	}
+
+	label, err := setLocationAction(loc, locationActionPayload{Kind: "grpc_proxy", Target: "http://127.0.0.1:50051"})
+	if err != nil {
+		t.Fatalf("setLocationAction grpc_proxy: %v", err)
+	}
+	if label != "grpc_proxy" {
+		t.Errorf("label = %q, want grpc_proxy", label)
+	}
+	if loc.ProxyPass != "http://127.0.0.1:50051" {
+		t.Errorf("ProxyPass = %q, want http://127.0.0.1:50051", loc.ProxyPass)
+	}
+	if !loc.GRPC {
+		t.Error("GRPC = false, want true (grpc_proxy must set GRPC=true)")
+	}
+	// Cache is preserved for proxy-type actions (only static clears it).
+	if loc.Redirect != "" || loc.Return != 0 || loc.Deny || loc.Root != "" {
+		t.Error("other action discriminators must be cleared")
+	}
+
+	// Empty target must be rejected.
+	if _, err := setLocationAction(loc, locationActionPayload{Kind: "grpc_proxy", Target: ""}); err == nil {
+		t.Error("expected error for grpc_proxy with empty target")
+	}
+
+	// Confirm plain proxy does NOT set GRPC.
+	loc2 := &config.LocationConfig{}
+	if _, err := setLocationAction(loc2, locationActionPayload{Kind: "proxy", Target: "http://127.0.0.1:9000"}); err != nil {
+		t.Fatalf("setLocationAction proxy: %v", err)
+	}
+	if loc2.GRPC {
+		t.Error("plain proxy must not set GRPC=true")
+	}
+}
+
