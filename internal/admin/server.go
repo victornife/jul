@@ -256,13 +256,12 @@ func (s *Server) RecordManagedApplyOutcome(ctx ApplyRequestContext, o ManagedApp
 	}
 	result := "success"
 	if !o.OK {
-		if o.RestoreError != "" {
-			result = "failure"
-		} else if o.Restored {
-			result = "success"
-		} else {
-			result = "failure"
-		}
+		// C4 (N-08): always record "failure" when the apply did not succeed,
+		// regardless of whether the previous configuration was restored.
+		// Restoration is a recovery action, not an indication that the apply
+		// succeeded. The restored and restore_error fields in the detail
+		// string provide the full picture.
+		result = "failure"
 	}
 	detail := fmt.Sprintf("outcome=%s restored=%t", o.Outcome, o.Restored)
 	if o.RestoreError != "" {

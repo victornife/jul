@@ -317,8 +317,28 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.ConnStateHook = metrics.ConnState
 	srv.OnReloadStart = metrics.ReloadStarted
 	srv.OnReloadComplete = metrics.ObserveReload
+	// C1 (N-04): maintain a durable admin-degraded flag that persists until a
+	// post-Publish reload succeeds for the admin subsystem. It is not cleared
+	// by pre-Publish failures, which fixes the defect where a failed pre-Publish
+	// reload overwrites the LastReload pointer and silently clears a previously
+	// degraded state reported by a published reload.
+	var activeAdminDegraded atomic.Bool
+	var lastAdminDegradedErr atomic.Pointer[string]
 	srv.OnReloadResult = func(r server.ReloadResult) {
 		metrics.ObserveReloadResult(string(r.Outcome), r.PhaseDurations, r.TimedOut, r.TimedOutPhase)
+		// Only published reloads affect the durable admin-health flag.
+		// Pre-Publish failures leave it unchanged.
+		if r.Published {
+			if r.Admin.Status == server.ReloadSubsystemFailed || r.Admin.Status == server.ReloadSubsystemTimedOut {
+				msg := "admin subsystem reload failed: " + r.Admin.Error
+				lastAdminDegradedErr.Store(&msg)
+				activeAdminDegraded.Store(true)
+			} else {
+				// Successful post-Publish admin clears the degraded state.
+				lastAdminDegradedErr.Store(nil)
+				activeAdminDegraded.Store(false)
+			}
+		}
 	}
 	srv.ACME = rt.ACME
 
@@ -360,19 +380,23 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// H-04: only fail readiness for post-Publish admin subsystem failure or
 	// timeout. Pre-publish failures, skipped phases, and not_run do not block
 	// readiness because the previous runtime state is still serving.
+	// C1 (N-04): read from the durable activeAdminDegraded flag rather than
+	// deriving health from srv.LastReload() alone. A later pre-Publish failure
+	// updates LastReload to a result with Published=false, which would
+	// previously erase a degraded state from a prior published failure.
 	deps.AdminHealth = func() error {
-		lr := srv.LastReload()
-		if lr == nil {
+		if !activeAdminDegraded.Load() {
 			return nil
 		}
-		if lr.Published && (lr.Admin.Status == server.ReloadSubsystemFailed || lr.Admin.Status == server.ReloadSubsystemTimedOut) {
-			return &admin.AdminHealthStatus{
-				Healthy: false,
-				Reason:  "admin_reload",
-				Detail:  "admin subsystem reload failed: " + lr.Admin.Error,
-			}
+		detail := "admin subsystem reload failed"
+		if p := lastAdminDegradedErr.Load(); p != nil && *p != "" {
+			detail = *p
 		}
-		return nil
+		return &admin.AdminHealthStatus{
+			Healthy: false,
+			Reason:  "admin_reload",
+			Detail:  detail,
+		}
 	}
 
 	// Wire the managed apply path now that srv exists so the coordinator can
@@ -543,6 +567,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// admin.New copies deps, so the overview can read it. The actual callback
 	// that populates the pointer is wired after adminSrv exists.
 	var lastManagedApply atomic.Pointer[admin.ManagedApplyOutcome]
+	// C3: monotonic high-water mark of stored apply outcomes. Callbacks with a
+	// lower sequence number (stale results from a timed-out earlier apply that
+	// fired after a newer apply completed) are silently dropped.
+	var lastManagedApplySeq atomic.Uint64
 	if coordinator != nil {
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
@@ -574,6 +602,20 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// the runtime overview.
 	if coordinator != nil && adminSrv != nil {
 		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
+			// C3: ignore callbacks from older applies (e.g. a timed-out first
+			// apply whose finalizer fires after a second apply has already
+			// completed). Parse the monotonic sequence from the reload ID
+			// ("rl_N") and only store/record when N is strictly newer.
+			seq := parseReloadSeq(res.Reload.ID)
+			for {
+				prev := lastManagedApplySeq.Load()
+				if seq <= prev {
+					return // stale result; a newer outcome is already stored
+				}
+				if lastManagedApplySeq.CompareAndSwap(prev, seq) {
+					break
+				}
+			}
 			outcome := ""
 			if res.Reload != nil {
 				outcome = string(res.Reload.Outcome)
@@ -768,6 +810,20 @@ func parseWorkerThreads(s string) int {
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// parseReloadSeq extracts the monotonic sequence number from a reload ID of
+// the form "rl_N". It returns 0 for any ID that does not match that format.
+// Used by OnManagedApplyComplete to implement the C3 sequence guard.
+func parseReloadSeq(id string) uint64 {
+	if !strings.HasPrefix(id, "rl_") {
+		return 0
+	}
+	n, err := strconv.ParseUint(id[3:], 10, 64)
+	if err != nil {
 		return 0
 	}
 	return n

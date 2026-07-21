@@ -49,10 +49,10 @@ type ApplyResult struct {
 
 	// Restoration fields (F-03): first-class truth about whether a rejected
 	// candidate was rolled back to the previous configuration.
-	Persisted         bool   // true if the candidate bytes were written to disk
-	Restored          bool   // true if the previous configuration was restored
-	RestoreError      string // non-empty if restoration was attempted and failed
-	FinalDiskVersion  string // canonical version of the on-disk file after apply
+	Persisted           bool   // true if the candidate bytes were written to disk
+	Restored            bool   // true if the previous configuration was restored
+	RestoreError        string // non-empty if restoration was attempted and failed
+	FinalDiskVersion    string // canonical version of the on-disk file after apply
 	FinalServingVersion string // canonical version of the live serving config (may lag)
 
 	// StagedRestartIsUpdate is true when a stage_restart apply replaced an
@@ -623,17 +623,22 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// restoration echo so the watcher does not loop.
 		restoreErr := c.restorePreviousLocked(prevRaw, previouslyExisted, rawDigest)
 		c.inFlightState = ApplyInFlightNone
-		c.mu.Unlock()
+		// C5 (N-05): build structured truth with Persisted/Restored/FinalDiskVersion
+		// while still holding the lock so the disk read in withRestorationOutcome
+		// is atomic with the restoration.
 		msg := "Reload enqueue failed; the configuration was saved but may not be applied."
 		if restoreErr != nil {
 			msg += " Restoration failed: " + restoreErr.Error()
 		}
-		return ApplyResult{
+		baseRes := ApplyResult{
 			OK:      false,
 			Mode:    mode,
 			Version: desiredVersion,
 			Message: msg,
-		}, err
+		}
+		terminal := c.withRestorationOutcome(baseRes, prevRaw, previouslyExisted, rawDigest)
+		c.mu.Unlock()
+		return terminal, err
 	}
 	c.mu.Unlock()
 
@@ -676,11 +681,18 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 					c.logRestorationFailure(id, err)
 				}
 				c.inFlightState = ApplyInFlightNone
+				// C2 (N-05): build the terminal result while holding the lock so
+				// the disk read in withRestorationOutcome is atomic with the
+				// restoration and cannot race with a concurrent apply's write.
+				terminal = c.buildTerminalResult(mode, desiredVersion, terminalRR, prevRaw, previouslyExisted, rawDigest)
 				c.mu.Unlock()
+			} else {
+				// Success path: buildTerminalResult does not read disk for OK
+				// results (no restoration occurred), so no lock is required.
+				terminal = c.buildTerminalResult(mode, desiredVersion, terminalRR, prevRaw, previouslyExisted, rawDigest)
 			}
 
 			// H-05: build and emit the terminal managed outcome.
-			terminal = c.buildTerminalResult(mode, desiredVersion, terminalRR, prevRaw, previouslyExisted, rawDigest)
 		case <-c.BaseCtx.Done():
 			// Process shutting down; no restoration attempt — startup will
 			// determine the correct state from disk and marker files.
