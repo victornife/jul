@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -767,3 +768,453 @@ func TestInconsistentMarkerSetsFlag(t *testing.T) {
 	}
 }
 
+// ─── B1: managed_staged takes priority over external_divergence (H-02) ──────
+
+// TestManagedStagedTakesPriorityOverExternalDivergence verifies that when both
+// a valid managed staged marker is pending AND external divergence is set (e.g.
+// because PendingRestartCheck ran and saw disk != startup), the authoritative
+// state is managed_staged, not external_divergence (H-02).
+func TestManagedStagedTakesPriorityOverExternalDivergence(t *testing.T) {
+	store := &PlannedRestartStore{}
+
+	// Simulate the race: external divergence set before managed staged is known.
+	store.SetExternalDivergence(true)
+	store.Stage([]byte("staged-candidate"))
+
+	st := store.State()
+	if st.State != PlannedRestartStateManagedStaged {
+		t.Errorf("state = %q, want managed_staged when both pending and external are set", st.State)
+	}
+	if !st.Pending {
+		t.Error("Pending should be true")
+	}
+	if st.External {
+		t.Error("External should be false when managed_staged wins priority")
+	}
+}
+
+// TestFileStoreManagedStagedTakesPriorityOverExternalDivergence tests the same
+// priority fix with a real file-backed store and a valid marker on disk.
+func TestFileStoreManagedStagedTakesPriorityOverExternalDivergence(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	staged := []byte("staged-config")
+	if err := os.WriteFile(configPath, staged, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Write the marker before constructing the store so the constructor can
+	// hydrate the in-memory pending flag via LoadMarker.
+	markerData, _ := marshalMarker(PlannedRestartMarker{
+		Version:            plannedRestartMarkerVersion,
+		State:              plannedRestartStateStaged,
+		ConfigPath:         configPath,
+		BaseRawSHA256:      sha256Hex([]byte("original")),
+		StagedRawSHA256:    sha256Hex(staged),
+		BaseServingVersion: "v1",
+	})
+	// Determine the marker path without a store instance (same suffix convention).
+	markerPath := configPath + ".pending-restart.json"
+	backupPath := configPath + ".pending-restart.bak"
+	if err := os.WriteFile(markerPath, markerData, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if err := os.WriteFile(backupPath, []byte("original"), 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	// Constructor hydrates pending=true from the staged marker.
+	store := NewFilePlannedRestartStore(configPath)
+	if !store.IsPending() {
+		t.Fatal("constructor should set IsPending=true from the staged marker")
+	}
+
+	// Simulate what the RefreshState hook used to do: set external divergence
+	// because the startup config differs from the current disk config.
+	store.SetExternalDivergence(true)
+
+	st := store.State()
+	if st.State != PlannedRestartStateManagedStaged {
+		t.Errorf("state = %q, want managed_staged; external divergence should not override a valid staged marker", st.State)
+	}
+}
+
+// ─── B2: previous_staged_raw_sha256 field populated on updates ───────────────
+
+// TestStageUpdateStoresPreviousStagedDigest verifies that StageManaged records
+// the previous staged digest in PreviousStagedRawSHA256 when performing a
+// staged update, enabling crash recovery (N-03).
+func TestStageUpdateStoresPreviousStagedDigest(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	seed := []byte("original-config")
+	v1 := []byte("staged-v1")
+
+	if err := os.WriteFile(configPath, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+
+	// First stage.
+	m1 := PlannedRestartMarker{
+		BaseRawSHA256:   sha256Hex(seed),
+		StagedRawSHA256: sha256Hex(v1),
+		StagedVersion:   "v1",
+	}
+	if err := store.StageManaged(seed, v1, m1); err != nil {
+		t.Fatalf("first StageManaged: %v", err)
+	}
+	if err := store.PromoteToStaged(v1); err != nil {
+		t.Fatalf("first PromoteToStaged: %v", err)
+	}
+
+	// Second stage (update): write v1 to disk so the store sees it as staged.
+	if err := os.WriteFile(configPath, v1, 0o600); err != nil {
+		t.Fatalf("write v1: %v", err)
+	}
+
+	v2 := []byte("staged-v2")
+	m2 := PlannedRestartMarker{
+		StagedRawSHA256: sha256Hex(v2),
+		StagedVersion:   "v2",
+	}
+	if err := store.StageManaged(seed, v2, m2); err != nil {
+		t.Fatalf("second StageManaged: %v", err)
+	}
+
+	loaded, err := store.LoadMarker()
+	if err != nil || loaded == nil {
+		t.Fatalf("LoadMarker after update: %v, %v", loaded, err)
+	}
+	if loaded.PreviousStagedRawSHA256 != sha256Hex(v1) {
+		t.Errorf("PreviousStagedRawSHA256 = %q, want digest of v1", loaded.PreviousStagedRawSHA256)
+	}
+	// BaseRawSHA256 must be preserved from the first stage.
+	if loaded.BaseRawSHA256 != sha256Hex(seed) {
+		t.Errorf("BaseRawSHA256 = %q, want digest of seed", loaded.BaseRawSHA256)
+	}
+}
+
+// ─── B3: PromoteToStaged returns sentinel errors (N-03) ──────────────────────
+
+// TestPromoteToStagedErrorOnMissingMarker verifies that PromoteToStaged returns
+// ErrNoManagedPreparedMarker when no marker file is present, rather than
+// silently succeeding.
+func TestPromoteToStagedErrorOnMissingMarker(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	if err := os.WriteFile(configPath, []byte("content"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	store := NewFilePlannedRestartStore(configPath)
+	// No StageManaged call → no marker on disk.
+	err := store.PromoteToStaged([]byte("candidate"))
+	if !errors.Is(err, ErrNoManagedPreparedMarker) {
+		t.Errorf("PromoteToStaged with missing marker = %v, want ErrNoManagedPreparedMarker", err)
+	}
+}
+
+// TestPromoteToStagedErrorOnWrongState verifies that PromoteToStaged returns
+// ErrMarkerWrongState when the marker is already in "staged" state (e.g. a
+// duplicate call after a crash-resume).
+func TestPromoteToStagedErrorOnWrongState(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	staged := []byte("staged-content")
+	if err := os.WriteFile(configPath, staged, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+	marker := PlannedRestartMarker{
+		Version:         plannedRestartMarkerVersion,
+		State:           plannedRestartStateStaged, // already staged, not prepared
+		ConfigPath:      configPath,
+		BaseRawSHA256:   sha256Hex([]byte("original")),
+		StagedRawSHA256: sha256Hex(staged),
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(store.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	err := store.PromoteToStaged(staged)
+	if !errors.Is(err, ErrMarkerWrongState) {
+		t.Errorf("PromoteToStaged with staged marker = %v, want ErrMarkerWrongState", err)
+	}
+}
+
+// ─── B4: crash-injection tests (N-03) ────────────────────────────────────────
+
+// TestReconcileUpdateCrashRecoversPreviousStaged simulates a staged-update
+// crash: the prepared marker has PreviousStagedRawSHA256 set and the disk
+// still holds the previous staged content. Reconcile must restore the store
+// to a clean staged state using the previous digest rather than marking
+// the state as inconsistent.
+func TestReconcileUpdateCrashRecoversPreviousStaged(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+
+	original := []byte("original-content")
+	v1 := []byte("staged-v1-content")
+	v2 := []byte("staged-v2-content") // never written to disk
+
+	// Disk holds the previous staged content (v1) — v2 write failed.
+	if err := os.WriteFile(configPath, v1, 0o600); err != nil {
+		t.Fatalf("write v1 to disk: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+	// Write the prepared marker that would have been written by StageManaged
+	// for the second stage attempt.
+	marker := PlannedRestartMarker{
+		Version:                 plannedRestartMarkerVersion,
+		State:                   plannedRestartStatePrepared,
+		ConfigPath:              configPath,
+		BaseRawSHA256:           sha256Hex(original),
+		StagedRawSHA256:         sha256Hex(v2), // the failed new candidate
+		PreviousStagedRawSHA256: sha256Hex(v1), // the safe fallback
+		StagedVersion:           "v2",
+		BaseServingVersion:      "v0",
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(store.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if err := os.WriteFile(store.backupPath(), original, 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	if err := store.Reconcile(); err != nil {
+		t.Fatalf("Reconcile should recover from update crash without error, got: %v", err)
+	}
+	if !store.IsPending() {
+		t.Fatal("IsPending should be true after update-crash recovery")
+	}
+	st := store.State()
+	if st.State != PlannedRestartStateManagedStaged {
+		t.Errorf("state = %q, want managed_staged after update-crash recovery", st.State)
+	}
+
+	// Marker on disk must now be in staged state with PreviousStagedRawSHA256 cleared.
+	loaded, err := store.LoadMarker()
+	if err != nil || loaded == nil {
+		t.Fatalf("LoadMarker after recovery: %v %v", loaded, err)
+	}
+	if loaded.State != plannedRestartStateStaged {
+		t.Errorf("recovered marker state = %q, want staged", loaded.State)
+	}
+	if loaded.StagedRawSHA256 != sha256Hex(v1) {
+		t.Errorf("recovered StagedRawSHA256 = %q, want digest of v1", loaded.StagedRawSHA256)
+	}
+	if loaded.PreviousStagedRawSHA256 != "" {
+		t.Errorf("PreviousStagedRawSHA256 should be cleared after recovery, got %q", loaded.PreviousStagedRawSHA256)
+	}
+	// BaseRawSHA256 must be preserved from original.
+	if loaded.BaseRawSHA256 != sha256Hex(original) {
+		t.Errorf("BaseRawSHA256 = %q, want digest of original", loaded.BaseRawSHA256)
+	}
+}
+
+// TestRefreshUpdateCrashRecoversPreviousStaged tests the same update-crash
+// recovery path via Refresh (called during the running process's live
+// RefreshState hook) rather than Reconcile (called on startup).
+func TestRefreshUpdateCrashRecoversPreviousStaged(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+
+	original := []byte("original-content")
+	v1 := []byte("staged-v1-content")
+	v2 := []byte("staged-v2-content")
+
+	// Disk holds v1 — v2 write failed.
+	if err := os.WriteFile(configPath, v1, 0o600); err != nil {
+		t.Fatalf("write v1: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+	marker := PlannedRestartMarker{
+		Version:                 plannedRestartMarkerVersion,
+		State:                   plannedRestartStatePrepared,
+		ConfigPath:              configPath,
+		BaseRawSHA256:           sha256Hex(original),
+		StagedRawSHA256:         sha256Hex(v2),
+		PreviousStagedRawSHA256: sha256Hex(v1),
+		StagedVersion:           "v2",
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(store.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if err := os.WriteFile(store.backupPath(), original, 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("Refresh should recover from update crash without error, got: %v", err)
+	}
+	if !store.IsPending() {
+		t.Fatal("IsPending should be true after Refresh update-crash recovery")
+	}
+
+	loaded, err := store.LoadMarker()
+	if err != nil || loaded == nil {
+		t.Fatalf("LoadMarker after Refresh recovery: %v %v", loaded, err)
+	}
+	if loaded.State != plannedRestartStateStaged {
+		t.Errorf("recovered marker state = %q, want staged", loaded.State)
+	}
+	if loaded.StagedRawSHA256 != sha256Hex(v1) {
+		t.Errorf("recovered StagedRawSHA256 = %q, want digest of v1", loaded.StagedRawSHA256)
+	}
+	if loaded.PreviousStagedRawSHA256 != "" {
+		t.Errorf("PreviousStagedRawSHA256 should be cleared, got %q", loaded.PreviousStagedRawSHA256)
+	}
+}
+
+// TestReconcileUpdateCrashTrulyInconsistent verifies that Reconcile still
+// marks the state inconsistent when disk matches neither base, staged, previous
+// staged, nor any known digest — i.e. a genuine corruption, not just an update
+// crash.
+func TestReconcileUpdateCrashTrulyInconsistent(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+
+	// Disk holds content that matches none of the marker digests.
+	if err := os.WriteFile(configPath, []byte("completely-unknown"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(configPath)
+	marker := PlannedRestartMarker{
+		Version:                 plannedRestartMarkerVersion,
+		State:                   plannedRestartStatePrepared,
+		ConfigPath:              configPath,
+		BaseRawSHA256:           sha256Hex([]byte("original")),
+		StagedRawSHA256:         sha256Hex([]byte("v2")),
+		PreviousStagedRawSHA256: sha256Hex([]byte("v1")),
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(store.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	err := store.Reconcile()
+	if err == nil {
+		t.Fatal("expected error for truly inconsistent state")
+	}
+	st := store.Status()
+	if !st.Inconsistent {
+		t.Error("Status().Inconsistent should be true")
+	}
+}
+
+// ─── B5: composition-level RefreshState guard (H-02) ─────────────────────────
+
+// TestRefreshStateSkipsDivergenceCheckWhenManaged verifies the composition-
+// level contract added in serve.go: when a valid managed staged restart is
+// pending, the RefreshState hook must NOT call PendingRestartCheck (which
+// would set external divergence). It also verifies that any stale external
+// flag is cleared so the authoritative state remains managed_staged.
+func TestRefreshStateSkipsDivergenceCheckWhenManaged(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	staged := []byte("staged-config")
+	if err := os.WriteFile(configPath, staged, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	sharedStore := NewFilePlannedRestartStore(configPath)
+	marker := PlannedRestartMarker{
+		Version:            plannedRestartMarkerVersion,
+		State:              plannedRestartStateStaged,
+		ConfigPath:         configPath,
+		BaseRawSHA256:      sha256Hex([]byte("original")),
+		StagedRawSHA256:    sha256Hex(staged),
+		BaseServingVersion: "v1",
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(sharedStore.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if err := os.WriteFile(sharedStore.backupPath(), []byte("original"), 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	// Prime in-memory state to simulate what Reconcile would do on startup.
+	if err := sharedStore.Refresh(); err != nil {
+		t.Fatalf("initial Refresh: %v", err)
+	}
+
+	// Pre-set a stale external-divergence flag (could happen from a prior cycle).
+	sharedStore.SetExternalDivergence(true)
+
+	// Wire the same RefreshState closure that serve.go constructs.
+	divergenceCheckCalled := false
+	pendingRestartCheckFn := func(_ server.LiveSnapshot) []string {
+		divergenceCheckCalled = true
+		sharedStore.SetExternalDivergence(true)
+		return []string{"log_format"}
+	}
+	refreshState := func() error {
+		if err := sharedStore.Refresh(); err != nil {
+			return err
+		}
+		if sharedStore.IsPending() {
+			sharedStore.SetExternalDivergence(false)
+		} else {
+			_ = pendingRestartCheckFn(server.LiveSnapshot{})
+		}
+		return nil
+	}
+
+	if err := refreshState(); err != nil {
+		t.Fatalf("refreshState: %v", err)
+	}
+	if divergenceCheckCalled {
+		t.Error("PendingRestartCheck must not be called when a managed staged marker is pending")
+	}
+
+	st := sharedStore.State()
+	if st.State != PlannedRestartStateManagedStaged {
+		t.Errorf("state = %q, want managed_staged; external divergence must not win priority", st.State)
+	}
+	if st.External {
+		t.Error("External should be false after RefreshState clears the stale flag")
+	}
+}
+
+// TestRefreshStateCallsDivergenceCheckWhenNotManaged verifies the complementary
+// path: when no managed staged restart is pending, RefreshState does call
+// PendingRestartCheck and propagates the external-divergence flag normally.
+func TestRefreshStateCallsDivergenceCheckWhenNotManaged(t *testing.T) {
+	sharedStore := &PlannedRestartStore{} // in-memory, no managed pending
+
+	checkCalled := false
+	pendingRestartCheckFn := func(_ server.LiveSnapshot) []string {
+		checkCalled = true
+		sharedStore.SetExternalDivergence(true)
+		return []string{"log_format"}
+	}
+	refreshState := func() error {
+		// No Refresh needed for in-memory store.
+		if sharedStore.IsPending() {
+			sharedStore.SetExternalDivergence(false)
+		} else {
+			_ = pendingRestartCheckFn(server.LiveSnapshot{})
+		}
+		return nil
+	}
+
+	if err := refreshState(); err != nil {
+		t.Fatalf("refreshState: %v", err)
+	}
+	if !checkCalled {
+		t.Error("PendingRestartCheck must be called when no managed staged restart is pending")
+	}
+	st := sharedStore.State()
+	if st.State != PlannedRestartStateExternalDivergence {
+		t.Errorf("state = %q, want external_divergence", st.State)
+	}
+}

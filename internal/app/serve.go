@@ -440,7 +440,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err := sharedStore.Refresh(); err != nil {
 				return err
 			}
-			if deps.PendingRestartCheck != nil && deps.LiveSnapshot != nil {
+			// Only check for unmanaged disk divergence when no managed staged
+			// restart is pending. A valid managed marker accounts for the
+			// disk/runtime difference and must not be misclassified as external
+			// divergence (H-02). Clear any stale external flag when the managed
+			// staged state is confirmed.
+			if sharedStore.IsPending() {
+				sharedStore.SetExternalDivergence(false)
+			} else if deps.PendingRestartCheck != nil && deps.LiveSnapshot != nil {
 				_ = deps.PendingRestartCheck(deps.LiveSnapshot())
 			}
 			return nil
