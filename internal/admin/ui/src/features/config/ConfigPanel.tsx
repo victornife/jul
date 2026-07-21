@@ -309,10 +309,16 @@ export function ConfigPanel() {
     mutationFn: (confirmAdmin: boolean) => applyConfig(current, baseVersion, confirmAdmin, "hot"),
     onSuccess: (res) => {
       setBaseline(current);
+      // D3 (H-06): derive outcome from reload.outcome when present so the
+      // banner reflects the authoritative correlated result rather than the
+      // indirect pending_reload + overview-poll path.
+      const reloadOutcome = res.reload?.outcome;
       setApplied({
         status: res.status ?? [],
-        pendingReload: res.pending_reload ?? true,
-        reloadTimedOut: res.previous_reload?.timed_out ?? false,
+        pendingReload: reloadOutcome !== undefined
+          ? reloadOutcome === "saved_not_live"
+          : (res.pending_reload ?? true),
+        reloadTimedOut: res.reload?.timed_out === true || reloadOutcome === "applied_degraded",
         mode: "hot",
         isStagedUpdate: false,
       });
@@ -347,11 +353,15 @@ export function ConfigPanel() {
       setBaseline(candidate);
       setDraft(candidate);
       setBaseVersion(res.version ?? undefined);
+      // D3 (H-06): use reload.outcome when present for authoritative result.
+      const reloadOutcome = res.reload?.outcome;
       setApplied({
         status: res.status ?? [],
-        pendingReload: res.pending_reload ?? true,
-        reloadTimedOut: res.previous_reload?.timed_out ?? false,
-        mode: "hot",
+        pendingReload: reloadOutcome !== undefined
+          ? reloadOutcome === "saved_not_live"
+          : (res.pending_reload ?? true),
+        reloadTimedOut: res.reload?.timed_out === true || reloadOutcome === "applied_degraded",
+        mode: res.mode ?? "hot",
         isStagedUpdate: false,
       });
       setConfirming(false);

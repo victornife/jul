@@ -389,6 +389,24 @@ export function OverviewPanel() {
         </div>
       )}
 
+      {/* Admin subsystem degraded (C1/M-05): a post-Publish admin reload
+          failed. Hot applies are still possible but the admin subsystem
+          (RBAC, config endpoints) may be running stale policy. Surface as
+          a persistent warning so operators don't miss it via /readyz alone. */}
+      {data.admin_health && !data.admin_health.healthy && (
+        <div
+          role="alert"
+          className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm text-jul-warning"
+        >
+          <span className="font-semibold">Admin subsystem degraded.</span>{" "}
+          The admin reload failed after the last configuration apply. The server
+          is still running but the admin subsystem may be serving stale policy.{" "}
+          {data.admin_health.detail && (
+            <span className="text-jul-muted">{data.admin_health.detail}</span>
+          )}
+        </div>
+      )}
+
       {/* Durable audit-trail degraded (Fix8/P3-08): the audit sink could not be
           opened or a write failed, so the compliance trail is not being
           persisted. Recording still works in memory, so this is degraded — not
@@ -674,6 +692,49 @@ export function OverviewPanel() {
             setActiveMetric(null);
           }}
         />
+      )}
+
+      {/* Last managed apply (H-06/M-05): terminal outcome of the most recent
+          API-driven configuration apply, including async restoration. Absent
+          until the first managed apply completes after startup. Surfaced here
+          so operators can confirm the final state of a previously timed-out
+          apply without re-polling the config panel. */}
+      {data.last_managed_apply && (
+        <div className="rounded-lg border border-jul-border bg-jul-surface px-4 py-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+              Last apply
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                data.last_managed_apply.ok
+                  ? "bg-jul-success/15 text-jul-success"
+                  : data.last_managed_apply.restored
+                  ? "bg-jul-warning/15 text-jul-warning"
+                  : "bg-jul-danger/15 text-jul-danger"
+              }`}
+            >
+              {data.last_managed_apply.ok
+                ? data.last_managed_apply.outcome
+                : data.last_managed_apply.restored
+                ? "failed — restored"
+                : "failed"}
+            </span>
+            {data.last_managed_apply.final_disk_version && (
+              <span className="font-mono text-xs text-jul-muted">
+                {data.last_managed_apply.final_disk_version}
+              </span>
+            )}
+            <span className="ml-auto text-xs text-jul-muted">
+              {new Date(data.last_managed_apply.completed_at).toLocaleString()}
+            </span>
+          </div>
+          {data.last_managed_apply.restore_error && (
+            <p className="mt-1 text-xs text-jul-danger">
+              Restore error: {data.last_managed_apply.restore_error}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

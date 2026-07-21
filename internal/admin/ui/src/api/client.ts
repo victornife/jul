@@ -312,6 +312,36 @@ export const CertRiskSchema = z.object({
 });
 export type CertRisk = z.infer<typeof CertRiskSchema>;
 
+// AdminHealthStatusSchema mirrors admin.AdminHealthStatus: the health of the
+// admin subsystem itself (e.g. a failed post-Publish admin reload). Surfaced in
+// RuntimeOverview so the console can display a persistent banner when the admin
+// subsystem is degraded rather than silently leaving /readyz to catch it (M-05).
+export const AdminHealthStatusSchema = z.object({
+  healthy: z.boolean(),
+  reason: z.string().optional(),
+  detail: z.string().optional(),
+});
+export type AdminHealthStatus = z.infer<typeof AdminHealthStatusSchema>;
+
+// ManagedApplyOutcomeSchema mirrors admin.ManagedApplyOutcome: the terminal
+// async result of a managed configuration apply (including any restoration).
+// Exposed in RuntimeOverview as last_managed_apply so the console can surface
+// the final state of a previously timed-out apply without polling (H-06/M-05).
+export const ManagedApplyOutcomeSchema = z.object({
+  id: z.string(),
+  mode: z.string(),
+  ok: z.boolean(),
+  outcome: z.string(),
+  restored: z.boolean().optional(),
+  restore_error: z.string().optional(),
+  final_disk_version: z.string().optional(),
+  final_serving_version: z.string().optional(),
+  completed_at: z.string(),
+  actor: z.string().optional(),
+  source_ip: z.string().optional(),
+});
+export type ManagedApplyOutcome = z.infer<typeof ManagedApplyOutcomeSchema>;
+
 export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
@@ -356,6 +386,14 @@ export const OverviewSchema = z.object({
   // last_reload is the correlated result of the most recent hot reload (P2-04).
   // Absent when no reload has run since startup.
   last_reload: ReloadResultSchema.optional(),
+  // admin_health reports admin-subsystem degradation (C1/M-05). Present only
+  // when the admin subsystem is degraded (e.g. a post-Publish admin reload
+  // failure). Absent when the admin subsystem is healthy.
+  admin_health: AdminHealthStatusSchema.optional(),
+  // last_managed_apply is the terminal outcome of the most recent managed
+  // configuration apply, including any async restoration (H-06/M-05). Absent
+  // until the first managed apply completes.
+  last_managed_apply: ManagedApplyOutcomeSchema.optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 
@@ -1506,6 +1544,8 @@ const ConflictBodySchema = z.object({
 
 export const PatchApplyResultSchema = z.object({
   ok: z.literal(true),
+  // mode is "hot" or "stage_restart" (D1). Absent for legacy responses.
+  mode: z.enum(["hot", "stage_restart"]).optional(),
   // pending_reload mirrors applyConfig: persisted and validated, but the live
   // runtime swap is asynchronous.
   pending_reload: z.boolean().optional(),
@@ -1519,6 +1559,14 @@ export const PatchApplyResultSchema = z.object({
   message: z.string().optional(),
   // previous_reload: see ApplyResultSchema for semantics.
   previous_reload: ReloadSnapshotSchema.optional(),
+  // reload is the correlated result of the live reload triggered by this apply
+  // (D2/H-06). Replaces previous_reload for new consumers.
+  reload: ReloadResultSchema.optional(),
+  // Restoration fields (D2/N-05): first-class truth about whether a rejected
+  // candidate was rolled back to the previous configuration.
+  restored: z.boolean().optional(),
+  restore_error: z.string().optional(),
+  final_disk_version: z.string().optional(),
 });
 export type PatchApplyResult = z.infer<typeof PatchApplyResultSchema>;
 
@@ -1529,18 +1577,24 @@ export type PatchApplyResult = z.infer<typeof PatchApplyResultSchema>;
  * candidate. When baseVersion is supplied and the live config has since changed,
  * the apply is rejected with ConfigConflictError (optimistic concurrency).
  * Rejects with ConfigRejectedError when an op cannot be applied or the result is
- * invalid, or ApiError on transport failure.
+ * invalid, or ApiError on transport failure. mode selects the apply path:
+ * "hot" applies live (default); "stage_restart" saves for the next restart.
  */
 export async function applyPatchBatch(
   ops: ConfigPatch[],
   baseVersion?: string,
+  mode: ApplyMode = "hot",
 ): Promise<PatchApplyResult> {
   const headers = new Headers();
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/json");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const resp = await fetch("/api/config/patch/apply", {
+  const params = new URLSearchParams();
+  if (mode !== "hot") params.set("mode", mode);
+  const query = params.toString();
+  const url = query ? `/api/config/patch/apply?${query}` : "/api/config/patch/apply";
+  const resp = await fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify({ base_version: baseVersion, ops }),
