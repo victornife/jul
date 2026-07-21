@@ -1065,6 +1065,7 @@ export type LocationMatchPatch = {
 // actions (gRPC, transcode, FastCGI/uWSGI, handler plugin) stay read-only.
 export type LocationActionPatch =
   | { kind: "proxy"; target: string }
+  | { kind: "grpc_proxy"; target: string }
   | { kind: "static"; target: string }
   | { kind: "redirect"; target: string; status?: number }
   | { kind: "return"; status: number }

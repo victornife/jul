@@ -110,20 +110,6 @@ export interface AppEditorProps {
   readonly onClose: () => void;
 }
 
-// backendPatches returns the first backend address and weight as required by
-// upstream_add. The editor prevents adding an app with no backend.
-function backendPayload(d: AppDraft): { address: string; weight: number } {
-  const b = d.backends.find((x) => x.address.trim().length > 0);
-  if (!b) {
-    // Guard: openInEditor checks for at least one backend before calling this.
-    return { address: "", weight: 1 };
-  }
-  return {
-    address: b.address.trim(),
-    weight: b.weight > 0 ? b.weight : 1,
-  };
-}
-
 function healthCheckPatch(d: AppDraft): HealthCheckPatch {
   return {
     enabled: true,
@@ -198,7 +184,16 @@ export function AppEditor({ initial, existingRoutes, onClose }: AppEditorProps) 
   function buildPatches(): ConfigPatch[] {
     const ops: ConfigPatch[] = [];
     const name = draft.name.trim();
-    const first = backendPayload(draft);
+
+    // E7 (M-07): filter to non-empty backends FIRST, then split into first/rest.
+    // Without this, if backends[0] is empty the first non-empty entry is used
+    // by backendPayload() AND included again in the slice(1) loop, duplicating
+    // the backend in the upstream pool.
+    const validBackends = draft.backends.filter((b) => b.address.trim().length > 0);
+    const firstB = validBackends[0];
+    const first = firstB
+      ? { address: firstB.address.trim(), weight: firstB.weight > 0 ? firstB.weight : 1 }
+      : { address: "", weight: 1 };
 
     ops.push({
       op: "upstream_add",
@@ -208,8 +203,7 @@ export function AppEditor({ initial, existingRoutes, onClose }: AppEditorProps) 
       strategy: draft.strategy,
     });
 
-    for (const b of draft.backends.slice(1)) {
-      if (b.address.trim().length === 0) continue;
+    for (const b of validBackends.slice(1)) {
       ops.push({
         op: "upstream_add_backend",
         upstream: name,
@@ -244,7 +238,7 @@ export function AppEditor({ initial, existingRoutes, onClose }: AppEditorProps) 
         match_set: { type: "prefix", path },
         action:
           presetId === "grpc"
-            ? { kind: "proxy", target: `http://${name}` }
+            ? { kind: "grpc_proxy", target: `http://${name}` }
             : { kind: "proxy", target: `http://${name}` },
       });
 

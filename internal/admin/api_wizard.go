@@ -116,7 +116,13 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("format") == "patch" {
-		ops, err := wizardPatchOps(cfg)
+		// Load the current config so server_add can be skipped when the listen
+		// address already exists in the target (E6/M-06).
+		var existingCfg *config.Config
+		if s.deps.LoadConfig != nil {
+			existingCfg, _ = s.deps.LoadConfig()
+		}
+		ops, err := wizardPatchOps(cfg, existingCfg)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -134,9 +140,10 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 }
 
 // wizardPatchOps converts a wizard-generated config into a sequence of patch
-// operations that recreate the same server/upstream structure. The ops assume
-// the target config is empty enough for server_add/upstream_add to succeed.
-func wizardPatchOps(cfg *config.Config) ([]patchRequest, error) {
+// operations that recreate the same server/upstream structure. existing is the
+// current live config and is used to skip server_add when the listen address
+// already exists (E6/M-06). Pass nil to treat all servers as new.
+func wizardPatchOps(cfg *config.Config, existing *config.Config) ([]patchRequest, error) {
 	var ops []patchRequest
 	for _, up := range cfg.Upstreams {
 		if len(up.Servers) == 0 {
@@ -179,7 +186,22 @@ func wizardPatchOps(cfg *config.Config) ([]patchRequest, error) {
 	for _, srv := range cfg.Servers {
 		serverNames := make([]string, len(srv.ServerNames))
 		copy(serverNames, srv.ServerNames)
-		ops = append(ops, patchRequest{Op: "server_add", Listen: srv.Listen, ServerNames: serverNames})
+		// E6 (M-06): skip server_add when the listen address already exists in
+		// the current live config. server_add would be rejected with a conflict
+		// error and the apply would fail; the location_add ops that follow still
+		// target the correct server.
+		serverExists := false
+		if existing != nil {
+			for _, es := range existing.Servers {
+				if es.Listen == srv.Listen {
+					serverExists = true
+					break
+				}
+			}
+		}
+		if !serverExists {
+			ops = append(ops, patchRequest{Op: "server_add", Listen: srv.Listen, ServerNames: serverNames})
+		}
 		if srv.H2C {
 			ops = append(ops, patchRequest{Op: "server_toggle_h2c", Listen: srv.Listen, Enabled: ptr(true)})
 		}

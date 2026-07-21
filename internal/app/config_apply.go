@@ -375,30 +375,6 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 //  3. atomicfile.Write writes the candidate.
 //  4. PromoteToStaged promotes the marker to "staged" only after the candidate write succeeds.
 func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, data, prevRaw []byte) (ApplyResult, error) {
-	candidate, err := config.NewCandidate(cfg)
-	if err != nil {
-		return ApplyResult{
-			OK:               false,
-			Mode:             ApplyStageRestart,
-			Message:          "The configuration contains errors; no change was staged.",
-			ValidationErrors: []string{err.Error()},
-		}, nil
-	}
-	if err := ValidateRuntimeConfig(candidate.Effective); err != nil {
-		return ApplyResult{
-			OK:               false,
-			Mode:             ApplyStageRestart,
-			Message:          "The configuration contains errors; no change was staged.",
-			ValidationErrors: []string{err.Error()},
-		}, nil
-	}
-
-	desiredVersion := server.CanonicalVersion(candidate.Effective)
-	liveVersion := ""
-	if c.LiveSnapshot != nil {
-		liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
-	}
-
 	// H-03: determine whether this is a staged update. If a managed staged
 	// restart is already pending, the new candidate replaces it but the
 	// original serving config remains the rollback base and the diff base.
@@ -434,6 +410,15 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 			Message:          "The configuration contains errors; no change was staged.",
 			ValidationErrors: []string{err.Error()},
 		}, nil
+	}
+
+	// E3 (M-02): use pfResult.Candidate directly — Preflight.Apply already
+	// resolves secrets and validates the config, so a second NewCandidate call
+	// is redundant and produces a stale resolved copy.
+	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
+	liveVersion := ""
+	if c.LiveSnapshot != nil {
+		liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
 	}
 
 	// Collect subsystem names from the lifecycle diff.

@@ -89,8 +89,10 @@ var Registry = []Entry{
 	{Path: "admin.plugin_upload_dir", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload directory is opened at startup", StartupConsumed: true},
 	{Path: "admin.plugin_upload_max_size", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload limits are configured at startup", StartupConsumed: true},
 	{Path: "admin.plugin_upload_enabled", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload endpoint is configured at startup", StartupConsumed: true},
-	// RBAC enabled flag is restart-required; the policy contents are hot-swappable.
-	{Path: "admin.rbac.enabled", Class: RestartRequiredClass, Subsystem: "admin", Reason: "enabling or disabling RBAC changes auth middleware wiring at startup", StartupConsumed: true},
+	// RBAC enabled flag is hot-reloadable: requirePermission reads the current
+	// policy on every request via s.currentPolicy(), so toggling RBAC on or off
+	// takes effect on the next successful hot reload without a restart (M-03).
+	{Path: "admin.rbac.enabled", Class: HotReloadClass, Subsystem: "rbac", Reason: "RBAC policy (including enabled/disabled) is rebuilt and atomically swapped on each successful hot reload"},
 	// RBAC policy contents (roles, principals, tokens) are hot-reloadable through
 	// atomic policy swap after a successful config apply (P3-01). They are not
 	// in the startup fingerprint because changing them does not require a restart.

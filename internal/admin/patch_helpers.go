@@ -320,6 +320,16 @@ func setLocationAction(loc *config.LocationConfig, a locationActionPayload) (str
 			return "", fmt.Errorf("location_set_action: the proxy action requires a target")
 		}
 		loc.ProxyPass = target
+	case "grpc_proxy":
+		// gRPC reverse proxy: sets proxy_pass and enables the GRPC flag so Jul
+		// strips content-type framing and speaks h2c to the backend. The server
+		// that owns this location must have h2c enabled (server_toggle_h2c);
+		// the caller is responsible for emitting that op.
+		if target == "" {
+			return "", fmt.Errorf("location_set_action: the grpc_proxy action requires a target")
+		}
+		loc.ProxyPass = target
+		loc.GRPC = true
 	case "static":
 		if target == "" {
 			return "", fmt.Errorf("location_set_action: the static action requires a root path")
@@ -347,7 +357,7 @@ func setLocationAction(loc *config.LocationConfig, a locationActionPayload) (str
 	case "deny":
 		loc.Deny = true
 	default:
-		return "", fmt.Errorf("location_set_action: unknown action %q (want proxy, static, redirect, return, or deny)", a.Kind)
+		return "", fmt.Errorf("location_set_action: unknown action %q (want proxy, grpc_proxy, static, redirect, return, or deny)", a.Kind)
 	}
 	return kind, nil
 }

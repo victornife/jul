@@ -108,7 +108,7 @@ func (m *Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig)
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", name, err)
 		}
-		p, err := m.compilePlugin(name, pc)
+		p, err := m.compilePlugin(ctx, name, pc)
 		if err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", name, err)
 		}
@@ -162,7 +162,7 @@ type plugin struct {
 	onPanic  func(string)
 }
 
-func (m *Manager) compilePlugin(name string, pc config.PluginConfig) (*plugin, error) {
+func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.PluginConfig) (*plugin, error) {
 	wasm, err := loadModule(pc)
 	if err != nil {
 		return nil, err
@@ -237,7 +237,9 @@ func (m *Manager) compilePlugin(name string, pc config.PluginConfig) (*plugin, e
 		},
 	}
 
-	ctx := context.Background()
+	// Use the caller-supplied context so the reload deadline bounds WASM
+	// compilation. WithCloseOnContextDone ensures the runtime is torn down
+	// if the reload is cancelled before compilation finishes (M-01).
 	rtCfg := wazero.NewRuntimeConfig().
 		WithCompilationCache(m.cache).
 		WithMemoryLimitPages(pages).

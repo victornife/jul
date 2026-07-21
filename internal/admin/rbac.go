@@ -107,9 +107,12 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 			// ── RBAC path ─────────────────────────────────────────────────
 			authID, err := pol.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
+				// E5 (M-04): a disabled or expired principal is a credential
+				// problem, not an authorisation problem — the client needs to
+				// re-authenticate with a valid token. Return 401, not 403.
 				w.Header().Set("WWW-Authenticate", "Bearer")
-				writeJSON(w, http.StatusForbidden, map[string]string{
-					"error":   "forbidden",
+				writeJSON(w, http.StatusUnauthorized, map[string]string{
+					"error":   "unauthorized",
 					"message": "principal is disabled or expired",
 				})
 				return
@@ -163,8 +166,9 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 		if pol != nil && pol.Enabled() {
 			id, err := pol.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
+				// E5 (M-04): disabled/expired credential → 401, not 403.
 				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, `{"error":"forbidden","message":"principal is disabled or expired"}`, http.StatusForbidden)
+				http.Error(w, `{"error":"unauthorized","message":"principal is disabled or expired"}`, http.StatusUnauthorized)
 				return
 			}
 			if err != nil {
