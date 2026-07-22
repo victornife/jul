@@ -77,11 +77,15 @@ type PlannedRestartMarker struct {
 	// can distinguish a failed update write (disk == previous staged) from a
 	// genuine inconsistency (N-03).
 	PreviousStagedRawSHA256 string `json:"previous_staged_raw_sha256,omitempty"`
-	// M-01: Preserve the previous staged version and subsystems for recovery.
-	// When a staged-update fails, these fields let the API report the correct
-	// metadata instead of showing the failed candidate's values.
+	// M-01: Preserve the previous staged version, subsystems, and timestamp for
+	// recovery. When a staged-update fails, these fields let the API report the
+	// correct metadata instead of showing the failed candidate's values.
 	PreviousStagedVersion string   `json:"previous_staged_version,omitempty"`
 	PreviousSubsystems    []string `json:"previous_subsystems,omitempty"`
+	// PreviousStagedAt is the timestamp of the previous staged configuration.
+	// It is restored when the update write fails so the API reports the
+	// correct time instead of the failed-attempt timestamp.
+	PreviousStagedAt      time.Time `json:"previous_staged_at,omitempty"`
 	PendingSubsystems     []string `json:"pending_subsystems"`
 	StagedAt              time.Time `json:"staged_at"`
 }
@@ -287,9 +291,10 @@ func (s *PlannedRestartStore) StageManaged(baseRaw, candidateRaw []byte, marker 
 		// distinguish a failed update write (disk == previous staged) from a true
 		// inconsistency (N-03).
 		marker.PreviousStagedRawSHA256 = existing.StagedRawSHA256
-		// M-01: Preserve the previous staged version and subsystems for recovery.
+		// M-01: Preserve the previous staged version, subsystems, and timestamp.
 		marker.PreviousStagedVersion = existing.StagedVersion
 		marker.PreviousSubsystems = existing.PendingSubsystems
+		marker.PreviousStagedAt = existing.StagedAt
 		if s.baseRaw == nil {
 			// Load base raw from backup if in-memory cache was lost.
 			if base, err := os.ReadFile(s.backupPath()); err == nil {
