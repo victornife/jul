@@ -227,24 +227,29 @@ type Server struct {
 	timeline *eventHistory
 	audit    *auditLog
 	health   *consoleHealth
-	quit     chan struct{}
-	httpd    *http.Server
-	// policy holds the active RBAC policy. It is atomically swapped on each
-	// successful config apply when RBAC is enabled (P3-01). Nil until RBAC is
-	// enabled; legacy single-token auth is used when the pointer is nil or when
-	// the stored policy reports !Enabled().
-	policy atomic.Pointer[rbacPolicy]
-	// liveCfg holds the most recently applied admin config. It is updated
-	// after every successful hot reload so legacy token changes take effect
-	// without requiring a process restart. The listener address remains
-	// startup-bound and is read from cfg.Listen.
-	liveCfg atomic.Pointer[config.AdminConfig]
-	// applyMu serializes config writes (raw apply, structured patch apply, and
-	// history rollback) so optimistic-concurrency checks and the write they guard
-	// are atomic, closing the read-modify-write race between concurrent edits
-	// (P2-12).
-	applyMu sync.Mutex
-}
+quit     chan struct{}
+ 	httpd    *http.Server
+ 	// policy holds the active RBAC policy. It is atomically swapped on each
+ 	// successful config apply when RBAC is enabled (P3-01). Nil until RBAC is
+ 	// enabled; legacy single-token auth is used when the pointer is nil or when
+ 	// the stored policy reports !Enabled().
+ 	policy atomic.Pointer[rbacPolicy]
+ 	// liveCfg holds the most recently applied admin config. It is updated
+ 	// after every successful hot reload so legacy token changes take effect
+ 	// without requiring a process restart. The listener address remains
+ 	// startup-bound and is read from cfg.Listen.
+ 	liveCfg atomic.Pointer[config.AdminConfig]
+ 	// H-01: rbacEnabled tracks whether RBAC was enabled at the time of the last
+ 	// successful policy build. When the config says RBAC is enabled but the
+ 	// policy pointer is nil (build failure), the middleware should fail-closed
+ 	// rather than falling through to legacy/anonymous auth.
+ 	rbacEnabled atomic.Bool
+ 	// applyMu serializes config writes (raw apply, structured patch apply, and
+ 	// history rollback) so optimistic-concurrency checks and the write they guard
+ 	// are atomic, closing the read-modify-write race between concurrent edits
+ 	// (P2-12).
+ 	applyMu sync.Mutex
+ }
 
 // RecordManagedApplyOutcome records the terminal async outcome of a managed
 // apply in the audit log (H-05). The actor is the original request identity

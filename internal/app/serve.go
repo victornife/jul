@@ -682,19 +682,26 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// config, so secrets are resolved. This runs after Publish so the new
 		// policy never races with handler swap.
 		if adminSrv != nil {
-			adminSrv.UpdateLiveAdminConfig(c.Admin)
+			// H-01: Build the policy BEFORE updating the live config to ensure they
+			// are updated atomically. On failure, the previous policy remains paired
+			// with the previous config (fail-closed via rbacEnabled flag).
 			if c.Admin.RBAC.Enabled {
-				if p, err := buildRBACPolicy(c.Admin); err != nil {
+				p, err := buildRBACPolicy(c.Admin)
+				if err != nil {
 					adminErr = fmt.Errorf("rbac policy update failed: %w", err)
 					log.Warn("RBAC policy rebuild failed on reload; retaining previous policy", "error", err)
+					// Keep previous state intact; fail-closed is enforced by the
+					// rbacEnabled check in requirePermission/authWithRBAC.
 				} else {
 					adminSrv.UpdatePolicy(p)
+					adminSrv.UpdateLiveAdminConfig(c.Admin)
 				}
 			} else {
 				// RBAC explicitly disabled: clear the active policy so the
 				// server falls back to legacy token auth (or anonymous if no
 				// token is configured).
 				adminSrv.UpdatePolicy(nil)
+				adminSrv.UpdateLiveAdminConfig(c.Admin)
 			}
 		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {

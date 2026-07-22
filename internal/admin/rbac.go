@@ -27,12 +27,18 @@ type rbacPolicy struct {
 //
 // A nil policy clears RBAC; the server falls back to legacy single-token auth
 // (or anonymous access when no legacy token is configured).
+//
+// H-01: rbacEnabled must be set to match the policy state. When RBAC is
+// enabled in config but the policy is nil (build failure), the middleware
+// should fail-closed rather than falling through to legacy/anonymous auth.
 func (s *Server) UpdatePolicy(p *rbac.Policy) {
 	if p == nil {
 		s.policy.Store(nil)
+		s.rbacEnabled.Store(false)
 		return
 	}
 	s.policy.Store(&rbacPolicy{p: p})
+	s.rbacEnabled.Store(true)
 }
 
 // UpdateLiveAdminConfig stores the latest effective admin config so auth
@@ -93,6 +99,10 @@ func (s *Server) requirePermissionForMethods(perms map[string]rbac.Permission, n
 // comparison and synthesises a wildcard Identity so downstream handlers can
 // always use rbac.IdentityFromContext uniformly.
 //
+// H-01: If RBAC is enabled in config but the policy is nil (build failure),
+// the middleware fails closed with 503 to avoid falling through to legacy
+// or anonymous auth.
+//
 // Return values:
 //   - 401 + WWW-Authenticate for absent/invalid/expired credentials.
 //   - 403 JSON for authenticated but unauthorized.
@@ -101,6 +111,16 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 		pol := s.currentPolicy()
 		bearer := r.Header.Get("Authorization")
 		now := time.Now()
+
+		// H-01: Check if RBAC is expected but policy is missing (build failure).
+		// Fail closed rather than falling through to legacy/anon auth.
+		if s.rbacEnabled.Load() && pol == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error":   "rbac_unavailable",
+				"message": "RBAC is enabled but the policy could not be built; check server logs for details.",
+			})
+			return
+		}
 
 		var id rbac.Identity
 		if pol != nil && pol.Enabled() {
@@ -157,11 +177,24 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 // authWithRBAC provides the same authn+authz stack but without a specific
 // permission requirement (used by auth() which delegates to this). Routes
 // that need per-route permission gates use requirePermission instead.
+//
+// H-01: If RBAC is enabled in config but the policy is nil (build failure),
+// the middleware fails closed with 503 to avoid falling through to legacy
+// or anonymous auth.
 func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pol := s.currentPolicy()
 		bearer := r.Header.Get("Authorization")
 		now := time.Now()
+
+		// H-01: Check if RBAC is expected but policy is missing (build failure).
+		if s.rbacEnabled.Load() && pol == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error":   "rbac_unavailable",
+				"message": "RBAC is enabled but the policy could not be built; check server logs for details.",
+			})
+			return
+		}
 
 		if pol != nil && pol.Enabled() {
 			id, err := pol.Authenticate(bearer, now)
