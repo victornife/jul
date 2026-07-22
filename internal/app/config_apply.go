@@ -36,6 +36,10 @@ const (
 // produced by ConfigApplyCoordinator. It carries the persisted and serving
 // truth without any UI, audit, or history rendering policy.
 type ApplyResult struct {
+	// ApplyID is the monotonic transaction ID, populated regardless of whether
+	// a reload was submitted. This allows callbacks to record outcomes even
+	// when Reload is nil (e.g., enqueue failure).
+	ApplyID string
 	OK               bool
 	Mode             ApplyMode
 	Version          string
@@ -46,7 +50,6 @@ type ApplyResult struct {
 	ValidationErrors []string
 	RestartRequired  bool
 	CanStage         bool
-
 	// Restoration fields (F-03): first-class truth about whether a rejected
 	// candidate was rolled back to the previous configuration.
 	Persisted           bool   // true if the candidate bytes were written to disk
@@ -602,32 +605,43 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		Result:    resultCh,
 	}
 
-	if err := c.SubmitReload(req); err != nil {
+if err := c.SubmitReload(req); err != nil {
 		// Enqueue failed: the candidate file is on disk but the runtime will
 		// not reload. Restore the exact previous bytes and suppress the
 		// restoration echo so the watcher does not loop.
 		restoreErr := c.restorePreviousLocked(prevRaw, previouslyExisted, rawDigest)
 		c.inFlightState = ApplyInFlightNone
-		// C5 (N-05): build structured truth with Persisted/Restored/FinalDiskVersion
+		// Build structured truth with Persisted/Restored/FinalDiskVersion
 		// while still holding the lock so the disk read in withRestorationOutcome
-		// is atomic with the restoration.
-		msg := "Reload enqueue failed; the configuration was saved but may not be applied."
+		// is atomic with the restoration. ApplyID is set so the callback can
+		// record the outcome even when Reload is nil.
+		msg := "Reload was not enqueued; the previous configuration was restored."
 		if restoreErr != nil {
-			msg += " Restoration failed: " + restoreErr.Error()
+			msg = "Reload enqueue failed; the candidate may remain on disk: " + restoreErr.Error()
 		}
-		baseRes := ApplyResult{
+		terminal := ApplyResult{
+			ApplyID: id,
 			OK:      false,
 			Mode:    mode,
 			Version: desiredVersion,
 			Message: msg,
+			Persisted: true,
+			Reload: &server.ReloadResult{
+				ID:        id,
+				Source:    server.ReloadSourceAdmin,
+				Outcome:   server.ReloadNotApplied,
+				Persisted: true,
+				Published: false,
+				FailedPhase: "enqueue",
+				Error:     err.Error(),
+			},
 		}
-		terminal := c.withRestorationOutcome(baseRes, prevRaw, previouslyExisted, rawDigest)
-		// M-05: emit terminal callback on enqueue failure so the outcome is
-		// recorded in last_managed_apply, metrics, and audit.
+		terminal = c.withRestorationOutcome(terminal, prevRaw, previouslyExisted, rawDigest)
+		// M-05: Move callback after unlock to prevent mutex wedge on panic.
+		c.mu.Unlock()
 		if c.OnManagedApplyComplete != nil {
 			c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(terminal))
 		}
-		c.mu.Unlock()
 		return terminal, err
 	}
 	c.mu.Unlock()

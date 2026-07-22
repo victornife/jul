@@ -1365,6 +1365,9 @@ export type ReloadSnapshot = z.infer<typeof ReloadSnapshotSchema>;
 
 export const ApplyResultSchema = z.object({
   ok: z.literal(true),
+  // apply_id is the monotonic transaction ID, present even when reload is absent
+  // (e.g., enqueue failure). Used for outcome correlation and sequence guarding.
+  apply_id: z.string().optional(),
   // mode is "hot" or "stage_restart". When absent the response is from the
   // legacy path (pre-P2-02) and should be treated as "hot".
   mode: z.enum(["hot", "stage_restart"]).optional(),

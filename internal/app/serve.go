@@ -607,9 +607,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
 			// C3: ignore callbacks from older applies (e.g. a timed-out first
 			// apply whose finalizer fires after a second apply has already
-			// completed). Parse the monotonic sequence from the reload ID
-			// ("rl_N") and only store/record when N is strictly newer.
-			seq := parseReloadSeq(res.Reload.ID)
+			// completed). Use ApplyID for the monotonic sequence guard instead
+			// of res.Reload.ID which may be nil on enqueue failure.
+			seq := parseReloadSeq(res.ApplyID)
 			for {
 				prev := lastManagedApplySeq.Load()
 				if seq <= prev {
@@ -624,6 +624,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				outcome = string(res.Reload.Outcome)
 			}
 			restoredLabel := "n/a"
+			// M-05: also treat enqueue_failure as a non-persisted outcome for labeling.
 			if outcome != "" && outcome != string(server.ReloadAppliedLive) && outcome != string(server.ReloadSavedNotLive) {
 				if res.Restored {
 					restoredLabel = "true"
@@ -634,7 +635,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			metrics.ObserveManagedApplyFinalized(outcome, restoredLabel)
 
 			o := &admin.ManagedApplyOutcome{
-				ID:                  res.Reload.ID,
+				ID:                  res.ApplyID,
 				Mode:                res.Mode,
 				OK:                  res.OK,
 				Outcome:             outcome,
@@ -721,6 +722,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 // API response shape. It is a pure projection: no new policy is added.
 func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 	return admin.ConfigApplyResult{
+		ApplyID:             r.ApplyID,
 		OK:                    r.OK,
 		Mode:                  string(r.Mode),
 		Version:               r.Version,

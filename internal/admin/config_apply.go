@@ -9,6 +9,10 @@ import "jul/internal/server"
 // apply. It correlates the persisted candidate with its live reload outcome
 // when a hot reload was performed.
 type ConfigApplyResult struct {
+	// ApplyID is the monotonic transaction ID, populated regardless of whether
+	// a reload was submitted. This allows callbacks to record outcomes even
+	// when Reload is nil (e.g., enqueue failure).
+	ApplyID string `json:"apply_id,omitempty"`
 	OK             bool                  `json:"ok"`
 	Mode           string                `json:"mode"`
 	Version        string                `json:"version,omitempty"`

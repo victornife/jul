@@ -213,20 +213,22 @@ export function ConfigPanel() {
   // timed-out reload) is derived from these signals plus the post-apply runtime
   // snapshot below, so the operator sees an explicit outcome rather than an
   // unconditional "saved" (AUX-02). mode tracks how it was applied.
-  const [applied, setApplied] = useState<{
-    status: FeatureStatus[];
-    pendingReload: boolean;
-    reloadTimedOut: boolean;
-    mode: "hot" | "stage_restart";
-    isStagedUpdate: boolean;
-    // M-03: Full reload metadata for complete outcome representation.
-    http: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
-    stream: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
-    admin: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
-    persisted?: boolean | undefined;
-    failedPhase?: string | undefined;
-    timedOutPhase?: string | undefined;
-  } | null>(null);
+const [applied, setApplied] = useState<{
+     status: FeatureStatus[];
+     pendingReload: boolean;
+     reloadTimedOut: boolean;
+     mode: "hot" | "stage_restart";
+     isStagedUpdate: boolean;
+     // M-03: Full reload metadata for complete outcome representation.
+     http: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
+     stream: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
+     admin: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
+     persisted?: boolean | undefined;
+     failedPhase?: string | undefined;
+     timedOutPhase?: string | undefined;
+     // P0-1 M-05: Enqueue failure flag for outcome differentiation.
+     enqueueFailed?: boolean | undefined;
+   } | null>(null);
 
   // Patch draft state: when a structured patch is handed off, the editor shows
   // the candidate read-only and the diff is pre-computed; applying uses the
@@ -320,22 +322,23 @@ export function ConfigPanel() {
       // banner reflects the authoritative correlated result rather than the
       // indirect pending_reload + overview-poll path.
       const reloadOutcome = res.reload?.outcome;
-      setApplied({
-        status: res.status ?? [],
-        pendingReload: reloadOutcome !== undefined
-          ? reloadOutcome === "saved_not_live"
-          : (res.pending_reload ?? true),
-        reloadTimedOut: res.reload?.timed_out === true || reloadOutcome === "applied_degraded",
-        mode: "hot",
-        isStagedUpdate: false,
-        // M-03: Pass full reload metadata for complete outcome representation.
-        http: res.reload?.http ?? undefined,
-        stream: res.reload?.stream ?? undefined,
-        admin: res.reload?.admin ?? undefined,
-        persisted: res.reload?.persisted ?? undefined,
-        failedPhase: res.reload?.failed_phase ?? undefined,
-        timedOutPhase: res.reload?.timed_out_phase ?? undefined,
-      });
+setApplied({
+         status: res.status ?? [],
+         pendingReload: reloadOutcome !== undefined
+           ? reloadOutcome === "saved_not_live"
+           : (res.pending_reload ?? true),
+         reloadTimedOut: res.reload?.timed_out === true,
+         mode: "hot",
+         isStagedUpdate: false,
+         // M-03: Pass full reload metadata for complete outcome representation.
+         http: res.reload?.http ?? undefined,
+         stream: res.reload?.stream ?? undefined,
+         admin: res.reload?.admin ?? undefined,
+         persisted: res.reload?.persisted ?? undefined,
+         failedPhase: res.reload?.failed_phase ?? undefined,
+         timedOutPhase: res.reload?.timed_out_phase ?? undefined,
+         enqueueFailed: reloadOutcome === "not_applied",
+       });
       setConfirming(false);
       // Advance the token to the freshly-applied version so a follow-up edit
       // does not trip a spurious conflict.
@@ -372,22 +375,23 @@ export function ConfigPanel() {
       setBaseVersion(res.version ?? undefined);
       // D3 (H-06): use reload.outcome when present for authoritative result.
       const reloadOutcome = res.reload?.outcome;
-      setApplied({
-        status: res.status ?? [],
-        pendingReload: reloadOutcome !== undefined
-          ? reloadOutcome === "saved_not_live"
-          : (res.pending_reload ?? true),
-        reloadTimedOut: res.reload?.timed_out === true || reloadOutcome === "applied_degraded",
-        mode: res.mode ?? (hasPendingRestart ? "stage_restart" : "hot"),
-        isStagedUpdate: hasPendingRestart && res.mode === "stage_restart",
-        // M-03: Pass full reload metadata for complete outcome representation.
-        http: res.reload?.http ?? undefined,
-        stream: res.reload?.stream ?? undefined,
-        admin: res.reload?.admin ?? undefined,
-        persisted: res.reload?.persisted ?? undefined,
-        failedPhase: res.reload?.failed_phase ?? undefined,
-        timedOutPhase: res.reload?.timed_out_phase ?? undefined,
-      });
+setApplied({
+         status: res.status ?? [],
+         pendingReload: reloadOutcome !== undefined
+           ? reloadOutcome === "saved_not_live"
+           : (res.pending_reload ?? true),
+         reloadTimedOut: res.reload?.timed_out === true,
+         mode: res.mode ?? (hasPendingRestart ? "stage_restart" : "hot"),
+         isStagedUpdate: hasPendingRestart && res.mode === "stage_restart",
+         // M-03: Pass full reload metadata for complete outcome representation.
+         http: res.reload?.http ?? undefined,
+         stream: res.reload?.stream ?? undefined,
+         admin: res.reload?.admin ?? undefined,
+         persisted: res.reload?.persisted ?? undefined,
+         failedPhase: res.reload?.failed_phase ?? undefined,
+         timedOutPhase: res.reload?.timed_out_phase ?? undefined,
+         enqueueFailed: reloadOutcome === "not_applied",
+       });
       setConfirming(false);
       setConflictVersion(undefined);
       // M-02: After a successful patch apply, navigate away if the user lacks
@@ -488,20 +492,46 @@ export function ConfigPanel() {
     if (applied) {
       if (applied.mode === "stage_restart") {
         return deriveApplyOutcome({
-          accepted: true,
+          accepted: applied.OK,
           pendingReload: false,
           runtimeObserved: false,
           mode: "stage_restart",
           isStagedUpdate: applied.isStagedUpdate,
+          http: applied.http,
+          stream: applied.stream,
+          admin: applied.admin,
+          persisted: applied.persisted,
+          failedPhase: applied.failedPhase,
+          timedOutPhase: applied.timedOutPhase,
+        });
+      }
+      if (!applied.OK && applied.reload?.outcome === "not_applied") {
+        return deriveApplyOutcome({
+          accepted: false,
+          pendingReload: false,
+          runtimeObserved: true,
+          persisted: applied.persisted,
+          enqueueFailed: true,
+          http: applied.http,
+          stream: applied.stream,
+          admin: applied.admin,
+          failedPhase: applied.failedPhase,
+          timedOutPhase: applied.timedOutPhase,
         });
       }
       const streamStatus = postApply.data?.stream_status;
       return deriveApplyOutcome({
-        accepted: true,
+        accepted: applied.OK,
         pendingReload: applied.pendingReload,
         runtimeObserved: postApply.isSuccess,
         reloadTimedOut: applied.reloadTimedOut,
         ...(streamStatus !== undefined ? { streamStatus } : {}),
+        http: applied.http,
+        stream: applied.stream,
+        admin: applied.admin,
+        persisted: applied.persisted,
+        failedPhase: applied.failedPhase,
+        timedOutPhase: applied.timedOutPhase,
       });
     }
     return null;

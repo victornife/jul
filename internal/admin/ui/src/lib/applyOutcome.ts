@@ -48,7 +48,10 @@ export type ApplyOutcomeKind =
   | "pending-restart-blocks-hot"
   // The staged restart was successfully discarded and the previous configuration
   // was restored. The live runtime was already serving the previous config.
-  | "discard-success";
+  | "discard-success"
+  // Reload enqueue failed; candidate was persisted but never reached the runtime.
+  // Restoration was attempted (and may have succeeded).
+  | "enqueue-failed";
 
 /** One subsystem that did not activate the new config during a partial reload. */
 export interface SubsystemFailure {
@@ -108,22 +111,24 @@ export interface ApplyOutcomeInput {
    * restores the previous configuration; live runtime was already serving it.
    */
   readonly isDiscard?: boolean;
-  /**
-   * True when this is a staged-update (a further stage_restart apply while one
-   * is already pending). Derived from pending_restart.staged in the response.
-   */
-  readonly isStagedUpdate?: boolean;
-  /**
-   * M-03: Per-subsystem reload results from reload.outcome for complete outcome.
-   */
-  readonly http?: SubsystemReloadResult;
-  readonly stream?: SubsystemReloadResult;
-  readonly admin?: SubsystemReloadResult;
-  /** M-03: Whether the reload was persisted (saved to disk) vs published to runtime. */
-  readonly persisted?: boolean;
-  /** M-03: The reload phase that failed or timed out. */
-  readonly failedPhase?: string;
-  readonly timedOutPhase?: string;
+/**
+  * True when this is a staged-update (a further stage_restart apply while one
+  * is already pending). Derived from pending_restart.staged in the response.
+  */
+ readonly isStagedUpdate?: boolean;
+ /**
+  * M-03: Per-subsystem reload results from reload.outcome for complete outcome.
+  */
+ readonly http?: SubsystemReloadResult;
+ readonly stream?: SubsystemReloadResult;
+ readonly admin?: SubsystemReloadResult;
+ /** M-03: Whether the reload was persisted (saved to disk) vs published to runtime. */
+ readonly persisted?: boolean;
+ /** M-03: The reload phase that failed or timed out. */
+ readonly failedPhase?: string;
+ readonly timedOutPhase?: string;
+ /** P0-1: Enqueue failure when reload.outcome is "not_applied". */
+ readonly enqueueFailed?: boolean;
 }
 
 /**
@@ -195,6 +200,19 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
   }
 
   if (!input.accepted) {
+    // P0-1 M-05: Enqueue failure is a distinct outcome: config was persisted
+    // but never reached the runtime. Surface as a warning, not blocked.
+    if (input.persisted === true || input.enqueueFailed) {
+      return {
+        kind: "enqueue-failed",
+        severity: "warning",
+        blocking: false,
+        title: "Reload was not enqueued",
+        message:
+          "The configuration was saved but could not be applied to the running server. The previous configuration was restored if possible. Check the server logs for the queue/submit error.",
+        failures: [],
+      };
+    }
     const msg = input.restartMessage?.trim();
     return {
       kind: "restart-required",
