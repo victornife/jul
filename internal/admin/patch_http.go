@@ -317,24 +317,22 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	cfg, err := s.deps.LoadConfig()
+	// M-06: Fail-closed prerequisite using shared currentWriteState helper.
+	state, err := s.currentWriteState(true)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot load current config: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
-	before, err := config.Marshal(cfg)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	currentVersion := configVersion(before)
-	if req.BaseVersion != "" && req.BaseVersion != currentVersion {
+	cfg := state.Config
+
+	if req.BaseVersion != "" && req.BaseVersion != state.Version {
 		s.recordAudit(r, "config.patch", "config", "failure", "rejected: base version stale (concurrent change)")
 		writeJSON(w, http.StatusConflict, conflictResponse{
 			OK:             false,
 			Conflict:       true,
 			Message:        "The configuration changed since this edit was prepared; reload and try again.",
-			CurrentVersion: currentVersion,
+			CurrentVersion: state.Version,
 		})
 		return
 	}
@@ -363,7 +361,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	// Snapshot the prior config, then persist through the authoritative apply
 	// preflight. A rejection here means nothing was written, preserving the
 	// all-or-nothing guarantee.
-	prev := s.currentRaw()
+	prev := state.Raw
 	mode := r.URL.Query().Get("mode")
 	switch mode {
 	case "", "hot":
@@ -411,7 +409,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		s.emit("config", "apply", "info", "Structured patch validated and saved.")
 	}
 
-	beforeCfg, _ := config.Parse(before)
+	beforeCfg, _ := config.Parse(state.Raw)
 	result.Summary = summaries
 	result.Diff = diffConfigs(beforeCfg, cfg)
 

@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -663,6 +664,14 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
+	// M-06: Fail-closed prerequisite check for mutation endpoints.
+	state, err := s.currentWriteState(true)
+	if err != nil {
+		s.recordAudit(r, "config.raw", "config", "failure", "rejected: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
+		return
+	}
+
 	// Object-level guard: a caller with config:apply still must hold admin:manage
 	// to change anything under [admin]. This check runs inside the write lock so
 	// the current config cannot change between authorization and write (N-02).
@@ -673,40 +682,27 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	// Optimistic concurrency: reject stale writes. An empty base_version skips
 	// the check (explicit force-apply). The version basis matches /api/config/apply
 	// so both editors can interoperate.
-	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" && s.deps.LoadConfig != nil {
-		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
-			if marshaled, merr := config.Marshal(cur); merr == nil {
-				if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-					s.recordAudit(r, "config.raw", "config", "failure", "rejected: base version stale (concurrent change)")
-					writeJSON(w, http.StatusConflict, conflictResponse{
-						OK:             false,
-						Conflict:       true,
-						Message:        "The configuration changed since this edit was prepared; reload and try again.",
-						CurrentVersion: currentVersion,
-					})
-					return
-				}
-			}
+	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
+		if baseVersion != state.Version {
+			s.recordAudit(r, "config.raw", "config", "failure", "rejected: base version stale (concurrent change)")
+			writeJSON(w, http.StatusConflict, conflictResponse{
+				OK:             false,
+				Conflict:       true,
+				Message:        "The configuration changed since this edit was prepared; reload and try again.",
+				CurrentVersion: state.Version,
+			})
+			return
 		}
 	}
 
-	prev := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(body); err != nil {
 		s.recordAudit(r, "config.raw", "config", "failure", "rejected: invalid configuration")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.recordHistory(prev)
+	s.recordHistory(state.Raw)
 	s.recordAudit(r, "config.raw", "config", "success", "configuration validated and saved; live runtime reloading")
-	var version string
-	if s.deps.LoadConfig != nil {
-		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
-			if marshaled, merr := config.Marshal(cfg); merr == nil {
-				version = configVersion(marshaled)
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": version})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": state.Version})
 }
 
 // handleConfigSettings applies the curated settings subset (simple form),
@@ -729,32 +725,32 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// Load the current config inside the lock so the read-modify-write is atomic.
+	// Serialize with the apply path so the read-modify-write is atomic.
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	cfg, err := s.deps.LoadConfig()
+	// M-06: Fail-closed prerequisite check for mutation endpoints.
+	state, err := s.currentWriteState(true)
 	if err != nil {
-		s.recordAudit(r, "config.settings", "config", "failure", "cannot load current config: "+err.Error())
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.recordAudit(r, "config.settings", "config", "failure", "rejected: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
+	cfg := state.Config
 
 	// Optimistic concurrency: reject stale writes. An empty base_version skips
 	// the check (explicit force-apply). The version basis matches /api/config/patch
 	// so both editors can interoperate.
 	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
-		if marshaled, merr := config.Marshal(cfg); merr == nil {
-			if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-				s.recordAudit(r, "config.settings", "config", "failure", "rejected: base version stale (concurrent change)")
-				writeJSON(w, http.StatusConflict, conflictResponse{
-					OK:             false,
-					Conflict:       true,
-					Message:        "The configuration changed since this edit was prepared; reload and try again.",
-					CurrentVersion: currentVersion,
-				})
-				return
-			}
+		if baseVersion != state.Version {
+			s.recordAudit(r, "config.settings", "config", "failure", "rejected: base version stale (concurrent change)")
+			writeJSON(w, http.StatusConflict, conflictResponse{
+				OK:             false,
+				Conflict:       true,
+				Message:        "The configuration changed since this edit was prepared; reload and try again.",
+				CurrentVersion: state.Version,
+			})
+			return
 		}
 	}
 
@@ -768,23 +764,55 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeConfigCandidate(w, r, "config.settings", cfg) {
 		return
 	}
-	prev := s.currentRaw()
 	if err := s.deps.SaveConfig(cfg); err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot save config")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.recordHistory(prev)
+	s.recordHistory(state.Raw)
 	s.recordAudit(r, "config.settings", "config", "success", "settings applied and saved; live runtime reloading")
-	var version string
-	if s.deps.LoadConfig != nil {
-		if cfg2, err := s.deps.LoadConfig(); err == nil && cfg2 != nil {
-			if marshaled, merr := config.Marshal(cfg2); merr == nil {
-				version = configVersion(marshaled)
-			}
-		}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": state.Version})
+}
+// CurrentWriteState holds the current configuration state needed for mutation
+// endpoint prerequisites. It is obtained atomically so no state can change
+// during the check.
+type CurrentWriteState struct {
+	Config  *config.Config
+	Raw     []byte
+	Version string
+}
+
+// currentWriteState loads the current configuration state with fail-closed
+// semantics: it returns an error if LoadConfig is unavailable, fails, returns
+// nil config, or if marshaling fails. The raw snapshot is only required when
+// the caller needs it (e.g., for history recording).
+func (s *Server) currentWriteState(requireRaw bool) (CurrentWriteState, error) {
+	if s.deps.LoadConfig == nil {
+		return CurrentWriteState{}, errors.New("system unavailable: config loader not wired")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": version})
+	cur, err := s.deps.LoadConfig()
+	if err != nil {
+		return CurrentWriteState{}, fmt.Errorf("cannot load config: %w", err)
+	}
+	if cur == nil {
+		return CurrentWriteState{}, errors.New("config loader returned nil")
+	}
+	marshaled, err := config.Marshal(cur)
+	if err != nil {
+		return CurrentWriteState{}, fmt.Errorf("cannot marshal config: %w", err)
+	}
+	state := CurrentWriteState{
+		Config:  cur,
+		Version: configVersion(marshaled),
+	}
+	if requireRaw && s.deps.ReadConfigRaw != nil {
+		raw, err := s.deps.ReadConfigRaw()
+		if err != nil {
+			return CurrentWriteState{}, fmt.Errorf("cannot read config raw: %w", err)
+		}
+		state.Raw = raw
+	}
+	return state, nil
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

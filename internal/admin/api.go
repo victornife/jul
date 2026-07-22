@@ -433,36 +433,32 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
+	// M-06: Fail-closed prerequisite check using shared currentWriteState helper.
+	// This handles both optimistic concurrency and admin lockout checks atomically,
+	// avoiding multiple LoadConfig calls and ensuring consistent error handling.
+	curState, err := s.currentWriteState(false)
+	if err != nil && r.URL.Query().Get("base_version") != "" {
+		s.recordAudit(r, "config.apply", "config", "failure", "rejected: cannot check base version: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "optimistic concurrency check failed: " + err.Error()})
+		return
+	}
+
 	// Optimistic concurrency: when the client sends the base_version it read the
 	// config at, reject the write with 409 if the live config changed since, so a
 	// stale raw edit cannot silently clobber a concurrent change. An empty
 	// base_version skips the check (an explicit force-apply). The version basis is
 	// the canonical marshaled form, identical to the structured-patch path, so a
 	// base_version from either editor is interchangeable.
-	// M-06: Fail-closed when LoadConfig is unavailable or fails.
-	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
-		if s.deps.LoadConfig == nil {
-			s.recordAudit(r, "config.apply", "config", "failure", "rejected: cannot check base version (LoadConfig unavailable)")
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "optimistic concurrency check failed: system unavailable"})
+	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" && err == nil {
+		if baseVersion != curState.Version {
+			s.recordAudit(r, "config.apply", "config", "failure", "rejected: base version stale (concurrent change)")
+			writeJSON(w, http.StatusConflict, conflictResponse{
+				OK:             false,
+				Conflict:       true,
+				Message:        "The configuration changed since this edit was prepared; reload and try again.",
+				CurrentVersion: curState.Version,
+			})
 			return
-		}
-		cur, lerr := s.deps.LoadConfig()
-		if lerr != nil || cur == nil {
-			s.recordAudit(r, "config.apply", "config", "failure", "rejected: cannot load config for base version check")
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "optimistic concurrency check failed: config unavailable"})
-			return
-		}
-		if marshaled, merr := config.Marshal(cur); merr == nil {
-			if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-				s.recordAudit(r, "config.apply", "config", "failure", "rejected: base version stale (concurrent change)")
-				writeJSON(w, http.StatusConflict, conflictResponse{
-					OK:             false,
-					Conflict:       true,
-					Message:        "The configuration changed since this edit was prepared; reload and try again.",
-					CurrentVersion: currentVersion,
-				})
-				return
-			}
 		}
 	}
 
@@ -473,22 +469,11 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	// silently locking themselves out with a single raw edit — the one change
 	// that no rollback can undo from the console, because the console would be
 	// gone. M-06: Fail-closed when LoadConfig is unavailable or fails.
-	if r.URL.Query().Get("confirm_admin") != "true" {
-		if s.deps.LoadConfig == nil {
-			s.recordAudit(r, "config.apply", "config", "failure", "rejected: cannot check admin lockout (LoadConfig unavailable)")
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "admin lockout check failed: system unavailable"})
-			return
-		}
-		cur, lerr := s.deps.LoadConfig()
-		if lerr != nil || cur == nil {
-			s.recordAudit(r, "config.apply", "config", "failure", "rejected: cannot load config for admin lockout check")
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "admin lockout check failed: config unavailable"})
-			return
-		}
+	if r.URL.Query().Get("confirm_admin") != "true" && err == nil {
 		if next, perr := config.Parse(body); perr != nil || next == nil {
 			// Parse error will be handled by normal validation path; skip lockout check.
 		} else {
-			if changes := adminLockoutChanges(cur.Admin, next.Admin); len(changes) > 0 {
+			if changes := adminLockoutChanges(curState.Config.Admin, next.Admin); len(changes) > 0 {
 				s.recordAudit(r, "config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation")
 				s.emit("config", "apply_failed", "warn", "Configuration apply would change admin access and was held for confirmation.")
 				writeJSON(w, http.StatusConflict, adminGuardResponse{

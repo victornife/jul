@@ -91,7 +91,16 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 		return http.StatusForbidden, authErr
 	}
 
-	prev := s.currentRaw()
+	// M-06: Get current state for proper admin lockout confirmation
+	// The admin lockout check is already done above via requireAdminManageForCandidate,
+	// but we still need the raw snapshot for history recording.
+	state, err := s.currentWriteState(true)
+	if err != nil {
+		// WriteConfigRaw is available but we cannot get current state - fail closed
+		return http.StatusServiceUnavailable, fmt.Errorf("cannot get current config state: %w", err)
+	}
+	prev := state.Raw
+
 	if err := s.deps.WriteConfigRaw(raw); err != nil {
 		// Map coordinator rejections to the correct HTTP status so the handler
 		// does not report a false success.
