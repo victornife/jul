@@ -745,39 +745,45 @@ func (s *Server) authorizeConfigCandidate(w http.ResponseWriter, r *http.Request
 		writeForbidden(w, rbac.ConfigApply, id)
 		return false
 	}
-	return s.requireAdminManageForCandidate(w, r, action, next)
+	if err := s.requireAdminManageForCandidate(r, action, next); err != nil {
+		if authErr, ok := err.(*AuthorizationError); ok {
+			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})
+			return false
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return false
+	}
+	return true
 }
 
 // requireAdminManageForCandidate enforces only the admin-subtree guard. It is
 // used by write paths whose route-level permission is not config:apply (e.g.
 // history:rollback) but whose candidate may still affect admin settings.
-func (s *Server) requireAdminManageForCandidate(w http.ResponseWriter, r *http.Request, action string, next *config.Config) bool {
+// P1-3: Refactored to return AuthorizationError instead of writing HTTP
+// responses directly, preventing double-response bugs in rollback handlers.
+func (s *Server) requireAdminManageForCandidate(r *http.Request, action string, next *config.Config) error {
 	if s.deps.LoadConfig == nil || next == nil {
 		s.recordAudit(r, action, "config", "failure", "rejected: cannot check admin change (LoadConfig unavailable)")
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "authorization check failed: system unavailable"})
-		return false
+		return &AuthorizationError{Status: http.StatusServiceUnavailable, Message: "authorization check failed: system unavailable", Reason: "system_unavailable", Required: rbac.AdminManage}
 	}
 	cur, err := s.deps.LoadConfig()
 	if err != nil || cur == nil {
 		s.recordAudit(r, action, "config", "failure", "rejected: cannot load current config for admin change check")
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "authorization check failed: config unavailable"})
-		return false
+		return &AuthorizationError{Status: http.StatusServiceUnavailable, Message: "authorization check failed: config unavailable", Reason: "config_unavailable", Required: rbac.AdminManage}
 	}
 	if adminConfigEqual(cur.Admin, next.Admin) {
-		return true
+		return nil
 	}
 	id, ok := rbacIdentityFromRequest(r)
 	if !ok {
 		s.recordAudit(r, action, "config", "failure", "rejected: admin change without identity")
-		writeForbidden(w, rbac.AdminManage, rbac.Identity{})
-		return false
+		return &AuthorizationError{Status: http.StatusForbidden, Message: "admin change rejected", Reason: "admin_manage_required", Required: rbac.AdminManage}
 	}
 	if !id.Has(rbac.AdminManage) {
 		s.recordAudit(r, action, "config", "failure", "rejected: admin change lacks admin:manage")
-		writeForbidden(w, rbac.AdminManage, id)
-		return false
+		return &AuthorizationError{Status: http.StatusForbidden, Message: "admin change rejected", Reason: "admin_manage_required", Required: rbac.AdminManage}
 	}
-	return true
+	return nil
 }
 
 // authorizeRawCandidate parses body as a candidate config and runs the same

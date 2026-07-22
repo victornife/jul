@@ -27,6 +27,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/observability"
+	"jul/internal/rbac"
 	"jul/internal/server"
 )
 
@@ -44,6 +45,18 @@ type ApplyRequestContext struct {
 	TokenID  string
 	SourceIP string
 }
+
+// AuthorizationError represents an authorization failure with typed details.
+// It is returned by authorization helpers instead of writing HTTP responses
+// directly, so callers can handle response writing consistently.
+type AuthorizationError struct {
+	Status   int
+	Message  string
+	Reason   string // user-facing reason code
+	Required rbac.Permission
+}
+
+func (e *AuthorizationError) Error() string { return e.Message }
 
 // ManagedApplyOutcome is the terminal result of a managed configuration apply,
 // including any async restoration. It is exposed in RuntimeOverview so the

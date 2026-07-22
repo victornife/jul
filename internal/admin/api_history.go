@@ -81,8 +81,14 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 	// Object-level guard: rolling back to a snapshot that changes [admin]
 	// requires admin:manage. This runs inside the lock so the current config
 	// cannot change between the authorization check and the write (N-02).
-	if !s.authorizeConfigCandidate(w, r, "config.rollback", next) {
-		return http.StatusForbidden, errors.New("rollback not authorized")
+	// P1-3: Use requireAdminManageForCandidate which returns error instead of
+	// writing response directly, preventing double-write bugs.
+	if authErr := s.requireAdminManageForCandidate(r, "config.rollback", next); authErr != nil {
+		authID, ok := authErr.(*AuthorizationError)
+		if ok {
+			return authID.Status, authErr
+		}
+		return http.StatusForbidden, authErr
 	}
 
 	prev := s.currentRaw()
@@ -212,9 +218,11 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	code, err := s.rollbackToSnapshot(req.ID, w, r)
 	if err != nil {
-		if code == http.StatusBadRequest {
-			s.recordAudit(r, "config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID)
+		if authErr, ok := err.(*AuthorizationError); ok {
+			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})
+			return
 		}
+		s.recordAudit(r, "config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID)
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
