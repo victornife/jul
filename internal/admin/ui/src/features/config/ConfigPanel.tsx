@@ -4,6 +4,8 @@
  */
 
 import { Suspense, lazy, useEffect, useState, useMemo, useRef } from "react";
+import { SubsystemReloadResult } from "../../lib/applyOutcome";
+import { ReloadResult } from "../../api/client";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -220,14 +222,16 @@ const [applied, setApplied] = useState<{
      mode: "hot" | "stage_restart";
      isStagedUpdate: boolean;
      // M-03: Full reload metadata for complete outcome representation.
-     http: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
-     stream: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
-     admin: { status?: string | undefined; error?: string | undefined; duration_ms?: number | undefined } | undefined;
+     http: SubsystemReloadResult | undefined;
+     stream: SubsystemReloadResult | undefined;
+     admin: SubsystemReloadResult | undefined;
      persisted?: boolean | undefined;
      failedPhase?: string | undefined;
      timedOutPhase?: string | undefined;
      // P0-1 M-05: Enqueue failure flag for outcome differentiation.
      enqueueFailed?: boolean | undefined;
+     ok: boolean;
+     reload?: ReloadResult | undefined;
    } | null>(null);
 
   // Patch draft state: when a structured patch is handed off, the editor shows
@@ -323,22 +327,24 @@ const [applied, setApplied] = useState<{
       // indirect pending_reload + overview-poll path.
       const reloadOutcome = res.reload?.outcome;
 setApplied({
-         status: res.status ?? [],
-         pendingReload: reloadOutcome !== undefined
-           ? reloadOutcome === "saved_not_live"
-           : (res.pending_reload ?? true),
-         reloadTimedOut: res.reload?.timed_out === true,
-         mode: "hot",
-         isStagedUpdate: false,
-         // M-03: Pass full reload metadata for complete outcome representation.
-         http: res.reload?.http ?? undefined,
-         stream: res.reload?.stream ?? undefined,
-         admin: res.reload?.admin ?? undefined,
-         persisted: res.reload?.persisted ?? undefined,
-         failedPhase: res.reload?.failed_phase ?? undefined,
-         timedOutPhase: res.reload?.timed_out_phase ?? undefined,
-         enqueueFailed: reloadOutcome === "not_applied",
-       });
+          ok: res.ok,
+          status: res.status ?? [],
+          pendingReload: reloadOutcome !== undefined
+            ? reloadOutcome === "saved_not_live"
+            : (res.pending_reload ?? true),
+          reloadTimedOut: res.reload?.timed_out === true,
+          mode: "hot",
+          isStagedUpdate: false,
+          // M-03: Pass full reload metadata for complete outcome representation.
+          http: res.reload?.http ?? undefined,
+          stream: res.reload?.stream ?? undefined,
+          admin: res.reload?.admin ?? undefined,
+          persisted: res.reload?.persisted ?? undefined,
+          failedPhase: res.reload?.failed_phase ?? undefined,
+          timedOutPhase: res.reload?.timed_out_phase ?? undefined,
+          enqueueFailed: reloadOutcome === "not_applied",
+          reload: res.reload,
+        });
       setConfirming(false);
       // Advance the token to the freshly-applied version so a follow-up edit
       // does not trip a spurious conflict.
@@ -376,22 +382,24 @@ setApplied({
       // D3 (H-06): use reload.outcome when present for authoritative result.
       const reloadOutcome = res.reload?.outcome;
 setApplied({
-         status: res.status ?? [],
-         pendingReload: reloadOutcome !== undefined
-           ? reloadOutcome === "saved_not_live"
-           : (res.pending_reload ?? true),
-         reloadTimedOut: res.reload?.timed_out === true,
-         mode: res.mode ?? (hasPendingRestart ? "stage_restart" : "hot"),
-         isStagedUpdate: hasPendingRestart && res.mode === "stage_restart",
-         // M-03: Pass full reload metadata for complete outcome representation.
-         http: res.reload?.http ?? undefined,
-         stream: res.reload?.stream ?? undefined,
-         admin: res.reload?.admin ?? undefined,
-         persisted: res.reload?.persisted ?? undefined,
-         failedPhase: res.reload?.failed_phase ?? undefined,
-         timedOutPhase: res.reload?.timed_out_phase ?? undefined,
-         enqueueFailed: reloadOutcome === "not_applied",
-       });
+          ok: res.ok,
+          status: res.status ?? [],
+          pendingReload: reloadOutcome !== undefined
+            ? reloadOutcome === "saved_not_live"
+            : (res.pending_reload ?? true),
+          reloadTimedOut: res.reload?.timed_out === true,
+          mode: res.mode ?? (hasPendingRestart ? "stage_restart" : "hot"),
+          isStagedUpdate: hasPendingRestart && res.mode === "stage_restart",
+          // M-03: Pass full reload metadata for complete outcome representation.
+          http: res.reload?.http ?? undefined,
+          stream: res.reload?.stream ?? undefined,
+          admin: res.reload?.admin ?? undefined,
+          persisted: res.reload?.persisted ?? undefined,
+          failedPhase: res.reload?.failed_phase ?? undefined,
+          timedOutPhase: res.reload?.timed_out_phase ?? undefined,
+          enqueueFailed: reloadOutcome === "not_applied",
+          reload: res.reload,
+        });
       setConfirming(false);
       setConflictVersion(undefined);
       // M-02: After a successful patch apply, navigate away if the user lacks
@@ -414,20 +422,22 @@ setApplied({
     mutationFn: () => applyConfig(current, baseVersion, false, "stage_restart"),
     onSuccess: (res) => {
       setBaseline(current);
-      setApplied({
-        status: res.status ?? [],
-        pendingReload: false,
-        reloadTimedOut: false,
-        mode: "stage_restart",
-        isStagedUpdate: hasPendingRestart,
-        // M-03: Pass full reload metadata for complete outcome representation.
-        http: res.reload?.http ?? undefined,
-        stream: res.reload?.stream ?? undefined,
-        admin: res.reload?.admin ?? undefined,
-        persisted: res.reload?.persisted ?? undefined,
-        failedPhase: res.reload?.failed_phase ?? undefined,
-        timedOutPhase: res.reload?.timed_out_phase ?? undefined,
-      });
+setApplied({
+          ok: res.ok,
+          status: res.status ?? [],
+          pendingReload: false,
+          reloadTimedOut: false,
+          mode: "stage_restart",
+          isStagedUpdate: hasPendingRestart,
+          // M-03: Pass full reload metadata for complete outcome representation.
+          http: res.reload?.http ?? undefined,
+          stream: res.reload?.stream ?? undefined,
+          admin: res.reload?.admin ?? undefined,
+          persisted: res.reload?.persisted ?? undefined,
+          failedPhase: res.reload?.failed_phase ?? undefined,
+          timedOutPhase: res.reload?.timed_out_phase ?? undefined,
+          reload: res.reload,
+        });
       setStageConfirming(false);
       setBaseVersion(res.version ?? undefined);
       setConflictVersion(undefined);
@@ -492,7 +502,7 @@ setApplied({
     if (applied) {
       if (applied.mode === "stage_restart") {
         return deriveApplyOutcome({
-          accepted: applied.OK,
+          accepted: applied.ok,
           pendingReload: false,
           runtimeObserved: false,
           mode: "stage_restart",
@@ -505,7 +515,7 @@ setApplied({
           timedOutPhase: applied.timedOutPhase,
         });
       }
-      if (!applied.OK && applied.reload?.outcome === "not_applied") {
+      if (!applied.ok && applied.reload?.outcome === "not_applied") {
         return deriveApplyOutcome({
           accepted: false,
           pendingReload: false,
@@ -521,7 +531,7 @@ setApplied({
       }
       const streamStatus = postApply.data?.stream_status;
       return deriveApplyOutcome({
-        accepted: applied.OK,
+        accepted: applied.ok,
         pendingReload: applied.pendingReload,
         runtimeObserved: postApply.isSuccess,
         reloadTimedOut: applied.reloadTimedOut,

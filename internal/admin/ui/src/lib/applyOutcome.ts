@@ -72,9 +72,9 @@ export interface ApplyOutcome {
 
 /** Per-subsystem reload result from the backend. */
 export interface SubsystemReloadResult {
-  readonly status?: string;
-  readonly error?: string;
-  readonly duration_ms?: number;
+  readonly status?: string | undefined;
+  readonly error?: string | undefined;
+  readonly duration_ms?: number | undefined;
 }
 
 export interface ApplyOutcomeInput {
@@ -116,17 +116,17 @@ export interface ApplyOutcomeInput {
   * is already pending). Derived from pending_restart.staged in the response.
   */
  readonly isStagedUpdate?: boolean;
- /**
-  * M-03: Per-subsystem reload results from reload.outcome for complete outcome.
-  */
- readonly http?: SubsystemReloadResult;
- readonly stream?: SubsystemReloadResult;
- readonly admin?: SubsystemReloadResult;
- /** M-03: Whether the reload was persisted (saved to disk) vs published to runtime. */
- readonly persisted?: boolean;
- /** M-03: The reload phase that failed or timed out. */
- readonly failedPhase?: string;
- readonly timedOutPhase?: string;
+/**
+   * M-03: Per-subsystem reload results from reload.outcome for complete outcome.
+   */
+  readonly http?: SubsystemReloadResult | undefined;
+  readonly stream?: SubsystemReloadResult | undefined;
+  readonly admin?: SubsystemReloadResult | undefined;
+/** M-03: Whether the reload was persisted (saved to disk) vs published to runtime. */
+  readonly persisted?: boolean | undefined;
+  /** M-03: The reload phase that failed or timed out. */
+  readonly failedPhase?: string | undefined;
+  readonly timedOutPhase?: string | undefined;
  /** P0-1: Enqueue failure when reload.outcome is "not_applied". */
  readonly enqueueFailed?: boolean;
 }
