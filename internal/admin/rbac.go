@@ -4,7 +4,9 @@
 package admin
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -49,6 +51,47 @@ type authSnapshot struct {
 	cfg    config.AdminConfig
 	policy *rbac.Policy
 	gen    string
+}
+
+// PreparedAuth is a fully built immutable authentication snapshot that can be
+// installed with one no-fail atomic store at the reload Publish boundary.
+type PreparedAuth struct {
+	snapshot *authSnapshot
+}
+
+// PrepareAuth builds candidate authentication state without mutating the live
+// server. generation identifies the effective auth contents, not install order.
+func PrepareAuth(cfg config.AdminConfig, p *rbac.Policy) *PreparedAuth {
+	return &PreparedAuth{snapshot: deriveAuthSnapshot(cfg, p, authGeneration(cfg, p))}
+}
+
+// CommitPreparedAuth installs the exact snapshot returned by PrepareAuth.
+func (s *Server) CommitPreparedAuth(prepared *PreparedAuth) {
+	if prepared != nil && prepared.snapshot != nil {
+		s.authState.Store(prepared.snapshot)
+	}
+}
+
+// AuthGeneration returns a safe digest of the currently installed effective
+// auth state. It contains no plaintext credentials.
+func (s *Server) AuthGeneration() string { return s.currentAuth().gen }
+
+func authGeneration(cfg config.AdminConfig, p *rbac.Policy) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(strconv.FormatBool(cfg.Enabled)))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(cfg.Listen))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(strconv.FormatBool(cfg.ConsoleEnabled())))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(strconv.FormatBool(cfg.RBAC.Enabled)))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(rbac.TokenDigest(cfg.Token)))
+	if p != nil {
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(p.Fingerprint()))
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 
 // deriveAuthSnapshot computes the authoritative snapshot from the desired
@@ -156,11 +199,12 @@ func (s *Server) requirePermissionForMethods(perms map[string]rbac.Permission, n
 
 // legacyIdentity is the synthetic wildcard identity granted in legacy and open
 // modes so downstream handlers can uniformly use rbac.IdentityFromContext.
-func legacyIdentity() rbac.Identity {
+func legacyIdentity(token string) rbac.Identity {
 	return rbac.Identity{
 		Principal:   "shared",
 		Role:        "admin",
 		TokenID:     "(legacy)",
+		TokenDigest: rbac.TokenDigest(token),
 		Permissions: []rbac.Permission{rbac.Wildcard},
 		Legacy:      true,
 	}
@@ -234,7 +278,7 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity())))
+			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))
 			return
 		}
 	})
@@ -274,7 +318,7 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity())))
+			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))
 			return
 
 		default: // authModeOpen — no auth configured (loopback-only)

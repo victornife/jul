@@ -908,11 +908,16 @@ func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
 
 	// Allow the first finalizer to finish restoring.
 	close(finalizerContinue)
-	time.Sleep(100 * time.Millisecond)
-
-	onDisk, _ := os.ReadFile(path)
-	if string(onDisk) != string(seed) {
-		t.Error("finalizer should have restored previous bytes")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		onDisk, _ := os.ReadFile(path)
+		if string(onDisk) == string(seed) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("finalizer should have restored previous bytes")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

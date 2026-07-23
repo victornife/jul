@@ -155,6 +155,36 @@ func TestMergeReloadFansInAndSkipsNil(t *testing.T) {
 	_ = MergeReload(ctx, a, nil, nil, &lastAdminDigest)
 }
 
+func TestMergeReloadNeverDropsPreparedAdminRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sig := make(chan struct{}, 8)
+	watch := make(chan [32]byte, 8)
+	admin := make(chan server.ReloadRequest, 1)
+	var lastAdminDigest atomic.Pointer[[32]byte]
+	out := MergeReload(ctx, sig, watch, admin, &lastAdminDigest)
+	for i := 0; i < 8; i++ {
+		sig <- struct{}{}
+		watch <- [32]byte{byte(i + 1)}
+	}
+	prepared := server.NewPreparedCommit(nil, func() { t.Error("prepared request was aborted") })
+	admin <- server.ReloadRequest{ID: "managed", Source: server.ReloadSourceAdmin, Candidate: &config.Candidate{}, PreparedAdmin: prepared}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case req := <-out:
+			if req.ID == "managed" {
+				if req.PreparedAdmin != prepared {
+					t.Fatal("prepared artifact was not preserved")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("prepared admin request was dropped behind untyped reloads")
+		}
+	}
+}
+
 // TestMergeReloadSuppressesWatcherEcho (R10-01) verifies that a file-watch
 // event whose digest matches the last admin-written digest is dropped, while
 // a file-watch event with a different digest is forwarded as an external

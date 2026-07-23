@@ -82,10 +82,17 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 	if err != nil {
 		return ConfigApplyResult{}, http.StatusServiceUnavailable, fmt.Errorf("cannot get current config state: %w", err)
 	}
+	reqCtx := applyRequestContext(r)
+	reqCtx.Baseline = &state
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
+	effectiveNext, err := prepareMutationCandidate(&reqCtx, next)
+	if err != nil {
+		return ConfigApplyResult{}, http.StatusBadRequest, err
+	}
 
 	// Authorize against the same exact raw-first baseline passed to the
 	// coordinator, not a separate LoadConfig call.
-	if authErr := s.requireAdminManageAgainst(r, "config.rollback", state.Config, next); authErr != nil {
+	if authErr := s.requireAdminManageAgainst(r, "config.rollback", currentEffective, effectiveNext.Effective); authErr != nil {
 		authID, ok := authErr.(*AuthorizationError)
 		if ok {
 			return ConfigApplyResult{}, authID.Status, authErr
@@ -102,14 +109,12 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 	// explicit confirmation unless confirm_admin=true.
 	if r.URL.Query().Get("confirm_admin") != "true" {
 		id, _ := rbacIdentityFromRequest(r)
-		if changes := s.reachabilityChanges(state.Config, next, id); len(changes) > 0 {
+		if changes := s.reachabilityChanges(currentEffective, effectiveNext.Effective, id); len(changes) > 0 {
 			return ConfigApplyResult{}, http.StatusConflict, &adminReachabilityError{changes: changes}
 		}
 	}
 
 	if s.deps.ApplyConfigRaw != nil {
-		reqCtx := applyRequestContext(r)
-		reqCtx.Baseline = &state
 		result, applyErr := s.deps.ApplyConfigRaw(reqCtx, raw, "hot")
 		if applyErr != nil {
 			if errors.Is(applyErr, ErrConfigStorageUnavailable) {

@@ -52,6 +52,9 @@ type ReloadPlan struct {
 	// effective config, the redaction state, and secret digests. Secrets are
 	// resolved exactly once per reload (R7-05).
 	Candidate *config.Candidate
+	// PreparedAdmin is built before persistence for managed applies or during
+	// Prepare for source-driven reloads, then installed exactly once at Publish.
+	PreparedAdmin *PreparedCommit
 
 	// StartupFP is the effective startup fingerprint the candidate is compared
 	// against. It is captured from the server at plan creation.
@@ -84,13 +87,14 @@ type ReloadPlan struct {
 // newReloadPlan creates a plan for reloading raw (unexpanded) config into s.
 // When candidate is non-nil it is used directly and secrets are not resolved
 // again; this is the admin apply path that hands off the preflight candidate.
-func (s *Server) newReloadPlan(ctx context.Context, raw *config.Config, candidate *config.Candidate) *ReloadPlan {
+func (s *Server) newReloadPlan(ctx context.Context, raw *config.Config, candidate *config.Candidate, preparedAdmin *PreparedCommit) *ReloadPlan {
 	return &ReloadPlan{
 		s:               s,
 		ctx:             ctx,
 		start:           time.Now(),
 		rawConfig:       raw,
 		Candidate:       candidate,
+		PreparedAdmin:   preparedAdmin,
 		StartupFP:       s.startupFP,
 		oldAddrs:        setOf(uniqueListenAddrs(s.cfg.Servers)),
 		stagedListeners: make(map[string]*listenerEntry),
@@ -178,6 +182,13 @@ func (p *ReloadPlan) Lifecycle() error {
 // It does not commit anything; Publish/Abort must follow.
 func (p *ReloadPlan) Prepare() error {
 	return p.runPhase("prepare", func() error {
+		if p.PreparedAdmin == nil && p.s.PrepareAdmin != nil {
+			prepared, err := p.s.PrepareAdmin(p.Candidate.Effective.Admin)
+			if err != nil {
+				return fmt.Errorf("prepare admin auth: %w", err)
+			}
+			p.PreparedAdmin = prepared
+		}
 		handlers, genID, commit, abort, err := p.s.factory(p.ctx, p.Candidate.Effective)
 		if err != nil {
 			return fmt.Errorf("build: %w", err)
@@ -254,6 +265,7 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// (R10-02).
 	p.s.cfg = p.Candidate.Effective
 	p.s.rawCfg = p.Candidate.Raw
+	p.PreparedAdmin.Commit()
 	p.publishRuntimeState()
 
 	if prevGen != nil {
@@ -352,6 +364,7 @@ func (p *ReloadPlan) Abort() {
 	if p.handlerAbort != nil {
 		p.handlerAbort()
 	}
+	p.PreparedAdmin.Abort()
 	for _, entry := range p.stagedListeners {
 		_ = entry.ln.Close()
 		if entry.h3 != nil {

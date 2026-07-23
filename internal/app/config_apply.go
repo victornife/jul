@@ -100,6 +100,7 @@ type ConfigApplyCoordinator struct {
 	LiveSnapshot   func() server.LiveSnapshot
 	WatchDigest    *atomic.Pointer[[32]byte]
 	PlannedRestart *PlannedRestartStore
+	AuthGeneration func() string
 	// ReadConfigRaw reads the persisted config for baseline/CAS verification.
 	// Nil uses os.ReadFile(Path); tests may inject deterministic failures.
 	ReadConfigRaw func() ([]byte, error)
@@ -169,9 +170,17 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 			Message: "A previous apply is still in flight; wait for it to complete or check the runtime overview for status.",
 		}, nil
 	}
+	if ctx.LiveGeneration != 0 && c.LiveSnapshot != nil && c.LiveSnapshot().Generation != ctx.LiveGeneration {
+		return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "The live runtime changed since this edit was authorized; reload and try again."}, nil
+	}
+	if ctx.AuthGeneration != "" && c.AuthGeneration != nil && c.AuthGeneration() != ctx.AuthGeneration {
+		return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "Admin authentication changed since this edit was authorized; reload and try again."}, nil
+	}
 
 	baselineHint := ctx.Baseline
+	preparedCandidate := ctx.Candidate
 	ctx.Baseline = nil // do not retain raw configuration in the audit callback context
+	ctx.Candidate = nil
 	baseline, err := c.loadMutationBaseline(baselineHint)
 	if err != nil {
 		return ApplyResult{
@@ -249,10 +258,15 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	}
 
 	if mode == ApplyStageRestart {
-		return c.applyStageRestart(cfg, prevCfg, data, baseline)
+		return c.applyStageRestart(cfg, preparedCandidate, prevCfg, data, baseline)
 	}
 
-	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightHot)
+	var pfResult *PreflightResult
+	if preparedCandidate != nil && server.CanonicalVersion(preparedCandidate.Raw) == server.CanonicalVersion(cfg) {
+		pfResult, err = c.Preflight.ApplyCandidate(c.BaseCtx, preparedCandidate, prevCfg, PreflightHot)
+	} else {
+		pfResult, err = c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightHot)
+	}
 	if err != nil {
 		result := ApplyResult{
 			OK:      false,
@@ -269,7 +283,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		return result, nil
 	}
 
-	return c.applyCandidate(ctx, data, pfResult.Candidate, baseline, mode)
+	return c.applyCandidate(ctx, data, pfResult.Candidate, pfResult.PreparedAdmin, baseline, mode)
 }
 
 // ApplyConfig applies a parsed configuration. It marshals the config and
@@ -402,7 +416,7 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 //  2. StageManaged writes .bak (fresh stage only) and prepared marker.
 //  3. atomicfile.Write writes the candidate.
 //  4. PromoteToStaged promotes the marker to "staged" only after the candidate write succeeds.
-func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyStageRestart(cfg *config.Config, preparedCandidate *config.Candidate, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
 	// H-03: determine whether this is a staged update. If a managed staged
 	// restart is already pending, the new candidate replaces it but the
 	// original serving config remains the rollback base and the diff base.
@@ -430,7 +444,13 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	// classification is retained rather than rejected. For updates the diff is
 	// computed against the original serving config, not the previously staged
 	// candidate.
-	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, diffBaseCfg, PreflightStageRestart)
+	var pfResult *PreflightResult
+	var err error
+	if preparedCandidate != nil && server.CanonicalVersion(preparedCandidate.Raw) == server.CanonicalVersion(cfg) {
+		pfResult, err = c.Preflight.ApplyCandidate(c.BaseCtx, preparedCandidate, diffBaseCfg, PreflightStageRestart)
+	} else {
+		pfResult, err = c.Preflight.Apply(c.BaseCtx, cfg, diffBaseCfg, PreflightStageRestart)
+	}
 	if err != nil {
 		return ApplyResult{
 			OK:               false,
@@ -439,6 +459,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 			ValidationErrors: []string{err.Error()},
 		}, nil
 	}
+	defer pfResult.PreparedAdmin.Abort()
 
 	// E3 (M-02): use pfResult.Candidate directly — Preflight.Apply already
 	// resolves secrets and validates the config, so a second NewCandidate call
@@ -628,7 +649,13 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 	return res
 }
 
-func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, data []byte, candidate *config.Candidate, baseline admin.MutationBaseline, mode ApplyMode) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, data []byte, candidate *config.Candidate, preparedAdmin *server.PreparedCommit, baseline admin.MutationBaseline, mode ApplyMode) (ApplyResult, error) {
+	preparedOwned := preparedAdmin != nil
+	defer func() {
+		if preparedOwned {
+			preparedAdmin.Abort()
+		}
+	}()
 	persistedVersion := server.CanonicalVersion(candidate.Raw)
 	desiredVersion := server.CanonicalVersion(candidate.Effective)
 	rawDigest := sha256.Sum256(data)
@@ -708,9 +735,15 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	c.suppressWatcher(rawDigest)
 
 	req := server.ReloadRequest{
-		ID:        id,
-		Source:    server.ReloadSourceAdmin,
-		Candidate: candidate,
+		ID:                 id,
+		Source:             server.ReloadSourceAdmin,
+		Candidate:          candidate,
+		PreparedAdmin:      preparedAdmin,
+		ExpectedGeneration: reqCtx.LiveGeneration,
+		AuthGeneration:     reqCtx.AuthGeneration,
+		ValidateAuthGeneration: func(expected string) bool {
+			return c.AuthGeneration == nil || c.AuthGeneration() == expected
+		},
 		RawDigest: rawDigest,
 		Deadline:  deadline,
 		Result:    resultCh,
@@ -759,6 +792,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		}
 		return terminal, err
 	}
+	preparedOwned = false // the server reload plan now owns commit/abort
 	c.mu.Unlock()
 
 	// Finalizer goroutine: sole owner of the reload result. It forwards the

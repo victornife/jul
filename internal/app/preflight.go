@@ -41,6 +41,8 @@ type PreflightResult struct {
 	// non-nil and mode is PreflightStageRestart; it is used by the coordinator
 	// to build the pending-restart marker without re-running the diff.
 	Lifecycle lifecycle.ChangeSet
+	// PreparedAdmin is the exact immutable auth artifact to install at Publish.
+	PreparedAdmin *server.PreparedCommit
 }
 
 // StreamPreflighter abstracts the stream (L4) server's preflight methods so
@@ -72,6 +74,9 @@ type Preflight struct {
 	// config, bound listener fingerprints, and generation. When nil, preflight
 	// falls back to the on-disk prev baseline (legacy behaviour).
 	LiveSnapshot func() server.LiveSnapshot
+	// PrepareAdmin builds the candidate's immutable effective auth state. In
+	// production it is shared with source-driven reload preparation.
+	PrepareAdmin func(config.AdminConfig) (*server.PreparedCommit, error)
 }
 
 // Apply runs the admin write preflight gates and returns a PreflightResult on
@@ -103,15 +108,36 @@ func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Co
 	if err != nil {
 		return nil, err
 	}
+	return p.applyCandidate(ctx, candidate, prev, mode)
+}
+
+// ApplyCandidate runs preflight on an already-resolved immutable candidate so
+// handler authorization and runtime publication consume the same secret values.
+func (p *Preflight) ApplyCandidate(ctx context.Context, candidate *config.Candidate, prev *config.Config, mode PreflightMode) (*PreflightResult, error) {
+	if candidate == nil || candidate.Raw == nil || candidate.Effective == nil {
+		return nil, fmt.Errorf("preflight candidate is incomplete")
+	}
+	return p.applyCandidate(ctx, candidate, prev, mode)
+}
+
+func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candidate, prev *config.Config, mode PreflightMode) (_ *PreflightResult, retErr error) {
 	if err := ValidateRuntimeConfig(candidate.Effective); err != nil {
 		return nil, err
 	}
-	// RBAC policy build is part of the reload contract (F-09): validate it
-	// now, after secrets expansion, so token/role/permission errors that only
-	// surface during policy construction are caught before persistence.
-	if err := validateAdminRBACPolicy(candidate.Effective.Admin); err != nil {
+	var preparedAdmin *server.PreparedCommit
+	if p.PrepareAdmin != nil {
+		preparedAdmin, retErr = p.PrepareAdmin(candidate.Effective.Admin)
+		if retErr != nil {
+			return nil, retErr
+		}
+	} else if err := validateAdminRBACPolicy(candidate.Effective.Admin); err != nil {
 		return nil, err
 	}
+	defer func() {
+		if retErr != nil {
+			preparedAdmin.Abort()
+		}
+	}()
 	if err := server.PreflightTLS(candidate.Effective.Servers); err != nil {
 		return nil, err
 	}
@@ -141,7 +167,7 @@ func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Co
 		return nil, err
 	}
 
-	result := &PreflightResult{Candidate: candidate}
+	result := &PreflightResult{Candidate: candidate, PreparedAdmin: preparedAdmin}
 
 	if mode == PreflightStageRestart {
 		// Classify lifecycle changes; do not reject them.

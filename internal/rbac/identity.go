@@ -14,6 +14,9 @@ type Identity struct {
 	// TokenID is the opaque public identifier of the credential that was
 	// presented. It is safe to log and audit; it never contains secret bytes.
 	TokenID string
+	// TokenDigest is the full SHA-256 credential digest used only for internal
+	// equality. It must never be logged or serialized.
+	TokenDigest string
 	// Permissions is the resolved permission set for this identity. It is
 	// pre-computed at policy build time.
 	Permissions []Permission

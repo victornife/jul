@@ -309,3 +309,17 @@ func TestAuthSnapshot_ConcurrentReadsAlwaysConsistent(t *testing.T) {
 		t.Fatalf("observed %d internally inconsistent snapshots; atomic install is not holding", got)
 	}
 }
+
+func TestPreparedAuthInstallsExactSnapshot(t *testing.T) {
+	s := &Server{cfg: config.AdminConfig{Listen: "127.0.0.1:0"}}
+	pol := snapAdminPolicy(t, snapRBACTok, time.Now())
+	cfg := config.AdminConfig{RBAC: config.AdminRBACConfig{Enabled: true}}
+	prepared := PrepareAuth(cfg, pol)
+	s.CommitPreparedAuth(prepared)
+	if s.currentAuth() != prepared.snapshot {
+		t.Fatal("CommitPreparedAuth did not install the exact prepared snapshot")
+	}
+	if s.AuthGeneration() == "" {
+		t.Fatal("prepared snapshot has no effective auth generation")
+	}
+}

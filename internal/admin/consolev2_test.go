@@ -22,6 +22,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/rbac"
+	"jul/internal/server"
 )
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -141,6 +142,73 @@ func TestConfigApplyCarriesRawFirstBaseline(t *testing.T) {
 	}
 	if captured.Baseline.Version == "" || captured.Baseline.Config == nil {
 		t.Fatalf("incomplete baseline: %+v", captured.Baseline)
+	}
+}
+
+func TestConfigApplyAuthorizesEffectiveSecretRotation(t *testing.T) {
+	t.Setenv("AUDIT_ADMIN_TOKEN", "old-admin-token-32-characters----")
+	current := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	current.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles:   []config.AdminRole{{Name: "writer", Permissions: []string{"config:apply"}}},
+			Principals: []config.AdminPrincipal{
+				{Name: "operator", Role: "writer", Token: "operator-token-32-characters-----"},
+				{Name: "admin", Role: rbac.RoleAdmin, Token: "${env:AUDIT_ADMIN_TOKEN}"},
+			},
+		},
+	}
+	raw, err := config.Marshal(current)
+	if err != nil {
+		t.Fatalf("marshal current: %v", err)
+	}
+	liveCandidate, err := config.NewCandidate(current)
+	if err != nil {
+		t.Fatalf("resolve current: %v", err)
+	}
+	operatorToken := current.Admin.RBAC.Principals[0].Token
+	policy, err := rbac.Build(true, "admin", map[string][]string{"writer": {"config:apply"}}, []rbac.PrincipalDef{
+		{Name: "operator", Role: "writer", Token: operatorToken},
+		{Name: "admin", Role: rbac.RoleAdmin, Token: liveCandidate.Effective.Admin.RBAC.Principals[1].Token},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatalf("build policy: %v", err)
+	}
+	called := false
+	s := newTestServer(t, config.AdminConfig{RBAC: config.AdminRBACConfig{Enabled: true}}, Deps{
+		ReadConfigRaw: func() ([]byte, error) { return raw, nil },
+		LoadConfig:    func() (*config.Config, error) { return current, nil },
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{EffectiveConfig: liveCandidate.Effective}
+		},
+		ApplyConfigRaw: func(_ ApplyRequestContext, _ []byte, mode string) (ConfigApplyResult, error) {
+			called = true
+			return ConfigApplyResult{OK: true, Mode: mode}, nil
+		},
+	})
+	s.UpdateAuth(liveCandidate.Effective.Admin, policy)
+	t.Setenv("AUDIT_ADMIN_TOKEN", "new-admin-token-32-characters----")
+	candidate, err := current.Clone()
+	if err != nil {
+		t.Fatalf("clone candidate: %v", err)
+	}
+	candidate.Global.LogLevel = "debug"
+	candidateRaw, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(candidateRaw))
+	req.Header.Set("Authorization", "Bearer "+operatorToken)
+	s.routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for effective auth transition; body: %s", rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Fatal("effective auth transition reached coordinator without admin:manage")
 	}
 }
 

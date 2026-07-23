@@ -593,6 +593,20 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				adminSrv.UpdatePolicy(p)
 			}
 		}
+		prepareAdmin := func(adminCfg config.AdminConfig) (*server.PreparedCommit, error) {
+			var policy *rbac.Policy
+			if adminCfg.RBAC.Enabled {
+				built, err := buildRBACPolicy(adminCfg)
+				if err != nil {
+					return nil, fmt.Errorf("rbac policy: %w", err)
+				}
+				policy = built
+			}
+			prepared := admin.PrepareAuth(adminCfg, policy)
+			return server.NewPreparedCommit(func() { adminSrv.CommitPreparedAuth(prepared) }, nil), nil
+		}
+		pf.PrepareAdmin = prepareAdmin
+		srv.PrepareAdmin = prepareAdmin
 		go func() {
 			if err := adminSrv.Run(ctx); err != nil {
 				log.Error("admin listener failed", "error", err)
@@ -604,6 +618,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// outcome callback so it records audit/metrics and exposes the result in
 	// the runtime overview.
 	if coordinator != nil && adminSrv != nil {
+		coordinator.AuthGeneration = adminSrv.AuthGeneration
 		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
 			// C3/M-05: ignore callbacks from older applies (e.g. a timed-out
 			// first apply whose finalizer fires after a second apply has
@@ -674,37 +689,6 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			runtime.GOMAXPROCS(n)
 		} else {
 			runtime.GOMAXPROCS(lifecycle.InitialGOMAXPROCS())
-		}
-		// Hot-swap RBAC policy and live admin config after a successful hot
-		// reload. The candidate is the already-Publish-committed effective
-		// config, so secrets are resolved. This runs after Publish so the new
-		// policy never races with handler swap.
-		if adminSrv != nil {
-			// H-01: Install configuration, mode, and policy as ONE atomic
-			// snapshot swap so a concurrent request can never observe a
-			// transient anonymous/legacy window during an RBAC transition.
-			if c.Admin.RBAC.Enabled {
-				p, err := buildRBACPolicy(c.Admin)
-				if err != nil {
-					// Desired mode is RBAC but the policy failed to build.
-					// Install the NEW config with a nil policy: deriveAuthSnapshot
-					// maps (RBAC.Enabled && policy==nil) to the explicit Blocked
-					// mode, which fails closed with 503. This never retains the
-					// previous legacy/open access after a failed enablement.
-					adminErr = fmt.Errorf("rbac policy update failed: %w", err)
-					log.Warn("RBAC policy rebuild failed on reload; installing fail-closed blocked auth state", "error", err)
-					adminSrv.UpdateAuth(c.Admin, nil)
-				} else {
-					// Single atomic swap: config + policy + derived RBAC mode.
-					adminSrv.UpdateAuth(c.Admin, p)
-				}
-			} else {
-				// RBAC explicitly disabled: single atomic swap installs the new
-				// config with no policy; the derived mode is legacy (token set)
-				// or open (no token). There is no intermediate state where the
-				// old config is paired with a cleared policy.
-				adminSrv.UpdateAuth(c.Admin, nil)
-			}
 		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)

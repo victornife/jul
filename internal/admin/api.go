@@ -387,6 +387,7 @@ func applyRequestContext(r *http.Request) ApplyRequestContext {
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
 		ctx.Actor = id.Principal
 		ctx.TokenID = id.TokenID
+		ctx.TokenDigest = id.TokenDigest
 	}
 	return ctx
 }
@@ -447,6 +448,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.Baseline = &curState
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, curState.Config)
 
 	// Optimistic concurrency: when the client sends the base_version it read the
 	// config at, reject the write with 409 if the live config changed since, so a
@@ -472,6 +474,10 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	// (M-06). A parse error is left to the normal validation path in applyRaw,
 	// which reports it without persisting anything.
 	candidate, parseErr := config.Parse(body)
+	var effectiveCandidate *config.Candidate
+	if parseErr == nil && candidate != nil {
+		effectiveCandidate, parseErr = prepareMutationCandidate(&reqCtx, candidate)
+	}
 
 	// Object-level admin:manage guard (P3-02 / Wave 1): any change in the
 	// [admin] subtree requires admin:manage in addition to config:apply.
@@ -485,8 +491,8 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	// is not even permitted to make the change, and would let a role-escalation
 	// attempt be classified as a self-lockout instead of an authorization
 	// failure (finding: RBAC same-count role escalation must be 403, not 409).
-	if parseErr == nil && candidate != nil {
-		if !s.authorizeConfigTransition(w, r, "config.apply", curState.Config, candidate) {
+	if parseErr == nil && effectiveCandidate != nil {
+		if !s.authorizeConfigTransition(w, r, "config.apply", currentEffective, effectiveCandidate.Effective) {
 			return
 		}
 	}
@@ -500,9 +506,9 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	// can undo from the console, because the console would be gone. The current
 	// configuration was obtained fail-closed above, so a missing baseline can
 	// never silently skip this check.
-	if r.URL.Query().Get("confirm_admin") != "true" && parseErr == nil && candidate != nil {
+	if r.URL.Query().Get("confirm_admin") != "true" && parseErr == nil && effectiveCandidate != nil {
 		id, _ := rbacIdentityFromRequest(r)
-		if changes := s.reachabilityChanges(curState.Config, candidate, id); len(changes) > 0 {
+		if changes := s.reachabilityChanges(currentEffective, effectiveCandidate.Effective, id); len(changes) > 0 {
 			s.recordAudit(r, "config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation")
 			s.emit("config", "apply_failed", "warn", "Configuration apply would change admin access and was held for confirmation.")
 			writeJSON(w, http.StatusConflict, adminGuardResponse{
@@ -609,6 +615,13 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, result)
 }
 
+func bindEffectiveBaseline(s *Server, ctx *ApplyRequestContext, fallback *config.Config) *config.Config {
+	if effective := s.bindMutationRuntime(ctx); effective != nil {
+		return effective
+	}
+	return fallback
+}
+
 // adminGuardResponse is the 409 body when an apply would change a setting that
 // governs admin reachability (disabling the admin interface, its listen address,
 // its token, or the web console) without explicit confirmation. The write was
@@ -681,7 +694,7 @@ func rbacPrincipalsEqual(a, b []config.AdminPrincipal) bool {
 			return false
 		}
 		if existing.Role != p.Role ||
-			existing.Token != p.Token ||
+			rbac.TokenDigest(existing.Token) != rbac.TokenDigest(p.Token) ||
 			existing.Disabled != p.Disabled ||
 			!existing.ExpiresAt.Equal(p.ExpiresAt) {
 			return false
@@ -871,7 +884,7 @@ func (s *Server) authorizeRawCandidate(w http.ResponseWriter, r *http.Request, a
 func adminConfigEqual(a, b config.AdminConfig) bool {
 	if a.Enabled != b.Enabled ||
 		a.Listen != b.Listen ||
-		a.Token != b.Token {
+		rbac.TokenDigest(a.Token) != rbac.TokenDigest(b.Token) {
 		return false
 	}
 	if !adminRBACEqual(a.RBAC, b.RBAC) {

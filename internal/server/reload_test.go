@@ -1249,6 +1249,86 @@ func TestAdminReloadRejectsDiskChangeDuringPreparation(t *testing.T) {
 	}
 }
 
+func TestReloadInstallsPreparedCommitAtPublish(t *testing.T) {
+	addr := freePort(t)
+	src := &stubSource{}
+	initial := cfgWithReturn(addr, 200)
+	src.set(initial, nil)
+	var prepared, committed atomic.Int64
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintf(w, "return-%d", c.Servers[0].Locations[0].Return)
+		})
+		return map[string]http.Handler{addr: h}, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+	}
+	srv := New(initial, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	srv.PrepareAdmin = func(config.AdminConfig) (*PreparedCommit, error) {
+		prepared.Add(1)
+		return NewPreparedCommit(func() { committed.Add(1) }, nil), nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+addr+"/", "return-200")
+	next := cfgWithReturn(addr, 201)
+	src.set(next, nil)
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
+	if !eventually(t, "http://"+addr+"/", "return-201") {
+		t.Fatal("reload did not publish")
+	}
+	if prepared.Load() != 1 || committed.Load() != 1 {
+		t.Fatalf("prepared/committed = %d/%d, want 1/1", prepared.Load(), committed.Load())
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestStaleManagedReloadAbortsPreparedCommit(t *testing.T) {
+	addr := freePort(t)
+	src := &stubSource{}
+	initial := cfgWithReturn(addr, 200)
+	src.set(initial, nil)
+	initialRaw, err := config.Marshal(initial)
+	if err != nil {
+		t.Fatalf("marshal initial: %v", err)
+	}
+	src.setRaw(initialRaw)
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintf(w, "return-%d", c.Servers[0].Locations[0].Return)
+		})
+		return map[string]http.Handler{addr: h}, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+	}
+	srv := New(initial, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+addr+"/", "return-200")
+
+	candidate, err := config.NewCandidate(cfgWithReturn(addr, 201))
+	if err != nil {
+		t.Fatalf("candidate: %v", err)
+	}
+	var aborted atomic.Int64
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{ID: "stale-prepared", Source: ReloadSourceAdmin, Candidate: candidate, RawDigest: sha256Digest([]byte("does-not-match")), PreparedAdmin: NewPreparedCommit(nil, func() { aborted.Add(1) }), Result: resultCh}
+	result := <-resultCh
+	if result.Outcome != ReloadNotApplied || result.FailedPhase != "persisted_cas" {
+		t.Fatalf("result = %+v, want stale rejection", result)
+	}
+	if aborted.Load() != 1 {
+		t.Fatalf("prepared aborts = %d, want 1", aborted.Load())
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
 // TestAdminReloadRawDigestMatchesRawBytes (R11-03) verifies that the raw
 // digest used for candidate validity is compared against the source's raw
 // bytes, not against a canonical re-marshal. A file that contains comments

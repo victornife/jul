@@ -325,12 +325,12 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	reqCtx.Baseline = &state
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
 	// C-01: authorize against a pristine baseline. Never mutate state.Config in
 	// place: LoadConfig may return a shared pointer, so mutating it and then
 	// reloading for authorization would alias current == candidate and skip the
 	// admin:manage guard. Keep the loaded config as the immutable baseline and
 	// apply ops to an independent deep clone.
-	baseline := state.Config
 	cfg, cloneErr := state.Config.Clone()
 	if cloneErr != nil {
 		s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot clone current config: "+cloneErr.Error())
@@ -364,11 +364,16 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		}
 		summaries = append(summaries, summary)
 	}
+	effectiveCandidate, candidateErr := prepareMutationCandidate(&reqCtx, cfg)
+	if candidateErr != nil {
+		writeJSON(w, http.StatusBadRequest, validationErrorResponse{OK: false, Message: "The configuration contains errors.", Errors: humanizeErr(candidateErr.Error())})
+		return
+	}
 	// Object-level guard: a structured patch may target [admin] fields (e.g.
 	// rate limits via future ops). Any change in the [admin] subtree requires
 	// admin:manage in addition to config:apply. Authorize the mutated candidate
 	// against the immutable baseline (no reload) to defeat aliasing (C-01).
-	if !s.authorizeConfigTransition(w, r, "config.patch", baseline, cfg) {
+	if !s.authorizeConfigTransition(w, r, "config.patch", currentEffective, effectiveCandidate.Effective) {
 		return
 	}
 	// Self-lockout guard (finding 9): a structured patch can move the admin
@@ -377,7 +382,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	// used by the raw apply/settings endpoints unless confirm_admin=true.
 	if r.URL.Query().Get("confirm_admin") != "true" {
 		id, _ := rbacIdentityFromRequest(r)
-		if changes := s.reachabilityChanges(baseline, cfg, id); len(changes) > 0 {
+		if changes := s.reachabilityChanges(currentEffective, effectiveCandidate.Effective, id); len(changes) > 0 {
 			s.recordAudit(r, "config.patch", "config", "failure", "rejected: admin-reachability change needs confirmation")
 			s.emit("config", "apply_failed", "warn", "Structured patch would change admin access and was held for confirmation.")
 			writeJSON(w, http.StatusConflict, adminGuardResponse{

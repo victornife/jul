@@ -83,58 +83,58 @@ func rbacCredentialLockoutChanges(prev, next config.AdminConfig, id rbac.Identit
 		return nil
 	}
 
-	// RBAC → RBAC: verify the CURRENT operator's principal survives the change.
-	// An anonymous/legacy identity with RBAC enabled cannot be self-locked-out
-	// by a principal edit (it is not a principal), so there is nothing to flag.
-	if id.Legacy || id.Principal == "" {
+	// RBAC -> RBAC: evaluate the current safe token ID against the effective
+	// configs. This covers named principals, predefined and custom roles,
+	// resource/global wildcards, and the synthetic shared identity.
+	if id.TokenID == "" {
 		return nil
 	}
-
-	before, hadBefore := findPrincipal(prev.RBAC.Principals, id.Principal)
-	after, hasAfter := findPrincipal(next.RBAC.Principals, id.Principal)
-
+	beforeCredential, hadBefore := effectiveCredential(prev, id)
+	afterCredential, hasAfter := effectiveCredential(next, id)
 	if !hadBefore {
-		// The current session is not tied to a named principal we can track
-		// (e.g. bootstrap/default identity); do not guess.
 		return nil
 	}
 	if !hasAfter {
-		return []string{fmt.Sprintf("your admin principal %q would be removed", id.Principal)}
+		return []string{fmt.Sprintf("your admin credential for principal %q would no longer be accepted", beforeCredential.name)}
 	}
-
-	var changes []string
-	if after.Disabled && !before.Disabled {
-		changes = append(changes, fmt.Sprintf("your admin principal %q would be disabled", id.Principal))
+	if beforeCredential.active && !afterCredential.active {
+		return []string{fmt.Sprintf("your admin principal %q would be disabled or expired", afterCredential.name)}
 	}
-	if after.Token != before.Token {
-		changes = append(changes, fmt.Sprintf("the token for your admin principal %q would change (your current session would need to re-authenticate)", id.Principal))
+	if beforeCredential.admin && !afterCredential.admin {
+		return []string{fmt.Sprintf("your admin principal %q would lose permission to manage the admin subsystem", afterCredential.name)}
 	}
-	if principalExpired(after) && !principalExpired(before) {
-		changes = append(changes, fmt.Sprintf("your admin principal %q would be expired", id.Principal))
-	}
-	if after.Role != before.Role {
-		// A role change only matters for lockout if it drops admin:manage, the
-		// permission required to keep administering the service.
-		if !roleGrantsAdminManage(next.RBAC, after.Role) {
-			changes = append(changes, fmt.Sprintf("your admin principal %q would change to role %q, which cannot manage the admin subsystem", id.Principal, after.Role))
-		}
-	} else if !roleGrantsAdminManage(next.RBAC, after.Role) && roleGrantsAdminManage(prev.RBAC, before.Role) {
-		// Same role name but the role's permission set was edited to remove
-		// admin:manage.
-		changes = append(changes, fmt.Sprintf("your admin role %q would lose the permission to manage the admin subsystem", after.Role))
-	}
-	return changes
+	return nil
 }
 
-// findPrincipal returns the principal with the given name (case-sensitive) and
-// whether it was found.
-func findPrincipal(principals []config.AdminPrincipal, name string) (config.AdminPrincipal, bool) {
-	for _, p := range principals {
-		if p.Name == name {
-			return p, true
+type credentialState struct {
+	name   string
+	active bool
+	admin  bool
+}
+
+func effectiveCredential(a config.AdminConfig, id rbac.Identity) (credentialState, bool) {
+	if a.Token != "" && credentialMatches(a.Token, id) {
+		role := a.RBAC.DefaultRole
+		if role == "" {
+			role = rbac.RoleAdmin
 		}
+		return credentialState{name: "shared", active: true, admin: roleGrantsAdminManage(a.RBAC, role)}, true
 	}
-	return config.AdminPrincipal{}, false
+	for _, principal := range a.RBAC.Principals {
+		if !credentialMatches(principal.Token, id) {
+			continue
+		}
+		return credentialState{
+			name:   principal.Name,
+			active: !principal.Disabled && !principalExpired(principal),
+			admin:  roleGrantsAdminManage(a.RBAC, principal.Role),
+		}, true
+	}
+	return credentialState{}, false
+}
+
+func credentialMatches(token string, id rbac.Identity) bool {
+	return id.TokenDigest != "" && rbac.TokenDigest(token) == id.TokenDigest
 }
 
 // principalExpired reports whether a principal's token has expired relative to
@@ -154,11 +154,11 @@ func roleGrantsAdminManage(cfg config.AdminRBACConfig, roleName string) bool {
 			continue
 		}
 		for _, perm := range role.Permissions {
-			if perm == string(rbac.AdminManage) || perm == "*" {
+			if rbac.Matches(rbac.Permission(perm), rbac.AdminManage) {
 				return true
 			}
 		}
 		return false
 	}
-	return false
+	return rbac.RoleHas(roleName, rbac.AdminManage)
 }

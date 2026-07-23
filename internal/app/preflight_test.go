@@ -161,6 +161,26 @@ func TestPreflightApplyReturnsCandidate(t *testing.T) {
 	}
 }
 
+func TestPreflightPreparedAdminAbortsOnFailure(t *testing.T) {
+	cfg := config.ProxyTarget(":9000", ":0")
+	var aborted bool
+	p := Preflight{
+		PrepareAdmin: func(config.AdminConfig) (*server.PreparedCommit, error) {
+			return server.NewPreparedCommit(nil, func() { aborted = true }), nil
+		},
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			return nil, nil, errors.New("handler build failed")
+		},
+		Stream: &mockStreamPreflighter{},
+	}
+	if _, err := p.Apply(context.Background(), cfg, nil, PreflightHot); err == nil {
+		t.Fatal("preflight unexpectedly succeeded")
+	}
+	if !aborted {
+		t.Fatal("prepared admin artifact was not aborted after preflight failure")
+	}
+}
+
 // TestPreflightApplyUsesLiveSnapshotForRebind (R9-04) verifies that when a
 // LiveSnapshot is provided, the listener rebind check uses the actually-bound
 // listener set rather than the on-disk prev config. A re-added address that is

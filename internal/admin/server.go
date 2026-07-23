@@ -43,15 +43,25 @@ type Purger interface {
 // request through to the managed apply coordinator so async finalizers can
 // emit an audit event attributed to the original actor (H-05).
 type ApplyRequestContext struct {
-	Actor    string
-	TokenID  string
-	SourceIP string
+	Actor   string
+	TokenID string
+	// TokenDigest is retained only for internal confirmation binding. Never log
+	// or serialize it; TokenID remains the public audit identifier.
+	TokenDigest string
+	SourceIP    string
 
 	// Baseline is the exact persisted configuration snapshot against which the
 	// HTTP handler performed concurrency, authorization, and reachability
 	// checks. The coordinator must compare this digest immediately before any
 	// write instead of adopting a later filesystem read as its own baseline.
 	Baseline *MutationBaseline
+	// Candidate is the already-resolved immutable candidate used for effective
+	// authorization and passed unchanged to the coordinator.
+	Candidate *config.Candidate
+	// LiveGeneration and AuthGeneration bind authorization to the exact live
+	// runtime and authentication snapshots observed by the handler.
+	LiveGeneration uint64
+	AuthGeneration string
 }
 
 // MutationBaseline is the authoritative raw-first snapshot for a configuration
@@ -63,6 +73,29 @@ type MutationBaseline struct {
 	Version string
 	Config  *config.Config
 	Exists  bool
+}
+
+func prepareMutationCandidate(ctx *ApplyRequestContext, raw *config.Config) (*config.Candidate, error) {
+	if raw == nil {
+		return nil, errors.New("candidate is nil")
+	}
+	candidate, err := config.NewCandidate(raw)
+	if err != nil {
+		return nil, err
+	}
+	ctx.Candidate = candidate
+	return candidate, nil
+}
+
+func (s *Server) bindMutationRuntime(ctx *ApplyRequestContext) *config.Config {
+	if s.deps.LiveSnapshot != nil {
+		snapshot := s.deps.LiveSnapshot()
+		ctx.LiveGeneration = snapshot.Generation
+		ctx.AuthGeneration = s.AuthGeneration()
+		return snapshot.EffectiveConfig
+	}
+	ctx.AuthGeneration = s.AuthGeneration()
+	return nil
 }
 
 // AuthorizationError represents an authorization failure with typed details.
@@ -683,11 +716,16 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	reqCtx := applyRequestContext(r)
 	reqCtx.Baseline = &state
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
+	var effectiveNext *config.Candidate
+	if next != nil {
+		effectiveNext, parseErr = prepareMutationCandidate(&reqCtx, next)
+	}
 
 	// Object-level guard: a caller with config:apply still must hold admin:manage
 	// to change anything under [admin]. This check runs inside the write lock so
 	// the current config cannot change between authorization and write (N-02).
-	if next != nil && !s.authorizeConfigTransition(w, r, "config.raw", state.Config, next) {
+	if effectiveNext != nil && !s.authorizeConfigTransition(w, r, "config.raw", currentEffective, effectiveNext.Effective) {
 		return
 	}
 
@@ -710,9 +748,9 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	// Self-lockout guard (finding 9): a raw edit through the legacy endpoint can
 	// also change how the current operator reaches the console. Require the same
 	// explicit confirmation used by /api/config/apply unless confirm_admin=true.
-	if next != nil && r.URL.Query().Get("confirm_admin") != "true" {
+	if effectiveNext != nil && r.URL.Query().Get("confirm_admin") != "true" {
 		id, _ := rbacIdentityFromRequest(r)
-		if changes := s.reachabilityChanges(state.Config, next, id); len(changes) > 0 {
+		if changes := s.reachabilityChanges(currentEffective, effectiveNext.Effective, id); len(changes) > 0 {
 			s.recordAudit(r, "config.raw", "config", "failure", "rejected: admin-reachability change needs confirmation")
 			writeJSON(w, http.StatusConflict, adminGuardResponse{
 				OK:          false,
@@ -800,6 +838,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	reqCtx := applyRequestContext(r)
 	reqCtx.Baseline = &state
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
 	cfg := state.Config
 
 	// Optimistic concurrency: reject stale writes. An empty base_version skips
@@ -824,7 +863,6 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	// compare equal, silently skipping the admin:manage guard. Build an
 	// independent candidate from a deep clone, mutate the clone, and authorize
 	// the clone against the pristine baseline WITHOUT reloading.
-	baseline := cfg
 	candidate, cerr := cfg.Clone()
 	if cerr != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot clone current config: "+cerr.Error())
@@ -836,10 +874,15 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	effectiveCandidate, candidateErr := prepareMutationCandidate(&reqCtx, candidate)
+	if candidateErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": candidateErr.Error()})
+		return
+	}
 	// Object-level guard: the settings form can mutate [admin].listen, so any
 	// change in the [admin] subtree requires admin:manage. Authorize the
 	// candidate against the immutable baseline (no reload) to defeat aliasing.
-	if !s.authorizeConfigTransition(w, r, "config.settings", baseline, candidate) {
+	if !s.authorizeConfigTransition(w, r, "config.settings", currentEffective, effectiveCandidate.Effective) {
 		return
 	}
 	// Self-lockout guard (finding 9): the settings form can move the admin
@@ -847,7 +890,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	// used by /api/config/apply unless confirm_admin=true.
 	if r.URL.Query().Get("confirm_admin") != "true" {
 		id, _ := rbacIdentityFromRequest(r)
-		if changes := s.reachabilityChanges(baseline, candidate, id); len(changes) > 0 {
+		if changes := s.reachabilityChanges(currentEffective, effectiveCandidate.Effective, id); len(changes) > 0 {
 			s.recordAudit(r, "config.settings", "config", "failure", "rejected: admin-reachability change needs confirmation")
 			writeJSON(w, http.StatusConflict, adminGuardResponse{
 				OK:          false,
