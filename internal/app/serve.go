@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -232,7 +233,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// It is buffered so a candidate-bearing request can queue while a reload is
 	// in progress, but it preserves causal ordering: the candidate is part of
 	// the request message, not stored in a separate global slot (R9-02).
-	adminReload := make(chan server.ReloadRequest, 1)
+	// Unbuffered ownership transfer: SubmitReload succeeds only when the fan-in
+	// has accepted responsibility for forwarding or rejecting the request.
+	adminReload := make(chan server.ReloadRequest)
 	// lastAdminDigest holds the SHA-256 digest of the most recent raw config
 	// written by an admin apply. The file watcher uses it to suppress its own
 	// echo of that write (R10-01).
@@ -254,6 +257,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		select {
 		case adminReload <- req:
 			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("reload dispatch canceled: %w", ctx.Err())
 		case <-time.After(5 * time.Second):
 			return fmt.Errorf("reload enqueue timed out after 5s")
 		}
@@ -365,6 +370,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		select {
 		case adminReload <- req:
 			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("reload dispatch canceled: %w", ctx.Err())
 		case <-time.After(5 * time.Second):
 			return fmt.Errorf("reload enqueue timed out after 5s")
 		}
@@ -414,6 +421,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			select {
 			case adminReload <- req:
 				return nil
+			case <-ctx.Done():
+				return fmt.Errorf("reload dispatch canceled: %w", ctx.Err())
 			case <-time.After(5 * time.Second):
 				return fmt.Errorf("reload enqueue timed out after 5s")
 			}
@@ -571,6 +580,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// lower sequence number (stale results from a timed-out earlier apply that
 	// fired after a newer apply completed) are silently dropped.
 	var lastManagedApplySeq atomic.Uint64
+	var lastManagedApplyMu sync.Mutex
 	if coordinator != nil {
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
@@ -620,12 +630,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	if coordinator != nil && adminSrv != nil {
 		coordinator.AuthGeneration = adminSrv.AuthGeneration
 		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
+			lastManagedApplyMu.Lock()
 			// C3/M-05: ignore callbacks from older applies (e.g. a timed-out
 			// first apply whose finalizer fires after a second apply has
 			// already completed). managedApplySeqGuard prefers ApplyID and
 			// falls back to Reload.ID so a result missing ApplyID is still
 			// correlated rather than silently dropped as sequence 0.
 			if !managedApplySeqGuard(&lastManagedApplySeq, res) {
+				lastManagedApplyMu.Unlock()
 				return // stale/out-of-order result; a newer outcome is stored
 			}
 			applyID := res.ApplyID
@@ -661,6 +673,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				SourceIP:            ctx.SourceIP,
 			}
 			lastManagedApply.Store(o)
+			lastManagedApplyMu.Unlock()
 			adminSrv.RecordManagedApplyOutcome(ctx, *o)
 		}
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {

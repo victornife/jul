@@ -769,20 +769,14 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if s.deps.ApplyConfigRaw != nil {
 		result, applyErr := s.deps.ApplyConfigRaw(reqCtx, body, "hot")
 		if applyErr != nil {
-			code := http.StatusInternalServerError
-			if errors.Is(applyErr, ErrConfigStorageUnavailable) {
-				code = http.StatusServiceUnavailable
-			}
+			code := configApplyErrorStatus(result, applyErr)
 			s.recordAudit(r, "config.raw", "config", "failure", "coordinator error: "+applyErr.Error())
 			writeJSON(w, code, result)
 			return
 		}
-		if result.RestartRequired || !result.OK {
-			code := http.StatusConflict
-			if len(result.ValidationErrors) > 0 {
-				code = http.StatusBadRequest
-			}
-			writeJSON(w, code, result)
+		status := configApplyResultStatus(result)
+		if status != http.StatusOK {
+			writeJSON(w, status, result)
 			return
 		}
 		s.recordHistory(prevRaw)
@@ -906,20 +900,14 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	if s.deps.ApplyConfig != nil {
 		result, applyErr := s.deps.ApplyConfig(reqCtx, candidate, "hot")
 		if applyErr != nil {
-			code := http.StatusInternalServerError
-			if errors.Is(applyErr, ErrConfigStorageUnavailable) {
-				code = http.StatusServiceUnavailable
-			}
+			code := configApplyErrorStatus(result, applyErr)
 			s.recordAudit(r, "config.settings", "config", "failure", "coordinator error: "+applyErr.Error())
 			writeJSON(w, code, result)
 			return
 		}
-		if result.RestartRequired || !result.OK {
-			code := http.StatusConflict
-			if len(result.ValidationErrors) > 0 {
-				code = http.StatusBadRequest
-			}
-			writeJSON(w, code, result)
+		status := configApplyResultStatus(result)
+		if status != http.StatusOK {
+			writeJSON(w, status, result)
 			return
 		}
 		s.recordHistory(prevRaw)

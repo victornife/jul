@@ -413,9 +413,14 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	result, err := applyConfig(reqCtx, cfg, mode)
 	if err != nil {
 		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+err.Error())
-		if errors.Is(err, ErrConfigStorageUnavailable) {
-			s.emit("config", "apply_failed", "error", "Configuration storage could not be verified; no change was written.")
-			writeJSON(w, http.StatusServiceUnavailable, result)
+		status := configApplyErrorStatus(result, err)
+		if status == http.StatusServiceUnavailable {
+			if result.Reload != nil && result.Reload.FailedPhase == "enqueue" {
+				s.emit("config", "apply_failed", "error", result.Message)
+			} else {
+				s.emit("config", "apply_failed", "error", "Configuration storage could not be verified; no change was written.")
+			}
+			writeJSON(w, status, result)
 			return
 		}
 		s.emit("config", "apply_failed", "error", "Structured patch apply coordinator failed.")
@@ -444,7 +449,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if result.OK {
+	if result.OK && isTerminalApplyResult(result) {
 		s.recordHistory(prev)
 		s.recordAudit(r, "config.patch", "config", "success", strings.Join(summaries, "; "))
 		s.emit("config", "apply", "info", "Structured patch validated and saved.")
@@ -454,9 +459,6 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	result.Summary = summaries
 	result.Diff = diffConfigs(beforeCfg, cfg)
 
-	status := http.StatusOK
-	if !result.OK {
-		status = http.StatusConflict
-	}
+	status := configApplyResultStatus(result)
 	writeJSON(w, status, result)
 }

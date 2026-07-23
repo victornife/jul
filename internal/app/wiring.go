@@ -106,7 +106,10 @@ func IndexUpstreams(ups []config.UpstreamConfig) map[string]config.UpstreamConfi
 // event is treated as the echo of a recent admin write and is suppressed
 // (R10-01).
 func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-chan [32]byte, adminReload <-chan server.ReloadRequest, lastAdminDigest *atomic.Pointer[[32]byte]) <-chan server.ReloadRequest {
-	out := make(chan server.ReloadRequest, 3)
+	// Unbuffered handoff gives ownership a precise boundary: a send succeeds only
+	// when server.Run has accepted the request. Before that point this fan-in is
+	// responsible for completing or rejecting managed requests on cancellation.
+	out := make(chan server.ReloadRequest)
 	var wg sync.WaitGroup
 
 	forward := func(in <-chan struct{}, source server.ReloadSource) {
@@ -180,9 +183,41 @@ func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-cha
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			completeCanceled := func(req server.ReloadRequest) {
+				req.PreparedAdmin.Abort()
+				if req.Result == nil {
+					return
+				}
+				result := server.ReloadResult{
+					ID:          req.ID,
+					Source:      req.Source,
+					Outcome:     server.ReloadNotApplied,
+					Persisted:   req.Candidate != nil,
+					FailedPhase: "enqueue",
+					Error:       "reload dispatch canceled before server acceptance",
+				}
+				select {
+				case req.Result <- result:
+				default:
+				}
+			}
+			drainCanceled := func() {
+				for {
+					select {
+					case pending, ok := <-adminReload:
+						if !ok {
+							return
+						}
+						completeCanceled(pending)
+					default:
+						return
+					}
+				}
+			}
 			for {
 				select {
 				case <-ctx.Done():
+					drainCanceled()
 					return
 				case req, ok := <-adminReload:
 					if !ok {
@@ -191,7 +226,8 @@ func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-cha
 					select {
 					case out <- req:
 					case <-ctx.Done():
-						req.PreparedAdmin.Abort()
+						completeCanceled(req)
+						drainCanceled()
 						return
 					}
 				}

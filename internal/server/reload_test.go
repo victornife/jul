@@ -1286,6 +1286,60 @@ func TestReloadInstallsPreparedCommitAtPublish(t *testing.T) {
 	}
 }
 
+func TestManagedReloadWaitsForCoordinatorFinalization(t *testing.T) {
+	addr := freePort(t)
+	src := &stubSource{}
+	initial := cfgWithReturn(addr, 200)
+	src.set(initial, nil)
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintf(w, "return-%d", c.Servers[0].Locations[0].Return)
+		})
+		return map[string]http.Handler{addr: h}, uint64(c.Servers[0].Locations[0].Return), func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+	}
+	srv := New(initial, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 2)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+addr+"/", "return-200")
+
+	managedCfg := cfgWithReturn(addr, 201)
+	managed, err := config.NewCandidate(managedCfg)
+	if err != nil {
+		t.Fatalf("candidate: %v", err)
+	}
+	managedRaw, err := config.Marshal(managed.Raw)
+	if err != nil {
+		t.Fatalf("marshal managed: %v", err)
+	}
+	src.set(managedCfg, nil)
+	src.setRaw(managedRaw)
+	finalized := make(chan struct{})
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{ID: "managed-ack", Source: ReloadSourceAdmin, Candidate: managed, RawDigest: sha256Digest(managedRaw), Result: resultCh, Finalized: finalized}
+	result := <-resultCh
+	if result.Outcome != ReloadAppliedLive {
+		t.Fatalf("managed reload = %+v", result)
+	}
+
+	next := cfgWithReturn(addr, 202)
+	src.set(next, nil)
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
+	time.Sleep(50 * time.Millisecond)
+	if !eventually(t, "http://"+addr+"/", "return-201") {
+		t.Fatal("server processed next reload before coordinator finalization")
+	}
+	close(finalized)
+	if !eventually(t, "http://"+addr+"/", "return-202") {
+		t.Fatal("server did not process queued reload after finalization")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
 func TestStaleManagedReloadAbortsPreparedCommit(t *testing.T) {
 	addr := freePort(t)
 	src := &stubSource{}

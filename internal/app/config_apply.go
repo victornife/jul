@@ -121,6 +121,10 @@ type ConfigApplyCoordinator struct {
 	// for staging, after the prepared marker is written but before the final
 	// expected-baseline comparison. Production leaves it nil.
 	beforePersist func(ApplyMode)
+	// beforeRestore and waitMargin are deterministic test seams for exercising
+	// slow terminal restoration. Production leaves them unset.
+	beforeRestore func()
+	waitMargin    time.Duration
 
 	mu      sync.Mutex
 	applyMu sync.Mutex
@@ -665,13 +669,11 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	// resultCh has capacity 1 because the server sends exactly one terminal
 	// result and the finalizer goroutine below is the sole receiver.
 	resultCh := make(chan server.ReloadResult, 1)
-	// waiterCh carries the result from the finalizer goroutine to the
-	// synchronous HTTP path. It has capacity 1 so the finalizer never blocks
-	// when forwarding the result.
-	waiterCh := make(chan server.ReloadResult, 1)
-	// restoreDone is closed by the finalizer after it has finished any
-	// restoration, so applyCandidate can return the file to a known state.
-	restoreDone := make(chan struct{})
+	// terminalCh carries the one final ApplyResult after any required
+	// restoration. The HTTP response and completion callback consume the same
+	// value instead of independently reconstructing state from disk.
+	terminalCh := make(chan ApplyResult, 1)
+	finalizedCh := make(chan struct{})
 
 	// Use the currently serving config's reload_timeout for this transaction,
 	// not the candidate's. A candidate that changes reload_timeout affects the
@@ -747,6 +749,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		RawDigest: rawDigest,
 		Deadline:  deadline,
 		Result:    resultCh,
+		Finalized: finalizedCh,
 	}
 
 	if err := c.SubmitReload(req); err != nil {
@@ -787,138 +790,90 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		terminal = c.withRestorationOutcome(terminal, baseline.Raw, baseline.Exists, rawDigest)
 		// M-05: Move callback after unlock to prevent mutex wedge on panic.
 		c.mu.Unlock()
-		if c.OnManagedApplyComplete != nil {
-			c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(terminal))
-		}
+		c.notifyManagedApplyComplete(reqCtx, terminal)
 		return terminal, err
 	}
 	preparedOwned = false // the server reload plan now owns commit/abort
 	c.mu.Unlock()
 
-	// Finalizer goroutine: sole owner of the reload result. It forwards the
-	// result to waiterCh for the synchronous HTTP path, then performs any
-	// required restoration while holding c.mu so the digest check and restore
-	// are atomic with respect to a subsequent apply's write. For successful
-	// applies (no restoration needed) inFlightState is cleared before
-	// forwarding so the synchronous path cannot return while the transaction
-	// is still marked in-flight (M-08). The terminal managed outcome is
-	// emitted after the disk is in its final state (H-05).
+	// Finalizer goroutine: sole owner of the reload result and restoration. It
+	// creates exactly one terminal ApplyResult after disk state is final, then
+	// sends that value to both the callback and the synchronous waiter.
 	go func() {
-		defer close(restoreDone)
-		var terminal ApplyResult
-		var terminalRR server.ReloadResult
-		select {
-		case rr := <-resultCh:
-			terminalRR = rr
-			restoreNeeded := !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded
-
-			// M-08: clear in-flight state early when no restoration is needed.
-			if !restoreNeeded {
-				c.mu.Lock()
-				c.inFlightState = ApplyInFlightNone
-				c.mu.Unlock()
+		rr := <-resultCh
+		restoreNeeded := !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded
+		c.mu.Lock()
+		if restoreNeeded {
+			if c.beforeRestore != nil {
+				c.beforeRestore()
 			}
-
-			select {
-			case waiterCh <- rr:
-			default:
+			if err := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest); err != nil {
+				c.logRestorationFailure(id, err)
 			}
-
-			if restoreNeeded {
-				c.mu.Lock()
-				if err := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest); err != nil {
-					// Log the restoration failure; F-03 surfaces it through the
-					// result/audit path below when the synchronous path is still
-					// waiting. When it has already returned (saved_not_live), the
-					// failure is discoverable via overview/metrics.
-					c.logRestorationFailure(id, err)
-				}
-				c.inFlightState = ApplyInFlightNone
-				// C2 (N-05): build the terminal result while holding the lock so
-				// the disk read in withRestorationOutcome is atomic with the
-				// restoration and cannot race with a concurrent apply's write.
-				terminal = c.buildTerminalResult(mode, persistedVersion, desiredVersion, terminalRR, baseline.Raw, baseline.Exists, rawDigest)
-				c.mu.Unlock()
-			} else {
-				// Success path: buildTerminalResult does not read disk for OK
-				// results (no restoration occurred), so no lock is required.
-				terminal = c.buildTerminalResult(mode, persistedVersion, desiredVersion, terminalRR, baseline.Raw, baseline.Exists, rawDigest)
-			}
-
-			// H-05: build and emit the terminal managed outcome.
-		case <-c.BaseCtx.Done():
-			// Process shutting down; no restoration attempt — startup will
-			// determine the correct state from disk and marker files.
-			c.mu.Lock()
-			c.inFlightState = ApplyInFlightNone
-			c.mu.Unlock()
 		}
-
-		if c.OnManagedApplyComplete != nil && terminal.Reload != nil {
-			c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(terminal))
-		}
+		terminal := c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest)
+		c.inFlightState = ApplyInFlightNone
+		c.mu.Unlock()
+		close(finalizedCh)
+		terminalCh <- terminal
+		c.notifyManagedApplyComplete(reqCtx, terminal)
 	}()
 
-	waitTimeout := time.Until(deadline) + time.Second
+	waitMargin := c.waitMargin
+	if waitMargin <= 0 {
+		waitMargin = time.Second
+	}
+	waitTimeout := time.Until(deadline) + waitMargin
 	if waitTimeout <= 0 {
 		waitTimeout = time.Second
 	}
 
 	select {
-	case rr := <-waiterCh:
-		// Wait for restoration on failure so callers observe a known on-disk
-		// state before we return. On success buildTerminalResult is a no-op
-		// wait because inFlightState was already cleared.
-		res := c.decorateResultNoRestore(mode, persistedVersion, desiredVersion, rr)
-		if !res.OK {
-			select {
-			case <-restoreDone:
-			case <-time.After(5 * time.Second):
-			}
-		}
-		return c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest), nil
+	case terminal := <-terminalCh:
+		return terminal, nil
 	case <-c.BaseCtx.Done():
-		// The process is shutting down; the finalizer will clear inFlightState
-		// once it observes BaseCtx cancellation. ApplyID is populated so any
-		// terminal outcome remains sequence-correlatable (M-05).
-		return ApplyResult{
-			ApplyID:          id,
-			OK:               true,
-			Mode:             mode,
-			Version:          persistedVersion,
-			PersistedVersion: persistedVersion,
-			DesiredVersion:   desiredVersion,
-			ServingVersion:   server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
-			Message:          "Configuration saved; the process is shutting down and the reload outcome is unknown.",
-		}, nil
+		return c.provisionalResult(id, mode, persistedVersion, desiredVersion, transactionStarted, false, "Configuration saved; the process is shutting down and the reload outcome is unknown."), nil
 	case <-time.After(waitTimeout):
 		// Finalizer goroutine now owns the restoration obligation. The result
 		// returned here marks Persisted because the candidate is on disk, but
 		// the final restoration state will only be known after restoreDone.
 		// ApplyID is populated so the callback's monotonic sequence guard can
 		// correlate the async finalizer's later terminal result (M-05).
-		return ApplyResult{
-			ApplyID:          id,
-			OK:               true,
-			Mode:             mode,
-			Version:          persistedVersion,
-			PersistedVersion: persistedVersion,
-			DesiredVersion:   desiredVersion,
-			ServingVersion:   server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
-			Persisted:        true,
-			Reload: &server.ReloadResult{
-				ID:             id,
-				Source:         server.ReloadSourceAdmin,
-				Outcome:        server.ReloadSavedNotLive,
-				Persisted:      true,
-				TimedOut:       true,
-				DesiredVersion: desiredVersion,
-				ServingVersion: server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
-				StartedAt:      transactionStarted,
-			},
-			Message: "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome.",
-		}, nil
+		return c.provisionalResult(id, mode, persistedVersion, desiredVersion, transactionStarted, true, "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome."), nil
 	}
+}
+
+func (c *ConfigApplyCoordinator) provisionalResult(id string, mode ApplyMode, persistedVersion, desiredVersion string, startedAt time.Time, timedOut bool, message string) ApplyResult {
+	servingVersion := server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+	return ApplyResult{
+		ApplyID:          id,
+		OK:               true,
+		Mode:             mode,
+		Version:          persistedVersion,
+		PersistedVersion: persistedVersion,
+		DesiredVersion:   desiredVersion,
+		ServingVersion:   servingVersion,
+		Persisted:        true,
+		Reload: &server.ReloadResult{
+			ID:             id,
+			Source:         server.ReloadSourceAdmin,
+			Outcome:        server.ReloadSavedNotLive,
+			Persisted:      true,
+			TimedOut:       timedOut,
+			DesiredVersion: desiredVersion,
+			ServingVersion: servingVersion,
+			StartedAt:      startedAt,
+		},
+		Message: message,
+	}
+}
+
+func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(reqCtx admin.ApplyRequestContext, result ApplyResult) {
+	if c.OnManagedApplyComplete == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(result))
 }
 
 // loadMutationBaseline uses the HTTP handler's exact authorized snapshot when
@@ -1087,13 +1042,16 @@ func canonicalVersionFromRaw(raw []byte) string {
 // and for the async terminal outcome callback (H-05).
 func (c *ConfigApplyCoordinator) buildTerminalResult(mode ApplyMode, persistedVersion, desiredVersion string, rr server.ReloadResult, prevRaw []byte, previouslyExisted bool, expectedCandidateDigest [32]byte) ApplyResult {
 	res := c.decorateResultNoRestore(mode, persistedVersion, desiredVersion, rr)
+	res.FinalServingVersion = rr.ServingVersion
+	if res.FinalServingVersion == "" && c.LiveSnapshot != nil {
+		res.FinalServingVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+	}
 	if res.OK {
 		res.Persisted = true
 		res.FinalDiskVersion = persistedVersion
 		if current, err := os.ReadFile(c.Path); err == nil {
 			res.FinalDiskVersion = canonicalVersionFromRaw(current)
 		}
-		res.FinalServingVersion = rr.ServingVersion
 	} else {
 		res = c.withRestorationOutcome(res, prevRaw, previouslyExisted, expectedCandidateDigest)
 	}

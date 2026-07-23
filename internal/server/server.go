@@ -87,6 +87,11 @@ type ReloadRequest struct {
 	// Result receives the structured outcome of this reload. When non-nil the
 	// server sends the result once, non-blockingly, after the reload finishes.
 	Result chan<- ReloadResult
+	// Finalized is closed by a managed coordinator after it has consumed Result
+	// and completed any required disk restoration. The server waits for it before
+	// processing another reload so a rejected candidate cannot be reloaded from
+	// disk during the restoration window.
+	Finalized <-chan struct{}
 	// AdminErr, when set by the caller, is reported as a failed admin
 	// subsystem in the reload result. The app layer uses this to surface RBAC
 	// policy update failures independently of stream-proxy reload status.
@@ -968,7 +973,12 @@ func (s *Server) doReload(req ReloadRequest) {
 	if s.OnReloadStart != nil {
 		s.OnReloadStart()
 	}
-	defer s.sendReloadResult(req.Result, &result)
+	defer func() {
+		s.sendReloadResult(req.Result, &result)
+		if req.Finalized != nil {
+			<-req.Finalized
+		}
+	}()
 
 	if s.source == nil {
 		result.Outcome = ReloadNotApplied
@@ -1058,7 +1068,7 @@ func (s *Server) doReload(req ReloadRequest) {
 			result.DurationMS = time.Since(plan.start).Milliseconds()
 			result.Outcome = ReloadNotApplied
 			result.FailedPhase = phase.name
-			if reloadCtx.Err() != nil {
+			if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {
 				result.TimedOut = true
 				result.TimedOutPhase = phase.name
 			}
@@ -1110,7 +1120,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNotApplied
 		result.FailedPhase = "publish"
-		if reloadCtx.Err() != nil {
+		if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {
 			result.TimedOut = true
 			result.TimedOutPhase = "publish"
 		}
@@ -1206,7 +1216,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		s.log.Info("configuration reloaded", "duration_ms", result.DurationMS, "reload_id", req.ID)
 	}
 
-	if reloadCtx.Err() != nil {
+	if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
 		result.TimedOutPhase = "post_commit"
 		// A timeout after Publish cannot roll back safely; report the reload

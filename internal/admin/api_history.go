@@ -117,16 +117,13 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 	if s.deps.ApplyConfigRaw != nil {
 		result, applyErr := s.deps.ApplyConfigRaw(reqCtx, raw, "hot")
 		if applyErr != nil {
-			if errors.Is(applyErr, ErrConfigStorageUnavailable) {
-				return result, http.StatusServiceUnavailable, applyErr
-			}
-			return result, http.StatusInternalServerError, applyErr
+			return result, configApplyErrorStatus(result, applyErr), applyErr
 		}
-		if result.RestartRequired || !result.OK {
-			return result, http.StatusConflict, nil
+		status := configApplyResultStatus(result)
+		if result.OK && isTerminalApplyResult(result) {
+			s.recordHistory(prev)
 		}
-		s.recordHistory(prev)
-		return result, http.StatusOK, nil
+		return result, status, nil
 	}
 
 	if err := s.deps.WriteConfigRaw(raw); err != nil {
@@ -174,10 +171,18 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if isStructuredApplyError(result) {
+			writeJSON(w, code, result)
+			return
+		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 	if !result.OK {
+		writeJSON(w, code, result)
+		return
+	}
+	if code == http.StatusAccepted {
 		writeJSON(w, code, result)
 		return
 	}
@@ -282,11 +287,21 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if isStructuredApplyError(result) {
+			s.recordAudit(r, "config.rollback", "config", "failure", "rollback coordinator failed for snapshot "+req.ID)
+			writeJSON(w, code, result)
+			return
+		}
 		s.recordAudit(r, "config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID)
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 	if !result.OK {
+		writeJSON(w, code, result)
+		return
+	}
+	if code == http.StatusAccepted {
+		s.recordAudit(r, "config.rollback.accepted", "config", "success", "rollback saved; live outcome pending for snapshot "+req.ID)
 		writeJSON(w, code, result)
 		return
 	}

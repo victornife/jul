@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -685,6 +686,238 @@ func TestApplyResultReportsRestorationSuccess(t *testing.T) {
 	onDisk, _ := os.ReadFile(path)
 	if string(onDisk) != string(seed) {
 		t.Error("previous bytes should be restored")
+	}
+}
+
+func TestFastRestorationHTTPAndCallbackResultsMatch(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	callbackCh := make(chan admin.ConfigApplyResult, 1)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			go func() {
+				req.Result <- server.ReloadResult{ID: req.ID, Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, FailedPhase: "prepare", Error: "build failed"}
+			}()
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult) {
+			callbackCh <- result
+		},
+	}
+	httpResult, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	callback := <-callbackCh
+	want := toAdminConfigApplyResult(httpResult)
+	if !reflect.DeepEqual(callback, want) {
+		t.Fatalf("callback and HTTP result differ:\ncallback=%+v\nhttp=%+v", callback, want)
+	}
+}
+
+func TestShutdownReturnsCorrelatedSavedNotLive(t *testing.T) {
+	baseCtx, cancel := context.WithCancel(context.Background())
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	submitted := make(chan struct{})
+	reloadRequest := make(chan server.ReloadRequest, 1)
+	callbackCh := make(chan admin.ConfigApplyResult, 1)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   baseCtx,
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			reloadRequest <- req
+			close(submitted)
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult) {
+			callbackCh <- result
+		},
+	}
+	resultCh := make(chan ApplyResult, 1)
+	go func() {
+		result, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+		resultCh <- result
+	}()
+	<-submitted
+	cancel()
+	httpResult := <-resultCh
+	if httpResult.Reload == nil || httpResult.Reload.Outcome != server.ReloadSavedNotLive || !httpResult.Persisted {
+		t.Fatalf("shutdown result = %+v, want correlated saved_not_live", httpResult)
+	}
+	if httpResult.Reload.TimedOut {
+		t.Fatal("shutdown provisional result must not be labeled timed_out")
+	}
+	select {
+	case callback := <-callbackCh:
+		t.Fatalf("provisional shutdown result unexpectedly emitted terminal callback: %+v", callback)
+	default:
+	}
+	req := <-reloadRequest
+	req.Result <- server.ReloadResult{ID: req.ID, Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, FailedPhase: "shutdown", Error: "canceled"}
+	callback := <-callbackCh
+	if callback.Reload == nil || callback.Reload.Outcome != server.ReloadNotApplied || !callback.Restored {
+		t.Fatalf("shutdown terminal callback = %+v, want rejected/restored", callback)
+	}
+}
+
+func TestShutdownRestoresBufferedRejection(t *testing.T) {
+	baseCtx, cancel := context.WithCancel(context.Background())
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	resultBuffered := make(chan struct{})
+	resultContinue := make(chan struct{})
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   baseCtx,
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			close(resultBuffered)
+			go func() {
+				<-resultContinue
+				req.Result <- server.ReloadResult{ID: req.ID, Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, FailedPhase: "prepare", Error: "rejected"}
+			}()
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+	}
+	resultCh := make(chan ApplyResult, 1)
+	go func() {
+		result, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+		resultCh <- result
+	}()
+	<-resultBuffered
+	cancel()
+	provisional := <-resultCh
+	if provisional.Reload == nil || provisional.Reload.Outcome != server.ReloadSavedNotLive || provisional.Reload.TimedOut {
+		t.Fatalf("shutdown provisional = %+v", provisional)
+	}
+	close(resultContinue)
+	deadline := time.Now().Add(time.Second)
+	for {
+		onDisk, _ := os.ReadFile(path)
+		if string(onDisk) == string(seed) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shutdown abandoned a later rejection without restoration")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestCompletionCallbackPanicDoesNotBlockHTTP(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			go func() {
+				req.Result <- server.ReloadResult{ID: req.ID, Source: server.ReloadSourceAdmin, Outcome: server.ReloadAppliedLive, Published: true}
+			}()
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+		OnManagedApplyComplete: func(admin.ApplyRequestContext, admin.ConfigApplyResult) {
+			panic("callback panic")
+		},
+	}
+	result, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil || !result.OK {
+		t.Fatalf("result=%+v err=%v, callback panic blocked HTTP", result, err)
+	}
+}
+
+func TestSlowRestorationReturnsSavedNotLiveThenOneTerminalResult(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	restoreStarted := make(chan struct{})
+	restoreContinue := make(chan struct{})
+	terminalCh := make(chan admin.ConfigApplyResult, 1)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			go func() {
+				req.Result <- server.ReloadResult{ID: req.ID, Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, FailedPhase: "prepare", Error: "build failed"}
+			}()
+			return nil
+		},
+		LiveSnapshot: func() server.LiveSnapshot {
+			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+			cfg.Global.ReloadTimeout = config.Duration(20 * time.Millisecond)
+			return server.LiveSnapshot{EffectiveConfig: cfg}
+		},
+		PlannedRestart: &PlannedRestartStore{},
+		beforeRestore: func() {
+			close(restoreStarted)
+			<-restoreContinue
+		},
+		waitMargin: 10 * time.Millisecond,
+		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult) {
+			terminalCh <- result
+		},
+	}
+
+	resultCh := make(chan ApplyResult, 1)
+	go func() {
+		result, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+		resultCh <- result
+	}()
+	<-restoreStarted
+	provisional := <-resultCh
+	if provisional.Reload == nil || provisional.Reload.Outcome != server.ReloadSavedNotLive {
+		t.Fatalf("provisional result = %+v, want saved_not_live", provisional)
+	}
+	select {
+	case terminal := <-terminalCh:
+		t.Fatalf("callback ran before restoration completed: %+v", terminal)
+	default:
+	}
+	close(restoreContinue)
+	terminal := <-terminalCh
+	if terminal.OK || !terminal.Restored || terminal.RestoreError != "" {
+		t.Fatalf("terminal result = %+v, want rejected/restored", terminal)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	if string(onDisk) != string(seed) {
+		t.Fatal("terminal callback disagrees with final disk state")
 	}
 }
 

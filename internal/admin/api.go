@@ -539,9 +539,14 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	result, err := applyRaw(reqCtx, body, mode)
 	if err != nil {
 		s.recordAudit(r, "config.apply", "config", "failure", "coordinator error: "+err.Error())
-		if errors.Is(err, ErrConfigStorageUnavailable) {
-			s.emit("config", "apply_failed", "error", "Configuration storage could not be verified; no change was written.")
-			writeJSON(w, http.StatusServiceUnavailable, result)
+		status := configApplyErrorStatus(result, err)
+		if status == http.StatusServiceUnavailable {
+			if result.Reload != nil && result.Reload.FailedPhase == "enqueue" {
+				s.emit("config", "apply_failed", "error", result.Message)
+			} else {
+				s.emit("config", "apply_failed", "error", "Configuration storage could not be verified; no change was written.")
+			}
+			writeJSON(w, status, result)
 			return
 		}
 		s.emit("config", "apply_failed", "error", "Configuration apply coordinator failed.")
@@ -572,7 +577,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if result.OK {
+	if result.OK && isTerminalApplyResult(result) {
 		s.recordHistory(prev)
 		// Use distinct audit/timeline events for stage_restart vs hot apply so
 		// the timeline clearly distinguishes which transaction type ran.
@@ -608,10 +613,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 			"Configuration apply was rejected and restoration to the previous configuration failed.")
 	}
 
-	status := http.StatusOK
-	if !result.OK {
-		status = http.StatusConflict
-	}
+	status := configApplyResultStatus(result)
 	writeJSON(w, status, result)
 }
 

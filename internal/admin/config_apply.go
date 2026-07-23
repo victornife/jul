@@ -5,6 +5,7 @@ package admin
 
 import (
 	"errors"
+	"net/http"
 
 	"jul/internal/server"
 )
@@ -12,6 +13,43 @@ import (
 // ErrConfigStorageUnavailable marks a failure to read or verify the persisted
 // configuration. Mutation handlers map it to 503 and must not write anything.
 var ErrConfigStorageUnavailable = errors.New("configuration storage unavailable")
+
+func configApplyErrorStatus(result ConfigApplyResult, err error) int {
+	if errors.Is(err, ErrConfigStorageUnavailable) {
+		return http.StatusServiceUnavailable
+	}
+	if result.Reload != nil && result.Reload.FailedPhase == "enqueue" {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
+}
+
+func isStructuredApplyError(result ConfigApplyResult) bool {
+	return result.Reload != nil || result.ApplyID != "" || result.Mode != "" ||
+		result.Message != "" || result.Version != "" || result.PersistedVersion != "" ||
+		result.DesiredVersion != "" || result.Conflict || result.RestoreError != "" ||
+		len(result.ValidationErrors) > 0
+}
+
+func configApplyResultStatus(result ConfigApplyResult) int {
+	if len(result.ValidationErrors) > 0 {
+		return http.StatusBadRequest
+	}
+	if result.Reload != nil && result.Reload.FailedPhase == "enqueue" {
+		return http.StatusServiceUnavailable
+	}
+	if result.Reload != nil && result.Reload.Outcome == server.ReloadSavedNotLive {
+		return http.StatusAccepted
+	}
+	if result.OK {
+		return http.StatusOK
+	}
+	return http.StatusConflict
+}
+
+func isTerminalApplyResult(result ConfigApplyResult) bool {
+	return result.Reload == nil || result.Reload.Outcome != server.ReloadSavedNotLive
+}
 
 // ConfigApplyResult is the structured response for a managed configuration
 // apply. It correlates the persisted candidate with its live reload outcome
