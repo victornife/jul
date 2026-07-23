@@ -601,13 +601,22 @@ func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
 	}
 
 	// Allow A's finalizer to finish; this clears inFlightState and restores
-	// the previous (seed) bytes.
+	// the previous (seed) bytes. Poll for the restore rather than sleeping a
+	// fixed interval so the test stays deterministic under parallel load
+	// (go test ./...) where the finalizer goroutine can be scheduled late.
 	close(finalizerBlock)
-	time.Sleep(100 * time.Millisecond)
-
-	onDiskAfterA, _ := os.ReadFile(path)
-	if string(onDiskAfterA) != string(seed) {
-		t.Errorf("finalizer from A should have restored seed, got %q", onDiskAfterA)
+	var onDiskAfterA []byte
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		onDiskAfterA, _ = os.ReadFile(path)
+		if string(onDiskAfterA) == string(seed) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("finalizer from A should have restored seed, got %q", onDiskAfterA)
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	// Apply C can now proceed. It uses the same SubmitReload callback; submit

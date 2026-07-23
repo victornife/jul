@@ -324,7 +324,18 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
-	cfg := state.Config
+	// C-01: authorize against a pristine baseline. Never mutate state.Config in
+	// place: LoadConfig may return a shared pointer, so mutating it and then
+	// reloading for authorization would alias current == candidate and skip the
+	// admin:manage guard. Keep the loaded config as the immutable baseline and
+	// apply ops to an independent deep clone.
+	baseline := state.Config
+	cfg, cloneErr := state.Config.Clone()
+	if cloneErr != nil {
+		s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot clone current config: "+cloneErr.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot prepare configuration candidate: " + cloneErr.Error()})
+		return
+	}
 
 	if req.BaseVersion != "" && req.BaseVersion != state.Version {
 		s.recordAudit(r, "config.patch", "config", "failure", "rejected: base version stale (concurrent change)")
@@ -354,8 +365,9 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	}
 	// Object-level guard: a structured patch may target [admin] fields (e.g.
 	// rate limits via future ops). Any change in the [admin] subtree requires
-	// admin:manage in addition to config:apply.
-	if !s.authorizeConfigCandidate(w, r, "config.patch", cfg) {
+	// admin:manage in addition to config:apply. Authorize the mutated candidate
+	// against the immutable baseline (no reload) to defeat aliasing (C-01).
+	if !s.authorizeConfigTransition(w, r, "config.patch", baseline, cfg) {
 		return
 	}
 	// Snapshot the prior config, then persist through the authoritative apply

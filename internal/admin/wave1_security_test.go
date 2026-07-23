@@ -35,7 +35,7 @@ func wave1Server(t *testing.T, current *config.Config) (*Server, string, string,
 		cfg:  config.AdminConfig{Token: "legacy-token-32-chars-padded--"},
 		hist: newHistory(t.TempDir(), 10),
 	}
-	s.liveCfg.Store(&config.AdminConfig{Token: "legacy-token-32-chars-padded--"})
+	s.installAuth(config.AdminConfig{Token: "legacy-token-32-chars-padded--"}, nil)
 	s.UpdatePolicy(pol)
 	s.deps.WriteConfigRaw = func([]byte) error { return nil }
 	s.deps.ReadConfigRaw = func() ([]byte, error) {

@@ -12,7 +12,7 @@ type ConfigApplyResult struct {
 	// ApplyID is the monotonic transaction ID, populated regardless of whether
 	// a reload was submitted. This allows callbacks to record outcomes even
 	// when Reload is nil (e.g., enqueue failure).
-	ApplyID string `json:"apply_id,omitempty"`
+	ApplyID        string                `json:"apply_id,omitempty"`
 	OK             bool                  `json:"ok"`
 	Mode           string                `json:"mode"`
 	Version        string                `json:"version,omitempty"`
@@ -70,7 +70,7 @@ type PendingRestartStatus struct {
 	Staged bool `json:"staged"`
 	// External is true for external disk/runtime divergence.
 	// Deprecated: use State.
-	External bool `json:"external,omitempty"`
+	External         bool     `json:"external,omitempty"`
 	StagedAt         string   `json:"staged_at,omitempty"`
 	StagedVersion    string   `json:"staged_version,omitempty"`
 	ServingVersion   string   `json:"serving_version,omitempty"`

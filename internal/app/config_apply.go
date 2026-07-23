@@ -39,7 +39,7 @@ type ApplyResult struct {
 	// ApplyID is the monotonic transaction ID, populated regardless of whether
 	// a reload was submitted. This allows callbacks to record outcomes even
 	// when Reload is nil (e.g., enqueue failure).
-	ApplyID string
+	ApplyID          string
 	OK               bool
 	Mode             ApplyMode
 	Version          string
@@ -605,7 +605,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		Result:    resultCh,
 	}
 
-if err := c.SubmitReload(req); err != nil {
+	if err := c.SubmitReload(req); err != nil {
 		// Enqueue failed: the candidate file is on disk but the runtime will
 		// not reload. Restore the exact previous bytes and suppress the
 		// restoration echo so the watcher does not loop.
@@ -620,20 +620,20 @@ if err := c.SubmitReload(req); err != nil {
 			msg = "Reload enqueue failed; the candidate may remain on disk: " + restoreErr.Error()
 		}
 		terminal := ApplyResult{
-			ApplyID: id,
-			OK:      false,
-			Mode:    mode,
-			Version: desiredVersion,
-			Message: msg,
+			ApplyID:   id,
+			OK:        false,
+			Mode:      mode,
+			Version:   desiredVersion,
+			Message:   msg,
 			Persisted: true,
 			Reload: &server.ReloadResult{
-				ID:        id,
-				Source:    server.ReloadSourceAdmin,
-				Outcome:   server.ReloadNotApplied,
-				Persisted: true,
-				Published: false,
+				ID:          id,
+				Source:      server.ReloadSourceAdmin,
+				Outcome:     server.ReloadNotApplied,
+				Persisted:   true,
+				Published:   false,
 				FailedPhase: "enqueue",
-				Error:     err.Error(),
+				Error:       err.Error(),
 			},
 		}
 		terminal = c.withRestorationOutcome(terminal, prevRaw, previouslyExisted, rawDigest)
@@ -730,8 +730,10 @@ if err := c.SubmitReload(req); err != nil {
 		return c.buildTerminalResult(mode, desiredVersion, rr, prevRaw, previouslyExisted, rawDigest), nil
 	case <-c.BaseCtx.Done():
 		// The process is shutting down; the finalizer will clear inFlightState
-		// once it observes BaseCtx cancellation.
+		// once it observes BaseCtx cancellation. ApplyID is populated so any
+		// terminal outcome remains sequence-correlatable (M-05).
 		return ApplyResult{
+			ApplyID:        id,
 			OK:             true,
 			Mode:           mode,
 			Version:        desiredVersion,
@@ -742,7 +744,10 @@ if err := c.SubmitReload(req); err != nil {
 		// Finalizer goroutine now owns the restoration obligation. The result
 		// returned here marks Persisted because the candidate is on disk, but
 		// the final restoration state will only be known after restoreDone.
+		// ApplyID is populated so the callback's monotonic sequence guard can
+		// correlate the async finalizer's later terminal result (M-05).
 		return ApplyResult{
+			ApplyID:        id,
 			OK:             true,
 			Mode:           mode,
 			Version:        desiredVersion,
@@ -869,6 +874,12 @@ func (c *ConfigApplyCoordinator) buildTerminalResult(mode ApplyMode, desiredVers
 // applyCandidate to ensure exactly-once semantics.
 func (c *ConfigApplyCoordinator) decorateResultNoRestore(mode ApplyMode, desiredVersion string, rr server.ReloadResult) ApplyResult {
 	res := ApplyResult{
+		// M-05: ApplyID must be populated on every managed terminal result so
+		// the OnManagedApplyComplete monotonic sequence guard records normal
+		// applies (live, degraded, not-applied/restored, restoration-failed)
+		// instead of dropping them as sequence-0. The server echoes the
+		// request ID back into ReloadResult.ID.
+		ApplyID:        rr.ID,
 		OK:             rr.Outcome == server.ReloadAppliedLive || rr.Outcome == server.ReloadAppliedDegraded,
 		Mode:           mode,
 		Version:        desiredVersion,

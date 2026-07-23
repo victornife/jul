@@ -741,6 +741,32 @@ func (s *Server) authorizeConfigCandidate(w http.ResponseWriter, r *http.Request
 	return true
 }
 
+// authorizeConfigTransition is the alias-safe form of authorizeConfigCandidate
+// (C-01). It authorizes a mutation from an explicit immutable baseline to a
+// candidate WITHOUT reloading the current configuration. Handlers that mutate
+// a candidate derived from LoadConfig MUST use this form and pass a pristine,
+// independent baseline: if LoadConfig returns a shared/cached pointer and the
+// candidate is that same object mutated in place, a reload-based comparison
+// would see current == candidate and silently skip the admin:manage guard.
+// Callers must return immediately on false.
+func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Request, action string, current, next *config.Config) bool {
+	id, ok := rbacIdentityFromRequest(r)
+	if ok && !id.Legacy && !id.Has(rbac.ConfigApply) {
+		s.recordAudit(r, action, "config", "failure", "rejected: lacks config:apply")
+		writeForbidden(w, rbac.ConfigApply, id)
+		return false
+	}
+	if err := s.requireAdminManageAgainst(r, action, current, next); err != nil {
+		if authErr, ok := err.(*AuthorizationError); ok {
+			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})
+			return false
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
 // requireAdminManageForCandidate enforces only the admin-subtree guard. It is
 // used by write paths whose route-level permission is not config:apply (e.g.
 // history:rollback) but whose candidate may still affect admin settings.
@@ -757,6 +783,33 @@ func (s *Server) requireAdminManageForCandidate(r *http.Request, action string, 
 		return &AuthorizationError{Status: http.StatusServiceUnavailable, Message: "authorization check failed: config unavailable", Reason: "config_unavailable", Required: rbac.AdminManage}
 	}
 	if adminConfigEqual(cur.Admin, next.Admin) {
+		return nil
+	}
+	id, ok := rbacIdentityFromRequest(r)
+	if !ok {
+		s.recordAudit(r, action, "config", "failure", "rejected: admin change without identity")
+		return &AuthorizationError{Status: http.StatusForbidden, Message: "admin change rejected", Reason: "admin_manage_required", Required: rbac.AdminManage}
+	}
+	if !id.Has(rbac.AdminManage) {
+		s.recordAudit(r, action, "config", "failure", "rejected: admin change lacks admin:manage")
+		return &AuthorizationError{Status: http.StatusForbidden, Message: "admin change rejected", Reason: "admin_manage_required", Required: rbac.AdminManage}
+	}
+	return nil
+}
+
+// requireAdminManageAgainst enforces the admin-subtree guard using an explicit
+// immutable baseline instead of reloading the current configuration (C-01).
+// current must be a pristine snapshot that the caller has NOT mutated, and next
+// must be an independent candidate (e.g. a clone of current with the requested
+// edits applied). This avoids the aliasing bypass where LoadConfig returns a
+// shared pointer that a handler mutates in place: comparing current.Admin to
+// next.Admin then always reports "equal" and the admin:manage guard is skipped.
+func (s *Server) requireAdminManageAgainst(r *http.Request, action string, current, next *config.Config) error {
+	if current == nil || next == nil {
+		s.recordAudit(r, action, "config", "failure", "rejected: cannot check admin change (nil baseline or candidate)")
+		return &AuthorizationError{Status: http.StatusServiceUnavailable, Message: "authorization check failed: system unavailable", Reason: "system_unavailable", Required: rbac.AdminManage}
+	}
+	if adminConfigEqual(current.Admin, next.Admin) {
 		return nil
 	}
 	id, ok := rbacIdentityFromRequest(r)

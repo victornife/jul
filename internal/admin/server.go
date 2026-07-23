@@ -241,29 +241,25 @@ type Server struct {
 	timeline *eventHistory
 	audit    *auditLog
 	health   *consoleHealth
-quit     chan struct{}
- 	httpd    *http.Server
- 	// policy holds the active RBAC policy. It is atomically swapped on each
- 	// successful config apply when RBAC is enabled (P3-01). Nil until RBAC is
- 	// enabled; legacy single-token auth is used when the pointer is nil or when
- 	// the stored policy reports !Enabled().
- 	policy atomic.Pointer[rbacPolicy]
- 	// liveCfg holds the most recently applied admin config. It is updated
- 	// after every successful hot reload so legacy token changes take effect
- 	// without requiring a process restart. The listener address remains
- 	// startup-bound and is read from cfg.Listen.
- 	liveCfg atomic.Pointer[config.AdminConfig]
- 	// H-01: rbacEnabled tracks whether RBAC was enabled at the time of the last
- 	// successful policy build. When the config says RBAC is enabled but the
- 	// policy pointer is nil (build failure), the middleware should fail-closed
- 	// rather than falling through to legacy/anonymous auth.
- 	rbacEnabled atomic.Bool
- 	// applyMu serializes config writes (raw apply, structured patch apply, and
- 	// history rollback) so optimistic-concurrency checks and the write they guard
- 	// are atomic, closing the read-modify-write race between concurrent edits
- 	// (P2-12).
- 	applyMu sync.Mutex
- }
+	quit     chan struct{}
+	httpd    *http.Server
+	// auth holds the immutable, atomically-installed authentication snapshot
+	// (H-01). It pairs the effective admin config, the built RBAC policy, and
+	// the derived authoritative mode so middleware observes a single,
+	// internally-consistent view via one atomic pointer load. Replaces the
+	// previous three independent stores (policy, liveCfg, rbacEnabled) that
+	// could interleave and expose a transient anonymous/legacy window during an
+	// RBAC transition.
+	authState atomic.Pointer[authSnapshot]
+	// authGen is a monotonic generation counter stamped into each installed
+	// snapshot so transitions can be correlated in logs and tests.
+	authGen atomic.Uint64
+	// applyMu serializes config writes (raw apply, structured patch apply, and
+	// history rollback) so optimistic-concurrency checks and the write they guard
+	// are atomic, closing the read-modify-write race between concurrent edits
+	// (P2-12).
+	applyMu sync.Mutex
+}
 
 // RecordManagedApplyOutcome records the terminal async outcome of a managed
 // apply in the audit log (H-05). The actor is the original request identity
@@ -331,7 +327,7 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		Handler:           s.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	s.liveCfg.Store(&cfg)
+	s.installAuth(cfg, nil)
 	return s
 }
 
@@ -754,17 +750,31 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := applySettings(cfg, in); err != nil {
+	// C-01: never mutate the loaded baseline in place. LoadConfig may return a
+	// shared/cached pointer; if we mutated it and then reloaded for
+	// authorization, "current" and "candidate" would alias the same object and
+	// compare equal, silently skipping the admin:manage guard. Build an
+	// independent candidate from a deep clone, mutate the clone, and authorize
+	// the clone against the pristine baseline WITHOUT reloading.
+	baseline := cfg
+	candidate, cerr := cfg.Clone()
+	if cerr != nil {
+		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot clone current config: "+cerr.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot prepare configuration candidate: " + cerr.Error()})
+		return
+	}
+	if err := applySettings(candidate, in); err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: invalid settings")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	// Object-level guard: the settings form can mutate [admin].listen, so any
-	// change in the [admin] subtree requires admin:manage.
-	if !s.authorizeConfigCandidate(w, r, "config.settings", cfg) {
+	// change in the [admin] subtree requires admin:manage. Authorize the
+	// candidate against the immutable baseline (no reload) to defeat aliasing.
+	if !s.authorizeConfigTransition(w, r, "config.settings", baseline, candidate) {
 		return
 	}
-	if err := s.deps.SaveConfig(cfg); err != nil {
+	if err := s.deps.SaveConfig(candidate); err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot save config")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -773,6 +783,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	s.recordAudit(r, "config.settings", "config", "success", "settings applied and saved; live runtime reloading")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": state.Version})
 }
+
 // CurrentWriteState holds the current configuration state needed for mutation
 // endpoint prerequisites. It is obtained atomically so no state can change
 // during the check.

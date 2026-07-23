@@ -247,7 +247,7 @@ func TestRBACDisableClearsPolicy(t *testing.T) {
 		t.Fatalf("build policy: %v", err)
 	}
 	s := &Server{cfg: config.AdminConfig{Token: legacyTok}}
-	s.liveCfg.Store(&config.AdminConfig{Token: legacyTok})
+	s.installAuth(config.AdminConfig{Token: legacyTok}, nil)
 	s.UpdatePolicy(pol)
 
 	// Sanity: RBAC token works while enabled.
@@ -286,7 +286,7 @@ func TestRBACDisableClearsPolicy(t *testing.T) {
 // changes the legacy token checked by auth middleware without restarting.
 func TestLiveAdminConfigTokenUpdate(t *testing.T) {
 	s := &Server{cfg: config.AdminConfig{Token: "old-token-32-chars-padded-------"}}
-	s.liveCfg.Store(&config.AdminConfig{Token: "old-token-32-chars-padded-------"})
+	s.installAuth(config.AdminConfig{Token: "old-token-32-chars-padded-------"}, nil)
 
 	h := s.requirePermission(rbac.ConfigApply, okHandler())
 

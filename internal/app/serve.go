@@ -605,19 +605,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// the runtime overview.
 	if coordinator != nil && adminSrv != nil {
 		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
-			// C3: ignore callbacks from older applies (e.g. a timed-out first
-			// apply whose finalizer fires after a second apply has already
-			// completed). Use ApplyID for the monotonic sequence guard instead
-			// of res.Reload.ID which may be nil on enqueue failure.
-			seq := parseReloadSeq(res.ApplyID)
-			for {
-				prev := lastManagedApplySeq.Load()
-				if seq <= prev {
-					return // stale result; a newer outcome is already stored
-				}
-				if lastManagedApplySeq.CompareAndSwap(prev, seq) {
-					break
-				}
+			// C3/M-05: ignore callbacks from older applies (e.g. a timed-out
+			// first apply whose finalizer fires after a second apply has
+			// already completed). managedApplySeqGuard prefers ApplyID and
+			// falls back to Reload.ID so a result missing ApplyID is still
+			// correlated rather than silently dropped as sequence 0.
+			if !managedApplySeqGuard(&lastManagedApplySeq, res) {
+				return // stale/out-of-order result; a newer outcome is stored
+			}
+			applyID := res.ApplyID
+			if applyID == "" && res.Reload != nil {
+				applyID = res.Reload.ID
 			}
 			outcome := ""
 			if res.Reload != nil {
@@ -635,7 +633,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			metrics.ObserveManagedApplyFinalized(outcome, restoredLabel)
 
 			o := &admin.ManagedApplyOutcome{
-				ID:                  res.ApplyID,
+				ID:                  applyID,
 				Mode:                res.Mode,
 				OK:                  res.OK,
 				Outcome:             outcome,
@@ -682,26 +680,30 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// config, so secrets are resolved. This runs after Publish so the new
 		// policy never races with handler swap.
 		if adminSrv != nil {
-			// H-01: Build the policy BEFORE updating the live config to ensure they
-			// are updated atomically. On failure, the previous policy remains paired
-			// with the previous config (fail-closed via rbacEnabled flag).
+			// H-01: Install configuration, mode, and policy as ONE atomic
+			// snapshot swap so a concurrent request can never observe a
+			// transient anonymous/legacy window during an RBAC transition.
 			if c.Admin.RBAC.Enabled {
 				p, err := buildRBACPolicy(c.Admin)
 				if err != nil {
+					// Desired mode is RBAC but the policy failed to build.
+					// Install the NEW config with a nil policy: deriveAuthSnapshot
+					// maps (RBAC.Enabled && policy==nil) to the explicit Blocked
+					// mode, which fails closed with 503. This never retains the
+					// previous legacy/open access after a failed enablement.
 					adminErr = fmt.Errorf("rbac policy update failed: %w", err)
-					log.Warn("RBAC policy rebuild failed on reload; retaining previous policy", "error", err)
-					// Keep previous state intact; fail-closed is enforced by the
-					// rbacEnabled check in requirePermission/authWithRBAC.
+					log.Warn("RBAC policy rebuild failed on reload; installing fail-closed blocked auth state", "error", err)
+					adminSrv.UpdateAuth(c.Admin, nil)
 				} else {
-					adminSrv.UpdatePolicy(p)
-					adminSrv.UpdateLiveAdminConfig(c.Admin)
+					// Single atomic swap: config + policy + derived RBAC mode.
+					adminSrv.UpdateAuth(c.Admin, p)
 				}
 			} else {
-				// RBAC explicitly disabled: clear the active policy so the
-				// server falls back to legacy token auth (or anonymous if no
-				// token is configured).
-				adminSrv.UpdatePolicy(nil)
-				adminSrv.UpdateLiveAdminConfig(c.Admin)
+				// RBAC explicitly disabled: single atomic swap installs the new
+				// config with no policy; the derived mode is legacy (token set)
+				// or open (no token). There is no intermediate state where the
+				// old config is paired with a cleared policy.
+				adminSrv.UpdateAuth(c.Admin, nil)
 			}
 		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
@@ -729,7 +731,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 // API response shape. It is a pure projection: no new policy is added.
 func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 	return admin.ConfigApplyResult{
-		ApplyID:             r.ApplyID,
+		ApplyID:               r.ApplyID,
 		OK:                    r.OK,
 		Mode:                  string(r.Mode),
 		Version:               r.Version,
@@ -839,6 +841,30 @@ func parseReloadSeq(id string) uint64 {
 		return 0
 	}
 	return n
+}
+
+// managedApplySeqGuard implements the C3/M-05 monotonic high-water sequence
+// guard for managed-apply terminal callbacks. It returns true when res should
+// be recorded (its sequence is strictly greater than the current high-water
+// mark) and atomically advances the mark; it returns false for stale or
+// out-of-order results. It prefers res.ApplyID and falls back to res.Reload.ID
+// so a terminal result that somehow lacks ApplyID is still sequence-correlated
+// rather than silently dropped as sequence 0.
+func managedApplySeqGuard(hw *atomic.Uint64, res admin.ConfigApplyResult) bool {
+	applyID := res.ApplyID
+	if applyID == "" && res.Reload != nil {
+		applyID = res.Reload.ID
+	}
+	seq := parseReloadSeq(applyID)
+	for {
+		prev := hw.Load()
+		if seq <= prev {
+			return false
+		}
+		if hw.CompareAndSwap(prev, seq) {
+			return true
+		}
+	}
 }
 
 // pendingRestartCheck reports which startup-bound subsystems have changed on

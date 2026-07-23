@@ -85,9 +85,9 @@ type PlannedRestartMarker struct {
 	// PreviousStagedAt is the timestamp of the previous staged configuration.
 	// It is restored when the update write fails so the API reports the
 	// correct time instead of the failed-attempt timestamp.
-	PreviousStagedAt      time.Time `json:"previous_staged_at,omitempty"`
-	PendingSubsystems     []string `json:"pending_subsystems"`
-	StagedAt              time.Time `json:"staged_at"`
+	PreviousStagedAt  time.Time `json:"previous_staged_at,omitempty"`
+	PendingSubsystems []string  `json:"pending_subsystems"`
+	StagedAt          time.Time `json:"staged_at"`
 }
 
 // PlannedRestartStateEnum is the authoritative single enum representing the
@@ -408,9 +408,11 @@ func (s *PlannedRestartStore) Refresh() error {
 				// M-01: Restore the previous staged version and subsystems.
 				marker.StagedVersion = marker.PreviousStagedVersion
 				marker.PendingSubsystems = marker.PreviousSubsystems
+				marker.StagedAt = marker.PreviousStagedAt
 				marker.PreviousStagedRawSHA256 = ""
 				marker.PreviousStagedVersion = ""
 				marker.PreviousSubsystems = nil
+				marker.PreviousStagedAt = time.Time{}
 				if werr := s.writeMarkerLocked(*marker); werr != nil {
 					s.inconsistent = true
 					return fmt.Errorf("planned-restart refresh: restore previous staged after update crash: %w", werr)
@@ -484,6 +486,14 @@ func (s *PlannedRestartStore) PromoteToStaged(candidateRaw []byte) error {
 		return ErrMarkerWrongState
 	}
 	marker.State = plannedRestartStateStaged
+	// M-01: A successful promote finalizes this staged candidate, so clear all
+	// Previous* recovery metadata. Leaving it set would let a later unrelated
+	// staged-update crash recovery resurrect a superseded candidate's digest,
+	// version, subsystem list, or timestamp.
+	marker.PreviousStagedRawSHA256 = ""
+	marker.PreviousStagedVersion = ""
+	marker.PreviousSubsystems = nil
+	marker.PreviousStagedAt = time.Time{}
 	if err := s.writeMarkerLocked(*marker); err != nil {
 		return fmt.Errorf("planned-restart stage: promote to staged: %w", err)
 	}
@@ -684,9 +694,11 @@ func (s *PlannedRestartStore) Reconcile() error {
 				// M-01: Restore the previous staged version and subsystems.
 				marker.StagedVersion = marker.PreviousStagedVersion
 				marker.PendingSubsystems = marker.PreviousSubsystems
+				marker.StagedAt = marker.PreviousStagedAt
 				marker.PreviousStagedRawSHA256 = ""
 				marker.PreviousStagedVersion = ""
 				marker.PreviousSubsystems = nil
+				marker.PreviousStagedAt = time.Time{}
 				if werr := s.writeMarkerLocked(*marker); werr != nil {
 					s.inconsistent = true
 					return fmt.Errorf("reconcile: restore previous staged after update crash: %w", werr)
