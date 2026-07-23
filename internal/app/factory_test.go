@@ -392,4 +392,3 @@ func TestPrepareCapturesSnapshotsAfterCommit(t *testing.T) {
 		t.Errorf("second snapshot has %d backends, want 2", len(snapshots2[key].Backends()))
 	}
 }
-

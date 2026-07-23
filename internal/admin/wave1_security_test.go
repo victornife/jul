@@ -241,12 +241,25 @@ token = "rotated-admin-token-32-chars---"
 listen = ":8081"
 `)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/raw", bytes.NewReader(candidate))
+	// Rotating the admin token is a reachability-affecting change, so the
+	// self-lockout guard (finding 9) requires confirm_admin=true even for an
+	// admin:manage holder. Without confirmation the write must be held at 409;
+	// with confirmation it proceeds. This asserts both halves so the guard
+	// cannot silently regress to always-allow.
+	reqNoConfirm := httptest.NewRequest(http.MethodPost, "/api/config/raw", bytes.NewReader(candidate))
+	reqNoConfirm.Header.Set("Authorization", "Bearer "+adminTok)
+	rrNoConfirm := httptest.NewRecorder()
+	s.routes().ServeHTTP(rrNoConfirm, reqNoConfirm)
+	if rrNoConfirm.Code != http.StatusConflict {
+		t.Errorf("admin changing admin token without confirm got %d, want 409: %s", rrNoConfirm.Code, rrNoConfirm.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/raw?confirm_admin=true", bytes.NewReader(candidate))
 	req.Header.Set("Authorization", "Bearer "+adminTok)
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Errorf("admin changing admin token got %d, want 200: %s", rr.Code, rr.Body.String())
+		t.Errorf("admin changing admin token with confirm got %d, want 200: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -339,7 +352,20 @@ listen = ":8081"
 
 	body := []byte(`{"id":"` + id + `"}`)
 	for _, path := range []string{"/api/history/rollback", "/api/config/rollback"} {
-		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		// Rolling back to a snapshot that rotates the admin token changes admin
+		// reachability, so the self-lockout guard (finding 9) requires
+		// confirm_admin=true even for an admin:manage holder. Assert the guard
+		// holds without confirmation, then that the rollback proceeds with it.
+		reqNoConfirm := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		reqNoConfirm.Header.Set("Authorization", "Bearer "+adminTok)
+		reqNoConfirm.Header.Set("Content-Type", "application/json")
+		rrNoConfirm := httptest.NewRecorder()
+		s.routes().ServeHTTP(rrNoConfirm, reqNoConfirm)
+		if rrNoConfirm.Code != http.StatusConflict {
+			t.Errorf("admin rollback %s without confirm got %d, want 409: %s", path, rrNoConfirm.Code, rrNoConfirm.Body.String())
+		}
+
+		req := httptest.NewRequest(http.MethodPost, path+"?confirm_admin=true", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+adminTok)
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()

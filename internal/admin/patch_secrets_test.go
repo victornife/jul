@@ -292,4 +292,3 @@ func TestLocationSetActionGRPCProxy(t *testing.T) {
 		t.Error("plain proxy must not set GRPC=true")
 	}
 }
-

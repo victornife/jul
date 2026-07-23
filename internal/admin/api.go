@@ -434,12 +434,16 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	defer s.applyMu.Unlock()
 
 	// M-06: Fail-closed prerequisite check using shared currentWriteState helper.
-	// This handles both optimistic concurrency and admin lockout checks atomically,
-	// avoiding multiple LoadConfig calls and ensuring consistent error handling.
+	// A failure to obtain the current configuration MUST block every apply,
+	// regardless of whether base_version was supplied: otherwise the optimistic-
+	// concurrency and self-lockout checks below would be silently skipped on a
+	// transient load error, letting a reachability-changing edit through without
+	// confirmation. This handles both checks atomically against one immutable
+	// baseline, avoiding multiple LoadConfig calls and inconsistent handling.
 	curState, err := s.currentWriteState(false)
-	if err != nil && r.URL.Query().Get("base_version") != "" {
-		s.recordAudit(r, "config.apply", "config", "failure", "rejected: cannot check base version: "+err.Error())
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "optimistic concurrency check failed: " + err.Error()})
+	if err != nil {
+		s.recordAudit(r, "config.apply", "config", "failure", "rejected: cannot load current configuration: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
 
@@ -449,7 +453,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	// base_version skips the check (an explicit force-apply). The version basis is
 	// the canonical marshaled form, identical to the structured-patch path, so a
 	// base_version from either editor is interchangeable.
-	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" && err == nil {
+	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
 		if baseVersion != curState.Version {
 			s.recordAudit(r, "config.apply", "config", "failure", "rejected: base version stale (concurrent change)")
 			writeJSON(w, http.StatusConflict, conflictResponse{
@@ -462,35 +466,50 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Self-lockout guard: refuse an apply that would change how the operator
-	// reaches the admin console (disabling admin, moving its listen address,
-	// rotating its token, or disabling the web console) unless the client
-	// explicitly confirms with ?confirm_admin=true. This stops an operator from
-	// silently locking themselves out with a single raw edit — the one change
-	// that no rollback can undo from the console, because the console would be
-	// gone. M-06: Fail-closed when LoadConfig is unavailable or fails.
-	if r.URL.Query().Get("confirm_admin") != "true" && err == nil {
-		if next, perr := config.Parse(body); perr != nil || next == nil {
-			// Parse error will be handled by normal validation path; skip lockout check.
-		} else {
-			if changes := adminLockoutChanges(curState.Config.Admin, next.Admin); len(changes) > 0 {
-				s.recordAudit(r, "config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation")
-				s.emit("config", "apply_failed", "warn", "Configuration apply would change admin access and was held for confirmation.")
-				writeJSON(w, http.StatusConflict, adminGuardResponse{
-					OK:          false,
-					AdminChange: true,
-					Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
-					Changes:     changes,
-				})
-				return
-			}
-		}
-	}
+	// Parse the candidate exactly once and run every prerequisite check against
+	// that single immutable value plus the immutable baseline in curState
+	// (M-06). A parse error is left to the normal validation path in applyRaw,
+	// which reports it without persisting anything.
+	candidate, parseErr := config.Parse(body)
 
 	// Object-level admin:manage guard (P3-02 / Wave 1): any change in the
 	// [admin] subtree requires admin:manage in addition to config:apply.
-	if next, perr := config.Parse(body); perr == nil && next != nil {
-		if !s.authorizeConfigCandidate(w, r, "config.apply", next) {
+	// Authorize the single parsed candidate against the immutable baseline so
+	// the decision cannot be aliased by a shared LoadConfig pointer (C-01).
+	//
+	// Authorization MUST precede the reachability/self-lockout confirmation
+	// below: an unauthorized caller must be rejected with 403 regardless of
+	// whether the change happens to touch admin reachability. Running the
+	// confirmation first would leak a 409 "needs confirmation" to a caller who
+	// is not even permitted to make the change, and would let a role-escalation
+	// attempt be classified as a self-lockout instead of an authorization
+	// failure (finding: RBAC same-count role escalation must be 403, not 409).
+	if parseErr == nil && candidate != nil {
+		if !s.authorizeConfigTransition(w, r, "config.apply", curState.Config, candidate) {
+			return
+		}
+	}
+
+	// Self-lockout guard: refuse an apply that would change how the operator
+	// reaches the admin console (disabling admin, moving its listen address,
+	// rotating its token, disabling the web console, or invalidating the current
+	// operator's RBAC credential) unless the client explicitly confirms with
+	// ?confirm_admin=true. This stops an operator from silently locking
+	// themselves out with a single raw edit — the one change that no rollback
+	// can undo from the console, because the console would be gone. The current
+	// configuration was obtained fail-closed above, so a missing baseline can
+	// never silently skip this check.
+	if r.URL.Query().Get("confirm_admin") != "true" && parseErr == nil && candidate != nil {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(curState.Config, candidate, id); len(changes) > 0 {
+			s.recordAudit(r, "config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			s.emit("config", "apply_failed", "warn", "Configuration apply would change admin access and was held for confirmation.")
+			writeJSON(w, http.StatusConflict, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     changes,
+			})
 			return
 		}
 	}

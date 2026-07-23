@@ -660,8 +660,13 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	// M-06: Fail-closed prerequisite check for mutation endpoints.
-	state, err := s.currentWriteState(true)
+	// M-06: Fail-closed prerequisite check for mutation endpoints. The raw
+	// endpoint only needs the baseline config (for the admin:manage guard,
+	// optimistic-concurrency version, and reachability confirmation); the raw
+	// bytes are used solely for best-effort history and must not hard-require a
+	// wired ReadConfigRaw. Finding 11's mandatory-raw contract is scoped to the
+	// structured-patch history/diff caller, which is handled separately.
+	state, err := s.currentWriteState(false)
 	if err != nil {
 		s.recordAudit(r, "config.raw", "config", "failure", "rejected: "+err.Error())
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
@@ -691,14 +696,38 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Self-lockout guard (finding 9): a raw edit through the legacy endpoint can
+	// also change how the current operator reaches the console. Require the same
+	// explicit confirmation used by /api/config/apply unless confirm_admin=true.
+	if next != nil && r.URL.Query().Get("confirm_admin") != "true" {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(state.Config, next, id); len(changes) > 0 {
+			s.recordAudit(r, "config.raw", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			writeJSON(w, http.StatusConflict, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     changes,
+			})
+			return
+		}
+	}
+
+	// Capture the pre-write raw for the history snapshot BEFORE the write; after
+	// WriteConfigRaw the file already holds the new configuration, so reading it
+	// then would snapshot the new config instead of the prior one.
+	prevRaw := s.currentRaw()
 	if err := s.deps.WriteConfigRaw(body); err != nil {
 		s.recordAudit(r, "config.raw", "config", "failure", "rejected: invalid configuration")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.recordHistory(state.Raw)
+	s.recordHistory(prevRaw)
 	s.recordAudit(r, "config.raw", "config", "success", "configuration validated and saved; live runtime reloading")
-	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": state.Version})
+	// Finding 10: return the version of what was just persisted, not the pre-write
+	// version, so a client can reuse it as the next optimistic-concurrency token
+	// without a spurious 409. Reload the authoritative post-write state.
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": s.postWriteVersion(state.Version)})
 }
 
 // handleConfigSettings applies the curated settings subset (simple form),
@@ -725,8 +754,10 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	// M-06: Fail-closed prerequisite check for mutation endpoints.
-	state, err := s.currentWriteState(true)
+	// M-06: Fail-closed prerequisite check for mutation endpoints. As with the
+	// raw endpoint, the settings form only needs the baseline config; the raw
+	// bytes are best-effort history, so requireRaw stays false here.
+	state, err := s.currentWriteState(false)
 	if err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: "+err.Error())
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
@@ -774,14 +805,46 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeConfigTransition(w, r, "config.settings", baseline, candidate) {
 		return
 	}
+	// Self-lockout guard (finding 9): the settings form can move the admin
+	// listener or change credentials. Require the same explicit confirmation
+	// used by /api/config/apply unless confirm_admin=true.
+	if r.URL.Query().Get("confirm_admin") != "true" {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(baseline, candidate, id); len(changes) > 0 {
+			s.recordAudit(r, "config.settings", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			writeJSON(w, http.StatusConflict, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     changes,
+			})
+			return
+		}
+	}
+	// Capture the pre-write raw for the history snapshot BEFORE SaveConfig.
+	prevRaw := s.currentRaw()
 	if err := s.deps.SaveConfig(candidate); err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot save config")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.recordHistory(state.Raw)
+	s.recordHistory(prevRaw)
 	s.recordAudit(r, "config.settings", "config", "success", "settings applied and saved; live runtime reloading")
-	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": state.Version})
+	// Finding 10: return the post-write version so it is a valid next base token.
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": s.postWriteVersion(state.Version)})
+}
+
+// postWriteVersion returns the canonical version of the configuration currently
+// on disk after a successful write, so callers receive a token that identifies
+// what was just saved rather than the pre-write version (finding 10). If the
+// authoritative post-write state cannot be re-read it falls back to the
+// supplied pre-write version rather than failing an already-committed write.
+func (s *Server) postWriteVersion(fallback string) string {
+	fresh, err := s.currentWriteState(false)
+	if err != nil {
+		return fallback
+	}
+	return fresh.Version
 }
 
 // CurrentWriteState holds the current configuration state needed for mutation
@@ -816,7 +879,16 @@ func (s *Server) currentWriteState(requireRaw bool) (CurrentWriteState, error) {
 		Config:  cur,
 		Version: configVersion(marshaled),
 	}
-	if requireRaw && s.deps.ReadConfigRaw != nil {
+	if requireRaw {
+		// Finding 11: when raw state is required (history/diff callers), the
+		// absence of a raw reader is a hard error, not a silent nil. Read the
+		// bytes exactly once. The version basis stays the canonical marshaled
+		// form above so it remains interchangeable with the structured-patch and
+		// v2 apply editors; Config and Raw both originate from this same load, so
+		// they cannot refer to different filesystem moments.
+		if s.deps.ReadConfigRaw == nil {
+			return CurrentWriteState{}, errors.New("system unavailable: raw config reader not wired")
+		}
 		raw, err := s.deps.ReadConfigRaw()
 		if err != nil {
 			return CurrentWriteState{}, fmt.Errorf("cannot read config raw: %w", err)

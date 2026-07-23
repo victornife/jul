@@ -101,6 +101,19 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 	}
 	prev := state.Raw
 
+	// Self-lockout guard (finding 9): rolling back to an older snapshot can move
+	// the admin listener, change credentials, flip the RBAC/legacy mode, or
+	// disable the console — the same reachability-affecting changes the forward
+	// apply endpoints confirm. admin:manage authorizes the *permission* but does
+	// not confirm the operator accepts losing their own session, so require the
+	// explicit confirmation unless confirm_admin=true.
+	if r.URL.Query().Get("confirm_admin") != "true" {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(state.Config, next, id); len(changes) > 0 {
+			return http.StatusConflict, &adminReachabilityError{changes: changes}
+		}
+	}
+
 	if err := s.deps.WriteConfigRaw(raw); err != nil {
 		// Map coordinator rejections to the correct HTTP status so the handler
 		// does not report a false success.
@@ -137,6 +150,15 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	code, err := s.rollbackToSnapshot(req.ID, w, r)
 	if err != nil {
+		if re, ok := err.(*adminReachabilityError); ok {
+			writeJSON(w, code, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This rollback affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     re.changes,
+			})
+			return
+		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
@@ -229,6 +251,16 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if authErr, ok := err.(*AuthorizationError); ok {
 			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})
+			return
+		}
+		if re, ok := err.(*adminReachabilityError); ok {
+			s.recordAudit(r, "config.rollback", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			writeJSON(w, code, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This rollback affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     re.changes,
+			})
 			return
 		}
 		s.recordAudit(r, "config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID)

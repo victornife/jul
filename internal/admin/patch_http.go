@@ -370,6 +370,24 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	if !s.authorizeConfigTransition(w, r, "config.patch", baseline, cfg) {
 		return
 	}
+	// Self-lockout guard (finding 9): a structured patch can move the admin
+	// listener, rotate the legacy token, disable the console, or invalidate the
+	// current operator's RBAC principal. Require the same explicit confirmation
+	// used by the raw apply/settings endpoints unless confirm_admin=true.
+	if r.URL.Query().Get("confirm_admin") != "true" {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(baseline, cfg, id); len(changes) > 0 {
+			s.recordAudit(r, "config.patch", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			s.emit("config", "apply_failed", "warn", "Structured patch would change admin access and was held for confirmation.")
+			writeJSON(w, http.StatusConflict, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     changes,
+			})
+			return
+		}
+	}
 	// Snapshot the prior config, then persist through the authoritative apply
 	// preflight. A rejection here means nothing was written, preserving the
 	// all-or-nothing guarantee.

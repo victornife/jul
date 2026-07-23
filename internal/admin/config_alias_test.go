@@ -123,12 +123,40 @@ func TestSettingsAliasAdminManageAllows(t *testing.T) {
 		t.Fatalf("marshal settings: %v", err)
 	}
 
+	// The admin.listen move is a reachability-affecting change, so the
+	// self-lockout guard (finding 9) requires explicit confirmation even for an
+	// admin:manage holder. Confirm it so this test isolates the aliasing
+	// authorization concern rather than the lockout concern.
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/config/settings", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/config/settings?confirm_admin=true", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+adminTok)
 	s.routes().ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestSettingsReachabilityNeedsConfirmation proves the self-lockout guard
+// (finding 9) fires on the settings endpoint: an admin:manage holder moving the
+// admin listener without confirm_admin=true is rejected with 409 and the change
+// is not saved, while the same request with confirmation succeeds.
+func TestSettingsReachabilityNeedsConfirmation(t *testing.T) {
+	s, shared, _, adminTok := sharedPointerRBACServer(t)
+
+	in := extractSettings(shared)
+	in.AdminListen = "127.0.0.1:19999"
+	body, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/settings", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	s.routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("without confirm: status = %d, want 409; body: %s", rr.Code, rr.Body.String())
 	}
 }
