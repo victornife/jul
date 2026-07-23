@@ -155,6 +155,38 @@ describe("deriveApplyOutcome", () => {
     });
     expect(o.kind).toBe("reload-timed-out");
   });
+
+  // Finding 5: saved_not_live must never be rendered as "serving".
+  it("saved-not-live: accepted, backend outcome saved_not_live, final outcome unknown", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: true,
+      runtimeObserved: false,
+      savedNotLive: true,
+    });
+    expect(o.kind).toBe("saved-not-live");
+    expect(o.severity).toBe("warning");
+    expect(o.blocking).toBe(false);
+    // The copy must NOT claim the config is serving, and must point the operator
+    // at the runtime overview for the terminal outcome.
+    expect(o.message.toLowerCase()).not.toContain("is now serving");
+    expect(o.message.toLowerCase()).not.toContain("and is now live");
+    expect(o.message).toMatch(/final outcome|runtime overview/i);
+  });
+
+  it("saved-not-live outranks reloadTimedOut so timed-out copy never claims serving", () => {
+    // The backend marks a saved_not_live response as timed_out; without the
+    // precedence guard the operator would see the "is now serving" timeout copy.
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: true,
+      runtimeObserved: false,
+      savedNotLive: true,
+      reloadTimedOut: true,
+    });
+    expect(o.kind).toBe("saved-not-live");
+    expect(o.message.toLowerCase()).not.toContain("is now serving");
+  });
 });
 
 describe("ApplyOutcomeBanner", () => {

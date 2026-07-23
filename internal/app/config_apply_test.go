@@ -108,6 +108,123 @@ func TestCoordinatorApplyRawSuccess(t *testing.T) {
 	}
 }
 
+// TestCoordinatorApplyRawRejectsExternalWriteInCASWindow verifies finding 12:
+// the coordinator-level optimistic-concurrency CAS. An external writer that
+// does not participate in applyMu changes the file on disk AFTER the apply read
+// its base (prevRaw) but BEFORE the coordinator's guarded write. The apply must
+// reject with a conflict and must NOT clobber the external bytes.
+//
+// The external write is injected through LiveSnapshot, which the coordinator
+// invokes inside applyCandidate before it takes c.mu — i.e. exactly inside the
+// time-of-check/time-of-use window the CAS closes.
+func TestCoordinatorApplyRawRejectsExternalWriteInCASWindow(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	// The bytes an external editor lands during the apply window.
+	externalRaw := validConfigRaw(t, ":9999")
+
+	var injected atomic.Bool
+	var submitted atomic.Bool
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(server.ReloadRequest) error {
+			submitted.Store(true)
+			return nil
+		},
+		LiveSnapshot: func() server.LiveSnapshot {
+			// Simulate an external writer landing a change exactly once, in the
+			// window between the base read and the guarded write.
+			if injected.CompareAndSwap(false, true) {
+				if err := os.WriteFile(path, externalRaw, 0o600); err != nil {
+					t.Errorf("inject external write: %v", err)
+				}
+			}
+			return server.LiveSnapshot{}
+		},
+		PlannedRestart: &PlannedRestartStore{},
+	}
+
+	newRaw := validConfigRaw(t, ":8081")
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
+	if err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+	if res.OK {
+		t.Fatalf("ok = true, want false (CAS must reject an apply over an external write)")
+	}
+	if !strings.Contains(res.Message, "changed on disk") {
+		t.Errorf("message = %q, want a disk-changed conflict", res.Message)
+	}
+	if submitted.Load() {
+		t.Error("SubmitReload was called; a CAS-rejected apply must not enqueue a reload")
+	}
+	// The external bytes must survive untouched — the apply must not clobber them.
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(onDisk) != string(externalRaw) {
+		t.Error("CAS-rejected apply overwrote the external write; disk must retain external bytes")
+	}
+}
+
+// TestCoordinatorApplyRawSucceedsWhenNoExternalWrite is the positive control for
+// finding 12: with no external write in the window, the CAS is a no-op and the
+// apply proceeds and persists normally.
+func TestCoordinatorApplyRawSucceedsWhenNoExternalWrite(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	var watchDigest atomicPointer32
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			go func() {
+				req.Result <- server.ReloadResult{
+					ID:             req.ID,
+					Source:         server.ReloadSourceAdmin,
+					Outcome:        server.ReloadAppliedLive,
+					Published:      true,
+					ServingVersion: "v2",
+				}
+			}()
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		WatchDigest:    &watchDigest,
+		PlannedRestart: &PlannedRestartStore{},
+	}
+
+	newRaw := validConfigRaw(t, ":8081")
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
+	if err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("ok = false, want true; message: %s", res.Message)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(onDisk) != string(newRaw) {
+		t.Error("on-disk bytes do not match applied bytes")
+	}
+}
+
 func TestCoordinatorApplyRawValidationFailureNoWrite(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")

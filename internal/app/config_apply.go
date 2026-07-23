@@ -579,6 +579,25 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	// released before the reload wait so the async finalizer cannot deadlock
 	// with the HTTP goroutine; applyMu still prevents concurrent applies.
 	c.mu.Lock()
+	// Finding 12: coordinator-level optimistic-concurrency CAS. prevRaw was read
+	// at the top of ApplyRaw WITHOUT c.mu held, and the candidate was
+	// preflighted and diffed against it. Between that read and this write an
+	// external writer (file watcher, operator editing the file directly) that
+	// does not hold applyMu could have changed the file on disk. Writing the
+	// candidate now would silently clobber that external change — the exact
+	// time-of-check/time-of-use window the audit calls out. Re-read the base
+	// under c.mu, immediately before the write, and reject with a conflict when
+	// the on-disk base no longer matches what this apply prepared against. The
+	// HTTP layer maps a non-OK managed result to 409.
+	if c.baseChangedLocked(prevRaw, previouslyExisted) {
+		c.mu.Unlock()
+		return ApplyResult{
+			OK:      false,
+			Mode:    mode,
+			Version: desiredVersion,
+			Message: "The configuration file changed on disk since this edit was prepared; reload and try again.",
+		}, nil
+	}
 	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
 		c.mu.Unlock()
 		return ApplyResult{
@@ -764,6 +783,43 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			Message: "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome.",
 		}, nil
 	}
+}
+
+// baseChangedLocked reports whether the on-disk configuration file changed since
+// the base snapshot (prevRaw) that this apply was preflighted and diffed
+// against. It re-reads the file while c.mu is held, immediately before the
+// candidate write, so it closes the time-of-check/time-of-use window against an
+// external writer that does not participate in applyMu (finding 12).
+//
+// It compares by content digest rather than version so an operator's manual
+// edit that is semantically equivalent but textually different is still treated
+// as a divergence — the apply was prepared against the exact previous bytes and
+// the coordinator must not silently overwrite bytes it never saw.
+//
+// The coordinator's own suppressed writes go through this same c.mu, so this can
+// never false-positive on a self-write: a managed apply holds applyMu for its
+// whole lifetime, and prevRaw is re-read at the top of each ApplyRaw.
+func (c *ConfigApplyCoordinator) baseChangedLocked(prevRaw []byte, previouslyExisted bool) bool {
+	if c.Path == "" {
+		return false
+	}
+	current, err := os.ReadFile(c.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// File is gone now. If it existed when we prepared, that is a
+			// divergence; if it never existed, there is nothing to clobber.
+			return previouslyExisted
+		}
+		// Cannot read the file to verify the base. Fail closed: treat as changed
+		// so we do not blindly overwrite an unknown on-disk state.
+		return true
+	}
+	if !previouslyExisted {
+		// We prepared against "no file", but a file exists now: an external
+		// writer created it in the window. Do not clobber it.
+		return true
+	}
+	return sha256.Sum256(current) != sha256.Sum256(prevRaw)
 }
 
 // logRestorationFailure records a restoration failure in a best-effort way.

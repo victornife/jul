@@ -219,6 +219,11 @@ const [applied, setApplied] = useState<{
      status: FeatureStatus[];
      pendingReload: boolean;
      reloadTimedOut: boolean;
+     // Finding 5: the backend returned reload.outcome "saved_not_live" — the
+     // candidate is persisted but the terminal live/restored outcome is not yet
+     // known. Tracked separately so the banner never claims the config is
+     // serving for this transaction.
+     savedNotLive: boolean;
      mode: "hot" | "stage_restart";
      isStagedUpdate: boolean;
      // M-03: Full reload metadata for complete outcome representation.
@@ -333,6 +338,7 @@ setApplied({
             ? reloadOutcome === "saved_not_live"
             : (res.pending_reload ?? true),
           reloadTimedOut: res.reload?.timed_out === true,
+          savedNotLive: reloadOutcome === "saved_not_live",
           mode: "hot",
           isStagedUpdate: false,
           // M-03: Pass full reload metadata for complete outcome representation.
@@ -388,6 +394,7 @@ setApplied({
             ? reloadOutcome === "saved_not_live"
             : (res.pending_reload ?? true),
           reloadTimedOut: res.reload?.timed_out === true,
+          savedNotLive: reloadOutcome === "saved_not_live",
           mode: res.mode ?? (hasPendingRestart ? "stage_restart" : "hot"),
           isStagedUpdate: hasPendingRestart && res.mode === "stage_restart",
           // M-03: Pass full reload metadata for complete outcome representation.
@@ -427,6 +434,7 @@ setApplied({
           status: res.status ?? [],
           pendingReload: false,
           reloadTimedOut: false,
+          savedNotLive: false,
           mode: "stage_restart",
           isStagedUpdate: hasPendingRestart,
           // M-03: Pass full reload metadata for complete outcome representation.
@@ -462,6 +470,14 @@ setApplied({
       void qc.invalidateQueries();
     },
   });
+
+  // Finding 13 (H-03): when a structured patch is applied while a managed staged
+  // restart is pending, the backend routes it to stage_restart — it replaces the
+  // STAGED configuration and does NOT touch the running runtime. The UI must say
+  // so explicitly rather than showing the ordinary "apply now / apply patch"
+  // copy, which implies a live change. One derived flag drives the button label,
+  // dialog title, confirm label, explanatory copy, and success wording.
+  const updatingStagedPatch = isPatchMode && hasPendingRestart;
 
   const applyActive = isPatchMode ? applyPatch : applyRaw;
   const applyError = applyActive.error;
@@ -535,6 +551,9 @@ setApplied({
         pendingReload: applied.pendingReload,
         runtimeObserved: postApply.isSuccess,
         reloadTimedOut: applied.reloadTimedOut,
+        // Finding 5: pass saved_not_live so the banner shows the "final outcome
+        // pending" copy instead of falsely claiming the config is serving.
+        savedNotLive: applied.savedNotLive,
         ...(streamStatus !== undefined ? { streamStatus } : {}),
         http: applied.http,
         stream: applied.stream,
@@ -657,9 +676,11 @@ setApplied({
               ? "Applying…"
               : hasPendingRestart && !isPatchMode && !rawForbidden
                 ? "Update staged configuration"
-                : isPatchMode
-                  ? "Apply patch"
-                  : "Apply changes"}
+                : updatingStagedPatch
+                  ? "Update staged configuration"
+                  : isPatchMode
+                    ? "Apply patch"
+                    : "Apply changes"}
           </button>
         </div>
       </div>
@@ -829,11 +850,19 @@ setApplied({
           title={
             adminChangeError
               ? "Confirm admin access change?"
-              : isPatchMode
-                ? "Apply atomic patch?"
-                : "Apply configuration?"
+              : updatingStagedPatch
+                ? "Update staged configuration?"
+                : isPatchMode
+                  ? "Apply atomic patch?"
+                  : "Apply configuration?"
           }
-          confirmLabel={adminChangeError ? "Apply and change admin access" : "Apply now"}
+          confirmLabel={
+            adminChangeError
+              ? "Apply and change admin access"
+              : updatingStagedPatch
+                ? "Update staged config"
+                : "Apply now"
+          }
           busy={applyActive.isPending}
           onConfirm={() => {
             if (adminChangeError) {
@@ -861,6 +890,16 @@ setApplied({
                   <li key={`adm-${String(i)}`}>{c}</li>
                 ))}
               </ul>
+            </>
+          ) : updatingStagedPatch ? (
+            <>
+              <p>
+                A configuration is staged for the next process restart. This structured patch
+                replaces that staged configuration; it is validated and persisted atomically, but
+                the running runtime is not modified and will keep serving the current configuration
+                until the process is restarted. If another operator changed the staged config since
+                this edit was prepared, the update will be rejected so no change is lost.
+              </p>
             </>
           ) : isPatchMode ? (
             <>

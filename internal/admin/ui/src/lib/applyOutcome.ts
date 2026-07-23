@@ -26,6 +26,12 @@ export type ApplyOutcomeKind =
   // Accepted and persisted; the asynchronous runtime swap has not been
   // confirmed live yet (the transient state right after an apply).
   | "reload-pending"
+  // Accepted and persisted, but the synchronous window closed before the live
+  // reload/restoration outcome was known (backend outcome "saved_not_live").
+  // The final result — applied live, or rejected and restored to the previous
+  // config — is NOT yet determined, so the UI must NOT claim the new config is
+  // serving. The operator polls the runtime overview for the terminal outcome.
+  | "saved-not-live"
   // Accepted and live for HTTP, but a subsystem failed to activate the new
   // config and is still serving the previous one -' a degraded, not failed,
   // apply that needs operator attention.
@@ -129,6 +135,15 @@ export interface ApplyOutcomeInput {
   readonly timedOutPhase?: string | undefined;
  /** P0-1: Enqueue failure when reload.outcome is "not_applied". */
  readonly enqueueFailed?: boolean;
+  /**
+   * Finding 5 (M-03): True when the backend returned reload.outcome
+   * "saved_not_live" — the candidate is persisted but the final live-reload /
+   * restoration outcome is not yet known. This is explicitly NOT "serving": the
+   * async finalizer may still restore the previous configuration. It takes
+   * precedence over reloadTimedOut so a saved_not_live response (which the
+   * backend also marks timed_out) is never rendered with "is now serving" copy.
+   */
+  readonly savedNotLive?: boolean;
 }
 
 /**
@@ -223,6 +238,25 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
         msg && msg.length > 0
           ? msg
           : "This change is valid but cannot be applied while the server is running. Nothing was saved; update the configuration file and restart the server for it to take effect.",
+      failures: [],
+    };
+  }
+
+  // Finding 5: saved_not_live — the candidate is on disk but the terminal
+  // live-reload/restoration outcome is unknown. This MUST take precedence over
+  // the reloadTimedOut branch below, because the backend marks a saved_not_live
+  // response as timed_out; without this guard the operator would be shown the
+  // "is now serving" copy for a transaction whose new config may never serve.
+  // The message makes the uncertainty explicit and points at the overview,
+  // which the panel correlates and polls to a terminal state.
+  if (input.savedNotLive) {
+    return {
+      kind: "saved-not-live",
+      severity: "warning",
+      blocking: false,
+      title: "Saved — final outcome pending",
+      message:
+        "The configuration was validated and saved, but the live reload did not confirm within the timeout window, so its final outcome is not yet known. It may still apply, or be rolled back to the previous configuration. This panel is not claiming the new configuration is serving; check the runtime overview for the final outcome.",
       failures: [],
     };
   }
