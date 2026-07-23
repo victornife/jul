@@ -1106,7 +1106,7 @@ func TestDoReloadNewListenerUsesNewConfig(t *testing.T) {
 // TestAdminReloadRequestUsesCandidate (R9-02) verifies the typed admin reload
 // path: a ReloadRequest carrying a preflight-resolved candidate is applied
 // directly, and a stale candidate whose raw digest no longer matches is
-// rejected in favor of the source load.
+// rejected without publishing a different source config under the same ID.
 func TestAdminReloadRequestUsesCandidate(t *testing.T) {
 	addr := freePort(t)
 
@@ -1154,8 +1154,9 @@ func TestAdminReloadRequestUsesCandidate(t *testing.T) {
 		t.Fatal("admin candidate was not applied")
 	}
 
-	// Stale admin candidate: the on-disk raw bytes no longer match the
-	// supplied digest, so the server must fall back to the source load.
+	// Stale admin candidate: the on-disk raw bytes no longer match the supplied
+	// digest, so the correlated transaction must be rejected. A later ordinary
+	// source reload may apply raw202 under its own transaction.
 	raw202 := cfgWithReturn(addr, 202)
 	data202, err := config.Marshal(raw202)
 	if err != nil {
@@ -1169,10 +1170,77 @@ func TestAdminReloadRequestUsesCandidate(t *testing.T) {
 		t.Fatalf("NewCandidate: %v", err)
 	}
 	// Deliberately use the digest from raw201 to force a mismatch.
-	reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: cand203, RawDigest: sha256Digest(data201)}
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{ID: "stale-admin", Source: ReloadSourceAdmin, Candidate: cand203, RawDigest: sha256Digest(data201), Result: resultCh}
+	result := <-resultCh
+	if result.Outcome != ReloadNotApplied || result.FailedPhase != "persisted_cas" || result.Published {
+		t.Fatalf("stale result = %+v, want pre-publish persisted_cas rejection", result)
+	}
+	if !eventually(t, "http://"+addr+"/", "return-201") {
+		t.Fatal("stale managed candidate changed the serving runtime")
+	}
 
-	if !eventually(t, "http://"+addr+"/", "return-202") {
-		t.Fatal("stale admin candidate did not fall back to source load")
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestAdminReloadRejectsDiskChangeDuringPreparation(t *testing.T) {
+	addr := freePort(t)
+	src := &stubSource{}
+	initial := cfgWithReturn(addr, 200)
+	src.set(initial, nil)
+	initialRaw, err := config.Marshal(initial)
+	if err != nil {
+		t.Fatalf("marshal initial: %v", err)
+	}
+	src.setRaw(initialRaw)
+
+	var mutateDuringPrepare atomic.Bool
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		if mutateDuringPrepare.Load() {
+			external := cfgWithReturn(addr, 202)
+			externalRaw, merr := config.Marshal(external)
+			if merr != nil {
+				return nil, 0, nil, nil, merr
+			}
+			src.set(external, nil)
+			src.setRaw(externalRaw)
+		}
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintf(w, "return-%d", c.Servers[0].Locations[0].Return)
+		})
+		return map[string]http.Handler{addr: h}, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+	}
+
+	srv := New(initial, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(*config.Config) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+addr+"/", "return-200")
+
+	candidateRaw := cfgWithReturn(addr, 201)
+	candidate, err := config.NewCandidate(candidateRaw)
+	if err != nil {
+		t.Fatalf("candidate: %v", err)
+	}
+	persisted, err := config.Marshal(candidate.Raw)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+	src.set(candidate.Raw, nil)
+	src.setRaw(persisted)
+	mutateDuringPrepare.Store(true)
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{ID: "prepare-race", Source: ReloadSourceAdmin, Candidate: candidate, RawDigest: sha256Digest(persisted), Result: resultCh}
+	result := <-resultCh
+	if result.Outcome != ReloadNotApplied || result.FailedPhase != "persisted_cas" || result.Published {
+		t.Fatalf("result = %+v, want persisted_cas rejection", result)
+	}
+	if !eventually(t, "http://"+addr+"/", "return-200") {
+		t.Fatal("candidate was published despite disk change during preparation")
 	}
 
 	cancel()
@@ -1372,4 +1440,3 @@ func TestShutdownBoundedByGraceTimeout(t *testing.T) {
 	// Release the blocked handler goroutine so goleak does not flag it.
 	close(blocking)
 }
-

@@ -70,7 +70,11 @@ type PlannedRestartMarker struct {
 	BaseCanonicalVersion string `json:"base_canonical_version"`
 	BaseServingVersion   string `json:"base_serving_version"`
 	StagedRawSHA256      string `json:"staged_raw_sha256"`
-	StagedVersion        string `json:"staged_version"`
+	// StagedVersion retains its legacy meaning: the canonical resolved effective
+	// candidate version. StagedPersistedVersion identifies the unresolved config
+	// on disk without changing existing marker/API semantics.
+	StagedVersion          string `json:"staged_version"`
+	StagedPersistedVersion string `json:"staged_persisted_version,omitempty"`
 	// PreviousStagedRawSHA256 is set only when this marker was written for a
 	// staged-update (a second stage_restart while one was already pending). It
 	// records the digest of the previous staged content so that crash recovery
@@ -80,8 +84,9 @@ type PlannedRestartMarker struct {
 	// M-01: Preserve the previous staged version, subsystems, and timestamp for
 	// recovery. When a staged-update fails, these fields let the API report the
 	// correct metadata instead of showing the failed candidate's values.
-	PreviousStagedVersion string   `json:"previous_staged_version,omitempty"`
-	PreviousSubsystems    []string `json:"previous_subsystems,omitempty"`
+	PreviousStagedVersion          string   `json:"previous_staged_version,omitempty"`
+	PreviousStagedPersistedVersion string   `json:"previous_staged_persisted_version,omitempty"`
+	PreviousSubsystems             []string `json:"previous_subsystems,omitempty"`
 	// PreviousStagedAt is the timestamp of the previous staged configuration.
 	// It is restored when the update write fails so the API reports the
 	// correct time instead of the failed-attempt timestamp.
@@ -293,6 +298,7 @@ func (s *PlannedRestartStore) StageManaged(baseRaw, candidateRaw []byte, marker 
 		marker.PreviousStagedRawSHA256 = existing.StagedRawSHA256
 		// M-01: Preserve the previous staged version, subsystems, and timestamp.
 		marker.PreviousStagedVersion = existing.StagedVersion
+		marker.PreviousStagedPersistedVersion = existing.StagedPersistedVersion
 		marker.PreviousSubsystems = existing.PendingSubsystems
 		marker.PreviousStagedAt = existing.StagedAt
 		if s.baseRaw == nil {
@@ -324,6 +330,47 @@ func (s *PlannedRestartStore) StageManaged(baseRaw, candidateRaw []byte, marker 
 	// Step 3 (write candidate to disk) is performed by the caller AFTER this
 	// function returns so that watcher suppression is registered before the
 	// rename becomes visible.
+	return nil
+}
+
+// AbortPrepared restores the sidecar state that existed before StageManaged
+// when the final expected-base check rejects the candidate. It never touches
+// the active config file. A fresh stage removes its new marker and backup; a
+// staged update restores the previous staged marker and keeps its backup.
+func (s *PlannedRestartStore) AbortPrepared(previous *PlannedRestartMarker) error {
+	if s == nil || s.ConfigPath == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, err := s.loadMarkerLocked()
+	if err != nil || current == nil || current.State != plannedRestartStatePrepared {
+		return ErrNoManagedPreparedMarker
+	}
+	if previous == nil {
+		if err := os.Remove(s.markerPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("planned-restart abort: remove marker: %w", err)
+		}
+		if err := os.Remove(s.backupPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("planned-restart abort: remove backup: %w", err)
+		}
+		s.pending = false
+		s.raw = nil
+		s.baseRaw = nil
+		s.stagedAt = time.Time{}
+		s.inconsistent = false
+		return nil
+	}
+	if previous.State != plannedRestartStateStaged {
+		return ErrMarkerWrongState
+	}
+	if err := s.writeMarkerLocked(*previous); err != nil {
+		return fmt.Errorf("planned-restart abort: restore previous marker: %w", err)
+	}
+	s.pending = true
+	s.stagedAt = previous.StagedAt
+	s.inconsistent = false
 	return nil
 }
 
@@ -407,10 +454,12 @@ func (s *PlannedRestartStore) Refresh() error {
 				marker.StagedRawSHA256 = marker.PreviousStagedRawSHA256
 				// M-01: Restore the previous staged version and subsystems.
 				marker.StagedVersion = marker.PreviousStagedVersion
+				marker.StagedPersistedVersion = marker.PreviousStagedPersistedVersion
 				marker.PendingSubsystems = marker.PreviousSubsystems
 				marker.StagedAt = marker.PreviousStagedAt
 				marker.PreviousStagedRawSHA256 = ""
 				marker.PreviousStagedVersion = ""
+				marker.PreviousStagedPersistedVersion = ""
 				marker.PreviousSubsystems = nil
 				marker.PreviousStagedAt = time.Time{}
 				if werr := s.writeMarkerLocked(*marker); werr != nil {
@@ -492,6 +541,7 @@ func (s *PlannedRestartStore) PromoteToStaged(candidateRaw []byte) error {
 	// version, subsystem list, or timestamp.
 	marker.PreviousStagedRawSHA256 = ""
 	marker.PreviousStagedVersion = ""
+	marker.PreviousStagedPersistedVersion = ""
 	marker.PreviousSubsystems = nil
 	marker.PreviousStagedAt = time.Time{}
 	if err := s.writeMarkerLocked(*marker); err != nil {
@@ -693,10 +743,12 @@ func (s *PlannedRestartStore) Reconcile() error {
 				marker.StagedRawSHA256 = marker.PreviousStagedRawSHA256
 				// M-01: Restore the previous staged version and subsystems.
 				marker.StagedVersion = marker.PreviousStagedVersion
+				marker.StagedPersistedVersion = marker.PreviousStagedPersistedVersion
 				marker.PendingSubsystems = marker.PreviousSubsystems
 				marker.StagedAt = marker.PreviousStagedAt
 				marker.PreviousStagedRawSHA256 = ""
 				marker.PreviousStagedVersion = ""
+				marker.PreviousStagedPersistedVersion = ""
 				marker.PreviousSubsystems = nil
 				marker.PreviousStagedAt = time.Time{}
 				if werr := s.writeMarkerLocked(*marker); werr != nil {
@@ -785,6 +837,7 @@ func (s *PlannedRestartStore) Status() pendingRestartStatus {
 	if s.ConfigPath != "" && (st.State == PlannedRestartStateManagedStaged || st.State == PlannedRestartStateInconsistent) {
 		if m, err := s.loadMarkerLocked(); err == nil && m != nil {
 			prs.StagedVersion = m.StagedVersion
+			prs.PersistedVersion = m.StagedPersistedVersion
 			prs.ServingVersion = m.BaseServingVersion
 			prs.Subsystems = m.PendingSubsystems
 		}
@@ -802,6 +855,7 @@ type pendingRestartStatus struct {
 	External         bool
 	StagedAt         time.Time
 	StagedVersion    string
+	PersistedVersion string
 	ServingVersion   string
 	Subsystems       []string
 	DiscardAvailable bool

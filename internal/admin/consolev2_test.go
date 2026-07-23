@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -109,6 +110,38 @@ func v2WriteServer(t *testing.T) (*Server, string) {
 	}
 	cfg := config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}
 	return newTestServer(t, cfg, deps), cfgPath
+}
+
+func TestConfigApplyCarriesRawFirstBaseline(t *testing.T) {
+	s, cfgPath := v2WriteServer(t)
+	seed, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+	var captured ApplyRequestContext
+	s.deps.ApplyConfigRaw = func(ctx ApplyRequestContext, data []byte, mode string) (ConfigApplyResult, error) {
+		captured = ctx
+		return ConfigApplyResult{OK: true, Mode: mode, Version: configVersion(data)}, nil
+	}
+
+	candidate := validTOML(t, "./public", ":8081")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(candidate)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("apply = %d, want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	if captured.Baseline == nil {
+		t.Fatal("managed apply did not receive a mutation baseline")
+	}
+	if !bytes.Equal(captured.Baseline.Raw, seed) {
+		t.Fatal("baseline raw bytes do not match the authorized snapshot")
+	}
+	if captured.Baseline.Digest != sha256.Sum256(seed) || !captured.Baseline.Exists {
+		t.Fatalf("baseline digest/existence = %x/%t", captured.Baseline.Digest, captured.Baseline.Exists)
+	}
+	if captured.Baseline.Version == "" || captured.Baseline.Config == nil {
+		t.Fatalf("incomplete baseline: %+v", captured.Baseline)
+	}
 }
 
 // ── /api/runtime/overview ────────────────────────────────────────────────────

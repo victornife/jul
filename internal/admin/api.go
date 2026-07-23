@@ -446,6 +446,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
+	reqCtx.Baseline = &curState
 
 	// Optimistic concurrency: when the client sends the base_version it read the
 	// config at, reject the write with 409 if the live config changed since, so a
@@ -515,7 +516,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Snapshot the current config before applying so the apply is reversible.
-	prev := s.currentRaw()
+	prev := curState.Raw
 
 	mode := r.URL.Query().Get("mode")
 	switch mode {
@@ -532,6 +533,11 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	result, err := applyRaw(reqCtx, body, mode)
 	if err != nil {
 		s.recordAudit(r, "config.apply", "config", "failure", "coordinator error: "+err.Error())
+		if errors.Is(err, ErrConfigStorageUnavailable) {
+			s.emit("config", "apply_failed", "error", "Configuration storage could not be verified; no change was written.")
+			writeJSON(w, http.StatusServiceUnavailable, result)
+			return
+		}
 		s.emit("config", "apply_failed", "error", "Configuration apply coordinator failed.")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

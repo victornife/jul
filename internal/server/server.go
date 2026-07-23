@@ -949,12 +949,19 @@ func (s *Server) doReload(req ReloadRequest) {
 	var plan *ReloadPlan
 	if req.Candidate != nil {
 		// Admin apply path: use the exact candidate that passed preflight.
-		// If the on-disk file has diverged from the candidate's raw digest,
-		// fall back to source load so a stale candidate cannot publish.
+		// If the on-disk file has diverged from the candidate's raw digest, reject
+		// this correlated transaction. Loading and publishing a different source
+		// config under the same request ID would make its result untruthful.
 		if s.candidateStillValid(req) {
 			plan = s.newReloadPlan(reloadCtx, req.Candidate.Raw, req.Candidate)
 		} else {
-			s.log.Warn("reload: injected candidate no longer matches persisted file; falling back to source load", "source", s.source.Name(), "reload_id", req.ID)
+			result.Outcome = ReloadNotApplied
+			result.FailedPhase = "persisted_cas"
+			result.DesiredVersion = CanonicalVersion(req.Candidate.Effective)
+			result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+			result.Error = "persisted configuration no longer matches the managed candidate"
+			s.log.Warn("reload: managed candidate no longer matches persisted file; rejecting correlated transaction", "source", s.source.Name(), "reload_id", req.ID)
+			return
 		}
 	}
 	if plan == nil {
@@ -997,6 +1004,20 @@ func (s *Server) doReload(req ReloadRequest) {
 		}
 	}
 	result.DesiredVersion = CanonicalVersion(plan.Candidate.Effective)
+	// Preparation may be expensive. Recheck the exact persisted bytes at the
+	// Publish boundary so an external edit during preparation cannot cause this
+	// correlated admin transaction to publish a stale candidate.
+	if req.Candidate != nil && !s.candidateStillValid(req) {
+		plan.Abort()
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNotApplied
+		result.FailedPhase = "persisted_cas"
+		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.Error = "persisted configuration changed while the managed candidate was preparing"
+		s.log.Warn("reload: managed candidate changed during preparation; aborting before publish", "source", s.source.Name(), "reload_id", req.ID)
+		return
+	}
 
 	// Phase 6: publish — this is the point of no return.
 	if _, err := plan.Publish(); err != nil {

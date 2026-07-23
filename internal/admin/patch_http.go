@@ -324,6 +324,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
+	reqCtx.Baseline = &state
 	// C-01: authorize against a pristine baseline. Never mutate state.Config in
 	// place: LoadConfig may return a shared pointer, so mutating it and then
 	// reloading for authorization would alias current == candidate and skip the
@@ -407,6 +408,11 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	result, err := applyConfig(reqCtx, cfg, mode)
 	if err != nil {
 		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+err.Error())
+		if errors.Is(err, ErrConfigStorageUnavailable) {
+			s.emit("config", "apply_failed", "error", "Configuration storage could not be verified; no change was written.")
+			writeJSON(w, http.StatusServiceUnavailable, result)
+			return
+		}
 		s.emit("config", "apply_failed", "error", "Structured patch apply coordinator failed.")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

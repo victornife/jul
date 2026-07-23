@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,23 @@ type ApplyRequestContext struct {
 	Actor    string
 	TokenID  string
 	SourceIP string
+
+	// Baseline is the exact persisted configuration snapshot against which the
+	// HTTP handler performed concurrency, authorization, and reachability
+	// checks. The coordinator must compare this digest immediately before any
+	// write instead of adopting a later filesystem read as its own baseline.
+	Baseline *MutationBaseline
+}
+
+// MutationBaseline is the authoritative raw-first snapshot for a configuration
+// mutation. Config is parsed from Raw, Version is the canonical unresolved
+// configuration version, and Digest identifies the exact persisted bytes.
+type MutationBaseline struct {
+	Raw     []byte
+	Digest  [32]byte
+	Version string
+	Config  *config.Config
+	Exists  bool
 }
 
 // AuthorizationError represents an authorization failure with typed details.
@@ -596,32 +614,23 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		"version":        s.deps.Version,
 		"path":           s.deps.ConfigPath,
 		"authRequired":   adminCfg.Token != "",
-		"rawEditable":    s.deps.WriteConfigRaw != nil,
-		"formEditable":   s.deps.LoadConfig != nil && s.deps.SaveConfig != nil,
+		"rawEditable":    s.deps.ApplyConfigRaw != nil || s.deps.WriteConfigRaw != nil,
+		"formEditable":   s.deps.LoadConfig != nil && (s.deps.ApplyConfig != nil || s.deps.SaveConfig != nil),
 		"consoleEnabled": consoleV2Compiled && adminCfg.ConsoleEnabled(),
 	}
-	if s.deps.ReadConfigRaw != nil {
-		raw, err := s.deps.ReadConfigRaw()
+	if s.deps.ReadConfigRaw != nil || s.deps.LoadConfig != nil {
+		state, err := s.currentWriteState(false)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		resp["raw"] = string(raw)
-	}
-	if s.deps.LoadConfig != nil {
-		cfg, err := s.deps.LoadConfig()
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+		if s.deps.ReadConfigRaw != nil {
+			resp["raw"] = string(state.Raw)
 		}
-		resp["settings"] = extractSettings(cfg)
-		// base_version is the optimistic-concurrency fingerprint of the live
-		// config (canonical marshaled form, identical to the structured-patch
-		// preview's base_version). The raw editor sends it back on apply so a
-		// stale edit cannot silently clobber a concurrent change.
-		if marshaled, merr := config.Marshal(cfg); merr == nil {
-			resp["base_version"] = configVersion(marshaled)
-		}
+		resp["settings"] = extractSettings(state.Config)
+		// base_version always identifies the canonical unresolved configuration
+		// parsed from the exact raw bytes returned above.
+		resp["base_version"] = state.Version
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -637,7 +646,7 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.deps.WriteConfigRaw == nil {
+	if s.deps.ApplyConfigRaw == nil && s.deps.WriteConfigRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -672,11 +681,13 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
+	reqCtx := applyRequestContext(r)
+	reqCtx.Baseline = &state
 
 	// Object-level guard: a caller with config:apply still must hold admin:manage
 	// to change anything under [admin]. This check runs inside the write lock so
 	// the current config cannot change between authorization and write (N-02).
-	if next != nil && !s.authorizeConfigCandidate(w, r, "config.raw", next) {
+	if next != nil && !s.authorizeConfigTransition(w, r, "config.raw", state.Config, next) {
 		return
 	}
 
@@ -716,7 +727,31 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	// Capture the pre-write raw for the history snapshot BEFORE the write; after
 	// WriteConfigRaw the file already holds the new configuration, so reading it
 	// then would snapshot the new config instead of the prior one.
-	prevRaw := s.currentRaw()
+	prevRaw := state.Raw
+	if s.deps.ApplyConfigRaw != nil {
+		result, applyErr := s.deps.ApplyConfigRaw(reqCtx, body, "hot")
+		if applyErr != nil {
+			code := http.StatusInternalServerError
+			if errors.Is(applyErr, ErrConfigStorageUnavailable) {
+				code = http.StatusServiceUnavailable
+			}
+			s.recordAudit(r, "config.raw", "config", "failure", "coordinator error: "+applyErr.Error())
+			writeJSON(w, code, result)
+			return
+		}
+		if result.RestartRequired || !result.OK {
+			code := http.StatusConflict
+			if len(result.ValidationErrors) > 0 {
+				code = http.StatusBadRequest
+			}
+			writeJSON(w, code, result)
+			return
+		}
+		s.recordHistory(prevRaw)
+		s.recordAudit(r, "config.raw", "config", "success", "configuration validated and saved")
+		writeJSON(w, http.StatusOK, ConfigMutationResponse{Status: "saved", ConfigApplyResult: result})
+		return
+	}
 	if err := s.deps.WriteConfigRaw(body); err != nil {
 		s.recordAudit(r, "config.raw", "config", "failure", "rejected: invalid configuration")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -741,7 +776,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.deps.LoadConfig == nil || s.deps.SaveConfig == nil {
+	if s.deps.LoadConfig == nil || (s.deps.ApplyConfig == nil && s.deps.SaveConfig == nil) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -763,6 +798,8 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
+	reqCtx := applyRequestContext(r)
+	reqCtx.Baseline = &state
 	cfg := state.Config
 
 	// Optimistic concurrency: reject stale writes. An empty base_version skips
@@ -822,7 +859,31 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Capture the pre-write raw for the history snapshot BEFORE SaveConfig.
-	prevRaw := s.currentRaw()
+	prevRaw := state.Raw
+	if s.deps.ApplyConfig != nil {
+		result, applyErr := s.deps.ApplyConfig(reqCtx, candidate, "hot")
+		if applyErr != nil {
+			code := http.StatusInternalServerError
+			if errors.Is(applyErr, ErrConfigStorageUnavailable) {
+				code = http.StatusServiceUnavailable
+			}
+			s.recordAudit(r, "config.settings", "config", "failure", "coordinator error: "+applyErr.Error())
+			writeJSON(w, code, result)
+			return
+		}
+		if result.RestartRequired || !result.OK {
+			code := http.StatusConflict
+			if len(result.ValidationErrors) > 0 {
+				code = http.StatusBadRequest
+			}
+			writeJSON(w, code, result)
+			return
+		}
+		s.recordHistory(prevRaw)
+		s.recordAudit(r, "config.settings", "config", "success", "settings applied and saved")
+		writeJSON(w, http.StatusOK, ConfigMutationResponse{Status: "saved", ConfigApplyResult: result})
+		return
+	}
 	if err := s.deps.SaveConfig(candidate); err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot save config")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -847,20 +908,40 @@ func (s *Server) postWriteVersion(fallback string) string {
 	return fresh.Version
 }
 
-// CurrentWriteState holds the current configuration state needed for mutation
-// endpoint prerequisites. It is obtained atomically so no state can change
-// during the check.
-type CurrentWriteState struct {
-	Config  *config.Config
-	Raw     []byte
-	Version string
-}
+// CurrentWriteState is retained as an alias for the raw-first mutation
+// baseline used by mutation handlers.
+type CurrentWriteState = MutationBaseline
 
 // currentWriteState loads the current configuration state with fail-closed
 // semantics: it returns an error if LoadConfig is unavailable, fails, returns
 // nil config, or if marshaling fails. The raw snapshot is only required when
 // the caller needs it (e.g., for history recording).
 func (s *Server) currentWriteState(requireRaw bool) (CurrentWriteState, error) {
+	// File-backed production paths must read the bytes once and parse those
+	// exact bytes. Calling LoadConfig and ReadConfigRaw independently can pair a
+	// parsed configuration from one filesystem generation with raw bytes from
+	// another.
+	if s.deps.ReadConfigRaw != nil {
+		raw, err := s.deps.ReadConfigRaw()
+		if err != nil {
+			return CurrentWriteState{}, fmt.Errorf("cannot read config raw: %w", err)
+		}
+		cur, err := config.Parse(raw)
+		if err != nil {
+			return CurrentWriteState{}, fmt.Errorf("cannot parse config raw: %w", err)
+		}
+		return CurrentWriteState{
+			Raw:     raw,
+			Digest:  sha256.Sum256(raw),
+			Version: server.CanonicalVersion(cur),
+			Config:  cur,
+			Exists:  true,
+		}, nil
+	}
+
+	if requireRaw {
+		return CurrentWriteState{}, errors.New("system unavailable: raw config reader not wired")
+	}
 	if s.deps.LoadConfig == nil {
 		return CurrentWriteState{}, errors.New("system unavailable: config loader not wired")
 	}
@@ -871,31 +952,17 @@ func (s *Server) currentWriteState(requireRaw bool) (CurrentWriteState, error) {
 	if cur == nil {
 		return CurrentWriteState{}, errors.New("config loader returned nil")
 	}
-	marshaled, err := config.Marshal(cur)
+	raw, err := config.Marshal(cur)
 	if err != nil {
 		return CurrentWriteState{}, fmt.Errorf("cannot marshal config: %w", err)
 	}
-	state := CurrentWriteState{
+	return CurrentWriteState{
+		Raw:     raw,
+		Digest:  sha256.Sum256(raw),
+		Version: server.CanonicalVersion(cur),
 		Config:  cur,
-		Version: configVersion(marshaled),
-	}
-	if requireRaw {
-		// Finding 11: when raw state is required (history/diff callers), the
-		// absence of a raw reader is a hard error, not a silent nil. Read the
-		// bytes exactly once. The version basis stays the canonical marshaled
-		// form above so it remains interchangeable with the structured-patch and
-		// v2 apply editors; Config and Raw both originate from this same load, so
-		// they cannot refer to different filesystem moments.
-		if s.deps.ReadConfigRaw == nil {
-			return CurrentWriteState{}, errors.New("system unavailable: raw config reader not wired")
-		}
-		raw, err := s.deps.ReadConfigRaw()
-		if err != nil {
-			return CurrentWriteState{}, fmt.Errorf("cannot read config raw: %w", err)
-		}
-		state.Raw = raw
-	}
-	return state, nil
+		Exists:  true,
+	}, nil
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

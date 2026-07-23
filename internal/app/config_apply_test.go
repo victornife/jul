@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net/http"
 	"os"
@@ -37,6 +38,21 @@ func validConfigRaw(t *testing.T, listen string) []byte {
 		t.Fatalf("marshal config: %v", err)
 	}
 	return raw
+}
+
+func mutationBaseline(t *testing.T, raw []byte) *admin.MutationBaseline {
+	t.Helper()
+	cfg, err := config.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse mutation baseline: %v", err)
+	}
+	return &admin.MutationBaseline{
+		Raw:     append([]byte(nil), raw...),
+		Digest:  sha256.Sum256(raw),
+		Version: server.CanonicalVersion(cfg),
+		Config:  cfg,
+		Exists:  true,
+	}
 }
 
 // restartRequiredConfigRaw returns a config raw that differs from the seed
@@ -173,6 +189,269 @@ func TestCoordinatorApplyRawRejectsExternalWriteInCASWindow(t *testing.T) {
 	if string(onDisk) != string(externalRaw) {
 		t.Error("CAS-rejected apply overwrote the external write; disk must retain external bytes")
 	}
+}
+
+// The HTTP handler authorizes against seed, but an external writer lands a new
+// config before the coordinator starts. The supplied baseline must prevent the
+// coordinator from adopting and overwriting that later file.
+func TestCoordinatorRejectsExternalWriteBeforeEntry(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	baseline := mutationBaseline(t, seed)
+	externalRaw := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, externalRaw, 0o600); err != nil {
+		t.Fatalf("write external config: %v", err)
+	}
+
+	var submitted atomic.Bool
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(server.ReloadRequest) error {
+			submitted.Store(true)
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+	}
+
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{Baseline: baseline}, validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+	if !res.Conflict || res.OK {
+		t.Fatalf("result = %+v, want typed conflict", res)
+	}
+	if submitted.Load() {
+		t.Fatal("CAS-rejected baseline was submitted for reload")
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	if string(onDisk) != string(externalRaw) {
+		t.Fatal("external configuration was overwritten")
+	}
+}
+
+func TestCoordinatorStageRejectsExternalWriteBeforeEntry(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	baseline := mutationBaseline(t, seed)
+	externalRaw := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, externalRaw, 0o600); err != nil {
+		t.Fatalf("write external config: %v", err)
+	}
+
+	store := NewFilePlannedRestartStore(path)
+	pf := testPreflight()
+	pf.StartupFP = lifecycle.ComputeFingerprint(config.ProxyTarget("127.0.0.1:9000", ":8080"))
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      pf,
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: store,
+	}
+
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{Baseline: baseline}, restartRequiredConfigRaw(t, ":8080"), ApplyStageRestart)
+	if err != nil {
+		t.Fatalf("stage error: %v", err)
+	}
+	if !res.Conflict || res.OK {
+		t.Fatalf("result = %+v, want typed conflict", res)
+	}
+	if _, err := os.Stat(path + ".pending-restart.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stage conflict wrote a marker: %v", err)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	if string(onDisk) != string(externalRaw) {
+		t.Fatal("stage conflict overwrote external configuration")
+	}
+}
+
+func TestCoordinatorStageRejectsExternalWriteAfterPreparedMarker(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	externalRaw := validConfigRaw(t, ":9999")
+	pf := testPreflight()
+	pf.StartupFP = lifecycle.ComputeFingerprint(config.ProxyTarget("127.0.0.1:9000", ":8080"))
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      pf,
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: NewFilePlannedRestartStore(path),
+		beforePersist: func(mode ApplyMode) {
+			if mode == ApplyStageRestart {
+				if err := os.WriteFile(path, externalRaw, 0o600); err != nil {
+					t.Errorf("write external config: %v", err)
+				}
+			}
+		},
+	}
+
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{Baseline: mutationBaseline(t, seed)}, restartRequiredConfigRaw(t, ":8080"), ApplyStageRestart)
+	if err != nil {
+		t.Fatalf("stage error: %v", err)
+	}
+	if !res.Conflict || res.OK {
+		t.Fatalf("result = %+v, want typed conflict", res)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	if string(onDisk) != string(externalRaw) {
+		t.Fatal("stage overwrote external configuration after preparing marker")
+	}
+	marker, err := c.PlannedRestart.LoadMarker()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("load marker: %v", err)
+	}
+	if marker != nil {
+		t.Fatalf("marker = %+v, want fresh prepared state rolled back", marker)
+	}
+}
+
+func TestCoordinatorRejectsCommentOnlyExternalEdit(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	externalRaw := append([]byte("# externally edited\n"), seed...)
+	if err := os.WriteFile(path, externalRaw, 0o600); err != nil {
+		t.Fatalf("write external config: %v", err)
+	}
+
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      testPreflight(),
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+	}
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{Baseline: mutationBaseline(t, seed)}, validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply error: %v", err)
+	}
+	if !res.Conflict {
+		t.Fatalf("result = %+v, want exact-byte conflict", res)
+	}
+	if res.CurrentVersion != mutationBaseline(t, seed).Version {
+		t.Fatalf("current_version = %q, want canonical version %q", res.CurrentVersion, mutationBaseline(t, seed).Version)
+	}
+}
+
+func TestCoordinatorInitialReadErrorFailsClosed(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	c := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      testPreflight(),
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+		ReadConfigRaw:  func() ([]byte, error) { return nil, os.ErrPermission },
+	}
+	_, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+	if err == nil || !errors.Is(err, admin.ErrConfigStorageUnavailable) {
+		t.Fatalf("error = %v, want ErrConfigStorageUnavailable", err)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	if string(onDisk) != string(seed) {
+		t.Fatal("read failure changed persisted config")
+	}
+}
+
+func TestCoordinatorSecretReferenceVersionDomains(t *testing.T) {
+	t.Setenv("JUL_TEST_LOG_LEVEL", "warn")
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	apply := func(raw []byte, baseline *admin.MutationBaseline) ApplyResult {
+		c := &ConfigApplyCoordinator{
+			BaseCtx:   context.Background(),
+			Path:      path,
+			Preflight: testPreflight(),
+			SubmitReload: func(req server.ReloadRequest) error {
+				go func() {
+					desired := server.CanonicalVersion(req.Candidate.Effective)
+					req.Result <- server.ReloadResult{ID: req.ID, Source: server.ReloadSourceAdmin, Outcome: server.ReloadAppliedLive, Published: true, DesiredVersion: desired, ServingVersion: desired}
+				}()
+				return nil
+			},
+			LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+			PlannedRestart: &PlannedRestartStore{},
+		}
+		res, err := c.ApplyRaw(admin.ApplyRequestContext{Baseline: baseline}, raw, ApplyHot)
+		if err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if !res.OK {
+			t.Fatalf("apply result: %+v", res)
+		}
+		return res
+	}
+
+	candidateCfg := config.ProxyTarget("127.0.0.1:9000", ":8081")
+	candidateCfg.Global.LogLevel = "${env:JUL_TEST_LOG_LEVEL}"
+	candidateRaw, err := config.Marshal(candidateCfg)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+	first := apply(candidateRaw, mutationBaseline(t, seed))
+	if first.Version == first.DesiredVersion {
+		t.Fatalf("persisted and effective versions unexpectedly match: %q", first.Version)
+	}
+	if first.Version != first.PersistedVersion || first.FinalDiskVersion != first.PersistedVersion {
+		t.Fatalf("version domains inconsistent: %+v", first)
+	}
+
+	secondCfg, err := config.Parse(candidateRaw)
+	if err != nil {
+		t.Fatalf("parse second candidate: %v", err)
+	}
+	secondCfg.Servers[0].Locations[0].ProxyPass = "http://127.0.0.1:9001"
+	secondRaw, err := config.Marshal(secondCfg)
+	if err != nil {
+		t.Fatalf("marshal second candidate: %v", err)
+	}
+	baseline := mutationBaseline(t, candidateRaw)
+	if first.Version != baseline.Version {
+		t.Fatalf("first response version = %q, subsequent base = %q", first.Version, baseline.Version)
+	}
+	_ = apply(secondRaw, baseline)
 }
 
 // TestCoordinatorApplyRawSucceedsWhenNoExternalWrite is the positive control for

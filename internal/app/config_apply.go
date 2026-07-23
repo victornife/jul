@@ -39,11 +39,19 @@ type ApplyResult struct {
 	// ApplyID is the monotonic transaction ID, populated regardless of whether
 	// a reload was submitted. This allows callbacks to record outcomes even
 	// when Reload is nil (e.g., enqueue failure).
-	ApplyID          string
-	OK               bool
-	Mode             ApplyMode
+	ApplyID string
+	OK      bool
+	Mode    ApplyMode
+	// Version and PersistedVersion identify the canonical unresolved candidate
+	// persisted on disk. Version is retained for API compatibility.
 	Version          string
+	PersistedVersion string
+	// DesiredVersion identifies the resolved effective candidate; ServingVersion
+	// identifies the resolved effective live runtime.
+	DesiredVersion   string
 	ServingVersion   string
+	Conflict         bool
+	CurrentVersion   string
 	Reload           *server.ReloadResult
 	PendingRestart   *admin.PendingRestartStatus
 	Message          string
@@ -92,6 +100,9 @@ type ConfigApplyCoordinator struct {
 	LiveSnapshot   func() server.LiveSnapshot
 	WatchDigest    *atomic.Pointer[[32]byte]
 	PlannedRestart *PlannedRestartStore
+	// ReadConfigRaw reads the persisted config for baseline/CAS verification.
+	// Nil uses os.ReadFile(Path); tests may inject deterministic failures.
+	ReadConfigRaw func() ([]byte, error)
 
 	// RefreshState is called while applyMu is held before any state-dependent
 	// decision. It must reconcile the planned-restart marker with disk and
@@ -104,6 +115,11 @@ type ConfigApplyCoordinator struct {
 	// It receives the original request context so the terminal audit event can
 	// be attributed to the caller (H-05).
 	OnManagedApplyComplete func(admin.ApplyRequestContext, admin.ConfigApplyResult)
+
+	// beforePersist is a deterministic test barrier invoked after preflight and,
+	// for staging, after the prepared marker is written but before the final
+	// expected-baseline comparison. Production leaves it nil.
+	beforePersist func(ApplyMode)
 
 	mu      sync.Mutex
 	applyMu sync.Mutex
@@ -154,8 +170,17 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		}, nil
 	}
 
-	prevRaw, prevErr := os.ReadFile(c.Path)
-	previouslyExisted := !errors.Is(prevErr, os.ErrNotExist)
+	baselineHint := ctx.Baseline
+	ctx.Baseline = nil // do not retain raw configuration in the audit callback context
+	baseline, err := c.loadMutationBaseline(baselineHint)
+	if err != nil {
+		return ApplyResult{
+			OK:      false,
+			Mode:    mode,
+			Message: "The persisted configuration could not be read safely.",
+		}, err
+	}
+	prevRaw := baseline.Raw
 
 	// Block hot apply on any blocking planned-restart state: managed pending,
 	// external unmanaged divergence, or post-reconciliation inconsistency.
@@ -224,7 +249,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	}
 
 	if mode == ApplyStageRestart {
-		return c.applyStageRestart(cfg, prevCfg, data, prevRaw)
+		return c.applyStageRestart(cfg, prevCfg, data, baseline)
 	}
 
 	pfResult, err := c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightHot)
@@ -244,7 +269,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		return result, nil
 	}
 
-	return c.applyCandidate(ctx, data, pfResult.Candidate, prevRaw, previouslyExisted, mode)
+	return c.applyCandidate(ctx, data, pfResult.Candidate, baseline, mode)
 }
 
 // ApplyConfig applies a parsed configuration. It marshals the config and
@@ -377,7 +402,7 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 //  2. StageManaged writes .bak (fresh stage only) and prepared marker.
 //  3. atomicfile.Write writes the candidate.
 //  4. PromoteToStaged promotes the marker to "staged" only after the candidate write succeeds.
-func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, data, prevRaw []byte) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
 	// H-03: determine whether this is a staged update. If a managed staged
 	// restart is already pending, the new candidate replaces it but the
 	// original serving config remains the rollback base and the diff base.
@@ -397,7 +422,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 			}
 		}
 	} else {
-		baseRaw = prevRaw
+		baseRaw = baseline.Raw
 		diffBaseCfg = prevCfg
 	}
 
@@ -418,6 +443,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	// E3 (M-02): use pfResult.Candidate directly — Preflight.Apply already
 	// resolves secrets and validates the config, so a second NewCandidate call
 	// is redundant and produces a stale resolved copy.
+	persistedVersion := server.CanonicalVersion(pfResult.Candidate.Raw)
 	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
 	liveVersion := ""
 	if c.LiveSnapshot != nil {
@@ -432,10 +458,12 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	// the operator to use hot apply instead.
 	if len(subsystems) == 0 {
 		return ApplyResult{
-			OK:      false,
-			Mode:    ApplyStageRestart,
-			Version: desiredVersion,
-			Message: "No restart-required changes detected; use a hot apply instead.",
+			OK:               false,
+			Mode:             ApplyStageRestart,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			Message:          "No restart-required changes detected; use a hot apply instead.",
 		}, nil
 	}
 
@@ -443,42 +471,87 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	// originally-serving config, not the candidate. For updates StageManaged
 	// preserves the existing base fields; for fresh stages it uses these values.
 	marker := PlannedRestartMarker{
-		BaseServingVersion:   liveVersion,
-		BaseCanonicalVersion: liveVersion, // version of the live config, not the candidate
-		StagedRawSHA256:      sha256Hex(data),
-		StagedVersion:        desiredVersion,
-		PendingSubsystems:    subsystems,
+		BaseServingVersion:     liveVersion,
+		BaseCanonicalVersion:   baseline.Version,
+		StagedRawSHA256:        sha256Hex(data),
+		StagedVersion:          desiredVersion,
+		StagedPersistedVersion: persistedVersion,
+		PendingSubsystems:      subsystems,
+	}
+
+	// Bind staging to the exact bytes authorized by the HTTP handler before any
+	// recovery sidecar is written.
+	c.mu.Lock()
+	changed, currentVersion, verifyErr := c.verifyBaselineLocked(baseline)
+	c.mu.Unlock()
+	if verifyErr != nil {
+		return ApplyResult{OK: false, Mode: ApplyStageRestart, Version: persistedVersion, PersistedVersion: persistedVersion, DesiredVersion: desiredVersion, Message: "The persisted configuration could not be verified safely."}, verifyErr
+	}
+	if changed {
+		return c.conflictResult(ApplyStageRestart, persistedVersion, desiredVersion, currentVersion), nil
 	}
 
 	// Step 1+2: Write backup (baseRaw, fresh stage only) and prepared marker
 	// BEFORE writing the candidate to disk. StageManaged preserves the existing
 	// backup and base metadata when this is an update.
+	var previousMarker *PlannedRestartMarker
 	if c.PlannedRestart != nil {
+		previousMarker, _ = c.PlannedRestart.LoadMarker()
 		if err := c.PlannedRestart.StageManaged(baseRaw, data, marker); err != nil {
 			// Sidecar write failed; nothing has changed on disk yet. Return error.
 			return ApplyResult{
-				OK:      false,
-				Mode:    ApplyStageRestart,
-				Version: desiredVersion,
-				Message: "Failed to write planned-restart sidecar: " + err.Error(),
+				OK:               false,
+				Mode:             ApplyStageRestart,
+				Version:          persistedVersion,
+				PersistedVersion: persistedVersion,
+				DesiredVersion:   desiredVersion,
+				Message:          "Failed to write planned-restart sidecar: " + err.Error(),
 			}, err
 		}
 	}
+	if c.beforePersist != nil {
+		c.beforePersist(ApplyStageRestart)
+	}
 
-	// Step 3: Now that backup+marker are safely on disk, write the candidate.
+	// Step 3: Now that backup+marker are safely on disk, verify the same expected
+	// base again immediately before writing the candidate.
+	c.mu.Lock()
+	changed, currentVersion, verifyErr = c.verifyBaselineLocked(baseline)
+	if verifyErr != nil {
+		c.mu.Unlock()
+		if c.PlannedRestart != nil {
+			if cleanupErr := c.PlannedRestart.AbortPrepared(previousMarker); cleanupErr != nil {
+				return ApplyResult{OK: false, Mode: ApplyStageRestart, Version: persistedVersion, PersistedVersion: persistedVersion, DesiredVersion: desiredVersion, Message: "The staged recovery sidecar could not be rolled back safely."}, fmt.Errorf("%w: abort prepared stage after verification failure: %v", admin.ErrConfigStorageUnavailable, cleanupErr)
+			}
+		}
+		return ApplyResult{OK: false, Mode: ApplyStageRestart, Version: persistedVersion, PersistedVersion: persistedVersion, DesiredVersion: desiredVersion, Message: "The persisted configuration could not be verified safely."}, verifyErr
+	}
+	if changed {
+		c.mu.Unlock()
+		if c.PlannedRestart != nil {
+			if cleanupErr := c.PlannedRestart.AbortPrepared(previousMarker); cleanupErr != nil {
+				return ApplyResult{OK: false, Mode: ApplyStageRestart, Version: persistedVersion, PersistedVersion: persistedVersion, DesiredVersion: desiredVersion, Message: "The staged recovery sidecar could not be rolled back safely."}, fmt.Errorf("%w: abort prepared stage after baseline conflict: %v", admin.ErrConfigStorageUnavailable, cleanupErr)
+			}
+		}
+		return c.conflictResult(ApplyStageRestart, persistedVersion, desiredVersion, currentVersion), nil
+	}
 	rawDigest := sha256.Sum256(data)
 	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
+		c.mu.Unlock()
 		// Candidate write failed. The prepared marker is on disk but the config
 		// file is unchanged. Reconcile on the next startup will detect
 		// prepared+disk==base and clean up automatically.
 		return ApplyResult{
-			OK:      false,
-			Mode:    ApplyStageRestart,
-			Version: desiredVersion,
-			Message: "Failed to persist staged configuration; sidecar marker preserved for reconciliation on restart.",
+			OK:               false,
+			Mode:             ApplyStageRestart,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			Message:          "Failed to persist staged configuration; sidecar marker preserved for reconciliation on restart.",
 		}, err
 	}
 	c.suppressWatcher(rawDigest)
+	c.mu.Unlock()
 
 	// Step 4: promote the marker to "staged" only after the candidate write
 	// succeeds. A crash before this leaves marker="prepared" and disk==base,
@@ -486,10 +559,12 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	if c.PlannedRestart != nil {
 		if err := c.PlannedRestart.PromoteToStaged(data); err != nil {
 			return ApplyResult{
-				OK:      false,
-				Mode:    ApplyStageRestart,
-				Version: desiredVersion,
-				Message: "Failed to promote staged marker after candidate write: " + err.Error(),
+				OK:               false,
+				Mode:             ApplyStageRestart,
+				Version:          persistedVersion,
+				PersistedVersion: persistedVersion,
+				DesiredVersion:   desiredVersion,
+				Message:          "Failed to promote staged marker after candidate write: " + err.Error(),
 			}, err
 		}
 	}
@@ -501,7 +576,9 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg, prevCfg *config.Config, 
 	return ApplyResult{
 		OK:                    true,
 		Mode:                  ApplyStageRestart,
-		Version:               desiredVersion,
+		Version:               persistedVersion,
+		PersistedVersion:      persistedVersion,
+		DesiredVersion:        desiredVersion,
 		ServingVersion:        liveVersion,
 		PendingRestart:        c.plannedRestartStatus(),
 		Message:               msg,
@@ -542,6 +619,7 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 		Inconsistent:     st.Inconsistent,
 		Subsystems:       st.Subsystems,
 		StagedVersion:    st.StagedVersion,
+		PersistedVersion: st.PersistedVersion,
 		ServingVersion:   st.ServingVersion,
 	}
 	if !st.StagedAt.IsZero() {
@@ -550,9 +628,11 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 	return res
 }
 
-func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, data []byte, candidate *config.Candidate, prevRaw []byte, previouslyExisted bool, mode ApplyMode) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, data []byte, candidate *config.Candidate, baseline admin.MutationBaseline, mode ApplyMode) (ApplyResult, error) {
+	persistedVersion := server.CanonicalVersion(candidate.Raw)
 	desiredVersion := server.CanonicalVersion(candidate.Effective)
 	rawDigest := sha256.Sum256(data)
+	transactionStarted := time.Now()
 
 	id := c.nextID()
 	// resultCh has capacity 1 because the server sends exactly one terminal
@@ -573,11 +653,14 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	if snap := c.LiveSnapshot(); snap.EffectiveConfig != nil && snap.EffectiveConfig.Global.ReloadTimeout > 0 {
 		reloadTimeout = snap.EffectiveConfig.Global.ReloadTimeout
 	}
-	deadline := time.Now().Add(reloadTimeout.Std())
+	deadline := transactionStarted.Add(reloadTimeout.Std())
 
 	// Serialize file writes and staged state with the coordinator mutex. It is
 	// released before the reload wait so the async finalizer cannot deadlock
 	// with the HTTP goroutine; applyMu still prevents concurrent applies.
+	if c.beforePersist != nil {
+		c.beforePersist(mode)
+	}
 	c.mu.Lock()
 	// Finding 12: coordinator-level optimistic-concurrency CAS. prevRaw was read
 	// at the top of ApplyRaw WITHOUT c.mu held, and the candidate was
@@ -589,22 +672,31 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	// under c.mu, immediately before the write, and reject with a conflict when
 	// the on-disk base no longer matches what this apply prepared against. The
 	// HTTP layer maps a non-OK managed result to 409.
-	if c.baseChangedLocked(prevRaw, previouslyExisted) {
+	changed, currentVersion, verifyErr := c.verifyBaselineLocked(baseline)
+	if verifyErr != nil {
 		c.mu.Unlock()
 		return ApplyResult{
-			OK:      false,
-			Mode:    mode,
-			Version: desiredVersion,
-			Message: "The configuration file changed on disk since this edit was prepared; reload and try again.",
-		}, nil
+			OK:               false,
+			Mode:             mode,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			Message:          "The persisted configuration could not be verified safely.",
+		}, verifyErr
+	}
+	if changed {
+		c.mu.Unlock()
+		return c.conflictResult(mode, persistedVersion, desiredVersion, currentVersion), nil
 	}
 	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
 		c.mu.Unlock()
 		return ApplyResult{
-			OK:      false,
-			Mode:    mode,
-			Version: desiredVersion,
-			Message: "Failed to persist configuration.",
+			OK:               false,
+			Mode:             mode,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			Message:          "Failed to persist configuration.",
 		}, err
 	}
 
@@ -628,7 +720,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// Enqueue failed: the candidate file is on disk but the runtime will
 		// not reload. Restore the exact previous bytes and suppress the
 		// restoration echo so the watcher does not loop.
-		restoreErr := c.restorePreviousLocked(prevRaw, previouslyExisted, rawDigest)
+		restoreErr := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest)
 		c.inFlightState = ApplyInFlightNone
 		// Build structured truth with Persisted/Restored/FinalDiskVersion
 		// while still holding the lock so the disk read in withRestorationOutcome
@@ -639,23 +731,27 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			msg = "Reload enqueue failed; the candidate may remain on disk: " + restoreErr.Error()
 		}
 		terminal := ApplyResult{
-			ApplyID:   id,
-			OK:        false,
-			Mode:      mode,
-			Version:   desiredVersion,
-			Message:   msg,
-			Persisted: true,
+			ApplyID:          id,
+			OK:               false,
+			Mode:             mode,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			Message:          msg,
+			Persisted:        true,
 			Reload: &server.ReloadResult{
-				ID:          id,
-				Source:      server.ReloadSourceAdmin,
-				Outcome:     server.ReloadNotApplied,
-				Persisted:   true,
-				Published:   false,
-				FailedPhase: "enqueue",
-				Error:       err.Error(),
+				ID:             id,
+				Source:         server.ReloadSourceAdmin,
+				DesiredVersion: desiredVersion,
+				ServingVersion: server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
+				Outcome:        server.ReloadNotApplied,
+				Persisted:      true,
+				Published:      false,
+				FailedPhase:    "enqueue",
+				Error:          err.Error(),
 			},
 		}
-		terminal = c.withRestorationOutcome(terminal, prevRaw, previouslyExisted, rawDigest)
+		terminal = c.withRestorationOutcome(terminal, baseline.Raw, baseline.Exists, rawDigest)
 		// M-05: Move callback after unlock to prevent mutex wedge on panic.
 		c.mu.Unlock()
 		if c.OnManagedApplyComplete != nil {
@@ -696,7 +792,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 
 			if restoreNeeded {
 				c.mu.Lock()
-				if err := c.restorePreviousLocked(prevRaw, previouslyExisted, rawDigest); err != nil {
+				if err := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest); err != nil {
 					// Log the restoration failure; F-03 surfaces it through the
 					// result/audit path below when the synchronous path is still
 					// waiting. When it has already returned (saved_not_live), the
@@ -707,12 +803,12 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 				// C2 (N-05): build the terminal result while holding the lock so
 				// the disk read in withRestorationOutcome is atomic with the
 				// restoration and cannot race with a concurrent apply's write.
-				terminal = c.buildTerminalResult(mode, desiredVersion, terminalRR, prevRaw, previouslyExisted, rawDigest)
+				terminal = c.buildTerminalResult(mode, persistedVersion, desiredVersion, terminalRR, baseline.Raw, baseline.Exists, rawDigest)
 				c.mu.Unlock()
 			} else {
 				// Success path: buildTerminalResult does not read disk for OK
 				// results (no restoration occurred), so no lock is required.
-				terminal = c.buildTerminalResult(mode, desiredVersion, terminalRR, prevRaw, previouslyExisted, rawDigest)
+				terminal = c.buildTerminalResult(mode, persistedVersion, desiredVersion, terminalRR, baseline.Raw, baseline.Exists, rawDigest)
 			}
 
 			// H-05: build and emit the terminal managed outcome.
@@ -739,25 +835,27 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// Wait for restoration on failure so callers observe a known on-disk
 		// state before we return. On success buildTerminalResult is a no-op
 		// wait because inFlightState was already cleared.
-		res := c.decorateResultNoRestore(mode, desiredVersion, rr)
+		res := c.decorateResultNoRestore(mode, persistedVersion, desiredVersion, rr)
 		if !res.OK {
 			select {
 			case <-restoreDone:
 			case <-time.After(5 * time.Second):
 			}
 		}
-		return c.buildTerminalResult(mode, desiredVersion, rr, prevRaw, previouslyExisted, rawDigest), nil
+		return c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest), nil
 	case <-c.BaseCtx.Done():
 		// The process is shutting down; the finalizer will clear inFlightState
 		// once it observes BaseCtx cancellation. ApplyID is populated so any
 		// terminal outcome remains sequence-correlatable (M-05).
 		return ApplyResult{
-			ApplyID:        id,
-			OK:             true,
-			Mode:           mode,
-			Version:        desiredVersion,
-			ServingVersion: server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
-			Message:        "Configuration saved; the process is shutting down and the reload outcome is unknown.",
+			ApplyID:          id,
+			OK:               true,
+			Mode:             mode,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			ServingVersion:   server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
+			Message:          "Configuration saved; the process is shutting down and the reload outcome is unknown.",
 		}, nil
 	case <-time.After(waitTimeout):
 		// Finalizer goroutine now owns the restoration obligation. The result
@@ -766,60 +864,100 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// ApplyID is populated so the callback's monotonic sequence guard can
 		// correlate the async finalizer's later terminal result (M-05).
 		return ApplyResult{
-			ApplyID:        id,
-			OK:             true,
-			Mode:           mode,
-			Version:        desiredVersion,
-			ServingVersion: server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
-			Persisted:      true,
+			ApplyID:          id,
+			OK:               true,
+			Mode:             mode,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			ServingVersion:   server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
+			Persisted:        true,
 			Reload: &server.ReloadResult{
-				ID:        id,
-				Source:    server.ReloadSourceAdmin,
-				Outcome:   server.ReloadSavedNotLive,
-				Persisted: true,
-				TimedOut:  true,
-				StartedAt: deadline.Add(-candidate.Effective.Global.ReloadTimeout.Std()),
+				ID:             id,
+				Source:         server.ReloadSourceAdmin,
+				Outcome:        server.ReloadSavedNotLive,
+				Persisted:      true,
+				TimedOut:       true,
+				DesiredVersion: desiredVersion,
+				ServingVersion: server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
+				StartedAt:      transactionStarted,
 			},
 			Message: "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome.",
 		}, nil
 	}
 }
 
-// baseChangedLocked reports whether the on-disk configuration file changed since
-// the base snapshot (prevRaw) that this apply was preflighted and diffed
-// against. It re-reads the file while c.mu is held, immediately before the
-// candidate write, so it closes the time-of-check/time-of-use window against an
-// external writer that does not participate in applyMu (finding 12).
-//
-// It compares by content digest rather than version so an operator's manual
-// edit that is semantically equivalent but textually different is still treated
-// as a divergence — the apply was prepared against the exact previous bytes and
-// the coordinator must not silently overwrite bytes it never saw.
-//
-// The coordinator's own suppressed writes go through this same c.mu, so this can
-// never false-positive on a self-write: a managed apply holds applyMu for its
-// whole lifetime, and prevRaw is re-read at the top of each ApplyRaw.
-func (c *ConfigApplyCoordinator) baseChangedLocked(prevRaw []byte, previouslyExisted bool) bool {
-	if c.Path == "" {
-		return false
+// loadMutationBaseline uses the HTTP handler's exact authorized snapshot when
+// supplied. Context-free compatibility callers fall back to one coordinator
+// read, but read errors other than absence always fail closed.
+func (c *ConfigApplyCoordinator) loadMutationBaseline(hint *admin.MutationBaseline) (admin.MutationBaseline, error) {
+	if hint != nil {
+		baseline := *hint
+		baseline.Raw = append([]byte(nil), hint.Raw...)
+		return baseline, nil
 	}
-	current, err := os.ReadFile(c.Path)
+	if c.Path == "" {
+		return admin.MutationBaseline{}, nil
+	}
+	raw, err := c.readConfigRaw()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// File is gone now. If it existed when we prepared, that is a
-			// divergence; if it never existed, there is nothing to clobber.
-			return previouslyExisted
+			return admin.MutationBaseline{}, nil
 		}
-		// Cannot read the file to verify the base. Fail closed: treat as changed
-		// so we do not blindly overwrite an unknown on-disk state.
-		return true
+		return admin.MutationBaseline{}, fmt.Errorf("%w: read persisted config: %v", admin.ErrConfigStorageUnavailable, err)
 	}
-	if !previouslyExisted {
-		// We prepared against "no file", but a file exists now: an external
-		// writer created it in the window. Do not clobber it.
-		return true
+	cfg, err := config.Parse(raw)
+	if err != nil {
+		return admin.MutationBaseline{}, fmt.Errorf("%w: parse persisted config: %v", admin.ErrConfigStorageUnavailable, err)
 	}
-	return sha256.Sum256(current) != sha256.Sum256(prevRaw)
+	return admin.MutationBaseline{
+		Raw:     raw,
+		Digest:  sha256.Sum256(raw),
+		Version: server.CanonicalVersion(cfg),
+		Config:  cfg,
+		Exists:  true,
+	}, nil
+}
+
+// verifyBaselineLocked compares the current exact bytes with the snapshot used
+// for concurrency, authorization, reachability, history, and diffing. It
+// returns the current canonical raw version for a typed conflict response.
+func (c *ConfigApplyCoordinator) verifyBaselineLocked(baseline admin.MutationBaseline) (changed bool, currentVersion string, err error) {
+	if c.Path == "" {
+		return false, "", nil
+	}
+	current, err := c.readConfigRaw()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return baseline.Exists, "", nil
+		}
+		return false, "", fmt.Errorf("%w: verify persisted config: %v", admin.ErrConfigStorageUnavailable, err)
+	}
+	currentVersion = canonicalVersionFromRaw(current)
+	if !baseline.Exists {
+		return true, currentVersion, nil
+	}
+	return sha256.Sum256(current) != baseline.Digest, currentVersion, nil
+}
+
+func (c *ConfigApplyCoordinator) readConfigRaw() ([]byte, error) {
+	if c.ReadConfigRaw != nil {
+		return c.ReadConfigRaw()
+	}
+	return os.ReadFile(c.Path)
+}
+
+func (c *ConfigApplyCoordinator) conflictResult(mode ApplyMode, persistedVersion, desiredVersion, currentVersion string) ApplyResult {
+	return ApplyResult{
+		OK:               false,
+		Mode:             mode,
+		Version:          persistedVersion,
+		PersistedVersion: persistedVersion,
+		DesiredVersion:   desiredVersion,
+		Conflict:         true,
+		CurrentVersion:   currentVersion,
+		Message:          "The configuration file changed on disk since this edit was prepared; reload and try again.",
+	}
 }
 
 // logRestorationFailure records a restoration failure in a best-effort way.
@@ -913,11 +1051,14 @@ func canonicalVersionFromRaw(raw []byte) string {
 // buildTerminalResult constructs the final ApplyResult after the finalizer has
 // finished any restoration. It is used both for the synchronous success path
 // and for the async terminal outcome callback (H-05).
-func (c *ConfigApplyCoordinator) buildTerminalResult(mode ApplyMode, desiredVersion string, rr server.ReloadResult, prevRaw []byte, previouslyExisted bool, expectedCandidateDigest [32]byte) ApplyResult {
-	res := c.decorateResultNoRestore(mode, desiredVersion, rr)
+func (c *ConfigApplyCoordinator) buildTerminalResult(mode ApplyMode, persistedVersion, desiredVersion string, rr server.ReloadResult, prevRaw []byte, previouslyExisted bool, expectedCandidateDigest [32]byte) ApplyResult {
+	res := c.decorateResultNoRestore(mode, persistedVersion, desiredVersion, rr)
 	if res.OK {
 		res.Persisted = true
-		res.FinalDiskVersion = desiredVersion
+		res.FinalDiskVersion = persistedVersion
+		if current, err := os.ReadFile(c.Path); err == nil {
+			res.FinalDiskVersion = canonicalVersionFromRaw(current)
+		}
 		res.FinalServingVersion = rr.ServingVersion
 	} else {
 		res = c.withRestorationOutcome(res, prevRaw, previouslyExisted, expectedCandidateDigest)
@@ -928,19 +1069,21 @@ func (c *ConfigApplyCoordinator) buildTerminalResult(mode ApplyMode, desiredVers
 // decorateResultNoRestore builds the ApplyResult from a ReloadResult without
 // calling restorePrevious — restoration is handled by the restore closure in
 // applyCandidate to ensure exactly-once semantics.
-func (c *ConfigApplyCoordinator) decorateResultNoRestore(mode ApplyMode, desiredVersion string, rr server.ReloadResult) ApplyResult {
+func (c *ConfigApplyCoordinator) decorateResultNoRestore(mode ApplyMode, persistedVersion, desiredVersion string, rr server.ReloadResult) ApplyResult {
 	res := ApplyResult{
 		// M-05: ApplyID must be populated on every managed terminal result so
 		// the OnManagedApplyComplete monotonic sequence guard records normal
 		// applies (live, degraded, not-applied/restored, restoration-failed)
 		// instead of dropping them as sequence-0. The server echoes the
 		// request ID back into ReloadResult.ID.
-		ApplyID:        rr.ID,
-		OK:             rr.Outcome == server.ReloadAppliedLive || rr.Outcome == server.ReloadAppliedDegraded,
-		Mode:           mode,
-		Version:        desiredVersion,
-		ServingVersion: rr.ServingVersion,
-		Reload:         &rr,
+		ApplyID:          rr.ID,
+		OK:               rr.Outcome == server.ReloadAppliedLive || rr.Outcome == server.ReloadAppliedDegraded,
+		Mode:             mode,
+		Version:          persistedVersion,
+		PersistedVersion: persistedVersion,
+		DesiredVersion:   desiredVersion,
+		ServingVersion:   rr.ServingVersion,
+		Reload:           &rr,
 	}
 	switch rr.Outcome {
 	case server.ReloadAppliedLive:
