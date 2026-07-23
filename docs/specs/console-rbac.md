@@ -1,14 +1,18 @@
 # Console RBAC — design spec (HP-02 / SEQ-09)
 
-> **Status:** Design (implementable). Precursor to roadmap **Y3-02** (SSO/SAML/OIDC).
-> **Scope:** Role-based access control for the **admin API and Console** — named
-> principals, predefined **and** custom roles, scoped revocable tokens,
-> per-principal audit attribution, and authorization enforced at the API
-> boundary. External identity providers are explicitly **out of scope** here and
-> deferred to Y3-02.
+> **Status:** Implemented (Phase 3), in security remediation. This document
+> remains the authoritative design and permission-matrix reference; the model it
+> describes — named principals, predefined **and** custom roles, scoped revocable
+> tokens, per-principal audit attribution, and API-boundary enforcement — is now
+> built in `internal/rbac` and the admin server. Atomicity of the hot-reload
+> policy swap and self-lockout confirmation across every mutation endpoint are
+> the subjects of the active remediation pass; do not treat RBAC as
+> release-ready until that pass and its exact-head CI evidence close. Precursor
+> to roadmap **Y3-02** (SSO/SAML/OIDC); external identity providers remain **out
+> of scope** here and deferred to Y3-02.
 >
-> This document is concrete enough to implement in phases. The permission matrix
-> below is **exhaustive** over every admin endpoint that exists today.
+> The permission matrix below is **exhaustive** over every admin endpoint that
+> exists today.
 
 ## Contents
 
