@@ -105,10 +105,42 @@ post-promotion disk verification.
   retention; no success response precedes coherent marker+disk verification; no
   high-water check suppresses a legitimate audit event.
 
+## Implementation status
+
+The following pieces of this decision have landed and are covered by tests:
+
+- **Operation identity (AC-01):** `ApplyOperation` enum and `ApplyRequestContext.Operation`
+  in `internal/admin/server.go`, assigned by each write handler.
+- **Terminal ledger + exact-ID API (AC-02):** `internal/admin/managed_apply_registry.go`
+  and `GET /api/config/applies/{id}`.
+- **Coordinator finalizer ordering (AC-03):** `internal/app/config_apply.go` runs
+  terminal finalization before clearing the in-flight guard, closing `Finalized`,
+  or delivering the synchronous result.
+- **Durable-recording-before-high-water + operation-specific audit and bounded
+  metric labels (AC-04):** `internal/app/serve.go` callback ordering,
+  `finalizedAuditOperation` in `internal/admin/server.go`, and the
+  `operation`/`mode` labels on `jul_managed_apply_finalized_total`.
+- **History metadata sidecar (AC-05 storage):** `HistoryMetadata`,
+  `snapshotWithMeta`, and `getMeta` in `internal/admin/history.go`.
+- **Preview immutability (AC-07):** clone-before-mutate in
+  `internal/admin/patch_http.go` for the preview and candidate endpoints.
+- **Planned-restart linearization (AC-06):** `PromoteToStagedVerified` in
+  `internal/app/planned_restart.go`, driven under the coordinator mutex from
+  `internal/app/config_apply.go`.
+
+Still outstanding at the time of writing: moving history creation into
+terminalization (AC-05 wiring), the single `completeManagedApply` helper for
+all terminal paths (AC-03 completion), whole-transaction `reload_timeout`
+bounding (AC-08), the remaining Console correlation work (AC-09–AC-13), and the
+health/finalization degradation surface (AC-14).
+
 ## Related
 
-- `internal/admin/server.go` — `ApplyRequestContext`, `ApplyOperation`
-- `internal/app/managed_apply_registry.go` — terminal ledger
+- `internal/admin/server.go` — `ApplyRequestContext`, `ApplyOperation`, `finalizedAuditOperation`
+- `internal/admin/managed_apply_registry.go` — bounded terminal ledger
+- `internal/admin/history.go` — `HistoryMetadata` sidecar
+- `internal/app/planned_restart.go` — `PromoteToStagedVerified`
+- `internal/app/config_apply.go` — managed apply coordinator and finalizer ordering
 - `internal/config/candidate.go` — immutable candidate
 - ADR 0011 — ReloadPlan reload transaction
 - `docs/reload-semantics.md` — operator-facing reload semantics
