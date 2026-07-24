@@ -16,13 +16,7 @@ import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 
 vi.mock("@/features/config/CodeEditor.tsx", () => ({
-  CodeEditor: ({
-    value,
-    onChange,
-  }: {
-    value: string;
-    onChange: (v: string) => void;
-  }) => (
+  CodeEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <textarea
       aria-label="editor"
       value={value}
@@ -171,12 +165,7 @@ describe("ConfirmDialog", () => {
     const onConfirm = vi.fn();
     const onCancel = vi.fn();
     render(
-      <ConfirmDialog
-        title="Sure?"
-        confirmLabel="Do it"
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      >
+      <ConfirmDialog title="Sure?" confirmLabel="Do it" onConfirm={onConfirm} onCancel={onCancel}>
         body
       </ConfirmDialog>,
     );
@@ -216,7 +205,7 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(counters.apply).toBe(1);
     });
-    expect(await screen.findByText("Applied and live")).toBeInTheDocument();
+    expect(await screen.findByText("Applied -' runtime reloading")).toBeInTheDocument();
   });
 
   it("shows an apply-progress spinner while the apply request is in flight", async () => {
@@ -275,7 +264,7 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(applied).toBe(1);
     });
-    await screen.findByText("Applied and live");
+    await screen.findByText("Applied -' runtime reloading");
   });
 
   it("renders structured validation issues with their config path", async () => {
@@ -327,11 +316,17 @@ describe("ConfigPanel apply flow", () => {
     takePendingDraft(); // clear any leftover handoff state
     let patchApplies = 0;
     let rawApplyBaseVersion: string | null = null;
+    let configReads = 0;
     globalThis.fetch = vi.fn((input: string) => {
       const url = input;
       if (url === "/api/config") {
+        configReads += 1;
         return Promise.resolve(
-          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }),
+          json({
+            raw: configReads === 1 ? 'listen = ":8443"\n' : 'listen = ":9000"\n',
+            path: "/etc/jul.toml",
+            base_version: configReads === 1 ? "v1" : "v2",
+          }),
         );
       }
       if (url === "/api/config/patch/apply") {
@@ -388,11 +383,12 @@ describe("ConfigPanel apply flow", () => {
       expect(patchApplies).toBe(1);
     });
 
-    // Patch mode is exited and the editor is clean: baseline now equals the
-    // applied candidate, so a fresh "Apply changes" button is disabled.
+    // Patch mode is exited only after fetching the authoritative persisted raw
+    // configuration, so a fresh "Apply changes" button is disabled.
     const rawBtn = await screen.findByRole("button", { name: "Apply changes" });
     await waitFor(() => {
       expect(rawBtn).toBeDisabled();
+      expect(editor.value).toContain('listen = ":9000"');
     });
 
     // A follow-up raw edit applies with the *new* base_version (v2) returned by
@@ -447,9 +443,7 @@ describe("ConfigPanel apply flow", () => {
     );
 
     // The raw editor is replaced by a permission notice; the diff is still shown.
-    expect(
-      await screen.findByText(/Raw configuration preview is hidden/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Raw configuration preview is hidden/)).toBeInTheDocument();
     expect(screen.getByText(/1 change/)).toBeInTheDocument();
 
     const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
@@ -513,6 +507,239 @@ describe("ConfigPanel apply flow", () => {
       expect(applyBtn).toBeDisabled();
     });
   });
+
+  it("retries an admin-confirmed structured patch as the same patch operation", async () => {
+    takePendingDraft();
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn((input: string) => {
+      urls.push(input);
+      if (input === "/api/config")
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
+      if (
+        input === "/api/config/patch/apply" &&
+        urls.filter((u) => u.includes("patch/apply")).length === 1
+      ) {
+        return Promise.resolve(
+          json(
+            { ok: false, admin_change: true, message: "confirm", changes: ["admin token changes"] },
+            409,
+          ),
+        );
+      }
+      if (input === "/api/config/patch/apply?confirm_admin=true") {
+        return Promise.resolve(
+          json({
+            ok: true,
+            mode: "hot",
+            version: "v2",
+            summary: [],
+            diff: { summary: "done" },
+            reload: { id: "rl_1", outcome: "applied_live", published: true },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    setPendingDraft({
+      kind: "patch",
+      ops: [{ op: "server_toggle_http3", listen: ":8443", enabled: true }],
+      baseVersion: "v1",
+      previewDiff: { summary: "admin patch" },
+      candidate: 'listen = ":8443"\n',
+    });
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Apply patch" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    expect(await screen.findByText("Confirm admin access change?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply and change admin access" }));
+    await waitFor(() => {
+      expect(urls).toContain("/api/config/patch/apply?confirm_admin=true");
+    });
+    expect(urls.filter((url) => url.includes("/api/config/apply"))).toHaveLength(0);
+  });
+
+  it("stages a restart-required patch without raw config access", async () => {
+    takePendingDraft();
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn((input: string) => {
+      urls.push(input);
+      if (input === "/api/config") return Promise.resolve(json({ error: "forbidden" }, 403));
+      if (input === "/api/config/patch/apply") {
+        return Promise.resolve(
+          json(
+            {
+              ok: false,
+              restart_required: true,
+              can_stage: true,
+              message: "restart",
+              pending_restart: {
+                state: "none",
+                managed: false,
+                staged: false,
+                subsystems: ["global"],
+                discard_available: false,
+                inconsistent: false,
+              },
+            },
+            409,
+          ),
+        );
+      }
+      if (input === "/api/config/patch/apply?mode=stage_restart") {
+        return Promise.resolve(
+          json({
+            ok: true,
+            mode: "stage_restart",
+            version: "v2",
+            summary: [],
+            diff: { summary: "staged" },
+            staged_restart_is_update: false,
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    setPendingDraft({
+      kind: "patch",
+      ops: [{ op: "server_toggle_http3", listen: ":8443", enabled: true }],
+      baseVersion: "v1",
+      previewDiff: { summary: "restart patch" },
+    });
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Apply patch" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    const offer = await screen.findByText("Save for next restart?");
+    const offerBox = offer.parentElement;
+    const offerButton = offerBox?.querySelector("button");
+    if (!offerButton) throw new Error("stage offer button missing");
+    fireEvent.click(offerButton);
+    const dialog = await screen.findByRole("dialog", { name: "Save for next restart?" });
+    const confirm = dialog.querySelector("button.bg-jul-accent");
+    if (!confirm) throw new Error("stage confirmation button missing");
+    fireEvent.click(confirm);
+    await waitFor(() => {
+      expect(urls).toContain("/api/config/patch/apply?mode=stage_restart");
+    });
+    expect(urls.some((url) => url.startsWith("/api/config/apply"))).toBe(false);
+  });
+
+  it("correlates saved-not-live only to the matching apply id and refreshes restored config", async () => {
+    let overviewReads = 0;
+    let configReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        configReads += 1;
+        return Promise.resolve(
+          json({
+            raw: configReads === 1 ? 'listen = ":8443"\n' : 'listen = ":restored"\n',
+            base_version: configReads === 1 ? "v1" : "v-restored",
+          }),
+        );
+      }
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/apply?base_version=v1") {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_7",
+              mode: "hot",
+              version: "v2",
+              persisted: true,
+              reload: {
+                id: "rl_7",
+                outcome: "saved_not_live",
+                persisted: true,
+                timed_out: true,
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      if (input === "/api/runtime/overview") {
+        overviewReads += 1;
+        if (overviewReads === 1) {
+          return Promise.resolve(
+            json({
+              product: "jul",
+              version: "1",
+              status: [],
+              last_managed_apply: {
+                id: "rl_99",
+                mode: "hot",
+                ok: true,
+                outcome: "applied_live",
+                completed_at: "2026-01-01T00:00:00Z",
+              },
+            }),
+          );
+        }
+        return Promise.resolve(
+          json({
+            product: "jul",
+            version: "1",
+            status: [],
+            last_managed_apply: {
+              id: "rl_7",
+              mode: "hot",
+              ok: false,
+              outcome: "not_applied",
+              restored: true,
+              final_disk_version: "v-restored",
+              final_serving_version: "live-v1",
+              completed_at: "2026-01-01T00:00:01Z",
+            },
+            last_reload: {
+              id: "rl_7",
+              outcome: "not_applied",
+              failed_phase: "prepare",
+              error: "build failed",
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(overviewReads).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 4000 },
+    );
+    expect(
+      await screen.findByText("Apply rejected — previous configuration restored"),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(editor.value).toContain(":restored");
+    });
+  });
 });
 
 describe("HistoryPanel rollback flow", () => {
@@ -534,6 +761,126 @@ describe("HistoryPanel rollback flow", () => {
     await waitFor(() => {
       expect(counters.rollback).toBe(1);
     });
+  });
+
+  it("keeps rollback open and retries the same snapshot after admin confirmation", async () => {
+    let rollbacks = 0;
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn((input: string) => {
+      urls.push(input);
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "admin change" }));
+      if (input.startsWith("/api/config/rollback")) {
+        rollbacks += 1;
+        if (rollbacks === 1)
+          return Promise.resolve(
+            json(
+              {
+                ok: false,
+                admin_change: true,
+                message: "confirm rollback",
+                changes: ["admin token changes"],
+              },
+              409,
+            ),
+          );
+        return Promise.resolve(json({ ok: true, mode: "hot", status: "rolled back", id: "s1" }));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    expect(await screen.findByText("Confirm admin access rollback?")).toBeInTheDocument();
+    expect(screen.getByText("admin token changes")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and roll back" }));
+    await waitFor(() => {
+      expect(urls).toContain("/api/config/rollback?confirm_admin=true");
+    });
+  });
+
+  it("keeps a provisional rollback open until its correlated terminal result", async () => {
+    let overviewReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/rollback") {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_rb",
+              mode: "hot",
+              reload: {
+                id: "rl_rb",
+                outcome: "saved_not_live",
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      if (input === "/api/runtime/overview") {
+        overviewReads += 1;
+        return Promise.resolve(
+          json({
+            product: "jul",
+            version: "1",
+            status: [],
+            ...(overviewReads > 1
+              ? {
+                  last_managed_apply: {
+                    id: "rl_rb",
+                    mode: "hot",
+                    ok: true,
+                    outcome: "applied_live",
+                    completed_at: "2026-01-01T00:00:01Z",
+                  },
+                }
+              : {
+                  last_managed_apply: {
+                    id: "other",
+                    mode: "hot",
+                    ok: true,
+                    outcome: "applied_live",
+                    completed_at: "2026-01-01T00:00:00Z",
+                  },
+                }),
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    expect(await screen.findByText(/live result is still pending/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Roll back to this snapshot?" })).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByRole("dialog", { name: "Roll back to this snapshot?" }),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 4000 },
+    );
   });
 });
 

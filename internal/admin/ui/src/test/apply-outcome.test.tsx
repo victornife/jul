@@ -13,11 +13,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import {
-  deriveApplyOutcome,
-  streamReloadFailure,
-  type ApplyOutcome,
-} from "@/lib/applyOutcome.ts";
+import { deriveApplyOutcome, streamReloadFailure, type ApplyOutcome } from "@/lib/applyOutcome.ts";
 import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
 
 afterEach(() => {
@@ -136,6 +132,7 @@ describe("deriveApplyOutcome", () => {
       runtimeObserved: true,
       streamStatus: "ok",
       reloadTimedOut: true,
+      published: true,
     });
     expect(o.kind).toBe("reload-timed-out");
     expect(o.severity).toBe("warning");
@@ -152,6 +149,7 @@ describe("deriveApplyOutcome", () => {
       runtimeObserved: false,
       streamStatus: "failed: bind error",
       reloadTimedOut: true,
+      published: true,
     });
     expect(o.kind).toBe("reload-timed-out");
   });
@@ -197,7 +195,12 @@ describe("ApplyOutcomeBanner", () => {
   it("renders a full-live apply as polite status", () => {
     render(
       <ApplyOutcomeBanner
-        outcome={bannerFor({ accepted: true, pendingReload: true, runtimeObserved: true, streamStatus: "ok" })}
+        outcome={bannerFor({
+          accepted: true,
+          pendingReload: true,
+          runtimeObserved: true,
+          streamStatus: "ok",
+        })}
       />,
     );
     const el = screen.getByRole("status");
@@ -247,6 +250,7 @@ describe("ApplyOutcomeBanner", () => {
           runtimeObserved: true,
           streamStatus: "ok",
           reloadTimedOut: true,
+          published: true,
         })}
       />,
     );
@@ -348,11 +352,64 @@ describe("ApplyOutcomeBanner — reload-timed-out and capabilities (continued)",
           runtimeObserved: true,
           streamStatus: "ok",
           reloadTimedOut: true,
+          published: true,
         })}
       />,
     );
     const el = screen.getByRole("alert");
     expect(el).toHaveTextContent("reload exceeded");
+  });
+
+  it("treats a timed-out subsystem as degradation", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "applied_degraded",
+      published: true,
+      admin: { status: "timed_out", error: "policy install exceeded deadline" },
+    });
+    expect(o.kind).toBe("partial-reload");
+    expect(o.failures[0]?.name).toBe("admin subsystem");
+  });
+
+  it("renders not-applied plus restored without claiming live", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "not_applied",
+      persisted: true,
+      restored: true,
+      reloadError: "prepare failed",
+    });
+    expect(o.kind).toBe("rejected-restored");
+    expect(o.message.toLowerCase()).not.toContain("now live");
+  });
+
+  it("distinguishes restoration failure", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "not_applied",
+      persisted: true,
+      restoreError: "disk digest mismatch",
+    });
+    expect(o.kind).toBe("restoration-failed");
+    expect(o.blocking).toBe(true);
+  });
+
+  it("classifies an enqueue rejection before generic restored handling", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "not_applied",
+      enqueueFailed: true,
+      restored: true,
+    });
+    expect(o.kind).toBe("enqueue-failed");
   });
 
   it("shows the capability tally only for a non-blocking outcome", () => {

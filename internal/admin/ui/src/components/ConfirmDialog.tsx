@@ -10,6 +10,8 @@ export interface ConfirmDialogProps {
   readonly title: string;
   readonly confirmLabel: string;
   readonly busy?: boolean;
+  readonly confirmDisabled?: boolean;
+  readonly cancelDisabled?: boolean;
   readonly danger?: boolean;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
@@ -26,6 +28,8 @@ export function ConfirmDialog({
   title,
   confirmLabel,
   busy = false,
+  confirmDisabled = false,
+  cancelDisabled = false,
   danger = false,
   onConfirm,
   onCancel,
@@ -41,13 +45,13 @@ export function ConfirmDialog({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
-      if (e.key === "Escape" && !busy) onCancel();
+      if (e.key === "Escape" && !busy && !cancelDisabled) onCancel();
     }
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [busy, onCancel]);
+  }, [busy, cancelDisabled, onCancel]);
 
   return (
     <div
@@ -56,14 +60,18 @@ export function ConfirmDialog({
       aria-modal="true"
       aria-label={title}
     >
-      <div className="flex w-full max-w-lg flex-col gap-4 rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl outline-none" ref={dialogRef} tabIndex={-1}>
+      <div
+        className="flex w-full max-w-lg flex-col gap-4 rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl outline-none"
+        ref={dialogRef}
+        tabIndex={-1}
+      >
         <h2 className="text-lg font-semibold text-jul-text">{title}</h2>
         <div className="text-sm text-jul-muted">{children}</div>
         <div className="flex justify-end gap-3 pt-2">
           <button
             type="button"
             onClick={onCancel}
-            disabled={busy}
+            disabled={busy || cancelDisabled}
             className="rounded-md border border-jul-border px-4 py-1.5 text-sm text-jul-muted hover:text-jul-text disabled:opacity-50"
           >
             Cancel
@@ -72,7 +80,7 @@ export function ConfirmDialog({
             ref={confirmRef}
             type="button"
             onClick={onConfirm}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             className={`rounded-md px-4 py-1.5 text-sm font-medium disabled:opacity-50 ${
               danger
                 ? "bg-jul-danger/90 text-jul-bg hover:bg-jul-danger"

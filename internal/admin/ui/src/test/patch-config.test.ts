@@ -9,6 +9,7 @@ import {
   applyPatchBatch,
   ConfigRejectedError,
   ConfigConflictError,
+  ConfigAdminChangeError,
   ApiError,
 } from "@/api/client.ts";
 
@@ -180,7 +181,11 @@ describe("patchConfig", () => {
     });
     const res = await patchConfig({ op: "server_toggle_http3", listen: ":443", enabled: true });
     expect(res.summary).toContain("HTTP/3");
-    expect(JSON.parse(seenBody)).toMatchObject({ op: "server_toggle_http3", listen: ":443", enabled: true });
+    expect(JSON.parse(seenBody)).toMatchObject({
+      op: "server_toggle_http3",
+      listen: ":443",
+      enabled: true,
+    });
   });
 
   it("serializes a server h2c toggle by listen", async () => {
@@ -197,7 +202,11 @@ describe("patchConfig", () => {
     });
     const res = await patchConfig({ op: "server_toggle_h2c", listen: ":8080", enabled: false });
     expect(res.summary).toContain("h2c");
-    expect(JSON.parse(seenBody)).toMatchObject({ op: "server_toggle_h2c", listen: ":8080", enabled: false });
+    expect(JSON.parse(seenBody)).toMatchObject({
+      op: "server_toggle_h2c",
+      listen: ":8080",
+      enabled: false,
+    });
   });
 
   it("surfaces validation_errors when the candidate would not build", async () => {
@@ -211,7 +220,7 @@ describe("patchConfig", () => {
           {
             code: "unknown",
             path: "",
-            summary: "proxy_pass references unknown upstream \"ghost\"",
+            summary: 'proxy_pass references unknown upstream "ghost"',
             detail: "",
             severity: "error",
           },
@@ -243,7 +252,14 @@ describe("patchConfig", () => {
   it("throws ApiError on a non-structured transport failure", async () => {
     mockFetch(() => new Response("boom", { status: 500 }));
     await expect(
-      patchConfig({ op: "route_toggle_cache", listen: ":80", server_names: [], match_type: "prefix", path: "/", enabled: true }),
+      patchConfig({
+        op: "route_toggle_cache",
+        listen: ":80",
+        server_names: [],
+        match_type: "prefix",
+        path: "/",
+        enabled: true,
+      }),
     ).rejects.toBeInstanceOf(ApiError);
   });
 });
@@ -307,7 +323,10 @@ describe("applyPatchBatch", () => {
 
   it("throws ConfigRejectedError on a 400 structured rejection", async () => {
     mockFetch(() =>
-      json({ ok: false, message: "Operation 2 could not be applied; no change was made.", errors: [] }, 400),
+      json(
+        { ok: false, message: "Operation 2 could not be applied; no change was made.", errors: [] },
+        400,
+      ),
     );
     await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ConfigRejectedError);
   });
@@ -316,5 +335,27 @@ describe("applyPatchBatch", () => {
     mockFetch(() => new Response("boom", { status: 500 }));
     await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ApiError);
   });
-});
 
+  it("recognizes admin confirmation and retries with confirm_admin", async () => {
+    let seen = "";
+    mockFetch((url) => {
+      seen = url;
+      return json({ ok: true, mode: "stage_restart", summary: [], diff: { summary: "ok" } });
+    });
+    await applyPatchBatch([op], "base", "stage_restart", true);
+    expect(seen).toBe("/api/config/patch/apply?mode=stage_restart&confirm_admin=true");
+
+    mockFetch(() =>
+      json(
+        {
+          ok: false,
+          admin_change: true,
+          message: "confirm patch",
+          changes: ["admin token changes"],
+        },
+        409,
+      ),
+    );
+    await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ConfigAdminChangeError);
+  });
+});

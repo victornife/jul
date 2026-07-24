@@ -11,16 +11,35 @@ import { z } from "zod";
 // apply response and as `last_reload` in the runtime overview. Keeping one
 // schema avoids drift between the two consumption paths.
 
+export const ReloadSubsystemStatusSchema = z.enum([
+  "ok",
+  "failed",
+  "timed_out",
+  "skipped",
+  "not_run",
+]);
+export const ReloadOutcomeSchema = z.enum([
+  "applied_live",
+  "applied_degraded",
+  "not_applied",
+  "saved_not_live",
+]);
+
 const ReloadSubsystemResultSchema = z.object({
-  status: z.string().optional(),
+  // Go serializes zero-value subsystem results as {status:""}. Treat that as
+  // absent for provisional and pre-Publish results.
+  status: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    ReloadSubsystemStatusSchema.optional(),
+  ),
   duration_ms: z.number().optional(),
   error: z.string().optional(),
 });
 
 export const ReloadResultSchema = z.object({
   id: z.string().optional(),
-  source: z.string().optional(),
-  outcome: z.string().optional(),
+  source: z.union([z.string(), z.number()]).optional(),
+  outcome: ReloadOutcomeSchema.optional(),
   desired_version: z.string().optional(),
   serving_version: z.string().optional(),
   started_at: z.string().optional(),
@@ -38,6 +57,27 @@ export const ReloadResultSchema = z.object({
   error: z.string().optional(),
 });
 export type ReloadResult = z.infer<typeof ReloadResultSchema>;
+
+export const PendingRestartStatusSchema = z.object({
+  state: z.enum(["none", "managed_staged", "external_divergence", "inconsistent"]),
+  managed: z.boolean(),
+  staged: z.boolean(),
+  external: z.boolean().optional(),
+  staged_at: z.string().optional(),
+  staged_version: z.string().optional(),
+  persisted_version: z.string().optional(),
+  serving_version: z.string().optional(),
+  subsystems: z.array(z.string()).optional(),
+  discard_available: z.boolean(),
+  inconsistent: z.boolean(),
+});
+export type PendingRestartStatus = z.infer<typeof PendingRestartStatusSchema>;
+
+const ApplyPendingRestartStatusSchema = PendingRestartStatusSchema.extend({
+  // Older mutation responses predate the explicit state enum. The dedicated
+  // status endpoint and runtime overview remain strict.
+  state: PendingRestartStatusSchema.shape.state.optional(),
+});
 
 // ── Design-token helpers ─────────────────────────────────────────────────────
 
@@ -196,7 +236,8 @@ export function describeApiError(error: unknown, resource: string): ApiErrorDesc
         status,
         retryable: true,
         title: "Out of date",
-        message: error.message || `${resource} changed on the server. Reload to see the latest state.`,
+        message:
+          error.message || `${resource} changed on the server. Reload to see the latest state.`,
       };
     }
     if (status === 429) {
@@ -248,7 +289,8 @@ export function describeApiError(error: unknown, resource: string): ApiErrorDesc
     kind: "unknown",
     retryable: true,
     title: "Something went wrong",
-    message: error instanceof Error && error.message ? error.message : `Could not load ${resource}.`,
+    message:
+      error instanceof Error && error.message ? error.message : `Could not load ${resource}.`,
   };
 }
 
@@ -331,7 +373,7 @@ export const ManagedApplyOutcomeSchema = z.object({
   id: z.string(),
   mode: z.string(),
   ok: z.boolean(),
-  outcome: z.string(),
+  outcome: ReloadOutcomeSchema,
   restored: z.boolean().optional(),
   restore_error: z.string().optional(),
   final_disk_version: z.string().optional(),
@@ -461,12 +503,14 @@ export const LocationProjectionSchema = z.object({
   cache: z.boolean(),
   compression: z.boolean().default(false),
   rate_limit: z.boolean().default(false),
-  rate_limit_detail: z.object({
-    enabled: z.boolean(),
-    rate: z.number().optional(),
-    burst: z.number().optional(),
-    key: z.string().optional(),
-  }).optional(),
+  rate_limit_detail: z
+    .object({
+      enabled: z.boolean(),
+      rate: z.number().optional(),
+      burst: z.number().optional(),
+      key: z.string().optional(),
+    })
+    .optional(),
   secure: z.boolean(),
   require_client_cert: z.boolean().default(false),
   upstream: z.string().optional(),
@@ -867,12 +911,27 @@ export function fetchHistorySnapshot(id: string): Promise<HistorySnapshot> {
   );
 }
 
-export async function rollback(id: string): Promise<void> {
-  await api("/config/rollback", {
+export async function rollback(id: string, confirmAdmin = false): Promise<ApplyResult> {
+  const headers = new Headers({ "Content-Type": "application/json", Accept: "application/json" });
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const query = confirmAdmin ? "?confirm_admin=true" : "";
+  const resp = await fetch(`/api/config/rollback${query}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ id }),
   });
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
+    classifyApplyFailure("/config/rollback", resp.status, data);
+  }
+  return parseConfigMutationResult(data);
 }
 
 // ── Planned restart (P2-04) ──────────────────────────────────────────────────
@@ -883,20 +942,6 @@ export async function rollback(id: string): Promise<void> {
  * discard_available=true and carry version/subsystem metadata; external ones
  * have managed=false and discard_available=false.
  */
-export const PendingRestartStatusSchema = z.object({
-  state: z.enum(["none", "managed_staged", "external_divergence", "inconsistent"]),
-  managed: z.boolean(),
-  staged: z.boolean(),
-  external: z.boolean().optional(),
-  staged_at: z.string().optional(),
-  staged_version: z.string().optional(),
-  serving_version: z.string().optional(),
-  subsystems: z.array(z.string()).optional(),
-  discard_available: z.boolean(),
-  inconsistent: z.boolean(),
-});
-export type PendingRestartStatus = z.infer<typeof PendingRestartStatusSchema>;
-
 export const PendingRestartResponseSchema = z.object({
   pending: z.boolean(),
   status: PendingRestartStatusSchema.optional(),
@@ -908,9 +953,7 @@ export type PendingRestartResponse = z.infer<typeof PendingRestartResponseSchema
  * when no staged restart exists (never 404).
  */
 export function fetchPendingRestart(): Promise<PendingRestartResponse> {
-  return api<unknown>("/config/pending-restart").then((d) =>
-    PendingRestartResponseSchema.parse(d),
-  );
+  return api<unknown>("/config/pending-restart").then((d) => PendingRestartResponseSchema.parse(d));
 }
 
 /**
@@ -1160,9 +1203,26 @@ export type ConfigPatch =
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch }
   | { op: "server_toggle_http3"; listen: string; enabled: boolean }
   | { op: "server_toggle_h2c"; listen: string; enabled: boolean }
-  | { op: "server_set_client_auth"; listen: string; server_names: string[]; client_auth: ClientAuthPatch }
-  | { op: "location_add"; listen: string; server_names?: string[]; match_set: LocationMatchPatch; action: LocationActionPatch }
-  | { op: "location_remove"; listen: string; server_names?: string[]; match_type: string; path: string }
+  | {
+      op: "server_set_client_auth";
+      listen: string;
+      server_names: string[];
+      client_auth: ClientAuthPatch;
+    }
+  | {
+      op: "location_add";
+      listen: string;
+      server_names?: string[];
+      match_set: LocationMatchPatch;
+      action: LocationActionPatch;
+    }
+  | {
+      op: "location_remove";
+      listen: string;
+      server_names?: string[];
+      match_type: string;
+      path: string;
+    }
   | { op: "upstream_add"; upstream: string; address: string; weight?: number; strategy?: string }
   | { op: "upstream_remove"; upstream: string }
   | ({ op: "location_toggle_require_client_cert"; enabled: boolean } & RouteTarget);
@@ -1309,7 +1369,11 @@ export async function patchConfigBatch(
         rejected.data.errors ?? [],
       );
     }
-    throw new ApiError("/config/patch/preview", resp.status, `${String(resp.status)} ${resp.statusText}`);
+    throw new ApiError(
+      "/config/patch/preview",
+      resp.status,
+      `${String(resp.status)} ${resp.statusText}`,
+    );
   }
   return PatchResultSchema.parse(data);
 }
@@ -1363,8 +1427,8 @@ export const ReloadSnapshotSchema = z.object({
 });
 export type ReloadSnapshot = z.infer<typeof ReloadSnapshotSchema>;
 
-export const ApplyResultSchema = z.object({
-  ok: z.literal(true),
+const ConfigApplyResultBaseSchema = z.object({
+  ok: z.boolean(),
   // apply_id is the monotonic transaction ID, present even when reload is absent
   // (e.g., enqueue failure). Used for outcome correlation and sequence guarding.
   apply_id: z.string().optional(),
@@ -1380,9 +1444,24 @@ export const ApplyResultSchema = z.object({
   // the raw editor's optimistic-concurrency token so a follow-up edit does not
   // trip a spurious conflict.
   version: z.string().optional(),
+  persisted_version: z.string().optional(),
+  desired_version: z.string().optional(),
   serving_version: z.string().optional(),
+  conflict: z.boolean().optional(),
+  current_version: z.string().optional(),
+  admin_change: z.boolean().optional(),
+  changes: z.array(z.string()).optional(),
+  restart_required: z.boolean().optional(),
+  can_stage: z.boolean().optional(),
+  validation_errors: z.array(z.string()).optional(),
+  persisted: z.boolean().optional(),
+  restored: z.boolean().optional(),
+  restore_error: z.string().optional(),
+  final_disk_version: z.string().optional(),
+  final_serving_version: z.string().optional(),
+  staged_restart_is_update: z.boolean().optional(),
   message: z.string().optional(),
-  status: z.array(FeatureStatusSchema).optional(),
+  status: z.union([z.array(FeatureStatusSchema), z.string()]).optional(),
   // previous_reload is the outcome of the most recent reload before this apply.
   // When timed_out is true the prior reload exceeded reload_timeout; the new
   // config is serving but the slow path should be investigated.
@@ -1393,19 +1472,16 @@ export const ApplyResultSchema = z.object({
   reload: ReloadResultSchema.optional(),
   // pending_restart is set when mode=stage_restart and the staged config is now
   // waiting for a process restart to take effect.
-  pending_restart: z
-    .object({
-      managed: z.boolean(),
-      staged: z.boolean(),
-      staged_at: z.string().optional(),
-      staged_version: z.string().optional(),
-      serving_version: z.string().optional(),
-      subsystems: z.array(z.string()).optional(),
-      discard_available: z.boolean(),
-      inconsistent: z.boolean(),
-    })
-    .optional(),
+  pending_restart: ApplyPendingRestartStatusSchema.optional(),
+  errors: z.array(ValidationIssueSchema).optional(),
+  id: z.string().optional(),
 });
+export const ApplyResultSchema = ConfigApplyResultBaseSchema.transform((value) => ({
+  ...value,
+  status: Array.isArray(value.status) ? value.status : undefined,
+  mutation_status: typeof value.status === "string" ? value.status : undefined,
+  mutation_id: value.id,
+}));
 export type ApplyResult = z.infer<typeof ApplyResultSchema>;
 
 /**
@@ -1413,6 +1489,96 @@ export type ApplyResult = z.infer<typeof ApplyResultSchema>;
  * for the next process restart without changing the live runtime.
  */
 export type ApplyMode = "hot" | "stage_restart";
+
+export type ConfigApplyErrorKind =
+  | "pending-restart"
+  | "not-applied"
+  | "enqueue"
+  | "unavailable"
+  | "rejected";
+
+export class ConfigApplyOutcomeError extends ApiError {
+  constructor(
+    path: string,
+    status: number,
+    public readonly kind: ConfigApplyErrorKind,
+    public readonly result: ApplyResult,
+  ) {
+    super(path, status, result.message ?? "Configuration apply failed.");
+    this.name = "ConfigApplyOutcomeError";
+  }
+}
+
+function parseApplyResult(data: unknown): ApplyResult | null {
+  const parsed = ApplyResultSchema.safeParse(data);
+  return parsed.success ? parsed.data : null;
+}
+
+const LegacyConfigMutationResponseSchema = z
+  .object({
+    status: z.string(),
+    id: z.string().optional(),
+  })
+  .transform((value) =>
+    ApplyResultSchema.parse({
+      ok: true,
+      status: value.status,
+      id: value.id,
+    }),
+  );
+
+function parseConfigMutationResult(data: unknown): ApplyResult {
+  const managed = ApplyResultSchema.safeParse(data);
+  if (managed.success) return managed.data;
+  return LegacyConfigMutationResponseSchema.parse(data);
+}
+
+function classifyApplyFailure(path: string, status: number, data: unknown): never {
+  const result = parseApplyResult(data);
+  const conflict = ConflictBodySchema.safeParse(data);
+  if (conflict.success && conflict.data.admin_change) {
+    throw new ConfigAdminChangeError(
+      conflict.data.message ??
+        "This change affects how you reach the admin console; confirm to proceed.",
+      conflict.data.changes ?? [],
+    );
+  }
+  if (conflict.success && conflict.data.restart_required) {
+    throw new ConfigRestartRequiredError(
+      conflict.data.message ?? "This change requires a server restart to take effect.",
+      conflict.data.can_stage ?? false,
+      conflict.data.pending_restart?.subsystems ?? [],
+    );
+  }
+  if (conflict.success && conflict.data.conflict) {
+    throw new ConfigConflictError(
+      conflict.data.message ??
+        "The configuration changed since this edit was prepared; reload and try again.",
+      conflict.data.current_version,
+    );
+  }
+  const rejected = ValidationResultSchema.safeParse(data);
+  if (status === 400 && rejected.success) {
+    throw new ConfigRejectedError(
+      rejected.data.message ?? "The configuration was rejected.",
+      rejected.data.errors ?? [],
+    );
+  }
+  if (result) {
+    const kind: ConfigApplyErrorKind =
+      result.reload?.failed_phase === "enqueue"
+        ? "enqueue"
+        : result.reload?.outcome === "not_applied"
+          ? "not-applied"
+          : result.pending_restart !== undefined
+            ? "pending-restart"
+            : status === 503
+              ? "unavailable"
+              : "rejected";
+    throw new ConfigApplyOutcomeError(path, status, kind, result);
+  }
+  throw new ApiError(path, status, `HTTP ${String(status)}`);
+}
 
 /**
  * Applies a candidate config through the authoritative write path and resolves
@@ -1447,37 +1613,7 @@ export async function applyConfig(
   }
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
-    if (resp.status === 409) {
-      const conflict = ConflictBodySchema.safeParse(data);
-      if (conflict.success && conflict.data.restart_required) {
-        throw new ConfigRestartRequiredError(
-          conflict.data.message ?? "This change requires a server restart to take effect.",
-          conflict.data.can_stage ?? false,
-          conflict.data.pending_restart?.subsystems ?? [],
-        );
-      }
-      if (conflict.success && conflict.data.admin_change) {
-        throw new ConfigAdminChangeError(
-          conflict.data.message ??
-            "This change affects how you reach the admin console; confirm to proceed.",
-          conflict.data.changes ?? [],
-        );
-      }
-      throw new ConfigConflictError(
-        conflict.success && conflict.data.message
-          ? conflict.data.message
-          : "The configuration changed since this edit was prepared; reload and try again.",
-        conflict.success ? conflict.data.current_version : undefined,
-      );
-    }
-    const rejected = ValidationResultSchema.safeParse(data);
-    if (rejected.success) {
-      throw new ConfigRejectedError(
-        rejected.data.message ?? "The configuration was rejected.",
-        rejected.data.errors ?? [],
-      );
-    }
-    throw new ApiError("/config/apply", resp.status, `${String(resp.status)} ${resp.statusText}`);
+    classifyApplyFailure("/config/apply", resp.status, data);
   }
   return ApplyResultSchema.parse(data);
 }
@@ -1546,8 +1682,7 @@ const ConflictBodySchema = z.object({
     .optional(),
 });
 
-export const PatchApplyResultSchema = z.object({
-  ok: z.literal(true),
+export const PatchApplyResultSchema = ConfigApplyResultBaseSchema.extend({
   // mode is "hot" or "stage_restart" (D1). Absent for legacy responses.
   mode: z.enum(["hot", "stage_restart"]).optional(),
   // pending_reload mirrors applyConfig: persisted and validated, but the live
@@ -1559,19 +1694,12 @@ export const PatchApplyResultSchema = z.object({
   summary: z.array(z.string()),
   diff: ConfigDiffSchema,
   // status is the post-apply runtime delta derived from the persisted config.
-  status: z.array(FeatureStatusSchema).optional(),
-  message: z.string().optional(),
-  // previous_reload: see ApplyResultSchema for semantics.
-  previous_reload: ReloadSnapshotSchema.optional(),
-  // reload is the correlated result of the live reload triggered by this apply
-  // (D2/H-06). Replaces previous_reload for new consumers.
-  reload: ReloadResultSchema.optional(),
-  // Restoration fields (D2/N-05): first-class truth about whether a rejected
-  // candidate was rolled back to the previous configuration.
-  restored: z.boolean().optional(),
-  restore_error: z.string().optional(),
-  final_disk_version: z.string().optional(),
-});
+}).transform((value) => ({
+  ...value,
+  status: Array.isArray(value.status) ? value.status : undefined,
+  mutation_status: typeof value.status === "string" ? value.status : undefined,
+  mutation_id: value.id,
+}));
 export type PatchApplyResult = z.infer<typeof PatchApplyResultSchema>;
 
 /**
@@ -1588,6 +1716,7 @@ export async function applyPatchBatch(
   ops: ConfigPatch[],
   baseVersion?: string,
   mode: ApplyMode = "hot",
+  confirmAdmin = false,
 ): Promise<PatchApplyResult> {
   const headers = new Headers();
   headers.set("Accept", "application/json");
@@ -1596,6 +1725,7 @@ export async function applyPatchBatch(
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const params = new URLSearchParams();
   if (mode !== "hot") params.set("mode", mode);
+  if (confirmAdmin) params.set("confirm_admin", "true");
   const query = params.toString();
   const url = query ? `/api/config/patch/apply?${query}` : "/api/config/patch/apply";
   const resp = await fetch(url, {
@@ -1611,34 +1741,7 @@ export async function applyPatchBatch(
   }
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
-    if (resp.status === 409) {
-      const conflict = ConflictBodySchema.safeParse(data);
-      if (conflict.success && conflict.data.restart_required) {
-        throw new ConfigRestartRequiredError(
-          conflict.data.message ?? "This change requires a server restart to take effect.",
-          conflict.data.can_stage ?? false,
-          conflict.data.pending_restart?.subsystems ?? [],
-        );
-      }
-      throw new ConfigConflictError(
-        conflict.success && conflict.data.message
-          ? conflict.data.message
-          : "The configuration changed since this edit was prepared; reload and try again.",
-        conflict.success ? conflict.data.current_version : undefined,
-      );
-    }
-    const rejected = ValidationResultSchema.safeParse(data);
-    if (rejected.success) {
-      throw new ConfigRejectedError(
-        rejected.data.message ?? "The edit was rejected.",
-        rejected.data.errors ?? [],
-      );
-    }
-    throw new ApiError(
-      "/config/patch/apply",
-      resp.status,
-      `${String(resp.status)} ${resp.statusText}`,
-    );
+    classifyApplyFailure("/config/patch/apply", resp.status, data);
   }
   return PatchApplyResultSchema.parse(data);
 }
@@ -2196,7 +2299,9 @@ export async function uploadTranscodeDescriptor(file: File): Promise<TranscodeDe
     let msg = "Descriptor upload failed";
     try {
       msg = await resp.text();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     throw new ApiError("/api/transcode/descriptor-upload", resp.status, msg);
   }
   const data = (await resp.json()) as unknown;

@@ -3,9 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { Suspense, lazy, useEffect, useState, useMemo, useRef } from "react";
-import { SubsystemReloadResult } from "../../lib/applyOutcome";
-import { ReloadResult } from "../../api/client";
+import { Suspense, lazy, useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -22,7 +20,9 @@ import {
   ConfigConflictError,
   ConfigRestartRequiredError,
   ConfigAdminChangeError,
-  type FeatureStatus,
+  ConfigApplyOutcomeError,
+  type ApplyResult,
+  type ConfigApplyErrorKind,
   type ConfigDiff,
   type PendingRestartStatus,
 } from "@/api/client.ts";
@@ -115,7 +115,8 @@ function PendingRestartBanner({
               Staged: <span className="font-mono">{status.staged_version}</span>
               {status.serving_version && (
                 <>
-                  {" "}· Serving: <span className="font-mono">{status.serving_version}</span>
+                  {" "}
+                  · Serving: <span className="font-mono">{status.serving_version}</span>
                 </>
               )}
             </p>
@@ -208,46 +209,93 @@ export function ConfigPanel() {
   const [baseline, setBaseline] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [stageConfirming, setStageConfirming] = useState(false);
-  // applied holds the accepted-apply result: the post-apply capability status,
-  // the server's pending_reload flag, and whether the previous reload exceeded
-  // the configured reload_timeout (surfaced via previous_reload.timed_out). The
-  // live outcome (fully live, still reloading, partial subsystem failure, or a
-  // timed-out reload) is derived from these signals plus the post-apply runtime
-  // snapshot below, so the operator sees an explicit outcome rather than an
-  // unconditional "saved" (AUX-02). mode tracks how it was applied.
-const [applied, setApplied] = useState<{
-     status: FeatureStatus[];
-     pendingReload: boolean;
-     reloadTimedOut: boolean;
-     // Finding 5: the backend returned reload.outcome "saved_not_live" — the
-     // candidate is persisted but the terminal live/restored outcome is not yet
-     // known. Tracked separately so the banner never claims the config is
-     // serving for this transaction.
-     savedNotLive: boolean;
-     mode: "hot" | "stage_restart";
-     isStagedUpdate: boolean;
-     // M-03: Full reload metadata for complete outcome representation.
-     http: SubsystemReloadResult | undefined;
-     stream: SubsystemReloadResult | undefined;
-     admin: SubsystemReloadResult | undefined;
-     persisted?: boolean | undefined;
-     failedPhase?: string | undefined;
-     timedOutPhase?: string | undefined;
-     // P0-1 M-05: Enqueue failure flag for outcome differentiation.
-     enqueueFailed?: boolean | undefined;
-     ok: boolean;
-     reload?: ReloadResult | undefined;
-   } | null>(null);
+  const [appliedState, setAppliedState] = useState<{
+    readonly operationID: number;
+    readonly result: ApplyResult;
+    readonly errorKind: ConfigApplyErrorKind | null;
+    readonly wasPatch: boolean;
+    readonly patchCandidate: string | null;
+  } | null>(null);
+  const applied = appliedState?.result ?? null;
+  const operationIDRef = useRef(0);
+  const confirmedAdminOperationRef = useRef<number | null>(null);
+  const postApplyPollAttemptsRef = useRef(0);
 
   // Patch draft state: when a structured patch is handed off, the editor shows
   // the candidate read-only and the diff is pre-computed; applying uses the
   // atomic patch endpoint rather than raw apply.
-  const [patchDraft, setPatchDraft] = useState<PendingDraft & { kind: "patch" } | null>(null);
+  const [patchDraft, setPatchDraft] = useState<(PendingDraft & { kind: "patch" }) | null>(null);
+  const [patchReconciling, setPatchReconciling] = useState(false);
+  const [patchReconcileError, setPatchReconcileError] = useState<Error | null>(null);
   const [conflictVersion, setConflictVersion] = useState<string | undefined>();
   // baseVersion is the optimistic-concurrency token for the raw editor: the
   // version the loaded config was read at. It is sent on raw apply so a stale
   // edit is rejected with 409 instead of clobbering a concurrent change.
   const [baseVersion, setBaseVersion] = useState<string | undefined>();
+
+  function startOperation(): number {
+    operationIDRef.current += 1;
+    confirmedAdminOperationRef.current = null;
+    postApplyPollAttemptsRef.current = 0;
+    setPatchReconcileError(null);
+    setAppliedState(null);
+    return operationIDRef.current;
+  }
+
+  function cancelOperation(): void {
+    operationIDRef.current += 1;
+    confirmedAdminOperationRef.current = null;
+    setPatchReconciling(false);
+    setPatchReconcileError(null);
+  }
+
+  const refreshEditorAfterFailure = useCallback(
+    (operationID: number): void => {
+      if (rawForbidden) return;
+      void qc
+        .fetchQuery({ queryKey: ["raw-config"], queryFn: fetchRawConfig, staleTime: 0 })
+        .then((fresh) => {
+          if (operationIDRef.current !== operationID) return;
+          setBaseline(fresh.raw ?? "");
+          setDraft(fresh.raw ?? "");
+          setBaseVersion(fresh.base_version);
+        })
+        .catch(() => undefined);
+    },
+    [qc, rawForbidden],
+  );
+
+  const reconcilePatchEditor = useCallback(
+    (operationID: number, fallbackVersion?: string): void => {
+      if (rawForbidden) {
+        void navigate("/routes");
+        return;
+      }
+      setPatchReconciling(true);
+      setPatchReconcileError(null);
+      void qc
+        .fetchQuery({ queryKey: ["raw-config"], queryFn: fetchRawConfig, staleTime: 0 })
+        .then((fresh) => {
+          if (operationIDRef.current !== operationID) return;
+          const raw = fresh.raw ?? "";
+          setPatchDraft(null);
+          setBaseline(raw);
+          setDraft(raw);
+          setBaseVersion(fresh.base_version ?? fallbackVersion);
+          setPatchReconciling(false);
+        })
+        .catch((error: unknown) => {
+          if (operationIDRef.current !== operationID) return;
+          setPatchReconciling(false);
+          setPatchReconcileError(
+            error instanceof Error
+              ? error
+              : new Error("Unable to reload the applied configuration."),
+          );
+        });
+    },
+    [navigate, qc, rawForbidden],
+  );
 
   // Seed the editor once the raw config arrives. A pending handoff, if present,
   // becomes the draft so the operator lands on a ready-to-review diff. When the
@@ -324,34 +372,20 @@ const [applied, setApplied] = useState<{
   );
 
   const applyRaw = useMutation({
-    mutationFn: (confirmAdmin: boolean) => applyConfig(current, baseVersion, confirmAdmin, "hot"),
-    onSuccess: (res) => {
+    mutationFn: ({ confirmAdmin }: { confirmAdmin: boolean; operationID: number }) =>
+      applyConfig(current, baseVersion, confirmAdmin, "hot"),
+    onSuccess: (res, variables) => {
+      if (operationIDRef.current !== variables.operationID) return;
       setBaseline(current);
-      // D3 (H-06): derive outcome from reload.outcome when present so the
-      // banner reflects the authoritative correlated result rather than the
-      // indirect pending_reload + overview-poll path.
-      const reloadOutcome = res.reload?.outcome;
-setApplied({
-          ok: res.ok,
-          status: res.status ?? [],
-          pendingReload: reloadOutcome !== undefined
-            ? reloadOutcome === "saved_not_live"
-            : (res.pending_reload ?? true),
-          reloadTimedOut: res.reload?.timed_out === true,
-          savedNotLive: reloadOutcome === "saved_not_live",
-          mode: "hot",
-          isStagedUpdate: false,
-          // M-03: Pass full reload metadata for complete outcome representation.
-          http: res.reload?.http ?? undefined,
-          stream: res.reload?.stream ?? undefined,
-          admin: res.reload?.admin ?? undefined,
-          persisted: res.reload?.persisted ?? undefined,
-          failedPhase: res.reload?.failed_phase ?? undefined,
-          timedOutPhase: res.reload?.timed_out_phase ?? undefined,
-          enqueueFailed: reloadOutcome === "not_applied",
-          reload: res.reload,
-        });
+      setAppliedState({
+        operationID: variables.operationID,
+        result: res,
+        errorKind: null,
+        wasPatch: false,
+        patchCandidate: null,
+      });
       setConfirming(false);
+      confirmedAdminOperationRef.current = null;
       // Advance the token to the freshly-applied version so a follow-up edit
       // does not trip a spurious conflict.
       setBaseVersion(res.version ?? undefined);
@@ -359,104 +393,136 @@ setApplied({
       void qc.invalidateQueries({ queryKey: ["pending-restart"] });
       void qc.invalidateQueries();
     },
-    onError: (err) => {
+    onError: (err, variables) => {
+      if (operationIDRef.current !== variables.operationID) return;
+      if (!(err instanceof ConfigAdminChangeError)) setConfirming(false);
       if (err instanceof ConfigConflictError) {
         setConflictVersion(err.currentVersion);
+      }
+      if (err instanceof ConfigApplyOutcomeError) {
+        setAppliedState({
+          operationID: variables.operationID,
+          result: err.result,
+          errorKind: err.kind,
+          wasPatch: false,
+          patchCandidate: null,
+        });
+        if (err.result.restored || err.result.reload?.outcome === "not_applied") {
+          refreshEditorAfterFailure(variables.operationID);
+        }
       }
     },
   });
 
   const applyPatch = useMutation({
-    mutationFn: () => {
+    mutationFn: ({ confirmAdmin }: { confirmAdmin: boolean; operationID: number }) => {
       if (!patchDraft) throw new Error("no patch draft to apply");
       // H-03: If a managed staged restart is pending, patch applies should
       // update the staged configuration instead of hot apply.
       const mode = hasPendingRestart ? "stage_restart" : "hot";
-      return applyPatchBatch(patchDraft.ops, patchDraft.baseVersion ?? conflictVersion, mode);
+      return applyPatchBatch(
+        patchDraft.ops,
+        patchDraft.baseVersion ?? conflictVersion,
+        mode,
+        confirmAdmin,
+      );
     },
-    onSuccess: (res) => {
+    onSuccess: (res, variables) => {
+      if (operationIDRef.current !== variables.operationID) return;
       // Reconcile the raw-editor state with the freshly-applied patch: the
       // candidate is now the persisted config and res.version is its
       // fingerprint. Without this, exiting patch mode leaves the editor looking
       // dirty (draft still the candidate, baseline still the old config) and a
       // follow-up raw apply trips a spurious 409 on the stale baseVersion.
-      const candidate = patchDraft?.candidate ?? current;
-      setPatchDraft(null);
-      setBaseline(candidate);
-      setDraft(candidate);
+      const candidate = patchDraft?.candidate ?? null;
+      if (res.reload?.outcome !== "saved_not_live") {
+        reconcilePatchEditor(variables.operationID, res.version);
+      }
       setBaseVersion(res.version ?? undefined);
       // D3 (H-06): use reload.outcome when present for authoritative result.
-      const reloadOutcome = res.reload?.outcome;
-setApplied({
-          ok: res.ok,
-          status: res.status ?? [],
-          pendingReload: reloadOutcome !== undefined
-            ? reloadOutcome === "saved_not_live"
-            : (res.pending_reload ?? true),
-          reloadTimedOut: res.reload?.timed_out === true,
-          savedNotLive: reloadOutcome === "saved_not_live",
-          mode: res.mode ?? (hasPendingRestart ? "stage_restart" : "hot"),
-          isStagedUpdate: hasPendingRestart && res.mode === "stage_restart",
-          // M-03: Pass full reload metadata for complete outcome representation.
-          http: res.reload?.http ?? undefined,
-          stream: res.reload?.stream ?? undefined,
-          admin: res.reload?.admin ?? undefined,
-          persisted: res.reload?.persisted ?? undefined,
-          failedPhase: res.reload?.failed_phase ?? undefined,
-          timedOutPhase: res.reload?.timed_out_phase ?? undefined,
-          enqueueFailed: reloadOutcome === "not_applied",
-          reload: res.reload,
-        });
+      setAppliedState({
+        operationID: variables.operationID,
+        result: res,
+        errorKind: null,
+        wasPatch: true,
+        patchCandidate: candidate,
+      });
       setConfirming(false);
+      confirmedAdminOperationRef.current = null;
       setConflictVersion(undefined);
-      // M-02: After a successful patch apply, navigate away if the user lacks
-      // config:raw. This prevents landing in the raw-editor error state.
-      if (rawForbidden && isPatchMode) {
-        void navigate("/routes");
-      }
       void qc.invalidateQueries({ queryKey: ["pending-restart"] });
       void qc.invalidateQueries();
     },
-    onError: (err) => {
+    onError: (err, variables) => {
+      if (operationIDRef.current !== variables.operationID) return;
+      if (!(err instanceof ConfigAdminChangeError)) setConfirming(false);
       if (err instanceof ConfigConflictError) {
         setConflictVersion(err.currentVersion);
+      }
+      if (err instanceof ConfigApplyOutcomeError) {
+        setAppliedState({
+          operationID: variables.operationID,
+          result: err.result,
+          errorKind: err.kind,
+          wasPatch: true,
+          patchCandidate: patchDraft?.candidate ?? current,
+        });
+        if (err.result.restored || err.result.reload?.outcome === "not_applied") {
+          refreshEditorAfterFailure(variables.operationID);
+        }
       }
     },
   });
 
   // Stage-restart apply: sends mode=stage_restart; no live reload, just saves for next boot.
   const applyStage = useMutation({
-    mutationFn: () => applyConfig(current, baseVersion, false, "stage_restart"),
-    onSuccess: (res) => {
-      setBaseline(current);
-setApplied({
-          ok: res.ok,
-          status: res.status ?? [],
-          pendingReload: false,
-          reloadTimedOut: false,
-          savedNotLive: false,
-          mode: "stage_restart",
-          isStagedUpdate: hasPendingRestart,
-          // M-03: Pass full reload metadata for complete outcome representation.
-          http: res.reload?.http ?? undefined,
-          stream: res.reload?.stream ?? undefined,
-          admin: res.reload?.admin ?? undefined,
-          persisted: res.reload?.persisted ?? undefined,
-          failedPhase: res.reload?.failed_phase ?? undefined,
-          timedOutPhase: res.reload?.timed_out_phase ?? undefined,
-          reload: res.reload,
-        });
+    mutationFn: ({ confirmAdmin }: { confirmAdmin: boolean; operationID: number }) => {
+      if (patchDraft) {
+        return applyPatchBatch(
+          patchDraft.ops,
+          patchDraft.baseVersion ?? conflictVersion,
+          "stage_restart",
+          confirmAdmin,
+        );
+      }
+      return applyConfig(current, baseVersion, confirmAdmin, "stage_restart");
+    },
+    onSuccess: (res, variables) => {
+      if (operationIDRef.current !== variables.operationID) return;
+      const wasPatch = patchDraft !== null;
+      const candidate = patchDraft?.candidate ?? null;
+      setAppliedState({
+        operationID: variables.operationID,
+        result: res,
+        errorKind: null,
+        wasPatch,
+        patchCandidate: wasPatch ? candidate : null,
+      });
+      if (wasPatch) reconcilePatchEditor(variables.operationID, res.version);
+      else setBaseline(current);
       setStageConfirming(false);
       setBaseVersion(res.version ?? undefined);
       setConflictVersion(undefined);
+      confirmedAdminOperationRef.current = null;
+      applyRaw.reset();
+      applyPatch.reset();
       void qc.invalidateQueries({ queryKey: ["pending-restart"] });
       void qc.invalidateQueries();
     },
-    onError: (err) => {
+    onError: (err, variables) => {
+      if (operationIDRef.current !== variables.operationID) return;
       if (err instanceof ConfigConflictError) {
         setConflictVersion(err.currentVersion);
       }
-      setStageConfirming(false);
+      if (err instanceof ConfigApplyOutcomeError) {
+        setAppliedState({
+          operationID: variables.operationID,
+          result: err.result,
+          errorKind: err.kind,
+          wasPatch: patchDraft !== null,
+          patchCandidate: patchDraft?.candidate ?? null,
+        });
+      }
     },
   });
 
@@ -464,7 +530,8 @@ setApplied({
   const discard = useMutation({
     mutationFn: discardPendingRestart,
     onSuccess: () => {
-      setApplied(null);
+      cancelOperation();
+      setAppliedState(null);
       void qc.invalidateQueries({ queryKey: ["pending-restart"] });
       void qc.invalidateQueries({ queryKey: ["raw-config"] });
       void qc.invalidateQueries();
@@ -485,22 +552,80 @@ setApplied({
   // rejected with a 409 the first time; the same confirm modal then re-applies
   // with confirm_admin=true. Derived from the error so no extra state is needed.
   const adminChangeError = applyError instanceof ConfigAdminChangeError ? applyError : null;
-  const restartError =
-    applyError instanceof ConfigRestartRequiredError ? applyError : null;
-
-  // After an accepted apply, poll the runtime overview a few times so the
-  // asynchronous stream (L4) reload has a chance to report its outcome. Only
-  // meaningful for hot applies; stage_restart does not trigger a reload.
+  const restartError = applyError instanceof ConfigRestartRequiredError ? applyError : null;
+  const pendingApplyID =
+    applied?.reload?.outcome === "saved_not_live" ? applied.apply_id : undefined;
+  const legacyApplyPending =
+    applied !== null &&
+    (applied.mode ?? "hot") === "hot" &&
+    applied.reload === undefined &&
+    applied.pending_reload !== false;
+  const pollingExpired = pendingApplyID !== undefined && postApplyPollAttemptsRef.current >= 20;
   const postApply = useQuery({
-    queryKey: ["config-apply-overview"],
-    queryFn: fetchOverview,
-    enabled: applied !== null && applied.mode === "hot",
+    queryKey: ["config-apply-overview", pendingApplyID ?? appliedState?.operationID],
+    queryFn: async () => {
+      postApplyPollAttemptsRef.current += 1;
+      return fetchOverview();
+    },
+    enabled: pendingApplyID !== undefined || legacyApplyPending,
+    retry: false,
     staleTime: 0,
     gcTime: 0,
     refetchOnWindowFocus: false,
-    refetchInterval: (query) =>
-      applied !== null && applied.mode === "hot" && query.state.dataUpdateCount < 3 ? 1500 : false,
+    refetchInterval: (query) => {
+      if (!pendingApplyID) return postApplyPollAttemptsRef.current >= 3 ? false : 1500;
+      const terminal = query.state.data?.last_managed_apply;
+      return terminal?.id === pendingApplyID || postApplyPollAttemptsRef.current >= 20
+        ? false
+        : 1500;
+    },
   });
+
+  useEffect(() => {
+    if (!pendingApplyID || !appliedState) return;
+    const operationID = appliedState.operationID;
+    const terminal = postApply.data?.last_managed_apply;
+    if (!terminal || terminal.id !== pendingApplyID) return;
+    const reload = postApply.data?.last_reload;
+    setAppliedState((currentState) =>
+      currentState?.operationID === operationID && currentState.result.apply_id === pendingApplyID
+        ? {
+            ...currentState,
+            result: {
+              ...currentState.result,
+              ok: terminal.ok,
+              restored: terminal.restored,
+              restore_error: terminal.restore_error,
+              final_disk_version: terminal.final_disk_version,
+              final_serving_version: terminal.final_serving_version,
+              reload:
+                reload?.id === pendingApplyID
+                  ? reload
+                  : currentState.result.reload
+                    ? {
+                        ...currentState.result.reload,
+                        id: pendingApplyID,
+                        outcome: terminal.outcome,
+                      }
+                    : { id: pendingApplyID, outcome: terminal.outcome },
+            },
+          }
+        : currentState,
+    );
+    if (operationIDRef.current !== operationID) return;
+    if (terminal.ok && appliedState.wasPatch) {
+      reconcilePatchEditor(operationID, appliedState.result.version);
+    }
+    if (terminal.restored || !terminal.ok) {
+      refreshEditorAfterFailure(operationID);
+    }
+  }, [
+    appliedState,
+    pendingApplyID,
+    postApply.data,
+    reconcilePatchEditor,
+    refreshEditorAfterFailure,
+  ]);
 
   // Fold the raw apply signals into one explicit, severity-tagged outcome so the
   // operator can tell a fully-live apply from one that still needs a restart or
@@ -516,57 +641,75 @@ setApplied({
       });
     }
     if (applied) {
-      if (applied.mode === "stage_restart") {
+      const reload = applied.reload;
+      const mode = applied.mode ?? "hot";
+      if (appliedState?.errorKind === "pending-restart") {
+        const pending = applied.pending_restart;
+        const managedStaged =
+          pending?.state === "managed_staged" ||
+          (pending?.state === undefined && pending?.managed === true && pending.staged);
+        if (!managedStaged) return null;
+        return deriveApplyOutcome({
+          accepted: false,
+          pendingReload: false,
+          runtimeObserved: false,
+          pendingRestartBlocksHot: true,
+        });
+      }
+      if (
+        appliedState?.errorKind !== null &&
+        appliedState?.errorKind !== "not-applied" &&
+        appliedState?.errorKind !== "enqueue"
+      ) {
+        return null;
+      }
+      if (mode === "stage_restart") {
         return deriveApplyOutcome({
           accepted: applied.ok,
           pendingReload: false,
           runtimeObserved: false,
           mode: "stage_restart",
-          isStagedUpdate: applied.isStagedUpdate,
-          http: applied.http,
-          stream: applied.stream,
-          admin: applied.admin,
-          persisted: applied.persisted,
-          failedPhase: applied.failedPhase,
-          timedOutPhase: applied.timedOutPhase,
+          isStagedUpdate: applied.staged_restart_is_update ?? false,
+          http: reload?.http,
+          stream: reload?.stream,
+          admin: reload?.admin,
+          persisted: applied.persisted ?? reload?.persisted,
+          failedPhase: reload?.failed_phase,
+          timedOutPhase: reload?.timed_out_phase,
         });
       }
-      if (!applied.ok && applied.reload?.outcome === "not_applied") {
-        return deriveApplyOutcome({
-          accepted: false,
-          pendingReload: false,
-          runtimeObserved: true,
-          persisted: applied.persisted,
-          enqueueFailed: true,
-          http: applied.http,
-          stream: applied.stream,
-          admin: applied.admin,
-          failedPhase: applied.failedPhase,
-          timedOutPhase: applied.timedOutPhase,
-        });
-      }
-      const streamStatus = postApply.data?.stream_status;
       return deriveApplyOutcome({
         accepted: applied.ok,
-        pendingReload: applied.pendingReload,
-        runtimeObserved: postApply.isSuccess,
-        reloadTimedOut: applied.reloadTimedOut,
-        // Finding 5: pass saved_not_live so the banner shows the "final outcome
-        // pending" copy instead of falsely claiming the config is serving.
-        savedNotLive: applied.savedNotLive,
-        ...(streamStatus !== undefined ? { streamStatus } : {}),
-        http: applied.http,
-        stream: applied.stream,
-        admin: applied.admin,
-        persisted: applied.persisted,
-        failedPhase: applied.failedPhase,
-        timedOutPhase: applied.timedOutPhase,
+        pendingReload:
+          reload?.outcome === "saved_not_live" ||
+          (reload === undefined ? (applied.pending_reload ?? true) : false),
+        runtimeObserved:
+          reload !== undefined
+            ? reload.outcome !== "saved_not_live"
+            : applied.pending_reload === false,
+        reloadTimedOut: reload?.timed_out === true,
+        savedNotLive: reload?.outcome === "saved_not_live",
+        ...(reload?.outcome !== undefined ? { reloadOutcome: reload.outcome } : {}),
+        ...(reload?.published !== undefined ? { published: reload.published } : {}),
+        ...(applied.restored !== undefined ? { restored: applied.restored } : {}),
+        ...(applied.restore_error !== undefined ? { restoreError: applied.restore_error } : {}),
+        ...(reload?.error !== undefined ? { reloadError: reload.error } : {}),
+        enqueueFailed: reload?.failed_phase === "enqueue",
+        ...(reload === undefined && postApply.data?.stream_status !== undefined
+          ? { streamStatus: postApply.data.stream_status }
+          : {}),
+        http: reload?.http,
+        stream: reload?.stream,
+        admin: reload?.admin,
+        persisted: applied.persisted ?? reload?.persisted,
+        failedPhase: reload?.failed_phase,
+        timedOutPhase: reload?.timed_out_phase,
       });
     }
     return null;
-  }, [restartError, applied, postApply.isSuccess, postApply.data]);
+  }, [restartError, applied, appliedState?.errorKind, postApply.data]);
 
-  const appliedCapabilities = applied
+  const appliedCapabilities = applied?.status
     ? { active: applied.status.filter((s) => s.active).length, total: applied.status.length }
     : undefined;
 
@@ -600,7 +743,9 @@ setApplied({
       {restartBlocked && (
         <PendingRestartBanner
           status={pendingRestartStatus}
-          onDiscard={() => { discard.mutate(); }}
+          onDiscard={() => {
+            discard.mutate();
+          }}
           discarding={discard.isPending}
           discardError={discard.error instanceof Error ? discard.error : null}
         />
@@ -610,8 +755,8 @@ setApplied({
         <div className="space-y-1">
           <h1 className="text-xl font-semibold">Configuration</h1>
           <p className="max-w-3xl text-sm text-jul-muted">
-            Live TOML editor with validation, diff previews, and atomic patch support.
-            Review every change before it is applied to make sure the configuration remains sound.
+            Live TOML editor with validation, diff previews, and atomic patch support. Review every
+            change before it is applied to make sure the configuration remains sound.
           </p>
         </div>
         {data?.path && <span className="font-mono text-xs text-jul-muted">{data.path}</span>}
@@ -635,15 +780,23 @@ setApplied({
           <button
             type="button"
             onClick={() => {
+              cancelOperation();
               setDraft(baseline);
               setPatchDraft(null);
-              setApplied(null);
+              setAppliedState(null);
               setConflictVersion(undefined);
               applyRaw.reset();
               applyPatch.reset();
               applyStage.reset();
             }}
-            disabled={!dirty || applyActive.isPending || applyStage.isPending}
+            disabled={
+              !dirty ||
+              applyActive.isPending ||
+              applyStage.isPending ||
+              patchReconciling ||
+              patchReconcileError !== null ||
+              pendingApplyID !== undefined
+            }
             className="rounded-md border border-jul-border px-3 py-1 text-sm text-jul-muted hover:text-jul-text disabled:opacity-40"
           >
             Reset
@@ -651,6 +804,7 @@ setApplied({
           <button
             type="button"
             onClick={() => {
+              startOperation();
               // When a managed staged restart is active, hot apply is blocked —
               // offer to update the staged configuration instead. External
               // divergence or inconsistency blocks all applies. Operators who
@@ -664,8 +818,11 @@ setApplied({
             disabled={
               !dirty ||
               !valid ||
+              pendingApplyID !== undefined ||
               applyActive.isPending ||
               applyStage.isPending ||
+              patchReconciling ||
+              patchReconcileError !== null ||
               (restartBlocked && !hasPendingRestart) ||
               (rawForbidden && !isPatchMode)
             }
@@ -688,17 +845,30 @@ setApplied({
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
         <div className="min-h-0 overflow-hidden rounded-lg border border-jul-border bg-jul-surface">
           <Suspense fallback={<EditorFallback />}>
-            {draft !== null && !(rawForbidden && isPatchMode && !patchDraft?.candidate) && (
+            {draft !== null && !(rawForbidden && isPatchMode && !patchDraft.candidate) && (
               <CodeEditor
                 value={draft}
-                readOnly={isPatchMode || rawForbidden}
+                readOnly={
+                  isPatchMode ||
+                  rawForbidden ||
+                  applyActive.isPending ||
+                  applyStage.isPending ||
+                  patchReconciling ||
+                  patchReconcileError !== null ||
+                  pendingApplyID !== undefined
+                }
                 onChange={(next) => {
+                  cancelOperation();
                   setDraft(next);
-                  if (applied) setApplied(null);
+                  if (applied) setAppliedState(null);
+                  setConflictVersion(undefined);
+                  applyRaw.reset();
+                  applyPatch.reset();
+                  applyStage.reset();
                 }}
               />
             )}
-            {rawForbidden && isPatchMode && !patchDraft?.candidate && (
+            {rawForbidden && isPatchMode && !patchDraft.candidate && (
               <div className="flex h-full items-center justify-center p-6 text-sm text-jul-muted">
                 <p>
                   Raw configuration preview is hidden because you do not have the{" "}
@@ -717,6 +887,42 @@ setApplied({
               {...(appliedCapabilities ? { capabilities: appliedCapabilities } : {})}
             />
           )}
+          {pollingExpired && applied?.reload?.outcome === "saved_not_live" && (
+            <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-sm">
+              <p className="font-medium text-jul-warning">Final result still unavailable</p>
+              <p className="mt-1 text-xs text-jul-muted">
+                Polling stopped without observing the matching terminal result. Check Runtime
+                Overview before making another configuration change.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  void navigate("/");
+                }}
+                className="mt-2 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+              >
+                Open Runtime Overview
+              </button>
+            </div>
+          )}
+          {patchReconcileError && appliedState?.wasPatch && (
+            <div className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm">
+              <p className="font-medium text-jul-danger">Applied, but editor refresh failed</p>
+              <p className="mt-1 text-xs text-jul-muted">
+                The patch result is authoritative, but the editor is blocked until it reloads the
+                persisted configuration. {patchReconcileError.message}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  reconcilePatchEditor(appliedState.operationID, appliedState.result.version);
+                }}
+                className="mt-2 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+              >
+                Retry editor refresh
+              </button>
+            </div>
+          )}
 
           {/* Inline offer to stage the change after a restart-required rejection. */}
           {restartError && restartError.canStage && (
@@ -733,7 +939,9 @@ setApplied({
               </p>
               <button
                 type="button"
-                onClick={() => { setStageConfirming(true); }}
+                onClick={() => {
+                  setStageConfirming(true);
+                }}
                 disabled={applyStage.isPending}
                 className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
               >
@@ -748,52 +956,58 @@ setApplied({
             </div>
           )}
 
-          {applyError && !adminChangeError && !restartError && (
-            <div className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm">
-              <p className="font-medium text-jul-danger">
-                {applyError instanceof ConfigRejectedError
-                  ? applyError.message
-                  : applyError instanceof ConfigConflictError
-                    ? "Conflict — another change was applied while you were editing."
-                    : "Apply failed."}
-              </p>
-              {applyError instanceof ConfigRejectedError &&
-                applyError.issues.map((iss, i) => (
-                  <p key={`ae-${String(i)}`} className="mt-1 text-xs text-jul-muted">
-                    {iss.path ? `${iss.path}: ` : ""}
-                    {iss.summary}
-                    {iss.detail ? ` — ${iss.detail}` : ""}
-                  </p>
-                ))}
-              {applyError instanceof ConfigConflictError && (
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Discard the stale draft and re-seed from the latest
-                      // persisted config so the editor text and the base_version
-                      // token both reflect the concurrent change.
-                      setPatchDraft(null);
-                      setApplied(null);
-                      setConflictVersion(undefined);
-                      applyRaw.reset();
-                      applyPatch.reset();
-                      void qc
-                        .fetchQuery({ queryKey: ["raw-config"], queryFn: fetchRawConfig })
-                        .then((fresh) => {
-                          setBaseline(fresh.raw ?? "");
-                          setDraft(fresh.raw ?? "");
-                          setBaseVersion(fresh.base_version);
-                        });
-                    }}
-                    className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
-                  >
-                    Reload latest config
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          {applyError &&
+            !adminChangeError &&
+            !restartError &&
+            (!(applyError instanceof ConfigApplyOutcomeError) || outcome === null) && (
+              <div className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm">
+                <p className="font-medium text-jul-danger">
+                  {applyError instanceof ConfigRejectedError
+                    ? applyError.message
+                    : applyError instanceof ConfigConflictError
+                      ? "Conflict — another change was applied while you were editing."
+                      : applyError instanceof ConfigApplyOutcomeError
+                        ? applyError.message
+                        : "Apply failed."}
+                </p>
+                {applyError instanceof ConfigRejectedError &&
+                  applyError.issues.map((iss, i) => (
+                    <p key={`ae-${String(i)}`} className="mt-1 text-xs text-jul-muted">
+                      {iss.path ? `${iss.path}: ` : ""}
+                      {iss.summary}
+                      {iss.detail ? ` — ${iss.detail}` : ""}
+                    </p>
+                  ))}
+                {applyError instanceof ConfigConflictError && (
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Discard the stale draft and re-seed from the latest
+                        // persisted config so the editor text and the base_version
+                        // token both reflect the concurrent change.
+                        const operationID = startOperation();
+                        setPatchDraft(null);
+                        setConflictVersion(undefined);
+                        applyRaw.reset();
+                        applyPatch.reset();
+                        void qc
+                          .fetchQuery({ queryKey: ["raw-config"], queryFn: fetchRawConfig })
+                          .then((fresh) => {
+                            if (operationIDRef.current !== operationID) return;
+                            setBaseline(fresh.raw ?? "");
+                            setDraft(fresh.raw ?? "");
+                            setBaseVersion(fresh.base_version);
+                          });
+                      }}
+                      className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
+                    >
+                      Reload latest config
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
           {!valid && issues.length > 0 && (
             <div className="space-y-2 rounded-md border border-jul-danger/40 bg-jul-danger/5 p-3">
@@ -865,17 +1079,22 @@ setApplied({
           }
           busy={applyActive.isPending}
           onConfirm={() => {
+            const operationID = operationIDRef.current;
             if (adminChangeError) {
-              applyRaw.mutate(true);
+              confirmedAdminOperationRef.current = operationID;
+              if (isPatchMode) applyPatch.mutate({ confirmAdmin: true, operationID });
+              else applyRaw.mutate({ confirmAdmin: true, operationID });
             } else if (isPatchMode) {
-              applyPatch.mutate();
+              applyPatch.mutate({ confirmAdmin: false, operationID });
             } else {
-              applyRaw.mutate(false);
+              applyRaw.mutate({ confirmAdmin: false, operationID });
             }
           }}
           onCancel={() => {
+            cancelOperation();
             setConfirming(false);
             applyRaw.reset();
+            applyPatch.reset();
           }}
         >
           {adminChangeError ? (
@@ -904,9 +1123,9 @@ setApplied({
           ) : isPatchMode ? (
             <>
               <p>
-                This applies the structured edit atomically server-side. The config is validated
-                and persisted; if another operator changed config since this edit was prepared,
-                the apply will be rejected so no change is lost.
+                This applies the structured edit atomically server-side. The config is validated and
+                persisted; if another operator changed config since this edit was prepared, the
+                apply will be rejected so no change is lost.
               </p>
             </>
           ) : (
@@ -914,9 +1133,9 @@ setApplied({
               <p>
                 This validates the new configuration, writes it, and triggers a live reload of the
                 proxy. The draft is fully preflighted before it is saved, so a config that is
-                accepted here is guaranteed to build; the reload that swaps it into the live
-                runtime happens moments later. The current configuration is snapshotted first, so
-                you can roll back from the History panel.
+                accepted here is guaranteed to build; the reload that swaps it into the live runtime
+                happens moments later. The current configuration is snapshotted first, so you can
+                roll back from the History panel.
               </p>
             </>
           )}
@@ -927,20 +1146,36 @@ setApplied({
       {/* Stage-restart confirm dialog */}
       {stageConfirming && (
         <ConfirmDialog
-          title={
-            hasPendingRestart ? "Update staged configuration?" : "Save for next restart?"
-          }
+          title={hasPendingRestart ? "Update staged configuration?" : "Save for next restart?"}
           confirmLabel={hasPendingRestart ? "Update staged config" : "Save for next restart"}
           busy={applyStage.isPending}
           onConfirm={() => {
-            applyStage.mutate();
+            const operationID = operationIDRef.current;
+            const confirmAdmin =
+              applyStage.error instanceof ConfigAdminChangeError ||
+              confirmedAdminOperationRef.current === operationID;
+            if (confirmAdmin) confirmedAdminOperationRef.current = operationID;
+            applyStage.mutate({ confirmAdmin, operationID });
           }}
           onCancel={() => {
+            cancelOperation();
             setStageConfirming(false);
             applyStage.reset();
           }}
         >
-          {hasPendingRestart ? (
+          {applyStage.error instanceof ConfigAdminChangeError ? (
+            <>
+              <p>
+                This staged change affects admin access. Confirm the same staged operation to
+                proceed.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-jul-text">
+                {applyStage.error.changes.map((change) => (
+                  <li key={change}>{change}</li>
+                ))}
+              </ul>
+            </>
+          ) : hasPendingRestart ? (
             <p>
               The staged configuration will be replaced with this draft. The running server will
               remain unchanged until the process is restarted.
@@ -961,6 +1196,11 @@ setApplied({
             </>
           )}
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
+          {applyStage.error && !(applyStage.error instanceof ConfigAdminChangeError) && (
+            <p className="mt-2 text-xs text-jul-danger">
+              {applyStage.error instanceof Error ? applyStage.error.message : "Stage failed."}
+            </p>
+          )}
         </ConfirmDialog>
       )}
     </div>

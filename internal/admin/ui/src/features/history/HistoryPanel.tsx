@@ -3,14 +3,16 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchHistory,
   fetchHistorySnapshot,
   diffConfig,
+  fetchOverview,
   rollback,
   describeApiError,
+  ConfigAdminChangeError,
   type HistoryEntry,
 } from "@/api/client.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
@@ -70,11 +72,19 @@ function RollbackConfirm({
   busy,
   onConfirm,
   onCancel,
+  adminChanges,
+  error,
+  pending,
+  pollingExpired,
 }: {
   readonly id: string;
   readonly busy: boolean;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
+  readonly adminChanges: readonly string[];
+  readonly error: Error | null;
+  readonly pending: boolean;
+  readonly pollingExpired: boolean;
 }) {
   const snap = useQuery({
     queryKey: ["history-snap", id],
@@ -84,33 +94,53 @@ function RollbackConfirm({
     queryKey: ["history-rollback-diff", id],
     queryFn: () => diffConfig(snap.data?.raw ?? ""),
     enabled: snap.data !== undefined,
-    staleTime: Infinity,
+    staleTime: 0,
     refetchInterval: false,
     refetchOnWindowFocus: false,
     retry: false,
   });
   return (
     <ConfirmDialog
-      title="Roll back to this snapshot?"
-      confirmLabel="Roll back"
+      title={
+        adminChanges.length > 0 ? "Confirm admin access rollback?" : "Roll back to this snapshot?"
+      }
+      confirmLabel={adminChanges.length > 0 ? "Confirm and roll back" : "Roll back"}
       danger
       busy={busy}
+      confirmDisabled={pending}
+      cancelDisabled={pending && !pollingExpired}
       onConfirm={onConfirm}
       onCancel={onCancel}
     >
       <p>
-        Re-applies snapshot <span className="font-mono text-jul-text">{id}</span> as the
-        live configuration and triggers a reload. The current config is snapshotted
-        first, so this is reversible.
+        Re-applies snapshot <span className="font-mono text-jul-text">{id}</span> as the live
+        configuration and triggers a reload. The current config is snapshotted first, so this is
+        reversible.
       </p>
       <div className="mt-3">
-        {snap.isLoading && <p className="text-xs">Loading snapshot…</p>}
-        {diff.isFetching && (
-          <p className="text-xs text-jul-muted">Computing changes vs running…</p>
+        {adminChanges.length > 0 && (
+          <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-jul-warning">
+            {adminChanges.map((change) => (
+              <li key={change}>{change}</li>
+            ))}
+          </ul>
         )}
+        {snap.isLoading && <p className="text-xs">Loading snapshot…</p>}
+        {diff.isFetching && <p className="text-xs text-jul-muted">Computing changes vs running…</p>}
         {diff.data && <DiffView diff={diff.data} />}
-        {diff.isError && (
-          <p className="text-xs text-jul-danger">Unable to compute diff preview.</p>
+        {diff.isError && <p className="text-xs text-jul-danger">Unable to compute diff preview.</p>}
+        {error && <p className="mt-2 text-xs text-jul-danger">{error.message}</p>}
+        {pending && !pollingExpired && (
+          <p className="mt-2 text-xs text-jul-warning">
+            The rollback was saved, but its live result is still pending. This dialog will stay open
+            until the matching operation finishes.
+          </p>
+        )}
+        {pollingExpired && (
+          <p className="mt-2 text-xs text-jul-warning">
+            The final rollback result is still unavailable. Check Runtime Overview before making
+            another configuration change.
+          </p>
         )}
       </div>
     </ConfirmDialog>
@@ -163,6 +193,13 @@ export function HistoryPanel() {
   const [viewing, setViewing] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [rollingId, setRollingId] = useState<string | null>(null);
+  const [confirmAdmin, setConfirmAdmin] = useState(false);
+  const [adminChanges, setAdminChanges] = useState<string[]>([]);
+  const [pendingApplyID, setPendingApplyID] = useState<string | null>(null);
+  const [terminalError, setTerminalError] = useState<Error | null>(null);
+  const [pollingExpired, setPollingExpired] = useState(false);
+  const rollbackAttemptRef = useRef(0);
+  const rollbackPollAttemptsRef = useRef(0);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["history"],
@@ -170,16 +207,101 @@ export function HistoryPanel() {
   });
 
   const rollbackMutation = useMutation({
-    mutationFn: (id: string) => rollback(id),
-    onMutate: (id) => {
+    mutationFn: ({ id, confirmed }: { id: string; confirmed: boolean; attempt: number }) =>
+      rollback(id, confirmed),
+    onMutate: ({ id }) => {
       setRollingId(id);
+      setTerminalError(null);
     },
-    onSettled: () => {
+    onSuccess: (result, variables) => {
+      if (rollbackAttemptRef.current !== variables.attempt) return;
       setRollingId(null);
+      if (result.reload?.outcome === "saved_not_live" && result.apply_id) {
+        rollbackPollAttemptsRef.current = 0;
+        setPollingExpired(false);
+        setPendingApplyID(result.apply_id);
+        setTerminalError(null);
+        return;
+      }
+      if (result.reload?.outcome === "applied_degraded") {
+        setTerminalError(
+          new Error(
+            result.reload.error ??
+              "Rollback completed with a degraded reload. Review Runtime Overview before continuing.",
+          ),
+        );
+        return;
+      }
       setConfirmId(null);
+      setConfirmAdmin(false);
+      setAdminChanges([]);
+      setPendingApplyID(null);
       void qc.invalidateQueries();
     },
+    onError: (error, variables) => {
+      if (rollbackAttemptRef.current !== variables.attempt) return;
+      setRollingId(null);
+      if (error instanceof ConfigAdminChangeError) {
+        setConfirmAdmin(true);
+        setAdminChanges([...error.changes]);
+      }
+    },
   });
+
+  const rollbackTerminal = useQuery({
+    queryKey: ["rollback-apply-overview", pendingApplyID],
+    queryFn: async () => {
+      rollbackPollAttemptsRef.current += 1;
+      if (rollbackPollAttemptsRef.current >= 20) setPollingExpired(true);
+      return fetchOverview();
+    },
+    enabled: pendingApplyID !== null,
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) => {
+      const terminal = query.state.data?.last_managed_apply;
+      return terminal?.id === pendingApplyID || rollbackPollAttemptsRef.current >= 20
+        ? false
+        : 1500;
+    },
+  });
+
+  useEffect(() => {
+    if (!pendingApplyID || !confirmId) return;
+    const terminal = rollbackTerminal.data?.last_managed_apply;
+    if (!terminal || terminal.id !== pendingApplyID) return;
+    setPendingApplyID(null);
+    setPollingExpired(false);
+    setConfirmAdmin(false);
+    setAdminChanges([]);
+    if (terminal.ok && terminal.outcome === "applied_live") {
+      setConfirmId(null);
+      setTerminalError(null);
+      void qc.invalidateQueries();
+      return;
+    }
+    if (terminal.ok) {
+      setTerminalError(
+        new Error(
+          "Rollback completed with a degraded reload. Review Runtime Overview before continuing.",
+        ),
+      );
+      void qc.invalidateQueries();
+      return;
+    }
+    setTerminalError(
+      new Error(
+        terminal.restore_error
+          ? `Rollback failed and restoration failed: ${terminal.restore_error}`
+          : terminal.restored
+            ? "Rollback was rejected; the previous configuration was restored."
+            : "Rollback was rejected and restoration could not be confirmed. Check Runtime Overview.",
+      ),
+    );
+    void qc.invalidateQueries();
+  }, [confirmId, pendingApplyID, qc, rollbackTerminal.data]);
 
   if (isLoading) return <Loading label="Loading history…" />;
   if (isError || !data)
@@ -190,8 +312,8 @@ export function HistoryPanel() {
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">Config History</h1>
         <p className="max-w-3xl text-sm text-jul-muted">
-          Saved configuration snapshots with diffs, attribution, and one-click rollback.
-          Review what changed, who changed it, and restore a previous working state safely.
+          Saved configuration snapshots with diffs, attribution, and one-click rollback. Review what
+          changed, who changed it, and restore a previous working state safely.
         </p>
       </div>
 
@@ -229,7 +351,15 @@ export function HistoryPanel() {
                     setViewing(id);
                   }}
                   onRollback={(id) => {
+                    rollbackAttemptRef.current += 1;
                     setConfirmId(id);
+                    setConfirmAdmin(false);
+                    setAdminChanges([]);
+                    setPendingApplyID(null);
+                    setTerminalError(null);
+                    setPollingExpired(false);
+                    rollbackPollAttemptsRef.current = 0;
+                    rollbackMutation.reset();
                   }}
                   rolling={rollingId === entry.id}
                 />
@@ -244,11 +374,33 @@ export function HistoryPanel() {
           id={confirmId}
           busy={rollbackMutation.isPending}
           onConfirm={() => {
-            rollbackMutation.mutate(confirmId);
+            rollbackMutation.mutate({
+              id: confirmId,
+              confirmed: confirmAdmin,
+              attempt: rollbackAttemptRef.current,
+            });
           }}
           onCancel={() => {
+            rollbackAttemptRef.current += 1;
             setConfirmId(null);
+            setConfirmAdmin(false);
+            setAdminChanges([]);
+            setPendingApplyID(null);
+            setTerminalError(null);
+            setPollingExpired(false);
+            rollbackMutation.reset();
           }}
+          adminChanges={adminChanges}
+          error={
+            terminalError ??
+            (rollbackMutation.error instanceof ConfigAdminChangeError
+              ? null
+              : rollbackMutation.error instanceof Error
+                ? rollbackMutation.error
+                : null)
+          }
+          pending={pendingApplyID !== null}
+          pollingExpired={pendingApplyID !== null && pollingExpired}
         />
       )}
     </div>
