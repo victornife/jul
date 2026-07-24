@@ -279,8 +279,14 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		}
 	}
 
+	// AC-03: allocate the transaction ApplyID BEFORE the hot vs stage_restart
+	// branch so every persisted mutation — hot apply, enqueue failure, stage
+	// create, and stage update — carries a stable ID and is routed through the
+	// single completeManagedApply helper at terminalization.
+	id := c.nextID()
+
 	if mode == ApplyStageRestart {
-		return c.applyStageRestart(ctx, cfg, preparedCandidate, prevCfg, data, baseline)
+		return c.applyStageRestart(ctx, id, cfg, preparedCandidate, prevCfg, data, baseline)
 	}
 
 	var pfResult *PreflightResult
@@ -305,7 +311,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		return result, nil
 	}
 
-	return c.applyCandidate(ctx, data, pfResult.Candidate, pfResult.PreparedAdmin, baseline, mode)
+	return c.applyCandidate(ctx, id, data, pfResult.Candidate, pfResult.PreparedAdmin, baseline, mode)
 }
 
 // ApplyConfig applies a parsed configuration. It marshals the config and
@@ -438,7 +444,7 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 //  2. StageManaged writes .bak (fresh stage only) and prepared marker.
 //  3. atomicfile.Write writes the candidate.
 //  4. PromoteToStaged promotes the marker to "staged" only after the candidate write succeeds.
-func (c *ConfigApplyCoordinator) applyStageRestart(reqCtx admin.ApplyRequestContext, cfg *config.Config, preparedCandidate *config.Candidate, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyStageRestart(reqCtx admin.ApplyRequestContext, id string, cfg *config.Config, preparedCandidate *config.Candidate, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
 	// H-03: determine whether this is a staged update. If a managed staged
 	// restart is already pending, the new candidate replaces it but the
 	// original serving config remains the rollback base and the diff base.
@@ -632,6 +638,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(reqCtx admin.ApplyRequestCont
 		msg = "Staged configuration updated for the next process restart; the live runtime is unchanged."
 	}
 	result := ApplyResult{
+		ApplyID:               id,
 		OK:                    true,
 		Mode:                  ApplyStageRestart,
 		Version:               persistedVersion,
@@ -693,7 +700,7 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 	return res
 }
 
-func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, data []byte, candidate *config.Candidate, preparedAdmin *server.PreparedCommit, baseline admin.MutationBaseline, mode ApplyMode) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, id string, data []byte, candidate *config.Candidate, preparedAdmin *server.PreparedCommit, baseline admin.MutationBaseline, mode ApplyMode) (ApplyResult, error) {
 	preparedOwned := preparedAdmin != nil
 	defer func() {
 		if preparedOwned {
@@ -705,7 +712,8 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	rawDigest := sha256.Sum256(data)
 	transactionStarted := time.Now()
 
-	id := c.nextID()
+	// AC-03: id is allocated once in ApplyRaw before the hot/stage branch so
+	// every persisted mutation shares one monotonic transaction ID.
 	// resultCh has capacity 1 because the server sends exactly one terminal
 	// result and the finalizer goroutine below is the sole receiver.
 	resultCh := make(chan server.ReloadResult, 1)
