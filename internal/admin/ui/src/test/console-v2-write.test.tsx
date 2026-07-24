@@ -926,15 +926,15 @@ describe("HistoryPanel rollback flow", () => {
     });
   });
 
-  it("keeps a provisional rollback open until its correlated terminal result", async () => {
-    let overviewReads = 0;
+  it("keeps a provisional rollback open until its correlated terminal record", async () => {
+    let recordReads = 0;
     globalThis.fetch = vi.fn((input: string) => {
       if (input === "/api/config/history")
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
       if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
-      if (input === "/api/config/rollback") {
+      if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json(
             {
@@ -953,32 +953,35 @@ describe("HistoryPanel rollback flow", () => {
           ),
         );
       }
-      if (input === "/api/runtime/overview") {
-        overviewReads += 1;
+      // AC-09: rollback finalization polls the EXACT apply id, never the runtime
+      // overview's global last_managed_apply. A pending record keeps the dialog
+      // open; only the correlated terminal record closes it.
+      if (input === "/api/config/applies/rl_rb") {
+        recordReads += 1;
+        if (recordReads === 1) {
+          return Promise.resolve(
+            json(
+              {
+                id: "rl_rb",
+                state: "pending",
+                operation: "config.rollback",
+                result: { ok: true, apply_id: "rl_rb", mode: "hot" },
+              },
+              202,
+            ),
+          );
+        }
         return Promise.resolve(
           json({
-            product: "jul",
-            version: "1",
-            status: [],
-            ...(overviewReads > 1
-              ? {
-                  last_managed_apply: {
-                    id: "rl_rb",
-                    mode: "hot",
-                    ok: true,
-                    outcome: "applied_live",
-                    completed_at: "2026-01-01T00:00:01Z",
-                  },
-                }
-              : {
-                  last_managed_apply: {
-                    id: "other",
-                    mode: "hot",
-                    ok: true,
-                    outcome: "applied_live",
-                    completed_at: "2026-01-01T00:00:00Z",
-                  },
-                }),
+            id: "rl_rb",
+            state: "terminal",
+            operation: "config.rollback",
+            result: {
+              ok: true,
+              apply_id: "rl_rb",
+              mode: "hot",
+              reload: { id: "rl_rb", outcome: "applied_live" },
+            },
           }),
         );
       }
@@ -1001,6 +1004,7 @@ describe("HistoryPanel rollback flow", () => {
       },
       { timeout: 4000 },
     );
+    expect(recordReads).toBeGreaterThanOrEqual(2);
   });
 });
 

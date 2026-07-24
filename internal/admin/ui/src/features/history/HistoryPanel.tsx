@@ -9,7 +9,7 @@ import {
   fetchHistory,
   fetchHistorySnapshot,
   diffConfig,
-  fetchOverview,
+  fetchManagedApply,
   rollback,
   describeApiError,
   ConfigAdminChangeError,
@@ -31,6 +31,23 @@ function formatTime(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+// finalizationAdvisory renders the AC-14 finalization provenance of a terminal
+// managed apply as a single advisory sentence, or null when the sidecar
+// finalized cleanly. These fields are orthogonal to reload success/failure: a
+// committed (ok=true) rollback can still have degraded its history sidecar, and
+// that must be surfaced as an advisory — never as an apply failure and never as
+// a readiness signal.
+function finalizationAdvisory(o: {
+  readonly history_error?: string | undefined;
+  readonly finalization_error?: string | undefined;
+}): string | null {
+  const parts: string[] = [];
+  if (o.history_error)
+    parts.push(`The configuration history snapshot degraded: ${o.history_error}.`);
+  if (o.finalization_error) parts.push(`Finalization reported: ${o.finalization_error}.`);
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 function SnapshotViewer({ id, onClose }: { readonly id: string; readonly onClose: () => void }) {
@@ -198,6 +215,12 @@ export function HistoryPanel() {
   const [pendingApplyID, setPendingApplyID] = useState<string | null>(null);
   const [terminalError, setTerminalError] = useState<Error | null>(null);
   const [pollingExpired, setPollingExpired] = useState(false);
+  // AC-10: a committed-but-degraded rollback surfaces here as a persistent,
+  // dismissable warning banner (distinct from an error) with no retry action.
+  const [degradedNotice, setDegradedNotice] = useState<string | null>(null);
+  // AC-14: advisory finalization/history-sidecar provenance, orthogonal to the
+  // reload outcome. Rendered as a non-blocking banner. Never affects readiness.
+  const [finalizationNotice, setFinalizationNotice] = useState<string | null>(null);
   const rollbackAttemptRef = useRef(0);
   const rollbackPollAttemptsRef = useRef(0);
 
@@ -224,12 +247,20 @@ export function HistoryPanel() {
         return;
       }
       if (result.reload?.outcome === "applied_degraded") {
-        setTerminalError(
-          new Error(
-            result.reload.error ??
-              "Rollback completed with a degraded reload. Review Runtime Overview before continuing.",
-          ),
+        // AC-10: applied_degraded is a COMMITTED rollback, not a failure. The
+        // snapshot is now live; some subsystems reloaded degraded. Close the
+        // dialog (and its repeatable rollback action), refresh dependent views,
+        // and leave a separate, persistent warning banner — never a retry.
+        setConfirmId(null);
+        setConfirmAdmin(false);
+        setAdminChanges([]);
+        setPendingApplyID(null);
+        setTerminalError(null);
+        setDegradedNotice(
+          result.reload.error ??
+            "Rollback applied with a degraded reload. The snapshot is now the live configuration, but one or more subsystems reloaded degraded — review Runtime Overview.",
         );
+        void qc.invalidateQueries();
         return;
       }
       setConfirmId(null);
@@ -248,12 +279,18 @@ export function HistoryPanel() {
     },
   });
 
+  // AC-09: poll the terminal ledger by the EXACT apply ID rather than reading
+  // the runtime overview's global last_managed_apply. The overview reflects the
+  // most recent managed apply process-wide, so a newer, unrelated apply could
+  // masquerade as this rollback's result; the exact-ID endpoint cannot. A 404
+  // (record not yet visible) resolves to null and keeps polling — a missing
+  // record is never mistaken for success.
   const rollbackTerminal = useQuery({
-    queryKey: ["rollback-apply-overview", pendingApplyID],
+    queryKey: ["rollback-apply-record", pendingApplyID],
     queryFn: async () => {
       rollbackPollAttemptsRef.current += 1;
       if (rollbackPollAttemptsRef.current >= 20) setPollingExpired(true);
-      return fetchOverview();
+      return pendingApplyID ? fetchManagedApply(pendingApplyID) : null;
     },
     enabled: pendingApplyID !== null,
     retry: false,
@@ -261,8 +298,10 @@ export function HistoryPanel() {
     gcTime: 0,
     refetchOnWindowFocus: false,
     refetchInterval: (query) => {
-      const terminal = query.state.data?.last_managed_apply;
-      return terminal?.id === pendingApplyID || rollbackPollAttemptsRef.current >= 20
+      const record = query.state.data;
+      // Stop once the exact-ID record is terminal, or polling has expired; a
+      // null (404) or pending record keeps the interval alive.
+      return record?.state === "terminal" || rollbackPollAttemptsRef.current >= 20
         ? false
         : 1500;
     },
@@ -270,32 +309,44 @@ export function HistoryPanel() {
 
   useEffect(() => {
     if (!pendingApplyID || !confirmId) return;
-    const terminal = rollbackTerminal.data?.last_managed_apply;
-    if (!terminal || terminal.id !== pendingApplyID) return;
+    const record = rollbackTerminal.data;
+    // Only a terminal record for the exact ID resolves the wait. null (404, not
+    // yet recorded) and state==="pending" both keep the dialog open — the
+    // console never claims success from a missing or in-flight record.
+    if (!record || record.id !== pendingApplyID || record.state !== "terminal") return;
     setPendingApplyID(null);
     setPollingExpired(false);
     setConfirmAdmin(false);
     setAdminChanges([]);
-    if (terminal.ok && terminal.outcome === "applied_live") {
+    // AC-14: surface finalization provenance whenever the terminal record
+    // carries it, including on a fully-live rollback — it is advisory and
+    // independent of the reload outcome (a committed rollback can be ok=true
+    // while its history sidecar degraded). Never readiness-affecting.
+    setFinalizationNotice(finalizationAdvisory(record));
+    const result = record.result;
+    if (result.ok && result.reload?.outcome === "applied_live") {
       setConfirmId(null);
       setTerminalError(null);
       void qc.invalidateQueries();
       return;
     }
-    if (terminal.ok) {
-      setTerminalError(
-        new Error(
-          "Rollback completed with a degraded reload. Review Runtime Overview before continuing.",
-        ),
+    if (result.ok) {
+      // AC-10: committed-but-degraded. Dismiss the dialog and its retry action,
+      // refresh dependent views, and leave a persistent, separate warning
+      // banner rather than presenting a committed rollback as a failure.
+      setConfirmId(null);
+      setTerminalError(null);
+      setDegradedNotice(
+        "Rollback applied with a degraded reload. The snapshot is now the live configuration, but one or more subsystems reloaded degraded — review Runtime Overview.",
       );
       void qc.invalidateQueries();
       return;
     }
     setTerminalError(
       new Error(
-        terminal.restore_error
-          ? `Rollback failed and restoration failed: ${terminal.restore_error}`
-          : terminal.restored
+        result.restore_error
+          ? `Rollback failed and restoration failed: ${result.restore_error}`
+          : result.restored
             ? "Rollback was rejected; the previous configuration was restored."
             : "Rollback was rejected and restoration could not be confirmed. Check Runtime Overview.",
       ),
@@ -316,6 +367,46 @@ export function HistoryPanel() {
           changed, who changed it, and restore a previous working state safely.
         </p>
       </div>
+
+      {degradedNotice && (
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-jul-warning/40 bg-jul-warning/5 p-4">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-jul-warning">
+              Rollback applied — degraded reload
+            </p>
+            <p className="text-xs text-jul-muted">{degradedNotice}</p>
+            {finalizationNotice && <p className="text-xs text-jul-muted">{finalizationNotice}</p>}
+          </div>
+          <button
+            onClick={() => {
+              setDegradedNotice(null);
+              setFinalizationNotice(null);
+            }}
+            className="text-jul-muted hover:text-jul-text text-lg leading-none"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {!degradedNotice && finalizationNotice && (
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-jul-warning/40 bg-jul-warning/5 p-4">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-jul-warning">Finalization advisory</p>
+            <p className="text-xs text-jul-muted">{finalizationNotice}</p>
+          </div>
+          <button
+            onClick={() => {
+              setFinalizationNotice(null);
+            }}
+            className="text-jul-muted hover:text-jul-text text-lg leading-none"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {viewing && (
         <SnapshotViewer
@@ -358,6 +449,8 @@ export function HistoryPanel() {
                     setPendingApplyID(null);
                     setTerminalError(null);
                     setPollingExpired(false);
+                    setDegradedNotice(null);
+                    setFinalizationNotice(null);
                     rollbackPollAttemptsRef.current = 0;
                     rollbackMutation.reset();
                   }}

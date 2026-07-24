@@ -381,6 +381,13 @@ export const ManagedApplyOutcomeSchema = z.object({
   completed_at: z.string(),
   actor: z.string().optional(),
   source_ip: z.string().optional(),
+  // AC-14 finalization provenance, mirrored from the per-ID ledger record onto
+  // the overview outcome. Advisory only: a committed apply can be ok=true while
+  // history_error/finalization_error is non-empty (its history sidecar
+  // degraded). This is NOT a reload failure and must never affect readiness.
+  history_snapshot_id: z.string().optional(),
+  history_error: z.string().optional(),
+  finalization_error: z.string().optional(),
 });
 export type ManagedApplyOutcome = z.infer<typeof ManagedApplyOutcomeSchema>;
 
