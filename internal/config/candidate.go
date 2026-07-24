@@ -3,7 +3,11 @@
 
 package config
 
-import "jul/internal/redact"
+import (
+	"context"
+
+	"jul/internal/redact"
+)
 
 // Candidate is the single immutable configuration object for a startup,
 // preflight, or reload transaction. It carries the raw (on-disk/admin-facing)
@@ -34,12 +38,28 @@ type Candidate struct {
 // NewCandidate builds a Candidate from raw. It resolves secret references
 // exactly once and returns an immutable view. The raw config is cloned so the
 // candidate cannot be mutated through the caller's pointer.
+//
+// NewCandidate is the context.Background() wrapper around NewCandidateContext;
+// managed apply paths that must be bounded by reload_timeout should call
+// NewCandidateContext directly so secret resolution is cancellable.
 func NewCandidate(raw *Config) (*Candidate, error) {
+	return NewCandidateContext(context.Background(), raw)
+}
+
+// NewCandidateContext builds a Candidate from raw, resolving secret references
+// under ctx so that a slow or blocked secret provider (e.g. a file read on a
+// stalled mount) is bounded by the caller's deadline. When ctx is cancelled or
+// its deadline expires before resolution completes, it returns ctx.Err()
+// (context.DeadlineExceeded or context.Canceled) without persisting anything.
+func NewCandidateContext(ctx context.Context, raw *Config) (*Candidate, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	clone, err := raw.Clone()
 	if err != nil {
 		return nil, err
 	}
-	effective, state, digests, err := Resolve(clone)
+	effective, state, digests, err := ResolveContext(ctx, clone)
 	if err != nil {
 		return nil, err
 	}

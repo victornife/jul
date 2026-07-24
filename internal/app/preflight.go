@@ -106,7 +106,11 @@ type Preflight struct {
 //
 // Any error aborts the write; the caller must not persist the config.
 func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Config, mode PreflightMode) (*PreflightResult, error) {
-	candidate, err := config.NewCandidate(c)
+	// Build the candidate under ctx so secret resolution and the candidate
+	// build are bounded by the same deadline as the rest of preflight; a
+	// stalled ${file:...} provider cannot hang the managed apply past
+	// reload_timeout (AC-08).
+	candidate, err := config.NewCandidateContext(ctx, c)
 	if err != nil {
 		return nil, err
 	}
