@@ -11,6 +11,7 @@ import {
   applyPatchBatch,
   diffConfig,
   discardPendingRestart,
+  fetchManagedApply,
   fetchOverview,
   fetchPendingRestart,
   fetchRawConfig,
@@ -164,6 +165,16 @@ function PendingRestartBanner({
     </div>
   );
 }
+
+// AC-09 exact-ID poll cadence for a saved-not-live managed apply: an immediate
+// first read, a 1s cadence for the first ~10 reads (~10s), then a 2s cadence up
+// to a bounded deadline+margin. LEGACY_OVERVIEW_MAX_POLLS bounds the best-effort
+// runtime-overview poll used only for pre-managed hot applies (stream_status).
+const POLL_FAST_INTERVAL_MS = 1000;
+const POLL_SLOW_INTERVAL_MS = 2000;
+const POLL_FAST_POLLS = 10;
+const POLL_MAX_ATTEMPTS = 25;
+const LEGACY_OVERVIEW_MAX_POLLS = 3;
 
 export function ConfigPanel() {
   const navigate = useNavigate();
@@ -560,55 +571,76 @@ export function ConfigPanel() {
     (applied.mode ?? "hot") === "hot" &&
     applied.reload === undefined &&
     applied.pending_reload !== false;
-  const pollingExpired = pendingApplyID !== undefined && postApplyPollAttemptsRef.current >= 20;
-  const postApply = useQuery({
-    queryKey: ["config-apply-overview", pendingApplyID ?? appliedState?.operationID],
+  // Legacy (pre-managed) hot applies carry no per-ID ledger record, so the only
+  // supplemental signal is the runtime overview's async stream_status. This is a
+  // best-effort, short-lived poll — it never upgrades an uncorrelated result to
+  // "live" (AC-11); it only surfaces the L4 stream reload state.
+  const legacyOverview = useQuery({
+    queryKey: ["config-apply-legacy-overview", appliedState?.operationID],
     queryFn: async () => {
       postApplyPollAttemptsRef.current += 1;
       return fetchOverview();
     },
-    enabled: pendingApplyID !== undefined || legacyApplyPending,
+    enabled: legacyApplyPending,
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchInterval: () =>
+      postApplyPollAttemptsRef.current >= LEGACY_OVERVIEW_MAX_POLLS ? false : POLL_FAST_INTERVAL_MS,
+  });
+  // AC-09: a saved-not-live managed apply is finalized by polling its EXACT
+  // ledger record at GET /api/config/applies/{id} — never the runtime overview's
+  // global last_managed_apply, which a newer unrelated apply could overwrite. The
+  // schedule is: immediate first read, then a 1s cadence for ~10s, then 2s until
+  // a bounded deadline+margin. Polling stops on a terminal record, on a missing
+  // record (null/404 after a restart), on cancel, or at the deadline. A missing
+  // record is NEVER treated as success.
+  const applyRecord = useQuery({
+    queryKey: ["config-apply-record", pendingApplyID],
+    queryFn: async () => {
+      postApplyPollAttemptsRef.current += 1;
+      return fetchManagedApply(pendingApplyID as string);
+    },
+    enabled: pendingApplyID !== undefined,
     retry: false,
     staleTime: 0,
     gcTime: 0,
     refetchOnWindowFocus: false,
     refetchInterval: (query) => {
-      if (!pendingApplyID) return postApplyPollAttemptsRef.current >= 3 ? false : 1500;
-      const terminal = query.state.data?.last_managed_apply;
-      return terminal?.id === pendingApplyID || postApplyPollAttemptsRef.current >= 20
-        ? false
-        : 1500;
+      const record = query.state.data;
+      if (record?.state === "terminal") return false;
+      // null == 404: the record is gone (e.g. after a restart). Stop; the
+      // expired banner is shown rather than any success claim.
+      if (record === null) return false;
+      if (postApplyPollAttemptsRef.current >= POLL_MAX_ATTEMPTS) return false;
+      return postApplyPollAttemptsRef.current >= POLL_FAST_POLLS
+        ? POLL_SLOW_INTERVAL_MS
+        : POLL_FAST_INTERVAL_MS;
     },
   });
+  // The pending managed apply stopped resolving to a terminal result within the
+  // bounded budget (deadline reached) or its record vanished (404). Either way
+  // the console must not claim the new configuration is serving.
+  const pollingExpired =
+    pendingApplyID !== undefined &&
+    applyRecord.data?.state !== "terminal" &&
+    (applyRecord.data === null || postApplyPollAttemptsRef.current >= POLL_MAX_ATTEMPTS);
 
   useEffect(() => {
     if (!pendingApplyID || !appliedState) return;
+    const record = applyRecord.data;
+    // AC-09: only a *terminal* record for the EXACT awaited id finalizes the
+    // panel. A pending (202) record, a missing record (null/404), or a record
+    // for any other id is never treated as success.
+    if (!record || record.state !== "terminal" || record.id !== pendingApplyID) return;
     const operationID = appliedState.operationID;
-    const terminal = postApply.data?.last_managed_apply;
-    if (!terminal || terminal.id !== pendingApplyID) return;
-    const reload = postApply.data?.last_reload;
+    const terminal = record.result;
     setAppliedState((currentState) =>
       currentState?.operationID === operationID && currentState.result.apply_id === pendingApplyID
         ? {
             ...currentState,
-            result: {
-              ...currentState.result,
-              ok: terminal.ok,
-              restored: terminal.restored,
-              restore_error: terminal.restore_error,
-              final_disk_version: terminal.final_disk_version,
-              final_serving_version: terminal.final_serving_version,
-              reload:
-                reload?.id === pendingApplyID
-                  ? reload
-                  : currentState.result.reload
-                    ? {
-                        ...currentState.result.reload,
-                        id: pendingApplyID,
-                        outcome: terminal.outcome,
-                      }
-                    : { id: pendingApplyID, outcome: terminal.outcome },
-            },
+            result: { ...currentState.result, ...terminal, apply_id: pendingApplyID },
           }
         : currentState,
     );
@@ -622,7 +654,7 @@ export function ConfigPanel() {
   }, [
     appliedState,
     pendingApplyID,
-    postApply.data,
+    applyRecord.data,
     reconcilePatchEditor,
     refreshEditorAfterFailure,
   ]);
@@ -695,8 +727,8 @@ export function ConfigPanel() {
         ...(applied.restore_error !== undefined ? { restoreError: applied.restore_error } : {}),
         ...(reload?.error !== undefined ? { reloadError: reload.error } : {}),
         enqueueFailed: reload?.failed_phase === "enqueue",
-        ...(reload === undefined && postApply.data?.stream_status !== undefined
-          ? { streamStatus: postApply.data.stream_status }
+        ...(reload === undefined && legacyOverview.data?.stream_status !== undefined
+          ? { streamStatus: legacyOverview.data.stream_status }
           : {}),
         http: reload?.http,
         stream: reload?.stream,
@@ -707,7 +739,7 @@ export function ConfigPanel() {
       });
     }
     return null;
-  }, [restartError, applied, appliedState?.errorKind, postApply.data]);
+  }, [restartError, applied, appliedState?.errorKind, legacyOverview.data]);
 
   const appliedCapabilities = applied?.status
     ? { active: applied.status.filter((s) => s.active).length, total: applied.status.length }

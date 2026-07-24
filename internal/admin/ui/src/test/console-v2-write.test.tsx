@@ -631,8 +631,8 @@ describe("ConfigPanel apply flow", () => {
     expect(urls.some((url) => url.startsWith("/api/config/apply"))).toBe(false);
   });
 
-  it("correlates saved-not-live only to the matching apply id and refreshes restored config", async () => {
-    let overviewReads = 0;
+  it("finalizes saved-not-live by polling the exact apply-id record and refreshes restored config", async () => {
+    let recordReads = 0;
     let configReads = 0;
     globalThis.fetch = vi.fn((input: string) => {
       if (input === "/api/config") {
@@ -669,44 +669,41 @@ describe("ConfigPanel apply flow", () => {
           ),
         );
       }
-      if (input === "/api/runtime/overview") {
-        overviewReads += 1;
-        if (overviewReads === 1) {
+      // AC-09: the console polls the EXACT apply id, never the runtime overview.
+      // Hitting /api/runtime/overview here would be a correctness violation.
+      if (input === "/api/config/applies/rl_7") {
+        recordReads += 1;
+        if (recordReads === 1) {
           return Promise.resolve(
-            json({
-              product: "jul",
-              version: "1",
-              status: [],
-              last_managed_apply: {
-                id: "rl_99",
-                mode: "hot",
-                ok: true,
-                outcome: "applied_live",
-                completed_at: "2026-01-01T00:00:00Z",
+            json(
+              {
+                id: "rl_7",
+                state: "pending",
+                operation: "config.apply",
+                result: { ok: true, apply_id: "rl_7", mode: "hot" },
               },
-            }),
+              202,
+            ),
           );
         }
         return Promise.resolve(
           json({
-            product: "jul",
-            version: "1",
-            status: [],
-            last_managed_apply: {
-              id: "rl_7",
-              mode: "hot",
+            id: "rl_7",
+            state: "terminal",
+            operation: "config.apply",
+            result: {
               ok: false,
-              outcome: "not_applied",
+              apply_id: "rl_7",
+              mode: "hot",
               restored: true,
               final_disk_version: "v-restored",
               final_serving_version: "live-v1",
-              completed_at: "2026-01-01T00:00:01Z",
-            },
-            last_reload: {
-              id: "rl_7",
-              outcome: "not_applied",
-              failed_phase: "prepare",
-              error: "build failed",
+              reload: {
+                id: "rl_7",
+                outcome: "not_applied",
+                failed_phase: "prepare",
+                error: "build failed",
+              },
             },
           }),
         );
@@ -729,7 +726,7 @@ describe("ConfigPanel apply flow", () => {
     expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
     await waitFor(
       () => {
-        expect(overviewReads).toBeGreaterThanOrEqual(2);
+        expect(recordReads).toBeGreaterThanOrEqual(2);
       },
       { timeout: 4000 },
     );
@@ -739,6 +736,129 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(editor.value).toContain(":restored");
     });
+  });
+
+  it("does not claim success when the exact apply-id record is gone (404 after restart)", async () => {
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
+      }
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/apply?base_version=v1") {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_8",
+              mode: "hot",
+              version: "v2",
+              persisted: true,
+              reload: {
+                id: "rl_8",
+                outcome: "saved_not_live",
+                persisted: true,
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      // The record vanished (e.g. the process restarted): 404. A missing record
+      // must NEVER be upgraded to a success claim (AC-09).
+      if (input === "/api/config/applies/rl_8") {
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
+    expect(await screen.findByText("Final result still unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Applied and live")).not.toBeInTheDocument();
+  });
+
+  it("ignores a terminal record for an unrelated apply id", async () => {
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
+      }
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/apply?base_version=v1") {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_9",
+              mode: "hot",
+              version: "v2",
+              persisted: true,
+              reload: {
+                id: "rl_9",
+                outcome: "saved_not_live",
+                persisted: true,
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      // The server returns a terminal record whose id does NOT match the awaited
+      // apply. The console must not finalize on it (AC-09).
+      if (input === "/api/config/applies/rl_9") {
+        recordReads += 1;
+        return Promise.resolve(
+          json({
+            id: "rl_OTHER",
+            state: "terminal",
+            operation: "config.apply",
+            result: { ok: true, apply_id: "rl_OTHER", mode: "hot" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(recordReads).toBeGreaterThanOrEqual(1);
+    });
+    // The mismatched record never upgrades the panel to a live/restored claim.
+    expect(screen.getByText("Saved — final outcome pending")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Apply rejected — previous configuration restored"),
+    ).not.toBeInTheDocument();
   });
 });
 

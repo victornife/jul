@@ -1533,6 +1533,79 @@ function parseConfigMutationResult(data: unknown): ApplyResult {
   return LegacyConfigMutationResponseSchema.parse(data);
 }
 
+// ── Managed-apply terminal ledger (AC-02 / AC-09) ────────────────────────────
+//
+// ManagedApplyRecordSchema mirrors admin.publicManagedApplyRecord: the single
+// object the console retrieves by *exact* apply ID from
+// GET /api/config/applies/{id} to observe the terminal result of a recent
+// accepted apply regardless of later transactions. Polling this endpoint — not
+// the runtime overview's global last_managed_apply — closes the window where a
+// newer, unrelated apply could be mistaken for the awaited one (AC-09).
+//
+// A record is `pending` (HTTP 202) until it reaches exactly one terminal result
+// (HTTP 200, state=terminal). `result` is the same structured ConfigApplyResult
+// the apply response carries; it already omits secrets, actor, and source IP.
+// The three finalization fields are advisory provenance (AC-14): a committed
+// apply can be ok=true while history_error is non-empty (its history sidecar
+// degraded) — that is NOT an apply failure.
+export const ManagedApplyStateSchema = z.enum(["pending", "terminal"]);
+export type ManagedApplyState = z.infer<typeof ManagedApplyStateSchema>;
+
+export const ManagedApplyRecordSchema = z.object({
+  id: z.string(),
+  state: ManagedApplyStateSchema,
+  // operation is a bounded audit label (config.apply, config.patch, …). Kept as
+  // a string so an added operation kind never fails the parse for a field the
+  // console only surfaces, never branches on for correctness.
+  operation: z.string().optional(),
+  started_at: z.string().optional(),
+  completed_at: z.string().optional(),
+  result: ApplyResultSchema,
+  // AC-14 finalization provenance: advisory, never readiness-affecting.
+  history_snapshot_id: z.string().optional(),
+  history_error: z.string().optional(),
+  finalization_error: z.string().optional(),
+});
+export type ManagedApplyRecord = z.infer<typeof ManagedApplyRecordSchema>;
+
+/**
+ * fetchManagedApply retrieves the terminal-or-pending ledger record for an exact
+ * apply ID (AC-09). It resolves with:
+ *   - the parsed record for a terminal (200) or pending (202) transaction;
+ *   - `null` when the server has no record for the ID (404) — a missing record
+ *     is NEVER treated as a success by callers; polling either keeps waiting or
+ *     expires without ever claiming the new configuration is serving.
+ * It rejects with ApiError for a malformed ID (400) or any other transport
+ * failure. The endpoint is always Cache-Control: no-store on the server; this
+ * client sets no-store on the request too so an intermediary cannot serve a
+ * stale pending record after the transaction has finalized.
+ */
+export async function fetchManagedApply(id: string): Promise<ManagedApplyRecord | null> {
+  const headers = new Headers();
+  headers.set("Accept", "application/json");
+  headers.set("Cache-Control", "no-store");
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch(`/api/config/applies/${encodeURIComponent(id)}`, { headers });
+  if (resp.status === 404) return null;
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  // 202 (pending) is a non-error status the fetch API still reports as !ok, so
+  // it must pass through to parsing; only genuine failures throw.
+  if (!resp.ok && resp.status !== 202) {
+    if (resp.status === 401) notifyUnauthorized();
+    let msg = `${String(resp.status)} ${resp.statusText}`;
+    const body = data as { error?: string } | null;
+    if (body?.error) msg = body.error;
+    throw new ApiError(`/config/applies/${id}`, resp.status, msg, parseRetryAfter(resp));
+  }
+  return ManagedApplyRecordSchema.parse(data);
+}
+
 function classifyApplyFailure(path: string, status: number, data: unknown): never {
   const result = parseApplyResult(data);
   const conflict = ConflictBodySchema.safeParse(data);
