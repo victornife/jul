@@ -1,9 +1,11 @@
 # Audit-closure implementation — continuation handoff (session 3)
 
 ## Status snapshot
-- **Current HEAD: `5e90f4c0`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass).
+- **Current HEAD: `1b62cd19`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass).
 - Baseline reviewed at `427e75d2`. Session-1 landed: AC-01, AC-02, AC-03 (hot-finalizer ordering), AC-04, AC-05 (storage), AC-06, AC-07; partial AC-15/AC-16.
-- Session-2 landed (below): AC-05 terminalization wiring + AC-03 finish.
+- Session-2 landed: AC-05 terminalization wiring + AC-03 finish.
+- Session-3 landed (below): **AC-08 complete** (2 commits) + **AC-14 backend** (finalization provenance wired to ledger + overview).
+- **Next work is the Console (AC-09–AC-13) + AC-14 Console rendering — a different tree (`internal/admin/ui`, TS/pnpm). Start a FRESH session: the Go composition-root files (`serve.go`, `config_apply.go`, `admin/server.go`) are large and are NOT needed for the Console work; do not pre-load them.**
 
 ## Environment / workflow reminders
 - Windows 11, cmd shell; CWD path has spaces — use `powershell -NoProfile -Command "..."` to slice files; `findstr` cannot open spaced paths.
@@ -13,7 +15,7 @@
 - After edits: `gofmt -w <files>` then `gofmt -l <files>` (empty output = clean). LF→CRLF warnings harmless.
 - Verify each increment: `go build ./...`; `go vet` changed pkgs; `go test -count=1 ./internal/...` affected pkgs; gofmt clean; then commit.
 
-## Completed THIS session (both committed & green)
+## Completed in session-2 (committed & green)
 
 ### AC-05 wiring — configuration history at terminalization (commit `5127b534`)
 - `internal/app/config_apply.go`:
@@ -38,12 +40,22 @@
 - `internal/app/config_apply.go`: allocate `id := c.nextID()` in `ApplyRaw` **before** the hot vs `stage_restart` branch. Threaded through `applyStageRestart(reqCtx, id, …)` (sets `result.ApplyID = id`) and `applyCandidate(reqCtx, id, …)` (removed its internal `c.nextID()`). Every persisted mutation — hot, enqueue-failure, stage create, stage update — now carries a stable ID and is finalized once via the existing terminal ordering (duplicate callbacks still guarded by the registry `BeginFinalization` in `serve.go`).
 - Also removed a stray `test-full.toml` byproduct that a test run left in the tree (folded into `5e90f4c0`).
 
+## Completed in session-3 (committed & green)
+
+### AC-08 — reload_timeout bounds the whole managed transaction (commits `accef73e`, `b71a20c9`)
+- **Part 1 (`accef73e`)**: bounded secret resolution + candidate build by context. Added `config.NewCandidateContext(ctx, raw)`; `config.NewCandidate` is now the `context.Background()` wrapper. Secret providers observe the deadline. Tests: `internal/config/candidate_context_test.go`.
+- **Part 2 (`b71a20c9`)**: the deadline (derived from the SERVING config's `reload_timeout`, per R15-01 — NOT the candidate's) now bounds candidate resolution + every preflight gate, not just `applyCandidate`. Added `ConfigApplyCoordinator.preflightContext(candidate)` + `runPreflight` with a per-phase observer that attributes a deadline breach to the exact gate. A **pre-persistence** breach aborts cleanly (disk untouched) and surfaces as `ApplyResult.TimedOutPhase`; the admin API maps non-empty `TimedOutPhase` → **504** in `configApplyResultStatus` (checked first, before validation/reload). `ConfigApplyResult.TimedOutPhase string json:"timed_out_phase,omitempty"` added. A timeout AFTER persistence stays `saved_not_live` (202), never 504 — disk truth is never lost. Tests: `internal/app/config_apply_timeout_test.go`, `internal/admin/config_apply_timeout_test.go`.
+
+### AC-14 backend — finalization provenance wired out (commit `1b62cd19`)
+- The coordinator already computed `HistorySnapshotID`/`HistoryError` on the app-side `ApplyResult` (AC-05), but they were dropped at the callback boundary. The serialized `admin.ConfigApplyResult` must NOT carry history provenance (AC-05 invariant), so a **dedicated carrier** was added: `admin.ManagedApplyFinalization{HistorySnapshotID, HistoryError, FinalizationError}` (`internal/admin/server.go`).
+- `OnManagedApplyComplete` signature gained a third `admin.ManagedApplyFinalization` argument; `notifyManagedApplyComplete` populates it from the terminal `ApplyResult` (`internal/app/config_apply.go`). All four coordinator callback sites in `config_apply_test.go` updated.
+- Composition root (`internal/app/serve.go`) routes the provenance into BOTH destinations: (1) the durable per-ID **ledger record** `ManagedApplyRecord.{HistorySnapshotID,HistoryError,FinalizationError}` — already surfaced by `GET /api/config/applies/{id}` via `publicManagedApplyRecord`; and (2) the runtime-overview `ManagedApplyOutcome` (extended with the same three fields, `history_snapshot_id`/`history_error`/`finalization_error`).
+- Semantics: a committed apply whose raw snapshot wrote but whose metadata sidecar failed is degraded-but-usable — `HistorySnapshotID` set AND `HistoryError` non-empty, terminal result stays `ok=true` (roll-back-able), never fails readiness. Test: `TestManagedApplyFinalizationProvenanceThreaded` in `internal/app/config_apply_test.go`.
+- **NOT yet done (Console side):** rendering these three fields as a finalization/degradation surface distinct from reload success/failure, and (if still wanted) an admin **health component** for `managed_apply_finalization` + `config_history`. The health-component question is open: current design surfaces degradation per-terminal-record + on the overview outcome rather than as a readiness-affecting health component (history degradation must never fail readiness). Decide during the Console pass whether a non-readiness advisory health row is also wanted.
+
 ## Remaining work — implement in this order
 
-### AC-08 (P1, largest, 3–5 d) — reload_timeout bounds the whole transaction
-Candidate resolution + full preflight currently use `c.BaseCtx`; only `applyCandidate` derives a deadline (already uses the SERVING config's reload_timeout, not the candidate's — correct). Extend the deadline to bound secret resolution + candidate build + all preflight. Add `config.NewCandidateContext(ctx, raw)` with `config.NewCandidate` as a `context.Background()` wrapper; thread the deadline ctx through secret providers and `Preflight.Apply`/`applyCandidate` (preflight already accepts+propagates ctx). Phase-specific 504 with `timed_out_phase` (phases: resolve, authorize_admin, preflight_validate/tls/handlers/plugins/stream/listeners/startup_resources, persist, enqueue, reload_prepare/publish/post_commit). Request cancellation before persistence aborts; AFTER persistence must NOT abandon restoration — continue under process context bounded by the same absolute deadline. Cleanup: no goroutine/fd/temp/marker leaks. Tests use injected blocking functions per phase; assert 504, exact phase, disk unchanged, no marker, cleanup once, goroutine count returns to baseline (deterministic barriers, not sleeps).
-
-### AC-09–AC-13 (P1) — Console (`internal/admin/ui`, pnpm)
+### AC-09–AC-13 (P1, NEXT) — Console (`internal/admin/ui`, pnpm)
 Gate: `pnpm --dir internal/admin/ui run typecheck|lint|test:coverage|build`, embedded asset drift guard must pass.
 - AC-09: poll `/api/config/applies/{id}` (exact-ID) not Runtime Overview; add `ManagedApplyRecordSchema` (zod) + `fetchManagedApply`; poll until state=terminal; immediate first read, 1s for 10s then 2s until deadline+margin; stop on terminal/404-after-restart/cancel; missing never becomes success.
 - AC-10: degraded rollback (ok=true, applied_degraded) is committed — close dialog, invalidate queries (history/raw/pending-restart/overview/route-app), show separate persistent warning banner, no repeatable rollback action.
@@ -51,8 +63,8 @@ Gate: `pnpm --dir internal/admin/ui run typecheck|lint|test:coverage|build`, emb
 - AC-12: config:raw operators → call `/api/config/patch/candidate` with base_version, show candidate read-only; non-config:raw → diff only; label source view truthfully.
 - AC-13: extract ConfigPanel mutation state machine into reducer/hook preserving operation kind, candidate/patch ops, base version, mode, admin-confirmed state, operation generation, apply ID.
 
-### AC-14 — health/finalization degradation surface
-Admin health component for `managed_apply_finalization` + `config_history`; terminal result exposes `history_snapshot_id`/`history_error`/`finalization_error`; Console shows separately from reload success/failure. Note: coordinator already carries `HistorySnapshotID`/`HistoryError` internally (AC-05) — wire them into the admin health/terminal surface and the ledger record.
+### AC-14 Console rendering (backend already landed at `1b62cd19`)
+Backend contract is live: `history_snapshot_id`/`history_error`/`finalization_error` appear on BOTH `GET /api/config/applies/{id}` (per-ID ledger record) and the runtime-overview `last_managed_apply` outcome. Remaining: Console renders them as an advisory finalization/degradation surface **distinct** from reload success/failure (a committed apply can be `ok=true` while its history sidecar degraded — never present that as an apply failure). Add the three fields to `ManagedApplyRecordSchema` (zod) and the overview schema; render a non-blocking banner. Fold this into AC-09/AC-10 since it shares the same schemas/components. Open decision: whether to also add a non-readiness advisory admin health row for `managed_apply_finalization`/`config_history` (history degradation must NEVER fail `/readyz`).
 
 ### Remaining AC-15/AC-16 + closure
 Docs: `docs/reload-semantics.md`, `docs/specs/console-rbac.md`, ADRs (planned-restart linearization, timeout boundary), audit closure report `docs/audit/<date>-configuration-audit-closure.md` (per-finding: id, path, closure commit, summary, test names, workflow job, disposition, reviewer — do NOT write "closed" before the exact green SHA). Comment cleanup: buildRBACPolicy post-Publish rebuild claims, BOM/encoding in Console source. Then PR to main, ensure exact SHA runs all workflows, add `workflow_dispatch` trigger, independent security/concurrency + frontend reviewers, record run IDs, tag only after report signed.
@@ -62,6 +74,9 @@ No result reconstructed independently by handler or Console; no global latest-st
 
 ## Commit ledger (this workstream)
 ```
+1b62cd19 AC-14 backend: thread finalization provenance to ledger + overview
+b71a20c9 AC-08 (part 2): bound whole managed apply transaction; phase-specific 504 (timed_out_phase)
+accef73e AC-08 (part 1): bound secret resolution + candidate build by context
 5e90f4c0 AC-03: allocate ApplyID before hot/stage branch (every persisted managed mutation identified & finalized once)
 5127b534 AC-05: record configuration history at managed-apply terminalization
 49884e6c app/preflight: correct stale 'ctx reserved for future use' comment (AC-16)
@@ -74,4 +89,4 @@ ec9cea4d AC-03 hot-finalizer ordering
 c1a30ffd/cead4bc9 AC-01/AC-02
 ```
 
-Start next session with AC-08. Repository is clean & green at `5e90f4c0`.
+Start next session with the Console (AC-09–AC-13 + AC-14 rendering), in the `internal/admin/ui` (TS/pnpm) tree — do NOT pre-load the large Go composition-root files. Repository is clean & green at `1b62cd19`.
