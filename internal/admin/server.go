@@ -303,6 +303,15 @@ type Deps struct {
 	// result). It returns nil when healthy. When it returns an error, /readyz
 	// reports not ready and the runtime overview surfaces the degradation.
 	AdminHealth func() error
+
+	// ManagedHistoryActive reports that the managed apply coordinator records
+	// configuration-history snapshots at terminalization (AC-05). When true the
+	// HTTP handlers MUST NOT record history eagerly for managed apply paths —
+	// doing so would double-snapshot and, worse, snapshot at a provisional 202
+	// before the terminal outcome is known. When false (unit tests that wire
+	// WriteConfigRaw/ApplyConfig fakes without a terminal callback) the handlers
+	// keep recording history eagerly so behavior is unchanged.
+	ManagedHistoryActive bool
 }
 
 // ReloadSnapshot is the legacy admin-package view of the most recent reload
@@ -845,7 +854,14 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, status, result)
 			return
 		}
-		s.recordHistory(prevRaw)
+		// AC-05: when the managed coordinator records history at
+		// terminalization, the handler must NOT snapshot here — doing so would
+		// double-record and could snapshot at a provisional 202 before the
+		// terminal outcome is known. Handlers keep recording eagerly only when
+		// no managed terminal writer is wired (unit-test fakes).
+		if !s.deps.ManagedHistoryActive {
+			s.recordHistory(prevRaw)
+		}
 		s.recordAudit(r, "config.raw", "config", "success", "configuration validated and saved")
 		writeJSON(w, http.StatusOK, ConfigMutationResponse{Status: "saved", ConfigApplyResult: result})
 		return
@@ -976,7 +992,11 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, status, result)
 			return
 		}
-		s.recordHistory(prevRaw)
+		// AC-05: skip eager handler-side history when the managed coordinator
+		// records it at terminalization (see handleConfigRaw for rationale).
+		if !s.deps.ManagedHistoryActive {
+			s.recordHistory(prevRaw)
+		}
 		s.recordAudit(r, "config.settings", "config", "success", "settings applied and saved")
 		writeJSON(w, http.StatusOK, ConfigMutationResponse{Status: "saved", ConfigApplyResult: result})
 		return

@@ -486,7 +486,11 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if result.OK && isTerminalApplyResult(result) {
-		s.recordHistory(prev)
+		// AC-05: skip eager handler-side history when the managed coordinator
+		// records it at terminalization (see handleConfigRaw for rationale).
+		if !s.deps.ManagedHistoryActive {
+			s.recordHistory(prev)
+		}
 		s.recordAudit(r, "config.patch", "config", "success", strings.Join(summaries, "; "))
 		s.emit("config", "apply", "info", "Structured patch validated and saved.")
 	}

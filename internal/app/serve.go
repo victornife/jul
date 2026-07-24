@@ -590,6 +590,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
 		}
+		// AC-05: the managed coordinator records configuration-history snapshots
+		// at terminalization, so the HTTP handlers must not snapshot eagerly.
+		// The WriteManagedHistory hook is wired after adminSrv exists (below);
+		// this flag must be set before admin.New copies deps.
+		deps.ManagedHistoryActive = true
 	}
 
 	// Build admin server before srv.Run so it is running when the first
@@ -634,6 +639,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// the runtime overview.
 	if coordinator != nil && adminSrv != nil {
 		coordinator.AuthGeneration = adminSrv.AuthGeneration
+		// AC-05: history snapshots are written at terminalization by the trusted
+		// in-process writer on the admin server. previousRaw is sensitive and is
+		// forwarded only to this hook, never logged or retained by the coordinator.
+		coordinator.WriteManagedHistory = adminSrv.RecordManagedHistory
 		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
 			applyID := res.ApplyID
 			if applyID == "" && res.Reload != nil {

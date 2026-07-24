@@ -71,6 +71,15 @@ type ApplyResult struct {
 	// applyMu is acquired) so concurrent stage applies cannot misclassify the
 	// first stage as an update.
 	StagedRestartIsUpdate bool
+
+	// HistorySnapshotID and HistoryError capture the configuration-history
+	// snapshot written at terminalization (AC-05). They are internal
+	// provenance for the composition root and tests; they are NOT part of the
+	// serialized apply result. HistoryError is non-empty when the raw snapshot
+	// was written but its metadata sidecar failed — a degraded-but-usable
+	// state that never fails an already-committed apply.
+	HistorySnapshotID string
+	HistoryError      string
 }
 
 // ApplyInFlightState tracks the current managed apply transaction. It is used
@@ -116,6 +125,15 @@ type ConfigApplyCoordinator struct {
 	// It receives the original request context so the terminal audit event can
 	// be attributed to the caller (H-05).
 	OnManagedApplyComplete func(admin.ApplyRequestContext, admin.ConfigApplyResult)
+
+	// WriteManagedHistory records a configuration-history snapshot at
+	// terminalization (AC-05). It receives the request context, the terminal
+	// result, and the exact previous on-disk configuration. The previous raw
+	// bytes are sensitive: they are passed only to this trusted in-process
+	// writer and are never logged, retained, or serialized by the coordinator.
+	// It returns the snapshot id and a non-fatal history-degradation error.
+	// Nil disables coordinator-side history so handlers keep recording eagerly.
+	WriteManagedHistory func(admin.ApplyRequestContext, admin.ConfigApplyResult, []byte) (string, error)
 
 	// beforePersist is a deterministic test barrier invoked after preflight and,
 	// for staging, after the prepared marker is written but before the final
@@ -262,7 +280,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	}
 
 	if mode == ApplyStageRestart {
-		return c.applyStageRestart(cfg, preparedCandidate, prevCfg, data, baseline)
+		return c.applyStageRestart(ctx, cfg, preparedCandidate, prevCfg, data, baseline)
 	}
 
 	var pfResult *PreflightResult
@@ -420,7 +438,7 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 //  2. StageManaged writes .bak (fresh stage only) and prepared marker.
 //  3. atomicfile.Write writes the candidate.
 //  4. PromoteToStaged promotes the marker to "staged" only after the candidate write succeeds.
-func (c *ConfigApplyCoordinator) applyStageRestart(cfg *config.Config, preparedCandidate *config.Candidate, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyStageRestart(reqCtx admin.ApplyRequestContext, cfg *config.Config, preparedCandidate *config.Candidate, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
 	// H-03: determine whether this is a staged update. If a managed staged
 	// restart is already pending, the new candidate replaces it but the
 	// original serving config remains the rollback base and the diff base.
@@ -613,7 +631,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg *config.Config, preparedC
 	if isUpdate {
 		msg = "Staged configuration updated for the next process restart; the live runtime is unchanged."
 	}
-	return ApplyResult{
+	result := ApplyResult{
 		OK:                    true,
 		Mode:                  ApplyStageRestart,
 		Version:               persistedVersion,
@@ -623,7 +641,14 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg *config.Config, preparedC
 		PendingRestart:        c.plannedRestartStatus(),
 		Message:               msg,
 		StagedRestartIsUpdate: isUpdate,
-	}, nil
+	}
+	// AC-05: a committed stage (create or update) snapshots the prior on-disk
+	// configuration — the previous serving config for a fresh stage, or the
+	// prior staged candidate for an update — because baseline.Raw is whatever
+	// was persisted before this stage overwrote it. Recorded once, here at the
+	// stage's terminal success, so no snapshot is written at a provisional 202.
+	result = c.recordManagedHistory(reqCtx, result, baseline.Raw)
+	return result, nil
 }
 
 // subsystemNames extracts unique subsystem names from a lifecycle ChangeSet.
@@ -805,6 +830,10 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		terminal = c.withRestorationOutcome(terminal, baseline.Raw, baseline.Exists, rawDigest)
 		// M-05: Move callback after unlock to prevent mutex wedge on panic.
 		c.mu.Unlock()
+		// AC-05: an enqueue failure whose restoration also failed records a
+		// recovery snapshot; a clean restoration records nothing. Recorded
+		// before the completion callback and outside c.mu.
+		terminal = c.recordManagedHistory(reqCtx, terminal, baseline.Raw)
 		c.notifyManagedApplyComplete(reqCtx, terminal)
 		return terminal, err
 	}
@@ -838,6 +867,12 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// notifyManagedApplyComplete contains its own panic recovery so a
 		// callback panic cannot wedge the coordinator here.
 		c.mu.Unlock()
+		// AC-05: record the terminal configuration-history snapshot before the
+		// completion callback so the prior config is durably captured
+		// (pre_apply on a committed apply, recovery when a failed apply's
+		// restoration also failed) and enriched onto the terminal result. The
+		// filesystem write runs outside c.mu.
+		terminal = c.recordManagedHistory(reqCtx, terminal, baseline.Raw)
 		c.notifyManagedApplyComplete(reqCtx, terminal)
 		c.mu.Lock()
 		c.inFlightState = ApplyInFlightNone
@@ -901,6 +936,25 @@ func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(reqCtx admin.ApplyRe
 	}
 	defer func() { _ = recover() }()
 	c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(result))
+}
+
+// recordManagedHistory writes the terminal configuration-history snapshot for a
+// managed apply through the trusted WriteManagedHistory hook and records the
+// resulting snapshot id / degradation onto the result. previousRaw is the exact
+// prior on-disk configuration; it is forwarded only to the hook and is never
+// logged or retained here. When no hook is wired it is a no-op. The hook itself
+// decides — from the terminal outcome — whether to snapshot and with which
+// reason, so this method never encodes history policy.
+func (c *ConfigApplyCoordinator) recordManagedHistory(reqCtx admin.ApplyRequestContext, result ApplyResult, previousRaw []byte) ApplyResult {
+	if c.WriteManagedHistory == nil {
+		return result
+	}
+	id, err := c.WriteManagedHistory(reqCtx, toAdminConfigApplyResult(result), previousRaw)
+	result.HistorySnapshotID = id
+	if err != nil {
+		result.HistoryError = err.Error()
+	}
+	return result
 }
 
 // loadMutationBaseline uses the HTTP handler's exact authorized snapshot when

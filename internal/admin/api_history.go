@@ -120,7 +120,9 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 			return result, configApplyErrorStatus(result, applyErr), applyErr
 		}
 		status := configApplyResultStatus(result)
-		if result.OK && isTerminalApplyResult(result) {
+		// AC-05: skip eager handler-side history when the managed coordinator
+		// records it at terminalization (see handleConfigRaw for rationale).
+		if result.OK && isTerminalApplyResult(result) && !s.deps.ManagedHistoryActive {
 			s.recordHistory(prev)
 		}
 		return result, status, nil

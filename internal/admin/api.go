@@ -582,7 +582,11 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.OK && isTerminalApplyResult(result) {
-		s.recordHistory(prev)
+		// AC-05: when the managed coordinator records history at
+		// terminalization, do not double-record here.
+		if !s.deps.ManagedHistoryActive {
+			s.recordHistory(prev)
+		}
 		// Use distinct audit/timeline events for stage_restart vs hot apply so
 		// the timeline clearly distinguishes which transaction type ran.
 		// StagedRestartIsUpdate is set by the serve.go closure BEFORE the apply
