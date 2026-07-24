@@ -576,13 +576,27 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg *config.Config, preparedC
 		}, err
 	}
 	c.suppressWatcher(rawDigest)
-	c.mu.Unlock()
 
-	// Step 4: promote the marker to "staged" only after the candidate write
-	// succeeds. A crash before this leaves marker="prepared" and disk==base,
-	// which Reconcile cleans up automatically.
+	// AC-06: promote the marker to "staged" WHILE STILL HOLDING c.mu, using the
+	// verified promotion that re-reads the active config and confirms it still
+	// equals the candidate both immediately before and after the marker is
+	// staged. Keeping c.mu held from the candidate write through the final disk
+	// verification makes the write→verify→promote→verify sequence linearizable
+	// with respect to other managed applies, and the disk checks detect an
+	// external writer replacing the candidate in the promotion window. A crash
+	// before promotion still leaves marker="prepared" with disk==candidate,
+	// which Reconcile promotes; a crash before the candidate write leaves
+	// marker="prepared" with disk==base, which Reconcile cleans up.
 	if c.PlannedRestart != nil {
-		if err := c.PlannedRestart.PromoteToStaged(data); err != nil {
+		if err := c.PlannedRestart.PromoteToStagedVerified(data); err != nil {
+			c.mu.Unlock()
+			// An external write in the promotion window (or a state mismatch)
+			// must not be reported as a successful stage. Map the disk-change
+			// races to a conflict so the HTTP layer returns 409; genuine
+			// state/programming errors surface as a storage error.
+			if errors.Is(err, ErrStagedCandidateChanged) {
+				return c.conflictResult(ApplyStageRestart, persistedVersion, desiredVersion, currentVersion), nil
+			}
 			return ApplyResult{
 				OK:               false,
 				Mode:             ApplyStageRestart,
@@ -593,6 +607,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(cfg *config.Config, preparedC
 			}, err
 		}
 	}
+	c.mu.Unlock()
 
 	msg := "Configuration staged for the next process restart; the live runtime is unchanged."
 	if isUpdate {

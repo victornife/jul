@@ -54,6 +54,20 @@ var ErrNoManagedPreparedMarker = errors.New("no managed prepared marker found; P
 // previous run) or in an unknown state.
 var ErrMarkerWrongState = errors.New("marker is not in prepared state; PromoteToStaged called out of sequence")
 
+// ErrMarkerCandidateMismatch is returned by PromoteToStagedVerified when the
+// prepared marker's StagedRawSHA256 does not match the digest of the candidate
+// bytes supplied to the promotion. This is a programming/state error: the
+// marker describes different bytes than the caller believes it wrote.
+var ErrMarkerCandidateMismatch = errors.New("prepared marker candidate digest does not match supplied candidate bytes")
+
+// ErrStagedCandidateChanged is returned by PromoteToStagedVerified when the
+// active config file on disk does not equal the expected candidate at the time
+// of marker promotion — either an external writer replaced the candidate
+// between the write and the promotion, or the file changed immediately after
+// the marker was promoted. In both cases the stage cannot be reported as
+// successful and the caller must surface a conflict/inconsistent state.
+var ErrStagedCandidateChanged = errors.New("active config changed from the staged candidate during marker promotion")
+
 // PlannedRestartMarker is the JSON sidecar written adjacent to the active
 // config file when a staged restart is pending. It is the crash-recovery
 // anchor: any process that starts up with this file present can determine
@@ -546,6 +560,93 @@ func (s *PlannedRestartStore) PromoteToStaged(candidateRaw []byte) error {
 	marker.PreviousStagedAt = time.Time{}
 	if err := s.writeMarkerLocked(*marker); err != nil {
 		return fmt.Errorf("planned-restart stage: promote to staged: %w", err)
+	}
+
+	s.pending = true
+	s.raw = candidateRaw
+	if s.baseRaw == nil {
+		s.baseRaw = candidateRaw
+	}
+	s.stagedAt = marker.StagedAt
+	return nil
+}
+
+// PromoteToStagedVerified is the linearizable AC-06 replacement for
+// PromoteToStaged. In addition to promoting a prepared marker to "staged" it
+// verifies, while holding the store mutex, that:
+//
+//   - the prepared marker's StagedRawSHA256 equals the digest of candidateRaw
+//     (ErrMarkerCandidateMismatch — a programming/state error), and
+//   - the active config file on disk still equals candidateRaw both immediately
+//     before the marker is promoted and immediately after (ErrStagedCandidateChanged).
+//
+// The pre-promotion disk check closes the TOCTOU window where an external
+// writer replaces the just-written candidate before the marker is promoted,
+// which would otherwise let the API report success while the marker describes
+// different bytes. The post-promotion check detects a write landing during the
+// marker update. A successful stage therefore linearizes at the final disk
+// digest verification after the marker is staged; any external write before
+// that point prevents a success response and any write after is a normal new
+// external-divergence event detected by the refresh path.
+//
+// The caller MUST hold the coordinator mutex across the candidate write and
+// this call so the write→verify→promote→verify sequence is atomic with respect
+// to other managed applies. When ConfigPath is empty this is a no-op (in-memory
+// stores have no disk to verify).
+func (s *PlannedRestartStore) PromoteToStagedVerified(candidateRaw []byte) error {
+	if s == nil || s.ConfigPath == "" {
+		return nil
+	}
+	expectedDigest := sha256Hex(candidateRaw)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	marker, err := s.loadMarkerLocked()
+	if err != nil || marker == nil {
+		return ErrNoManagedPreparedMarker
+	}
+	if marker.State != plannedRestartStatePrepared {
+		return ErrMarkerWrongState
+	}
+	if marker.StagedRawSHA256 != expectedDigest {
+		// The marker was prepared for different bytes than the caller supplied.
+		s.inconsistent = true
+		return ErrMarkerCandidateMismatch
+	}
+
+	// Pre-promotion disk check: the active config must still be the candidate.
+	before, err := os.ReadFile(s.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("planned-restart promote: read config before promotion: %w", err)
+	}
+	if sha256Hex(before) != expectedDigest {
+		// An external writer replaced the candidate between the write and the
+		// promotion. Do not report success and do not repair the file.
+		return ErrStagedCandidateChanged
+	}
+
+	marker.State = plannedRestartStateStaged
+	// M-01: finalize the staged candidate; clear all Previous* recovery metadata.
+	marker.PreviousStagedRawSHA256 = ""
+	marker.PreviousStagedVersion = ""
+	marker.PreviousStagedPersistedVersion = ""
+	marker.PreviousSubsystems = nil
+	marker.PreviousStagedAt = time.Time{}
+	if err := s.writeMarkerLocked(*marker); err != nil {
+		return fmt.Errorf("planned-restart promote: write staged marker: %w", err)
+	}
+
+	// Post-promotion disk check: detect a write that landed during the marker
+	// update. The marker is already staged, so a mismatch is an inconsistency.
+	after, err := os.ReadFile(s.ConfigPath)
+	if err != nil {
+		s.inconsistent = true
+		return fmt.Errorf("planned-restart promote: read config after promotion: %w", err)
+	}
+	if sha256Hex(after) != expectedDigest {
+		s.inconsistent = true
+		return ErrStagedCandidateChanged
 	}
 
 	s.pending = true
