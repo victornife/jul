@@ -382,8 +382,12 @@ func restartRequiredMessage(err error) string {
 // applyRequestContext extracts the authenticated identity and source IP from
 // an admin request so it can be threaded through to the coordinator's async
 // finalizer for attribution in the terminal audit event (H-05).
-func applyRequestContext(r *http.Request) ApplyRequestContext {
-	ctx := ApplyRequestContext{SourceIP: adminClientIP(r)}
+func applyRequestContext(r *http.Request, op ApplyOperation) ApplyRequestContext {
+	ctx := ApplyRequestContext{
+		Operation: op,
+		Resource:  "config",
+		SourceIP:  adminClientIP(r),
+	}
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
 		ctx.Actor = id.Principal
 		ctx.TokenID = id.TokenID
@@ -397,7 +401,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	reqCtx := applyRequestContext(r)
+	reqCtx := applyRequestContext(r, ApplyOperationConfigApply)
 	// Prefer the new correlated apply path; fall back to the legacy
 	// WriteConfigRaw closure for tests and callers that have not migrated.
 	applyRaw := s.deps.ApplyConfigRaw

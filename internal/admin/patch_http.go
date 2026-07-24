@@ -265,7 +265,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	reqCtx := applyRequestContext(r)
+	reqCtx := applyRequestContext(r, ApplyOperationPatchApply)
 	// Prefer the new correlated apply path; fall back to the legacy
 	// WriteConfigRaw closure for tests and callers that have not migrated.
 	applyConfig := s.deps.ApplyConfig

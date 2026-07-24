@@ -39,10 +39,31 @@ type Purger interface {
 	Delete(key string)
 }
 
+// ApplyOperation is a bounded enum identifying the initiating write operation
+// for a managed configuration mutation. It is assigned by the HTTP handler
+// before the coordinator runs so the terminal audit event, history entry, and
+// managed-result record can be traced to the operation without parsing free
+// text or inferring from URL strings, mode, or response shape (AC-01).
+type ApplyOperation string
+
+const (
+	ApplyOperationConfigApply ApplyOperation = "config.apply"
+	ApplyOperationPatchApply  ApplyOperation = "config.patch"
+	ApplyOperationLegacyRaw   ApplyOperation = "config.raw"
+	ApplyOperationSettings    ApplyOperation = "config.settings"
+	ApplyOperationRollback    ApplyOperation = "config.rollback"
+)
+
 // ApplyRequestContext carries the authenticated caller from an admin HTTP
 // request through to the managed apply coordinator so async finalizers can
 // emit an audit event attributed to the original actor (H-05).
 type ApplyRequestContext struct {
+	// Operation is the immutable identity of the initiating write operation.
+	// It MUST be assigned by the handler before calling the coordinator.
+	Operation ApplyOperation
+	// Resource is the audited resource label (e.g. "config").
+	Resource string
+
 	Actor   string
 	TokenID string
 	// TokenDigest is retained only for internal confirmation binding. Never log
@@ -714,7 +735,7 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
-	reqCtx := applyRequestContext(r)
+	reqCtx := applyRequestContext(r, ApplyOperationLegacyRaw)
 	reqCtx.Baseline = &state
 	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
 	var effectiveNext *config.Candidate
@@ -830,7 +851,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
-	reqCtx := applyRequestContext(r)
+	reqCtx := applyRequestContext(r, ApplyOperationSettings)
 	reqCtx.Baseline = &state
 	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
 	cfg := state.Config
