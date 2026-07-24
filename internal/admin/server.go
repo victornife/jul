@@ -83,6 +83,14 @@ type ApplyRequestContext struct {
 	// runtime and authentication snapshots observed by the handler.
 	LiveGeneration uint64
 	AuthGeneration string
+
+	// StartedAt is the wall-clock time the handler admitted the operation. It
+	// is recorded on the terminal ledger record so a browser can observe when
+	// the transaction began (AC-01/AC-02). Deadline is the absolute transaction
+	// deadline derived from the currently serving reload_timeout (AC-08); it is
+	// zero when no bounded deadline applies.
+	StartedAt time.Time
+	Deadline  time.Time
 }
 
 // MutationBaseline is the authoritative raw-first snapshot for a configuration
@@ -284,6 +292,12 @@ type Deps struct {
 	// apply, including async restoration state (H-05). Nil when no apply has
 	// finalized since startup.
 	LastManagedApply func() *ManagedApplyOutcome
+	// ManagedApplies is the bounded terminal-result ledger (AC-02). When set,
+	// GET /api/config/applies/{id} serves the exact terminal (or pending)
+	// record for a managed apply transaction, so the console can retrieve the
+	// precise outcome of a recent accepted apply regardless of later
+	// transactions. Nil yields 404 for all IDs.
+	ManagedApplies *ManagedApplyRegistry
 	// AdminHealth reports the health of admin-subsystem concerns that are owned
 	// by the composition root (e.g., the most recent reload's admin subsystem
 	// result). It returns nil when healthy. When it returns an error, /readyz

@@ -581,7 +581,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// fired after a newer apply completed) are silently dropped.
 	var lastManagedApplySeq atomic.Uint64
 	var lastManagedApplyMu sync.Mutex
+	// AC-02: bounded terminal-result ledger so a browser can retrieve the exact
+	// terminal result of any recent accepted apply by exact ID, independent of
+	// the singular latest pointer. Wired into deps before admin.New copies them.
+	managedApplies := admin.NewManagedApplyRegistry(0, 0)
 	if coordinator != nil {
+		deps.ManagedApplies = managedApplies
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
 		}
@@ -630,20 +635,29 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	if coordinator != nil && adminSrv != nil {
 		coordinator.AuthGeneration = adminSrv.AuthGeneration
 		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
-			lastManagedApplyMu.Lock()
-			// C3/M-05: ignore callbacks from older applies (e.g. a timed-out
-			// first apply whose finalizer fires after a second apply has
-			// already completed). managedApplySeqGuard prefers ApplyID and
-			// falls back to Reload.ID so a result missing ApplyID is still
-			// correlated rather than silently dropped as sequence 0.
-			if !managedApplySeqGuard(&lastManagedApplySeq, res) {
-				lastManagedApplyMu.Unlock()
-				return // stale/out-of-order result; a newer outcome is stored
-			}
 			applyID := res.ApplyID
 			if applyID == "" && res.Reload != nil {
 				applyID = res.Reload.ID
 			}
+
+			// AC-02/AC-04: record durable per-ID terminal state and emit audit
+			// and metrics BEFORE the singular latest high-water guard, so a
+			// legitimate older terminal result finishing later is still
+			// retrievable by exact ID and still audited/metered — it is only
+			// prevented from replacing the latest pointer, not discarded.
+			// BeginFinalization claims the single terminal callback for this ID
+			// so a duplicate callback produces no duplicate side effects.
+			claimed := true
+			if applyID != "" {
+				ok, err := managedApplies.BeginFinalization(applyID)
+				if err == nil {
+					claimed = ok
+				}
+			}
+			if !claimed {
+				return // exact duplicate terminal callback; nothing more to do
+			}
+
 			outcome := ""
 			if res.Reload != nil {
 				outcome = string(res.Reload.Outcome)
@@ -672,9 +686,34 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				Actor:               ctx.Actor,
 				SourceIP:            ctx.SourceIP,
 			}
-			lastManagedApply.Store(o)
-			lastManagedApplyMu.Unlock()
 			adminSrv.RecordManagedApplyOutcome(ctx, *o)
+
+			// AC-02: publish the durable per-ID terminal record. The public
+			// record deliberately omits actor and source IP (available only
+			// through the audit API) and never carries raw TOML or secrets.
+			if applyID != "" {
+				rec := admin.ManagedApplyRecord{
+					ID:          applyID,
+					Operation:   ctx.Operation,
+					StartedAt:   ctx.StartedAt,
+					CompletedAt: o.CompletedAt,
+					Result:      res,
+				}
+				_ = managedApplies.Complete(rec)
+			}
+
+			// AC-04: the singular latest pointer is updated only when this
+			// terminal result is the newest by monotonic sequence. An older
+			// result finishing later keeps its own per-ID record but does not
+			// replace the latest pointer.
+			lastManagedApplyMu.Lock()
+			if managedApplySeqGuard(&lastManagedApplySeq, res) {
+				lastManagedApply.Store(o)
+				if applyID != "" {
+					managedApplies.SetLatest(applyID)
+				}
+			}
+			lastManagedApplyMu.Unlock()
 		}
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()

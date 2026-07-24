@@ -199,6 +199,16 @@ var Catalog = []RouteSpec{
 		Permission: rbac.ConfigRead,
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handlePendingRestart) },
 	},
+	// Exact-ID managed apply lookup (AC-02). Retrieves the terminal (or
+	// pending) result of a managed apply transaction by its rl_N id. The
+	// secret-free public view is gated on status:read; actor and source IP
+	// remain available only through the audit API.
+	{
+		Pattern:    "/api/config/applies/{id}",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleManagedApplyGet) },
+	},
 	{
 		Pattern:    "/api/config/history",
 		Methods:    []string{http.MethodGet},
