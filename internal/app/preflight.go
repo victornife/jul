@@ -80,7 +80,9 @@ type Preflight struct {
 }
 
 // Apply runs the admin write preflight gates and returns a PreflightResult on
-// success. ctx is reserved for future use and may be context.Background().
+// success. ctx bounds the preflight work (candidate resolution, handler,
+// plugin, stream and listener probing) and is propagated to applyCandidate; a
+// caller that wants an unbounded preflight may pass context.Background().
 //
 // Shared gates (both modes):
 //
