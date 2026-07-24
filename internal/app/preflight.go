@@ -18,6 +18,43 @@ import (
 	"jul/internal/server"
 )
 
+// Preflight phase names attributed to a reload_timeout breach (AC-08). They are
+// reported through the context phase observer as each gate is entered so the
+// coordinator can surface a phase-specific 504 (timed_out_phase) when the
+// bounded pre-persistence work is aborted by the deadline.
+const (
+	PreflightPhaseResolve          = "resolve"
+	PreflightPhaseAuthorizeAdmin   = "authorize_admin"
+	PreflightPhaseValidate         = "preflight_validate"
+	PreflightPhaseTLS              = "preflight_tls"
+	PreflightPhaseHandlers         = "preflight_handlers"
+	PreflightPhaseStream           = "preflight_stream"
+	PreflightPhaseListeners        = "preflight_listeners"
+	PreflightPhaseStartupResources = "preflight_startup_resources"
+)
+
+// phaseObserverKey is the context key for the pre-persistence phase observer.
+type phaseObserverKey struct{}
+
+// withPhaseObserver returns a context that reports each preflight phase entry to
+// fn. The observer is consumed only by the coordinator's timeout attribution and
+// is a no-op when absent, so a caller that passes context.Background() sees the
+// original unbounded, uninstrumented behaviour.
+func withPhaseObserver(ctx context.Context, fn func(string)) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, phaseObserverKey{}, fn)
+}
+
+// reportPhase notifies the context phase observer, if any, that execution has
+// entered phase. It never blocks meaningfully and is safe with a nil observer.
+func reportPhase(ctx context.Context, phase string) {
+	if fn, ok := ctx.Value(phaseObserverKey{}).(func(string)); ok && fn != nil {
+		fn(phase)
+	}
+}
+
 // PreflightMode selects which validation gates run in Preflight.Apply.
 type PreflightMode int
 
@@ -110,6 +147,7 @@ func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Co
 	// build are bounded by the same deadline as the rest of preflight; a
 	// stalled ${file:...} provider cannot hang the managed apply past
 	// reload_timeout (AC-08).
+	reportPhase(ctx, PreflightPhaseResolve)
 	candidate, err := config.NewCandidateContext(ctx, c)
 	if err != nil {
 		return nil, err
@@ -127,9 +165,11 @@ func (p *Preflight) ApplyCandidate(ctx context.Context, candidate *config.Candid
 }
 
 func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candidate, prev *config.Config, mode PreflightMode) (_ *PreflightResult, retErr error) {
+	reportPhase(ctx, PreflightPhaseValidate)
 	if err := ValidateRuntimeConfig(candidate.Effective); err != nil {
 		return nil, err
 	}
+	reportPhase(ctx, PreflightPhaseAuthorizeAdmin)
 	var preparedAdmin *server.PreparedCommit
 	if p.PrepareAdmin != nil {
 		preparedAdmin, retErr = p.PrepareAdmin(candidate.Effective.Admin)
@@ -144,6 +184,7 @@ func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candid
 			preparedAdmin.Abort()
 		}
 	}()
+	reportPhase(ctx, PreflightPhaseTLS)
 	if err := server.PreflightTLS(candidate.Effective.Servers); err != nil {
 		return nil, err
 	}
@@ -166,6 +207,7 @@ func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candid
 	// addresses are checked for frozen-setting changes in the hot path only;
 	// the stage-restart path classifies those changes rather than rejecting
 	// them.
+	reportPhase(ctx, PreflightPhaseListeners)
 	if err := server.PreflightListeners(httpBound, http3Bound, candidate.Effective.Servers); err != nil {
 		return nil, err
 	}
@@ -184,6 +226,7 @@ func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candid
 		// restart. These checks are side-effect-minimized: they create and
 		// immediately remove a temp file to prove writability, then close all
 		// handles.
+		reportPhase(ctx, PreflightPhaseStartupResources)
 		if err := startupResourcePreflight(candidate.Effective); err != nil {
 			return nil, err
 		}
@@ -329,8 +372,10 @@ func (p *Preflight) dryRun(ctx context.Context, c *config.Config) (err error) {
 			err = fmt.Errorf("configuration rejected: building it panicked: %v", r)
 		}
 	}()
+	reportPhase(ctx, PreflightPhaseHandlers)
 	if _, _, err = p.BuildHandlers(ctx, c, false); err != nil {
 		return err
 	}
+	reportPhase(ctx, PreflightPhaseStream)
 	return p.Stream.PreflightBuild(ctx, c.Streams, IndexUpstreams(c.Upstreams))
 }

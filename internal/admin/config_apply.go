@@ -32,6 +32,14 @@ func isStructuredApplyError(result ConfigApplyResult) bool {
 }
 
 func configApplyResultStatus(result ConfigApplyResult) int {
+	// AC-08: a reload_timeout breach BEFORE persistence surfaces as a
+	// phase-specific 504 Gateway Timeout. Nothing was written to disk, so this
+	// is a distinct outcome from a validation failure (400) or a
+	// saved-not-live in-flight reload (202). Checked first because the result
+	// carries neither ValidationErrors nor a Reload record.
+	if result.TimedOutPhase != "" {
+		return http.StatusGatewayTimeout
+	}
 	if len(result.ValidationErrors) > 0 {
 		return http.StatusBadRequest
 	}
@@ -105,6 +113,12 @@ type ConfigApplyResult struct {
 	// audit event (config.stage_restart.updated vs config.stage_restart.created)
 	// without re-reading disk state after the apply.
 	StagedRestartIsUpdate bool `json:"staged_restart_is_update,omitempty"`
+	// TimedOutPhase names the transaction phase that exceeded reload_timeout
+	// before the candidate was persisted (AC-08). When non-empty the handler
+	// maps the result to 504 Gateway Timeout; the on-disk configuration is
+	// unchanged. A timeout AFTER persistence is reported through Reload as
+	// saved_not_live (202) instead, never here.
+	TimedOutPhase string `json:"timed_out_phase,omitempty"`
 	// Summary and Diff are populated by the structured-patch apply path.
 	Summary []string   `json:"summary,omitempty"`
 	Diff    ConfigDiff `json:"diff,omitempty"`

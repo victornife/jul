@@ -797,6 +797,7 @@ func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 		FinalDiskVersion:      r.FinalDiskVersion,
 		FinalServingVersion:   r.FinalServingVersion,
 		StagedRestartIsUpdate: r.StagedRestartIsUpdate,
+		TimedOutPhase:         r.TimedOutPhase,
 	}
 }
 

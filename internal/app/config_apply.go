@@ -72,6 +72,14 @@ type ApplyResult struct {
 	// first stage as an update.
 	StagedRestartIsUpdate bool
 
+	// TimedOutPhase names the transaction phase that exceeded reload_timeout
+	// before the candidate was persisted (AC-08). It is empty unless the
+	// bounded pre-persistence work (resolve, preflight_*) was aborted by the
+	// deadline. The admin API maps a non-empty value to 504 Gateway Timeout
+	// with timed_out_phase. A timeout AFTER persistence surfaces instead as a
+	// saved_not_live (202) result, never here, so disk truth is never lost.
+	TimedOutPhase string
+
 	// HistorySnapshotID and HistoryError capture the configuration-history
 	// snapshot written at terminalization (AC-05). They are internal
 	// provenance for the composition root and tests; they are NOT part of the
@@ -285,15 +293,23 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	// single completeManagedApply helper at terminalization.
 	id := c.nextID()
 
+	// AC-08: bound candidate resolution and every preflight gate with the
+	// currently serving reload_timeout so a stalled ${file:...} provider or a
+	// wedged handler/bind probe cannot hang the managed apply past the
+	// transaction deadline. The deadline is derived from the SERVING config's
+	// reload_timeout, never the candidate's (R15-01). A pre-persistence
+	// deadline breach aborts cleanly (disk unchanged) and is surfaced as a
+	// phase-specific 504 by the admin API.
+	pctx, cancel := c.preflightContext(cfg)
+	defer cancel()
+
 	if mode == ApplyStageRestart {
-		return c.applyStageRestart(ctx, id, cfg, preparedCandidate, prevCfg, data, baseline)
+		return c.applyStageRestart(pctx, ctx, id, cfg, preparedCandidate, prevCfg, data, baseline)
 	}
 
-	var pfResult *PreflightResult
-	if preparedCandidate != nil && server.CanonicalVersion(preparedCandidate.Raw) == server.CanonicalVersion(cfg) {
-		pfResult, err = c.Preflight.ApplyCandidate(c.BaseCtx, preparedCandidate, prevCfg, PreflightHot)
-	} else {
-		pfResult, err = c.Preflight.Apply(c.BaseCtx, cfg, prevCfg, PreflightHot)
+	pfResult, timedOutPhase, err := c.runPreflight(pctx, cfg, preparedCandidate, prevCfg, PreflightHot)
+	if timedOutPhase != "" {
+		return c.timedOutResult(mode, timedOutPhase), nil
 	}
 	if err != nil {
 		result := ApplyResult{
@@ -312,6 +328,96 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	}
 
 	return c.applyCandidate(ctx, id, data, pfResult.Candidate, pfResult.PreparedAdmin, baseline, mode)
+}
+
+// servingReloadTimeout returns the transaction deadline budget for AC-08. It is
+// taken from the currently SERVING configuration's reload_timeout so a candidate
+// that changes reload_timeout governs only the next apply, never the one that
+// submits it (R15-01). When no live snapshot is available (unit tests without a
+// runtime) it falls back to the candidate's own reload_timeout so preflight is
+// still bounded; a zero value disables bounding.
+func (c *ConfigApplyCoordinator) servingReloadTimeout(candidate *config.Config) time.Duration {
+	if c.LiveSnapshot != nil {
+		if snap := c.LiveSnapshot(); snap.EffectiveConfig != nil && snap.EffectiveConfig.Global.ReloadTimeout > 0 {
+			return snap.EffectiveConfig.Global.ReloadTimeout.Std()
+		}
+	}
+	if candidate != nil && candidate.Global.ReloadTimeout > 0 {
+		return candidate.Global.ReloadTimeout.Std()
+	}
+	return 0
+}
+
+// preflightContext derives the bounded context that caps all pre-persistence
+// work (secret resolution + every preflight gate) with the serving
+// reload_timeout (AC-08). The returned cancel MUST be called by the caller. A
+// zero budget yields a cancel-only context so behaviour is unchanged for
+// callers/tests without a configured timeout.
+func (c *ConfigApplyCoordinator) preflightContext(candidate *config.Config) (context.Context, context.CancelFunc) {
+	base := c.BaseCtx
+	if base == nil {
+		base = context.Background()
+	}
+	if timeout := c.servingReloadTimeout(candidate); timeout > 0 {
+		return context.WithTimeout(base, timeout)
+	}
+	return context.WithCancel(base)
+}
+
+// runPreflight runs the preflight gates under the bounded, phase-instrumented
+// context pctx and attributes a reload_timeout breach to the phase that was
+// executing when the deadline fired (AC-08). It returns:
+//   - (result, "", nil) on success;
+//   - (nil, phase, nil)  when the bounded context expired before persistence;
+//   - (nil, "", err)     for an ordinary validation failure.
+//
+// The phase observer records the most recently entered gate so a deadline that
+// trips inside a gate is attributed to that gate rather than a coarse bucket.
+func (c *ConfigApplyCoordinator) runPreflight(pctx context.Context, cfg *config.Config, preparedCandidate *config.Candidate, prevCfg *config.Config, mode PreflightMode) (*PreflightResult, string, error) {
+	var (
+		mu        sync.Mutex
+		lastPhase string
+	)
+	obsCtx := withPhaseObserver(pctx, func(phase string) {
+		mu.Lock()
+		lastPhase = phase
+		mu.Unlock()
+	})
+
+	var (
+		pfResult *PreflightResult
+		err      error
+	)
+	if preparedCandidate != nil && server.CanonicalVersion(preparedCandidate.Raw) == server.CanonicalVersion(cfg) {
+		pfResult, err = c.Preflight.ApplyCandidate(obsCtx, preparedCandidate, prevCfg, mode)
+	} else {
+		pfResult, err = c.Preflight.Apply(obsCtx, cfg, prevCfg, mode)
+	}
+	if err != nil && pctx.Err() != nil {
+		mu.Lock()
+		phase := lastPhase
+		mu.Unlock()
+		if phase == "" {
+			phase = PreflightPhaseResolve
+		}
+		return nil, phase, nil
+	}
+	return pfResult, "", err
+}
+
+// timedOutResult builds the pre-persistence reload_timeout outcome for AC-08.
+// Nothing was written to disk, so the result carries no persistence or
+// restoration state; the admin API maps a non-empty TimedOutPhase to 504 with
+// timed_out_phase. The message names the phase so the operator knows which slow
+// path (secret resolution, handler build, bind probe, startup-resource
+// validation) to investigate or whether to raise reload_timeout.
+func (c *ConfigApplyCoordinator) timedOutResult(mode ApplyMode, phase string) ApplyResult {
+	return ApplyResult{
+		OK:            false,
+		Mode:          mode,
+		TimedOutPhase: phase,
+		Message:       "The configuration apply exceeded reload_timeout during the " + phase + " phase; nothing was changed. Investigate the slow path or raise reload_timeout.",
+	}
 }
 
 // ApplyConfig applies a parsed configuration. It marshals the config and
@@ -444,7 +550,7 @@ func (c *ConfigApplyCoordinator) suppressWatcher(digest [32]byte) {
 //  2. StageManaged writes .bak (fresh stage only) and prepared marker.
 //  3. atomicfile.Write writes the candidate.
 //  4. PromoteToStaged promotes the marker to "staged" only after the candidate write succeeds.
-func (c *ConfigApplyCoordinator) applyStageRestart(reqCtx admin.ApplyRequestContext, id string, cfg *config.Config, preparedCandidate *config.Candidate, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx admin.ApplyRequestContext, id string, cfg *config.Config, preparedCandidate *config.Candidate, prevCfg *config.Config, data []byte, baseline admin.MutationBaseline) (ApplyResult, error) {
 	// H-03: determine whether this is a staged update. If a managed staged
 	// restart is already pending, the new candidate replaces it but the
 	// original serving config remains the rollback base and the diff base.
@@ -471,13 +577,12 @@ func (c *ConfigApplyCoordinator) applyStageRestart(reqCtx admin.ApplyRequestCont
 	// Run the shared preflight gates in stage-restart mode so restart-required
 	// classification is retained rather than rejected. For updates the diff is
 	// computed against the original serving config, not the previously staged
-	// candidate.
-	var pfResult *PreflightResult
-	var err error
-	if preparedCandidate != nil && server.CanonicalVersion(preparedCandidate.Raw) == server.CanonicalVersion(cfg) {
-		pfResult, err = c.Preflight.ApplyCandidate(c.BaseCtx, preparedCandidate, diffBaseCfg, PreflightStageRestart)
-	} else {
-		pfResult, err = c.Preflight.Apply(c.BaseCtx, cfg, diffBaseCfg, PreflightStageRestart)
+	// candidate. AC-08: pctx bounds resolution + every gate with the serving
+	// reload_timeout; a pre-persistence breach surfaces as a phase-specific
+	// 504 with disk untouched (nothing has been staged yet).
+	pfResult, timedOutPhase, err := c.runPreflight(pctx, cfg, preparedCandidate, diffBaseCfg, PreflightStageRestart)
+	if timedOutPhase != "" {
+		return c.timedOutResult(ApplyStageRestart, timedOutPhase), nil
 	}
 	if err != nil {
 		return ApplyResult{

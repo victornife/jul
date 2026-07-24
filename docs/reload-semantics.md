@@ -374,6 +374,21 @@ post-commit phases complete even if the deadline has passed, and the outcome is
 recorded as `applied_degraded` if a post-commit side effect fails or the
 overall duration exceeded the threshold.
 
+The same `reload_timeout` also bounds the **pre-persistence** work of an admin
+apply — secret resolution, candidate build, and the full preflight gate (parse,
+dry-run handler build, TLS assembly, stream/listener bind probes, startup-
+resource construction). If any of those side-effect-free phases exceeds the
+deadline **before** the candidate is written to disk, the apply is aborted, the
+on-disk configuration is left untouched, and the admin API returns
+`504 Gateway Timeout` with a `timed_out_phase` field naming the phase that
+overran (one of `resolve`, `preflight_validate`, `preflight_tls`,
+`preflight_handlers`, `preflight_stream`, `preflight_listeners`, or
+`preflight_startup_resources`). Because nothing was persisted this is a distinct
+outcome from a validation failure (`400`) and from an in-flight reload that
+saved but could not go live (`202 saved_not_live`): a pre-persistence timeout is
+fully roll-back-safe. Following R15-01, the budget is taken from the **currently
+serving** config's `reload_timeout`, not the candidate's.
+
 The default 10s should accommodate all normal configs; operators may raise it for
 very large configs or environments with slow DNS.
 
