@@ -79,11 +79,19 @@ func configVersion(raw []byte) string {
 // safe preview response: summary, diff, base_version, and optional validation
 // diagnostics. It never includes the full candidate TOML (N-01).
 func (s *Server) previewPatchOps(ctx context.Context, ops []patchRequest) (map[string]any, error) {
-	cfg, err := s.deps.LoadConfig()
+	base, err := s.deps.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
-	before, err := config.Marshal(cfg)
+	before, err := config.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	// AC-07: never mutate the object returned by LoadConfig. A loader may
+	// legally return a cached or shared pointer, so applying patch operations
+	// to it would mutate shared state even though a preview claims no change
+	// was made. Apply the ops to an independent deep clone instead.
+	cfg, err := base.Clone()
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +208,34 @@ func (s *Server) handleConfigPatchCandidate(w http.ResponseWriter, r *http.Reque
 		})
 		return
 	}
-	cfg, err := s.deps.LoadConfig()
+	base, err := s.deps.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	baseRaw, err := config.Marshal(base)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// AC-07: honor base_version so the source view can never show a candidate
+	// generated from a different baseline than the structured diff. A matching
+	// version generates the candidate; a stale version is a 409 with the
+	// current version; an empty base_version is an explicit force-preview.
+	baseVersion := configVersion(baseRaw)
+	if req.BaseVersion != "" && req.BaseVersion != baseVersion {
+		writeJSON(w, http.StatusConflict, conflictResponse{
+			OK:             false,
+			Conflict:       true,
+			Message:        "The configuration changed since this edit was prepared; reload and try again.",
+			CurrentVersion: baseVersion,
+		})
+		return
+	}
+	// AC-07: never mutate the object returned by LoadConfig. Apply the ops to an
+	// independent deep clone so generating the candidate cannot mutate shared
+	// state.
+	cfg, err := base.Clone()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -221,8 +256,9 @@ func (s *Server) handleConfigPatchCandidate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"candidate": string(candidate),
+		"ok":           true,
+		"candidate":    string(candidate),
+		"base_version": baseVersion,
 	})
 }
 
