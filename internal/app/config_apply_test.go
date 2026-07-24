@@ -1253,14 +1253,29 @@ func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// Apply C can now proceed. It uses the same SubmitReload callback; submit
-	// count is now 2 so it returns applied_live.
-	resC, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8083"), ApplyHot)
-	if err != nil {
-		t.Fatalf("apply C error: %v", err)
-	}
-	if !resC.OK {
-		t.Fatalf("apply C should succeed, got: %s", resC.Message)
+	// Apply C can now proceed. Under the AC-03 finalization ordering the
+	// finalizer restores the disk while still holding the in-flight guard and
+	// only clears it after terminal finalization completes, so a restored disk
+	// no longer implies the transaction is terminal. Poll apply C until the
+	// in-flight guard has been released. It uses the same SubmitReload
+	// callback; submit count is now 2 so it returns applied_live.
+	var resC ApplyResult
+	cDeadline := time.Now().Add(5 * time.Second)
+	for {
+		resC, err = c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8083"), ApplyHot)
+		if err != nil {
+			t.Fatalf("apply C error: %v", err)
+		}
+		if resC.OK {
+			break
+		}
+		if !strings.Contains(resC.Message, "still in flight") {
+			t.Fatalf("apply C should succeed, got: %s", resC.Message)
+		}
+		if time.Now().After(cDeadline) {
+			t.Fatalf("apply C never cleared in-flight guard: %s", resC.Message)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	onDiskC, _ := os.ReadFile(path)

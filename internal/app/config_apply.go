@@ -812,11 +812,23 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			}
 		}
 		terminal := c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest)
+		// AC-03: terminal finalization ordering. Unlock the coordinator file
+		// mutex, then run terminal finalization (history/audit/metrics/ledger)
+		// BEFORE clearing the in-flight guard, closing Finalized, or delivering
+		// the result to the synchronous waiter. This guarantees that:
+		//   - no subsequent managed transaction can begin while terminal
+		//     history/audit is still outstanding (inFlightState stays set), and
+		//   - the HTTP caller never observes completion until the terminal
+		//     record is durably finalized in the ledger/audit/metrics.
+		// notifyManagedApplyComplete contains its own panic recovery so a
+		// callback panic cannot wedge the coordinator here.
+		c.mu.Unlock()
+		c.notifyManagedApplyComplete(reqCtx, terminal)
+		c.mu.Lock()
 		c.inFlightState = ApplyInFlightNone
 		c.mu.Unlock()
 		close(finalizedCh)
 		terminalCh <- terminal
-		c.notifyManagedApplyComplete(reqCtx, terminal)
 	}()
 
 	waitMargin := c.waitMargin
