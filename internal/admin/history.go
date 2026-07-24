@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +23,46 @@ const historyTimeLayout = "20060102T150405.000Z"
 // historyExt is the snapshot file extension. Only files with this suffix are
 // treated as snapshots, so unrelated files in the directory are ignored.
 const historyExt = ".toml"
+
+// historyMetaExt is the optional sidecar extension holding structured metadata
+// about a snapshot (AC-05). A snapshot is fully described by "<id>.toml" (the
+// raw configuration) plus an optional "<id>.json" sidecar. Snapshots written by
+// earlier releases have no sidecar and remain valid: list() and get() tolerate
+// its absence, and pruning removes both files together.
+const historyMetaExt = ".json"
+
+// historyMetaSchemaVersion is the current schema version stamped into every
+// sidecar so future readers can migrate older metadata.
+const historyMetaSchemaVersion = 1
+
+// HistoryMetadata is the structured sidecar describing why and how a snapshot
+// was created (AC-05). It is written next to the raw "<id>.toml" file as
+// "<id>.json". Every field is redacted, low-cardinality provenance — it never
+// contains raw configuration, secret values, or credentials.
+type HistoryMetadata struct {
+	SchemaVersion int `json:"schema_version"`
+
+	ApplyID   string         `json:"apply_id,omitempty"`
+	Operation ApplyOperation `json:"operation,omitempty"`
+	Mode      string         `json:"mode,omitempty"`
+	Outcome   string         `json:"outcome,omitempty"`
+	Actor     string         `json:"actor,omitempty"`
+
+	// Reason distinguishes an ordinary pre-apply snapshot of the prior config
+	// from an emergency recovery snapshot written when a restoration failed.
+	Reason string `json:"reason"` // "pre_apply" | "recovery"
+
+	PreviousVersion  string `json:"previous_version,omitempty"`
+	CandidateVersion string `json:"candidate_version,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// History snapshot reason constants (AC-05).
+const (
+	historyReasonPreApply = "pre_apply"
+	historyReasonRecovery = "recovery"
+)
 
 // history persists point-in-time snapshots of the raw configuration so the
 // console can offer one-click rollback. It is safe for concurrent use through
@@ -81,6 +122,61 @@ func (h *history) snapshot(raw []byte) (string, error) {
 	}
 	h.prune()
 	return id, nil
+}
+
+// snapshotWithMeta writes raw as a new snapshot and, when meta is non-nil, an
+// accompanying "<id>.json" sidecar describing its provenance (AC-05). It
+// returns the snapshot ID and a separate metaErr for the sidecar: a sidecar
+// write failure never discards the already-written raw snapshot, since the raw
+// TOML alone is still fully roll-back-able. Callers surface metaErr as a
+// degraded-history condition rather than a failed save. When meta is nil this
+// behaves exactly like snapshot.
+func (h *history) snapshotWithMeta(raw []byte, meta *HistoryMetadata) (id string, metaErr error, err error) {
+	id, err = h.snapshot(raw)
+	if err != nil || id == "" || meta == nil {
+		return id, nil, err
+	}
+	m := *meta
+	m.SchemaVersion = historyMetaSchemaVersion
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = parseHistoryID(id)
+	}
+	if m.Reason == "" {
+		m.Reason = historyReasonPreApply
+	}
+	encoded, mErr := json.MarshalIndent(&m, "", "  ")
+	if mErr != nil {
+		return id, fmt.Errorf("encode history metadata: %w", mErr), nil
+	}
+	metaPath := filepath.Join(h.dir, id+historyMetaExt)
+	if wErr := atomicfile.Write(metaPath, encoded, 0o600); wErr != nil {
+		return id, fmt.Errorf("write history metadata: %w", wErr), nil
+	}
+	return id, nil, nil
+}
+
+// getMeta returns the structured metadata sidecar for a snapshot, or (nil, nil)
+// when the snapshot exists without a sidecar (older raw-only snapshots remain
+// valid). The id is validated so it can never escape the history directory.
+func (h *history) getMeta(id string) (*HistoryMetadata, error) {
+	if !h.enabled() {
+		return nil, fmt.Errorf("history is disabled")
+	}
+	if !validHistoryID(id) {
+		return nil, fmt.Errorf("invalid snapshot id")
+	}
+	data, err := os.ReadFile(filepath.Join(h.dir, id+historyMetaExt))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // raw-only snapshot; no metadata is not an error
+		}
+		return nil, err
+	}
+	var m HistoryMetadata
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("decode history metadata: %w", err)
+	}
+	return &m, nil
 }
 
 // list returns stored snapshots newest-first.
@@ -153,6 +249,10 @@ func (h *history) prune() {
 	}
 	for _, name := range names[min(len(names), h.keep):] {
 		_ = os.Remove(filepath.Join(h.dir, name))
+		// AC-05: remove the metadata sidecar alongside the raw snapshot so the
+		// two never drift. Absent sidecars (older snapshots) are ignored.
+		id := strings.TrimSuffix(name, historyExt)
+		_ = os.Remove(filepath.Join(h.dir, id+historyMetaExt))
 	}
 }
 
