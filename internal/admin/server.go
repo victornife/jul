@@ -154,6 +154,31 @@ type ManagedApplyOutcome struct {
 	CompletedAt         time.Time `json:"completed_at"`
 	Actor               string    `json:"actor,omitempty"`
 	SourceIP            string    `json:"source_ip,omitempty"`
+
+	// HistorySnapshotID, HistoryError, and FinalizationError surface the
+	// configuration-history finalization provenance (AC-14) separately from the
+	// reload success/failure carried by Outcome. A committed apply whose raw
+	// history snapshot was written but whose metadata sidecar failed is a
+	// degraded-but-usable state: HistorySnapshotID is set AND HistoryError is
+	// non-empty. These never fail readiness — the raw config stays
+	// roll-back-able — so the Console shows them as an advisory finalization
+	// banner distinct from the reload outcome.
+	HistorySnapshotID string `json:"history_snapshot_id,omitempty"`
+	HistoryError      string `json:"history_error,omitempty"`
+	FinalizationError string `json:"finalization_error,omitempty"`
+}
+
+// ManagedApplyFinalization carries the terminal finalization provenance that is
+// deliberately NOT part of the serialized ConfigApplyResult (AC-05 invariant):
+// the configuration-history snapshot id, its non-fatal degradation, and any
+// finalization-machinery error. The composition root threads it from the
+// coordinator into the durable ledger record and the runtime-overview outcome
+// so the Console can render a finalization/degradation surface (AC-14) that is
+// independent of reload success/failure.
+type ManagedApplyFinalization struct {
+	HistorySnapshotID string
+	HistoryError      string
+	FinalizationError string
 }
 
 // Deps wires the admin server to runtime components owned by the composition

@@ -643,7 +643,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// in-process writer on the admin server. previousRaw is sensitive and is
 		// forwarded only to this hook, never logged or retained by the coordinator.
 		coordinator.WriteManagedHistory = adminSrv.RecordManagedHistory
-		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
+		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult, fin admin.ManagedApplyFinalization) {
 			applyID := res.ApplyID
 			if applyID == "" && res.Reload != nil {
 				applyID = res.Reload.ID
@@ -694,6 +694,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				CompletedAt:         time.Now().UTC(),
 				Actor:               ctx.Actor,
 				SourceIP:            ctx.SourceIP,
+				// AC-14: surface the configuration-history finalization
+				// provenance (threaded separately from the serialized
+				// ConfigApplyResult) on the runtime-overview outcome so the
+				// Console can render a degradation banner independent of the
+				// reload success/failure.
+				HistorySnapshotID: fin.HistorySnapshotID,
+				HistoryError:      fin.HistoryError,
+				FinalizationError: fin.FinalizationError,
 			}
 			adminSrv.RecordManagedApplyOutcome(ctx, *o)
 
@@ -707,6 +715,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					StartedAt:   ctx.StartedAt,
 					CompletedAt: o.CompletedAt,
 					Result:      res,
+					// AC-14: the durable per-ID ledger record carries the
+					// finalization provenance so a browser retrieving the exact
+					// terminal record by ID sees history_snapshot_id /
+					// history_error / finalization_error alongside the reload
+					// result.
+					HistorySnapshotID: fin.HistorySnapshotID,
+					HistoryError:      fin.HistoryError,
+					FinalizationError: fin.FinalizationError,
 				}
 				_ = managedApplies.Complete(rec)
 			}

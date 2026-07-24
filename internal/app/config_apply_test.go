@@ -709,7 +709,7 @@ func TestFastRestorationHTTPAndCallbackResultsMatch(t *testing.T) {
 		},
 		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
 		PlannedRestart: &PlannedRestartStore{},
-		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult) {
+		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult, _ admin.ManagedApplyFinalization) {
 			callbackCh <- result
 		},
 	}
@@ -721,6 +721,85 @@ func TestFastRestorationHTTPAndCallbackResultsMatch(t *testing.T) {
 	want := toAdminConfigApplyResult(httpResult)
 	if !reflect.DeepEqual(callback, want) {
 		t.Fatalf("callback and HTTP result differ:\ncallback=%+v\nhttp=%+v", callback, want)
+	}
+}
+
+// TestManagedApplyFinalizationProvenanceThreaded verifies AC-14: the
+// configuration-history finalization provenance written by WriteManagedHistory
+// at terminalization (snapshot id and its non-fatal degradation) is delivered
+// to OnManagedApplyComplete through the dedicated ManagedApplyFinalization
+// argument — NOT the serialized ConfigApplyResult, which by the AC-05 invariant
+// never carries it. The composition root routes these into the durable ledger
+// record and the runtime-overview outcome so the Console can render a
+// finalization/degradation surface independent of the reload outcome.
+func TestManagedApplyFinalizationProvenanceThreaded(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	finCh := make(chan admin.ManagedApplyFinalization, 1)
+	resCh := make(chan admin.ConfigApplyResult, 1)
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			go func() {
+				req.Result <- server.ReloadResult{
+					ID:             req.ID,
+					Source:         server.ReloadSourceAdmin,
+					Outcome:        server.ReloadAppliedLive,
+					Published:      true,
+					ServingVersion: "v2",
+				}
+			}()
+			return nil
+		},
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		PlannedRestart: &PlannedRestartStore{},
+		// A committed apply snapshots pre_apply and returns a degraded sidecar
+		// error: the raw snapshot id is still set (the config stays
+		// roll-back-able) while HistoryError explains the metadata degradation.
+		WriteManagedHistory: func(_ admin.ApplyRequestContext, _ admin.ConfigApplyResult, _ []byte) (string, error) {
+			return "snap-42", errors.New("metadata sidecar write failed")
+		},
+		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, res admin.ConfigApplyResult, fin admin.ManagedApplyFinalization) {
+			resCh <- res
+			finCh <- fin
+		},
+	}
+
+	httpResult, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if !httpResult.OK {
+		t.Fatalf("apply ok=false: %s", httpResult.Message)
+	}
+
+	var fin admin.ManagedApplyFinalization
+	var res admin.ConfigApplyResult
+	select {
+	case fin = <-finCh:
+		res = <-resCh
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnManagedApplyComplete was not called")
+	}
+
+	if fin.HistorySnapshotID != "snap-42" {
+		t.Errorf("finalization HistorySnapshotID = %q, want snap-42", fin.HistorySnapshotID)
+	}
+	if fin.HistoryError == "" {
+		t.Error("finalization HistoryError should carry the sidecar degradation")
+	}
+	// AC-05 invariant: the serialized result must NOT expose history provenance.
+	// ConfigApplyResult has no such fields, so the provenance can only travel on
+	// the finalization argument — this is the contract AC-14 depends on.
+	if !res.OK {
+		t.Errorf("terminal result ok=false, want true (history degradation must not fail a committed apply)")
 	}
 }
 
@@ -746,7 +825,7 @@ func TestShutdownReturnsCorrelatedSavedNotLive(t *testing.T) {
 		},
 		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
 		PlannedRestart: &PlannedRestartStore{},
-		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult) {
+		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult, _ admin.ManagedApplyFinalization) {
 			callbackCh <- result
 		},
 	}
@@ -846,7 +925,7 @@ func TestCompletionCallbackPanicDoesNotBlockHTTP(t *testing.T) {
 		},
 		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
 		PlannedRestart: &PlannedRestartStore{},
-		OnManagedApplyComplete: func(admin.ApplyRequestContext, admin.ConfigApplyResult) {
+		OnManagedApplyComplete: func(admin.ApplyRequestContext, admin.ConfigApplyResult, admin.ManagedApplyFinalization) {
 			panic("callback panic")
 		},
 	}
@@ -887,7 +966,7 @@ func TestSlowRestorationReturnsSavedNotLiveThenOneTerminalResult(t *testing.T) {
 			<-restoreContinue
 		},
 		waitMargin: 10 * time.Millisecond,
-		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult) {
+		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult, _ admin.ManagedApplyFinalization) {
 			terminalCh <- result
 		},
 	}
@@ -1368,7 +1447,7 @@ func TestManagedApplyOutcomeCallbackFired(t *testing.T) {
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
 		PlannedRestart: &PlannedRestartStore{},
-		OnManagedApplyComplete: func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
+		OnManagedApplyComplete: func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult, _ admin.ManagedApplyFinalization) {
 			if ctx.Actor != "alice" {
 				t.Errorf("callback actor = %q, want alice", ctx.Actor)
 			}

@@ -132,7 +132,7 @@ type ConfigApplyCoordinator struct {
 	// managed apply has reached a terminal state (including any restoration).
 	// It receives the original request context so the terminal audit event can
 	// be attributed to the caller (H-05).
-	OnManagedApplyComplete func(admin.ApplyRequestContext, admin.ConfigApplyResult)
+	OnManagedApplyComplete func(admin.ApplyRequestContext, admin.ConfigApplyResult, admin.ManagedApplyFinalization)
 
 	// WriteManagedHistory records a configuration-history snapshot at
 	// terminalization (AC-05). It receives the request context, the terminal
@@ -1048,7 +1048,16 @@ func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(reqCtx admin.ApplyRe
 		return
 	}
 	defer func() { _ = recover() }()
-	c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(result))
+	// AC-14: the configuration-history finalization provenance is threaded
+	// separately from the serialized ConfigApplyResult, which by the AC-05
+	// invariant never carries HistorySnapshotID/HistoryError. The composition
+	// root routes this into the durable ledger record and the runtime-overview
+	// outcome so the Console can render a finalization surface independent of
+	// the reload outcome.
+	c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(result), admin.ManagedApplyFinalization{
+		HistorySnapshotID: result.HistorySnapshotID,
+		HistoryError:      result.HistoryError,
+	})
 }
 
 // recordManagedHistory writes the terminal configuration-history snapshot for a
