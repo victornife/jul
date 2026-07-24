@@ -109,12 +109,12 @@ func TestMetricLabelPolicy(t *testing.T) {
 		"jul_mtls_handshakes_total":              {"result"},
 		// Reload and staged-restart metrics (P2-05): source/outcome labels are
 		// bounded to 3 source values × 4 outcome values = 12 series maximum.
-		"jul_reload_total":               {"outcome", "source"},
-		"jul_reload_duration_seconds":    {"outcome", "source"},
-		"jul_reload_in_progress":         nil,
-		"jul_config_stage_restart_total":   {"result"},
-		"jul_config_pending_restart":       nil,
-		"jul_managed_apply_finalized_total": {"outcome", "restored"},
+		"jul_reload_total":                  {"outcome", "source"},
+		"jul_reload_duration_seconds":       {"outcome", "source"},
+		"jul_reload_in_progress":            nil,
+		"jul_config_stage_restart_total":    {"result"},
+		"jul_config_pending_restart":        nil,
+		"jul_managed_apply_finalized_total": {"mode", "operation", "outcome", "restored"},
 	}
 
 	for name, names := range got {
@@ -230,5 +230,5 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveStageRestart("created")
 	m.SetPendingRestart(true)
 	m.SetPendingRestart(false)
-	m.ObserveManagedApplyFinalized("not_applied", "true")
+	m.ObserveManagedApplyFinalized("config.apply", "hot", "not_applied", "true")
 }

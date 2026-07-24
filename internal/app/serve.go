@@ -671,7 +671,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					restoredLabel = "false"
 				}
 			}
-			metrics.ObserveManagedApplyFinalized(outcome, restoredLabel)
+			metrics.ObserveManagedApplyFinalized(string(ctx.Operation), res.Mode, outcome, restoredLabel)
 
 			o := &admin.ManagedApplyOutcome{
 				ID:                  applyID,

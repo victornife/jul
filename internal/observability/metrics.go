@@ -269,8 +269,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}),
 		managedApplyFinalized: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_managed_apply_finalized_total",
-			Help: "Terminal async managed-apply outcomes, labeled by outcome and whether restoration succeeded (true/false/n/a).",
-		}, []string{"outcome", "restored"}),
+			Help: "Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a).",
+		}, []string{"operation", "mode", "outcome", "restored"}),
 		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_phase_duration_seconds",
 			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
@@ -661,10 +661,20 @@ func (m *Metrics) ObserveStageRestart(result string) {
 }
 
 // ObserveManagedApplyFinalized records the terminal async outcome of a managed
-// apply (H-05). outcome is the terminal reload classification; restored is
-// "true", "false", or "n/a" when restoration was not applicable.
-func (m *Metrics) ObserveManagedApplyFinalized(outcome, restored string) {
-	m.managedApplyFinalized.WithLabelValues(outcome, restored).Inc()
+// apply (H-05, AC-04). operation is the initiating managed operation
+// (config.apply/config.patch/config.raw/config.settings/config.rollback);
+// mode is the apply mode (hot/stage_restart); outcome is the terminal reload
+// classification; restored is "true", "false", or "n/a" when restoration was
+// not applicable. All labels are bounded, low-cardinality values — never an
+// apply ID, actor, path or version.
+func (m *Metrics) ObserveManagedApplyFinalized(operation, mode, outcome, restored string) {
+	if operation == "" {
+		operation = "unknown"
+	}
+	if mode == "" {
+		mode = "unknown"
+	}
+	m.managedApplyFinalized.WithLabelValues(operation, mode, outcome, restored).Inc()
 }
 
 // SetPendingRestart sets the pending-restart gauge to 1 when a managed staged

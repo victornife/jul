@@ -364,7 +364,16 @@ func (s *Server) RecordManagedApplyOutcome(ctx ApplyRequestContext, o ManagedApp
 		// string provide the full picture.
 		result = "failure"
 	}
+	// AC-04: the terminal audit detail carries only redacted, low-cardinality
+	// metadata — apply ID, mode, outcome, versions and restoration state. It
+	// never includes raw config, secret values or the token digest.
 	detail := fmt.Sprintf("outcome=%s restored=%t", o.Outcome, o.Restored)
+	if o.ID != "" {
+		detail = "apply_id=" + o.ID + " " + detail
+	}
+	if o.Mode != "" {
+		detail += " mode=" + o.Mode
+	}
 	if o.RestoreError != "" {
 		detail += " restore_error=" + o.RestoreError
 	}
@@ -382,12 +391,34 @@ func (s *Server) RecordManagedApplyOutcome(ctx ApplyRequestContext, o ManagedApp
 		Time:      time.Now().UTC(),
 		Actor:     actor,
 		TokenID:   ctx.TokenID,
-		Operation: "config.apply.finalized",
+		Operation: finalizedAuditOperation(ctx.Operation),
 		Resource:  "config",
 		Result:    result,
 		Detail:    detail,
 		SourceIP:  ctx.SourceIP,
 	})
+}
+
+// finalizedAuditOperation maps a managed ApplyOperation to its terminal audit
+// operation name (AC-04). Terminal audit operations are operation-specific so
+// a reviewer can distinguish a finalized patch from a finalized rollback
+// without parsing free-text detail. An empty or unknown operation falls back
+// to the generic config.apply.finalized name.
+func finalizedAuditOperation(op ApplyOperation) string {
+	switch op {
+	case ApplyOperationConfigApply:
+		return "config.apply.finalized"
+	case ApplyOperationPatchApply:
+		return "config.patch.finalized"
+	case ApplyOperationLegacyRaw:
+		return "config.raw.finalized"
+	case ApplyOperationSettings:
+		return "config.settings.finalized"
+	case ApplyOperationRollback:
+		return "config.rollback.finalized"
+	default:
+		return "config.apply.finalized"
+	}
 }
 
 // New builds an admin Server from config. It returns nil when admin is
