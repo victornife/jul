@@ -710,6 +710,17 @@ export function ConfigPanel() {
           timedOutPhase: reload?.timed_out_phase,
         });
       }
+      // AC-11: A legacy (pre-managed) hot apply returns no correlated per-ID
+      // reload record. Mark it uncorrelated so the outcome projection refuses to
+      // claim "Applied and live" on trust alone; it may only reach the live
+      // branch when the persisted and serving versions demonstrably match. The
+      // versions come from the response itself (serving_version/persisted_version)
+      // and, failing that, the best-effort overview's last_reload. A managed
+      // apply (reload present) stays fully correlated and is unaffected.
+      const legacyUncorrelated = reload === undefined;
+      const legacyPersistedVersion = applied.persisted_version ?? applied.version;
+      const legacyServingVersion =
+        applied.serving_version ?? legacyOverview.data?.last_reload?.serving_version;
       return deriveApplyOutcome({
         accepted: applied.ok,
         pendingReload:
@@ -730,6 +741,17 @@ export function ConfigPanel() {
         ...(reload === undefined && legacyOverview.data?.stream_status !== undefined
           ? { streamStatus: legacyOverview.data.stream_status }
           : {}),
+        ...(legacyUncorrelated
+          ? {
+              correlated: false,
+              ...(legacyPersistedVersion !== undefined
+                ? { persistedVersion: legacyPersistedVersion }
+                : {}),
+              ...(legacyServingVersion !== undefined
+                ? { servingVersion: legacyServingVersion }
+                : {}),
+            }
+          : {}),
         http: reload?.http,
         stream: reload?.stream,
         admin: reload?.admin,
@@ -740,6 +762,21 @@ export function ConfigPanel() {
     }
     return null;
   }, [restartError, applied, appliedState?.errorKind, legacyOverview.data]);
+
+  // AC-11: In development builds, warn once when a legacy uncorrelated apply is
+  // surfaced. The pre-managed hot-apply path returns no per-ID reload record and
+  // cannot prove the runtime went live; it is retained only for backward
+  // compatibility and should be replaced by the managed apply flow.
+  useEffect(() => {
+    if (import.meta.env.DEV && outcome?.kind === "saved-uncorrelated") {
+      console.warn(
+        "[jul-console] Deprecated: a configuration apply returned without a correlated " +
+          "per-operation reload record. The console cannot confirm the runtime went live and " +
+          'is showing "Saved; runtime status uncorrelated". This legacy apply path is deprecated; ' +
+          "prefer the managed apply flow that emits a per-ID ledger record.",
+      );
+    }
+  }, [outcome?.kind]);
 
   const appliedCapabilities = applied?.status
     ? { active: applied.status.filter((s) => s.active).length, total: applied.status.length }

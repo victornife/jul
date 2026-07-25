@@ -32,6 +32,12 @@ export type ApplyOutcomeKind =
   // config — is NOT yet determined, so the UI must NOT claim the new config is
   // serving. The operator polls the runtime overview for the terminal outcome.
   | "saved-not-live"
+  // AC-11: Accepted and persisted by a legacy (pre-managed) apply path that
+  // returns no correlated per-ID reload record, and whose persisted/serving
+  // versions could not be matched. The change is saved, but this console cannot
+  // prove the running runtime switched to it, so it must NOT claim "live". The
+  // operator confirms the serving version via the runtime overview.
+  | "saved-uncorrelated"
   // Accepted and live for HTTP, but a subsystem failed to activate the new
   // config and is still serving the previous one -' a degraded, not failed,
   // apply that needs operator attention.
@@ -153,6 +159,29 @@ export interface ApplyOutcomeInput {
   readonly restored?: boolean;
   readonly restoreError?: string;
   readonly reloadError?: string;
+  /**
+   * AC-11: False when the apply came back from a legacy (pre-managed) path that
+   * carries no correlated per-ID reload record, so the console cannot prove the
+   * running runtime switched to the new config. Undefined (the default) means
+   * the result is correlated — either a managed reload record is present, or the
+   * caller is a unit test asserting a fully-live apply — and the fully-live path
+   * is allowed. Only an explicit `false` downgrades an otherwise-live outcome to
+   * "saved-uncorrelated", and only when a version match cannot rescue it.
+   */
+  readonly correlated?: boolean;
+  /**
+   * AC-11: The config version the apply persisted (response persisted_version /
+   * version). Paired with `servingVersion` to correlate a legacy result: when
+   * both are present and equal, the running runtime demonstrably serves the same
+   * version that was persisted, which is proof enough to claim "live" even
+   * without a per-ID reload record.
+   */
+  readonly persistedVersion?: string;
+  /**
+   * AC-11: The version the running runtime reports serving (overview
+   * serving_version). See `persistedVersion`.
+   */
+  readonly servingVersion?: string;
 }
 
 /**
@@ -376,6 +405,31 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
         "The configuration was validated and saved. The live runtime is swapping to it now; this panel confirms once every subsystem reports the new config is live.",
       failures: [],
     };
+  }
+
+  // AC-11: A legacy (pre-managed) apply carries no correlated per-ID reload
+  // record. Without that proof — and unless the persisted and serving versions
+  // demonstrably match — the console must NOT claim "Applied and live". A
+  // version match is treated as correlation: the running runtime reports serving
+  // exactly the version this apply persisted, so the live claim is earned.
+  // Everything else is downgraded to a truthful "saved, runtime status
+  // uncorrelated" advisory that points the operator at the runtime overview.
+  if (input.correlated === false) {
+    const versionsMatch =
+      input.persistedVersion !== undefined &&
+      input.servingVersion !== undefined &&
+      input.persistedVersion === input.servingVersion;
+    if (!versionsMatch) {
+      return {
+        kind: "saved-uncorrelated",
+        severity: "info",
+        blocking: false,
+        title: "Saved; runtime status uncorrelated",
+        message:
+          "The configuration was validated and saved. This apply came back without a correlated per-operation result, so the console cannot confirm the running runtime switched to it. Check the runtime overview to confirm the serving version before making another change.",
+        failures: [],
+      };
+    }
   }
 
   return {

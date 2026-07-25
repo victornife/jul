@@ -185,6 +185,77 @@ describe("deriveApplyOutcome", () => {
     expect(o.kind).toBe("saved-not-live");
     expect(o.message.toLowerCase()).not.toContain("is now serving");
   });
+
+  // AC-11: a legacy (pre-managed) apply carries no correlated per-ID reload
+  // record. Without a version match, the console must NOT claim "Applied and
+  // live" — it downgrades to a truthful "saved, uncorrelated" advisory.
+  it("saved-uncorrelated: legacy uncorrelated apply never claims live", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      correlated: false,
+    });
+    expect(o.kind).toBe("saved-uncorrelated");
+    expect(o.severity).toBe("info");
+    expect(o.blocking).toBe(false);
+    expect(o.title).toMatch(/uncorrelated/i);
+    // Must not claim the config is live/serving.
+    expect(o.message.toLowerCase()).not.toContain("now live");
+    expect(o.message.toLowerCase()).not.toContain("is now serving");
+    // Must point the operator at the runtime overview to confirm.
+    expect(o.message).toMatch(/runtime overview|serving version/i);
+  });
+
+  it("saved-uncorrelated: an uncorrelated apply whose versions differ stays uncorrelated", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      correlated: false,
+      persistedVersion: "v-new",
+      servingVersion: "v-old",
+    });
+    expect(o.kind).toBe("saved-uncorrelated");
+  });
+
+  it("full-live: an uncorrelated apply is rescued when persisted and serving versions match", () => {
+    // A version match is proof the running runtime serves exactly what was
+    // persisted, so the live claim is earned even without a per-ID record.
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      correlated: false,
+      persistedVersion: "v-42",
+      servingVersion: "v-42",
+    });
+    expect(o.kind).toBe("full-live");
+    expect(o.severity).toBe("success");
+  });
+
+  it("full-live: a correlated apply (default) is unaffected by the AC-11 gate", () => {
+    // Undefined `correlated` means correlated — the managed path or a unit test
+    // asserting a fully-live apply — so the fully-live branch is still reached.
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+    });
+    expect(o.kind).toBe("full-live");
+  });
+
+  it("saved-uncorrelated does not fire while the reload is still pending", () => {
+    // reload-pending outranks the AC-11 gate: an in-flight reload is surfaced as
+    // pending, not as an uncorrelated legacy result.
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: true,
+      runtimeObserved: false,
+      correlated: false,
+    });
+    expect(o.kind).toBe("reload-pending");
+  });
 });
 
 describe("ApplyOutcomeBanner", () => {
@@ -256,6 +327,23 @@ describe("ApplyOutcomeBanner", () => {
     );
     const el = screen.getByRole("alert");
     expect(el).toHaveAttribute("data-outcome", "reload-timed-out");
+  });
+
+  it("renders a saved-uncorrelated apply as polite status that does not claim live", () => {
+    render(
+      <ApplyOutcomeBanner
+        outcome={bannerFor({
+          accepted: true,
+          pendingReload: false,
+          runtimeObserved: true,
+          correlated: false,
+        })}
+      />,
+    );
+    const el = screen.getByRole("status");
+    expect(el).toHaveAttribute("data-outcome", "saved-uncorrelated");
+    expect(el).toHaveTextContent(/uncorrelated/i);
+    expect(el).not.toHaveTextContent(/now live/i);
   });
 });
 
