@@ -1,14 +1,15 @@
 # Audit-closure implementation — continuation handoff (session 3)
 
 ## Status snapshot
-- **Current HEAD: `a9177fd9`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green (`typecheck`/`lint`/`build`, 444 vitest tests pass).
+- **Current HEAD: `c33e8647`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green (`typecheck`/`lint`/`build`, 451 vitest tests pass).
 - Baseline reviewed at `427e75d2`. Session-1 landed: AC-01, AC-02, AC-03 (hot-finalizer ordering), AC-04, AC-05 (storage), AC-06, AC-07; partial AC-15/AC-16.
 - Session-2 landed: AC-05 terminalization wiring + AC-03 finish.
 - Session-3 landed: **AC-08 complete** (2 commits) + **AC-14 backend** (finalization provenance wired to ledger + overview).
 - Session-4 landed: **AC-09 complete** (Console exact-ID polling), **AC-10 complete** (degraded-rollback committed surface), **AC-14 Console rendering complete** (advisory finalization banner on record + overview schemas).
 - Session-5 landed: **AC-11 complete** (legacy uncorrelated apply never claims "Applied and live").
-- Session-6 landed (below): **AC-12 complete** (config source-of-truth labeled truthfully — live vs candidate vs diff-only).
-- **Remaining Console work: AC-13 — same tree (`internal/admin/ui`, TS/pnpm). The Go composition-root files (`serve.go`, `config_apply.go`, `admin/server.go`) are large and NOT needed for the Console work; do not pre-load them.**
+- Session-6 landed: **AC-12 complete** (config source-of-truth labeled truthfully — live vs candidate vs diff-only).
+- Session-7 landed (below): **AC-13 complete** (ConfigPanel mutation state machine extracted into a pure reducer + hook). **All AC-01–AC-14 code findings are now landed.**
+- **Remaining: only AC-15/AC-16 + the formal closure pass (docs, audit-closure report, PR/CI/reviewers/tag). No more Console feature findings.**
 
 ## Environment / workflow reminders
 - Windows 11, cmd shell; CWD path has spaces — use `powershell -NoProfile -Command "..."` to slice files; `findstr` cannot open spaced paths.
@@ -82,13 +83,17 @@
 - `internal/admin/ui/src/features/config/ConfigPanel.tsx`: added a derived `sourceView` (`tone`/`label`/`detail`) with three exhaustive cases and rendered it as a labeled header strip (`data-source-view` = `live`/`candidate`/`diff-only`) above the editor: (1) **live** — a config:raw operator editing the running config in raw mode, labeled "Live configuration — editable"; (2) **candidate** — a server-computed structured-patch candidate shown READ-ONLY, labeled "Proposed candidate — read-only" with copy stating it is not the running config and only applies on confirm; (3) **diff-only** — a non-config:raw operator reviewing a structured change whose candidate text the backend withholds, labeled "Proposed change — diff only". The pre-existing behavior (candidate read-only vs the config:raw-hidden permission notice + diff) already matched AC-12's flow; this change makes the SOURCE explicit so a candidate is never mistaken for the live config. The candidate/base_version plumbing (`/api/config/patch/preview` → echo `base_version` on apply → 409 on drift) is unchanged and already correct.
 - Tests (`console-v2-write.test.tsx`): added `data-source-view` assertions to three existing flows — the raw apply test asserts the `live` label and the absence of any `candidate` label; the patch-apply test asserts the `candidate` label, that it does not say "editable", and the absence of a `live` label; the config:raw-forbidden test asserts the `diff-only` label and the absence of a `candidate` label. Suite: 444 pass. Gates green: typecheck/lint/build.
 
-## Remaining work — implement in this order
+## Completed in session-7 (committed & green)
 
-### AC-13 (P1, NEXT) — Console (`internal/admin/ui`, pnpm)
-Gate: `pnpm --dir internal/admin/ui run typecheck|lint|test:coverage|build`, embedded asset drift guard must pass.
-- AC-13: extract ConfigPanel mutation state machine into reducer/hook preserving operation kind, candidate/patch ops, base version, mode, admin-confirmed state, operation generation, apply ID.
+### AC-13 — ConfigPanel mutation state machine extracted (commit `c33e8647`)
+- `internal/admin/ui/src/features/config/configMutationMachine.ts` (NEW): a pure, exhaustively-typed reducer that owns every interlocking piece of write state the audit called out — `operationGeneration` (the monotonic token that supersedes stale operations), the correlated `applied` result + `errorKind` + `wasPatch` + `patchCandidate` (operation kind), `patchDraft` (ops/preview/base version), `baseVersion`/`conflictVersion` (optimistic-concurrency tokens), `adminConfirmedGeneration` (admin-confirmation scoped to the exact operation), and the bounded `pollAttempts`. Key invariants enforced centrally: `applyResult` is dropped unless its generation is current; `mergeTerminal` merges a per-ID ledger record ONLY when both the generation AND the held `apply_id` match (never cross-correlate a different operation); `startOperation` clears the prior result + admin confirmation. An `assertNever` guard makes a missing action case a compile error.
+- `internal/admin/ui/src/features/config/useConfigMutationMachine.ts` (NEW): the React binding. Backs the reducer with `useReducer` and keeps synchronous mirror refs (`operationIDRef`/`confirmedAdminOperationRef`/`postApplyPollAttemptsRef`) for the values async closures read without a re-render. Exposes the panel's historical imperative surface (`setAppliedState` accepting a value or a functional updater — a same-op same-id functional update is routed to `mergeTerminal`) so the ~600-line panel body was rewired with near-zero behavioral change. Function-type properties (not method signatures) + `React.RefObject` typing keep `@typescript-eslint`'s `unbound-method`/`no-deprecated` clean.
+- `ConfigPanel.tsx`: replaced the scattered `useState`/`useRef` write-state declarations and the inline `startOperation`/`cancelOperation` with the machine; the panel keeps only editor-text and dialog/UI state locally. Behavior preserved (all 20 console-v2-write integration tests still green).
+- `internal/admin/ui/src/test/config-mutation-machine.test.ts` (NEW): 7 reducer unit tests — generation bump/clear, stale-result drop, per-ID + per-generation terminal-merge gating, admin-confirmation scoping, poll budget, isolated draft/version transitions. Suite: 451 pass (was 444). Gates green: typecheck/lint/build.
 
-### Remaining AC-15/AC-16 + closure
+## Remaining work
+
+### AC-15/AC-16 + closure (the only remaining work)
 Docs: `docs/reload-semantics.md`, `docs/specs/console-rbac.md`, ADRs (planned-restart linearization, timeout boundary), audit closure report `docs/audit/<date>-configuration-audit-closure.md` (per-finding: id, path, closure commit, summary, test names, workflow job, disposition, reviewer — do NOT write "closed" before the exact green SHA). Comment cleanup: buildRBACPolicy post-Publish rebuild claims, BOM/encoding in Console source. Then PR to main, ensure exact SHA runs all workflows, add `workflow_dispatch` trigger, independent security/concurrency + frontend reviewers, record run IDs, tag only after report signed.
 
 ## Standards (plan §15) — keep enforcing
@@ -96,6 +101,7 @@ No result reconstructed independently by handler or Console; no global latest-st
 
 ## Commit ledger (this workstream)
 ```
+c33e8647 AC-13 Console: extract ConfigPanel mutation state machine into reducer + hook
 a9177fd9 AC-12 Console: label config source truthfully (live vs candidate vs diff-only)
 dfd61608 AC-11 Console: legacy uncorrelated apply never claims "Applied and live" (saved-uncorrelated outcome + version-match gate)
 a38573cf AC-09/AC-10/AC-14 Console: exact-ID polling, degraded-rollback committed surface, advisory finalization banner
@@ -114,4 +120,4 @@ ec9cea4d AC-03 hot-finalizer ordering
 c1a30ffd/cead4bc9 AC-01/AC-02
 ```
 
-Start next session with the remaining Console finding (AC-13), in the `internal/admin/ui` (TS/pnpm) tree — do NOT pre-load the large Go composition-root files. Repository is clean & green at `a9177fd9`.
+All AC-01–AC-14 code findings are landed. Start next session with the AC-15/AC-16 closure pass (docs + audit-closure report + PR/CI/independent-reviewers/tag) — never mark a finding "closed" before its exact green SHA exists. Repository is clean & green at `c33e8647`.
