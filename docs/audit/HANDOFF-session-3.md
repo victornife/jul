@@ -1,13 +1,14 @@
 # Audit-closure implementation — continuation handoff (session 3)
 
 ## Status snapshot
-- **Current HEAD: `dfd61608`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green (`typecheck`/`lint`/`build`, 444 vitest tests pass).
+- **Current HEAD: `a9177fd9`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green (`typecheck`/`lint`/`build`, 444 vitest tests pass).
 - Baseline reviewed at `427e75d2`. Session-1 landed: AC-01, AC-02, AC-03 (hot-finalizer ordering), AC-04, AC-05 (storage), AC-06, AC-07; partial AC-15/AC-16.
 - Session-2 landed: AC-05 terminalization wiring + AC-03 finish.
 - Session-3 landed: **AC-08 complete** (2 commits) + **AC-14 backend** (finalization provenance wired to ledger + overview).
 - Session-4 landed: **AC-09 complete** (Console exact-ID polling), **AC-10 complete** (degraded-rollback committed surface), **AC-14 Console rendering complete** (advisory finalization banner on record + overview schemas).
-- Session-5 landed (below): **AC-11 complete** (legacy uncorrelated apply never claims "Applied and live").
-- **Remaining Console work: AC-12, AC-13 — same tree (`internal/admin/ui`, TS/pnpm). The Go composition-root files (`serve.go`, `config_apply.go`, `admin/server.go`) are large and NOT needed for the Console work; do not pre-load them.**
+- Session-5 landed: **AC-11 complete** (legacy uncorrelated apply never claims "Applied and live").
+- Session-6 landed (below): **AC-12 complete** (config source-of-truth labeled truthfully — live vs candidate vs diff-only).
+- **Remaining Console work: AC-13 — same tree (`internal/admin/ui`, TS/pnpm). The Go composition-root files (`serve.go`, `config_apply.go`, `admin/server.go`) are large and NOT needed for the Console work; do not pre-load them.**
 
 ## Environment / workflow reminders
 - Windows 11, cmd shell; CWD path has spaces — use `powershell -NoProfile -Command "..."` to slice files; `findstr` cannot open spaced paths.
@@ -75,11 +76,16 @@
 - `internal/admin/ui/src/features/config/ConfigPanel.tsx`: the hot-apply outcome projection now marks the legacy path (`reload === undefined`) `correlated: false` and threads `persistedVersion` (response `persisted_version` ?? `version`) and `servingVersion` (response `serving_version` ?? the best-effort overview `last_reload.serving_version`). The managed path (reload present) stays fully correlated. Added a DEV-only one-shot `console.warn` deprecation notice keyed on `outcome?.kind === "saved-uncorrelated"`.
 - Tests: `internal/admin/ui/src/test/apply-outcome.test.tsx` — 6 new cases (uncorrelated → saved-uncorrelated; version-mismatch stays uncorrelated; version-match rescues to full-live; correlated default unaffected; reload-pending outranks the gate; banner renders saved-uncorrelated as polite `status` without a live claim). Suite: 444 pass (was 438). Gates green: typecheck/lint/build.
 
+## Completed in session-6 (committed & green)
+
+### AC-12 — config source-of-truth labeled truthfully (commit `a9177fd9`)
+- `internal/admin/ui/src/features/config/ConfigPanel.tsx`: added a derived `sourceView` (`tone`/`label`/`detail`) with three exhaustive cases and rendered it as a labeled header strip (`data-source-view` = `live`/`candidate`/`diff-only`) above the editor: (1) **live** — a config:raw operator editing the running config in raw mode, labeled "Live configuration — editable"; (2) **candidate** — a server-computed structured-patch candidate shown READ-ONLY, labeled "Proposed candidate — read-only" with copy stating it is not the running config and only applies on confirm; (3) **diff-only** — a non-config:raw operator reviewing a structured change whose candidate text the backend withholds, labeled "Proposed change — diff only". The pre-existing behavior (candidate read-only vs the config:raw-hidden permission notice + diff) already matched AC-12's flow; this change makes the SOURCE explicit so a candidate is never mistaken for the live config. The candidate/base_version plumbing (`/api/config/patch/preview` → echo `base_version` on apply → 409 on drift) is unchanged and already correct.
+- Tests (`console-v2-write.test.tsx`): added `data-source-view` assertions to three existing flows — the raw apply test asserts the `live` label and the absence of any `candidate` label; the patch-apply test asserts the `candidate` label, that it does not say "editable", and the absence of a `live` label; the config:raw-forbidden test asserts the `diff-only` label and the absence of a `candidate` label. Suite: 444 pass. Gates green: typecheck/lint/build.
+
 ## Remaining work — implement in this order
 
-### AC-12–AC-13 (P1, NEXT) — Console (`internal/admin/ui`, pnpm)
+### AC-13 (P1, NEXT) — Console (`internal/admin/ui`, pnpm)
 Gate: `pnpm --dir internal/admin/ui run typecheck|lint|test:coverage|build`, embedded asset drift guard must pass.
-- AC-12: config:raw operators → call `/api/config/patch/candidate` with base_version, show candidate read-only; non-config:raw → diff only; label source view truthfully.
 - AC-13: extract ConfigPanel mutation state machine into reducer/hook preserving operation kind, candidate/patch ops, base version, mode, admin-confirmed state, operation generation, apply ID.
 
 ### Remaining AC-15/AC-16 + closure
@@ -90,6 +96,7 @@ No result reconstructed independently by handler or Console; no global latest-st
 
 ## Commit ledger (this workstream)
 ```
+a9177fd9 AC-12 Console: label config source truthfully (live vs candidate vs diff-only)
 dfd61608 AC-11 Console: legacy uncorrelated apply never claims "Applied and live" (saved-uncorrelated outcome + version-match gate)
 a38573cf AC-09/AC-10/AC-14 Console: exact-ID polling, degraded-rollback committed surface, advisory finalization banner
 1b62cd19 AC-14 backend: thread finalization provenance to ledger + overview
@@ -107,4 +114,4 @@ ec9cea4d AC-03 hot-finalizer ordering
 c1a30ffd/cead4bc9 AC-01/AC-02
 ```
 
-Start next session with the remaining Console findings (AC-12, AC-13), in the `internal/admin/ui` (TS/pnpm) tree — do NOT pre-load the large Go composition-root files. Repository is clean & green at `dfd61608`.
+Start next session with the remaining Console finding (AC-13), in the `internal/admin/ui` (TS/pnpm) tree — do NOT pre-load the large Go composition-root files. Repository is clean & green at `a9177fd9`.
