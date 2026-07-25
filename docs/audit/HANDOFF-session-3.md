@@ -1,12 +1,13 @@
 # Audit-closure implementation — continuation handoff (session 3)
 
 ## Status snapshot
-- **Current HEAD: `a38573cf`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green (`typecheck`/`lint`/`build`, 438 vitest tests pass).
+- **Current HEAD: `dfd61608`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green (`typecheck`/`lint`/`build`, 444 vitest tests pass).
 - Baseline reviewed at `427e75d2`. Session-1 landed: AC-01, AC-02, AC-03 (hot-finalizer ordering), AC-04, AC-05 (storage), AC-06, AC-07; partial AC-15/AC-16.
 - Session-2 landed: AC-05 terminalization wiring + AC-03 finish.
 - Session-3 landed: **AC-08 complete** (2 commits) + **AC-14 backend** (finalization provenance wired to ledger + overview).
-- Session-4 landed (below): **AC-09 complete** (Console exact-ID polling), **AC-10 complete** (degraded-rollback committed surface), **AC-14 Console rendering complete** (advisory finalization banner on record + overview schemas).
-- **Remaining Console work: AC-11, AC-12, AC-13 — same tree (`internal/admin/ui`, TS/pnpm). The Go composition-root files (`serve.go`, `config_apply.go`, `admin/server.go`) are large and NOT needed for the Console work; do not pre-load them.**
+- Session-4 landed: **AC-09 complete** (Console exact-ID polling), **AC-10 complete** (degraded-rollback committed surface), **AC-14 Console rendering complete** (advisory finalization banner on record + overview schemas).
+- Session-5 landed (below): **AC-11 complete** (legacy uncorrelated apply never claims "Applied and live").
+- **Remaining Console work: AC-12, AC-13 — same tree (`internal/admin/ui`, TS/pnpm). The Go composition-root files (`serve.go`, `config_apply.go`, `admin/server.go`) are large and NOT needed for the Console work; do not pre-load them.**
 
 ## Environment / workflow reminders
 - Windows 11, cmd shell; CWD path has spaces — use `powershell -NoProfile -Command "..."` to slice files; `findstr` cannot open spaced paths.
@@ -67,11 +68,17 @@
 - `history_snapshot_id`/`history_error`/`finalization_error` added to `ManagedApplyRecordSchema` (zod) and the overview schema; the panel renders a non-blocking advisory banner **distinct** from reload success/failure. A committed apply that is `ok=true` while its history sidecar degraded is presented as an advisory, never an apply failure.
 - Open decision still deferred: whether to also add a non-readiness advisory admin health row for `managed_apply_finalization`/`config_history` (history degradation must NEVER fail `/readyz`).
 
+## Completed in session-5 (committed & green)
+
+### AC-11 — legacy uncorrelated apply never claims "Applied and live" (commit `dfd61608`)
+- `internal/admin/ui/src/lib/applyOutcome.ts`: added a new `saved-uncorrelated` outcome kind plus three input fields — `correlated?: boolean`, `persistedVersion?: string`, `servingVersion?: string`. A new branch, placed AFTER `reload-pending` and BEFORE the fully-live return, fires only when `correlated === false` AND the persisted/serving versions do not demonstrably match: it returns an `info`-severity "Saved; runtime status uncorrelated" advisory whose copy never claims live/serving and points the operator at the runtime overview. `correlated === undefined` (the default) preserves back-compat — every existing caller and unit test that reaches `full-live` is unaffected. A version MATCH (persisted === serving, both defined) is treated as correlation and rescues the fully-live claim even without a per-ID record.
+- `internal/admin/ui/src/features/config/ConfigPanel.tsx`: the hot-apply outcome projection now marks the legacy path (`reload === undefined`) `correlated: false` and threads `persistedVersion` (response `persisted_version` ?? `version`) and `servingVersion` (response `serving_version` ?? the best-effort overview `last_reload.serving_version`). The managed path (reload present) stays fully correlated. Added a DEV-only one-shot `console.warn` deprecation notice keyed on `outcome?.kind === "saved-uncorrelated"`.
+- Tests: `internal/admin/ui/src/test/apply-outcome.test.tsx` — 6 new cases (uncorrelated → saved-uncorrelated; version-mismatch stays uncorrelated; version-match rescues to full-live; correlated default unaffected; reload-pending outranks the gate; banner renders saved-uncorrelated as polite `status` without a live claim). Suite: 444 pass (was 438). Gates green: typecheck/lint/build.
+
 ## Remaining work — implement in this order
 
-### AC-11–AC-13 (P1, NEXT) — Console (`internal/admin/ui`, pnpm)
+### AC-12–AC-13 (P1, NEXT) — Console (`internal/admin/ui`, pnpm)
 Gate: `pnpm --dir internal/admin/ui run typecheck|lint|test:coverage|build`, embedded asset drift guard must pass.
-- AC-11: legacy uncorrelated results never claim "Applied and live"; say "Saved; runtime status uncorrelated" unless persisted+serving versions match; dev deprecation warning.
 - AC-12: config:raw operators → call `/api/config/patch/candidate` with base_version, show candidate read-only; non-config:raw → diff only; label source view truthfully.
 - AC-13: extract ConfigPanel mutation state machine into reducer/hook preserving operation kind, candidate/patch ops, base version, mode, admin-confirmed state, operation generation, apply ID.
 
@@ -83,6 +90,7 @@ No result reconstructed independently by handler or Console; no global latest-st
 
 ## Commit ledger (this workstream)
 ```
+dfd61608 AC-11 Console: legacy uncorrelated apply never claims "Applied and live" (saved-uncorrelated outcome + version-match gate)
 a38573cf AC-09/AC-10/AC-14 Console: exact-ID polling, degraded-rollback committed surface, advisory finalization banner
 1b62cd19 AC-14 backend: thread finalization provenance to ledger + overview
 b71a20c9 AC-08 (part 2): bound whole managed apply transaction; phase-specific 504 (timed_out_phase)
@@ -99,4 +107,4 @@ ec9cea4d AC-03 hot-finalizer ordering
 c1a30ffd/cead4bc9 AC-01/AC-02
 ```
 
-Start next session with the remaining Console findings (AC-11, AC-12, AC-13), in the `internal/admin/ui` (TS/pnpm) tree — do NOT pre-load the large Go composition-root files. Repository is clean & green at `a38573cf`.
+Start next session with the remaining Console findings (AC-12, AC-13), in the `internal/admin/ui` (TS/pnpm) tree — do NOT pre-load the large Go composition-root files. Repository is clean & green at `dfd61608`.
