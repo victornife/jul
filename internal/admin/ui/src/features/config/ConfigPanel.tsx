@@ -782,6 +782,41 @@ export function ConfigPanel() {
     ? { active: applied.status.filter((s) => s.active).length, total: applied.status.length }
     : undefined;
 
+  // AC-12: label the editor's source truthfully so an operator is never misled
+  // about what they are looking at. There are three distinct sources:
+  //   - live:       the config currently loaded by the server, shown editable
+  //                 in raw mode (config:raw operators authoring a raw change);
+  //   - candidate:  a server-computed PROPOSED candidate (structured patch), shown
+  //                 read-only — it is NOT live and is only applied on confirm;
+  //   - diff-only:  a structured change reviewed by an operator WITHOUT config:raw,
+  //                 who never sees the candidate text, only the diff/summary.
+  // The candidate is computed by the patch-preview endpoint against a pinned
+  // base_version, which is echoed back on apply so a concurrent change is
+  // rejected rather than silently clobbered.
+  const sourceView: {
+    readonly tone: "live" | "candidate" | "diff-only";
+    readonly label: string;
+    readonly detail: string;
+  } = isPatchMode
+    ? rawForbidden && !patchDraft.candidate
+      ? {
+          tone: "diff-only",
+          label: "Proposed change — diff only",
+          detail:
+            "You are reviewing a structured change as a diff. The full candidate configuration is not shown because you do not have config:raw.",
+        }
+      : {
+          tone: "candidate",
+          label: "Proposed candidate — read-only",
+          detail:
+            "This is a proposed configuration, not the running one. It is read-only and only takes effect when you apply it.",
+        }
+    : {
+        tone: "live",
+        label: "Live configuration — editable",
+        detail: "You are editing the configuration the server is currently running.",
+      };
+
   if (isLoading) return <Loading label="Loading configuration…" />;
   if ((isError || !data) && !(rawForbidden && isPatchMode))
     return <PanelError error={error} resource="the configuration" onRetry={() => void refetch()} />;
@@ -912,7 +947,25 @@ export function ConfigPanel() {
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
-        <div className="min-h-0 overflow-hidden rounded-lg border border-jul-border bg-jul-surface">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-jul-border bg-jul-surface">
+          {/* AC-12: truthful source-of-truth label — live vs proposed candidate vs diff-only. */}
+          <div
+            data-source-view={sourceView.tone}
+            className={`flex flex-shrink-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b px-3 py-1.5 text-xs ${
+              sourceView.tone === "live"
+                ? "border-jul-border bg-jul-bg/40"
+                : "border-jul-accent/30 bg-jul-accent/5"
+            }`}
+          >
+            <span
+              className={`font-semibold ${
+                sourceView.tone === "live" ? "text-jul-text" : "text-jul-accent"
+              }`}
+            >
+              {sourceView.label}
+            </span>
+            <span className="text-jul-muted">{sourceView.detail}</span>
+          </div>
           <Suspense fallback={<EditorFallback />}>
             {draft !== null && !(rawForbidden && isPatchMode && !patchDraft.candidate) && (
               <CodeEditor

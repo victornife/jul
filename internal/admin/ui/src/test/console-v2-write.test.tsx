@@ -187,6 +187,12 @@ describe("ConfigPanel apply flow", () => {
 
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
     expect(editor.value).toContain('listen = ":8443"');
+    // AC-12: a config:raw operator editing raw TOML is told, truthfully, that the
+    // editor holds the LIVE editable configuration — not a proposed candidate.
+    const liveLabel = document.querySelector('[data-source-view="live"]');
+    expect(liveLabel).not.toBeNull();
+    expect(liveLabel?.textContent).toMatch(/live configuration/i);
+    expect(document.querySelector('[data-source-view="candidate"]')).toBeNull();
 
     // Edit → becomes dirty → validates → Apply enabled.
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
@@ -371,6 +377,12 @@ describe("ConfigPanel apply flow", () => {
     // The panel lands in patch mode showing the read-only candidate.
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
     expect(editor.value).toContain('listen = ":9000"');
+    // AC-12: the source view is labeled truthfully as a proposed candidate, not
+    // the live config — the operator must never mistake it for the running one.
+    const candidateLabel = document.querySelector('[data-source-view="candidate"]');
+    expect(candidateLabel?.textContent).toMatch(/proposed candidate/i);
+    expect((candidateLabel?.textContent ?? "").toLowerCase()).not.toContain("editable");
+    expect(document.querySelector('[data-source-view="live"]')).toBeNull();
     const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
     await waitFor(() => {
       expect(patchBtn).toBeEnabled();
@@ -445,6 +457,12 @@ describe("ConfigPanel apply flow", () => {
     // The raw editor is replaced by a permission notice; the diff is still shown.
     expect(await screen.findByText(/Raw configuration preview is hidden/)).toBeInTheDocument();
     expect(screen.getByText(/1 change/)).toBeInTheDocument();
+    // AC-12: without config:raw the operator reviews a diff only — the source
+    // view says so and never claims to show the live or candidate config text.
+    const diffOnlyLabel = document.querySelector('[data-source-view="diff-only"]');
+    expect(diffOnlyLabel).not.toBeNull();
+    expect(diffOnlyLabel?.textContent).toMatch(/diff only/i);
+    expect(document.querySelector('[data-source-view="candidate"]')).toBeNull();
 
     const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
     await waitFor(() => {
