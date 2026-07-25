@@ -1,11 +1,12 @@
 # Audit-closure implementation — continuation handoff (session 3)
 
 ## Status snapshot
-- **Current HEAD: `1b62cd19`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass).
+- **Current HEAD: `a38573cf`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green (`typecheck`/`lint`/`build`, 438 vitest tests pass).
 - Baseline reviewed at `427e75d2`. Session-1 landed: AC-01, AC-02, AC-03 (hot-finalizer ordering), AC-04, AC-05 (storage), AC-06, AC-07; partial AC-15/AC-16.
 - Session-2 landed: AC-05 terminalization wiring + AC-03 finish.
-- Session-3 landed (below): **AC-08 complete** (2 commits) + **AC-14 backend** (finalization provenance wired to ledger + overview).
-- **Next work is the Console (AC-09–AC-13) + AC-14 Console rendering — a different tree (`internal/admin/ui`, TS/pnpm). Start a FRESH session: the Go composition-root files (`serve.go`, `config_apply.go`, `admin/server.go`) are large and are NOT needed for the Console work; do not pre-load them.**
+- Session-3 landed: **AC-08 complete** (2 commits) + **AC-14 backend** (finalization provenance wired to ledger + overview).
+- Session-4 landed (below): **AC-09 complete** (Console exact-ID polling), **AC-10 complete** (degraded-rollback committed surface), **AC-14 Console rendering complete** (advisory finalization banner on record + overview schemas).
+- **Remaining Console work: AC-11, AC-12, AC-13 — same tree (`internal/admin/ui`, TS/pnpm). The Go composition-root files (`serve.go`, `config_apply.go`, `admin/server.go`) are large and NOT needed for the Console work; do not pre-load them.**
 
 ## Environment / workflow reminders
 - Windows 11, cmd shell; CWD path has spaces — use `powershell -NoProfile -Command "..."` to slice files; `findstr` cannot open spaced paths.
@@ -53,18 +54,26 @@
 - Semantics: a committed apply whose raw snapshot wrote but whose metadata sidecar failed is degraded-but-usable — `HistorySnapshotID` set AND `HistoryError` non-empty, terminal result stays `ok=true` (roll-back-able), never fails readiness. Test: `TestManagedApplyFinalizationProvenanceThreaded` in `internal/app/config_apply_test.go`.
 - **NOT yet done (Console side):** rendering these three fields as a finalization/degradation surface distinct from reload success/failure, and (if still wanted) an admin **health component** for `managed_apply_finalization` + `config_history`. The health-component question is open: current design surfaces degradation per-terminal-record + on the overview outcome rather than as a readiness-affecting health component (history degradation must never fail readiness). Decide during the Console pass whether a non-readiness advisory health row is also wanted.
 
+## Completed in session-4 (committed & green)
+
+### AC-09 — Console exact-ID polling (in `HistoryPanel.tsx` + `client.ts`)
+- Console now polls `GET /api/config/applies/{id}` (exact ledger record) instead of reconstructing status from the Runtime Overview. Added `ManagedApplyRecordSchema` (zod) + `fetchManagedApply` in `internal/admin/ui/src/api/client.ts`; the panel polls until the record reaches a terminal state (immediate first read, 1s cadence for 10s then 2s until deadline+margin) and stops on terminal / 404-after-restart / cancel. A missing/absent record never becomes a success claim — a 404 after restart resolves to "record gone, not confirmed live". A terminal record for an unrelated apply id is ignored; a provisional rollback stays open until its own correlated terminal record.
+- Tests migrated to the exact-ID contract in `console-v2-write.test.tsx`: "finalizes saved-not-live by polling the exact apply-id record", "does not claim success when the exact apply-id record is gone (404 after restart)", "ignores a terminal record for an unrelated apply id", "keeps a provisional rollback open until its correlated terminal record".
+
+### AC-10 — degraded rollback is committed (in `HistoryPanel.tsx`)
+- A degraded rollback (`ok=true`, `applied_degraded`) is treated as committed: the dialog closes, queries invalidate (history/raw/pending-restart/overview/route-app), and a **separate persistent warning banner** surfaces the degradation with no repeatable rollback action. The terminal degraded path now surfaces `reload.error` on the banner so the operator sees WHY it degraded (not a generic notice). Deterministic test added for the degraded-rollback path.
+
+### AC-14 Console rendering — advisory finalization surface (commit `a38573cf` folds the rendering into AC-09/AC-10)
+- `history_snapshot_id`/`history_error`/`finalization_error` added to `ManagedApplyRecordSchema` (zod) and the overview schema; the panel renders a non-blocking advisory banner **distinct** from reload success/failure. A committed apply that is `ok=true` while its history sidecar degraded is presented as an advisory, never an apply failure.
+- Open decision still deferred: whether to also add a non-readiness advisory admin health row for `managed_apply_finalization`/`config_history` (history degradation must NEVER fail `/readyz`).
+
 ## Remaining work — implement in this order
 
-### AC-09–AC-13 (P1, NEXT) — Console (`internal/admin/ui`, pnpm)
+### AC-11–AC-13 (P1, NEXT) — Console (`internal/admin/ui`, pnpm)
 Gate: `pnpm --dir internal/admin/ui run typecheck|lint|test:coverage|build`, embedded asset drift guard must pass.
-- AC-09: poll `/api/config/applies/{id}` (exact-ID) not Runtime Overview; add `ManagedApplyRecordSchema` (zod) + `fetchManagedApply`; poll until state=terminal; immediate first read, 1s for 10s then 2s until deadline+margin; stop on terminal/404-after-restart/cancel; missing never becomes success.
-- AC-10: degraded rollback (ok=true, applied_degraded) is committed — close dialog, invalidate queries (history/raw/pending-restart/overview/route-app), show separate persistent warning banner, no repeatable rollback action.
 - AC-11: legacy uncorrelated results never claim "Applied and live"; say "Saved; runtime status uncorrelated" unless persisted+serving versions match; dev deprecation warning.
 - AC-12: config:raw operators → call `/api/config/patch/candidate` with base_version, show candidate read-only; non-config:raw → diff only; label source view truthfully.
 - AC-13: extract ConfigPanel mutation state machine into reducer/hook preserving operation kind, candidate/patch ops, base version, mode, admin-confirmed state, operation generation, apply ID.
-
-### AC-14 Console rendering (backend already landed at `1b62cd19`)
-Backend contract is live: `history_snapshot_id`/`history_error`/`finalization_error` appear on BOTH `GET /api/config/applies/{id}` (per-ID ledger record) and the runtime-overview `last_managed_apply` outcome. Remaining: Console renders them as an advisory finalization/degradation surface **distinct** from reload success/failure (a committed apply can be `ok=true` while its history sidecar degraded — never present that as an apply failure). Add the three fields to `ManagedApplyRecordSchema` (zod) and the overview schema; render a non-blocking banner. Fold this into AC-09/AC-10 since it shares the same schemas/components. Open decision: whether to also add a non-readiness advisory admin health row for `managed_apply_finalization`/`config_history` (history degradation must NEVER fail `/readyz`).
 
 ### Remaining AC-15/AC-16 + closure
 Docs: `docs/reload-semantics.md`, `docs/specs/console-rbac.md`, ADRs (planned-restart linearization, timeout boundary), audit closure report `docs/audit/<date>-configuration-audit-closure.md` (per-finding: id, path, closure commit, summary, test names, workflow job, disposition, reviewer — do NOT write "closed" before the exact green SHA). Comment cleanup: buildRBACPolicy post-Publish rebuild claims, BOM/encoding in Console source. Then PR to main, ensure exact SHA runs all workflows, add `workflow_dispatch` trigger, independent security/concurrency + frontend reviewers, record run IDs, tag only after report signed.
@@ -74,6 +83,7 @@ No result reconstructed independently by handler or Console; no global latest-st
 
 ## Commit ledger (this workstream)
 ```
+a38573cf AC-09/AC-10/AC-14 Console: exact-ID polling, degraded-rollback committed surface, advisory finalization banner
 1b62cd19 AC-14 backend: thread finalization provenance to ledger + overview
 b71a20c9 AC-08 (part 2): bound whole managed apply transaction; phase-specific 504 (timed_out_phase)
 accef73e AC-08 (part 1): bound secret resolution + candidate build by context
@@ -89,4 +99,4 @@ ec9cea4d AC-03 hot-finalizer ordering
 c1a30ffd/cead4bc9 AC-01/AC-02
 ```
 
-Start next session with the Console (AC-09–AC-13 + AC-14 rendering), in the `internal/admin/ui` (TS/pnpm) tree — do NOT pre-load the large Go composition-root files. Repository is clean & green at `1b62cd19`.
+Start next session with the remaining Console findings (AC-11, AC-12, AC-13), in the `internal/admin/ui` (TS/pnpm) tree — do NOT pre-load the large Go composition-root files. Repository is clean & green at `a38573cf`.
