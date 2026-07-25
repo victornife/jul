@@ -22,13 +22,11 @@ import {
   ConfigRestartRequiredError,
   ConfigAdminChangeError,
   ConfigApplyOutcomeError,
-  type ApplyResult,
-  type ConfigApplyErrorKind,
   type ConfigDiff,
   type PendingRestartStatus,
 } from "@/api/client.ts";
-import type { PendingDraft } from "@/lib/configDraftHandoff.ts";
 import { deriveApplyOutcome, type ApplyOutcome } from "@/lib/applyOutcome.ts";
+import { useConfigMutationMachine } from "@/features/config/useConfigMutationMachine.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
@@ -220,45 +218,50 @@ export function ConfigPanel() {
   const [baseline, setBaseline] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [stageConfirming, setStageConfirming] = useState(false);
-  const [appliedState, setAppliedState] = useState<{
-    readonly operationID: number;
-    readonly result: ApplyResult;
-    readonly errorKind: ConfigApplyErrorKind | null;
-    readonly wasPatch: boolean;
-    readonly patchCandidate: string | null;
-  } | null>(null);
-  const applied = appliedState?.result ?? null;
-  const operationIDRef = useRef(0);
-  const confirmedAdminOperationRef = useRef<number | null>(null);
-  const postApplyPollAttemptsRef = useRef(0);
 
-  // Patch draft state: when a structured patch is handed off, the editor shows
-  // the candidate read-only and the diff is pre-computed; applying uses the
-  // atomic patch endpoint rather than raw apply.
-  const [patchDraft, setPatchDraft] = useState<(PendingDraft & { kind: "patch" }) | null>(null);
+  // AC-13: every interlocking piece of write state — operation generation, the
+  // correlated apply result + its kind, the pending patch draft, the base and
+  // conflict versions, the admin-confirmation scope, and the bounded poll budget
+  // — lives in the extracted, unit-tested mutation machine
+  // (configMutationMachine.ts), bound to React by useConfigMutationMachine. The
+  // panel keeps only editor-text and dialog/UI state locally. The synchronous
+  // refs (operationIDRef / confirmedAdminOperationRef / postApplyPollAttemptsRef)
+  // mirror the reducer so async closures can read them without a re-render.
+  const machine = useConfigMutationMachine();
+  const {
+    operationIDRef,
+    confirmedAdminOperationRef,
+    postApplyPollAttemptsRef,
+    appliedState,
+    patchDraft,
+    baseVersion,
+    conflictVersion,
+    setAppliedState,
+    setPatchDraft,
+    setBaseVersion,
+    setConflictVersion,
+    startOperation: machineStartOperation,
+    cancelOperation: machineCancelOperation,
+  } = machine;
+  const applied = appliedState?.result ?? null;
+
+  // Patch-reconcile status is pure editor-text UI concern, so it stays local.
   const [patchReconciling, setPatchReconciling] = useState(false);
   const [patchReconcileError, setPatchReconcileError] = useState<Error | null>(null);
-  const [conflictVersion, setConflictVersion] = useState<string | undefined>();
-  // baseVersion is the optimistic-concurrency token for the raw editor: the
-  // version the loaded config was read at. It is sent on raw apply so a stale
-  // edit is rejected with 409 instead of clobbering a concurrent change.
-  const [baseVersion, setBaseVersion] = useState<string | undefined>();
 
-  function startOperation(): number {
-    operationIDRef.current += 1;
-    confirmedAdminOperationRef.current = null;
-    postApplyPollAttemptsRef.current = 0;
+  // Wrap the machine's operation-lifecycle transitions to also clear the local
+  // reconcile UI state, preserving the panel's original startOperation/cancel
+  // semantics.
+  const startOperation = useCallback((): number => {
     setPatchReconcileError(null);
-    setAppliedState(null);
-    return operationIDRef.current;
-  }
+    return machineStartOperation();
+  }, [machineStartOperation]);
 
-  function cancelOperation(): void {
-    operationIDRef.current += 1;
-    confirmedAdminOperationRef.current = null;
+  const cancelOperation = useCallback((): void => {
     setPatchReconciling(false);
     setPatchReconcileError(null);
-  }
+    machineCancelOperation();
+  }, [machineCancelOperation]);
 
   const refreshEditorAfterFailure = useCallback(
     (operationID: number): void => {
@@ -273,7 +276,7 @@ export function ConfigPanel() {
         })
         .catch(() => undefined);
     },
-    [qc, rawForbidden],
+    [qc, rawForbidden, operationIDRef, setBaseVersion],
   );
 
   const reconcilePatchEditor = useCallback(
@@ -305,7 +308,7 @@ export function ConfigPanel() {
           );
         });
     },
-    [navigate, qc, rawForbidden],
+    [navigate, qc, rawForbidden, operationIDRef, setBaseVersion, setPatchDraft],
   );
 
   // Seed the editor once the raw config arrives. A pending handoff, if present,
@@ -347,7 +350,7 @@ export function ConfigPanel() {
       setBaseline("");
       setDraft(handoff.candidate ?? "");
     }
-  }, [data, rawForbidden]);
+  }, [data, rawForbidden, setBaseVersion, setPatchDraft]);
 
   const current = draft ?? "";
   const isPatchMode = patchDraft !== null;
@@ -657,6 +660,8 @@ export function ConfigPanel() {
     applyRecord.data,
     reconcilePatchEditor,
     refreshEditorAfterFailure,
+    operationIDRef,
+    setAppliedState,
   ]);
 
   // Fold the raw apply signals into one explicit, severity-tagged outcome so the
