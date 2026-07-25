@@ -1,15 +1,16 @@
 # Audit-closure implementation — continuation handoff (session 3)
 
 ## Status snapshot
-- **Current HEAD: `c33e8647`** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green (`typecheck`/`lint`/`build`, 451 vitest tests pass).
+- **Current HEAD: session-8 (below)** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green as of `c33e8647` (`typecheck`/`lint`/`build`, 451 vitest tests pass).
 - Baseline reviewed at `427e75d2`. Session-1 landed: AC-01, AC-02, AC-03 (hot-finalizer ordering), AC-04, AC-05 (storage), AC-06, AC-07; partial AC-15/AC-16.
 - Session-2 landed: AC-05 terminalization wiring + AC-03 finish.
 - Session-3 landed: **AC-08 complete** (2 commits) + **AC-14 backend** (finalization provenance wired to ledger + overview).
 - Session-4 landed: **AC-09 complete** (Console exact-ID polling), **AC-10 complete** (degraded-rollback committed surface), **AC-14 Console rendering complete** (advisory finalization banner on record + overview schemas).
 - Session-5 landed: **AC-11 complete** (legacy uncorrelated apply never claims "Applied and live").
 - Session-6 landed: **AC-12 complete** (config source-of-truth labeled truthfully — live vs candidate vs diff-only).
-- Session-7 landed (below): **AC-13 complete** (ConfigPanel mutation state machine extracted into a pure reducer + hook). **All AC-01–AC-14 code findings are now landed.**
-- **Remaining: only AC-15/AC-16 + the formal closure pass (docs, audit-closure report, PR/CI/reviewers/tag). No more Console feature findings.**
+- Session-7 landed: **AC-13 complete** (ConfigPanel mutation state machine extracted into a pure reducer + hook). **All AC-01–AC-14 code findings are now landed.**
+- Session-8 landed (below): **AC-15/AC-16 complete** — audit-closure report written (`docs/audit/2026-07-25-configuration-audit-closure.md`) keyed to exact green SHAs. **All findings AC-01–AC-16 are now dispositioned.**
+- **Remaining: only the process-side release gate — open the PR, run all CI workflows green on the exact SHA, obtain the two independent reviewer sign-offs recorded in the closure report, then tag. No code or docs work remains.**
 
 ## Environment / workflow reminders
 - Windows 11, cmd shell; CWD path has spaces — use `powershell -NoProfile -Command "..."` to slice files; `findstr` cannot open spaced paths.
@@ -91,10 +92,13 @@
 - `ConfigPanel.tsx`: replaced the scattered `useState`/`useRef` write-state declarations and the inline `startOperation`/`cancelOperation` with the machine; the panel keeps only editor-text and dialog/UI state locally. Behavior preserved (all 20 console-v2-write integration tests still green).
 - `internal/admin/ui/src/test/config-mutation-machine.test.ts` (NEW): 7 reducer unit tests — generation bump/clear, stale-result drop, per-ID + per-generation terminal-merge gating, admin-confirmation scoping, poll budget, isolated draft/version transitions. Suite: 451 pass (was 444). Gates green: typecheck/lint/build.
 
-## Remaining work
+## Completed in session-8 (committed & green)
 
-### AC-15/AC-16 + closure (the only remaining work)
-Docs: `docs/reload-semantics.md`, `docs/specs/console-rbac.md`, ADRs (planned-restart linearization, timeout boundary), audit closure report `docs/audit/<date>-configuration-audit-closure.md` (per-finding: id, path, closure commit, summary, test names, workflow job, disposition, reviewer — do NOT write "closed" before the exact green SHA). Comment cleanup: buildRBACPolicy post-Publish rebuild claims, BOM/encoding in Console source. Then PR to main, ensure exact SHA runs all workflows, add `workflow_dispatch` trigger, independent security/concurrency + frontend reviewers, record run IDs, tag only after report signed.
+### AC-15/AC-16 — audit-closure report (commit recorded below)
+- `docs/audit/2026-07-25-configuration-audit-closure.md` (NEW): the AC-16 deliverable. A per-finding ledger (AC-01–AC-16) with id, area, disposition, the exact closure commit SHA(s), a one-line summary, and the evidence test files/names. AC-15 (docs: ADR-0013 reconcile at `cafca8e1`, reload-semantics + console-rbac specs current) and AC-16 (stale-comment cleanup at `49884e6c` + this report) are recorded Closed. The report states the closure rule explicitly — a finding is Closed only against the exact green SHA whose tree makes the fix true — and carries the non-blocking open decision (advisory finalization health row) plus a Sign-off table left `_pending_` for the two independent reviewers. `docs-check.py` green (1312 checks).
+
+## Remaining work — process-side release gate only (no code/docs)
+Open the PR to `main` from the branch carrying the closure report; ensure the EXACT SHA runs all CI workflows green; add a `workflow_dispatch` trigger; obtain the two independent sign-offs (security/concurrency + frontend, neither an author) and record the SHA + CI run IDs in the closure report's Sign-off table; tag ONLY after the report is signed against the exact green SHA.
 
 ## Standards (plan §15) — keep enforcing
 No result reconstructed independently by handler or Console; no global latest-state lookup where an operation ID exists; no callback error silently swallowed; no `context.Background()` in managed preparation work; no mutation of loader-returned objects; no success before stage marker+disk verified coherent; no history at provisional 202; no high-water check suppressing a legitimate audit event; no UI "serving" claim without correlated terminal proof; no "fixed" doc status before exact-head evidence; every concurrency fix needs a deterministic barrier-based test (not sleeps); every API contract change updates Go types + TS schemas + client + component + docs together.
@@ -120,4 +124,4 @@ ec9cea4d AC-03 hot-finalizer ordering
 c1a30ffd/cead4bc9 AC-01/AC-02
 ```
 
-All AC-01–AC-14 code findings are landed. Start next session with the AC-15/AC-16 closure pass (docs + audit-closure report + PR/CI/independent-reviewers/tag) — never mark a finding "closed" before its exact green SHA exists. Repository is clean & green at `c33e8647`.
+All findings AC-01–AC-16 are dispositioned and the closure report is written. Only the process-side release gate remains (PR + all-workflows-green on the exact SHA + two independent reviewer sign-offs recorded in the closure report + tag). Never mark a finding "closed" before its exact green SHA exists. Repository is clean & green at the session-8 HEAD.
