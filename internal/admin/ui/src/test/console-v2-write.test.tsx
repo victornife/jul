@@ -1006,6 +1006,84 @@ describe("HistoryPanel rollback flow", () => {
     );
     expect(recordReads).toBeGreaterThanOrEqual(2);
   });
+
+  it("closes the dialog and shows a persistent degraded banner without a retry action", async () => {
+    // AC-10: a committed-but-degraded rollback (terminal, result.ok=true, reload
+    // outcome != applied_live) is NOT a failure. The dialog — and its repeatable
+    // rollback action — must close, dependent views refresh, and a separate,
+    // persistent warning banner remain, never an error and never a retry button.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input.startsWith("/api/config/rollback")) {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_deg",
+              mode: "hot",
+              reload: {
+                id: "rl_deg",
+                outcome: "saved_not_live",
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      // AC-09/AC-10: poll the EXACT apply id; the terminal record commits with
+      // ok=true but a degraded (non-applied_live) reload outcome.
+      if (input === "/api/config/applies/rl_deg") {
+        recordReads += 1;
+        return Promise.resolve(
+          json({
+            id: "rl_deg",
+            state: "terminal",
+            operation: "config.rollback",
+            result: {
+              ok: true,
+              apply_id: "rl_deg",
+              mode: "hot",
+              reload: {
+                id: "rl_deg",
+                outcome: "applied_degraded",
+                error: "stream subsystem reloaded degraded",
+              },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+
+    // The committed-degraded terminal record closes the dialog and surfaces a
+    // persistent warning banner (not an error).
+    expect(await screen.findByText("Rollback applied — degraded reload")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Roll back to this snapshot?" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(recordReads).toBeGreaterThanOrEqual(1);
+    // The banner reports the degraded reload verbatim and offers no retry.
+    expect(screen.getByText(/stream subsystem reloaded degraded/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Roll back" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm and roll back" })).not.toBeInTheDocument();
+  });
 });
 
 describe("HistoryPanel empty state", () => {

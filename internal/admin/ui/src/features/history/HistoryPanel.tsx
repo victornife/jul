@@ -337,7 +337,8 @@ export function HistoryPanel() {
       setConfirmId(null);
       setTerminalError(null);
       setDegradedNotice(
-        "Rollback applied with a degraded reload. The snapshot is now the live configuration, but one or more subsystems reloaded degraded — review Runtime Overview.",
+        result.reload?.error ??
+          "Rollback applied with a degraded reload. The snapshot is now the live configuration, but one or more subsystems reloaded degraded — review Runtime Overview.",
       );
       void qc.invalidateQueries();
       return;
