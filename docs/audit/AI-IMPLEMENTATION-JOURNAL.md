@@ -1,4 +1,4 @@
-﻿# AI implementation journal
+# AI implementation journal
 
 > This is an execution log, not the final closure report. Never mark an audit item formally closed here.
 
@@ -90,6 +90,36 @@
 - Blocker-fix SHA: n/a
 - Accepted SHA: pending coordinator acceptance
 - Next execution file: WS01 Slice 01 (audit/ws01-managed-ledger)
+
+---
+
+### WS01_MANAGED_LEDGER / 01_BOOT_SCOPED_IDS_AND_REGISTRY_TYPES.md
+
+- Parent SHA: e707c41587a335cc92b643068b1c46053eff2621
+- Resulting SHA: recorded in this slice's completion report (the commit that includes this entry)
+- Branch: audit/ws01-managed-ledger
+- Agent role/context: implementation agent (Claude Opus 4.8, Act/Agent mode, highest reasoning); WS01 Slice 1
+- Files changed:
+  - internal/app/config_apply.go — boot-scoped apply IDs (rl_<boot-id>_<sequence>) on ConfigApplyCoordinator
+  - internal/admin/managed_apply_registry.go — structured ID parser, ManagedApplyFinalizing state, Deadline + OwnerTokenID fields, enriching BeginPending, ClaimFinalization, metadata-preserving Complete
+  - internal/app/serve.go — parseReloadSeq accepts boot-scoped + legacy IDs (trailing sequence)
+  - internal/app/managed_apply_id_test.go (new) — boot-scoped generation, monotonicity, per-process uniqueness, seq parsing
+  - internal/admin/managed_apply_registry_slice1_test.go (new) — ID validity/parse, finalizing lifecycle, enrichment, metadata preservation, non-serialization of OwnerTokenID
+- Production path verified: coordinator.nextID() (sole apply-ID source) → server.ReloadRequest.ID → terminal res.ApplyID → serve.go OnManagedApplyComplete → managedApplies.Complete + managedApplySeqGuard(parseReloadSeq). All production IDs now carry the boot-scoped prefix; registry accepts boot-scoped and legacy IDs; the sequence guard sequences on the trailing field.
+- Behavior implemented: boot-scoped monotonic apply IDs that prevent cross-restart reuse; legacy rl_<sequence> still accepted; registry gains an explicit finalizing claim state, an absolute Deadline for deadline-aware polling, and private non-serialized OwnerTokenID ownership metadata; BeginPending enriches an existing pending shell without downgrading finalizing/terminal; ClaimFinalization claims finalization exactly once; Complete accepts pending or finalizing and preserves private/lifecycle metadata.
+- Tests added: see Files changed (2 new focused test files); all existing managed-apply/seq-guard tests preserved unchanged.
+- Commands run: gofmt -w (clean); go build ./... (pass); go vet ./internal/admin/... ./internal/app/... (pass); go test -count=1 ./internal/admin/... ./internal/app/... ./internal/config/... (pass); git diff --check (clean, only benign LF→CRLF notices)
+- Commands unavailable: go test -race ./internal/admin/... and ./internal/app/... — UNVERIFIED: -race requires cgo and no C toolchain (gcc/clang) is installed in this environment (KNOWN_ENVIRONMENT_LIMITATION). Residual risk: data-race detection deferred to the CI race matrix; new registry logic reuses the existing mutex discipline and adds no new shared state outside the locked critical sections.
+- Deviations:
+  1. Requested parseCanonicalApplySequence bound `len(raw) > 20` → implemented `len(raw) > 19` → rationale: the repository's existing TestManagedApplyRegistry_InvalidIDs asserts a 20-digit sequence is invalid; keeping the 19-digit bound preserves that assertion instead of weakening it.
+  2. Requested a structured registry-side parser reused by the app-layer sequence guard → implemented the boot-scoped/legacy trailing-sequence parse inside serve.go's existing parseReloadSeq → rationale: parseManagedApplyID is unexported in package admin and importing it would cross package boundaries; the repository-native equivalent extracts the trailing underscore-delimited sequence, which is correct because all IDs in one process share one boot instance.
+  3. Retained BeginFinalization and the finalized map alongside the new ClaimFinalization → rationale: production (serve.go) still calls BeginFinalization; this slice introduces the finalizing state and claim API without rewiring that call site (scope minimization); the WS2 finalization-claim wiring is a later slice.
+- Self-review findings: single-purpose diff across 3 production files + 2 test files; no generated bundles, closure report, secrets, or bearer/token material touched; OwnerTokenID is json:"-" and a test proves it never serializes; no error swallowing; no unwired helper other than ClaimFinalization which is the deliberate WS2 seam introduced by this slice.
+- Independent review status: pending
+- Reviewer blockers: none
+- Blocker-fix SHA: n/a
+- Accepted SHA: pending coordinator acceptance
+- Next execution file: WS01 Slice 02 (audit/ws01-managed-ledger)
 
 ---
 

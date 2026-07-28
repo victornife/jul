@@ -5,7 +5,9 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -154,7 +156,13 @@ type ConfigApplyCoordinator struct {
 
 	mu      sync.Mutex
 	applyMu sync.Mutex
-	seq     atomic.Uint64
+
+	// applyIDOnce guards the one-time generation of applyInstanceID, the
+	// boot-scoped correlation prefix used by nextID. seq is the monotonically
+	// increasing per-process apply sequence.
+	applyIDOnce     sync.Once
+	applyInstanceID string
+	seq             atomic.Uint64
 
 	// inFlightState tracks whether a managed apply transaction is still
 	// outstanding. It is protected by applyMu for state transitions.
@@ -515,8 +523,38 @@ func (c *ConfigApplyCoordinator) refreshStateLocked() error {
 	return c.RefreshState()
 }
 
+// newManagedApplyInstanceID returns a 12-hex-character boot-scoped identifier
+// generated once per process. It is correlation metadata, not a cryptographic
+// secret; the fallback only runs if the OS CSPRNG is unavailable.
+func newManagedApplyInstanceID() string {
+	var raw [6]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return hex.EncodeToString(raw[:])
+	}
+
+	// Extremely defensive fallback. This identifier is correlation metadata,
+	// not a cryptographic secret.
+	fallback := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UTC().UnixNano())
+	sum := sha256.Sum256([]byte(fallback))
+	return hex.EncodeToString(sum[:6])
+}
+
+func (c *ConfigApplyCoordinator) managedApplyInstanceID() string {
+	c.applyIDOnce.Do(func() {
+		c.applyInstanceID = newManagedApplyInstanceID()
+	})
+	return c.applyInstanceID
+}
+
+// nextID allocates the next boot-scoped managed apply ID in the form
+// rl_<boot-id>_<sequence>. The boot-id prevents apply-ID reuse across process
+// restarts; the sequence is monotonically increasing within the process.
 func (c *ConfigApplyCoordinator) nextID() string {
-	return fmt.Sprintf("rl_%d", c.seq.Add(1))
+	return fmt.Sprintf(
+		"rl_%s_%d",
+		c.managedApplyInstanceID(),
+		c.seq.Add(1),
+	)
 }
 
 // PlannedRestartStatus returns the current managed planned-restart status as

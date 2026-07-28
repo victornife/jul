@@ -20,6 +20,13 @@ const (
 	// ManagedApplyPending marks a transaction that has been accepted but has
 	// not yet reached a terminal state. Pending records are never evicted.
 	ManagedApplyPending ManagedApplyState = "pending"
+	// ManagedApplyFinalizing marks a transaction whose single terminal callback
+	// has been claimed and whose terminal side effects (history, audit,
+	// metrics, ledger) are being applied. It is an explicit intermediate claim
+	// state between pending and terminal so a duplicate finalization callback
+	// is rejected without losing the pending record. Like pending records,
+	// finalizing records are never evicted.
+	ManagedApplyFinalizing ManagedApplyState = "finalizing"
 	// ManagedApplyTerminal marks a transaction that has reached exactly one
 	// terminal result. Terminal records are retained subject to the ledger's
 	// capacity and TTL bounds.
@@ -33,17 +40,26 @@ const (
 // digests, secret-expanded configuration, or public source IP: the struct is
 // serialized directly to the status:read result endpoint.
 type ManagedApplyRecord struct {
-	ID          string            `json:"id"`
-	State       ManagedApplyState `json:"state"`
-	Operation   ApplyOperation    `json:"operation"`
-	StartedAt   time.Time         `json:"started_at"`
-	CompletedAt time.Time         `json:"completed_at,omitempty"`
+	ID        string            `json:"id"`
+	State     ManagedApplyState `json:"state"`
+	Operation ApplyOperation    `json:"operation"`
+	StartedAt time.Time         `json:"started_at"`
+	// Deadline is the absolute transaction deadline for deadline-aware polling.
+	// It is optional: a zero value means no deadline was recorded.
+	Deadline    time.Time `json:"deadline,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitempty"`
 
 	Result ConfigApplyResult `json:"result"`
 
 	HistorySnapshotID string `json:"history_snapshot_id,omitempty"`
 	HistoryError      string `json:"history_error,omitempty"`
 	FinalizationError string `json:"finalization_error,omitempty"`
+
+	// OwnerTokenID is private ownership metadata used to authorize retrieval of
+	// a caller's own apply result. It is deliberately excluded from JSON
+	// serialization ("-") so it never leaks through the status:read result
+	// endpoint.
+	OwnerTokenID string `json:"-"`
 }
 
 // Ledger errors surfaced to callers.
@@ -103,30 +119,87 @@ func NewManagedApplyRegistry(maxTerminal int, ttl time.Duration) *ManagedApplyRe
 	}
 }
 
-// validManagedApplyID enforces the strict rl_N format before any lookup so an
-// attacker cannot traverse paths or create unbounded map entries.
-func validManagedApplyID(id string) bool {
-	const prefix = "rl_"
-	if !strings.HasPrefix(id, prefix) {
-		return false
+// managedApplyID is the structured decomposition of a managed apply ID. Instance
+// is the 12-hex boot-scoped prefix (empty for legacy IDs); Sequence is the
+// monotonic per-process counter; Legacy is true for the pre-boot-scoped
+// rl_<sequence> format retained for one compatibility release.
+type managedApplyID struct {
+	Instance string
+	Sequence uint64
+	Legacy   bool
+}
+
+// parseManagedApplyID parses either the boot-scoped rl_<instance>_<sequence>
+// format or the legacy rl_<sequence> format. It enforces a strict grammar
+// before any lookup so an attacker cannot traverse paths or create unbounded
+// map entries.
+func parseManagedApplyID(id string) (managedApplyID, error) {
+	if !strings.HasPrefix(id, "rl_") {
+		return managedApplyID{}, ErrManagedApplyInvalidID
 	}
-	n := id[len(prefix):]
-	if n == "" || len(n) > 19 { // bound the numeric portion
-		return false
+
+	rest := strings.TrimPrefix(id, "rl_")
+	parts := strings.Split(rest, "_")
+
+	switch len(parts) {
+	case 1:
+		seq, err := parseCanonicalApplySequence(parts[0])
+		if err != nil {
+			return managedApplyID{}, err
+		}
+		return managedApplyID{Sequence: seq, Legacy: true}, nil
+
+	case 2:
+		instance := parts[0]
+		if len(instance) != 12 {
+			return managedApplyID{}, ErrManagedApplyInvalidID
+		}
+		for _, r := range instance {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+				return managedApplyID{}, ErrManagedApplyInvalidID
+			}
+		}
+		seq, err := parseCanonicalApplySequence(parts[1])
+		if err != nil {
+			return managedApplyID{}, err
+		}
+		return managedApplyID{Instance: instance, Sequence: seq}, nil
+
+	default:
+		return managedApplyID{}, ErrManagedApplyInvalidID
 	}
-	for i := 0; i < len(n); i++ {
-		if n[i] < '0' || n[i] > '9' {
-			return false
+}
+
+// parseCanonicalApplySequence parses the canonical decimal sequence portion of
+// a managed apply ID. It rejects empty input, over-long input, leading zeros
+// (beyond a single "0"), and non-digit characters so IDs stay canonical and
+// bounded. The 19-character bound matches the repository's existing invariant
+// that a 20-digit sequence is invalid.
+func parseCanonicalApplySequence(raw string) (uint64, error) {
+	if raw == "" || len(raw) > 19 {
+		return 0, ErrManagedApplyInvalidID
+	}
+	if len(raw) > 1 && raw[0] == '0' {
+		return 0, ErrManagedApplyInvalidID
+	}
+	for _, r := range raw {
+		if r < '0' || r > '9' {
+			return 0, ErrManagedApplyInvalidID
 		}
 	}
-	// Reject leading zeros beyond a single "0" to keep IDs canonical.
-	if len(n) > 1 && n[0] == '0' {
-		return false
+	seq, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, ErrManagedApplyInvalidID
 	}
-	if _, err := strconv.ParseUint(n, 10, 64); err != nil {
-		return false
-	}
-	return true
+	return seq, nil
+}
+
+// validManagedApplyID reports whether id is a well-formed managed apply ID in
+// either the boot-scoped or legacy format before any lookup so an attacker
+// cannot traverse paths or create unbounded map entries.
+func validManagedApplyID(id string) bool {
+	_, err := parseManagedApplyID(id)
+	return err == nil
 }
 
 // BeginPending records a new pending transaction. It is idempotent for the same
@@ -140,10 +213,36 @@ func (r *ManagedApplyRegistry) BeginPending(rec ManagedApplyRecord) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if existing, ok := r.byID[rec.ID]; ok {
-		if existing.Operation != rec.Operation {
+		if existing.Operation != "" &&
+			rec.Operation != "" &&
+			existing.Operation != rec.Operation {
 			return ErrManagedApplyIDMismatch
 		}
-		return nil // idempotent
+
+		// Never downgrade a finalizing or terminal record back to pending.
+		if existing.State != ManagedApplyPending {
+			return nil
+		}
+
+		// Idempotent enrichment: a repeated pending call fills in any fields
+		// the first (possibly empty) call left blank rather than silently
+		// retaining an empty shell.
+		if existing.Operation == "" {
+			existing.Operation = rec.Operation
+		}
+		if existing.StartedAt.IsZero() {
+			existing.StartedAt = rec.StartedAt
+		}
+		if existing.Deadline.IsZero() {
+			existing.Deadline = rec.Deadline
+		}
+		if existing.OwnerTokenID == "" {
+			existing.OwnerTokenID = rec.OwnerTokenID
+		}
+		if rec.Result.ApplyID != "" {
+			existing.Result = rec.Result
+		}
+		return nil
 	}
 	rec.State = ManagedApplyPending
 	if rec.StartedAt.IsZero() {
@@ -154,6 +253,58 @@ func (r *ManagedApplyRegistry) BeginPending(rec ManagedApplyRecord) error {
 	// Pending records are not placed in the terminal eviction order; they are
 	// promoted into it on Complete.
 	return nil
+}
+
+// ClaimFinalization claims the single terminal finalization for a record and
+// transitions it to the explicit finalizing state (WS2 finalization claim). It
+// returns (true, nil) for the first caller, (false, nil) for a record already
+// finalizing or terminal, and a typed error for an invalid ID or an operation
+// mismatch. Unlike BeginFinalization it operates on the same record object so
+// the pending record is enriched rather than shadowed by a separate claim set.
+func (r *ManagedApplyRegistry) ClaimFinalization(rec ManagedApplyRecord) (bool, error) {
+	if !validManagedApplyID(rec.ID) {
+		return false, ErrManagedApplyInvalidID
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	existing, ok := r.byID[rec.ID]
+	if ok {
+		if existing.Operation != "" &&
+			rec.Operation != "" &&
+			existing.Operation != rec.Operation {
+			return false, ErrManagedApplyIDMismatch
+		}
+
+		switch existing.State {
+		case ManagedApplyFinalizing, ManagedApplyTerminal:
+			return false, nil
+		}
+
+		existing.State = ManagedApplyFinalizing
+		if existing.Operation == "" {
+			existing.Operation = rec.Operation
+		}
+		if existing.StartedAt.IsZero() {
+			existing.StartedAt = rec.StartedAt
+		}
+		if existing.Deadline.IsZero() {
+			existing.Deadline = rec.Deadline
+		}
+		if existing.OwnerTokenID == "" {
+			existing.OwnerTokenID = rec.OwnerTokenID
+		}
+		return true, nil
+	}
+
+	rec.State = ManagedApplyFinalizing
+	if rec.StartedAt.IsZero() {
+		rec.StartedAt = time.Now().UTC()
+	}
+	cp := rec
+	r.byID[rec.ID] = &cp
+	return true, nil
 }
 
 // BeginFinalization claims the single terminal callback for an ID. It returns
@@ -188,8 +339,19 @@ func (r *ManagedApplyRegistry) Complete(rec ManagedApplyRecord) error {
 		rec.CompletedAt = time.Now().UTC()
 	}
 	existing, ok := r.byID[rec.ID]
-	if ok && rec.StartedAt.IsZero() {
-		rec.StartedAt = existing.StartedAt
+	if ok {
+		// Complete accepts a pending or finalizing record and transitions it to
+		// terminal in place, preserving private/lifecycle metadata the terminal
+		// caller may not carry (ownership, start/deadline).
+		if rec.StartedAt.IsZero() {
+			rec.StartedAt = existing.StartedAt
+		}
+		if rec.Deadline.IsZero() {
+			rec.Deadline = existing.Deadline
+		}
+		if rec.OwnerTokenID == "" {
+			rec.OwnerTokenID = existing.OwnerTokenID
+		}
 	}
 	cp := rec
 	r.byID[rec.ID] = &cp
