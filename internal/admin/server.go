@@ -490,11 +490,21 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 	}
 	s.httpd = &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           s.routes(),
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	s.installAuth(cfg, nil)
 	return s
+}
+
+// Handler returns the fully-wired admin HTTP handler: the route mux with the
+// single authentication/authorization chokepoint applied. It is the exact
+// handler installed on the listener by New (and served by Run), exposed so the
+// composition root and cross-package integration tests can exercise the real
+// route stack — including route authorization — without reconstructing it or
+// bypassing the auth chokepoint.
+func (s *Server) Handler() http.Handler {
+	return s.routes()
 }
 
 // Run starts the admin listener and shuts it down when ctx is cancelled.
