@@ -123,6 +123,37 @@
 
 ---
 
+### WS01_MANAGED_LEDGER / 02_PENDING_PRODUCTION_WIRING.md
+
+- Parent SHA: cf7bd0211d52e0acaede2cea2d593499ebc56263
+- Resulting SHA: recorded in this slice's completion report (the commit that includes this entry)
+- Branch: audit/ws01-managed-ledger
+- Agent role/context: implementation agent (Claude Opus 4.8, Act/Agent mode, highest reasoning); WS01 Slice 2
+- Files changed:
+  - internal/admin/server.go — new ManagedApplyStart{Context, Result} carrier type for the pending-registration signal
+  - internal/app/config_apply.go — OnManagedApplyStarted hook on ConfigApplyCoordinator; notifyManagedApplyStarted helper; applyCandidate registers the exact-ID pending record after persist+enqueue and before the synchronous 202; notifyManagedApplyComplete now threads a finalizationErr into ManagedApplyFinalization.FinalizationError; the two complete call sites updated
+  - internal/app/serve.go — wired coordinator.OnManagedApplyStarted = managedApplies.BeginPending(...) inside the coordinator!=nil block (before admin.New copies deps and starts the listener); added errors import
+  - internal/admin/api_managed_apply.go — publicManagedApplyRecord gains Deadline (json:"deadline,omitempty") and toPublic() projects rec.Deadline
+  - internal/admin/ui/src/api/client.ts — ManagedApplyRecordSchema gains deadline: z.string().optional()
+  - internal/admin/assets/dist/** — regenerated Console bundle (index + lazy CodeEditor chunk rehash) via `pnpm run build`; never hand-edited
+  - internal/app/config_apply_pending_test.go (new) — production-wired pending-registration evidence
+- Production path verified: HTTP apply → deps.ApplyConfigRaw/ApplyConfig → coordinator.ApplyRaw → applyCandidate persists candidate (atomicfile.Write) → SubmitReload enqueues the correlated reload → notifyManagedApplyStarted projects the provisional saved_not_live result (provisionalResult) → serve.go's OnManagedApplyStarted resolves the ApplyID (Result.ApplyID, falling back to Result.Reload.ID) and calls managedApplies.BeginPending, so the exact-ID pending record exists BEFORE the synchronous wait can hand a 202 back to the caller. Terminal finalizer → notifyManagedApplyComplete(...finalizationErr) → serve.go OnManagedApplyComplete → managedApplies.Complete updates the same record in place. GET /api/config/applies/{id} → publicManagedApplyRecord.toPublic() now surfaces Deadline; the Console client schema accepts it.
+- Behavior implemented: a real 202 saved_not_live is always preceded by an exact-ID pending ledger record (closes the 202→404 window that stalls ConfigPanel); the record carries Operation, StartedAt, absolute Deadline (deadline-aware polling), the provisional Result, and private OwnerTokenID; a post-persistence pending-registration failure never rolls back the accepted apply nor reports the apply as failed — it is carried into ManagedApplyFinalization.FinalizationError and surfaced through the ledger/overview; the public API and the TypeScript schema expose deadline.
+- Tests added: internal/app/config_apply_pending_test.go — TestApplyRegistersPendingRecordBeforeSavedNotLive (package integration: drives the real coordinator through the saved_not_live path with the production BeginPending/Complete wiring; asserts the exact-ID pending record exists at 202 with correct operation/deadline/owner/result, that the terminal finalizer transitions the SAME record pending→terminal preserving owner/deadline, and that a later unrelated transaction never evicts it), TestApplyStartedErrorSurfacesInFinalization (failure injection: a failing OnManagedApplyStarted does not roll back the persisted candidate nor fail the live apply, and its wrapped error surfaces in ManagedApplyFinalization.FinalizationError). No existing test weakened.
+- Commands run: gofmt -w on the two changed files (clean; remaining gofmt -l output is the repository-wide benign LF/CRLF condition, not these edits); go build ./... (pass); go vet ./internal/admin/... ./internal/app/... (pass); go test -count=1 ./internal/admin/... ./internal/app/... ./internal/config/... (pass); pnpm --dir internal/admin/ui run typecheck (pass); run lint (pass); run test (37 files, 451 tests pass); pnpm --dir internal/admin/ui run build (deterministic bundle; asset-drift gate reflects only the schema change); git diff --check (clean, only benign LF→CRLF notices)
+- Commands unavailable: go test -race ./internal/admin/... and ./internal/app/... — UNVERIFIED: -race requires cgo and no C toolchain (gcc/clang) is installed in this environment (KNOWN_ENVIRONMENT_LIMITATION). Residual risk: data-race detection deferred to the CI race matrix; the new hook reuses the existing coordinator locking discipline (registration runs after c.mu is released, exactly like the pre-existing enqueue-failure completion path) and the registry's own mutex, adding no new shared state outside locked critical sections.
+- Deviations:
+  1. Requested `OnManagedApplyStarted func(admin.ManagedApplyStart) error` on ConfigApplyCoordinator plus a helper that projects ApplyResult via toAdminConfigApplyResult → implemented exactly, with the helper named notifyManagedApplyStarted mirroring the existing notifyManagedApplyComplete → rationale: matches the repository-native callback/notify pairing already present on the coordinator.
+  2. Requested "the finalizer closure must capture trackingErr and append it to ManagedApplyFinalization.FinalizationError" → implemented by adding a finalizationErr parameter to notifyManagedApplyComplete and threading it into the existing admin.ManagedApplyFinalization{...} construction (the enqueue-failure call site passes "") → rationale: the coordinator builds ManagedApplyFinalization in exactly one place; parameterizing that single constructor avoids duplicating the finalization struct and keeps FinalizationError authoritative, and serve.go already forwards fin.FinalizationError onto both the runtime-overview outcome and the durable ledger record.
+- Self-review findings: single-purpose diff — one new carrier type, one coordinator hook + helper, one registration call site, one composition-root wiring, one public-API field + its TS mirror, one regenerated bundle, one new focused test file. No unwired helpers (notifyManagedApplyStarted is called by applyCandidate; OnManagedApplyStarted is wired in serve.go). No error swallowing: the registration error is wrapped and carried to FinalizationError, never dropped; the accepted apply is never rolled back for a tracking failure (decision hierarchy: preserve the currently serving runtime / report exact truth after persistence). No secrets, bearer/token material, or raw TOML added; OwnerTokenID remains json:"-" and Deadline is low-cardinality metadata. The Console bundle was regenerated by `pnpm run build`, not hand-edited. The final audit-closure report was not touched.
+- Independent review status: pending
+- Reviewer blockers: none
+- Blocker-fix SHA: n/a
+- Accepted SHA: pending coordinator acceptance
+- Next execution file: WS01 Slice 03 (audit/ws01-managed-ledger)
+
+---
+
 ## Program-level open items
 
 - Exact-head CI pending: yes - exact-head CI not yet run against the bootstrap commit

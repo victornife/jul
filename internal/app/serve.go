@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -595,6 +596,34 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// The WriteManagedHistory hook is wired after adminSrv exists (below);
 		// this flag must be set before admin.New copies deps.
 		deps.ManagedHistoryActive = true
+
+		// AC-02: register the exact-ID pending ledger record the moment a
+		// managed apply persists its candidate and enqueues the reload, BEFORE
+		// the synchronous HTTP path can return a 202 saved_not_live. This closes
+		// the window where a real 202 could be immediately followed by a spurious
+		// 404 that stalls the ConfigPanel poll. Wired here — before admin.New
+		// copies deps and starts the listener — so the ledger already accepts
+		// pending writes by the time the admin server can receive apply requests.
+		coordinator.OnManagedApplyStarted = func(start admin.ManagedApplyStart) error {
+			applyID := start.Result.ApplyID
+			if applyID == "" && start.Result.Reload != nil {
+				applyID = start.Result.Reload.ID
+			}
+
+			if applyID == "" {
+				return errors.New("managed apply start has no apply id")
+			}
+
+			return managedApplies.BeginPending(admin.ManagedApplyRecord{
+				ID:           applyID,
+				State:        admin.ManagedApplyPending,
+				Operation:    start.Context.Operation,
+				StartedAt:    start.Context.StartedAt,
+				Deadline:     start.Context.Deadline,
+				Result:       start.Result,
+				OwnerTokenID: start.Context.TokenID,
+			})
+		}
 	}
 
 	// Build admin server before srv.Run so it is running when the first

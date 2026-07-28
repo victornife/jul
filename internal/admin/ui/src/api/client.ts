@@ -1566,6 +1566,9 @@ export const ManagedApplyRecordSchema = z.object({
   // console only surfaces, never branches on for correctness.
   operation: z.string().optional(),
   started_at: z.string().optional(),
+  // deadline is the absolute transaction deadline projected for deadline-aware
+  // polling (AC-08); omitted when the server recorded no bounded deadline.
+  deadline: z.string().optional(),
   completed_at: z.string().optional(),
   result: ApplyResultSchema,
   // AC-14 finalization provenance: advisory, never readiness-affecting.

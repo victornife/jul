@@ -130,6 +130,18 @@ type ConfigApplyCoordinator struct {
 	// inconsistent (fail-closed).
 	RefreshState func() error
 
+	// OnManagedApplyStarted is called once the candidate has been persisted and
+	// the correlated live reload has been enqueued, but BEFORE the synchronous
+	// HTTP path can return a 202 saved_not_live to the caller. The composition
+	// root registers an exact-ID pending record in the terminal ledger so a real
+	// 202 is never immediately followed by a 404 (AC-02). A non-nil error is a
+	// transaction-tracking failure after persistence: the apply itself is not
+	// rolled back and the already-accepted reload is not aborted; instead the
+	// error is carried into terminal finalization and surfaced through
+	// logs/health/ledger. Nil disables pending registration so context-free and
+	// unit-test callers behave exactly as before.
+	OnManagedApplyStarted func(admin.ManagedApplyStart) error
+
 	// OnManagedApplyComplete is called by the async finalizer after the
 	// managed apply has reached a terminal state (including any restoration).
 	// It receives the original request context so the terminal audit event can
@@ -985,11 +997,29 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// recovery snapshot; a clean restoration records nothing. Recorded
 		// before the completion callback and outside c.mu.
 		terminal = c.recordManagedHistory(reqCtx, terminal, baseline.Raw)
-		c.notifyManagedApplyComplete(reqCtx, terminal)
+		c.notifyManagedApplyComplete(reqCtx, terminal, "")
 		return terminal, err
 	}
 	preparedOwned = false // the server reload plan now owns commit/abort
 	c.mu.Unlock()
+
+	// AC-02: register the exact-ID pending ledger record now that the candidate
+	// is persisted and the reload is enqueued, but BEFORE the synchronous path
+	// below can hand a 202 saved_not_live back to the HTTP caller. Registering
+	// the pending record first closes the window where a real 202 could be
+	// immediately followed by a spurious 404 that stalls the ConfigPanel poll.
+	pending := c.provisionalResult(
+		id, mode, persistedVersion, desiredVersion, transactionStarted, false,
+		"Configuration saved; live reload is in flight.",
+	)
+	var trackingErr error
+	if err := c.notifyManagedApplyStarted(reqCtx, pending); err != nil {
+		// This is a transaction-tracking failure after persistence. Do not
+		// pretend the apply itself failed or roll back a reload already accepted
+		// by the runtime. Carry the error into terminal finalization and make it
+		// visible through logs/health/ledger.
+		trackingErr = fmt.Errorf("register managed apply pending record: %w", err)
+	}
 
 	// Finalizer goroutine: sole owner of the reload result and restoration. It
 	// creates exactly one terminal ApplyResult after disk state is final, then
@@ -1024,7 +1054,14 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// restoration also failed) and enriched onto the terminal result. The
 		// filesystem write runs outside c.mu.
 		terminal = c.recordManagedHistory(reqCtx, terminal, baseline.Raw)
-		c.notifyManagedApplyComplete(reqCtx, terminal)
+		// Carry any post-persistence pending-registration failure into the
+		// terminal finalization provenance so it is surfaced through the
+		// ledger/overview rather than silently dropped.
+		finalizationErr := ""
+		if trackingErr != nil {
+			finalizationErr = trackingErr.Error()
+		}
+		c.notifyManagedApplyComplete(reqCtx, terminal, finalizationErr)
 		c.mu.Lock()
 		c.inFlightState = ApplyInFlightNone
 		c.mu.Unlock()
@@ -1081,7 +1118,25 @@ func (c *ConfigApplyCoordinator) provisionalResult(id string, mode ApplyMode, pe
 	}
 }
 
-func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(reqCtx admin.ApplyRequestContext, result ApplyResult) {
+// notifyManagedApplyStarted registers the provisional pending record for a
+// managed apply the moment the candidate is persisted and the reload is
+// enqueued (AC-02). It projects the provisional saved_not_live result into the
+// admin shape so the composition root can insert an exact-ID pending ledger
+// record before the synchronous HTTP path can return a 202. A nil hook is a
+// no-op so context-free and unit-test callers are unaffected. A non-nil error
+// is a transaction-tracking failure after persistence; the caller carries it
+// into terminal finalization rather than rolling back an accepted reload.
+func (c *ConfigApplyCoordinator) notifyManagedApplyStarted(reqCtx admin.ApplyRequestContext, result ApplyResult) error {
+	if c.OnManagedApplyStarted == nil {
+		return nil
+	}
+	return c.OnManagedApplyStarted(admin.ManagedApplyStart{
+		Context: reqCtx,
+		Result:  toAdminConfigApplyResult(result),
+	})
+}
+
+func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(reqCtx admin.ApplyRequestContext, result ApplyResult, finalizationErr string) {
 	if c.OnManagedApplyComplete == nil {
 		return
 	}
@@ -1091,10 +1146,13 @@ func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(reqCtx admin.ApplyRe
 	// invariant never carries HistorySnapshotID/HistoryError. The composition
 	// root routes this into the durable ledger record and the runtime-overview
 	// outcome so the Console can render a finalization surface independent of
-	// the reload outcome.
+	// the reload outcome. finalizationErr carries any post-persistence
+	// transaction-tracking failure (e.g. pending-record registration) so it is
+	// surfaced through the ledger/overview rather than silently dropped.
 	c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(result), admin.ManagedApplyFinalization{
 		HistorySnapshotID: result.HistorySnapshotID,
 		HistoryError:      result.HistoryError,
+		FinalizationError: finalizationErr,
 	})
 }
 

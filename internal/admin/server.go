@@ -181,6 +181,21 @@ type ManagedApplyFinalization struct {
 	FinalizationError string
 }
 
+// ManagedApplyStart is the provisional pending-registration signal for a
+// managed configuration apply (AC-02). The composition root turns it into a
+// pending terminal-ledger record the moment the candidate is persisted and the
+// live reload is enqueued, but before the HTTP caller can observe a 202
+// saved_not_live. Registering the pending record first closes the window where
+// a real 202 saved_not_live could be immediately followed by a spurious 404,
+// which stalls the ConfigPanel on its first failed poll. The Result carries the
+// provisional pending projection (ApplyID + saved_not_live reload) and the
+// Context carries the authenticated caller, operation, start time, deadline,
+// and owner token used to enrich and authorize the pending record.
+type ManagedApplyStart struct {
+	Context ApplyRequestContext
+	Result  ConfigApplyResult
+}
+
 // Deps wires the admin server to runtime components owned by the composition
 // root. All fields are optional; endpoints degrade gracefully when a
 // dependency is nil.

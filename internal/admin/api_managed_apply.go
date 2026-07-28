@@ -13,11 +13,14 @@ import (
 // API (AC-02). The Result is the same structured ConfigApplyResult the console
 // consumes; it already omits secrets and token digests.
 type publicManagedApplyRecord struct {
-	ID          string            `json:"id"`
-	State       ManagedApplyState `json:"state"`
-	Operation   ApplyOperation    `json:"operation"`
-	StartedAt   time.Time         `json:"started_at"`
-	CompletedAt time.Time         `json:"completed_at,omitempty"`
+	ID        string            `json:"id"`
+	State     ManagedApplyState `json:"state"`
+	Operation ApplyOperation    `json:"operation"`
+	StartedAt time.Time         `json:"started_at"`
+	// Deadline is the absolute transaction deadline projected for deadline-aware
+	// polling (AC-08). It is omitted when zero (no bounded deadline recorded).
+	Deadline    time.Time `json:"deadline,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitempty"`
 
 	Result ConfigApplyResult `json:"result"`
 
@@ -36,6 +39,7 @@ func (rec ManagedApplyRecord) toPublic() publicManagedApplyRecord {
 		State:             rec.State,
 		Operation:         rec.Operation,
 		StartedAt:         rec.StartedAt,
+		Deadline:          rec.Deadline,
 		CompletedAt:       rec.CompletedAt,
 		Result:            rec.Result,
 		HistorySnapshotID: rec.HistorySnapshotID,
