@@ -154,6 +154,36 @@
 
 ---
 
+### WS01_MANAGED_LEDGER / 03_LOOKUP_API_AND_AUTHORIZATION.md
+
+- Parent SHA: 039bd0ee0e6573bcdb757ed45c561a0de3d8e0e9
+- Resulting SHA: recorded in this slice's completion report (the commit that includes this entry)
+- Branch: audit/ws01-managed-ledger
+- Agent role/context: implementation agent (Claude Opus 4.8, Act/Agent mode, highest reasoning); WS01 Slice 3
+- Files changed:
+  - internal/admin/route_catalog.go — RouteSpec gains AnyPermissions []rbac.Permission (logical-OR authorization); the /api/config/applies/{id} entry migrated from Permission: rbac.StatusRead to AnyPermissions: {rbac.StatusRead, rbac.ConfigApply} with an updated explanatory comment
+  - internal/admin/routes.go — routes() dispatcher converted to a switch; new case `len(spec.AnyPermissions) > 0 → s.requireAnyPermission(...)` inserted before the Permissions and single-Permission cases (Public still first)
+  - internal/admin/rbac.go — new requireAnyPermission middleware (authenticate once, authorize by looping over the accepted permissions) mirroring requirePermission's snapshot-mode dispatch (Blocked→503, RBAC→authn+authz-any, Legacy/Open→token/identity); new writeForbiddenAny 403 helper that lists the accepted permissions under required_any without leaking other principals/tokens
+  - internal/admin/route_catalog_test.go — TestCatalogNoRouteDefaultsToPublic and TestCatalogPermissionsInCatalog extended to recognize AnyPermissions; new TestCatalogExactlyOneAuthorizationMode guard proving exactly one of Public/Permission/Permissions/AnyPermissions is set per route
+  - internal/admin/api_managed_apply_test.go (extended) — RBAC HTTP-integration evidence for the AnyPermissions endpoint
+- Production path verified: HTTP GET /api/config/applies/{id} → s.routes() builds the mux from Catalog → the entry's AnyPermissions selects s.requireAnyPermission([]{StatusRead, ConfigApply}, handleManagedApplyGet) → the middleware loads the single immutable authSnapshot and dispatches on mode: RBAC authenticates the bearer once via snap.policy.Authenticate, then authorizes by iterating the accepted permissions with snap.policy.Authorize (first match serves the handler with the identity in context); Legacy/Open reuse checkLegacyToken + legacyIdentity exactly as requirePermission; Blocked fails closed with 503. On no match the request receives the structured writeForbiddenAny 403. handleManagedApplyGet is unchanged and still emits the secret-free public projection (no actor/source IP/token digest) with Cache-Control: no-store.
+- Behavior implemented: a principal permitted to APPLY configuration (config:apply) can now retrieve the secret-free result of its own class of operation at /api/config/applies/{id} even without status:read, because a more-privileged mutate capability implies the less-privileged read (AC-02, §2.8 Step 5). status:read continues to authorize the same endpoint. Authentication still happens exactly once; only the authorization decision is OR-combined. A principal holding neither permission receives a structured 403 listing the accepted permissions under required_any; the endpoint still never exposes raw config, actor, source IP, or token digest.
+- Tests added: internal/admin/api_managed_apply_test.go — TestManagedApplyGet_AnyPermissionAuthorizes (HTTP integration through the full routes() stack under a real rbac.Policy with four principals: viewer=status:read→200, automation=custom config:apply-only role→200, metrics-only=unrelated permission→403, no token→401) and TestManagedApplyGet_ForbiddenBodyListsAcceptedPermissions (HTTP integration: asserts the 403 body error=forbidden and required_any = {status:read, config:apply} and leaks no token_digest/token_id/principals); internal/admin/route_catalog_test.go — TestCatalogExactlyOneAuthorizationMode (unit guard). No existing test weakened; the two extended catalog guards became strictly more permissive only for the new AnyPermissions mode.
+- Commands run: gofmt -w on the five changed files (clean); go build ./... (pass); go vet ./internal/admin/... ./internal/app/... (pass); go test -count=1 ./internal/admin/... ./internal/app/... ./internal/config/... (pass); git diff --check (clean, only benign LF→CRLF notices)
+- Commands unavailable: go test -race ./internal/admin/... and ./internal/app/... — UNVERIFIED: -race requires cgo and no C toolchain (gcc/clang) is installed in this environment (KNOWN_ENVIRONMENT_LIMITATION). Residual risk: data-race detection deferred to the CI race matrix; requireAnyPermission introduces no new shared mutable state — it reads the same atomically-loaded authSnapshot as requirePermission and only iterates a read-only permission slice.
+- Console commands: none required — this slice is backend route authorization only (§2.8 Step 5). No internal/admin/ui source changed, so no typecheck/lint/test/build or asset-drift gate was needed; internal/admin/assets/dist was not touched.
+- Deviations:
+  1. Requested a single `snap.policy.Authenticate(r.Header.Get("Authorization"), now)` skeleton with a generic err→401 branch → implemented the repository-native two-branch authentication used by requirePermission, distinguishing rbac.ErrDisabled (structured "principal is disabled or expired" 401) from other errors → rationale: preserves the existing disabled/expired contract and keeps requireAnyPermission behaviourally identical to requirePermission except for the OR-authorization loop (decision hierarchy: prevent security weakening; reuse repository-native abstractions).
+  2. Skeleton showed the legacy branch as the switch default with no explicit Open handling → implemented the same `default: // authModeLegacy, authModeOpen` fallthrough requirePermission already uses, where checkLegacyToken returns true for an empty token (Open) → rationale: reuses the exact existing behaviour so Legacy and Open modes are handled identically to every other admin route.
+- Self-review findings: single-purpose diff across 3 production files + 2 test files, all under internal/admin. No unwired helpers — requireAnyPermission is reached via the routes() dispatcher and the /api/config/applies/{id} catalog entry; writeForbiddenAny is called only by requireAnyPermission. No error swallowing (authn errors return 401; unauthorized returns the structured 403). No secret/actor/source-IP/token-digest exposure (handler unchanged; the 403 body reports only the accepted permissions and the caller's own role). No generated bundle, closure report, or authentication/history/transaction truthfulness weakened — the change strictly widens which principals may READ an already-secret-free projection and never relaxes authentication or any mutating route.
+- Independent review status: pending
+- Reviewer blockers: none
+- Blocker-fix SHA: n/a
+- Accepted SHA: pending coordinator acceptance
+- Next execution file: WS02 (or the next coordinator-assigned slice)
+
+---
+
 ## Program-level open items
 
 - Exact-head CI pending: yes - exact-head CI not yet run against the bootstrap commit

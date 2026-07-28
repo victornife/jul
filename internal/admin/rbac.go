@@ -284,6 +284,67 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 	})
 }
 
+// requireAnyPermission is the canonical authn+authz middleware for routes that
+// grant access when the authenticated principal holds ANY one of several
+// permissions (logical OR). Authentication happens exactly once; only the
+// authorization decision loops over the allowed permissions. This lets a
+// more-privileged capability (e.g. config:apply) satisfy a route that also
+// accepts a less-privileged read (e.g. status:read) without granting the
+// second permission to the principal (AC-02).
+//
+// It dispatches on the same immutable snapshot mode as requirePermission:
+//
+//   - Blocked → 503 (fail closed; never falls through to legacy/open).
+//   - RBAC    → authenticate once, then authorize against each candidate.
+//   - Legacy  → constant-time shared-token compare, wildcard identity.
+//   - Open    → allow, wildcard identity.
+func (s *Server) requireAnyPermission(perms []rbac.Permission, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		snap := s.currentAuth()
+		now := time.Now()
+
+		switch snap.mode {
+		case authModeBlocked:
+			writeRBACUnavailable(w)
+			return
+
+		case authModeRBAC:
+			bearer := r.Header.Get("Authorization")
+			authID, err := snap.policy.Authenticate(bearer, now)
+			if err == rbac.ErrDisabled {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				writeJSON(w, http.StatusUnauthorized, map[string]string{
+					"error":   "unauthorized",
+					"message": "principal is disabled or expired",
+				})
+				return
+			}
+			if err != nil {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			for _, perm := range perms {
+				if snap.policy.Authorize(authID, perm) {
+					next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), authID)))
+					return
+				}
+			}
+			writeForbiddenAny(w, perms, authID)
+			return
+
+		default: // authModeLegacy, authModeOpen
+			if !checkLegacyToken(r, snap.cfg.Token) {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))
+			return
+		}
+	})
+}
+
 // authWithRBAC provides the same authn stack without a specific permission
 // requirement (used by auth()). It dispatches on the same single snapshot mode.
 func (s *Server) authWithRBAC(next http.Handler) http.Handler {
@@ -339,6 +400,28 @@ func writeForbidden(w http.ResponseWriter, required rbac.Permission, id rbac.Ide
 		"required":  string(required),
 		"principal": id.Principal,
 		"role":      id.Role,
+	}
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+// writeForbiddenAny writes a structured 403 JSON response for routes that
+// accept any one of several permissions. Like writeForbidden it reveals only
+// the required permissions and the authenticated principal's role, never
+// whether another principal/token exists. The accepted permissions are listed
+// under "required_any" so the caller can see which capability would grant
+// access.
+func writeForbiddenAny(w http.ResponseWriter, accepted []rbac.Permission, id rbac.Identity) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	acceptedStrings := make([]string, 0, len(accepted))
+	for _, p := range accepted {
+		acceptedStrings = append(acceptedStrings, string(p))
+	}
+	body := map[string]any{
+		"error":        "forbidden",
+		"required_any": acceptedStrings,
+		"principal":    id.Principal,
+		"role":         id.Role,
 	}
 	_ = json.NewEncoder(w).Encode(body)
 }

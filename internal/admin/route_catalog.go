@@ -22,12 +22,21 @@ type RouteSpec struct {
 	// invoke it. A nil map is treated as a single Permission applied to every
 	// method, preserving compatibility while the catalog is migrated.
 	//
-	// Exactly one of Permissions or Public must be set, and every method in
-	// Methods must have a corresponding entry in Permissions.
+	// Exactly one of Permission, Permissions, AnyPermissions, or Public must be
+	// set, and every method in Methods must have a corresponding entry in
+	// Permissions.
 	Permissions map[string]rbac.Permission
 	// Permission is the legacy single permission applied to all Methods when
 	// Permissions is nil. New entries should use Permissions.
 	Permission rbac.Permission
+	// AnyPermissions grants access to the route when the authenticated
+	// principal holds ANY one of the listed permissions (logical OR). It is
+	// used where a more-privileged capability implies a less-privileged read:
+	// e.g. a principal that can apply configuration may retrieve the
+	// secret-free result of its own class of operation without also being
+	// granted status:read (AC-02). Authentication still happens exactly once;
+	// only authorization loops over the allowed permissions.
+	AnyPermissions []rbac.Permission
 	// Public, when true, skips authentication entirely. Only use this for
 	// truly public endpoints (health, readiness, and console static shell).
 	Public bool
@@ -201,13 +210,20 @@ var Catalog = []RouteSpec{
 	},
 	// Exact-ID managed apply lookup (AC-02). Retrieves the terminal (or
 	// pending) result of a managed apply transaction by its rl_N id. The
-	// secret-free public view is gated on status:read; actor and source IP
+	// secret-free public view is authorized for EITHER status:read OR
+	// config:apply: a principal privileged enough to mutate configuration is
+	// more privileged than one that can read the secret-free transaction
+	// result, so a custom config:apply automation role can poll the outcome of
+	// its own apply without also holding status:read. Actor and source IP
 	// remain available only through the audit API.
 	{
-		Pattern:    "/api/config/applies/{id}",
-		Methods:    []string{http.MethodGet},
-		Permission: rbac.StatusRead,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleManagedApplyGet) },
+		Pattern: "/api/config/applies/{id}",
+		Methods: []string{http.MethodGet},
+		AnyPermissions: []rbac.Permission{
+			rbac.StatusRead,
+			rbac.ConfigApply,
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleManagedApplyGet) },
 	},
 	{
 		Pattern:    "/api/config/history",
