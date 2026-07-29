@@ -168,6 +168,24 @@ type ManagedApplyOutcome struct {
 	FinalizationError string `json:"finalization_error,omitempty"`
 }
 
+// ManagedApplyAdvisory is the ADVISORY, non-readiness finalization-health state
+// of the most recent managed apply (WS02 §3.9). It is healthy after a terminal
+// finalization that ran without finalization or configuration-history
+// degradation, and unhealthy — carrying the apply ID and a bounded detail — when
+// terminal finalization degraded (a completion-callback panic, a terminal-ledger
+// completion failure, or a configuration-history snapshot/metadata failure). It
+// is surfaced in the runtime overview as managed_apply_finalization and is
+// deliberately independent of readiness: a finalization degradation NEVER fails
+// /readyz and NEVER turns an already-committed apply into a failed apply. It
+// carries only bounded, low-cardinality metadata — never raw TOML, secrets, or
+// actor tokens.
+type ManagedApplyAdvisory struct {
+	Healthy bool      `json:"healthy"`
+	At      time.Time `json:"at,omitempty"`
+	ApplyID string    `json:"apply_id,omitempty"`
+	Detail  string    `json:"detail,omitempty"`
+}
+
 // ManagedApplyFinalization carries the terminal finalization provenance that is
 // deliberately NOT part of the serialized ConfigApplyResult (AC-05 invariant):
 // the configuration-history snapshot id, its non-fatal degradation, and any
@@ -363,6 +381,16 @@ type Deps struct {
 	// result). It returns nil when healthy. When it returns an error, /readyz
 	// reports not ready and the runtime overview surfaces the degradation.
 	AdminHealth func() error
+
+	// ManagedApplyFinalizationHealth returns the ADVISORY, non-readiness
+	// finalization-health state of the most recent managed apply (WS02 §3.9):
+	// healthy after a clean terminal finalization, unhealthy (with the apply ID
+	// and a bounded detail) after a finalization panic, a terminal-ledger
+	// completion failure, or a configuration-history snapshot/metadata failure.
+	// It is surfaced in the runtime overview as managed_apply_finalization and
+	// MUST NOT gate /readyz — an already-committed apply stays roll-back-able.
+	// Nil when no managed apply has finalized (the overview omits the field).
+	ManagedApplyFinalizationHealth func() *ManagedApplyAdvisory
 
 	// ManagedHistoryActive reports that the managed apply coordinator records
 	// configuration-history snapshots at terminalization (AC-05). When true the

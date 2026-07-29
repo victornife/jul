@@ -130,6 +130,12 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	if s.deps.LastManagedApply != nil {
 		out.LastManagedApply = s.deps.LastManagedApply()
 	}
+	// Advisory, non-readiness managed-apply finalization health (WS02 §3.9).
+	// Surfaced independently of AdminHealth so a finalization degradation is
+	// visible in the Overview without ever gating /readyz.
+	if s.deps.ManagedApplyFinalizationHealth != nil {
+		out.ManagedApplyFinalization = s.deps.ManagedApplyFinalizationHealth()
+	}
 	if s.deps.Stats != nil {
 		out.Stats = s.deps.Stats()
 	}

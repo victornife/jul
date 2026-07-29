@@ -330,12 +330,18 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// degraded state reported by a published reload.
 	var activeAdminDegraded atomic.Bool
 	var lastAdminDegradedErr atomic.Pointer[string]
-	// lastManagedApplyFinalizationErr is the advisory health state set when a
-	// managed-apply completion callback panics during terminal finalization
-	// (WS02 §3.6). It is advisory only: it surfaces the finalization-machinery
-	// failure through /readyz and the runtime overview without failing an
-	// already-committed apply (the raw configuration stays roll-back-able).
-	var lastManagedApplyFinalizationErr atomic.Pointer[string]
+	// lastManagedApplyFinalization is the ADVISORY, non-readiness finalization-
+	// health state of the most recent managed apply (WS02 §3.9). It is surfaced
+	// in the runtime overview as managed_apply_finalization and is deliberately
+	// INDEPENDENT of readiness: a finalization degradation (a completion-callback
+	// panic, a terminal-ledger completion failure, or a configuration-history
+	// snapshot/metadata failure) NEVER fails /readyz and NEVER turns an
+	// already-committed apply into a failed apply (the raw configuration stays
+	// roll-back-able). The terminal finalizer publishes a healthy advisory after
+	// a clean finalization — which CLEARS any prior degradation (§3.9) — and an
+	// unhealthy advisory carrying the apply ID and a bounded detail on
+	// degradation.
+	var lastManagedApplyFinalization atomic.Pointer[admin.ManagedApplyAdvisory]
 	srv.OnReloadResult = func(r server.ReloadResult) {
 		metrics.ObserveReloadResult(string(r.Outcome), r.PhaseDurations, r.TimedOut, r.TimedOutPhase)
 		// Only published reloads affect the durable admin-health flag.
@@ -410,19 +416,22 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				Detail:  detail,
 			}
 		}
-		// WS02 §3.6: a managed-apply finalization callback panic is surfaced as
-		// an advisory admin-health degradation so /readyz and the runtime
-		// overview make the finalization-machinery failure explicit. It never
-		// rolls back an already-committed apply (the raw config stays
-		// roll-back-able); it only reports the degradation.
-		if p := lastManagedApplyFinalizationErr.Load(); p != nil && *p != "" {
-			return &admin.AdminHealthStatus{
-				Healthy: false,
-				Reason:  "managed_finalization",
-				Detail:  *p,
-			}
-		}
+		// WS02 §3.9: managed-apply finalization health is ADVISORY and MUST NOT
+		// gate readiness. It is surfaced separately through
+		// deps.ManagedApplyFinalizationHealth (the runtime overview's
+		// managed_apply_finalization field), never through AdminHealth/readyz, so
+		// a terminal-finalization degradation never fails /readyz and never rolls
+		// back an already-committed apply.
 		return nil
+	}
+	// WS02 §3.9: advisory, non-readiness managed-apply finalization health. It is
+	// surfaced in the runtime overview as managed_apply_finalization and is wired
+	// here — before admin.New copies deps — so the running overview reads the
+	// same atomic pointer the terminal finalizer publishes to. It NEVER gates
+	// /readyz. Nil until the first managed apply finalizes, so the overview omits
+	// the field.
+	deps.ManagedApplyFinalizationHealth = func() *admin.ManagedApplyAdvisory {
+		return lastManagedApplyFinalization.Load()
 	}
 
 	// Wire the managed apply path now that srv exists so the coordinator can
@@ -687,15 +696,16 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// the runtime overview.
 	if coordinator != nil && adminSrv != nil {
 		coordinator.AuthGeneration = adminSrv.AuthGeneration
-		// WS02 §3.6: make a managed-apply finalization callback panic EXPLICIT.
-		// The coordinator recovers the panic, threads a FinalizationError onto
-		// the terminal result, and invokes this hook so the composition root
-		// (1) writes a structured error log, (2) increments the finalization-
-		// error metric, (3) sets an advisory admin-health state surfaced through
-		// /readyz and the runtime overview, and (4) best-effort writes a terminal
-		// ledger record carrying the FinalizationError. A finalization panic
-		// never fails an already-committed apply: the raw config stays
-		// roll-back-able.
+		// WS02 §3.6/§3.9: make a managed-apply finalization callback panic
+		// EXPLICIT. The coordinator recovers the panic, threads a
+		// FinalizationError onto the terminal result, and invokes this hook so
+		// the composition root (1) writes a structured error log, (2) increments
+		// the finalization-error metric, (3) publishes an advisory, NON-READINESS
+		// finalization-health state surfaced through the runtime overview's
+		// managed_apply_finalization field (never /readyz), and (4) best-effort
+		// writes a terminal ledger record carrying the FinalizationError. A
+		// finalization panic never fails an already-committed apply: the raw
+		// config stays roll-back-able.
 		coordinator.OnManagedApplyFinalizationError = func(applyID string, err error) {
 			detail := "managed apply finalization callback failed"
 			if err != nil {
@@ -706,7 +716,15 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				"error", detail,
 			)
 			metrics.ObserveManagedApplyFinalizationError()
-			lastManagedApplyFinalizationErr.Store(&detail)
+			// WS02 §3.9: publish the advisory, non-readiness finalization health.
+			// A panic aborts the normal completion path, so this is the only
+			// advisory write for the ID; it never gates /readyz.
+			lastManagedApplyFinalization.Store(&admin.ManagedApplyAdvisory{
+				Healthy: false,
+				At:      time.Now().UTC(),
+				ApplyID: applyID,
+				Detail:  detail,
+			})
 			// Best-effort terminal ledger record so a browser retrieving the
 			// exact apply ID sees the finalization failure. The panic aborted the
 			// normal completion path, so this is the only record for the ID.
@@ -727,9 +745,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// no longer ignores the terminal-ledger Complete error (defect 4), fails
 		// closed with an explicit FinalizationError on a claim error (defect 5),
 		// and returns the finalization provenance threaded back onto the terminal
-		// result. The advisory finalization-health flag surfaced through
-		// deps.AdminHealth is set on any claim/complete failure so a terminal
-		// finalization degradation is explicit rather than silently swallowed.
+		// result. The advisory, NON-READINESS finalization-health state surfaced
+		// through the runtime overview's managed_apply_finalization field (WS02
+		// §3.9) is published on every terminalization — healthy after a clean
+		// finalize (which clears any prior degradation) and unhealthy on any
+		// claim/complete/history failure — so a terminal finalization degradation
+		// is explicit rather than silently swallowed, without ever gating /readyz.
 		finalizer := &managedApplyFinalizer{
 			registry:  managedApplies,
 			admin:     adminSrv,
@@ -738,8 +759,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			latest:    &lastManagedApply,
 			latestSeq: &lastManagedApplySeq,
 			latestMu:  &lastManagedApplyMu,
-			setAdvisoryHealth: func(detail string) {
-				lastManagedApplyFinalizationErr.Store(&detail)
+			setAdvisory: func(a admin.ManagedApplyAdvisory) {
+				lastManagedApplyFinalization.Store(&a)
 			},
 		}
 		coordinator.OnManagedApplyComplete = finalizer.Finalize

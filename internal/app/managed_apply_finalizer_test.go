@@ -90,7 +90,7 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 	var latest atomic.Pointer[admin.ManagedApplyOutcome]
 	var latestSeq atomic.Uint64
 	var latestMu sync.Mutex
-	var advisory atomic.Pointer[string]
+	var advisory atomic.Pointer[admin.ManagedApplyAdvisory]
 	finalizer := &managedApplyFinalizer{
 		registry:  registry,
 		admin:     adminSrv,
@@ -99,8 +99,8 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 		latest:    &latest,
 		latestSeq: &latestSeq,
 		latestMu:  &latestMu,
-		setAdvisoryHealth: func(detail string) {
-			advisory.Store(&detail)
+		setAdvisory: func(a admin.ManagedApplyAdvisory) {
+			advisory.Store(&a)
 		},
 	}
 
@@ -224,8 +224,21 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 	if got := latest.Load(); got == nil || got.ID != applyID || !got.OK {
 		t.Fatalf("latest outcome = %+v, want OK outcome for %q", got, applyID)
 	}
-	if advisory.Load() != nil {
-		t.Errorf("advisory finalization-health flag set on a clean finalize: %q", *advisory.Load())
+	// WS02 §3.9: a clean finalize publishes a HEALTHY advisory (not nil) carrying
+	// this apply ID and no detail — it clears any prior degradation rather than
+	// leaving the advisory unset.
+	if adv := advisory.Load(); adv == nil {
+		t.Fatal("clean finalize did not publish a managed-apply finalization advisory")
+	} else {
+		if !adv.Healthy {
+			t.Errorf("advisory Healthy = false on a clean finalize; detail=%q", adv.Detail)
+		}
+		if adv.Detail != "" {
+			t.Errorf("advisory Detail = %q on a clean finalize, want empty", adv.Detail)
+		}
+		if adv.ApplyID != applyID {
+			t.Errorf("advisory ApplyID = %q, want %q", adv.ApplyID, applyID)
+		}
 	}
 
 	// 4. A DUPLICATE terminal callback for the same apply ID is deduplicated by

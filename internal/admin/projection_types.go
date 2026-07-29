@@ -368,4 +368,13 @@ type RuntimeOverview struct {
 	// apply finalizes. It supplements LastReload for the saved_not_live path
 	// where the terminal state is only known after the async finalizer completes.
 	LastManagedApply *ManagedApplyOutcome `json:"last_managed_apply,omitempty"`
+	// ManagedApplyFinalization is the ADVISORY, non-readiness finalization-health
+	// state of the most recent managed apply (WS02 §3.9). It is present once a
+	// managed apply has finalized: Healthy=true after a clean terminal
+	// finalization, or Healthy=false with the apply ID and a bounded detail after
+	// a finalization panic, a terminal-ledger completion failure, or a
+	// configuration-history snapshot/metadata failure. It NEVER gates readiness —
+	// the Console renders it as an advisory finalization banner distinct from the
+	// reload outcome and from AdminHealth. Nil until the first apply finalizes.
+	ManagedApplyFinalization *ManagedApplyAdvisory `json:"managed_apply_finalization,omitempty"`
 }

@@ -45,11 +45,17 @@ type managedApplyFinalizer struct {
 	latestSeq *atomic.Uint64
 	latestMu  *sync.Mutex
 
-	// setAdvisoryHealth stores the advisory finalization-error detail surfaced
-	// through deps.AdminHealth on /readyz/overview. It carries only the bounded
-	// error message (never raw TOML, secrets, or actor metadata). Nil in
-	// context-free/unit callers that do not expose advisory health.
-	setAdvisoryHealth func(detail string)
+	// setAdvisory publishes the ADVISORY, non-readiness managed-apply
+	// finalization-health state surfaced on the runtime overview as
+	// managed_apply_finalization (WS02 §3.9). It is called on EVERY
+	// terminalization: healthy after a clean finalize — which clears any prior
+	// degradation — and unhealthy (carrying the apply ID and a bounded detail)
+	// on a claim failure, a terminal-ledger completion failure, or a
+	// configuration-history snapshot/metadata failure. It carries only bounded,
+	// low-cardinality metadata (never raw TOML, secrets, or actor tokens) and
+	// MUST NOT gate readiness. Nil in context-free/unit callers that do not
+	// expose advisory health.
+	setAdvisory func(admin.ManagedApplyAdvisory)
 }
 
 // Finalize performs the single terminal finalization for a managed apply. It
@@ -101,7 +107,9 @@ func (f *managedApplyFinalizer) Finalize(completion admin.ManagedApplyCompletion
 	}
 	if !claimed {
 		// Exact duplicate terminal callback: return the provenance already
-		// recorded for this ID without repeating any side effect.
+		// recorded for this ID without repeating any side effect. It does NOT
+		// re-publish the advisory: the first (claiming) finalization already
+		// published the authoritative finalization-health state for this ID.
 		if existing, ok := f.registry.Get(applyID); ok {
 			return admin.ManagedApplyFinalization{
 				HistorySnapshotID: existing.HistorySnapshotID,
@@ -172,16 +180,63 @@ func (f *managedApplyFinalizer) Finalize(completion admin.ManagedApplyCompletion
 	}
 
 	f.updateLatestIfNewest(result, managedOutcome)
+	// WS02 §3.9: publish the advisory, non-readiness finalization-health state
+	// for this terminal ID. Every terminalization publishes exactly one advisory:
+	// unhealthy when any finalization or configuration-history degradation was
+	// recorded (a claim failure returns earlier via reportFinalizationError; a
+	// terminal-ledger completion failure and a history snapshot/metadata failure
+	// are captured here), otherwise healthy — a clean finalize CLEARS any prior
+	// degraded advisory. This never gates readiness.
+	f.publishAdvisory(applyID, fin)
 	return fin
+}
+
+// publishAdvisory reports the ADVISORY, non-readiness finalization-health state
+// for a completed terminal finalization (WS02 §3.9). A healthy advisory is
+// published when neither a finalization-machinery error nor a
+// configuration-history degradation was recorded — clearing any prior degraded
+// state — and an unhealthy advisory carrying the apply ID and a bounded detail
+// otherwise. It carries only bounded metadata and never gates readiness. It is a
+// no-op for context-free callers that do not expose advisory health.
+func (f *managedApplyFinalizer) publishAdvisory(applyID string, fin admin.ManagedApplyFinalization) {
+	if f.setAdvisory == nil {
+		return
+	}
+	advisory := admin.ManagedApplyAdvisory{
+		Healthy: true,
+		At:      time.Now().UTC(),
+		ApplyID: applyID,
+	}
+	if detail := advisoryDetail(fin); detail != "" {
+		advisory.Healthy = false
+		advisory.Detail = detail
+	}
+	f.setAdvisory(advisory)
+}
+
+// advisoryDetail returns the bounded advisory detail for a completed
+// finalization, or "" when the finalization was clean. A finalization-machinery
+// error (claim/complete) takes precedence; a configuration-history
+// snapshot/metadata failure is also a finalization degradation (WS02 §3.9) even
+// when the reload itself committed, so it is surfaced when no
+// FinalizationError is present.
+func advisoryDetail(fin admin.ManagedApplyFinalization) string {
+	if d := strings.TrimSpace(fin.FinalizationError); d != "" {
+		return d
+	}
+	if d := strings.TrimSpace(fin.HistoryError); d != "" {
+		return "configuration history: " + d
+	}
+	return ""
 }
 
 // reportFinalizationError makes a terminal-finalization machinery failure
 // EXPLICIT (WS02 §3.2 defect 4/5): it writes a structured error log, increments
-// the finalization-error metric, and stores the advisory admin-health detail.
-// It carries only the bounded error message — never raw TOML, secrets, or actor
-// metadata. It deliberately does NOT write a ledger record itself; the caller
-// owns the best-effort terminal Complete so the ledger side effect stays in one
-// place.
+// the finalization-error metric, and publishes the advisory, non-readiness
+// admin-health detail. It carries only the bounded error message — never raw
+// TOML, secrets, or actor metadata. It deliberately does NOT write a ledger
+// record itself; the caller owns the best-effort terminal Complete so the ledger
+// side effect stays in one place.
 func (f *managedApplyFinalizer) reportFinalizationError(applyID string, err error) {
 	detail := "managed apply finalization failed"
 	if err != nil {
@@ -196,8 +251,13 @@ func (f *managedApplyFinalizer) reportFinalizationError(applyID string, err erro
 	if f.metrics != nil {
 		f.metrics.ObserveManagedApplyFinalizationError()
 	}
-	if f.setAdvisoryHealth != nil {
-		f.setAdvisoryHealth(detail)
+	if f.setAdvisory != nil {
+		f.setAdvisory(admin.ManagedApplyAdvisory{
+			Healthy: false,
+			At:      time.Now().UTC(),
+			ApplyID: applyID,
+			Detail:  detail,
+		})
 	}
 }
 
