@@ -90,6 +90,12 @@ type ApplyResult struct {
 	// state that never fails an already-committed apply.
 	HistorySnapshotID string
 	HistoryError      string
+
+	// FinalizationError carries a post-persistence transaction-tracking failure
+	// (e.g. pending-record registration) discovered by the coordinator finalizer
+	// and threaded to the trusted composition-root completion callback. It is
+	// internal finalization provenance, NOT serialized in the apply result.
+	FinalizationError string
 }
 
 // ApplyInFlightState tracks the current managed apply transaction. It is used
@@ -142,20 +148,16 @@ type ConfigApplyCoordinator struct {
 	// unit-test callers behave exactly as before.
 	OnManagedApplyStarted func(admin.ManagedApplyStart) error
 
-	// OnManagedApplyComplete is called by the async finalizer after the
-	// managed apply has reached a terminal state (including any restoration).
-	// It receives the original request context so the terminal audit event can
-	// be attributed to the caller (H-05).
-	OnManagedApplyComplete func(admin.ApplyRequestContext, admin.ConfigApplyResult, admin.ManagedApplyFinalization)
-
-	// WriteManagedHistory records a configuration-history snapshot at
-	// terminalization (AC-05). It receives the request context, the terminal
-	// result, and the exact previous on-disk configuration. The previous raw
-	// bytes are sensitive: they are passed only to this trusted in-process
-	// writer and are never logged, retained, or serialized by the coordinator.
-	// It returns the snapshot id and a non-fatal history-degradation error.
-	// Nil disables coordinator-side history so handlers keep recording eagerly.
-	WriteManagedHistory func(admin.ApplyRequestContext, admin.ConfigApplyResult, []byte) (string, error)
+	// OnManagedApplyComplete is called by the async finalizer after the managed
+	// apply has reached a terminal state (including any restoration). It receives
+	// a single ManagedApplyCompletion object — the original request context, the
+	// serialized terminal result, and the exact previous on-disk configuration —
+	// and returns a ManagedApplyFinalization carrying the history/finalization
+	// provenance threaded back onto the terminal result. The composition-root
+	// callback performs the trusted history write itself and produces the fin, so
+	// history-writing and terminal finalization are driven from one claim (H-05).
+	// Nil disables completion notification for context-free and unit-test callers.
+	OnManagedApplyComplete func(admin.ManagedApplyCompletion) admin.ManagedApplyFinalization
 
 	// beforePersist is a deterministic test barrier invoked after preflight and,
 	// for staging, after the prepared marker is written but before the final
@@ -809,7 +811,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 	// prior staged candidate for an update — because baseline.Raw is whatever
 	// was persisted before this stage overwrote it. Recorded once, here at the
 	// stage's terminal success, so no snapshot is written at a provisional 202.
-	result = c.recordManagedHistory(reqCtx, result, baseline.Raw)
+	result = c.completeManagedApply(reqCtx, result, baseline.Raw)
 	return result, nil
 }
 
@@ -995,9 +997,8 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		c.mu.Unlock()
 		// AC-05: an enqueue failure whose restoration also failed records a
 		// recovery snapshot; a clean restoration records nothing. Recorded
-		// before the completion callback and outside c.mu.
-		terminal = c.recordManagedHistory(reqCtx, terminal, baseline.Raw)
-		c.notifyManagedApplyComplete(reqCtx, terminal, "")
+		// through the single terminal completion helper outside c.mu.
+		terminal = c.completeManagedApply(reqCtx, terminal, baseline.Raw)
 		return terminal, err
 	}
 	preparedOwned = false // the server reload plan now owns commit/abort
@@ -1048,20 +1049,17 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// notifyManagedApplyComplete contains its own panic recovery so a
 		// callback panic cannot wedge the coordinator here.
 		c.mu.Unlock()
-		// AC-05: record the terminal configuration-history snapshot before the
-		// completion callback so the prior config is durably captured
-		// (pre_apply on a committed apply, recovery when a failed apply's
-		// restoration also failed) and enriched onto the terminal result. The
-		// filesystem write runs outside c.mu.
-		terminal = c.recordManagedHistory(reqCtx, terminal, baseline.Raw)
 		// Carry any post-persistence pending-registration failure into the
 		// terminal finalization provenance so it is surfaced through the
 		// ledger/overview rather than silently dropped.
-		finalizationErr := ""
 		if trackingErr != nil {
-			finalizationErr = trackingErr.Error()
+			terminal.FinalizationError = trackingErr.Error()
 		}
-		c.notifyManagedApplyComplete(reqCtx, terminal, finalizationErr)
+		// AC-05: drive the single terminal completion — the composition root
+		// writes the configuration-history snapshot from the ManagedApplyCompletion
+		// and returns the finalization provenance threaded back onto the terminal
+		// result. The trusted history write runs outside c.mu.
+		terminal = c.completeManagedApply(reqCtx, terminal, baseline.Raw)
 		c.mu.Lock()
 		c.inFlightState = ApplyInFlightNone
 		c.mu.Unlock()
@@ -1136,42 +1134,42 @@ func (c *ConfigApplyCoordinator) notifyManagedApplyStarted(reqCtx admin.ApplyReq
 	})
 }
 
-func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(reqCtx admin.ApplyRequestContext, result ApplyResult, finalizationErr string) {
+// notifyManagedApplyComplete invokes the single composition-root completion
+// callback with the ManagedApplyCompletion object and returns the resulting
+// ManagedApplyFinalization. A nil callback yields a zero finalization so
+// context-free and unit-test callers are unaffected. The callback is invoked
+// under panic recovery so a misbehaving composition root cannot wedge the
+// coordinator finalizer.
+func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
 	if c.OnManagedApplyComplete == nil {
-		return
+		return admin.ManagedApplyFinalization{}
 	}
-	defer func() { _ = recover() }()
-	// AC-14: the configuration-history finalization provenance is threaded
-	// separately from the serialized ConfigApplyResult, which by the AC-05
-	// invariant never carries HistorySnapshotID/HistoryError. The composition
-	// root routes this into the durable ledger record and the runtime-overview
-	// outcome so the Console can render a finalization surface independent of
-	// the reload outcome. finalizationErr carries any post-persistence
-	// transaction-tracking failure (e.g. pending-record registration) so it is
-	// surfaced through the ledger/overview rather than silently dropped.
-	c.OnManagedApplyComplete(reqCtx, toAdminConfigApplyResult(result), admin.ManagedApplyFinalization{
-		HistorySnapshotID: result.HistorySnapshotID,
-		HistoryError:      result.HistoryError,
-		FinalizationError: finalizationErr,
-	})
+	fin := admin.ManagedApplyFinalization{}
+	func() {
+		defer func() { _ = recover() }()
+		fin = c.OnManagedApplyComplete(comp)
+	}()
+	return fin
 }
 
-// recordManagedHistory writes the terminal configuration-history snapshot for a
-// managed apply through the trusted WriteManagedHistory hook and records the
-// resulting snapshot id / degradation onto the result. previousRaw is the exact
-// prior on-disk configuration; it is forwarded only to the hook and is never
-// logged or retained here. When no hook is wired it is a no-op. The hook itself
-// decides — from the terminal outcome — whether to snapshot and with which
-// reason, so this method never encodes history policy.
-func (c *ConfigApplyCoordinator) recordManagedHistory(reqCtx admin.ApplyRequestContext, result ApplyResult, previousRaw []byte) ApplyResult {
-	if c.WriteManagedHistory == nil {
-		return result
-	}
-	id, err := c.WriteManagedHistory(reqCtx, toAdminConfigApplyResult(result), previousRaw)
-	result.HistorySnapshotID = id
-	if err != nil {
-		result.HistoryError = err.Error()
-	}
+// completeManagedApply drives the single terminal completion for a managed
+// apply: it hands the trusted composition root a ManagedApplyCompletion
+// (request context, serialized terminal result, and the exact prior on-disk
+// configuration) and threads the returned ManagedApplyFinalization provenance
+// (history snapshot id, history degradation, and any post-persistence
+// finalization error) back onto the terminal result. previousRaw is sensitive
+// and is forwarded only to the callback, never logged or retained here. A nil
+// callback yields a zero finalization so context-free and unit-test callers are
+// unaffected.
+func (c *ConfigApplyCoordinator) completeManagedApply(reqCtx admin.ApplyRequestContext, result ApplyResult, previousRaw []byte) ApplyResult {
+	fin := c.notifyManagedApplyComplete(admin.ManagedApplyCompletion{
+		Context:     reqCtx,
+		Result:      toAdminConfigApplyResult(result),
+		PreviousRaw: append([]byte(nil), previousRaw...),
+	})
+	result.HistorySnapshotID = fin.HistorySnapshotID
+	result.HistoryError = fin.HistoryError
+	result.FinalizationError = fin.FinalizationError
 	return result
 }
 

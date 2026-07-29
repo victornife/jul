@@ -709,8 +709,9 @@ func TestFastRestorationHTTPAndCallbackResultsMatch(t *testing.T) {
 		},
 		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
 		PlannedRestart: &PlannedRestartStore{},
-		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult, _ admin.ManagedApplyFinalization) {
-			callbackCh <- result
+		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+			callbackCh <- comp.Result
+			return admin.ManagedApplyFinalization{FinalizationError: comp.Result.FinalizationError}
 		},
 	}
 	httpResult, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
@@ -763,12 +764,18 @@ func TestManagedApplyFinalizationProvenanceThreaded(t *testing.T) {
 		// A committed apply snapshots pre_apply and returns a degraded sidecar
 		// error: the raw snapshot id is still set (the config stays
 		// roll-back-able) while HistoryError explains the metadata degradation.
-		WriteManagedHistory: func(_ admin.ApplyRequestContext, _ admin.ConfigApplyResult, _ []byte) (string, error) {
-			return "snap-42", errors.New("metadata sidecar write failed")
-		},
-		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, res admin.ConfigApplyResult, fin admin.ManagedApplyFinalization) {
-			resCh <- res
+		// The unified completion callback is the composition root: it produces
+		// the ManagedApplyFinalization provenance itself (mirroring serve.go
+		// invoking RecordManagedHistory) and returns it to the coordinator.
+		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+			fin := admin.ManagedApplyFinalization{
+				HistorySnapshotID: "snap-42",
+				HistoryError:      "metadata sidecar write failed",
+				FinalizationError: comp.Result.FinalizationError,
+			}
+			resCh <- comp.Result
 			finCh <- fin
+			return fin
 		},
 	}
 
@@ -825,8 +832,9 @@ func TestShutdownReturnsCorrelatedSavedNotLive(t *testing.T) {
 		},
 		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
 		PlannedRestart: &PlannedRestartStore{},
-		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult, _ admin.ManagedApplyFinalization) {
-			callbackCh <- result
+		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+			callbackCh <- comp.Result
+			return admin.ManagedApplyFinalization{FinalizationError: comp.Result.FinalizationError}
 		},
 	}
 	resultCh := make(chan ApplyResult, 1)
@@ -925,7 +933,7 @@ func TestCompletionCallbackPanicDoesNotBlockHTTP(t *testing.T) {
 		},
 		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
 		PlannedRestart: &PlannedRestartStore{},
-		OnManagedApplyComplete: func(admin.ApplyRequestContext, admin.ConfigApplyResult, admin.ManagedApplyFinalization) {
+		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
 			panic("callback panic")
 		},
 	}
@@ -966,8 +974,9 @@ func TestSlowRestorationReturnsSavedNotLiveThenOneTerminalResult(t *testing.T) {
 			<-restoreContinue
 		},
 		waitMargin: 10 * time.Millisecond,
-		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, result admin.ConfigApplyResult, _ admin.ManagedApplyFinalization) {
-			terminalCh <- result
+		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+			terminalCh <- comp.Result
+			return admin.ManagedApplyFinalization{FinalizationError: comp.Result.FinalizationError}
 		},
 	}
 
@@ -1447,11 +1456,12 @@ func TestManagedApplyOutcomeCallbackFired(t *testing.T) {
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
 		PlannedRestart: &PlannedRestartStore{},
-		OnManagedApplyComplete: func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult, _ admin.ManagedApplyFinalization) {
-			if ctx.Actor != "alice" {
-				t.Errorf("callback actor = %q, want alice", ctx.Actor)
+		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+			if comp.Context.Actor != "alice" {
+				t.Errorf("callback actor = %q, want alice", comp.Context.Actor)
 			}
-			gotCallback <- res
+			gotCallback <- comp.Result
+			return admin.ManagedApplyFinalization{FinalizationError: comp.Result.FinalizationError}
 		},
 	}
 

@@ -196,6 +196,26 @@ type ManagedApplyStart struct {
 	Result  ConfigApplyResult
 }
 
+// ManagedApplyCompletion is the single terminal-completion object handed to the
+// unified OnManagedApplyComplete callback the moment a managed configuration
+// apply reaches a terminal state (including any restoration). It replaces the
+// former split hooks — the void completion notification plus the separate
+// WriteManagedHistory writer — so history-writing and terminal finalization are
+// driven from one claim inside the composition root. The Context attributes the
+// terminal audit/ledger record to the original caller (H-05); the Result is the
+// serialized terminal projection (which by the AC-05 invariant never carries
+// HistorySnapshotID/HistoryError); the callback returns a ManagedApplyFinalization
+// carrying the history/finalization provenance threaded back to the coordinator.
+type ManagedApplyCompletion struct {
+	Context ApplyRequestContext
+	Result  ConfigApplyResult
+
+	// PreviousRaw is the exact prior on-disk configuration. It is sensitive and
+	// is used only by the trusted in-process history writer. Never log,
+	// serialize, or retain it in the ledger.
+	PreviousRaw []byte
+}
+
 // Deps wires the admin server to runtime components owned by the composition
 // root. All fields are optional; endpoints degrade gracefully when a
 // dependency is nil.

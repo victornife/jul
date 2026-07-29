@@ -49,7 +49,10 @@ func wireProductionLedger(c *ConfigApplyCoordinator) (*admin.ManagedApplyRegistr
 		})
 	}
 
-	c.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult, fin admin.ManagedApplyFinalization) {
+	c.OnManagedApplyComplete = func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+		res := comp.Result
+		ctx := comp.Context
+		fin := admin.ManagedApplyFinalization{FinalizationError: res.FinalizationError}
 		applyID := res.ApplyID
 		if applyID == "" && res.Reload != nil {
 			applyID = res.Reload.ID
@@ -66,6 +69,7 @@ func wireProductionLedger(c *ConfigApplyCoordinator) (*admin.ManagedApplyRegistr
 			})
 		}
 		completedCh <- fin
+		return fin
 	}
 
 	return registry, startedCh, completedCh
@@ -270,8 +274,10 @@ func TestApplyStartedErrorSurfacesInFinalization(t *testing.T) {
 		OnManagedApplyStarted: func(admin.ManagedApplyStart) error {
 			return errors.New("boom")
 		},
-		OnManagedApplyComplete: func(_ admin.ApplyRequestContext, _ admin.ConfigApplyResult, fin admin.ManagedApplyFinalization) {
+		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+			fin := admin.ManagedApplyFinalization{FinalizationError: comp.Result.FinalizationError}
 			finCh <- fin
+			return fin
 		},
 	}
 

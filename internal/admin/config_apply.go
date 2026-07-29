@@ -119,6 +119,12 @@ type ConfigApplyResult struct {
 	// unchanged. A timeout AFTER persistence is reported through Reload as
 	// saved_not_live (202) instead, never here.
 	TimedOutPhase string `json:"timed_out_phase,omitempty"`
+	// FinalizationError carries a post-persistence transaction-tracking failure
+	// (e.g. pending-record registration) from the coordinator to the trusted
+	// composition-root completion callback. By the AC-05/AC-14 invariant this
+	// provenance is threaded to the finalization surface, never serialized in
+	// the apply result, so it is transport-only (json:"-").
+	FinalizationError string `json:"-"`
 	// Summary and Diff are populated by the structured-patch apply path.
 	Summary []string   `json:"summary,omitempty"`
 	Diff    ConfigDiff `json:"diff,omitempty"`

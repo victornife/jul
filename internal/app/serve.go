@@ -593,8 +593,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 		// AC-05: the managed coordinator records configuration-history snapshots
 		// at terminalization, so the HTTP handlers must not snapshot eagerly.
-		// The WriteManagedHistory hook is wired after adminSrv exists (below);
-		// this flag must be set before admin.New copies deps.
+		// The trusted history write is performed by the unified completion
+		// callback wired after adminSrv exists (below); this flag must be set
+		// before admin.New copies deps.
 		deps.ManagedHistoryActive = true
 
 		// AC-02: register the exact-ID pending ledger record the moment a
@@ -668,11 +669,16 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// the runtime overview.
 	if coordinator != nil && adminSrv != nil {
 		coordinator.AuthGeneration = adminSrv.AuthGeneration
-		// AC-05: history snapshots are written at terminalization by the trusted
-		// in-process writer on the admin server. previousRaw is sensitive and is
-		// forwarded only to this hook, never logged or retained by the coordinator.
-		coordinator.WriteManagedHistory = adminSrv.RecordManagedHistory
-		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult, fin admin.ManagedApplyFinalization) {
+		// AC-05: the unified completion callback owns terminal finalization. It
+		// claims the single terminal callback for this apply ID, performs the
+		// trusted in-process configuration-history write (previousRaw is
+		// sensitive and forwarded only here — never logged or retained by the
+		// coordinator), records the audit/metrics/ledger side effects exactly
+		// once, and returns the finalization provenance threaded back onto the
+		// terminal result.
+		coordinator.OnManagedApplyComplete = func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+			ctx := comp.Context
+			res := comp.Result
 			applyID := res.ApplyID
 			if applyID == "" && res.Reload != nil {
 				applyID = res.Reload.ID
@@ -693,7 +699,20 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				}
 			}
 			if !claimed {
-				return // exact duplicate terminal callback; nothing more to do
+				// Exact duplicate terminal callback; nothing more to do.
+				return admin.ManagedApplyFinalization{}
+			}
+
+			// AC-05: perform the trusted configuration-history write AFTER the
+			// BeginFinalization claim so the snapshot side effect happens exactly
+			// once per apply ID. The finalization provenance is threaded back
+			// onto the terminal result (and any post-persistence finalization
+			// error carried on the serialized result is echoed through).
+			fin := admin.ManagedApplyFinalization{FinalizationError: res.FinalizationError}
+			snapshotID, historyErr := adminSrv.RecordManagedHistory(comp.Context, comp.Result, comp.PreviousRaw)
+			fin.HistorySnapshotID = snapshotID
+			if historyErr != nil {
+				fin.HistoryError = historyErr.Error()
 			}
 
 			outcome := ""
@@ -732,7 +751,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				HistoryError:      fin.HistoryError,
 				FinalizationError: fin.FinalizationError,
 			}
-			adminSrv.RecordManagedApplyOutcome(ctx, *o)
+			adminSrv.RecordManagedApplyOutcome(comp.Context, *o)
 
 			// AC-02: publish the durable per-ID terminal record. The public
 			// record deliberately omits actor and source IP (available only
@@ -768,6 +787,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				}
 			}
 			lastManagedApplyMu.Unlock()
+
+			return fin
 		}
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
@@ -843,6 +864,7 @@ func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 		FinalServingVersion:   r.FinalServingVersion,
 		StagedRestartIsUpdate: r.StagedRestartIsUpdate,
 		TimedOutPhase:         r.TimedOutPhase,
+		FinalizationError:     r.FinalizationError,
 	}
 }
 
