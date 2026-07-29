@@ -119,6 +119,10 @@ func TestMetricLabelPolicy(t *testing.T) {
 		// carries NO labels so a callback-panic signal cannot leak apply IDs,
 		// actors, or configuration versions as unbounded cardinality.
 		"jul_managed_apply_finalization_errors_total": nil,
+		// WS02 §3.7: the terminal finalizer's history-snapshot counter is bounded
+		// to the managed operation and the snapshot disposition
+		// (recorded/skipped/failed) — never an apply ID, actor, path or version.
+		"jul_managed_apply_history_total": {"operation", "result"},
 	}
 
 	for name, names := range got {
@@ -236,4 +240,5 @@ func exerciseAllMetrics(m *Metrics) {
 	m.SetPendingRestart(false)
 	m.ObserveManagedApplyFinalized("config.apply", "hot", "not_applied", "true")
 	m.ObserveManagedApplyFinalizationError()
+	m.ObserveManagedApplyHistory("config.apply", "recorded")
 }

@@ -718,127 +718,31 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				})
 			}
 		}
-		// AC-05: the unified completion callback owns terminal finalization. It
-		// claims the single terminal callback for this apply ID, performs the
-		// trusted in-process configuration-history write (previousRaw is
-		// sensitive and forwarded only here — never logged or retained by the
-		// coordinator), records the audit/metrics/ledger side effects exactly
-		// once, and returns the finalization provenance threaded back onto the
-		// terminal result.
-		coordinator.OnManagedApplyComplete = func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
-			ctx := comp.Context
-			res := comp.Result
-			applyID := res.ApplyID
-			if applyID == "" && res.Reload != nil {
-				applyID = res.Reload.ID
-			}
-
-			// AC-02/AC-04: record durable per-ID terminal state and emit audit
-			// and metrics BEFORE the singular latest high-water guard, so a
-			// legitimate older terminal result finishing later is still
-			// retrievable by exact ID and still audited/metered — it is only
-			// prevented from replacing the latest pointer, not discarded.
-			// BeginFinalization claims the single terminal callback for this ID
-			// so a duplicate callback produces no duplicate side effects.
-			claimed := true
-			if applyID != "" {
-				ok, err := managedApplies.BeginFinalization(applyID)
-				if err == nil {
-					claimed = ok
-				}
-			}
-			if !claimed {
-				// Exact duplicate terminal callback; nothing more to do.
-				return admin.ManagedApplyFinalization{}
-			}
-
-			// AC-05: perform the trusted configuration-history write AFTER the
-			// BeginFinalization claim so the snapshot side effect happens exactly
-			// once per apply ID. The finalization provenance is threaded back
-			// onto the terminal result (and any post-persistence finalization
-			// error carried on the serialized result is echoed through).
-			fin := admin.ManagedApplyFinalization{FinalizationError: res.FinalizationError}
-			snapshotID, historyErr := adminSrv.RecordManagedHistory(comp.Context, comp.Result, comp.PreviousRaw)
-			fin.HistorySnapshotID = snapshotID
-			if historyErr != nil {
-				fin.HistoryError = historyErr.Error()
-			}
-
-			outcome := ""
-			if res.Reload != nil {
-				outcome = string(res.Reload.Outcome)
-			}
-			restoredLabel := "n/a"
-			// M-05: also treat enqueue_failure as a non-persisted outcome for labeling.
-			if outcome != "" && outcome != string(server.ReloadAppliedLive) && outcome != string(server.ReloadSavedNotLive) {
-				if res.Restored {
-					restoredLabel = "true"
-				} else {
-					restoredLabel = "false"
-				}
-			}
-			metrics.ObserveManagedApplyFinalized(string(ctx.Operation), res.Mode, outcome, restoredLabel)
-
-			o := &admin.ManagedApplyOutcome{
-				ID:                  applyID,
-				Mode:                res.Mode,
-				OK:                  res.OK,
-				Outcome:             outcome,
-				Restored:            res.Restored,
-				RestoreError:        res.RestoreError,
-				FinalDiskVersion:    res.FinalDiskVersion,
-				FinalServingVersion: res.FinalServingVersion,
-				CompletedAt:         time.Now().UTC(),
-				Actor:               ctx.Actor,
-				SourceIP:            ctx.SourceIP,
-				// AC-14: surface the configuration-history finalization
-				// provenance (threaded separately from the serialized
-				// ConfigApplyResult) on the runtime-overview outcome so the
-				// Console can render a degradation banner independent of the
-				// reload success/failure.
-				HistorySnapshotID: fin.HistorySnapshotID,
-				HistoryError:      fin.HistoryError,
-				FinalizationError: fin.FinalizationError,
-			}
-			adminSrv.RecordManagedApplyOutcome(comp.Context, *o)
-
-			// AC-02: publish the durable per-ID terminal record. The public
-			// record deliberately omits actor and source IP (available only
-			// through the audit API) and never carries raw TOML or secrets.
-			if applyID != "" {
-				rec := admin.ManagedApplyRecord{
-					ID:          applyID,
-					Operation:   ctx.Operation,
-					StartedAt:   ctx.StartedAt,
-					CompletedAt: o.CompletedAt,
-					Result:      res,
-					// AC-14: the durable per-ID ledger record carries the
-					// finalization provenance so a browser retrieving the exact
-					// terminal record by ID sees history_snapshot_id /
-					// history_error / finalization_error alongside the reload
-					// result.
-					HistorySnapshotID: fin.HistorySnapshotID,
-					HistoryError:      fin.HistoryError,
-					FinalizationError: fin.FinalizationError,
-				}
-				_ = managedApplies.Complete(rec)
-			}
-
-			// AC-04: the singular latest pointer is updated only when this
-			// terminal result is the newest by monotonic sequence. An older
-			// result finishing later keeps its own per-ID record but does not
-			// replace the latest pointer.
-			lastManagedApplyMu.Lock()
-			if managedApplySeqGuard(&lastManagedApplySeq, res) {
-				lastManagedApply.Store(o)
-				if applyID != "" {
-					managedApplies.SetLatest(applyID)
-				}
-			}
-			lastManagedApplyMu.Unlock()
-
-			return fin
+		// WS02 §3.7: the unified completion callback owns terminal finalization
+		// through the single managedApplyFinalizer orchestrator. It claims the
+		// transaction BEFORE any history write (fixing WS02 §3.2 defect 2),
+		// performs the trusted in-process configuration-history write (previousRaw
+		// is sensitive and forwarded only there — never logged or retained by the
+		// coordinator), records the audit/metrics/ledger side effects exactly once,
+		// no longer ignores the terminal-ledger Complete error (defect 4), fails
+		// closed with an explicit FinalizationError on a claim error (defect 5),
+		// and returns the finalization provenance threaded back onto the terminal
+		// result. The advisory finalization-health flag surfaced through
+		// deps.AdminHealth is set on any claim/complete failure so a terminal
+		// finalization degradation is explicit rather than silently swallowed.
+		finalizer := &managedApplyFinalizer{
+			registry:  managedApplies,
+			admin:     adminSrv,
+			metrics:   metrics,
+			log:       log,
+			latest:    &lastManagedApply,
+			latestSeq: &lastManagedApplySeq,
+			latestMu:  &lastManagedApplyMu,
+			setAdvisoryHealth: func(detail string) {
+				lastManagedApplyFinalizationErr.Store(&detail)
+			},
 		}
+		coordinator.OnManagedApplyComplete = finalizer.Finalize
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
 		}

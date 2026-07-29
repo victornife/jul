@@ -81,6 +81,12 @@ type Metrics struct {
 	// so the finalization-machinery failure is visible without leaking apply
 	// IDs, actors, or configuration versions as unbounded labels.
 	managedApplyFinalizationErrors prometheus.Counter
+	// managedApplyHistory counts configuration-history snapshot attempts made by
+	// the terminal finalizer (WS02 §3.7: jul_managed_apply_history_total). result
+	// is the bounded snapshot disposition ("recorded", "skipped", or "failed").
+	// operation is the initiating managed operation; both labels are bounded,
+	// low-cardinality values — never an apply ID, actor, path or version.
+	managedApplyHistory *prometheus.CounterVec
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -281,6 +287,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_managed_apply_finalization_errors_total",
 			Help: "Managed-apply finalizations whose composition-root completion callback panicked (WS02 §3.6). An increment means the terminal finalization was made explicit and surfaced through logs/health/ledger rather than silently discarded.",
 		}),
+		managedApplyHistory: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_managed_apply_history_total",
+			Help: "Configuration-history snapshot attempts made by the terminal managed-apply finalizer (WS02 §3.7), labeled by operation and result (recorded/skipped/failed).",
+		}, []string{"operation", "result"}),
 		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_phase_duration_seconds",
 			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
@@ -335,6 +345,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.pendingRestart,
 		m.managedApplyFinalized,
 		m.managedApplyFinalizationErrors,
+		m.managedApplyHistory,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -694,6 +705,21 @@ func (m *Metrics) ObserveManagedApplyFinalized(operation, mode, outcome, restore
 // apply IDs, actors, or configuration versions as unbounded labels.
 func (m *Metrics) ObserveManagedApplyFinalizationError() {
 	m.managedApplyFinalizationErrors.Inc()
+}
+
+// ObserveManagedApplyHistory records the disposition of a configuration-history
+// snapshot attempt made by the terminal managed-apply finalizer (WS02 §3.7).
+// operation is the initiating managed operation; result is the bounded snapshot
+// disposition ("recorded", "skipped", or "failed"). Both labels are bounded,
+// low-cardinality values — never an apply ID, actor, path or version.
+func (m *Metrics) ObserveManagedApplyHistory(operation, result string) {
+	if operation == "" {
+		operation = "unknown"
+	}
+	if result == "" {
+		result = "unknown"
+	}
+	m.managedApplyHistory.WithLabelValues(operation, result).Inc()
 }
 
 // SetPendingRestart sets the pending-restart gauge to 1 when a managed staged
