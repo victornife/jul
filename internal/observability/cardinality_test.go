@@ -115,6 +115,10 @@ func TestMetricLabelPolicy(t *testing.T) {
 		"jul_config_stage_restart_total":    {"result"},
 		"jul_config_pending_restart":        nil,
 		"jul_managed_apply_finalized_total": {"mode", "operation", "outcome", "restored"},
+		// WS02 §3.6: unlabeled finalization-error counter. It deliberately
+		// carries NO labels so a callback-panic signal cannot leak apply IDs,
+		// actors, or configuration versions as unbounded cardinality.
+		"jul_managed_apply_finalization_errors_total": nil,
 	}
 
 	for name, names := range got {
@@ -231,4 +235,5 @@ func exerciseAllMetrics(m *Metrics) {
 	m.SetPendingRestart(true)
 	m.SetPendingRestart(false)
 	m.ObserveManagedApplyFinalized("config.apply", "hot", "not_applied", "true")
+	m.ObserveManagedApplyFinalizationError()
 }

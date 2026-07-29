@@ -159,6 +159,19 @@ type ConfigApplyCoordinator struct {
 	// Nil disables completion notification for context-free and unit-test callers.
 	OnManagedApplyComplete func(admin.ManagedApplyCompletion) admin.ManagedApplyFinalization
 
+	// OnManagedApplyFinalizationError is invoked when the unified completion
+	// callback panics during terminal finalization (WS02 §3.6). The coordinator
+	// recovers the panic, threads a FinalizationError onto the terminal result,
+	// and calls this hook with the apply ID and the reconstructed panic error so
+	// the composition root can make the degradation explicit — a structured
+	// error log, a finalization-error metric, an advisory health state, and a
+	// best-effort terminal ledger record carrying the FinalizationError — instead
+	// of silently swallowing the panic. A finalization panic never fails an
+	// already-committed apply: the raw configuration stays roll-back-able. Nil
+	// leaves the recovered panic recorded on the returned finalization only, so
+	// context-free and unit-test callers are unaffected.
+	OnManagedApplyFinalizationError func(applyID string, err error)
+
 	// beforePersist is a deterministic test barrier invoked after preflight and,
 	// for staging, after the prepared marker is written but before the final
 	// expected-baseline comparison. Production leaves it nil.
@@ -1137,19 +1150,38 @@ func (c *ConfigApplyCoordinator) notifyManagedApplyStarted(reqCtx admin.ApplyReq
 // notifyManagedApplyComplete invokes the single composition-root completion
 // callback with the ManagedApplyCompletion object and returns the resulting
 // ManagedApplyFinalization. A nil callback yields a zero finalization so
-// context-free and unit-test callers are unaffected. The callback is invoked
-// under panic recovery so a misbehaving composition root cannot wedge the
-// coordinator finalizer.
-func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+// context-free and unit-test callers are unaffected.
+//
+// WS02 §3.6: a callback panic is made EXPLICIT rather than silently discarded.
+// The recovered panic is reconstructed into a FinalizationError on the returned
+// finalization (so it is threaded onto the terminal result and surfaced through
+// the ledger/overview) and, when wired, reported to OnManagedApplyFinalizationError
+// so the composition root can emit a structured error log, increment the
+// finalization-error metric, set an advisory health state, and best-effort
+// write a terminal ledger record carrying the FinalizationError. A finalization
+// panic never fails an already-committed apply: the raw configuration stays
+// roll-back-able and the coordinator finalizer is not wedged.
+func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(comp admin.ManagedApplyCompletion) (fin admin.ManagedApplyFinalization) {
 	if c.OnManagedApplyComplete == nil {
-		return admin.ManagedApplyFinalization{}
+		return fin
 	}
-	fin := admin.ManagedApplyFinalization{}
-	func() {
-		defer func() { _ = recover() }()
-		fin = c.OnManagedApplyComplete(comp)
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			fin.FinalizationError = fmt.Sprintf(
+				"managed apply finalization panic: %v",
+				recovered,
+			)
+			if c.OnManagedApplyFinalizationError != nil {
+				c.OnManagedApplyFinalizationError(
+					comp.Result.ApplyID,
+					errors.New(fin.FinalizationError),
+				)
+			}
+		}
 	}()
-	return fin
+
+	return c.OnManagedApplyComplete(comp)
 }
 
 // completeManagedApply drives the single terminal completion for a managed

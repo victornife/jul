@@ -330,6 +330,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// degraded state reported by a published reload.
 	var activeAdminDegraded atomic.Bool
 	var lastAdminDegradedErr atomic.Pointer[string]
+	// lastManagedApplyFinalizationErr is the advisory health state set when a
+	// managed-apply completion callback panics during terminal finalization
+	// (WS02 §3.6). It is advisory only: it surfaces the finalization-machinery
+	// failure through /readyz and the runtime overview without failing an
+	// already-committed apply (the raw configuration stays roll-back-able).
+	var lastManagedApplyFinalizationErr atomic.Pointer[string]
 	srv.OnReloadResult = func(r server.ReloadResult) {
 		metrics.ObserveReloadResult(string(r.Outcome), r.PhaseDurations, r.TimedOut, r.TimedOutPhase)
 		// Only published reloads affect the durable admin-health flag.
@@ -393,18 +399,30 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// updates LastReload to a result with Published=false, which would
 	// previously erase a degraded state from a prior published failure.
 	deps.AdminHealth = func() error {
-		if !activeAdminDegraded.Load() {
-			return nil
+		if activeAdminDegraded.Load() {
+			detail := "admin subsystem reload failed"
+			if p := lastAdminDegradedErr.Load(); p != nil && *p != "" {
+				detail = *p
+			}
+			return &admin.AdminHealthStatus{
+				Healthy: false,
+				Reason:  "admin_reload",
+				Detail:  detail,
+			}
 		}
-		detail := "admin subsystem reload failed"
-		if p := lastAdminDegradedErr.Load(); p != nil && *p != "" {
-			detail = *p
+		// WS02 §3.6: a managed-apply finalization callback panic is surfaced as
+		// an advisory admin-health degradation so /readyz and the runtime
+		// overview make the finalization-machinery failure explicit. It never
+		// rolls back an already-committed apply (the raw config stays
+		// roll-back-able); it only reports the degradation.
+		if p := lastManagedApplyFinalizationErr.Load(); p != nil && *p != "" {
+			return &admin.AdminHealthStatus{
+				Healthy: false,
+				Reason:  "managed_finalization",
+				Detail:  *p,
+			}
 		}
-		return &admin.AdminHealthStatus{
-			Healthy: false,
-			Reason:  "admin_reload",
-			Detail:  detail,
-		}
+		return nil
 	}
 
 	// Wire the managed apply path now that srv exists so the coordinator can
@@ -669,6 +687,37 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// the runtime overview.
 	if coordinator != nil && adminSrv != nil {
 		coordinator.AuthGeneration = adminSrv.AuthGeneration
+		// WS02 §3.6: make a managed-apply finalization callback panic EXPLICIT.
+		// The coordinator recovers the panic, threads a FinalizationError onto
+		// the terminal result, and invokes this hook so the composition root
+		// (1) writes a structured error log, (2) increments the finalization-
+		// error metric, (3) sets an advisory admin-health state surfaced through
+		// /readyz and the runtime overview, and (4) best-effort writes a terminal
+		// ledger record carrying the FinalizationError. A finalization panic
+		// never fails an already-committed apply: the raw config stays
+		// roll-back-able.
+		coordinator.OnManagedApplyFinalizationError = func(applyID string, err error) {
+			detail := "managed apply finalization callback failed"
+			if err != nil {
+				detail = err.Error()
+			}
+			log.Error("managed apply finalization callback panicked",
+				"apply_id", applyID,
+				"error", detail,
+			)
+			metrics.ObserveManagedApplyFinalizationError()
+			lastManagedApplyFinalizationErr.Store(&detail)
+			// Best-effort terminal ledger record so a browser retrieving the
+			// exact apply ID sees the finalization failure. The panic aborted the
+			// normal completion path, so this is the only record for the ID.
+			if applyID != "" {
+				_ = managedApplies.Complete(admin.ManagedApplyRecord{
+					ID:                applyID,
+					CompletedAt:       time.Now().UTC(),
+					FinalizationError: detail,
+				})
+			}
+		}
 		// AC-05: the unified completion callback owns terminal finalization. It
 		// claims the single terminal callback for this apply ID, performs the
 		// trusted in-process configuration-history write (previousRaw is

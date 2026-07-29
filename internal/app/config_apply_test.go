@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -921,6 +922,17 @@ func TestCompletionCallbackPanicDoesNotBlockHTTP(t *testing.T) {
 	if err := os.WriteFile(path, seed, 0o600); err != nil {
 		t.Fatalf("write seed: %v", err)
 	}
+	// WS02 §3.6: a finalization callback panic must be made EXPLICIT — recovered
+	// into a FinalizationError threaded onto the terminal result AND reported to
+	// OnManagedApplyFinalizationError — never silently discarded, and never
+	// blocking the HTTP path or failing an already-committed apply.
+	var (
+		hookMu      sync.Mutex
+		hookCalls   int
+		hookApplyID string
+		hookErr     error
+	)
+	errHookDone := make(chan struct{})
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -936,10 +948,46 @@ func TestCompletionCallbackPanicDoesNotBlockHTTP(t *testing.T) {
 		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
 			panic("callback panic")
 		},
+		OnManagedApplyFinalizationError: func(applyID string, err error) {
+			hookMu.Lock()
+			hookCalls++
+			hookApplyID = applyID
+			hookErr = err
+			hookMu.Unlock()
+			close(errHookDone)
+		},
 	}
 	result, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+	// The committed apply must still succeed — a finalization panic never rolls
+	// back an already-applied configuration.
 	if err != nil || !result.OK {
 		t.Fatalf("result=%+v err=%v, callback panic blocked HTTP", result, err)
+	}
+	// The recovered panic must be threaded onto the terminal result as a
+	// FinalizationError instead of being silently swallowed.
+	if !strings.Contains(result.FinalizationError, "finalization panic") {
+		t.Fatalf("FinalizationError = %q, want it to carry the recovered panic", result.FinalizationError)
+	}
+	if !strings.Contains(result.FinalizationError, "callback panic") {
+		t.Fatalf("FinalizationError = %q, want it to wrap the panic value", result.FinalizationError)
+	}
+	// The error-reporting hook must have been invoked exactly once with the
+	// apply ID and the reconstructed panic error.
+	select {
+	case <-errHookDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnManagedApplyFinalizationError was not called")
+	}
+	hookMu.Lock()
+	defer hookMu.Unlock()
+	if hookCalls != 1 {
+		t.Fatalf("finalization-error hook calls = %d, want 1", hookCalls)
+	}
+	if hookApplyID != result.ApplyID {
+		t.Fatalf("finalization-error hook apply id = %q, want %q", hookApplyID, result.ApplyID)
+	}
+	if hookErr == nil || !strings.Contains(hookErr.Error(), "finalization panic") {
+		t.Fatalf("finalization-error hook err = %v, want it to carry the panic", hookErr)
 	}
 }
 

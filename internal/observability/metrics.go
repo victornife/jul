@@ -75,6 +75,12 @@ type Metrics struct {
 	// (H-05: jul_managed_apply_finalized_total). outcome is the terminal
 	// reload classification; restored is "true", "false", or "n/a".
 	managedApplyFinalized *prometheus.CounterVec
+	// managedApplyFinalizationErrors counts managed-apply finalizations whose
+	// composition-root completion callback panicked (WS02 §3.6:
+	// jul_managed_apply_finalization_errors_total). It is an unlabeled counter
+	// so the finalization-machinery failure is visible without leaking apply
+	// IDs, actors, or configuration versions as unbounded labels.
+	managedApplyFinalizationErrors prometheus.Counter
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -271,6 +277,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_managed_apply_finalized_total",
 			Help: "Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a).",
 		}, []string{"operation", "mode", "outcome", "restored"}),
+		managedApplyFinalizationErrors: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "jul_managed_apply_finalization_errors_total",
+			Help: "Managed-apply finalizations whose composition-root completion callback panicked (WS02 §3.6). An increment means the terminal finalization was made explicit and surfaced through logs/health/ledger rather than silently discarded.",
+		}),
 		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_phase_duration_seconds",
 			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
@@ -324,6 +334,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.stageRestarts,
 		m.pendingRestart,
 		m.managedApplyFinalized,
+		m.managedApplyFinalizationErrors,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -675,6 +686,14 @@ func (m *Metrics) ObserveManagedApplyFinalized(operation, mode, outcome, restore
 		mode = "unknown"
 	}
 	m.managedApplyFinalized.WithLabelValues(operation, mode, outcome, restored).Inc()
+}
+
+// ObserveManagedApplyFinalizationError counts a managed-apply finalization whose
+// composition-root completion callback panicked (WS02 §3.6). It is deliberately
+// unlabeled so the finalization-machinery failure is visible without leaking
+// apply IDs, actors, or configuration versions as unbounded labels.
+func (m *Metrics) ObserveManagedApplyFinalizationError() {
+	m.managedApplyFinalizationErrors.Inc()
 }
 
 // SetPendingRestart sets the pending-restart gauge to 1 when a managed staged
