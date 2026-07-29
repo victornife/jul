@@ -220,3 +220,23 @@
 - Security/concurrency sign-off pending: yes
 - Frontend sign-off pending: yes (baseline Console suite green; per-slice sign-off pending)
 - Closure report status: not started (bootstrap only; no audit item closed)
+
+---
+
+## Workstream acceptance records
+
+### Workstream acceptance record - WS01_MANAGED_LEDGER
+
+- Workstream: WS01_MANAGED_LEDGER - Managed apply identity and pending ledger lifecycle
+- Branch: audit/ws01-managed-ledger
+- Base SHA: e707c41587a335cc92b643068b1c46053eff2621
+- Final reviewed SHA: a1c7a3e11195477601b30a067e8a2ed0cf509b91
+- Independent reviewer verdict: APPROVE
+- Reviewer context/identifier: Independent APPROVE, 0 required blocker fixes; all 5 objectives verified on the real production path (pending-before-202 closed; boot-scoped IDs w/ strict grammar; secret-free projection, OwnerTokenID json:"-"; config:apply OR status:read fail-closed 401/503; registry no-downgrade + start/deadline preserved). Non-blocking: ClaimFinalization/ManagedApplyFinalizing tested-but-unwired, correctly staged for WS02.
+- Focused test evidence: go build ./...; go vet ./internal/admin/... ./internal/app/...; go test -count=1 ./internal/admin/... ./internal/app/... ./internal/config/... (all pass); five new WS01 tests PASS (vertical 202->terminal, no-downgrade, start/deadline preserved, disabled/expired-401, Blocked-503).
+- Race evidence: UNVERIFIED - go test -race unavailable locally (no cgo/C toolchain); deferred to CI race matrix at exact SHA.
+- Console evidence: no additional Console change in this acceptance; the Console client schema (deadline) and the prior green Console suite baseline remain intact from earlier slices; internal/admin/assets/dist not touched during acceptance.
+- Commands unavailable and deferred to CI: (1) -race on finalizer/waiter interleaving + registry concurrency; (2) exact-SHA CI green.
+- Non-blocking follow-ups: ClaimFinalization/ManagedApplyFinalizing tested-but-unwired, correctly staged for WS02.
+- Next workstream branch: audit/ws02-finalization
+- Next expected parent SHA: a1c7a3e11195477601b30a067e8a2ed0cf509b91
