@@ -807,6 +807,12 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 	if isUpdate {
 		msg = "Staged configuration updated for the next process restart; the live runtime is unchanged."
 	}
+	// §3.2 defect 8 / §3.8: a committed stage_restart is a persisted mutation,
+	// so its terminal result carries the same first-class persistence truth as
+	// the hot path before it is routed through completeManagedApply: Persisted
+	// is true (the candidate bytes are on disk), FinalDiskVersion is the staged
+	// candidate now on disk, and FinalServingVersion is the still-serving live
+	// version (unchanged, since a stage does not touch the running runtime).
 	result := ApplyResult{
 		ApplyID:               id,
 		OK:                    true,
@@ -815,6 +821,9 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 		PersistedVersion:      persistedVersion,
 		DesiredVersion:        desiredVersion,
 		ServingVersion:        liveVersion,
+		Persisted:             true,
+		FinalDiskVersion:      persistedVersion,
+		FinalServingVersion:   liveVersion,
 		PendingRestart:        c.plannedRestartStatus(),
 		Message:               msg,
 		StagedRestartIsUpdate: isUpdate,
