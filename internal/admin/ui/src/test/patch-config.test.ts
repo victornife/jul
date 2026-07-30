@@ -7,6 +7,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   patchConfig,
   applyPatchBatch,
+  fetchPatchCandidate,
   ConfigRejectedError,
   ConfigConflictError,
   ConfigAdminChangeError,
@@ -357,5 +358,80 @@ describe("applyPatchBatch", () => {
       ),
     );
     await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ConfigAdminChangeError);
+  });
+});
+
+describe("fetchPatchCandidate", () => {
+  const op = {
+    op: "route_set_target" as const,
+    listen: ":8080",
+    server_names: [],
+    match_type: "prefix",
+    path: "/api",
+    target: "http://new",
+  };
+
+  it("posts ops + base_version and returns the candidate TOML on success", async () => {
+    let seenUrl = "";
+    let seenBody = "";
+    mockFetch((url, init) => {
+      seenUrl = url;
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        candidate: 'listen = ":8080"\n',
+        base_version: "deadbeefdeadbeef",
+      });
+    });
+    const res = await fetchPatchCandidate([op], "deadbeefdeadbeef");
+    expect(seenUrl).toBe("/api/config/patch/candidate");
+    expect(JSON.parse(seenBody)).toMatchObject({
+      base_version: "deadbeefdeadbeef",
+      ops: [{ op: "route_set_target", target: "http://new" }],
+    });
+    expect(res.candidate).toContain('listen = ":8080"');
+    expect(res.base_version).toBe("deadbeefdeadbeef");
+  });
+
+  it("throws ApiError(403) when the token lacks config:raw", async () => {
+    mockFetch(() => json({ error: "forbidden" }, 403));
+    try {
+      await fetchPatchCandidate([op]);
+      expect.unreachable("expected a forbidden error");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(403);
+    }
+  });
+
+  it("throws ConfigConflictError with current_version on a 409 stale preview", async () => {
+    mockFetch(() =>
+      json(
+        {
+          ok: false,
+          conflict: true,
+          message: "The configuration changed since this edit was prepared; reload and try again.",
+          current_version: "abc123abc123abc1",
+        },
+        409,
+      ),
+    );
+    try {
+      await fetchPatchCandidate([op], "stalestalestale0");
+      expect.unreachable("expected a conflict");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigConflictError);
+      expect((err as ConfigConflictError).currentVersion).toBe("abc123abc123abc1");
+    }
+  });
+
+  it("throws ConfigRejectedError on a 400 invalid operation", async () => {
+    mockFetch(() =>
+      json(
+        { ok: false, message: "Operation 1 could not be applied; no change was made.", errors: [] },
+        400,
+      ),
+    );
+    await expect(fetchPatchCandidate([op])).rejects.toBeInstanceOf(ConfigRejectedError);
   });
 });

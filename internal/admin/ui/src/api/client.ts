@@ -1042,8 +1042,9 @@ export async function diffConfig(candidate: string): Promise<ConfigDiff> {
  * A single structured edit to the running configuration. Each op targets an
  * existing object (a route by listen + server_names + match type + path, or an
  * upstream by name) and the server applies it to the PARSED config model,
- * returning the candidate TOML and full diff for review — it does not persist.
- * The caller then applies the candidate through the existing applyConfig path.
+ * returning the full diff for review — it does not persist and withholds the
+ * candidate TOML (fetchPatchCandidate exposes it under config:raw). The caller
+ * then applies the ops atomically through applyPatchBatch.
  */
 export interface ServerLimitsPatch {
   client_max_body_size?: string;
@@ -1289,8 +1290,12 @@ export type ValidationIssue = z.infer<typeof ValidationIssueSchema>;
 export const PatchResultSchema = z.object({
   ok: z.literal(true),
   summary: z.string(),
-  // Candidate TOML is omitted from /api/config/patch/preview for operators who
-  // lack config:raw, so the UI must not depend on it for structured review.
+  // @deprecated The preview endpoints (/api/config/patch and
+  // /api/config/patch/preview) never return the candidate TOML — it is withheld
+  // so an operator without config:raw cannot extract secrets from a preview
+  // (N-01). This field is retained only for wire back-compat and must not be
+  // depended on for review; callers that need the real candidate use
+  // fetchPatchCandidate, which the server gates on config:raw.
   candidate: z.string().optional(),
   diff: ConfigDiffSchema,
   // base_version fingerprints the config this candidate was computed from. The
@@ -1305,8 +1310,10 @@ export const PatchResultSchema = z.object({
 export type PatchResult = z.infer<typeof PatchResultSchema>;
 
 /**
- * Applies a structured edit server-side and resolves with the candidate TOML +
- * diff for review. Rejects with ConfigRejectedError when the edit cannot be
+ * Previews a structured edit server-side and resolves with the diff for review.
+ * It does NOT return the candidate TOML (that is gated on config:raw via
+ * fetchPatchCandidate); the caller applies the ops atomically through
+ * applyPatchBatch. Rejects with ConfigRejectedError when the edit cannot be
  * applied (target not found, invalid op, last backend, …).
  */
 export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
@@ -1343,9 +1350,10 @@ export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
 /**
  * Previews a batch of structured patch operations server-side without
  * persisting. The ops are applied in order to a freshly-loaded config; the
- * returned candidate and diff represent the combined effect. This lets editors
- * that create compound objects (e.g. a new server plus its first location)
- * hand off a single preview to the ConfigPanel (F-06).
+ * returned diff represents the combined effect (the candidate TOML is withheld —
+ * see fetchPatchCandidate). This lets editors that create compound objects
+ * (e.g. a new server plus its first location) hand off a single preview to the
+ * ConfigPanel (F-06).
  */
 export async function patchConfigBatch(
   ops: ConfigPatch[],
@@ -1383,6 +1391,78 @@ export async function patchConfigBatch(
     );
   }
   return PatchResultSchema.parse(data);
+}
+
+// PatchCandidate is the config:raw-gated response of /api/config/patch/candidate:
+// the full candidate TOML that results from applying a batch of ops, plus the
+// base_version it was computed against. Unlike the preview endpoints this DOES
+// carry the candidate, so the source view can display the true proposed
+// configuration instead of the current persisted bytes (N-01, WS05).
+export const PatchCandidateSchema = z.object({
+  ok: z.literal(true),
+  candidate: z.string(),
+  base_version: z.string(),
+});
+export type PatchCandidate = z.infer<typeof PatchCandidateSchema>;
+
+/**
+ * fetchPatchCandidate returns the full candidate TOML produced by applying a
+ * batch of structured ops, from the config:raw-gated /api/config/patch/candidate
+ * endpoint. base_version echoes the fingerprint the candidate was computed
+ * against so the caller can detect a stale preview.
+ *
+ * It preserves the server's error contract as typed errors:
+ *   - 403 (the token lacks config:raw) and any other transport failure →
+ *     ApiError, carrying the HTTP status;
+ *   - 409 (the config changed since the edit was prepared) →
+ *     ConfigConflictError, carrying the current version so the caller can
+ *     recompute and retry;
+ *   - 400 (an op could not be applied) → ConfigRejectedError, carrying the
+ *     structured issues.
+ */
+export async function fetchPatchCandidate(
+  ops: ConfigPatch[],
+  baseVersion?: string,
+): Promise<PatchCandidate> {
+  const headers = new Headers();
+  headers.set("Accept", "application/json");
+  headers.set("Content-Type", "application/json");
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/config/patch/candidate", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ base_version: baseVersion, ops }),
+  });
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
+    const conflict = ConflictBodySchema.safeParse(data);
+    if (resp.status === 409 && conflict.success && conflict.data.conflict) {
+      throw new ConfigConflictError(
+        conflict.data.message ??
+          "The configuration changed since this edit was prepared; reload and try again.",
+        conflict.data.current_version,
+      );
+    }
+    const rejected = ValidationResultSchema.safeParse(data);
+    if (resp.status === 400 && rejected.success) {
+      throw new ConfigRejectedError(
+        rejected.data.message ?? "The edit was rejected.",
+        rejected.data.errors ?? [],
+      );
+    }
+    let msg = `${String(resp.status)} ${resp.statusText}`;
+    const body = data as { error?: string } | null;
+    if (body?.error) msg = body.error;
+    throw new ApiError("/config/patch/candidate", resp.status, msg, parseRetryAfter(resp));
+  }
+  return PatchCandidateSchema.parse(data);
 }
 
 // ── Validate / Apply / Wizard (write flows) ──────────────────────────────────

@@ -411,7 +411,6 @@ export function RouteEditor({
         ops,
         baseVersion: res.base_version,
         previewDiff: res.diff,
-        candidate: res.candidate,
       });
       if (onReview) {
         onReview();

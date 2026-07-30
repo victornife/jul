@@ -32,7 +32,6 @@ export function useRunPatch(): {
           ops: [patch],
           baseVersion: res.base_version,
           previewDiff: res.diff,
-          candidate: res.candidate,
         });
         void navigate("/config");
       } catch (err) {

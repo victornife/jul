@@ -272,7 +272,6 @@ export function AppEditor({ initial, existingRoutes, onClose }: AppEditorProps) 
         ops,
         baseVersion: res.base_version,
         previewDiff: res.diff,
-        candidate: res.candidate,
       });
       void navigate("/config");
     } catch (err) {
