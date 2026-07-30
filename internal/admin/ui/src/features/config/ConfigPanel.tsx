@@ -27,6 +27,7 @@ import {
 } from "@/api/client.ts";
 import { deriveApplyOutcome, type ApplyOutcome } from "@/lib/applyOutcome.ts";
 import { MISSING_GRACE_ATTEMPTS } from "@/lib/useManagedApplyRecord.ts";
+import { deriveFinalizationAdvisory } from "@/lib/finalizationAdvisory.ts";
 import { useConfigMutationMachine } from "@/features/config/useConfigMutationMachine.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
@@ -174,6 +175,14 @@ const POLL_SLOW_INTERVAL_MS = 2000;
 const POLL_FAST_POLLS = 10;
 const POLL_MAX_ATTEMPTS = 25;
 const LEGACY_OVERVIEW_MAX_POLLS = 3;
+
+// formatLocalTime renders a server-provided ISO deadline in the operator's local
+// timezone for the deadline-aware finalization display (AC-08), falling back to
+// the raw string if it is unparseable so a bad timestamp never blanks the UI.
+function formatLocalTime(iso: string): string {
+  const parsed = new Date(iso);
+  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleString();
+}
 
 export function ConfigPanel() {
   const navigate = useNavigate();
@@ -658,6 +667,19 @@ export function ConfigPanel() {
     applyRecord.data?.state !== "terminal" &&
     (applyRecord.data === null || postApplyPollAttemptsRef.current >= POLL_MAX_ATTEMPTS);
 
+  // AC-14: finalization provenance is advisory, never readiness-affecting. It is
+  // derived from the retained full terminal record (Slice 02) and rendered as a
+  // non-blocking banner alongside — never replacing — the apply outcome. A
+  // committed apply can be ok=true while its history/finalization sidecar
+  // degraded; that is surfaced here, never as an apply failure.
+  const finalizationAdvisory = deriveFinalizationAdvisory(appliedState?.terminalRecord ?? null);
+  // AC-08: while a saved-not-live apply is still being finalized, tell the
+  // operator when the result is expected. The absolute deadline comes from the
+  // exact-ID ledger record (pending 202 records carry it); it is dropped once
+  // the poll expires so the UI switches to the past-deadline message instead.
+  const pendingDeadline =
+    pendingApplyID !== undefined && !pollingExpired ? applyRecord.data?.deadline : undefined;
+
   useEffect(() => {
     if (managedApplyID === undefined || !appliedState) return;
     const record = applyRecord.data;
@@ -1062,22 +1084,86 @@ export function ConfigPanel() {
               {...(appliedCapabilities ? { capabilities: appliedCapabilities } : {})}
             />
           )}
+          {/* AC-08: deadline-aware finalization hint while a saved-not-live apply
+              is still resolving. This is neutral status, not a success claim. */}
+          {pendingApplyID !== undefined && !pollingExpired && pendingDeadline && (
+            <p className="text-xs text-jul-muted">
+              Finalization expected by {formatLocalTime(pendingDeadline)}.
+            </p>
+          )}
+          {/* AC-14: finalization/audit provenance advisory. Non-blocking and
+              independent of the apply outcome above — never a success or failure
+              claim, only a heads-up that recovery/audit finalization degraded. */}
+          {finalizationAdvisory && (
+            <div
+              role="status"
+              className="rounded-md border border-jul-warning/40 bg-jul-warning/5 p-3 text-sm"
+            >
+              <p className="font-medium text-jul-warning">{finalizationAdvisory.title}</p>
+              {finalizationAdvisory.messages.map((m, i) => (
+                <p key={`fin-${String(i)}`} className="mt-1 text-xs text-jul-muted">
+                  {m}
+                </p>
+              ))}
+              {finalizationAdvisory.historySnapshotID && (
+                <p className="mt-1 text-xs text-jul-muted">
+                  History snapshot:{" "}
+                  <span className="font-mono text-jul-text">
+                    {finalizationAdvisory.historySnapshotID}
+                  </span>
+                </p>
+              )}
+            </div>
+          )}
           {pollingExpired && applied?.reload?.outcome === "saved_not_live" && (
             <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-sm">
               <p className="font-medium text-jul-warning">Final result still unavailable</p>
               <p className="mt-1 text-xs text-jul-muted">
-                Polling stopped without observing the matching terminal result. Check Runtime
-                Overview before making another configuration change.
+                The transaction result was not available by its deadline. This is not a success
+                confirmation. Check Runtime Overview before making another configuration change.
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  void navigate("/");
-                }}
-                className="mt-2 rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
-              >
-                Open Runtime Overview
-              </button>
+              {pendingApplyID && (
+                <p className="mt-1 text-xs text-jul-muted">
+                  Apply ID: <span className="font-mono text-jul-text">{pendingApplyID}</span>
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Re-check the exact-ID ledger record without inventing a new
+                    // operation, so the original result is preserved.
+                    postApplyPollAttemptsRef.current = 0;
+                    immediateRecordMissesRef.current = 0;
+                    void applyRecord.refetch();
+                  }}
+                  className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+                >
+                  Retry status
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigate("/");
+                  }}
+                  className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+                >
+                  Open Runtime Overview
+                </button>
+                {!rawForbidden && appliedState && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Reload the editor from the authoritative on-disk config
+                      // without clearing the original apply result.
+                      refreshEditorAfterFailure(appliedState.operationID);
+                    }}
+                    className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+                  >
+                    Reload authoritative configuration
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {patchReconcileError && appliedState?.wasPatch && (

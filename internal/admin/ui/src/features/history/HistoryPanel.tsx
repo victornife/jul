@@ -19,6 +19,10 @@ import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { EmptyState, Loading } from "@/components/ui.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
+import {
+  deriveFinalizationAdvisory,
+  type FinalizationAdvisory,
+} from "@/lib/finalizationAdvisory.ts";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${String(n)} B`;
@@ -31,23 +35,6 @@ function formatTime(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-// finalizationAdvisory renders the AC-14 finalization provenance of a terminal
-// managed apply as a single advisory sentence, or null when the sidecar
-// finalized cleanly. These fields are orthogonal to reload success/failure: a
-// committed (ok=true) rollback can still have degraded its history sidecar, and
-// that must be surfaced as an advisory — never as an apply failure and never as
-// a readiness signal.
-function finalizationAdvisory(o: {
-  readonly history_error?: string | undefined;
-  readonly finalization_error?: string | undefined;
-}): string | null {
-  const parts: string[] = [];
-  if (o.history_error)
-    parts.push(`The configuration history snapshot degraded: ${o.history_error}.`);
-  if (o.finalization_error) parts.push(`Finalization reported: ${o.finalization_error}.`);
-  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 function SnapshotViewer({ id, onClose }: { readonly id: string; readonly onClose: () => void }) {
@@ -220,7 +207,7 @@ export function HistoryPanel() {
   const [degradedNotice, setDegradedNotice] = useState<string | null>(null);
   // AC-14: advisory finalization/history-sidecar provenance, orthogonal to the
   // reload outcome. Rendered as a non-blocking banner. Never affects readiness.
-  const [finalizationNotice, setFinalizationNotice] = useState<string | null>(null);
+  const [finalizationNotice, setFinalizationNotice] = useState<FinalizationAdvisory | null>(null);
   const rollbackAttemptRef = useRef(0);
   const rollbackPollAttemptsRef = useRef(0);
 
@@ -326,7 +313,7 @@ export function HistoryPanel() {
     // carries it, including on a fully-live rollback — it is advisory and
     // independent of the reload outcome (a committed rollback can be ok=true
     // while its history sidecar degraded). Never readiness-affecting.
-    setFinalizationNotice(finalizationAdvisory(record));
+    setFinalizationNotice(deriveFinalizationAdvisory(record));
     const result = record.result;
     if (result.ok && result.reload?.outcome === "applied_live") {
       setConfirmId(null);
@@ -380,7 +367,11 @@ export function HistoryPanel() {
               Rollback applied — degraded reload
             </p>
             <p className="text-xs text-jul-muted">{degradedNotice}</p>
-            {finalizationNotice && <p className="text-xs text-jul-muted">{finalizationNotice}</p>}
+            {finalizationNotice?.messages.map((m, i) => (
+              <p key={`fin-degraded-${String(i)}`} className="text-xs text-jul-muted">
+                {m}
+              </p>
+            ))}
           </div>
           <button
             onClick={() => {
@@ -398,8 +389,20 @@ export function HistoryPanel() {
       {!degradedNotice && finalizationNotice && (
         <div className="flex items-start justify-between gap-4 rounded-lg border border-jul-warning/40 bg-jul-warning/5 p-4">
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-jul-warning">Finalization advisory</p>
-            <p className="text-xs text-jul-muted">{finalizationNotice}</p>
+            <p className="text-sm font-semibold text-jul-warning">{finalizationNotice.title}</p>
+            {finalizationNotice.messages.map((m, i) => (
+              <p key={`fin-${String(i)}`} className="text-xs text-jul-muted">
+                {m}
+              </p>
+            ))}
+            {finalizationNotice.historySnapshotID && (
+              <p className="text-xs text-jul-muted">
+                History snapshot:{" "}
+                <span className="font-mono text-jul-text">
+                  {finalizationNotice.historySnapshotID}
+                </span>
+              </p>
+            )}
           </div>
           <button
             onClick={() => {

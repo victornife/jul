@@ -807,6 +807,13 @@ describe("ConfigPanel apply flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
     expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
     expect(await screen.findByText("Final result still unavailable")).toBeInTheDocument();
+    // The expiry copy is explicit that this is NOT a success confirmation, names
+    // the exact apply id, and offers a re-check without clearing the result.
+    expect(
+      screen.getByText(/was not available by its deadline\. This is not a success confirmation/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("rl_8")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry status" })).toBeInTheDocument();
     expect(screen.queryByText("Applied and live")).not.toBeInTheDocument();
   });
 
@@ -961,6 +968,101 @@ describe("ConfigPanel apply flow", () => {
     // The banner remains the live outcome after the terminal record merges.
     expect(await screen.findByText("Applied and live")).toBeInTheDocument();
   });
+
+  it("shows the deadline hint while pending and a finalization advisory once terminal", async () => {
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
+      }
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/apply?base_version=v1") {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_fin",
+              mode: "hot",
+              version: "v2",
+              persisted: true,
+              reload: {
+                id: "rl_fin",
+                outcome: "saved_not_live",
+                persisted: true,
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      if (input === "/api/config/applies/rl_fin") {
+        recordReads += 1;
+        // AC-08: the pending record carries the absolute deadline used for the
+        // "Finalization expected by" hint; the terminal record then carries
+        // finalization provenance (AC-14) that must render as an advisory.
+        if (recordReads === 1) {
+          return Promise.resolve(
+            json(
+              {
+                id: "rl_fin",
+                state: "pending",
+                operation: "config.apply",
+                deadline: "2026-07-30T12:00:00Z",
+                result: { ok: true, apply_id: "rl_fin", mode: "hot" },
+              },
+              202,
+            ),
+          );
+        }
+        return Promise.resolve(
+          json({
+            id: "rl_fin",
+            state: "terminal",
+            operation: "config.apply",
+            history_snapshot_id: "snap-77",
+            finalization_error: "ledger append degraded",
+            result: {
+              ok: true,
+              apply_id: "rl_fin",
+              mode: "hot",
+              reload: { id: "rl_fin", outcome: "applied_live", published: true },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    // While pending, the deadline-aware hint is shown (not a success claim).
+    expect(await screen.findByText(/Finalization expected by/)).toBeInTheDocument();
+    // Once the terminal record merges, the finalization advisory renders — never
+    // as an apply failure — and the history snapshot id is surfaced.
+    expect(
+      await screen.findByText("Configuration applied, but recovery/audit finalization degraded"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Managed apply finalization degraded: ledger append degraded"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("snap-77")).toBeInTheDocument();
+    // The hint disappears once the transaction is terminal.
+    expect(screen.queryByText(/Finalization expected by/)).not.toBeInTheDocument();
+  });
 });
 
 describe("HistoryPanel rollback flow", () => {
@@ -1106,6 +1208,73 @@ describe("HistoryPanel rollback flow", () => {
       { timeout: 4000 },
     );
     expect(recordReads).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders the shared finalization advisory after a live rollback whose sidecar degraded", async () => {
+    // AC-14: a fully-live rollback (terminal, result.ok=true, applied_live) whose
+    // finalization sidecar degraded must surface the shared advisory — never as a
+    // rollback failure and never as a readiness signal.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input.startsWith("/api/config/rollback")) {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_fadv",
+              mode: "hot",
+              reload: {
+                id: "rl_fadv",
+                outcome: "saved_not_live",
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      if (input === "/api/config/applies/rl_fadv") {
+        recordReads += 1;
+        return Promise.resolve(
+          json({
+            id: "rl_fadv",
+            state: "terminal",
+            operation: "config.rollback",
+            history_snapshot_id: "snap-rb",
+            history_error: "snapshot write failed",
+            result: {
+              ok: true,
+              apply_id: "rl_fadv",
+              mode: "hot",
+              reload: { id: "rl_fadv", outcome: "applied_live" },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    expect(
+      await screen.findByText("Configuration applied, but recovery/audit finalization degraded"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Configuration history degraded: snapshot write failed"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("snap-rb")).toBeInTheDocument();
+    expect(recordReads).toBeGreaterThanOrEqual(1);
   });
 
   it("closes the dialog and shows a persistent degraded banner without a retry action", async () => {
