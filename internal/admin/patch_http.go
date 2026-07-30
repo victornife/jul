@@ -302,6 +302,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationPatchApply)
+	s.bindManagedApplyDeadline(&reqCtx)
 	// Prefer the new correlated apply path; fall back to the legacy
 	// WriteConfigRaw closure for tests and callers that have not migrated.
 	applyConfig := s.deps.ApplyConfig
@@ -400,7 +401,9 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		}
 		summaries = append(summaries, summary)
 	}
-	effectiveCandidate, candidateErr := prepareMutationCandidate(&reqCtx, cfg)
+	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+	defer cancel()
+	effectiveCandidate, candidateErr := prepareMutationCandidateContext(opCtx, &reqCtx, cfg)
 	if candidateErr != nil {
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{OK: false, Message: "The configuration contains errors.", Errors: humanizeErr(candidateErr.Error())})
 		return

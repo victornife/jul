@@ -390,9 +390,11 @@ func restartRequiredMessage(err error) string {
 // finalizer for attribution in the terminal audit event (H-05).
 func applyRequestContext(r *http.Request, op ApplyOperation) ApplyRequestContext {
 	ctx := ApplyRequestContext{
-		Operation: op,
-		Resource:  "config",
-		SourceIP:  adminClientIP(r),
+		Operation:      op,
+		Resource:       "config",
+		SourceIP:       adminClientIP(r),
+		StartedAt:      time.Now().UTC(),
+		RequestContext: r.Context(),
 	}
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
 		ctx.Actor = id.Principal
@@ -408,6 +410,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationConfigApply)
+	s.bindManagedApplyDeadline(&reqCtx)
 	// Prefer the new correlated apply path; fall back to the legacy
 	// WriteConfigRaw closure for tests and callers that have not migrated.
 	applyRaw := s.deps.ApplyConfigRaw
@@ -486,7 +489,9 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	candidate, parseErr := config.Parse(body)
 	var effectiveCandidate *config.Candidate
 	if parseErr == nil && candidate != nil {
-		effectiveCandidate, parseErr = prepareMutationCandidate(&reqCtx, candidate)
+		opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+		defer cancel()
+		effectiveCandidate, parseErr = prepareMutationCandidateContext(opCtx, &reqCtx, candidate)
 	}
 
 	// Object-level admin:manage guard (P3-02 / Wave 1): any change in the

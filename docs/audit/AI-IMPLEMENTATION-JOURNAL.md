@@ -447,4 +447,32 @@
 ### Next workstream
 
 - WS03_ABSOLUTE_DEADLINE on branch `audit/ws03-absolute-deadline`, created from the accepted cumulative WS02 head `d343694efe660a3b5e86be94c6f9fdd34dcebd26` (never from `origin/latest`). This handoff commit is WS03's base. Next prompt: `/jul-audit-ws03-s01`.
+
+---
+
+## WS03_ABSOLUTE_DEADLINE / Slice 01 — handler timing and context-aware candidate preparation
+
+- Parent SHA: `4e9f8077b613cb1f803afd8a1b21dcd9b828ccf6`
+- Resulting SHA: recorded in the excluded continuity state after commit (not embeddable in the committed entry).
+- Branch: `audit/ws03-absolute-deadline`
+- Agent role/context: GitHub Copilot (Claude Opus 4.8), Jul Audit Implementer mode; single-slice implementation.
+- Files changed:
+  - `internal/admin/server.go`: added `ApplyRequestContext.RequestContext context.Context` (`json:"-"`); replaced `prepareMutationCandidate` with `prepareMutationCandidateContext` (bounds secret resolution under an operation context); added `(*Server).bindManagedApplyDeadline` (derives the single absolute deadline from the serving reload_timeout at admission) and `managedApplyPrePersistenceContext` (bounded/cancel-only pre-persistence context); wired both legacy handlers (`handleConfigRaw`, `handleConfigSettings`).
+  - `internal/admin/api.go`: `applyRequestContext` now binds `StartedAt` and `RequestContext` at admission; `handleConfigApply` binds the deadline and resolves the candidate under the bounded context.
+  - `internal/admin/patch_http.go`: `handleConfigPatchApply` binds the deadline and resolves under the bounded context.
+  - `internal/admin/api_history.go`: `rollbackToSnapshot` binds the deadline and resolves under the bounded context.
+  - `internal/app/config_apply.go`: `ApplyRaw` clears `ctx.RequestContext` alongside `Baseline`/`Candidate` so the async finalizer copy never retains the request-scoped context.
+  - `internal/admin/managed_apply_deadline_test.go`: new focused HTTP-path tests.
+- Production path verified: HTTP admission (`applyRequestContext`) → `bindManagedApplyDeadline` (serving reload_timeout, R15-01) → `managedApplyPrePersistenceContext` → `prepareMutationCandidateContext` → `config.NewCandidateContext` → coordinator `ApplyConfigRaw`/`ApplyConfig` (reqCtx carries StartedAt/Deadline/RequestContext/Candidate). Verified for all five managed mutation entry points: config apply, legacy raw, settings, structured-patch apply, and rollback.
+- Behavior implemented: one absolute deadline is derived once at admission from the currently serving reload_timeout and carried on the request context; handler-side candidate secret resolution is bounded by that deadline and by client cancellation; the request context is never serialized and is cleared before any async audit/ledger copy.
+- Tests added: `TestManagedApplyBindsAbsoluteDeadlineFromServingReloadTimeout` (HTTP integration — proves Deadline = StartedAt + serving reload_timeout with a divergent candidate reload_timeout, RequestContext carried, candidate resolved); `TestManagedApplyDeadlineOmittedWithoutServingTimeout` (HTTP integration — proves StartedAt bound but no deadline when serving reload_timeout is not positive).
+- Commands run: `go test -count=1 ./internal/admin/... ./internal/app/... ./internal/config/...` (all ok); `go vet ./internal/admin/... ./internal/app/...` (ok); `gofmt -l` (clean); `git diff --check` (clean).
+- Commands unavailable: `go test -race` — `CGO_ENABLED=0`, no C toolchain; deferred to the exact-SHA CI race matrix.
+- Deviations: none — helper names, signatures, and wiring follow the runbook skeleton; `config.NewCandidateContext` already existed and was reused.
+- Self-review findings: all three new helpers are wired at every call site (no unwired helper); no error swallowing (candidate errors propagate as before); no duplicate persistence-side truth (coordinator deadline derivation unchanged, Slice 02 scope); no test weakened; `RequestContext` is `json:"-"` and cleared in the async copy (no secret/context exposure); struct comment updated.
+- Independent review status: pending.
+- Reviewer blockers: none recorded.
+- Blocker-fix SHA: n/a.
+- Accepted SHA: pending independent review and exact-SHA CI.
+- Next execution file: `/jul-audit-ws03-s02`.
 </content>

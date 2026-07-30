@@ -246,6 +246,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	preparedCandidate := ctx.Candidate
 	ctx.Baseline = nil // do not retain raw configuration in the audit callback context
 	ctx.Candidate = nil
+	ctx.RequestContext = nil // do not retain the request-scoped context in the async finalizer copy
 	baseline, err := c.loadMutationBaseline(baselineHint)
 	if err != nil {
 		return ApplyResult{

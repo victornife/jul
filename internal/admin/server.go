@@ -91,6 +91,13 @@ type ApplyRequestContext struct {
 	// zero when no bounded deadline applies.
 	StartedAt time.Time
 	Deadline  time.Time
+
+	// RequestContext is the initiating admin HTTP request's context. It bounds
+	// candidate resolution and other pre-persistence work to the caller's
+	// absolute managed-apply deadline (AC-08) and propagates client cancellation
+	// before anything is persisted. It is never serialized and is cleared before
+	// the coordinator retains any async audit/ledger copy.
+	RequestContext context.Context `json:"-"`
 }
 
 // MutationBaseline is the authoritative raw-first snapshot for a configuration
@@ -104,16 +111,68 @@ type MutationBaseline struct {
 	Exists  bool
 }
 
-func prepareMutationCandidate(ctx *ApplyRequestContext, raw *config.Config) (*config.Candidate, error) {
+// prepareMutationCandidateContext resolves raw into an immutable candidate under
+// operationCtx so a slow or blocked secret provider (e.g. a ${file:...} read on
+// a stalled mount) is bounded by the caller's absolute managed-apply deadline
+// (AC-08). The resolved candidate is stored on reqCtx for the coordinator to
+// reuse without re-resolving.
+func prepareMutationCandidateContext(operationCtx context.Context, reqCtx *ApplyRequestContext, raw *config.Config) (*config.Candidate, error) {
 	if raw == nil {
 		return nil, errors.New("candidate is nil")
 	}
-	candidate, err := config.NewCandidate(raw)
+	candidate, err := config.NewCandidateContext(operationCtx, raw)
 	if err != nil {
 		return nil, err
 	}
-	ctx.Candidate = candidate
+	reqCtx.Candidate = candidate
 	return candidate, nil
+}
+
+// bindManagedApplyDeadline derives the single absolute transaction deadline for
+// a managed mutation from the currently serving reload_timeout at admission
+// (AC-08). The deadline is taken from the live effective config so a candidate
+// that changes reload_timeout governs only the next apply, never the one that
+// submits it (R15-01). It is a no-op when a deadline is already bound, no live
+// snapshot is available, or the serving reload_timeout is not positive.
+func (s *Server) bindManagedApplyDeadline(ctx *ApplyRequestContext) {
+	if ctx == nil || !ctx.Deadline.IsZero() {
+		return
+	}
+	if ctx.StartedAt.IsZero() {
+		ctx.StartedAt = time.Now().UTC()
+	}
+	if s.deps.LiveSnapshot == nil {
+		return
+	}
+	live := s.deps.LiveSnapshot()
+	if live.EffectiveConfig == nil {
+		return
+	}
+	timeout := live.EffectiveConfig.Global.ReloadTimeout.Std()
+	if timeout <= 0 {
+		return
+	}
+	ctx.Deadline = ctx.StartedAt.Add(timeout)
+}
+
+// managedApplyPrePersistenceContext derives the bounded context that caps all
+// handler-side pre-persistence work (candidate secret resolution and effective
+// authorization preparation) with the single absolute deadline bound at
+// admission (AC-08) and propagates client cancellation. The returned cancel
+// MUST be called by the caller. A zero deadline yields a cancel-only context so
+// behaviour is unchanged for callers without a bounded deadline.
+func managedApplyPrePersistenceContext(reqCtx ApplyRequestContext, fallback context.Context) (context.Context, context.CancelFunc) {
+	base := reqCtx.RequestContext
+	if base == nil {
+		base = fallback
+	}
+	if base == nil {
+		base = context.Background()
+	}
+	if !reqCtx.Deadline.IsZero() {
+		return context.WithDeadline(base, reqCtx.Deadline)
+	}
+	return context.WithCancel(base)
 }
 
 func (s *Server) bindMutationRuntime(ctx *ApplyRequestContext) *config.Config {
@@ -888,11 +947,14 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationLegacyRaw)
+	s.bindManagedApplyDeadline(&reqCtx)
 	reqCtx.Baseline = &state
 	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
 	var effectiveNext *config.Candidate
 	if next != nil {
-		effectiveNext, parseErr = prepareMutationCandidate(&reqCtx, next)
+		opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+		defer cancel()
+		effectiveNext, parseErr = prepareMutationCandidateContext(opCtx, &reqCtx, next)
 	}
 
 	// Object-level guard: a caller with config:apply still must hold admin:manage
@@ -1011,6 +1073,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationSettings)
+	s.bindManagedApplyDeadline(&reqCtx)
 	reqCtx.Baseline = &state
 	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
 	cfg := state.Config
@@ -1048,7 +1111,9 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	effectiveCandidate, candidateErr := prepareMutationCandidate(&reqCtx, candidate)
+	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+	defer cancel()
+	effectiveCandidate, candidateErr := prepareMutationCandidateContext(opCtx, &reqCtx, candidate)
 	if candidateErr != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": candidateErr.Error()})
 		return

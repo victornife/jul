@@ -83,9 +83,12 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 		return ConfigApplyResult{}, http.StatusServiceUnavailable, fmt.Errorf("cannot get current config state: %w", err)
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationRollback)
+	s.bindManagedApplyDeadline(&reqCtx)
 	reqCtx.Baseline = &state
 	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
-	effectiveNext, err := prepareMutationCandidate(&reqCtx, next)
+	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+	defer cancel()
+	effectiveNext, err := prepareMutationCandidateContext(opCtx, &reqCtx, next)
 	if err != nil {
 		return ConfigApplyResult{}, http.StatusBadRequest, err
 	}
