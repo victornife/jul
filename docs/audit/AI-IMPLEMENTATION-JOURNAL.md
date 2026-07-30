@@ -564,4 +564,27 @@
 - Blocker-fix SHA: n/a.
 - Accepted SHA: pending independent review and exact-SHA CI.
 - Next execution file: `/jul-audit-review-ws03`.
+
+---
+
+## WS03_ABSOLUTE_DEADLINE / Blocker fix — regenerate stale embedded Console bundle
+
+- Parent SHA: `afa24d2a71e76adf418f0eab6c926620bcf0ce61`
+- Resulting SHA: recorded in the excluded continuity state after commit (not embeddable in the committed entry).
+- Branch: `audit/ws03-absolute-deadline`
+- Agent role/context: GitHub Copilot (Claude Opus 4.8), Jul Audit Blocker Fixer mode; single bounded blocker-fix commit. No production Go or Console source changed.
+- Review addressed: `.github/copilot-audit-state/reviews/WS03_ABSOLUTE_DEADLINE.md` — Blocker 1 (and only Blocker 1).
+- Blocker 1 (stale embedded Console bundle): FIXED. Slice 03 changed `internal/admin/ui/src/api/client.ts`, `internal/admin/ui/src/lib/applyOutcome.ts`, and `internal/admin/ui/src/features/config/ConfigPanel.tsx` (defects 7 and 8), but the git-tracked, `-tags console`-embedded `internal/admin/assets/dist/**` was never regenerated, so a `go build -tags console` binary served the old bundle and the CI drift guard would fail at head. Ran the source gates (typecheck, lint, test) then `pnpm --dir internal/admin/ui run build`; the rebuild renamed `assets/index-Dy4JYU3L.js` → `index-DTVTuTBo.js` and `assets/CodeEditor-BLPwjrUU.js` → `CodeEditor-CKCqIv9n.js` (plus their `.map`s and `index.html`), exactly the divergence the review predicted. The new content-addressed `index-DTVTuTBo.js` now embeds the defect 7/8 source, so the shipped Console classifies the top-level `timed_out_phase` 504 as `"timeout"` and renders the `preflight-timeout` outcome.
+- Production path verified: `go build -tags "console" ./cmd/jul` succeeds with the regenerated embedded assets. Reproduced the CI "drift guard (source profile only)" comparison locally: the committed asset filename set (excluding `*.map`) after this commit equals a fresh `pnpm run build` output set — clean. `git diff --check --cached` on the staged assets is clean.
+- Files changed: `internal/admin/assets/dist/index.html`, `internal/admin/assets/dist/assets/index-DTVTuTBo.js`(+`.map`), `internal/admin/assets/dist/assets/CodeEditor-CKCqIv9n.js`(+`.map`) — replacing the stale `index-Dy4JYU3L.js`/`CodeEditor-BLPwjrUU.js` variants. Content-identical, line-ending-only churn in `index-BXqB6tqy.css`, `query-BdSLN-Ub.js`, and `vendor-DB0PqBAn.js` was normalized away by Git (no hash change, not committed). Generated bundle only — no source edited by hand.
+- Tests added: none (regenerated-artifact blocker; the defect 7/8 behavior is already proven by the Slice 03 Console tests `client-write.test.ts` "classifies a pre-persistence preflight timeout 504 as kind timeout" and `apply-outcome.test.tsx` preflight-timeout cases, which run against the same source now embedded).
+- Commands run: `pnpm --dir internal/admin/ui run typecheck` (clean); `pnpm --dir internal/admin/ui run lint` (clean); `pnpm --dir internal/admin/ui run test` (37 files, 454 tests pass); `pnpm --dir internal/admin/ui run build` (rebuilt bundle; new content hashes as above); `go build -tags "console" ./cmd/jul` (ok); local drift-guard reproduction (committed==built filename set, `*.map` ignored — clean); `git diff --check --cached` (clean).
+- Commands unavailable: exact-SHA multi-OS CI not run locally (the drift-guard failure was reproduced and now shown clean locally instead); `go test -race` still `-race requires cgo` under `CGO_ENABLED=0`.
+- Deviations: none — the fix is exactly the review's required remediation (rebuild source gates → build → commit regenerated assets → confirm console build + drift guard) and touches nothing outside `internal/admin/assets/dist`.
+- Self-review findings: only Blocker 1 addressed; no non-blocking suggestions implemented; no source (Go/TS) changed; no manual edits to the generated bundle; no secrets/TOML/token material in the assets; the source gates were run before rebuilding per the audit instructions.
+- Independent review status: pending (re-review of WS03).
+- Reviewer blockers: Blocker 1 remains recorded until the re-review clears it.
+- Blocker-fix SHA: recorded in the excluded continuity state.
+- Accepted SHA: pending re-review and exact-SHA CI.
+- Next execution file: `/jul-audit-review-ws03`.
 </content>
