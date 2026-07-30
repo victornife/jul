@@ -1584,26 +1584,38 @@ export const ManagedApplyRecordSchema = z.object({
 });
 export type ManagedApplyRecord = z.infer<typeof ManagedApplyRecordSchema>;
 
+// ManagedApplyLookup is the discriminated result of an exact-ID ledger lookup.
+// It replaces the ambiguous `ManagedApplyRecord | null`: a `missing` result (the
+// server has no record for the ID, HTTP 404) is a distinct, explicit case that a
+// caller must handle as "keep waiting or expire", never as an implicit success.
+// Modeling absence as a variant instead of `null` removes the risk that a `null`
+// is silently coerced into a truthy/terminal branch.
+export type ManagedApplyLookup =
+  | { readonly kind: "record"; readonly record: ManagedApplyRecord }
+  | { readonly kind: "missing" };
+
 /**
  * fetchManagedApply retrieves the terminal-or-pending ledger record for an exact
  * apply ID (AC-09). It resolves with:
- *   - the parsed record for a terminal (200) or pending (202) transaction;
- *   - `null` when the server has no record for the ID (404) — a missing record
- *     is NEVER treated as a success by callers; polling either keeps waiting or
- *     expires without ever claiming the new configuration is serving.
+ *   - `{ kind: "record", record }` for a terminal (200) or pending (202)
+ *     transaction;
+ *   - `{ kind: "missing" }` when the server has no record for the ID (404) — a
+ *     missing record is NEVER treated as a success by callers; polling either
+ *     keeps waiting or expires without ever claiming the new configuration is
+ *     serving.
  * It rejects with ApiError for a malformed ID (400) or any other transport
  * failure. The endpoint is always Cache-Control: no-store on the server; this
  * client sets no-store on the request too so an intermediary cannot serve a
  * stale pending record after the transaction has finalized.
  */
-export async function fetchManagedApply(id: string): Promise<ManagedApplyRecord | null> {
+export async function fetchManagedApply(id: string): Promise<ManagedApplyLookup> {
   const headers = new Headers();
   headers.set("Accept", "application/json");
   headers.set("Cache-Control", "no-store");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch(`/api/config/applies/${encodeURIComponent(id)}`, { headers });
-  if (resp.status === 404) return null;
+  if (resp.status === 404) return { kind: "missing" };
   let data: unknown = null;
   try {
     data = (await resp.json()) as unknown;
@@ -1619,7 +1631,7 @@ export async function fetchManagedApply(id: string): Promise<ManagedApplyRecord 
     if (body?.error) msg = body.error;
     throw new ApiError(`/config/applies/${id}`, resp.status, msg, parseRetryAfter(resp));
   }
-  return ManagedApplyRecordSchema.parse(data);
+  return { kind: "record", record: ManagedApplyRecordSchema.parse(data) };
 }
 
 function classifyApplyFailure(path: string, status: number, data: unknown): never {

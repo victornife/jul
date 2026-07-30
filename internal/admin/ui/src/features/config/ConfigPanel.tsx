@@ -603,7 +603,10 @@ export function ConfigPanel() {
     queryKey: ["config-apply-record", pendingApplyID],
     queryFn: async () => {
       postApplyPollAttemptsRef.current += 1;
-      return fetchManagedApply(pendingApplyID as string);
+      const lookup = await fetchManagedApply(pendingApplyID as string);
+      // A missing (404) record maps to null so the existing terminal/expiry
+      // logic below is unchanged; a missing record is never a success.
+      return lookup.kind === "record" ? lookup.record : null;
     },
     enabled: pendingApplyID !== undefined,
     retry: false,

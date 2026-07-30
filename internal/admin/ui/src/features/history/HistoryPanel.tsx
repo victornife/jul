@@ -290,7 +290,11 @@ export function HistoryPanel() {
     queryFn: async () => {
       rollbackPollAttemptsRef.current += 1;
       if (rollbackPollAttemptsRef.current >= 20) setPollingExpired(true);
-      return pendingApplyID ? fetchManagedApply(pendingApplyID) : null;
+      if (!pendingApplyID) return null;
+      const lookup = await fetchManagedApply(pendingApplyID);
+      // A missing (404) record maps to null so the terminal-only resolution
+      // below keeps waiting; a missing record is never mistaken for success.
+      return lookup.kind === "record" ? lookup.record : null;
     },
     enabled: pendingApplyID !== null,
     retry: false,
