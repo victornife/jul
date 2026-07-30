@@ -57,7 +57,7 @@ sign-offs below remain outstanding.
 | AC-13 | Console | Reopened → remediated | WS06_HISTORY_OBSERVABILITY · `970cfee1` | The ConfigPanel mutation state machine is a single authoritative reducer + binding hook (generation-guarded results, per-ID terminal-merge gating, admin-confirmation scoping); duplicate mutation-machine truth removed. | `internal/admin/ui/src/test/use-config-mutation-machine.test.tsx` |
 | AC-14 | apply coordinator + Console | Reopened → remediated | WS02_FINALIZATION · `10c432fa`; WS04_CONSOLE_EXACT_ID · `4c3333e8`; WS06_HISTORY_OBSERVABILITY · `970cfee1` | Finalization provenance (`history_snapshot_id` / `history_error` / `finalization_error`) is threaded to BOTH the per-ID ledger record and the runtime-overview outcome via a dedicated carrier (never the serialized apply result), rendered as a non-blocking advisory, and counted by the bounded `jul_managed_apply_finalization_errors_total{component}` metric. History degradation never fails `/readyz`. | `internal/app/managed_apply_finalizer_test.go`, `internal/app/config_apply_report_error_test.go`, `internal/admin/api_managed_apply_test.go` |
 | AC-15 | docs | Reopened → remediated | WS07_DOCS_CERTIFICATION Slice 01 · `1486e8e7` | `docs/reload-semantics.md`, `docs/adr/0013-managed-apply-terminal-ledger.md`, and `docs/specs/console-rbac.md` reconciled with the landed implementation (RBAC hot-reload, exact-ID ledger, single absolute deadline, advisory finalization; unimplemented RBAC token management marked *future*). | `scripts/docs-check.py` (1474 checks) |
-| AC-16 | docs / process | Reopened → rebuilt | WS07_DOCS_CERTIFICATION Slice 02 · this slice (SHA in the excluded continuity state) | This report reopened and re-anchored to the workstream lineage; `.github/workflows/ci.yml` gained a `workflow_dispatch` trigger so the closure SHA can be re-run on demand; `scripts/audit-closure-check.sh` added as the local certification mirror. | this report; `scripts/audit-closure-check.sh`; `.github/workflows/ci.yml` |
+| AC-16 | docs / process | Reopened → rebuilt | WS07_DOCS_CERTIFICATION Slices 02–03 (accepted SHAs in the excluded continuity state) | This report reopened and re-anchored to the workstream lineage; `.github/workflows/ci.yml` gained a `workflow_dispatch` trigger so the closure SHA can be re-run on demand; `scripts/audit-closure-check.sh` added as the local certification mirror; the [exact-SHA certification evidence](#exact-sha-certification-evidence) matrix wires every release-gate check to its exact CI job so the reviewer fills real results, never fabricated ones. | this report (finding ledger + evidence matrix); `scripts/audit-closure-check.sh`; `.github/workflows/ci.yml` |
 
 ## Open design decision (non-blocking)
 
@@ -105,6 +105,37 @@ independent human reviewers, not further code — must complete:
 
 A local pre-commit hook or a green local `audit-closure-check.sh` is necessary
 but **not** sufficient: neither is CI and neither satisfies step 2.
+
+## Exact-SHA certification evidence
+
+This is the §8.9 evidence matrix the release gate must complete before any finding
+moves from **Reopened → remediated** to formally **Closed**. It is prepared here as
+a scaffold wired to the exact `.github/workflows/ci.yml` jobs; every value is
+`_pending_` until the complete CI run is green at the exact closure SHA and both
+[Sign-off](#sign-off) rows are signed against that same SHA. No value below is
+fabricated — the exact SHA, run ID, reviewers, and per-job results are recorded only
+once they exist. The local `scripts/audit-closure-check.sh` mirror and the pre-commit
+hook are **not** CI and never populate this matrix.
+
+| Field | Exact CI job(s) / source | Value at the certified SHA |
+|-------|--------------------------|----------------------------|
+| Closure SHA | reviewed HEAD of `audit/ws07-docs-certification` at certification | `_pending_` |
+| GitHub Actions run ID | the complete `CI` workflow run for that SHA (`workflow_dispatch` or push) | `_pending_` |
+| Security / concurrency reviewer | [Sign-off](#sign-off) row 1 — independent, not a fix author | `_pending_` |
+| Frontend reviewer | [Sign-off](#sign-off) row 2 — independent, not a fix author | `_pending_` |
+| Backend tests | `test (lean)`, `test (full)`, `build (lean)`, `build (full)`, `coverage gate` | `_pending_` — unverified until CI runs at the exact SHA |
+| Race detector | `test -race` (`go test -race -p 2`, full tags) | `_pending_` — unverified; needs a C toolchain, CI-only (no local run) |
+| Windows / macOS | `test-windows (lean)`, `test-windows (full)`, `test-macos (lean)`, `test-macos (full)` | `_pending_` |
+| Console gates | `console frontend (source)`, `console frontend (released)`, `console v2 (audit + coverage)`, `console e2e (browser smoke)`, `console e2e (real server)` | `_pending_` |
+| Asset drift | `console frontend (source)` → step `drift guard (source profile only)` | `_pending_` |
+| Docs checks | `docs-check` (`scripts/docs-check.py` + `scripts/test_docs_check.py`) | `_pending_` |
+| Vulnerability checks | `govulncheck` (Go, full tags) + `console v2 (audit + coverage)` → step `pnpm audit --audit-level moderate` | `_pending_` |
+
+Per the [closure rule](#closure-rule), **every** remaining `ci.yml` job must also be
+green at the same SHA and is not exempt: `license-check`, `gofmt`, `golangci-lint`,
+`full-tags-sync`, `benchmarks (smoke)`, `fuzz (smoke)`, and `soak (smoke)`. This matrix
+is complete only when every row carries the exact run's green result and the
+[Sign-off](#sign-off) rows are signed against that same SHA.
 
 ## Sign-off
 

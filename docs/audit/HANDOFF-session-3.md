@@ -1,5 +1,16 @@
 # Audit-closure implementation — continuation handoff (session 3)
 
+> **Superseded historical record.** This handoff narrates the original audit
+> sessions (1–8) and their now-abandoned SHAs. That closure was **reopened**:
+> implementation verification found incomplete production wiring behind the
+> premature closure at `00d3b884`, and the fixes were re-done and independently
+> reviewed on the audit-continuation lineage (WS01–WS07, `audit/ws0*` branches).
+> This document's "all findings dispositioned / no work remains / recorded Closed"
+> statements describe that superseded session and are **not** current: no finding
+> is Closed until its exact-SHA CI run is green and both reviewers sign. The
+> authoritative, reopened evidence is
+> [the configuration-audit closure report](2026-07-25-configuration-audit-closure.md).
+
 ## Status snapshot
 - **Current HEAD: session-8 (below)** — clean working tree, pre-commit gate green (`go test ./...` + `docs-check.py`, 1312 docs checks pass); Console gates green as of `c33e8647` (`typecheck`/`lint`/`build`, 451 vitest tests pass).
 - Baseline reviewed at `427e75d2`. Session-1 landed: AC-01, AC-02, AC-03 (hot-finalizer ordering), AC-04, AC-05 (storage), AC-06, AC-07; partial AC-15/AC-16.
