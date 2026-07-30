@@ -407,4 +407,44 @@
 - Non-blocking follow-ups: NONE (no required blocker fixes; no regressions).
 - Next workstream branch: audit/ws03-absolute-deadline
 - Next expected parent SHA: 10c432fafd86de5d33891beada59886e72baccc8
+
+---
+
+## Cline to GitHub Copilot handoff
+
+- Recorded at: 2026-07-30
+- Handoff agent: GitHub Copilot (Claude Opus 4.8), Jul Audit Implementer mode; materializes the Cline-to-Copilot bridge only (no WS03 implementation).
+- Tool transition: WS01 and WS02 were implemented and independently accepted under Cline; execution continues under GitHub Copilot from WS03 onward.
+
+### Remote historical baseline
+
+- Remote: `https://github.com/victornife/jul.git`
+- Baseline branch `latest` / `origin/latest`: `50052f9d5377488a6160935008e9e028fd08eca2` (verified after `git fetch --prune origin`; no drift). It is an ancestor of the current HEAD.
+
+### Verified cumulative workstream SHAs
+
+- WS01_MANAGED_LEDGER
+  - Base SHA: `e707c41587a335cc92b643068b1c46053eff2621`
+  - Reviewed head SHA: `a1c7a3e11195477601b30a067e8a2ed0cf509b91`
+  - Cumulative head SHA (branch `audit/ws01-managed-ledger`, incl. acceptance-record commit): `bb666a655a14d25b4a3eaeaee5b5d6234b26224e`
+- WS02_FINALIZATION
+  - Base SHA: `bb666a655a14d25b4a3eaeaee5b5d6234b26224e` (= WS01 cumulative head)
+  - Reviewed head SHA: `10c432fafd86de5d33891beada59886e72baccc8` (range `bb666a65..10c432fa` = exactly 5 commits, S01–S05)
+  - Cumulative head SHA (branch `audit/ws02-finalization`, incl. acceptance-record commit): `d343694efe660a3b5e86be94c6f9fdd34dcebd26`
+- Lineage verified linear via `git merge-base --is-ancestor` (all exit 0): `50052f9d → e707c415 → a1c7a3e1 → bb666a65 → 10c432fa → d343694e`. WS01 head is an ancestor of WS02 head; HEAD contains exactly the accepted WS02 work plus its journal-only acceptance-record commit (`d343694e`), with no unknown commits (12 commits `baseline..HEAD`, all identified).
+
+### Review evidence paths
+
+- `docs/audit/AI-IMPLEMENTATION-JOURNAL.md` → "Workstream acceptance record - WS01_MANAGED_LEDGER" (independent verdict APPROVE, 0 blockers).
+- `docs/audit/AI-IMPLEMENTATION-JOURNAL.md` → "Workstream acceptance record - WS02_FINALIZATION" (independent verdict APPROVE, 0 blockers).
+- `.github/copilot-audit-state/BRIDGE-AUDIT.md` (bridge verdict PASS; excluded from Git — local operational evidence).
+
+### Environment limitations
+
+- `go test -race` UNVERIFIED locally: `CGO_ENABLED=0` and no C toolchain; `-race` fails with "-race requires cgo". Deferred to the CI race matrix at the exact accepted SHA.
+- Exact-SHA CI certification (multi-OS GitHub Actions) not yet run; a program-level closure gate, not a bridge blocker.
+
+### Next workstream
+
+- WS03_ABSOLUTE_DEADLINE on branch `audit/ws03-absolute-deadline`, created from the accepted cumulative WS02 head `d343694efe660a3b5e86be94c6f9fdd34dcebd26` (never from `origin/latest`). This handoff commit is WS03's base. Next prompt: `/jul-audit-ws03-s01`.
 </content>
