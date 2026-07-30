@@ -223,7 +223,7 @@ func newEchoTranscoder(t testing.TB, reflect bool) *Transcoder {
 	}
 	t.Cleanup(func() { pool.Close() })
 
-	tr, err := New(cfg, pool, nil, Options{})
+	tr, err := New(context.Background(), cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -375,6 +375,7 @@ func TestTranscodeReflectionRejectsUnreflectiveBackend(t *testing.T) {
 
 	// A short reflect timeout bounds the test even if the backend stalls.
 	tr, err := New(
+		context.Background(),
 		config.GRPCTranscodeConfig{Target: addr, UseReflection: true},
 		pool,
 		nil,
@@ -431,7 +432,7 @@ func TestTranscodePassiveHealthMarking(t *testing.T) {
 	}
 	t.Cleanup(func() { pool.Close() })
 
-	tr, err := New(cfg, pool, nil, Options{})
+	tr, err := New(context.Background(), cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -517,7 +518,7 @@ func TestTranscoderEvictsStaleConnections(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	cfg := config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile}
-	tr, err := New(cfg, pool, nil, Options{})
+	tr, err := New(context.Background(), cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -648,7 +649,7 @@ func TestTranscoderRetiresStaleConnectionsDuringRequest(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	cfg := config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile}
-	tr, err := New(cfg, pool, nil, Options{})
+	tr, err := New(context.Background(), cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -751,7 +752,7 @@ func TestTranscodeReflectionWithDiscoveryUpstream(t *testing.T) {
 		Target:        "echo",
 		UseReflection: true,
 	}
-	tr, err := New(cfg, pool, snap, Options{})
+	tr, err := New(context.Background(), cfg, pool, snap, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder with discovery reflection: %v", err)
 	}
@@ -830,7 +831,7 @@ func TestTranscodeReflectionWithReusedDiscoveryUpstream(t *testing.T) {
 		Target:        "echo",
 		UseReflection: true,
 	}
-	tr, err := New(cfg, pool, snap, Options{})
+	tr, err := New(context.Background(), cfg, pool, snap, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder with reused discovery reflection: %v", err)
 	}
@@ -887,7 +888,7 @@ func TestTranscoderRetiredConnectionReappearsUsable(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	cfg := config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile}
-	tr, err := New(cfg, pool, nil, Options{})
+	tr, err := New(context.Background(), cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -977,7 +978,7 @@ func TestTranscoderRetiredConnectionConcurrentReappearance(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	cfg := config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile}
-	tr, err := New(cfg, pool, nil, Options{})
+	tr, err := New(context.Background(), cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}

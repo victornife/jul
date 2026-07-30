@@ -6,6 +6,7 @@
 package plugins
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"

@@ -6,6 +6,7 @@
 package transcode
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,7 +217,7 @@ func newStreamTranscoder(t *testing.T, streaming bool, mode string) *Transcoder 
 		t.Fatalf("create test pool: %v", err)
 	}
 	t.Cleanup(func() { pool.Close() })
-	tr, err := New(cfg, pool, nil, Options{})
+	tr, err := New(context.Background(), cfg, pool, nil, Options{})
 	if err != nil {
 		t.Fatalf("New transcoder: %v", err)
 	}
@@ -325,7 +326,7 @@ func TestStreamMsgCounter(t *testing.T) {
 	if err := os.WriteFile(descFile, raw, 0o600); err != nil {
 		t.Fatalf("write descriptor: %v", err)
 	}
-	tr, err := New(config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile, Streaming: true},
+	tr, err := New(context.Background(), config.GRPCTranscodeConfig{Target: addr, DescriptorSet: descFile, Streaming: true},
 		func() *upstream.Pool {
 			pool, err := upstream.NewPool(config.UpstreamConfig{
 				Name:     "test-msgcounter",
