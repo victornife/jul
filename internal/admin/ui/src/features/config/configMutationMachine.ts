@@ -22,7 +22,13 @@
  *   - adminConfirmedGeneration — the generation for which the operator has
  *     already confirmed an admin-affecting change, so a retry re-sends
  *     confirm_admin=true for the SAME operation and nothing else.
- *   - pollAttempts — bounded post-apply poll budget.
+ *   - terminalRecord — the full exact-ID terminal ledger record once retrieved,
+ *     retained in its entirety (including finalization provenance) rather than
+ *     projected down to only the nested apply result.
+ *
+ * The post-apply poll budget is a mutable ref owned by the React binding (the
+ * poll cadence is a rendering concern, not reducer truth), so the reducer no
+ * longer keeps a duplicate counter of it.
  *
  * The reducer is intentionally free of React and network concerns: ConfigPanel
  * keeps owning the react-query mutations and effects and dispatches typed
@@ -30,7 +36,13 @@
  * (configMutationMachine.test.ts) without rendering the panel.
  */
 
-import type { ApplyResult, ConfigApplyErrorKind, ConfigPatch, ConfigDiff } from "@/api/client.ts";
+import type {
+  ApplyResult,
+  ConfigApplyErrorKind,
+  ConfigPatch,
+  ConfigDiff,
+  ManagedApplyRecord,
+} from "@/api/client.ts";
 
 /** The pending structured patch handed off to the panel for review + apply. */
 export interface PatchDraftState {
@@ -47,6 +59,12 @@ export interface AppliedState {
   readonly errorKind: ConfigApplyErrorKind | null;
   readonly wasPatch: boolean;
   readonly patchCandidate: string | null;
+  // The full exact-ID terminal ledger record once retrieved (AC-09/AC-14).
+  // Retained in its entirety — including finalization provenance
+  // (history_snapshot_id / history_error / finalization_error) — so a later
+  // advisory render reads the real record rather than a lossy projection of
+  // only the nested apply result. Null until the terminal record is merged.
+  readonly terminalRecord: ManagedApplyRecord | null;
 }
 
 export type ApplyMode = "hot" | "stage_restart";
@@ -64,8 +82,6 @@ export interface ConfigMutationState {
   readonly conflictVersion: string | undefined;
   /** The generation for which an admin-affecting change was confirmed. */
   readonly adminConfirmedGeneration: number | null;
-  /** Bounded post-apply poll attempts for the current operation. */
-  readonly pollAttempts: number;
 }
 
 export function initialConfigMutationState(baseVersion?: string): ConfigMutationState {
@@ -76,7 +92,6 @@ export function initialConfigMutationState(baseVersion?: string): ConfigMutation
     baseVersion,
     conflictVersion: undefined,
     adminConfirmedGeneration: null,
-    pollAttempts: 0,
   };
 }
 
@@ -98,14 +113,16 @@ export type ConfigMutationAction =
       wasPatch: boolean;
       patchCandidate: string | null;
     }
-  // Merge a terminal per-ID ledger record into the applied result. Only applies
-  // when the generation matches AND the currently-held result's apply id equals
-  // the record's id (never cross-correlate a different operation).
+  // Retain the full terminal per-ID ledger record and merge its apply result
+  // into the applied result. Only applies when the generation matches, the
+  // currently-held result's apply id equals the awaited id, the record's own id
+  // equals that id, and the record is terminal — so a pending, cross-operation,
+  // or unrelated record can never merge (AC-09).
   | {
-      type: "mergeTerminal";
+      type: "mergeTerminalRecord";
       generation: number;
       applyId: string;
-      terminal: Partial<ApplyResult>;
+      record: ManagedApplyRecord;
     }
   // Clear the applied result (e.g. discard, or editor reset).
   | { type: "clearApplied" }
@@ -114,9 +131,7 @@ export type ConfigMutationAction =
   | { type: "setConflictVersion"; conflictVersion: string | undefined }
   // Mark the current generation as admin-confirmed so a retry re-sends
   // confirm_admin=true for this exact operation.
-  | { type: "confirmAdmin"; generation: number }
-  | { type: "incrementPollAttempts" }
-  | { type: "resetPollAttempts" };
+  | { type: "confirmAdmin"; generation: number };
 
 export function configMutationReducer(
   state: ConfigMutationState,
@@ -129,7 +144,6 @@ export function configMutationReducer(
         operationGeneration: state.operationGeneration + 1,
         applied: null,
         adminConfirmedGeneration: null,
-        pollAttempts: 0,
       };
     case "cancelOperation":
       return {
@@ -148,15 +162,18 @@ export function configMutationReducer(
           errorKind: action.errorKind,
           wasPatch: action.wasPatch,
           patchCandidate: action.patchCandidate,
+          terminalRecord: null,
         },
       };
-    case "mergeTerminal": {
+    case "mergeTerminalRecord": {
       const current = state.applied;
       if (
         action.generation !== state.operationGeneration ||
         current === null ||
         current.operationGeneration !== action.generation ||
-        current.result.apply_id !== action.applyId
+        current.result.apply_id !== action.applyId ||
+        action.record.id !== action.applyId ||
+        action.record.state !== "terminal"
       ) {
         return state;
       }
@@ -164,7 +181,8 @@ export function configMutationReducer(
         ...state,
         applied: {
           ...current,
-          result: { ...current.result, ...action.terminal, apply_id: action.applyId },
+          result: { ...current.result, ...action.record.result, apply_id: action.applyId },
+          terminalRecord: action.record,
         },
       };
     }
@@ -178,10 +196,6 @@ export function configMutationReducer(
       return { ...state, conflictVersion: action.conflictVersion };
     case "confirmAdmin":
       return { ...state, adminConfirmedGeneration: action.generation };
-    case "incrementPollAttempts":
-      return { ...state, pollAttempts: state.pollAttempts + 1 };
-    case "resetPollAttempts":
-      return { ...state, pollAttempts: 0 };
     default:
       // Exhaustiveness guard: a new action variant without a case is a type
       // error at the assignment below.

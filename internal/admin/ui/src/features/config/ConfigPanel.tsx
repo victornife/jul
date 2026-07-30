@@ -26,6 +26,7 @@ import {
   type PendingRestartStatus,
 } from "@/api/client.ts";
 import { deriveApplyOutcome, type ApplyOutcome } from "@/lib/applyOutcome.ts";
+import { MISSING_GRACE_ATTEMPTS } from "@/lib/useManagedApplyRecord.ts";
 import { useConfigMutationMachine } from "@/features/config/useConfigMutationMachine.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
@@ -237,6 +238,7 @@ export function ConfigPanel() {
     baseVersion,
     conflictVersion,
     setAppliedState,
+    mergeTerminalRecord,
     setPatchDraft,
     setBaseVersion,
     setConflictVersion,
@@ -244,6 +246,11 @@ export function ConfigPanel() {
     cancelOperation: machineCancelOperation,
   } = machine;
   const applied = appliedState?.result ?? null;
+  // Consecutive 404s while fetching an immediate result's ledger record. The
+  // record is written before the synchronous response returns, but a brief
+  // read-after-write gap is tolerated as a short grace rather than treated as a
+  // gone record (a saved-not-live poll keeps its own stop-on-404 semantics).
+  const immediateRecordMissesRef = useRef(0);
 
   // Patch-reconcile status is pure editor-text UI concern, so it stays local.
   const [patchReconciling, setPatchReconciling] = useState(false);
@@ -254,6 +261,7 @@ export function ConfigPanel() {
   // semantics.
   const startOperation = useCallback((): number => {
     setPatchReconcileError(null);
+    immediateRecordMissesRef.current = 0;
     return machineStartOperation();
   }, [machineStartOperation]);
 
@@ -569,6 +577,13 @@ export function ConfigPanel() {
   const restartError = applyError instanceof ConfigRestartRequiredError ? applyError : null;
   const pendingApplyID =
     applied?.reload?.outcome === "saved_not_live" ? applied.apply_id : undefined;
+  // AC-14: every managed result carries an exact apply id — not only a
+  // saved-not-live (202) one. An immediate terminal result (200/409/503) is
+  // finalized synchronously, but its finalization provenance (history snapshot
+  // id, history/finalization errors) lives only on the ledger record, so it is
+  // fetched too. pendingApplyID still gates the "pending/expired" UI; the
+  // supplemental immediate fetch never changes the already-shown runtime banner.
+  const managedApplyID = applied?.apply_id;
   const legacyApplyPending =
     applied !== null &&
     (applied.mode ?? "hot") === "hot" &&
@@ -592,23 +607,26 @@ export function ConfigPanel() {
     refetchInterval: () =>
       postApplyPollAttemptsRef.current >= LEGACY_OVERVIEW_MAX_POLLS ? false : POLL_FAST_INTERVAL_MS,
   });
-  // AC-09: a saved-not-live managed apply is finalized by polling its EXACT
-  // ledger record at GET /api/config/applies/{id} — never the runtime overview's
-  // global last_managed_apply, which a newer unrelated apply could overwrite. The
-  // schedule is: immediate first read, then a 1s cadence for ~10s, then 2s until
-  // a bounded deadline+margin. Polling stops on a terminal record, on a missing
-  // record (null/404 after a restart), on cancel, or at the deadline. A missing
-  // record is NEVER treated as success.
+  // AC-09/AC-14: a managed apply's terminal ledger record is retrieved by its
+  // EXACT apply id at GET /api/config/applies/{id} — never the runtime
+  // overview's global last_managed_apply, which a newer unrelated apply could
+  // overwrite. A saved-not-live (202) apply is polled to a terminal record on a
+  // bounded schedule (immediate first read, 1s cadence for ~10s, then 2s). An
+  // immediate terminal result (200/409/503) is fetched too — at least once — to
+  // retain finalization provenance, tolerating a short read-after-write 404 gap
+  // via a small grace. A missing record is NEVER treated as success.
   const applyRecord = useQuery({
-    queryKey: ["config-apply-record", pendingApplyID],
+    queryKey: ["config-apply-record", managedApplyID],
     queryFn: async () => {
       postApplyPollAttemptsRef.current += 1;
-      const lookup = await fetchManagedApply(pendingApplyID as string);
+      const lookup = await fetchManagedApply(managedApplyID as string);
+      if (lookup.kind === "missing") immediateRecordMissesRef.current += 1;
+      else immediateRecordMissesRef.current = 0;
       // A missing (404) record maps to null so the existing terminal/expiry
       // logic below is unchanged; a missing record is never a success.
       return lookup.kind === "record" ? lookup.record : null;
     },
-    enabled: pendingApplyID !== undefined,
+    enabled: managedApplyID !== undefined,
     retry: false,
     staleTime: 0,
     gcTime: 0,
@@ -616,9 +634,15 @@ export function ConfigPanel() {
     refetchInterval: (query) => {
       const record = query.state.data;
       if (record?.state === "terminal") return false;
-      // null == 404: the record is gone (e.g. after a restart). Stop; the
-      // expired banner is shown rather than any success claim.
-      if (record === null) return false;
+      // null == 404. For a saved-not-live poll the record is gone (e.g. after a
+      // restart): stop and show the expired banner rather than any success
+      // claim. For an immediate result the ledger record may just not be visible
+      // yet: retry within a short grace before giving up.
+      if (record === null) {
+        if (pendingApplyID !== undefined) return false;
+        if (immediateRecordMissesRef.current > MISSING_GRACE_ATTEMPTS) return false;
+        return POLL_FAST_INTERVAL_MS;
+      }
       if (postApplyPollAttemptsRef.current >= POLL_MAX_ATTEMPTS) return false;
       return postApplyPollAttemptsRef.current >= POLL_FAST_POLLS
         ? POLL_SLOW_INTERVAL_MS
@@ -627,44 +651,51 @@ export function ConfigPanel() {
   });
   // The pending managed apply stopped resolving to a terminal result within the
   // bounded budget (deadline reached) or its record vanished (404). Either way
-  // the console must not claim the new configuration is serving.
+  // the console must not claim the new configuration is serving. Gated on
+  // pendingApplyID so an immediate result's supplemental fetch never trips it.
   const pollingExpired =
     pendingApplyID !== undefined &&
     applyRecord.data?.state !== "terminal" &&
     (applyRecord.data === null || postApplyPollAttemptsRef.current >= POLL_MAX_ATTEMPTS);
 
   useEffect(() => {
-    if (!pendingApplyID || !appliedState) return;
+    if (managedApplyID === undefined || !appliedState) return;
     const record = applyRecord.data;
-    // AC-09: only a *terminal* record for the EXACT awaited id finalizes the
-    // panel. A pending (202) record, a missing record (null/404), or a record
-    // for any other id is never treated as success.
-    if (!record || record.state !== "terminal" || record.id !== pendingApplyID) return;
+    // AC-09: only a *terminal* record for the EXACT awaited id is retained. A
+    // pending (202) record, a missing record (null/404), or a record for any
+    // other id is never treated as success.
+    if (!record || record.state !== "terminal" || record.id !== managedApplyID) return;
+    if (appliedState.result.apply_id !== managedApplyID) return;
+    // Idempotent: once the exact terminal record is retained, do not re-merge —
+    // this also prevents the merge from re-triggering the effect indefinitely.
+    if (appliedState.terminalRecord !== null) return;
     const operationID = appliedState.operationID;
+    const wasPatch = appliedState.wasPatch;
+    const priorVersion = appliedState.result.version;
     const terminal = record.result;
-    setAppliedState((currentState) =>
-      currentState?.operationID === operationID && currentState.result.apply_id === pendingApplyID
-        ? {
-            ...currentState,
-            result: { ...currentState.result, ...terminal, apply_id: pendingApplyID },
-          }
-        : currentState,
-    );
+    // Retain the FULL terminal record (finalization provenance included) and
+    // merge its apply result into the applied result.
+    mergeTerminalRecord(record);
+    // Editor reconciliation is only for a polled saved-not-live finalization; an
+    // immediate terminal result already reconciled in the mutation's onSuccess,
+    // and its supplemental fetch must not re-drive the editor or the banner.
+    if (pendingApplyID === undefined) return;
     if (operationIDRef.current !== operationID) return;
-    if (terminal.ok && appliedState.wasPatch) {
-      reconcilePatchEditor(operationID, appliedState.result.version);
+    if (terminal.ok && wasPatch) {
+      reconcilePatchEditor(operationID, priorVersion);
     }
     if (terminal.restored || !terminal.ok) {
       refreshEditorAfterFailure(operationID);
     }
   }, [
     appliedState,
+    managedApplyID,
     pendingApplyID,
     applyRecord.data,
     reconcilePatchEditor,
     refreshEditorAfterFailure,
     operationIDRef,
-    setAppliedState,
+    mergeTerminalRecord,
   ]);
 
   // Fold the raw apply signals into one explicit, severity-tagged outcome so the

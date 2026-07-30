@@ -17,10 +17,19 @@ import {
   isAdminConfirmedFor,
   type ConfigMutationState,
 } from "@/features/config/configMutationMachine.ts";
-import type { ApplyResult } from "@/api/client.ts";
+import type { ApplyResult, ManagedApplyRecord } from "@/api/client.ts";
 
 function result(applyId: string, extra: Partial<ApplyResult> = {}): ApplyResult {
   return { apply_id: applyId, ...extra } as ApplyResult;
+}
+
+function record(
+  id: string,
+  state: "pending" | "terminal",
+  res: ApplyResult,
+  extra: Partial<ManagedApplyRecord> = {},
+): ManagedApplyRecord {
+  return { id, state, result: res, ...extra };
 }
 
 describe("configMutationReducer", () => {
@@ -42,7 +51,6 @@ describe("configMutationReducer", () => {
     expect(s.operationGeneration).toBe(1);
     expect(s.applied).toBeNull();
     expect(s.adminConfirmedGeneration).toBeNull();
-    expect(s.pollAttempts).toBe(0);
     // base_version is preserved across a new operation.
     expect(s.baseVersion).toBe("v1");
   });
@@ -81,9 +89,11 @@ describe("configMutationReducer", () => {
     expect(s.applied?.result.apply_id).toBe("rl_9");
     expect(s.applied?.wasPatch).toBe(true);
     expect(s.applied?.patchCandidate).toContain(":80");
+    // A fresh result has no terminal ledger record retained yet.
+    expect(s.applied?.terminalRecord).toBeNull();
   });
 
-  it("mergeTerminal merges only a matching-generation, matching-id record", () => {
+  it("mergeTerminalRecord retains only a matching-generation, matching-id terminal record", () => {
     let s = initialConfigMutationState();
     s = configMutationReducer(s, { type: "startOperation" }); // gen 1
     s = configMutationReducer(s, {
@@ -98,35 +108,68 @@ describe("configMutationReducer", () => {
     // A terminal record for a DIFFERENT apply id must never merge.
     const beforeWrong = s;
     s = configMutationReducer(s, {
-      type: "mergeTerminal",
+      type: "mergeTerminalRecord",
       generation: 1,
       applyId: "rl_OTHER",
-      terminal: { ok: false, restored: true },
+      record: record("rl_OTHER", "terminal", result("rl_OTHER", { ok: false, restored: true })),
     });
     expect(s).toBe(beforeWrong);
     expect(s.applied?.result.ok).toBe(true);
 
+    // A record whose OWN id does not match the awaited id must never merge, even
+    // when the applyId argument lines up with the held result.
+    const beforeIdSkew = s;
+    s = configMutationReducer(s, {
+      type: "mergeTerminalRecord",
+      generation: 1,
+      applyId: "rl_7",
+      record: record("rl_MISMATCH", "terminal", result("rl_7", { ok: false })),
+    });
+    expect(s).toBe(beforeIdSkew);
+
+    // A non-terminal (pending) record must never merge.
+    const beforePending = s;
+    s = configMutationReducer(s, {
+      type: "mergeTerminalRecord",
+      generation: 1,
+      applyId: "rl_7",
+      record: record("rl_7", "pending", result("rl_7", { ok: false })),
+    });
+    expect(s).toBe(beforePending);
+
     // A terminal record for a stale generation must never merge.
     const beforeStale = s;
     s = configMutationReducer(s, {
-      type: "mergeTerminal",
+      type: "mergeTerminalRecord",
       generation: 0,
       applyId: "rl_7",
-      terminal: { ok: false },
+      record: record("rl_7", "terminal", result("rl_7", { ok: false })),
     });
     expect(s).toBe(beforeStale);
+    expect(s.applied?.result.ok).toBe(true);
 
-    // The correlated terminal record (same generation + same id) merges.
+    // The correlated terminal record (same generation, same id, terminal) merges
+    // its result AND is retained whole — including finalization provenance.
+    const terminal = record(
+      "rl_7",
+      "terminal",
+      result("rl_7", { ok: false, restored: true }),
+      { history_snapshot_id: "snap-9", finalization_error: "ledger append degraded" },
+    );
     s = configMutationReducer(s, {
-      type: "mergeTerminal",
+      type: "mergeTerminalRecord",
       generation: 1,
       applyId: "rl_7",
-      terminal: { ok: false, restored: true },
+      record: terminal,
     });
     expect(s.applied?.result.ok).toBe(false);
     expect(s.applied?.result.restored).toBe(true);
     // The apply id is preserved through the merge.
     expect(s.applied?.result.apply_id).toBe("rl_7");
+    // The FULL record is retained, not a lossy projection of only result.
+    expect(s.applied?.terminalRecord).toBe(terminal);
+    expect(s.applied?.terminalRecord?.history_snapshot_id).toBe("snap-9");
+    expect(s.applied?.terminalRecord?.finalization_error).toBe("ledger append degraded");
   });
 
   it("confirmAdmin is scoped to the exact generation", () => {
@@ -141,15 +184,6 @@ describe("configMutationReducer", () => {
     s = configMutationReducer(s, { type: "startOperation" }); // gen 2
     expect(isAdminConfirmedFor(s, 2)).toBe(false);
     expect(s.adminConfirmedGeneration).toBeNull();
-  });
-
-  it("poll-attempt budget increments and resets", () => {
-    let s = initialConfigMutationState();
-    s = configMutationReducer(s, { type: "incrementPollAttempts" });
-    s = configMutationReducer(s, { type: "incrementPollAttempts" });
-    expect(s.pollAttempts).toBe(2);
-    s = configMutationReducer(s, { type: "resetPollAttempts" });
-    expect(s.pollAttempts).toBe(0);
   });
 
   it("patch-draft, base-version, and conflict-version transitions are isolated", () => {

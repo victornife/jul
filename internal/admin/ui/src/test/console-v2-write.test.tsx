@@ -878,6 +878,89 @@ describe("ConfigPanel apply flow", () => {
       screen.queryByText("Apply rejected — previous configuration restored"),
     ).not.toBeInTheDocument();
   });
+
+  it("fetches the exact ledger record for an immediate live apply to retain finalization provenance", async () => {
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
+      }
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/apply?base_version=v1") {
+        // AC-14: an immediate terminal result — the reload applied live
+        // synchronously (200), NOT saved_not_live — that still carries an exact
+        // apply id whose finalization provenance lives only on the ledger record.
+        return Promise.resolve(
+          json({
+            ok: true,
+            apply_id: "rl_live",
+            mode: "hot",
+            version: "v2",
+            persisted: true,
+            reload: {
+              id: "rl_live",
+              outcome: "applied_live",
+              published: true,
+              http: { status: "ok" },
+              stream: { status: "" },
+              admin: { status: "" },
+            },
+          }),
+        );
+      }
+      // Step 4: even an immediate live result is reconciled against its EXACT
+      // ledger record so finalization provenance is retained. A read-after-write
+      // 404 is tolerated briefly (grace) before the record becomes visible.
+      if (input === "/api/config/applies/rl_live") {
+        recordReads += 1;
+        if (recordReads === 1) return Promise.resolve(new Response(null, { status: 404 }));
+        return Promise.resolve(
+          json({
+            id: "rl_live",
+            state: "terminal",
+            operation: "config.apply",
+            history_snapshot_id: "snap-42",
+            finalization_error: "history sidecar append degraded",
+            result: {
+              ok: true,
+              apply_id: "rl_live",
+              mode: "hot",
+              reload: { id: "rl_live", outcome: "applied_live", published: true },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    // The immediate live outcome banner is shown right away — never delayed by,
+    // nor downgraded to "pending" for, the supplemental ledger fetch.
+    expect(await screen.findByText("Applied and live")).toBeInTheDocument();
+    expect(screen.queryByText("Saved — final outcome pending")).not.toBeInTheDocument();
+    // The exact ledger record is still fetched (through the read-after-write
+    // grace), retaining finalization provenance on the applied state.
+    await waitFor(
+      () => {
+        expect(recordReads).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 4000 },
+    );
+    // The banner remains the live outcome after the terminal record merges.
+    expect(await screen.findByText("Applied and live")).toBeInTheDocument();
+  });
 });
 
 describe("HistoryPanel rollback flow", () => {
