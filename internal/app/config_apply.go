@@ -246,7 +246,6 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	preparedCandidate := ctx.Candidate
 	ctx.Baseline = nil // do not retain raw configuration in the audit callback context
 	ctx.Candidate = nil
-	ctx.RequestContext = nil // do not retain the request-scoped context in the async finalizer copy
 	baseline, err := c.loadMutationBaseline(baselineHint)
 	if err != nil {
 		return ApplyResult{
@@ -308,36 +307,41 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		}, nil
 	}
 
-	// Parse and resolve the previous config so lifecycle.DiffConfig compares
-	// effective values on both sides. Without resolution, secret references
-	// produce false differences when the resolved value happens to match but
-	// the reference string differs (M-02 fix).
-	var prevCfg *config.Config
-	if len(prevRaw) > 0 {
-		if raw, err := config.Parse(prevRaw); err == nil {
-			if cand, err := config.NewCandidate(raw); err == nil {
-				prevCfg = cand.Effective
-			} else {
-				prevCfg = raw // fallback to unresolved on resolution error
-			}
-		}
-	}
-
 	// AC-03: allocate the transaction ApplyID BEFORE the hot vs stage_restart
 	// branch so every persisted mutation — hot apply, enqueue failure, stage
 	// create, and stage update — carries a stable ID and is routed through the
 	// single completeManagedApply helper at terminalization.
 	id := c.nextID()
 
-	// AC-08: bound candidate resolution and every preflight gate with the
-	// currently serving reload_timeout so a stalled ${file:...} provider or a
-	// wedged handler/bind probe cannot hang the managed apply past the
-	// transaction deadline. The deadline is derived from the SERVING config's
-	// reload_timeout, never the candidate's (R15-01). A pre-persistence
+	// AC-08: bound candidate resolution and every preflight gate with the ONE
+	// absolute transaction deadline. When the admitting handler bound a
+	// Deadline/RequestContext (R15-01), preflight derives from those so the
+	// same deadline that started at HTTP admission governs preflight,
+	// persistence, and reload — the candidate's own reload_timeout never
+	// affects the apply that submits it. Absent a bound deadline, preflight
+	// falls back to the currently serving reload_timeout. A pre-persistence
 	// deadline breach aborts cleanly (disk unchanged) and is surfaced as a
 	// phase-specific 504 by the admin API.
-	pctx, cancel := c.preflightContext(cfg)
+	pctx, cancel := c.preflightContext(ctx, cfg)
 	defer cancel()
+	ctx.RequestContext = nil // derived into pctx; never retained past this point
+
+	// Parse and resolve the previous config so lifecycle.DiffConfig compares
+	// effective values on both sides. Without resolution, secret references
+	// produce false differences when the resolved value happens to match but
+	// the reference string differs (M-02 fix). Resolution runs under pctx so a
+	// stalled previous-config secret provider cannot hang the apply past the
+	// transaction deadline (AC-08).
+	var prevCfg *config.Config
+	if len(prevRaw) > 0 {
+		if raw, err := config.Parse(prevRaw); err == nil {
+			if cand, err := config.NewCandidateContext(pctx, raw); err == nil {
+				prevCfg = cand.Effective
+			} else {
+				prevCfg = raw // fallback to unresolved on resolution error
+			}
+		}
+	}
 
 	if mode == ApplyStageRestart {
 		return c.applyStageRestart(pctx, ctx, id, cfg, preparedCandidate, prevCfg, data, baseline)
@@ -385,14 +389,24 @@ func (c *ConfigApplyCoordinator) servingReloadTimeout(candidate *config.Config) 
 }
 
 // preflightContext derives the bounded context that caps all pre-persistence
-// work (secret resolution + every preflight gate) with the serving
-// reload_timeout (AC-08). The returned cancel MUST be called by the caller. A
-// zero budget yields a cancel-only context so behaviour is unchanged for
-// callers/tests without a configured timeout.
-func (c *ConfigApplyCoordinator) preflightContext(candidate *config.Config) (context.Context, context.CancelFunc) {
-	base := c.BaseCtx
+// work (secret resolution + every preflight gate) under the ONE absolute
+// transaction deadline (AC-08). When the admitting handler bound a Deadline it
+// is used verbatim so preflight shares the exact deadline that started at HTTP
+// admission (R15-01); the request context, when present, is the parent so
+// client cancellation aborts pre-persistence work. Absent a bound deadline the
+// serving reload_timeout is applied as a relative fallback. The returned cancel
+// MUST be called by the caller. A zero budget yields a cancel-only context so
+// behaviour is unchanged for callers/tests without a configured timeout.
+func (c *ConfigApplyCoordinator) preflightContext(reqCtx admin.ApplyRequestContext, candidate *config.Config) (context.Context, context.CancelFunc) {
+	base := reqCtx.RequestContext
+	if base == nil {
+		base = c.BaseCtx
+	}
 	if base == nil {
 		base = context.Background()
+	}
+	if !reqCtx.Deadline.IsZero() {
+		return context.WithDeadline(base, reqCtx.Deadline)
 	}
 	if timeout := c.servingReloadTimeout(candidate); timeout > 0 {
 		return context.WithTimeout(base, timeout)
@@ -429,7 +443,11 @@ func (c *ConfigApplyCoordinator) runPreflight(pctx context.Context, cfg *config.
 	} else {
 		pfResult, err = c.Preflight.Apply(obsCtx, cfg, prevCfg, mode)
 	}
-	if err != nil && pctx.Err() != nil {
+	// AC-08: attribute a deadline breach even when the gate returned nil. A gate
+	// that finished a hair after the deadline fired (or ignored ctx) must not be
+	// allowed to persist; the expired transaction context aborts before any
+	// disk write, regardless of the gate's own error value.
+	if ctxErr := pctx.Err(); ctxErr != nil {
 		mu.Lock()
 		phase := lastPhase
 		mu.Unlock()
@@ -628,7 +646,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 		baseRaw = c.PlannedRestart.BaseRaw()
 		if len(baseRaw) > 0 {
 			if raw, err := config.Parse(baseRaw); err == nil {
-				if cand, err := config.NewCandidate(raw); err == nil {
+				if cand, err := config.NewCandidateContext(pctx, raw); err == nil {
 					diffBaseCfg = cand.Effective
 				} else {
 					diffBaseCfg = raw
@@ -890,7 +908,14 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	persistedVersion := server.CanonicalVersion(candidate.Raw)
 	desiredVersion := server.CanonicalVersion(candidate.Effective)
 	rawDigest := sha256.Sum256(data)
-	transactionStarted := time.Now()
+	// AC-08/R15-01: reuse the ONE absolute deadline bound at HTTP admission.
+	// transactionStarted is the admission time so provisional results and the
+	// reload deadline share a single origin; only when no admission time was
+	// bound (older callers/tests) do we fall back to now.
+	transactionStarted := reqCtx.StartedAt
+	if transactionStarted.IsZero() {
+		transactionStarted = time.Now().UTC()
+	}
 
 	// AC-03: id is allocated once in ApplyRaw before the hot/stage branch so
 	// every persisted mutation shares one monotonic transaction ID.
@@ -903,14 +928,19 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	terminalCh := make(chan ApplyResult, 1)
 	finalizedCh := make(chan struct{})
 
-	// Use the currently serving config's reload_timeout for this transaction,
-	// not the candidate's. A candidate that changes reload_timeout affects the
-	// next apply, never this one (R15-01).
-	reloadTimeout := candidate.Effective.Global.ReloadTimeout
-	if snap := c.LiveSnapshot(); snap.EffectiveConfig != nil && snap.EffectiveConfig.Global.ReloadTimeout > 0 {
-		reloadTimeout = snap.EffectiveConfig.Global.ReloadTimeout
+	// Do NOT restart the transaction clock or grant a fresh full timeout after
+	// preflight. Carry the single admission deadline through to reload so the
+	// whole transaction (preflight + persistence + reload wait) shares one
+	// budget (R15-01). When no deadline was bound, derive one from the serving
+	// reload_timeout relative to the admission time — never a full timeout
+	// starting now. A zero result means "no bound"; it is handled explicitly at
+	// the wait below rather than collapsing into an accidental one-second wait.
+	deadline := reqCtx.Deadline
+	if deadline.IsZero() {
+		if reloadTimeout := c.servingReloadTimeout(candidate.Effective); reloadTimeout > 0 {
+			deadline = transactionStarted.Add(reloadTimeout)
+		}
 	}
-	deadline := transactionStarted.Add(reloadTimeout.Std())
 
 	// Serialize file writes and staged state with the coordinator mutex. It is
 	// released before the reload wait so the async finalizer cannot deadlock
@@ -1094,9 +1124,19 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	if waitMargin <= 0 {
 		waitMargin = time.Second
 	}
-	waitTimeout := time.Until(deadline) + waitMargin
-	if waitTimeout <= 0 {
-		waitTimeout = time.Second
+	// Wait against the single transaction deadline. A zero deadline means no
+	// bound was configured, so the synchronous waiter blocks until the finalizer
+	// delivers (or the process shuts down) rather than collapsing into an
+	// accidental one-second wait.
+	var wait <-chan time.Time
+	if !deadline.IsZero() {
+		remaining := time.Until(deadline) + waitMargin
+		if remaining < 0 {
+			remaining = 0
+		}
+		timer := time.NewTimer(remaining)
+		defer timer.Stop()
+		wait = timer.C
 	}
 
 	select {
@@ -1104,7 +1144,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		return terminal, nil
 	case <-c.BaseCtx.Done():
 		return c.provisionalResult(id, mode, persistedVersion, desiredVersion, transactionStarted, false, "Configuration saved; the process is shutting down and the reload outcome is unknown."), nil
-	case <-time.After(waitTimeout):
+	case <-wait:
 		// Finalizer goroutine now owns the restoration obligation. The result
 		// returned here marks Persisted because the candidate is on disk, but
 		// the final restoration state will only be known after restoreDone.
