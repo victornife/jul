@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
  * SPDX-License-Identifier: agpl
  */
@@ -7,13 +7,13 @@
  * Apply-outcome taxonomy for the configuration write flow (AUX-02).
  *
  * A config apply is not a single yes/no event. The write path validates and
- * persists synchronously, but the swap into the live runtime -' and, for the L4
- * stream proxy, the listener rebind -' completes asynchronously; a handful of
+ * persists synchronously, but the swap into the live runtime — and, for the L4
+ * stream proxy, the listener rebind — completes asynchronously; a handful of
  * settings (the ACME issued-domain set and issuer) cannot be hot-applied at all
  * and need a process restart. Always painting a green "saved" hides the cases
  * where an apply is accepted but not yet, or not fully, live. This module folds
- * the raw signals -' accepted vs restart-required, the server's pending_reload
- * flag, and the post-apply stream_status -' into one explicit, severity-tagged
+ * the raw signals — accepted vs restart-required, the server's pending_reload
+ * flag, and the post-apply stream_status — into one explicit, severity-tagged
  * outcome so the panel can render every branch consistently and an operator can
  * tell them apart at a glance.
  */
@@ -30,7 +30,9 @@ export type ApplyOutcomeKind =
   // reload/restoration outcome was known (backend outcome "saved_not_live").
   // The final result — applied live, or rejected and restored to the previous
   // config — is NOT yet determined, so the UI must NOT claim the new config is
-  // serving. The operator polls the runtime overview for the terminal outcome.
+  // serving. The Console resolves the terminal outcome by polling the exact-ID
+  // managed-apply ledger record at GET /api/config/applies/{id}; the runtime
+  // overview is only a supplemental signal for the legacy pre-managed path.
   | "saved-not-live"
   // AC-11: Accepted and persisted by a legacy (pre-managed) apply path that
   // returns no correlated per-ID reload record, and whose persisted/serving
@@ -39,7 +41,7 @@ export type ApplyOutcomeKind =
   // operator confirms the serving version via the runtime overview.
   | "saved-uncorrelated"
   // Accepted and live for HTTP, but a subsystem failed to activate the new
-  // config and is still serving the previous one -' a degraded, not failed,
+  // config and is still serving the previous one — a degraded, not failed,
   // apply that needs operator attention.
   | "partial-reload"
   // Accepted, swap completed, but the reload exceeded the operator-configured
@@ -307,8 +309,8 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
   // the reloadTimedOut branch below, because the backend marks a saved_not_live
   // response as timed_out; without this guard the operator would be shown the
   // "is now serving" copy for a transaction whose new config may never serve.
-  // The message makes the uncertainty explicit and points at the overview,
-  // which the panel correlates and polls to a terminal state.
+  // The message makes the uncertainty explicit; the panel resolves the terminal
+  // state by polling the exact-ID managed-apply ledger (GET /api/config/applies/{id}).
   if (input.savedNotLive) {
     return {
       kind: "saved-not-live",
@@ -378,7 +380,7 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
       kind: "reload-timed-out",
       severity: "warning",
       blocking: false,
-      title: "Applied -' reload exceeded the configured timeout",
+      title: "Applied — reload exceeded the configured timeout",
       message:
         "The configuration was saved and is now serving, but the reload took longer than the configured reload_timeout" +
         phaseInfo +
@@ -433,7 +435,7 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
       kind: "reload-pending",
       severity: "info",
       blocking: false,
-      title: "Applied -' runtime reloading",
+      title: "Applied — runtime reloading",
       message:
         "The configuration was validated and saved. The live runtime is swapping to it now; this panel confirms once every subsystem reports the new config is live.",
       failures: [],

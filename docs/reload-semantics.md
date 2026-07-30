@@ -39,15 +39,19 @@ means:
 - Changes to **hot-reloadable** fields (routes, handlers, upstreams,
   compression, rate limiting, etc.) apply exactly as they do through the
   Console.
-- Changes to **restart-required** fields (cache, egress, admin, tracing,
-  access-log, ACME, log format, listener bind settings, `admin.rbac.enabled`) are **rejected at swap
-  time** — the swap is aborted, `LastReload.Outcome=not_applied` is recorded
+- Changes to **restart-required** fields (cache, egress, admin listener/token/
+  rate limits/history/plugin-upload/audit, tracing, access-log, ACME, log
+  format, listener bind settings) are **rejected at swap time** — the swap is
+  aborted, `LastReload.Outcome=not_applied` is recorded
   with the reason, and the old config remains authoritative. The file on disk
   may contain the new value, but the running process ignores it until a
   restart. `global.worker_threads` is *hot-reloadable* (the GOMAXPROCS cap is
-  updated on the next successful reload). **RBAC policy contents** (roles,
-  principals, token hashes) are hot-reloadable via atomic policy swap even
-  though `admin.rbac.enabled` itself is restart-required.
+  updated on the next successful reload). **RBAC is fully hot-reloadable**: both
+  the `admin.rbac.enabled` toggle and the policy contents (roles, principals,
+  token hashes) are rebuilt into a prepared authentication snapshot and
+  installed with a single atomic store at the reload Publish boundary, so
+  enabling, disabling, or repolicying RBAC takes effect on the next successful
+  reload without a restart.
 - **New-listener-only** fields (a new listen address, or a new L4 listener)
   apply to brand-new listeners without a restart; changing the same property on
   an already-bound listener is treated as restart-required.
@@ -98,17 +102,97 @@ includes `pending_restart` and the operator must discard or complete the staged
 restart first. Restart-required changes return `restart_required: true` with
 `can_stage: true` so the UI can offer staging instead of a flat rejection.
 
+## Managed apply terminal ledger
+
+Every managed write is assigned a **boot-scoped apply ID** of the form
+`rl_<instance>_<sequence>`, where `<instance>` is a 12-hex-character identifier
+generated once per process (so IDs are never reused across restarts) and
+`<sequence>` is a monotonic per-process counter. The coordinator records the
+transaction in a bounded in-memory ledger
+([`internal/admin/managed_apply_registry.go`](../internal/admin/managed_apply_registry.go))
+that carries three lifecycle states:
+
+- **pending** — accepted but not yet terminal. Never evicted.
+- **finalizing** — the single terminal callback has been claimed and the
+  terminal side effects (history, audit, metrics, ledger) are being applied.
+  Never evicted; a duplicate finalization callback is rejected here.
+- **terminal** — exactly one terminal result has been recorded. Retained
+  subject to the ledger's capacity and TTL bounds.
+
+A browser retrieves the exact record by ID at
+`GET /api/config/applies/{id}`, independent of any later transaction, so a
+newer apply can never overwrite the result the operator is awaiting. Response
+rules:
+
+| Condition | Status |
+|---|---|
+| malformed ID (not `rl_<instance>_<sequence>`) | `400 Bad Request` |
+| unknown or evicted ID | `404 Not Found` |
+| record present, still `pending` | `202 Accepted` with `state=pending` |
+| record present, `terminal` | `200 OK` with the terminal record |
+
+Each pending record also carries the **absolute transaction deadline** (see
+[Reload timeout and deadlines](#reload-timeout-and-deadlines-globalreload_timeout)),
+so the Console can render a deadline-aware "finalization expected by …" hint and
+switch to a past-deadline message when the poll expires.
+
+**Retention.** Terminal results are retained for at least **512 entries or one
+hour**, whichever keeps more recent results; pending and finalizing records are
+never evicted.
+
+**Permission.** The endpoint is authorized by **any-of** `status:read` **or**
+`config:apply`, so a principal privileged enough to apply configuration may read
+the secret-free result of its own transaction without also holding
+`status:read`.
+
+**Secret-free by construction.** A ledger record never carries raw TOML, bearer
+credentials, token digests, secret-expanded configuration, or the caller's
+source IP. The owning token id is private and is never serialized to the
+endpoint.
+
+## Exactly-once finalization
+
+Every terminal transaction is finalized **exactly once**. The finalizer claims
+the terminal callback through the ledger's `finalizing` state; a duplicate
+callback for the same ID is rejected without producing duplicate history, audit,
+or metric side effects. The terminal side effects run in a fixed order — record
+the terminal result in the ledger, emit terminal metrics, emit the terminal
+audit event, record history per the reversibility rules, update
+health/finalization status — and **only then** is it decided whether this record
+replaces the singular latest pointer.
+
+**History rules.** A committed apply (`applied_live` or `applied_degraded`) and
+a rollback each receive a history snapshot. A restoration failure creates an
+**emergency recovery snapshot** containing the exact pre-apply configuration
+even though the attempted apply failed.
+
+**Finalization degradation is advisory, never a runtime-apply failure.** A
+committed apply stays a success (`ok=true`) even if its history snapshot or its
+ledger/audit finalization degraded. The degradation is surfaced as a
+non-blocking advisory on the ledger record (`history_error` /
+`finalization_error`) and rendered alongside — never replacing — the apply
+outcome; it is never a readiness or success signal in either direction. A
+finalization-callback panic is caught, converted into a finalization error,
+surfaced through admin health, and never wedges the coordinator: finalization
+failure is an observability/compliance degradation, not a runtime rollback.
+
 ## Planned-restart staging
 
 A `stage_restart` apply mode persists a candidate that contains restart-bound
 changes without triggering a live reload. The staged configuration takes effect
 on the next process restart.
 
-Only one staged candidate may be in flight at a time. A second `stage_restart`
-request received while a candidate is already pending is rejected with a clear
-message; the operator must discard the pending candidate or restart the process
-before staging another. The original pre-stage backup and marker remain
-untouched by such a rejected request.
+At most one staged candidate is in flight at a time. A second `stage_restart`
+request received while a candidate is already pending **updates the existing
+managed staged candidate** rather than being rejected: the new candidate
+replaces the previously staged one on disk, but the original pre-stage backup
+(`.bak`) and the marker's base serving/canonical versions are preserved so the
+rollback base and the diff base remain the configuration that was serving when
+the *first* stage was created (never the intermediate staged candidate). The
+response reports `pending_restart.staged` (surfaced by the Console as the
+"staged configuration updated" outcome). The staged diff is always computed
+against the original serving config, so successive updates cannot drift the
+rollback baseline.
 
 Two sidecar files are written adjacent to the active config:
 
@@ -360,6 +444,14 @@ goroutine count and post-GC heap return to their pre-churn baseline.
 
 ## Reload timeout and deadlines (`[global].reload_timeout`)
 
+A managed admin apply runs under **one absolute transaction deadline**. The
+deadline is bound at HTTP admission as `now + reload_timeout` and the *same*
+deadline governs the whole transaction — candidate resolution → preflight →
+persistence → reload — so no single phase can be slow enough to let the overall
+apply run unbounded. Following R15-01 the budget is taken from the **currently
+serving** config's `reload_timeout`; a candidate that changes `reload_timeout`
+governs only the *next* transaction, never the one that submits it.
+
 A reload measures its own duration against `[global].reload_timeout` (default
 10s; zero or omitted defaults to 10s). The admin apply path submits a
 per-request deadline of `now + reload_timeout` to the live reload transaction.
@@ -420,7 +512,9 @@ applied dynamically on the next successful reload.
 - **Egress allow-list** — the outbound dial policy is built once at startup.
 - **Admin server** — listener, token, rate limits, history, plugin-upload, and
   audit-log settings are baked in at startup. Token rotation in particular does
-  not revoke the old token until restart.
+  not revoke the old token until restart. The RBAC policy and its
+  `admin.rbac.enabled` toggle are the exception: they hot-reload via the
+  prepared atomic authentication snapshot (see [config-lifecycle.yaml](config-lifecycle.yaml)).
 - **Metrics host label** — set when the Prometheus registry is created.
 
 Adding a brand-new `listen` address is *not* restart-required: the reload binds

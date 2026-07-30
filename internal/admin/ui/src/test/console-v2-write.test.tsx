@@ -222,7 +222,7 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(counters.apply).toBe(1);
     });
-    expect(await screen.findByText("Applied -' runtime reloading")).toBeInTheDocument();
+    expect(await screen.findByText("Applied — runtime reloading")).toBeInTheDocument();
   });
 
   it("shows an apply-progress spinner while the apply request is in flight", async () => {
@@ -281,7 +281,7 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(applied).toBe(1);
     });
-    await screen.findByText("Applied -' runtime reloading");
+    await screen.findByText("Applied — runtime reloading");
   });
 
   it("renders structured validation issues with their config path", async () => {

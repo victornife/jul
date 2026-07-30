@@ -324,10 +324,6 @@ export function ConfigPanel() {
   // Seed the editor once the raw config arrives. A pending handoff, if present,
   // becomes the draft so the operator lands on a ready-to-review diff. When the
   // principal lacks config:raw, raw config is absent but a structured patch
-  // handoff can still be reviewed and applied.
-  // Seed the editor once the raw config arrives. A pending handoff, if present,
-  // becomes the draft so the operator lands on a ready-to-review diff. When the
-  // principal lacks config:raw, raw config is absent but a structured patch
   // handoff can still be reviewed and applied. The initialized ref prevents the
   // effect from re-taking the handoff if React re-runs it before state updates
   // have committed.

@@ -93,6 +93,34 @@ on-disk digest is verified to still equal the staged candidate. Marker promotion
 holds the coordinator mutex from final baseline verification through
 post-promotion disk verification.
 
+### 6. One absolute transaction deadline
+
+A managed apply runs under a single absolute deadline, bound at HTTP admission
+as `now + reload_timeout`, that governs candidate resolution, the full
+pre-persistence preflight gate, persistence, and the live reload. There is no
+per-phase budget that could let one slow phase run the overall apply unbounded.
+Following R15-01 the budget is taken from the **currently serving** config's
+`reload_timeout`, so a candidate that changes `reload_timeout` governs only the
+next transaction, never the one that submits it. A deadline breach **before**
+persistence aborts cleanly with the on-disk configuration untouched and is
+surfaced as a phase-specific `504 Gateway Timeout` (`timed_out_phase`); after
+Publish the deadline no longer cancels work and an overrun is reported as
+`applied_degraded`, because the handler generation has already committed. The
+absolute deadline is recorded on the pending ledger record so a browser can poll
+it deadline-aware rather than by a fixed attempt count.
+
+### 7. Finalization degradation is advisory
+
+Runtime apply success and finalization success are orthogonal. A committed apply
+(`applied_live` or `applied_degraded`) stays a success even if its history
+snapshot or its ledger/audit finalization degrades; the degradation is surfaced
+as a non-blocking advisory on the terminal record (`history_error`,
+`finalization_error`) and rendered alongside — never replacing — the apply
+outcome. A finalization-callback panic is caught, converted into a finalization
+error, surfaced through admin health, and must not wedge the coordinator.
+Finalization failure is an observability/compliance degradation, not a runtime
+rollback.
+
 ## Consequences
 
 - **Positive:** every committed configuration transition is reversible; every
@@ -127,12 +155,33 @@ The following pieces of this decision have landed and are covered by tests:
 - **Planned-restart linearization (AC-06):** `PromoteToStagedVerified` in
   `internal/app/planned_restart.go`, driven under the coordinator mutex from
   `internal/app/config_apply.go`.
+- **History creation in terminalization (AC-05 wiring):** the terminal
+  `managedApplyFinalizer.Finalize` in `internal/app/managed_apply_finalizer.go`
+  calls `admin.Server.RecordManagedHistory`, so the snapshot is produced by the
+  single terminal path rather than out of band.
+- **Single terminal helper (AC-03 completion):** every persisted mutation — hot
+  apply, enqueue failure, stage create, and stage update — routes through the
+  single `completeManagedApply` helper in `internal/app/config_apply.go`
+  (covered by `config_apply_stage_finalize_test.go`).
+- **One absolute transaction deadline (AC-08):** `preflightContext` and
+  `servingReloadTimeout` in `internal/app/config_apply.go` bound resolution,
+  every preflight gate, persistence, and reload under a single deadline taken
+  from the serving `reload_timeout`; a pre-persistence breach surfaces as a
+  phase-specific `504` (`timed_out_phase`).
+- **Console correlation (AC-09–AC-13):** the exact-ID managed-apply poll
+  (`useManagedApplyRecord`, `fetchManagedApply`, `GET /api/config/applies/{id}`)
+  observes the terminal record by its exact id rather than the global
+  runtime-overview pointer.
+- **Health/finalization degradation surface (AC-14):** the finalization advisory
+  (`internal/admin/ui/src/lib/finalizationAdvisory.ts`, `history_error` /
+  `finalization_error` on the ledger record, and the bounded
+  `jul_managed_apply_finalization_errors_total{component}` counter) renders a
+  committed-but-degraded apply as advisory without downgrading apply success.
 
-Still outstanding at the time of writing: moving history creation into
-terminalization (AC-05 wiring), the single `completeManagedApply` helper for
-all terminal paths (AC-03 completion), whole-transaction `reload_timeout`
-bounding (AC-08), the remaining Console correlation work (AC-09–AC-13), and the
-health/finalization degradation surface (AC-14).
+All of the audit-closure acceptance criteria referenced above landed through the
+configuration-audit remediation workstreams (WS01–WS06) and are covered by
+tests; the closure evidence is regenerated at the exact green SHA under
+Workstream 7.
 
 ## Related
 
