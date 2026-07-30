@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"jul/internal/auth"
@@ -96,46 +97,44 @@ func IndexUpstreams(ups []config.UpstreamConfig) map[string]config.UpstreamConfi
 	return m
 }
 
-// MergeReload fans multiple reload sources into one typed channel. Each source
-// is tagged with its source kind; nil sources are skipped. The output channel
-// has capacity one per source so a burst of distinct events is coalesced to
-// the latest event but an admin candidate-bearing event is not dropped behind
-// a coalesced file-watch/SIGHUP signal.
+// MergeReload fans multiple reload sources into one typed channel. Untyped
+// notifications are coalesced before enqueue; candidate-bearing admin requests
+// are forwarded losslessly and are never removed from the shared output.
 //
 // fileWatch, when non-nil, carries the SHA-256 digest of the file contents at
 // the moment the watcher fired. When a digest matches lastAdminDigest, the
 // event is treated as the echo of a recent admin write and is suppressed
 // (R10-01).
 func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-chan [32]byte, adminReload <-chan server.ReloadRequest, lastAdminDigest *atomic.Pointer[[32]byte]) <-chan server.ReloadRequest {
-	out := make(chan server.ReloadRequest, 3)
+	// Unbuffered handoff gives ownership a precise boundary: a send succeeds only
+	// when server.Run has accepted the request. Before that point this fan-in is
+	// responsible for completing or rejecting managed requests on cancellation.
+	out := make(chan server.ReloadRequest)
+	var wg sync.WaitGroup
 
 	forward := func(in <-chan struct{}, source server.ReloadSource) {
 		if in == nil {
 			return
 		}
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
+			pending := false
 			for {
+				var send chan server.ReloadRequest
+				if pending {
+					send = out
+				}
 				select {
 				case <-ctx.Done():
 					return
+				case send <- server.ReloadRequest{Source: source}:
+					pending = false
 				case _, ok := <-in:
 					if !ok {
 						return
 					}
-					select {
-					case out <- server.ReloadRequest{Source: source}:
-					default:
-						// Coalesce untyped events: drop the buffered one and
-						// replace it with the latest signal.
-						select {
-						case <-out:
-						default:
-						}
-						select {
-						case out <- server.ReloadRequest{Source: source}:
-						default:
-						}
-					}
+					pending = true
 				}
 			}
 		}()
@@ -144,11 +143,20 @@ func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-cha
 	forward(sigReload, server.ReloadSourceSIGHUP)
 
 	if fileWatch != nil {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
+			pending := false
 			for {
+				var send chan server.ReloadRequest
+				if pending {
+					send = out
+				}
 				select {
 				case <-ctx.Done():
 					return
+				case send <- server.ReloadRequest{Source: server.ReloadSourceFileWatch}:
+					pending = false
 				case digest, ok := <-fileWatch:
 					if !ok {
 						return
@@ -165,51 +173,71 @@ func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-cha
 							continue
 						}
 					}
-					select {
-					case out <- server.ReloadRequest{Source: server.ReloadSourceFileWatch}:
-					default:
-						select {
-						case <-out:
-						default:
-						}
-						select {
-						case out <- server.ReloadRequest{Source: server.ReloadSourceFileWatch}:
-						default:
-						}
-					}
+					pending = true
 				}
 			}
 		}()
 	}
 
 	if adminReload != nil {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
+			completeCanceled := func(req server.ReloadRequest) {
+				req.PreparedAdmin.Abort()
+				if req.Result == nil {
+					return
+				}
+				result := server.ReloadResult{
+					ID:          req.ID,
+					Source:      req.Source,
+					Outcome:     server.ReloadNotApplied,
+					Persisted:   req.Candidate != nil,
+					FailedPhase: "enqueue",
+					Error:       "reload dispatch canceled before server acceptance",
+				}
+				select {
+				case req.Result <- result:
+				default:
+				}
+			}
+			drainCanceled := func() {
+				for {
+					select {
+					case pending, ok := <-adminReload:
+						if !ok {
+							return
+						}
+						completeCanceled(pending)
+					default:
+						return
+					}
+				}
+			}
 			for {
 				select {
 				case <-ctx.Done():
+					drainCanceled()
 					return
 				case req, ok := <-adminReload:
 					if !ok {
 						return
 					}
-					// Admin candidate-bearing events must not be coalesced away.
 					select {
 					case out <- req:
-					default:
-						// Drain a pending untyped event to make room.
-						select {
-						case <-out:
-						default:
-						}
-						select {
-						case out <- req:
-						default:
-						}
+					case <-ctx.Done():
+						completeCanceled(req)
+						drainCanceled()
+						return
 					}
 				}
 			}
 		}()
 	}
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
 
 	return out
 }

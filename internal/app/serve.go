@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -232,7 +234,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// It is buffered so a candidate-bearing request can queue while a reload is
 	// in progress, but it preserves causal ordering: the candidate is part of
 	// the request message, not stored in a separate global slot (R9-02).
-	adminReload := make(chan server.ReloadRequest, 1)
+	// Unbuffered ownership transfer: SubmitReload succeeds only when the fan-in
+	// has accepted responsibility for forwarding or rejecting the request.
+	adminReload := make(chan server.ReloadRequest)
 	// lastAdminDigest holds the SHA-256 digest of the most recent raw config
 	// written by an admin apply. The file watcher uses it to suppress its own
 	// echo of that write (R10-01).
@@ -254,6 +258,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		select {
 		case adminReload <- req:
 			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("reload dispatch canceled: %w", ctx.Err())
 		case <-time.After(5 * time.Second):
 			return fmt.Errorf("reload enqueue timed out after 5s")
 		}
@@ -326,6 +332,18 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// degraded state reported by a published reload.
 	var activeAdminDegraded atomic.Bool
 	var lastAdminDegradedErr atomic.Pointer[string]
+	// lastManagedApplyFinalization is the ADVISORY, non-readiness finalization-
+	// health state of the most recent managed apply (WS02 §3.9). It is surfaced
+	// in the runtime overview as managed_apply_finalization and is deliberately
+	// INDEPENDENT of readiness: a finalization degradation (a completion-callback
+	// panic, a terminal-ledger completion failure, or a configuration-history
+	// snapshot/metadata failure) NEVER fails /readyz and NEVER turns an
+	// already-committed apply into a failed apply (the raw configuration stays
+	// roll-back-able). The terminal finalizer publishes a healthy advisory after
+	// a clean finalization — which CLEARS any prior degradation (§3.9) — and an
+	// unhealthy advisory carrying the apply ID and a bounded detail on
+	// degradation.
+	var lastManagedApplyFinalization atomic.Pointer[admin.ManagedApplyAdvisory]
 	srv.OnReloadResult = func(r server.ReloadResult) {
 		metrics.ObserveReloadResult(string(r.Outcome), r.PhaseDurations, r.TimedOut, r.TimedOutPhase)
 		// Only published reloads affect the durable admin-health flag.
@@ -367,6 +385,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		select {
 		case adminReload <- req:
 			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("reload dispatch canceled: %w", ctx.Err())
 		case <-time.After(5 * time.Second):
 			return fmt.Errorf("reload enqueue timed out after 5s")
 		}
@@ -387,18 +407,33 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// updates LastReload to a result with Published=false, which would
 	// previously erase a degraded state from a prior published failure.
 	deps.AdminHealth = func() error {
-		if !activeAdminDegraded.Load() {
-			return nil
+		if activeAdminDegraded.Load() {
+			detail := "admin subsystem reload failed"
+			if p := lastAdminDegradedErr.Load(); p != nil && *p != "" {
+				detail = *p
+			}
+			return &admin.AdminHealthStatus{
+				Healthy: false,
+				Reason:  "admin_reload",
+				Detail:  detail,
+			}
 		}
-		detail := "admin subsystem reload failed"
-		if p := lastAdminDegradedErr.Load(); p != nil && *p != "" {
-			detail = *p
-		}
-		return &admin.AdminHealthStatus{
-			Healthy: false,
-			Reason:  "admin_reload",
-			Detail:  detail,
-		}
+		// WS02 §3.9: managed-apply finalization health is ADVISORY and MUST NOT
+		// gate readiness. It is surfaced separately through
+		// deps.ManagedApplyFinalizationHealth (the runtime overview's
+		// managed_apply_finalization field), never through AdminHealth/readyz, so
+		// a terminal-finalization degradation never fails /readyz and never rolls
+		// back an already-committed apply.
+		return nil
+	}
+	// WS02 §3.9: advisory, non-readiness managed-apply finalization health. It is
+	// surfaced in the runtime overview as managed_apply_finalization and is wired
+	// here — before admin.New copies deps — so the running overview reads the
+	// same atomic pointer the terminal finalizer publishes to. It NEVER gates
+	// /readyz. Nil until the first managed apply finalizes, so the overview omits
+	// the field.
+	deps.ManagedApplyFinalizationHealth = func() *admin.ManagedApplyAdvisory {
+		return lastManagedApplyFinalization.Load()
 	}
 
 	// Wire the managed apply path now that srv exists so the coordinator can
@@ -416,6 +451,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			select {
 			case adminReload <- req:
 				return nil
+			case <-ctx.Done():
+				return fmt.Errorf("reload dispatch canceled: %w", ctx.Err())
 			case <-time.After(5 * time.Second):
 				return fmt.Errorf("reload enqueue timed out after 5s")
 			}
@@ -573,9 +610,49 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// lower sequence number (stale results from a timed-out earlier apply that
 	// fired after a newer apply completed) are silently dropped.
 	var lastManagedApplySeq atomic.Uint64
+	var lastManagedApplyMu sync.Mutex
+	// AC-02: bounded terminal-result ledger so a browser can retrieve the exact
+	// terminal result of any recent accepted apply by exact ID, independent of
+	// the singular latest pointer. Wired into deps before admin.New copies them.
+	managedApplies := admin.NewManagedApplyRegistry(0, 0)
 	if coordinator != nil {
+		deps.ManagedApplies = managedApplies
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
+		}
+		// AC-05: the managed coordinator records configuration-history snapshots
+		// at terminalization, so the HTTP handlers must not snapshot eagerly.
+		// The trusted history write is performed by the unified completion
+		// callback wired after adminSrv exists (below); this flag must be set
+		// before admin.New copies deps.
+		deps.ManagedHistoryActive = true
+
+		// AC-02: register the exact-ID pending ledger record the moment a
+		// managed apply persists its candidate and enqueues the reload, BEFORE
+		// the synchronous HTTP path can return a 202 saved_not_live. This closes
+		// the window where a real 202 could be immediately followed by a spurious
+		// 404 that stalls the ConfigPanel poll. Wired here — before admin.New
+		// copies deps and starts the listener — so the ledger already accepts
+		// pending writes by the time the admin server can receive apply requests.
+		coordinator.OnManagedApplyStarted = func(start admin.ManagedApplyStart) error {
+			applyID := start.Result.ApplyID
+			if applyID == "" && start.Result.Reload != nil {
+				applyID = start.Result.Reload.ID
+			}
+
+			if applyID == "" {
+				return errors.New("managed apply start has no apply id")
+			}
+
+			return managedApplies.BeginPending(admin.ManagedApplyRecord{
+				ID:           applyID,
+				State:        admin.ManagedApplyPending,
+				Operation:    start.Context.Operation,
+				StartedAt:    start.Context.StartedAt,
+				Deadline:     start.Context.Deadline,
+				Result:       start.Result,
+				OwnerTokenID: start.Context.TokenID,
+			})
 		}
 	}
 
@@ -585,13 +662,30 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	adminSrv := admin.New(cfg.Admin, log, deps)
 	if adminSrv != nil {
 		// Install the initial RBAC policy from the startup candidate.
+		// H-01: Fail-closed when RBAC is enabled but policy build fails.
+		// Never silently fall back to legacy or anonymous auth.
 		if cfg.Admin.RBAC.Enabled {
 			if p, err := buildRBACPolicy(startupCand.Effective.Admin); err != nil {
-				log.Warn("RBAC policy build failed at startup; falling back to legacy auth", "error", err)
+				log.Error("RBAC policy build failed at startup; admin listener will not start", "error", err)
+				return 1
 			} else {
 				adminSrv.UpdatePolicy(p)
 			}
 		}
+		prepareAdmin := func(adminCfg config.AdminConfig) (*server.PreparedCommit, error) {
+			var policy *rbac.Policy
+			if adminCfg.RBAC.Enabled {
+				built, err := buildRBACPolicy(adminCfg)
+				if err != nil {
+					return nil, fmt.Errorf("rbac policy: %w", err)
+				}
+				policy = built
+			}
+			prepared := admin.PrepareAuth(adminCfg, policy)
+			return server.NewPreparedCommit(func() { adminSrv.CommitPreparedAuth(prepared) }, nil), nil
+		}
+		pf.PrepareAdmin = prepareAdmin
+		srv.PrepareAdmin = prepareAdmin
 		go func() {
 			if err := adminSrv.Run(ctx); err != nil {
 				log.Error("admin listener failed", "error", err)
@@ -603,51 +697,97 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// outcome callback so it records audit/metrics and exposes the result in
 	// the runtime overview.
 	if coordinator != nil && adminSrv != nil {
-		coordinator.OnManagedApplyComplete = func(ctx admin.ApplyRequestContext, res admin.ConfigApplyResult) {
-			// C3: ignore callbacks from older applies (e.g. a timed-out first
-			// apply whose finalizer fires after a second apply has already
-			// completed). Parse the monotonic sequence from the reload ID
-			// ("rl_N") and only store/record when N is strictly newer.
-			seq := parseReloadSeq(res.Reload.ID)
-			for {
-				prev := lastManagedApplySeq.Load()
-				if seq <= prev {
-					return // stale result; a newer outcome is already stored
-				}
-				if lastManagedApplySeq.CompareAndSwap(prev, seq) {
-					break
-				}
+		coordinator.AuthGeneration = adminSrv.AuthGeneration
+		// WS02 §3.6/§3.9: make a managed-apply finalization callback panic
+		// EXPLICIT. The coordinator recovers the panic, threads a
+		// FinalizationError onto the terminal result, and invokes this hook so
+		// the composition root (1) writes a structured error log, (2) increments
+		// the finalization-error metric, (3) publishes an advisory, NON-READINESS
+		// finalization-health state surfaced through the runtime overview's
+		// managed_apply_finalization field (never /readyz), and (4) best-effort
+		// writes a terminal ledger record carrying the FinalizationError. A
+		// finalization panic never fails an already-committed apply: the raw
+		// config stays roll-back-able.
+		coordinator.OnManagedApplyFinalizationError = func(applyID string, err error) {
+			detail := "managed apply finalization callback failed"
+			if err != nil {
+				detail = err.Error()
 			}
-			outcome := ""
-			if res.Reload != nil {
-				outcome = string(res.Reload.Outcome)
+			log.Error("managed apply finalization callback panicked",
+				"apply_id", applyID,
+				"error", detail,
+			)
+			metrics.ObserveManagedApplyFinalizationError("callback_panic")
+			// WS02 §3.9: publish the advisory, non-readiness finalization health.
+			// A panic aborts the normal completion path, so this is the only
+			// advisory write for the ID; it never gates /readyz.
+			lastManagedApplyFinalization.Store(&admin.ManagedApplyAdvisory{
+				Healthy: false,
+				At:      time.Now().UTC(),
+				ApplyID: applyID,
+				Detail:  detail,
+			})
+			// Best-effort terminal ledger record so a browser retrieving the
+			// exact apply ID sees the finalization failure. The panic aborted the
+			// normal completion path, so this is the only record for the ID.
+			if applyID != "" {
+				_ = managedApplies.Complete(admin.ManagedApplyRecord{
+					ID:                applyID,
+					CompletedAt:       time.Now().UTC(),
+					FinalizationError: detail,
+				})
+				// WS06 §7.5: keep the retained-ledger gauge in sync after this
+				// out-of-band terminal completion.
+				metrics.SetManagedApplyRegistryEntries(managedApplies.TerminalCount())
 			}
-			restoredLabel := "n/a"
-			if outcome != "" && outcome != string(server.ReloadAppliedLive) && outcome != string(server.ReloadSavedNotLive) {
-				if res.Restored {
-					restoredLabel = "true"
-				} else {
-					restoredLabel = "false"
-				}
-			}
-			metrics.ObserveManagedApplyFinalized(outcome, restoredLabel)
-
-			o := &admin.ManagedApplyOutcome{
-				ID:                  res.Reload.ID,
-				Mode:                res.Mode,
-				OK:                  res.OK,
-				Outcome:             outcome,
-				Restored:            res.Restored,
-				RestoreError:        res.RestoreError,
-				FinalDiskVersion:    res.FinalDiskVersion,
-				FinalServingVersion: res.FinalServingVersion,
-				CompletedAt:         time.Now().UTC(),
-				Actor:               ctx.Actor,
-				SourceIP:            ctx.SourceIP,
-			}
-			lastManagedApply.Store(o)
-			adminSrv.RecordManagedApplyOutcome(ctx, *o)
 		}
+		// WS06 §7.6: make managed-apply machinery failures that happen OUTSIDE
+		// the unified completion callback explicit — a saved_not_live terminal
+		// restoration write failure and a post-persistence pending-registration
+		// write failure. The coordinator supplies a bounded phase; the hook emits
+		// a structured error log and the bounded finalization-error metric so the
+		// failure is observable instead of silently swallowed. It never fails an
+		// already-committed apply: the raw configuration stays roll-back-able.
+		coordinator.ReportManagedApplyError = func(applyID, phase string, err error) {
+			detail := "managed apply " + phase + " failed"
+			if err != nil {
+				detail = err.Error()
+			}
+			log.Error("managed apply "+phase+" failed",
+				"apply_id", applyID,
+				"phase", phase,
+				"error", detail,
+			)
+			metrics.ObserveManagedApplyFinalizationError(phase)
+		}
+		// WS02 §3.7: the unified completion callback owns terminal finalization
+		// through the single managedApplyFinalizer orchestrator. It claims the
+		// transaction BEFORE any history write (fixing WS02 §3.2 defect 2),
+		// performs the trusted in-process configuration-history write (previousRaw
+		// is sensitive and forwarded only there — never logged or retained by the
+		// coordinator), records the audit/metrics/ledger side effects exactly once,
+		// no longer ignores the terminal-ledger Complete error (defect 4), fails
+		// closed with an explicit FinalizationError on a claim error (defect 5),
+		// and returns the finalization provenance threaded back onto the terminal
+		// result. The advisory, NON-READINESS finalization-health state surfaced
+		// through the runtime overview's managed_apply_finalization field (WS02
+		// §3.9) is published on every terminalization — healthy after a clean
+		// finalize (which clears any prior degradation) and unhealthy on any
+		// claim/complete/history failure — so a terminal finalization degradation
+		// is explicit rather than silently swallowed, without ever gating /readyz.
+		finalizer := &managedApplyFinalizer{
+			registry:  managedApplies,
+			admin:     adminSrv,
+			metrics:   metrics,
+			log:       log,
+			latest:    &lastManagedApply,
+			latestSeq: &lastManagedApplySeq,
+			latestMu:  &lastManagedApplyMu,
+			setAdvisory: func(a admin.ManagedApplyAdvisory) {
+				lastManagedApplyFinalization.Store(&a)
+			},
+		}
+		coordinator.OnManagedApplyComplete = finalizer.Finalize
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
 		}
@@ -675,26 +815,6 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		} else {
 			runtime.GOMAXPROCS(lifecycle.InitialGOMAXPROCS())
 		}
-		// Hot-swap RBAC policy and live admin config after a successful hot
-		// reload. The candidate is the already-Publish-committed effective
-		// config, so secrets are resolved. This runs after Publish so the new
-		// policy never races with handler swap.
-		if adminSrv != nil {
-			adminSrv.UpdateLiveAdminConfig(c.Admin)
-			if c.Admin.RBAC.Enabled {
-				if p, err := buildRBACPolicy(c.Admin); err != nil {
-					adminErr = fmt.Errorf("rbac policy update failed: %w", err)
-					log.Warn("RBAC policy rebuild failed on reload; retaining previous policy", "error", err)
-				} else {
-					adminSrv.UpdatePolicy(p)
-				}
-			} else {
-				// RBAC explicitly disabled: clear the active policy so the
-				// server falls back to legacy token auth (or anonymous if no
-				// token is configured).
-				adminSrv.UpdatePolicy(nil)
-			}
-		}
 		if err := rt.Stream.Reload(c.Streams, IndexUpstreams(c.Upstreams)); err != nil {
 			log.Error("stream proxy reload failed", "error", err)
 			msg := "failed: " + err.Error()
@@ -720,10 +840,15 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 // API response shape. It is a pure projection: no new policy is added.
 func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 	return admin.ConfigApplyResult{
+		ApplyID:               r.ApplyID,
 		OK:                    r.OK,
 		Mode:                  string(r.Mode),
 		Version:               r.Version,
+		PersistedVersion:      r.PersistedVersion,
+		DesiredVersion:        r.DesiredVersion,
 		ServingVersion:        r.ServingVersion,
+		Conflict:              r.Conflict,
+		CurrentVersion:        r.CurrentVersion,
 		Reload:                r.Reload,
 		PendingRestart:        r.PendingRestart,
 		Message:               r.Message,
@@ -736,6 +861,8 @@ func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 		FinalDiskVersion:      r.FinalDiskVersion,
 		FinalServingVersion:   r.FinalServingVersion,
 		StagedRestartIsUpdate: r.StagedRestartIsUpdate,
+		TimedOutPhase:         r.TimedOutPhase,
+		FinalizationError:     r.FinalizationError,
 	}
 }
 
@@ -817,18 +944,51 @@ func parseWorkerThreads(s string) int {
 	return n
 }
 
-// parseReloadSeq extracts the monotonic sequence number from a reload ID of
-// the form "rl_N". It returns 0 for any ID that does not match that format.
-// Used by OnManagedApplyComplete to implement the C3 sequence guard.
+// parseReloadSeq extracts the monotonic sequence number from a managed apply /
+// reload ID. It accepts both the boot-scoped "rl_<instance>_<sequence>" format
+// and the legacy "rl_<sequence>" format, returning 0 for any ID that matches
+// neither. The sequence is always the final underscore-delimited field; because
+// every ID generated by one process shares the same boot-scoped instance,
+// comparing the trailing sequence yields a correct monotonic ordering within
+// the process (the boot id is deliberately not compared). Used by
+// OnManagedApplyComplete to implement the C3 sequence guard.
 func parseReloadSeq(id string) uint64 {
 	if !strings.HasPrefix(id, "rl_") {
 		return 0
 	}
-	n, err := strconv.ParseUint(id[3:], 10, 64)
+	rest := id[3:]
+	if i := strings.LastIndex(rest, "_"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	n, err := strconv.ParseUint(rest, 10, 64)
 	if err != nil {
 		return 0
 	}
 	return n
+}
+
+// managedApplySeqGuard implements the C3/M-05 monotonic high-water sequence
+// guard for managed-apply terminal callbacks. It returns true when res should
+// be recorded (its sequence is strictly greater than the current high-water
+// mark) and atomically advances the mark; it returns false for stale or
+// out-of-order results. It prefers res.ApplyID and falls back to res.Reload.ID
+// so a terminal result that somehow lacks ApplyID is still sequence-correlated
+// rather than silently dropped as sequence 0.
+func managedApplySeqGuard(hw *atomic.Uint64, res admin.ConfigApplyResult) bool {
+	applyID := res.ApplyID
+	if applyID == "" && res.Reload != nil {
+		applyID = res.Reload.ID
+	}
+	seq := parseReloadSeq(applyID)
+	for {
+		prev := hw.Load()
+		if seq <= prev {
+			return false
+		}
+		if hw.CompareAndSwap(prev, seq) {
+			return true
+		}
+	}
 }
 
 // pendingRestartCheck reports which startup-bound subsystems have changed on

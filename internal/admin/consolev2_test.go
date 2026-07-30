@@ -7,7 +7,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +23,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/rbac"
+	"jul/internal/server"
 )
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -109,6 +112,242 @@ func v2WriteServer(t *testing.T) (*Server, string) {
 	}
 	cfg := config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}
 	return newTestServer(t, cfg, deps), cfgPath
+}
+
+func TestConfigApplyCarriesRawFirstBaseline(t *testing.T) {
+	s, cfgPath := v2WriteServer(t)
+	seed, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+	var captured ApplyRequestContext
+	s.deps.ApplyConfigRaw = func(ctx ApplyRequestContext, data []byte, mode string) (ConfigApplyResult, error) {
+		captured = ctx
+		return ConfigApplyResult{OK: true, Mode: mode, Version: configVersion(data)}, nil
+	}
+
+	candidate := validTOML(t, "./public", ":8081")
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(candidate)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("apply = %d, want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	if captured.Baseline == nil {
+		t.Fatal("managed apply did not receive a mutation baseline")
+	}
+	if !bytes.Equal(captured.Baseline.Raw, seed) {
+		t.Fatal("baseline raw bytes do not match the authorized snapshot")
+	}
+	if captured.Baseline.Digest != sha256.Sum256(seed) || !captured.Baseline.Exists {
+		t.Fatalf("baseline digest/existence = %x/%t", captured.Baseline.Digest, captured.Baseline.Exists)
+	}
+	if captured.Baseline.Version == "" || captured.Baseline.Config == nil {
+		t.Fatalf("incomplete baseline: %+v", captured.Baseline)
+	}
+}
+
+func TestConfigApplyReturnsStructuredEnqueueFailure(t *testing.T) {
+	s, _ := v2WriteServer(t)
+	s.deps.ApplyConfigRaw = func(_ ApplyRequestContext, _ []byte, mode string) (ConfigApplyResult, error) {
+		return ConfigApplyResult{
+			ApplyID:          "rl_42",
+			OK:               false,
+			Mode:             mode,
+			Persisted:        true,
+			Restored:         true,
+			FinalDiskVersion: "raw-v1",
+			Reload: &server.ReloadResult{
+				ID:          "rl_42",
+				Source:      server.ReloadSourceAdmin,
+				Outcome:     server.ReloadNotApplied,
+				FailedPhase: "enqueue",
+				Persisted:   true,
+			},
+			Message: "Reload was not enqueued; the previous configuration was restored.",
+		}, errors.New("enqueue failed")
+	}
+
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(validTOML(t, "./public", ":8081"))))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
+	}
+	var result ConfigApplyResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.ApplyID != "rl_42" || !result.Persisted || !result.Restored || result.Reload == nil || result.Reload.FailedPhase != "enqueue" {
+		t.Fatalf("structured enqueue truth was lost: %+v", result)
+	}
+}
+
+func TestConfigPatchReturnsStructuredEnqueueFailure(t *testing.T) {
+	s, _ := v2WriteServer(t)
+	s.deps.ApplyConfig = func(_ ApplyRequestContext, _ *config.Config, mode string) (ConfigApplyResult, error) {
+		return ConfigApplyResult{
+			ApplyID:  "rl_43",
+			OK:       false,
+			Mode:     mode,
+			Restored: true,
+			Reload:   &server.ReloadResult{ID: "rl_43", Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, FailedPhase: "enqueue"},
+		}, errors.New("enqueue failed")
+	}
+	body, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9999"}}})
+	if err != nil {
+		t.Fatalf("marshal patch: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/apply", bytes.NewReader(body)))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
+	}
+	var result ConfigApplyResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.ApplyID != "rl_43" || !result.Restored || result.Reload == nil || result.Reload.FailedPhase != "enqueue" {
+		t.Fatalf("structured patch enqueue truth was lost: %+v", result)
+	}
+}
+
+func TestRollbackReturnsStructuredEnqueueFailure(t *testing.T) {
+	for _, path := range []string{"/api/history/rollback", "/api/config/rollback"} {
+		t.Run(path, func(t *testing.T) {
+			s, cfgPath := v2WriteServer(t)
+			seed, err := os.ReadFile(cfgPath)
+			if err != nil {
+				t.Fatalf("read seed: %v", err)
+			}
+			entryID, err := s.hist.snapshot(seed)
+			if err != nil {
+				t.Fatalf("snapshot: %v", err)
+			}
+			s.deps.ApplyConfigRaw = func(_ ApplyRequestContext, _ []byte, mode string) (ConfigApplyResult, error) {
+				return ConfigApplyResult{
+					ApplyID:  "rl_rollback",
+					OK:       false,
+					Mode:     mode,
+					Restored: true,
+					Reload:   &server.ReloadResult{ID: "rl_rollback", Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, FailedPhase: "enqueue"},
+				}, errors.New("enqueue failed")
+			}
+			body, _ := json.Marshal(map[string]string{"id": entryID})
+			rr := httptest.NewRecorder()
+			s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)))
+			if rr.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
+			}
+			var result ConfigApplyResult
+			if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if result.ApplyID != "rl_rollback" || !result.Restored || result.Reload == nil || result.Reload.FailedPhase != "enqueue" {
+				t.Fatalf("structured rollback result lost: %+v", result)
+			}
+		})
+	}
+}
+
+func TestRollbackSavedNotLiveReturnsAccepted(t *testing.T) {
+	for _, path := range []string{"/api/history/rollback", "/api/config/rollback"} {
+		t.Run(path, func(t *testing.T) {
+			s, cfgPath := v2WriteServer(t)
+			seed, err := os.ReadFile(cfgPath)
+			if err != nil {
+				t.Fatalf("read seed: %v", err)
+			}
+			entryID, err := s.hist.snapshot(seed)
+			if err != nil {
+				t.Fatalf("snapshot: %v", err)
+			}
+			s.deps.ApplyConfigRaw = func(_ ApplyRequestContext, _ []byte, mode string) (ConfigApplyResult, error) {
+				return ConfigApplyResult{
+					ApplyID:   "rl_pending",
+					OK:        true,
+					Mode:      mode,
+					Persisted: true,
+					Reload:    &server.ReloadResult{ID: "rl_pending", Source: server.ReloadSourceAdmin, Outcome: server.ReloadSavedNotLive, Persisted: true},
+					Message:   "Configuration saved; live outcome pending.",
+				}, nil
+			}
+			body, _ := json.Marshal(map[string]string{"id": entryID})
+			rr := httptest.NewRecorder()
+			s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)))
+			if rr.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202; body: %s", rr.Code, rr.Body.String())
+			}
+			if strings.Contains(rr.Body.String(), `"status":"rolled back"`) {
+				t.Fatalf("provisional rollback claimed terminal success: %s", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestConfigApplyAuthorizesEffectiveSecretRotation(t *testing.T) {
+	t.Setenv("AUDIT_ADMIN_TOKEN", "old-admin-token-32-characters----")
+	current := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	current.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles:   []config.AdminRole{{Name: "writer", Permissions: []string{"config:apply"}}},
+			Principals: []config.AdminPrincipal{
+				{Name: "operator", Role: "writer", Token: "operator-token-32-characters-----"},
+				{Name: "admin", Role: rbac.RoleAdmin, Token: "${env:AUDIT_ADMIN_TOKEN}"},
+			},
+		},
+	}
+	raw, err := config.Marshal(current)
+	if err != nil {
+		t.Fatalf("marshal current: %v", err)
+	}
+	liveCandidate, err := config.NewCandidate(current)
+	if err != nil {
+		t.Fatalf("resolve current: %v", err)
+	}
+	operatorToken := current.Admin.RBAC.Principals[0].Token
+	policy, err := rbac.Build(true, "admin", map[string][]string{"writer": {"config:apply"}}, []rbac.PrincipalDef{
+		{Name: "operator", Role: "writer", Token: operatorToken},
+		{Name: "admin", Role: rbac.RoleAdmin, Token: liveCandidate.Effective.Admin.RBAC.Principals[1].Token},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatalf("build policy: %v", err)
+	}
+	called := false
+	s := newTestServer(t, config.AdminConfig{RBAC: config.AdminRBACConfig{Enabled: true}}, Deps{
+		ReadConfigRaw: func() ([]byte, error) { return raw, nil },
+		LoadConfig:    func() (*config.Config, error) { return current, nil },
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{EffectiveConfig: liveCandidate.Effective}
+		},
+		ApplyConfigRaw: func(_ ApplyRequestContext, _ []byte, mode string) (ConfigApplyResult, error) {
+			called = true
+			return ConfigApplyResult{OK: true, Mode: mode}, nil
+		},
+	})
+	s.UpdateAuth(liveCandidate.Effective.Admin, policy)
+	t.Setenv("AUDIT_ADMIN_TOKEN", "new-admin-token-32-characters----")
+	candidate, err := current.Clone()
+	if err != nil {
+		t.Fatalf("clone candidate: %v", err)
+	}
+	candidate.Global.LogLevel = "debug"
+	candidateRaw, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(candidateRaw))
+	req.Header.Set("Authorization", "Bearer "+operatorToken)
+	s.routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for effective auth transition; body: %s", rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Fatal("effective auth transition reached coordinator without admin:manage")
+	}
 }
 
 // ── /api/runtime/overview ────────────────────────────────────────────────────

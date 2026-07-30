@@ -725,7 +725,7 @@ func TestApplyPatchCompressionSet(t *testing.T) {
 
 func TestApplyPatchCompressionSetErrors(t *testing.T) {
 	cases := []patchRequest{
-		{Op: "compression_set"},                                             // nil payload
+		{Op: "compression_set"}, // nil payload
 		{Op: "compression_set", Compression: &compressionPatch{MinSize: "x"}}, // bad size
 	}
 	for _, req := range cases {
@@ -837,7 +837,7 @@ func TestApplyPatchLocationSetAction(t *testing.T) {
 	c.Servers[0].Locations[0].Return = 302
 	if _, err := applyPatch(c, patchRequest{
 		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
-		Action: &locationActionPayload{Kind: "grpc", Target: "http://backend:9000"},
+		Action: &locationActionPayload{Kind: "grpc_proxy", Target: "http://backend:9000"},
 	}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}

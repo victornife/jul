@@ -13,11 +13,14 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	for _, spec := range Catalog {
 		var h http.Handler
-		if spec.Public {
+		switch {
+		case spec.Public:
 			h = spec.Handler(s)
-		} else if spec.Permissions != nil {
+		case len(spec.AnyPermissions) > 0:
+			h = s.requireAnyPermission(spec.AnyPermissions, spec.Handler(s))
+		case spec.Permissions != nil:
 			h = s.requirePermissionForMethods(spec.Permissions, spec.Handler(s))
-		} else {
+		default:
 			h = s.requirePermission(spec.Permission, spec.Handler(s))
 		}
 		mux.Handle(spec.Pattern, h)

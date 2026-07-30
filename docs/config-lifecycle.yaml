@@ -70,13 +70,14 @@ restart_required:
   - subsystem: admin
     gated_by: "internal/lifecycle.RestartRequired"
     reason: >
-      admin.New copies AdminConfig by value. Changes to the listen address,
-      enabled flag, rate limits, history dir, plugin upload policy, or audit log
-      path require a restart. The bearer token is hot-reloadable via
-      admin.Server.UpdateLiveAdminConfig (see hot_reload section).
+      admin.New copies AdminConfig by value. Changes to the bearer token, listen
+      address, rate limits, history dir, plugin upload policy, or audit log path
+      require a restart. Token rotation in particular: the old token remains
+      valid until restart.
     fields:
       - "[admin].enabled"
       - "[admin].listen"
+      - "[admin].token"
       - "[admin].console"
       - "[admin].history_dir"
       - "[admin].history_keep"
@@ -210,29 +211,6 @@ hot_reload:
     except log_format (restart-required, above).
 
   entries:
-    - subsystem: admin
-      gated_by: "internal/admin.Server.UpdateLiveAdminConfig"
-      reason: >
-        The bearer token is updated live after each successful hot reload via
-        UpdateLiveAdminConfig; legacy-token auth checks currentAdminConfig() at
-        request time.
-      fields:
-        - "[admin].token"
-
-    - subsystem: rbac
-      gated_by: "internal/admin.Server.UpdatePolicy"
-      reason: >
-        The RBAC enabled flag and policy contents (roles, principals, token
-        hashes, default role) are rebuilt from the effective candidate after each
-        successful hot reload and installed atomically via UpdatePolicy. Enabling
-        RBAC for the first time still requires a restart if the initial startup
-        policy was never built.
-      fields:
-        - "[admin].rbac.enabled"
-        - "[admin].rbac.default_role"
-        - "[admin].rbac.roles.*"
-        - "[admin].rbac.principals.*"
-
     - subsystem: compression
       gated_by: "internal/app factory rebuild"
       reason: >

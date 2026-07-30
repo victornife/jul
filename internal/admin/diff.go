@@ -68,7 +68,6 @@ func (d *ConfigDiff) cover(path string) {
 	d.coveredPaths[path] = true
 }
 
-
 // diffConfigs produces a human-auditable diff between the current running
 // configuration and a draft candidate, explaining operational consequences
 // across servers, locations/routes (action, target, auth, cache, compression,

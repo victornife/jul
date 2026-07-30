@@ -198,15 +198,15 @@ const configUIPage = `<!doctype html>
       cache_enabled: document.getElementById('cacheEnabled').checked
     };
     fetch('api/config/settings', { method: 'POST', headers: headers(true), body: JSON.stringify(body) })
-      .then(readResult).then(function () {
-        setStatus('status', 'Saved and reloaded.', true); load();
+      .then(readResult).then(function (d) {
+        setStatus('status', d.message || 'Configuration saved.', true); load();
       }).catch(function (e) { setStatus('status', e.message, false); });
   }
   function saveRaw() {
     fetch('api/config/raw', { method: 'POST', headers: headers(false),
       body: document.getElementById('rawText').value })
-      .then(readResult).then(function () {
-        setStatus('status2', 'Saved and reloaded.', true);
+      .then(readResult).then(function (d) {
+        setStatus('status2', d.message || 'Configuration saved.', true);
       }).catch(function (e) { setStatus('status2', e.message, false); });
   }
   function triggerReload() {
@@ -216,7 +216,7 @@ const configUIPage = `<!doctype html>
   }
   function readResult(r) {
     return r.json().catch(function () { return {}; }).then(function (d) {
-      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+	  if (!r.ok) throw new Error(d.error || d.message || ('HTTP ' + r.status));
       return d;
     });
   }

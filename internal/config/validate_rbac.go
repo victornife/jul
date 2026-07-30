@@ -18,7 +18,7 @@ var principalNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,62}$`)
 
 // validateRBAC validates the [admin.rbac] configuration block. It is called
 // from Validate whenever [admin] is enabled.
-func validateRBAC(r AdminRBACConfig) []error {
+func validateRBAC(r AdminRBACConfig, legacyToken ...string) []error {
 	if !r.Enabled {
 		// When RBAC is disabled, allow only an empty or a well-formed config
 		// (in case operators paste a block with enabled=false as a template).
@@ -28,10 +28,10 @@ func validateRBAC(r AdminRBACConfig) []error {
 		}
 		return nil
 	}
-	return validateRBACStructure(r)
+	return validateRBACStructure(r, legacyToken...)
 }
 
-func validateRBACStructure(r AdminRBACConfig) []error {
+func validateRBACStructure(r AdminRBACConfig, legacyToken ...string) []error {
 	var errs []error
 
 	// Validate default_role when set.
@@ -80,6 +80,13 @@ func validateRBACStructure(r AdminRBACConfig) []error {
 	principalNames := make(map[string]bool, len(r.Principals))
 	now := time.Now()
 	hasAdmin := false
+	if len(legacyToken) > 0 && legacyToken[0] != "" {
+		role := r.DefaultRole
+		if role == "" {
+			role = rbac.RoleAdmin
+		}
+		hasAdmin = hasAdminPermission(role, r.Roles)
+	}
 
 	for i, p := range r.Principals {
 		where := fmt.Sprintf("[admin.rbac.principals[%d]]", i)
@@ -127,10 +134,6 @@ func validateRBACStructure(r AdminRBACConfig) []error {
 				hasAdmin = true
 			}
 		}
-	}
-
-	if r.Enabled && len(r.Principals) == 0 {
-		errs = append(errs, fmt.Errorf("[admin.rbac] enabled but no principals are configured"))
 	}
 
 	if r.Enabled && !hasAdmin {

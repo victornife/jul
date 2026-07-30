@@ -28,12 +28,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import {
-  PatchApplyResultSchema,
-  OverviewSchema,
-  applyPatchBatch,
-  type ApplyMode,
-} from "@/api/client.ts";
+import { PatchApplyResultSchema, OverviewSchema, applyPatchBatch } from "@/api/client.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -249,7 +244,7 @@ describe("applyPatchBatch — mode query param (D1)", () => {
     await applyPatchBatch(
       [{ op: "upstream_add", upstream: "pool3", address: "127.0.0.1:9003" }],
       undefined,
-      "stage_restart" as ApplyMode,
+      "stage_restart",
     );
     const url = (spy.mock.calls[0] as [string])[0];
     expect(url).toBe("/api/config/patch/apply?mode=stage_restart");

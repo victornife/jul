@@ -10,7 +10,7 @@
 // editor. The editors never write directly: invalid drafts are caught by the
 // validated apply path, so the running config is never replaced by a bad edit.
 
-export type RouteAction = "static" | "proxy" | "grpc" | "redirect" | "deny" | "return";
+export type RouteAction = "static" | "proxy" | "redirect" | "deny" | "return";
 
 // AuthMethod selects the concrete access-control mechanism for a route. "none"
 // emits no auth block at all. Every other value produces a policy that actually
@@ -200,10 +200,6 @@ export function generateRouteToml(d: RouteDraft): string {
       break;
     case "proxy":
       lines.push(`  proxy_pass = ${tomlString(d.target.trim())}`);
-      break;
-    case "grpc":
-      lines.push(`  proxy_pass = ${tomlString(d.target.trim())}`);
-      lines.push(`  grpc = true`);
       break;
     case "redirect":
       lines.push(`  redirect = ${tomlString(d.target.trim())}`);

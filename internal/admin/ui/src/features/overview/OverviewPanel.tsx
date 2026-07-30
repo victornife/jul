@@ -425,22 +425,6 @@ export function OverviewPanel() {
         </div>
       )}
 
-      {/* Admin subsystem degradation (F-05): surfaced only when unhealthy so
-          the operator sees a top-level banner for audit-sink or admin reload
-          failures. */}
-      {data.admin_health && !data.admin_health.healthy && (
-        <div
-          role="alert"
-          className="rounded-lg border border-jul-danger/40 bg-jul-danger/10 px-4 py-3 text-sm text-jul-danger"
-        >
-          <span className="font-semibold">Admin subsystem degraded.</span>{" "}
-          {data.admin_health.detail ?? `Reason: ${data.admin_health.reason ?? "unknown"}.`}{" "}
-          <span className="text-jul-muted">
-            The admin API may be impaired; check the server logs.
-          </span>
-        </div>
-      )}
-
       {/* Managed planned-restart banner (P2-04 / H-05): surfaced whenever the
           staged configuration on disk differs from what the running process was
           built from. Inconsistent state is shown as a blocking error (manual

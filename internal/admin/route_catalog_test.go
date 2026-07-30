@@ -24,8 +24,33 @@ func TestCatalogNoRouteDefaultsToPublic(t *testing.T) {
 		if spec.Public {
 			continue // public routes don't need a permission
 		}
-		if spec.Permission == "" && len(spec.Permissions) == 0 {
-			t.Errorf("route %q is non-public but has no Permission/Permissions declared; add permissions to route_catalog.go", spec.Pattern)
+		if spec.Permission == "" && len(spec.Permissions) == 0 && len(spec.AnyPermissions) == 0 {
+			t.Errorf("route %q is non-public but has no Permission/Permissions/AnyPermissions declared; add permissions to route_catalog.go", spec.Pattern)
+		}
+	}
+}
+
+// TestCatalogExactlyOneAuthorizationMode fails if any route configures more
+// than one of Public, Permission, Permissions, or AnyPermissions (or none for
+// a non-public route). Exactly one authorization mode must be selected so the
+// routes() dispatcher is unambiguous and no accidental default-allow exists.
+func TestCatalogExactlyOneAuthorizationMode(t *testing.T) {
+	for _, spec := range Catalog {
+		modes := 0
+		if spec.Public {
+			modes++
+		}
+		if spec.Permission != "" {
+			modes++
+		}
+		if len(spec.Permissions) > 0 {
+			modes++
+		}
+		if len(spec.AnyPermissions) > 0 {
+			modes++
+		}
+		if modes != 1 {
+			t.Errorf("route %q configures %d authorization modes; exactly one of Public, Permission, Permissions, or AnyPermissions must be set", spec.Pattern, modes)
 		}
 	}
 }
@@ -41,6 +66,11 @@ func TestCatalogPermissionsInCatalog(t *testing.T) {
 			t.Errorf("route %q uses permission %q which is not in the rbac catalog", spec.Pattern, spec.Permission)
 		}
 		for _, p := range spec.Permissions {
+			if !rbac.Known(p) {
+				t.Errorf("route %q uses permission %q which is not in the rbac catalog", spec.Pattern, p)
+			}
+		}
+		for _, p := range spec.AnyPermissions {
 			if !rbac.Known(p) {
 				t.Errorf("route %q uses permission %q which is not in the rbac catalog", spec.Pattern, p)
 			}
@@ -247,7 +277,7 @@ func TestRBACDisableClearsPolicy(t *testing.T) {
 		t.Fatalf("build policy: %v", err)
 	}
 	s := &Server{cfg: config.AdminConfig{Token: legacyTok}}
-	s.liveCfg.Store(&config.AdminConfig{Token: legacyTok})
+	s.installAuth(config.AdminConfig{Token: legacyTok}, nil)
 	s.UpdatePolicy(pol)
 
 	// Sanity: RBAC token works while enabled.
@@ -286,7 +316,7 @@ func TestRBACDisableClearsPolicy(t *testing.T) {
 // changes the legacy token checked by auth middleware without restarting.
 func TestLiveAdminConfigTokenUpdate(t *testing.T) {
 	s := &Server{cfg: config.AdminConfig{Token: "old-token-32-chars-padded-------"}}
-	s.liveCfg.Store(&config.AdminConfig{Token: "old-token-32-chars-padded-------"})
+	s.installAuth(config.AdminConfig{Token: "old-token-32-chars-padded-------"}, nil)
 
 	h := s.requirePermission(rbac.ConfigApply, okHandler())
 

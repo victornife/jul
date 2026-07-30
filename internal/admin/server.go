@@ -11,8 +11,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -27,6 +29,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/observability"
+	"jul/internal/rbac"
 	"jul/internal/server"
 )
 
@@ -36,14 +39,164 @@ type Purger interface {
 	Delete(key string)
 }
 
+// ApplyOperation is a bounded enum identifying the initiating write operation
+// for a managed configuration mutation. It is assigned by the HTTP handler
+// before the coordinator runs so the terminal audit event, history entry, and
+// managed-result record can be traced to the operation without parsing free
+// text or inferring from URL strings, mode, or response shape (AC-01).
+type ApplyOperation string
+
+const (
+	ApplyOperationConfigApply ApplyOperation = "config.apply"
+	ApplyOperationPatchApply  ApplyOperation = "config.patch"
+	ApplyOperationLegacyRaw   ApplyOperation = "config.raw"
+	ApplyOperationSettings    ApplyOperation = "config.settings"
+	ApplyOperationRollback    ApplyOperation = "config.rollback"
+)
+
 // ApplyRequestContext carries the authenticated caller from an admin HTTP
 // request through to the managed apply coordinator so async finalizers can
 // emit an audit event attributed to the original actor (H-05).
 type ApplyRequestContext struct {
-	Actor    string
-	TokenID  string
-	SourceIP string
+	// Operation is the immutable identity of the initiating write operation.
+	// It MUST be assigned by the handler before calling the coordinator.
+	Operation ApplyOperation
+	// Resource is the audited resource label (e.g. "config").
+	Resource string
+
+	Actor   string
+	TokenID string
+	// TokenDigest is retained only for internal confirmation binding. Never log
+	// or serialize it; TokenID remains the public audit identifier.
+	TokenDigest string
+	SourceIP    string
+
+	// Baseline is the exact persisted configuration snapshot against which the
+	// HTTP handler performed concurrency, authorization, and reachability
+	// checks. The coordinator must compare this digest immediately before any
+	// write instead of adopting a later filesystem read as its own baseline.
+	Baseline *MutationBaseline
+	// Candidate is the already-resolved immutable candidate used for effective
+	// authorization and passed unchanged to the coordinator.
+	Candidate *config.Candidate
+	// LiveGeneration and AuthGeneration bind authorization to the exact live
+	// runtime and authentication snapshots observed by the handler.
+	LiveGeneration uint64
+	AuthGeneration string
+
+	// StartedAt is the wall-clock time the handler admitted the operation. It
+	// is recorded on the terminal ledger record so a browser can observe when
+	// the transaction began (AC-01/AC-02). Deadline is the absolute transaction
+	// deadline derived from the currently serving reload_timeout (AC-08); it is
+	// zero when no bounded deadline applies.
+	StartedAt time.Time
+	Deadline  time.Time
+
+	// RequestContext is the initiating admin HTTP request's context. It bounds
+	// candidate resolution and other pre-persistence work to the caller's
+	// absolute managed-apply deadline (AC-08) and propagates client cancellation
+	// before anything is persisted. It is never serialized and is cleared before
+	// the coordinator retains any async audit/ledger copy.
+	RequestContext context.Context `json:"-"`
 }
+
+// MutationBaseline is the authoritative raw-first snapshot for a configuration
+// mutation. Config is parsed from Raw, Version is the canonical unresolved
+// configuration version, and Digest identifies the exact persisted bytes.
+type MutationBaseline struct {
+	Raw     []byte
+	Digest  [32]byte
+	Version string
+	Config  *config.Config
+	Exists  bool
+}
+
+// prepareMutationCandidateContext resolves raw into an immutable candidate under
+// operationCtx so a slow or blocked secret provider (e.g. a ${file:...} read on
+// a stalled mount) is bounded by the caller's absolute managed-apply deadline
+// (AC-08). The resolved candidate is stored on reqCtx for the coordinator to
+// reuse without re-resolving.
+func prepareMutationCandidateContext(operationCtx context.Context, reqCtx *ApplyRequestContext, raw *config.Config) (*config.Candidate, error) {
+	if raw == nil {
+		return nil, errors.New("candidate is nil")
+	}
+	candidate, err := config.NewCandidateContext(operationCtx, raw)
+	if err != nil {
+		return nil, err
+	}
+	reqCtx.Candidate = candidate
+	return candidate, nil
+}
+
+// bindManagedApplyDeadline derives the single absolute transaction deadline for
+// a managed mutation from the currently serving reload_timeout at admission
+// (AC-08). The deadline is taken from the live effective config so a candidate
+// that changes reload_timeout governs only the next apply, never the one that
+// submits it (R15-01). It is a no-op when a deadline is already bound, no live
+// snapshot is available, or the serving reload_timeout is not positive.
+func (s *Server) bindManagedApplyDeadline(ctx *ApplyRequestContext) {
+	if ctx == nil || !ctx.Deadline.IsZero() {
+		return
+	}
+	if ctx.StartedAt.IsZero() {
+		ctx.StartedAt = time.Now().UTC()
+	}
+	if s.deps.LiveSnapshot == nil {
+		return
+	}
+	live := s.deps.LiveSnapshot()
+	if live.EffectiveConfig == nil {
+		return
+	}
+	timeout := live.EffectiveConfig.Global.ReloadTimeout.Std()
+	if timeout <= 0 {
+		return
+	}
+	ctx.Deadline = ctx.StartedAt.Add(timeout)
+}
+
+// managedApplyPrePersistenceContext derives the bounded context that caps all
+// handler-side pre-persistence work (candidate secret resolution and effective
+// authorization preparation) with the single absolute deadline bound at
+// admission (AC-08) and propagates client cancellation. The returned cancel
+// MUST be called by the caller. A zero deadline yields a cancel-only context so
+// behaviour is unchanged for callers without a bounded deadline.
+func managedApplyPrePersistenceContext(reqCtx ApplyRequestContext, fallback context.Context) (context.Context, context.CancelFunc) {
+	base := reqCtx.RequestContext
+	if base == nil {
+		base = fallback
+	}
+	if base == nil {
+		base = context.Background()
+	}
+	if !reqCtx.Deadline.IsZero() {
+		return context.WithDeadline(base, reqCtx.Deadline)
+	}
+	return context.WithCancel(base)
+}
+
+func (s *Server) bindMutationRuntime(ctx *ApplyRequestContext) *config.Config {
+	if s.deps.LiveSnapshot != nil {
+		snapshot := s.deps.LiveSnapshot()
+		ctx.LiveGeneration = snapshot.Generation
+		ctx.AuthGeneration = s.AuthGeneration()
+		return snapshot.EffectiveConfig
+	}
+	ctx.AuthGeneration = s.AuthGeneration()
+	return nil
+}
+
+// AuthorizationError represents an authorization failure with typed details.
+// It is returned by authorization helpers instead of writing HTTP responses
+// directly, so callers can handle response writing consistently.
+type AuthorizationError struct {
+	Status   int
+	Message  string
+	Reason   string // user-facing reason code
+	Required rbac.Permission
+}
+
+func (e *AuthorizationError) Error() string { return e.Message }
 
 // ManagedApplyOutcome is the terminal result of a managed configuration apply,
 // including any async restoration. It is exposed in RuntimeOverview so the
@@ -60,6 +213,84 @@ type ManagedApplyOutcome struct {
 	CompletedAt         time.Time `json:"completed_at"`
 	Actor               string    `json:"actor,omitempty"`
 	SourceIP            string    `json:"source_ip,omitempty"`
+
+	// HistorySnapshotID, HistoryError, and FinalizationError surface the
+	// configuration-history finalization provenance (AC-14) separately from the
+	// reload success/failure carried by Outcome. A committed apply whose raw
+	// history snapshot was written but whose metadata sidecar failed is a
+	// degraded-but-usable state: HistorySnapshotID is set AND HistoryError is
+	// non-empty. These never fail readiness — the raw config stays
+	// roll-back-able — so the Console shows them as an advisory finalization
+	// banner distinct from the reload outcome.
+	HistorySnapshotID string `json:"history_snapshot_id,omitempty"`
+	HistoryError      string `json:"history_error,omitempty"`
+	FinalizationError string `json:"finalization_error,omitempty"`
+}
+
+// ManagedApplyAdvisory is the ADVISORY, non-readiness finalization-health state
+// of the most recent managed apply (WS02 §3.9). It is healthy after a terminal
+// finalization that ran without finalization or configuration-history
+// degradation, and unhealthy — carrying the apply ID and a bounded detail — when
+// terminal finalization degraded (a completion-callback panic, a terminal-ledger
+// completion failure, or a configuration-history snapshot/metadata failure). It
+// is surfaced in the runtime overview as managed_apply_finalization and is
+// deliberately independent of readiness: a finalization degradation NEVER fails
+// /readyz and NEVER turns an already-committed apply into a failed apply. It
+// carries only bounded, low-cardinality metadata — never raw TOML, secrets, or
+// actor tokens.
+type ManagedApplyAdvisory struct {
+	Healthy bool      `json:"healthy"`
+	At      time.Time `json:"at,omitempty"`
+	ApplyID string    `json:"apply_id,omitempty"`
+	Detail  string    `json:"detail,omitempty"`
+}
+
+// ManagedApplyFinalization carries the terminal finalization provenance that is
+// deliberately NOT part of the serialized ConfigApplyResult (AC-05 invariant):
+// the configuration-history snapshot id, its non-fatal degradation, and any
+// finalization-machinery error. The composition root threads it from the
+// coordinator into the durable ledger record and the runtime-overview outcome
+// so the Console can render a finalization/degradation surface (AC-14) that is
+// independent of reload success/failure.
+type ManagedApplyFinalization struct {
+	HistorySnapshotID string
+	HistoryError      string
+	FinalizationError string
+}
+
+// ManagedApplyStart is the provisional pending-registration signal for a
+// managed configuration apply (AC-02). The composition root turns it into a
+// pending terminal-ledger record the moment the candidate is persisted and the
+// live reload is enqueued, but before the HTTP caller can observe a 202
+// saved_not_live. Registering the pending record first closes the window where
+// a real 202 saved_not_live could be immediately followed by a spurious 404,
+// which stalls the ConfigPanel on its first failed poll. The Result carries the
+// provisional pending projection (ApplyID + saved_not_live reload) and the
+// Context carries the authenticated caller, operation, start time, deadline,
+// and owner token used to enrich and authorize the pending record.
+type ManagedApplyStart struct {
+	Context ApplyRequestContext
+	Result  ConfigApplyResult
+}
+
+// ManagedApplyCompletion is the single terminal-completion object handed to the
+// unified OnManagedApplyComplete callback the moment a managed configuration
+// apply reaches a terminal state (including any restoration). It replaces the
+// former split hooks — the void completion notification plus the separate
+// WriteManagedHistory writer — so history-writing and terminal finalization are
+// driven from one claim inside the composition root. The Context attributes the
+// terminal audit/ledger record to the original caller (H-05); the Result is the
+// serialized terminal projection (which by the AC-05 invariant never carries
+// HistorySnapshotID/HistoryError); the callback returns a ManagedApplyFinalization
+// carrying the history/finalization provenance threaded back to the coordinator.
+type ManagedApplyCompletion struct {
+	Context ApplyRequestContext
+	Result  ConfigApplyResult
+
+	// PreviousRaw is the exact prior on-disk configuration. It is sensitive and
+	// is used only by the trusted in-process history writer. Never log,
+	// serialize, or retain it in the ledger.
+	PreviousRaw []byte
 }
 
 // Deps wires the admin server to runtime components owned by the composition
@@ -198,11 +429,42 @@ type Deps struct {
 	// apply, including async restoration state (H-05). Nil when no apply has
 	// finalized since startup.
 	LastManagedApply func() *ManagedApplyOutcome
+	// ManagedApplies is the bounded terminal-result ledger (AC-02). When set,
+	// GET /api/config/applies/{id} serves the exact terminal (or pending)
+	// record for a managed apply transaction, so the console can retrieve the
+	// precise outcome of a recent accepted apply regardless of later
+	// transactions. Nil yields 404 for all IDs.
+	ManagedApplies *ManagedApplyRegistry
+	// ObserveManagedApplyLookup counts one exact-ID managed-apply lookup by
+	// bounded result ("pending", "terminal", "missing", or "invalid") for the
+	// GET /api/config/applies/{id} endpoint (WS06 §7.5). It carries no apply ID,
+	// actor, or source IP. Nil disables lookup metrics so context-free callers
+	// and tests are unaffected.
+	ObserveManagedApplyLookup func(result string)
 	// AdminHealth reports the health of admin-subsystem concerns that are owned
 	// by the composition root (e.g., the most recent reload's admin subsystem
 	// result). It returns nil when healthy. When it returns an error, /readyz
 	// reports not ready and the runtime overview surfaces the degradation.
 	AdminHealth func() error
+
+	// ManagedApplyFinalizationHealth returns the ADVISORY, non-readiness
+	// finalization-health state of the most recent managed apply (WS02 §3.9):
+	// healthy after a clean terminal finalization, unhealthy (with the apply ID
+	// and a bounded detail) after a finalization panic, a terminal-ledger
+	// completion failure, or a configuration-history snapshot/metadata failure.
+	// It is surfaced in the runtime overview as managed_apply_finalization and
+	// MUST NOT gate /readyz — an already-committed apply stays roll-back-able.
+	// Nil when no managed apply has finalized (the overview omits the field).
+	ManagedApplyFinalizationHealth func() *ManagedApplyAdvisory
+
+	// ManagedHistoryActive reports that the managed apply coordinator records
+	// configuration-history snapshots at terminalization (AC-05). When true the
+	// HTTP handlers MUST NOT record history eagerly for managed apply paths —
+	// doing so would double-snapshot and, worse, snapshot at a provisional 202
+	// before the terminal outcome is known. When false (unit tests that wire
+	// WriteConfigRaw/ApplyConfig fakes without a terminal callback) the handlers
+	// keep recording history eagerly so behavior is unchanged.
+	ManagedHistoryActive bool
 }
 
 // ReloadSnapshot is the legacy admin-package view of the most recent reload
@@ -229,16 +491,17 @@ type Server struct {
 	health   *consoleHealth
 	quit     chan struct{}
 	httpd    *http.Server
-	// policy holds the active RBAC policy. It is atomically swapped on each
-	// successful config apply when RBAC is enabled (P3-01). Nil until RBAC is
-	// enabled; legacy single-token auth is used when the pointer is nil or when
-	// the stored policy reports !Enabled().
-	policy atomic.Pointer[rbacPolicy]
-	// liveCfg holds the most recently applied admin config. It is updated
-	// after every successful hot reload so legacy token changes take effect
-	// without requiring a process restart. The listener address remains
-	// startup-bound and is read from cfg.Listen.
-	liveCfg atomic.Pointer[config.AdminConfig]
+	// auth holds the immutable, atomically-installed authentication snapshot
+	// (H-01). It pairs the effective admin config, the built RBAC policy, and
+	// the derived authoritative mode so middleware observes a single,
+	// internally-consistent view via one atomic pointer load. Replaces the
+	// previous three independent stores (policy, liveCfg, rbacEnabled) that
+	// could interleave and expose a transient anonymous/legacy window during an
+	// RBAC transition.
+	authState atomic.Pointer[authSnapshot]
+	// authGen is a monotonic generation counter stamped into each installed
+	// snapshot so transitions can be correlated in logs and tests.
+	authGen atomic.Uint64
 	// applyMu serializes config writes (raw apply, structured patch apply, and
 	// history rollback) so optimistic-concurrency checks and the write they guard
 	// are atomic, closing the read-modify-write race between concurrent edits
@@ -263,7 +526,16 @@ func (s *Server) RecordManagedApplyOutcome(ctx ApplyRequestContext, o ManagedApp
 		// string provide the full picture.
 		result = "failure"
 	}
+	// AC-04: the terminal audit detail carries only redacted, low-cardinality
+	// metadata — apply ID, mode, outcome, versions and restoration state. It
+	// never includes raw config, secret values or the token digest.
 	detail := fmt.Sprintf("outcome=%s restored=%t", o.Outcome, o.Restored)
+	if o.ID != "" {
+		detail = "apply_id=" + o.ID + " " + detail
+	}
+	if o.Mode != "" {
+		detail += " mode=" + o.Mode
+	}
 	if o.RestoreError != "" {
 		detail += " restore_error=" + o.RestoreError
 	}
@@ -281,12 +553,34 @@ func (s *Server) RecordManagedApplyOutcome(ctx ApplyRequestContext, o ManagedApp
 		Time:      time.Now().UTC(),
 		Actor:     actor,
 		TokenID:   ctx.TokenID,
-		Operation: "config.apply.finalized",
+		Operation: finalizedAuditOperation(ctx.Operation),
 		Resource:  "config",
 		Result:    result,
 		Detail:    detail,
 		SourceIP:  ctx.SourceIP,
 	})
+}
+
+// finalizedAuditOperation maps a managed ApplyOperation to its terminal audit
+// operation name (AC-04). Terminal audit operations are operation-specific so
+// a reviewer can distinguish a finalized patch from a finalized rollback
+// without parsing free-text detail. An empty or unknown operation falls back
+// to the generic config.apply.finalized name.
+func finalizedAuditOperation(op ApplyOperation) string {
+	switch op {
+	case ApplyOperationConfigApply:
+		return "config.apply.finalized"
+	case ApplyOperationPatchApply:
+		return "config.patch.finalized"
+	case ApplyOperationLegacyRaw:
+		return "config.raw.finalized"
+	case ApplyOperationSettings:
+		return "config.settings.finalized"
+	case ApplyOperationRollback:
+		return "config.rollback.finalized"
+	default:
+		return "config.apply.finalized"
+	}
 }
 
 // New builds an admin Server from config. It returns nil when admin is
@@ -309,11 +603,21 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 	}
 	s.httpd = &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           s.routes(),
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	s.liveCfg.Store(&cfg)
+	s.installAuth(cfg, nil)
 	return s
+}
+
+// Handler returns the fully-wired admin HTTP handler: the route mux with the
+// single authentication/authorization chokepoint applied. It is the exact
+// handler installed on the listener by New (and served by Run), exposed so the
+// composition root and cross-package integration tests can exercise the real
+// route stack — including route authorization — without reconstructing it or
+// bypassing the auth chokepoint.
+func (s *Server) Handler() http.Handler {
+	return s.routes()
 }
 
 // Run starts the admin listener and shuts it down when ctx is cancelled.
@@ -323,14 +627,17 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	s.log.Info("admin listener started", "addr", s.cfg.Listen, "auth", s.currentAdminConfig().Token != "")
-	// The admin API grants full read/write control of the running server and
-	// uses a single shared bearer token with no RBAC. It is designed for
-	// single-operator, loopback-bound use. Binding to a routable address
-	// without an external firewall, VPN, or mTLS layer is unsafe.
+	// The admin API grants full read/write control of the running server. It is
+	// designed for single-operator, loopback-bound use. Binding to a routable
+	// address without an external firewall, VPN, or mTLS layer is unsafe.
 	if !adminIsLoopback(s.cfg.Listen) {
+		security := "single shared bearer token; full read/write access"
+		if pol := s.currentPolicy(); pol != nil && pol.Enabled() {
+			security = "RBAC enabled; full read/write access"
+		}
 		s.log.Warn("admin listener bound to a non-loopback address — restrict access with firewall rules or a private network",
 			"addr", s.cfg.Listen,
-			"security", "single shared bearer token; no RBAC; full read/write access")
+			"security", security)
 	}
 
 	errCh := make(chan error, 1)
@@ -578,32 +885,23 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		"version":        s.deps.Version,
 		"path":           s.deps.ConfigPath,
 		"authRequired":   adminCfg.Token != "",
-		"rawEditable":    s.deps.WriteConfigRaw != nil,
-		"formEditable":   s.deps.LoadConfig != nil && s.deps.SaveConfig != nil,
+		"rawEditable":    s.deps.ApplyConfigRaw != nil || s.deps.WriteConfigRaw != nil,
+		"formEditable":   s.deps.LoadConfig != nil && (s.deps.ApplyConfig != nil || s.deps.SaveConfig != nil),
 		"consoleEnabled": consoleV2Compiled && adminCfg.ConsoleEnabled(),
 	}
-	if s.deps.ReadConfigRaw != nil {
-		raw, err := s.deps.ReadConfigRaw()
+	if s.deps.ReadConfigRaw != nil || s.deps.LoadConfig != nil {
+		state, err := s.currentWriteState(false)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		resp["raw"] = string(raw)
-	}
-	if s.deps.LoadConfig != nil {
-		cfg, err := s.deps.LoadConfig()
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+		if s.deps.ReadConfigRaw != nil {
+			resp["raw"] = string(state.Raw)
 		}
-		resp["settings"] = extractSettings(cfg)
-		// base_version is the optimistic-concurrency fingerprint of the live
-		// config (canonical marshaled form, identical to the structured-patch
-		// preview's base_version). The raw editor sends it back on apply so a
-		// stale edit cannot silently clobber a concurrent change.
-		if marshaled, merr := config.Marshal(cfg); merr == nil {
-			resp["base_version"] = configVersion(marshaled)
-		}
+		resp["settings"] = extractSettings(state.Config)
+		// base_version always identifies the canonical unresolved configuration
+		// parsed from the exact raw bytes returned above.
+		resp["base_version"] = state.Version
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -619,7 +917,7 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.deps.WriteConfigRaw == nil {
+	if s.deps.ApplyConfigRaw == nil && s.deps.WriteConfigRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -642,50 +940,114 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
+	// M-06: Fail-closed prerequisite check for mutation endpoints. The raw
+	// endpoint only needs the baseline config (for the admin:manage guard,
+	// optimistic-concurrency version, and reachability confirmation); the raw
+	// bytes are used solely for best-effort history and must not hard-require a
+	// wired ReadConfigRaw. Finding 11's mandatory-raw contract is scoped to the
+	// structured-patch history/diff caller, which is handled separately.
+	state, err := s.currentWriteState(false)
+	if err != nil {
+		s.recordAudit(r, "config.raw", "config", "failure", "rejected: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
+		return
+	}
+	reqCtx := applyRequestContext(r, ApplyOperationLegacyRaw)
+	s.bindManagedApplyDeadline(&reqCtx)
+	reqCtx.Baseline = &state
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
+	var effectiveNext *config.Candidate
+	if next != nil {
+		opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+		defer cancel()
+		effectiveNext, parseErr = prepareMutationCandidateContext(opCtx, &reqCtx, next)
+	}
+
 	// Object-level guard: a caller with config:apply still must hold admin:manage
 	// to change anything under [admin]. This check runs inside the write lock so
 	// the current config cannot change between authorization and write (N-02).
-	if next != nil && !s.authorizeConfigCandidate(w, r, "config.raw", next) {
+	if effectiveNext != nil && !s.authorizeConfigTransition(w, r, "config.raw", currentEffective, effectiveNext.Effective) {
 		return
 	}
 
 	// Optimistic concurrency: reject stale writes. An empty base_version skips
 	// the check (explicit force-apply). The version basis matches /api/config/apply
 	// so both editors can interoperate.
-	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" && s.deps.LoadConfig != nil {
-		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
-			if marshaled, merr := config.Marshal(cur); merr == nil {
-				if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-					s.recordAudit(r, "config.raw", "config", "failure", "rejected: base version stale (concurrent change)")
-					writeJSON(w, http.StatusConflict, conflictResponse{
-						OK:             false,
-						Conflict:       true,
-						Message:        "The configuration changed since this edit was prepared; reload and try again.",
-						CurrentVersion: currentVersion,
-					})
-					return
-				}
-			}
+	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
+		if baseVersion != state.Version {
+			s.recordAudit(r, "config.raw", "config", "failure", "rejected: base version stale (concurrent change)")
+			writeJSON(w, http.StatusConflict, conflictResponse{
+				OK:             false,
+				Conflict:       true,
+				Message:        "The configuration changed since this edit was prepared; reload and try again.",
+				CurrentVersion: state.Version,
+			})
+			return
 		}
 	}
 
-	prev := s.currentRaw()
+	// Self-lockout guard (finding 9): a raw edit through the legacy endpoint can
+	// also change how the current operator reaches the console. Require the same
+	// explicit confirmation used by /api/config/apply unless confirm_admin=true.
+	if effectiveNext != nil && r.URL.Query().Get("confirm_admin") != "true" {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(currentEffective, effectiveNext.Effective, id); len(changes) > 0 {
+			s.recordAudit(r, "config.raw", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			writeJSON(w, http.StatusConflict, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     changes,
+			})
+			return
+		}
+	}
+
+	// Capture the pre-write raw for the history snapshot BEFORE the write; after
+	// WriteConfigRaw the file already holds the new configuration, so reading it
+	// then would snapshot the new config instead of the prior one.
+	prevRaw := state.Raw
+	if s.deps.ApplyConfigRaw != nil {
+		result, applyErr := s.deps.ApplyConfigRaw(reqCtx, body, "hot")
+		if applyErr != nil {
+			code := configApplyErrorStatus(result, applyErr)
+			s.recordAudit(r, "config.raw", "config", "failure", "coordinator error: "+applyErr.Error())
+			writeJSON(w, code, result)
+			return
+		}
+		status := configApplyResultStatus(result)
+		if status != http.StatusOK {
+			if result.TimedOutPhase != "" {
+				// AC-08 / defect 9: name the timed-out preflight phase in the audit
+				// trail before writing the 504; nothing was persisted.
+				s.recordTimeoutAudit(r, reqCtx.Operation, result)
+			}
+			writeJSON(w, status, result)
+			return
+		}
+		// AC-05: when the managed coordinator records history at
+		// terminalization, the handler must NOT snapshot here — doing so would
+		// double-record and could snapshot at a provisional 202 before the
+		// terminal outcome is known. Handlers keep recording eagerly only when
+		// no managed terminal writer is wired (unit-test fakes).
+		if !s.deps.ManagedHistoryActive {
+			s.recordHistory(prevRaw)
+		}
+		s.recordAudit(r, "config.raw", "config", "success", "configuration validated and saved")
+		writeJSON(w, http.StatusOK, ConfigMutationResponse{Status: "saved", ConfigApplyResult: result})
+		return
+	}
 	if err := s.deps.WriteConfigRaw(body); err != nil {
 		s.recordAudit(r, "config.raw", "config", "failure", "rejected: invalid configuration")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.recordHistory(prev)
+	s.recordHistory(prevRaw)
 	s.recordAudit(r, "config.raw", "config", "success", "configuration validated and saved; live runtime reloading")
-	var version string
-	if s.deps.LoadConfig != nil {
-		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
-			if marshaled, merr := config.Marshal(cfg); merr == nil {
-				version = configVersion(marshaled)
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": version})
+	// Finding 10: return the version of what was just persisted, not the pre-write
+	// version, so a client can reuse it as the next optimistic-concurrency token
+	// without a spurious 409. Reload the authoritative post-write state.
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": s.postWriteVersion(state.Version)})
 }
 
 // handleConfigSettings applies the curated settings subset (simple form),
@@ -699,7 +1061,7 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.deps.LoadConfig == nil || s.deps.SaveConfig == nil {
+	if s.deps.LoadConfig == nil || (s.deps.ApplyConfig == nil && s.deps.SaveConfig == nil) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -708,62 +1070,195 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// Load the current config inside the lock so the read-modify-write is atomic.
+	// Serialize with the apply path so the read-modify-write is atomic.
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	cfg, err := s.deps.LoadConfig()
+	// M-06: Fail-closed prerequisite check for mutation endpoints. As with the
+	// raw endpoint, the settings form only needs the baseline config; the raw
+	// bytes are best-effort history, so requireRaw stays false here.
+	state, err := s.currentWriteState(false)
 	if err != nil {
-		s.recordAudit(r, "config.settings", "config", "failure", "cannot load current config: "+err.Error())
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.recordAudit(r, "config.settings", "config", "failure", "rejected: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
+	reqCtx := applyRequestContext(r, ApplyOperationSettings)
+	s.bindManagedApplyDeadline(&reqCtx)
+	reqCtx.Baseline = &state
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
+	cfg := state.Config
 
 	// Optimistic concurrency: reject stale writes. An empty base_version skips
 	// the check (explicit force-apply). The version basis matches /api/config/patch
 	// so both editors can interoperate.
 	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
-		if marshaled, merr := config.Marshal(cfg); merr == nil {
-			if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-				s.recordAudit(r, "config.settings", "config", "failure", "rejected: base version stale (concurrent change)")
-				writeJSON(w, http.StatusConflict, conflictResponse{
-					OK:             false,
-					Conflict:       true,
-					Message:        "The configuration changed since this edit was prepared; reload and try again.",
-					CurrentVersion: currentVersion,
-				})
-				return
-			}
+		if baseVersion != state.Version {
+			s.recordAudit(r, "config.settings", "config", "failure", "rejected: base version stale (concurrent change)")
+			writeJSON(w, http.StatusConflict, conflictResponse{
+				OK:             false,
+				Conflict:       true,
+				Message:        "The configuration changed since this edit was prepared; reload and try again.",
+				CurrentVersion: state.Version,
+			})
+			return
 		}
 	}
 
-	if err := applySettings(cfg, in); err != nil {
+	// C-01: never mutate the loaded baseline in place. LoadConfig may return a
+	// shared/cached pointer; if we mutated it and then reloaded for
+	// authorization, "current" and "candidate" would alias the same object and
+	// compare equal, silently skipping the admin:manage guard. Build an
+	// independent candidate from a deep clone, mutate the clone, and authorize
+	// the clone against the pristine baseline WITHOUT reloading.
+	candidate, cerr := cfg.Clone()
+	if cerr != nil {
+		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot clone current config: "+cerr.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot prepare configuration candidate: " + cerr.Error()})
+		return
+	}
+	if err := applySettings(candidate, in); err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: invalid settings")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// Object-level guard: the settings form can mutate [admin].listen, so any
-	// change in the [admin] subtree requires admin:manage.
-	if !s.authorizeConfigCandidate(w, r, "config.settings", cfg) {
+	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+	defer cancel()
+	effectiveCandidate, candidateErr := prepareMutationCandidateContext(opCtx, &reqCtx, candidate)
+	if candidateErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": candidateErr.Error()})
 		return
 	}
-	prev := s.currentRaw()
-	if err := s.deps.SaveConfig(cfg); err != nil {
+	// Object-level guard: the settings form can mutate [admin].listen, so any
+	// change in the [admin] subtree requires admin:manage. Authorize the
+	// candidate against the immutable baseline (no reload) to defeat aliasing.
+	if !s.authorizeConfigTransition(w, r, "config.settings", currentEffective, effectiveCandidate.Effective) {
+		return
+	}
+	// Self-lockout guard (finding 9): the settings form can move the admin
+	// listener or change credentials. Require the same explicit confirmation
+	// used by /api/config/apply unless confirm_admin=true.
+	if r.URL.Query().Get("confirm_admin") != "true" {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(currentEffective, effectiveCandidate.Effective, id); len(changes) > 0 {
+			s.recordAudit(r, "config.settings", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			writeJSON(w, http.StatusConflict, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     changes,
+			})
+			return
+		}
+	}
+	// Capture the pre-write raw for the history snapshot BEFORE SaveConfig.
+	prevRaw := state.Raw
+	if s.deps.ApplyConfig != nil {
+		result, applyErr := s.deps.ApplyConfig(reqCtx, candidate, "hot")
+		if applyErr != nil {
+			code := configApplyErrorStatus(result, applyErr)
+			s.recordAudit(r, "config.settings", "config", "failure", "coordinator error: "+applyErr.Error())
+			writeJSON(w, code, result)
+			return
+		}
+		status := configApplyResultStatus(result)
+		if status != http.StatusOK {
+			if result.TimedOutPhase != "" {
+				// AC-08 / defect 9: name the timed-out preflight phase in the audit
+				// trail before writing the 504; nothing was persisted.
+				s.recordTimeoutAudit(r, reqCtx.Operation, result)
+			}
+			writeJSON(w, status, result)
+			return
+		}
+		// AC-05: skip eager handler-side history when the managed coordinator
+		// records it at terminalization (see handleConfigRaw for rationale).
+		if !s.deps.ManagedHistoryActive {
+			s.recordHistory(prevRaw)
+		}
+		s.recordAudit(r, "config.settings", "config", "success", "settings applied and saved")
+		writeJSON(w, http.StatusOK, ConfigMutationResponse{Status: "saved", ConfigApplyResult: result})
+		return
+	}
+	if err := s.deps.SaveConfig(candidate); err != nil {
 		s.recordAudit(r, "config.settings", "config", "failure", "rejected: cannot save config")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.recordHistory(prev)
+	s.recordHistory(prevRaw)
 	s.recordAudit(r, "config.settings", "config", "success", "settings applied and saved; live runtime reloading")
-	var version string
-	if s.deps.LoadConfig != nil {
-		if cfg2, err := s.deps.LoadConfig(); err == nil && cfg2 != nil {
-			if marshaled, merr := config.Marshal(cfg2); merr == nil {
-				version = configVersion(marshaled)
-			}
-		}
+	// Finding 10: return the post-write version so it is a valid next base token.
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": s.postWriteVersion(state.Version)})
+}
+
+// postWriteVersion returns the canonical version of the configuration currently
+// on disk after a successful write, so callers receive a token that identifies
+// what was just saved rather than the pre-write version (finding 10). If the
+// authoritative post-write state cannot be re-read it falls back to the
+// supplied pre-write version rather than failing an already-committed write.
+func (s *Server) postWriteVersion(fallback string) string {
+	fresh, err := s.currentWriteState(false)
+	if err != nil {
+		return fallback
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "version": version})
+	return fresh.Version
+}
+
+// CurrentWriteState is retained as an alias for the raw-first mutation
+// baseline used by mutation handlers.
+type CurrentWriteState = MutationBaseline
+
+// currentWriteState loads the current configuration state with fail-closed
+// semantics: it returns an error if LoadConfig is unavailable, fails, returns
+// nil config, or if marshaling fails. The raw snapshot is only required when
+// the caller needs it (e.g., for history recording).
+func (s *Server) currentWriteState(requireRaw bool) (CurrentWriteState, error) {
+	// File-backed production paths must read the bytes once and parse those
+	// exact bytes. Calling LoadConfig and ReadConfigRaw independently can pair a
+	// parsed configuration from one filesystem generation with raw bytes from
+	// another.
+	if s.deps.ReadConfigRaw != nil {
+		raw, err := s.deps.ReadConfigRaw()
+		if err != nil {
+			return CurrentWriteState{}, fmt.Errorf("cannot read config raw: %w", err)
+		}
+		cur, err := config.Parse(raw)
+		if err != nil {
+			return CurrentWriteState{}, fmt.Errorf("cannot parse config raw: %w", err)
+		}
+		return CurrentWriteState{
+			Raw:     raw,
+			Digest:  sha256.Sum256(raw),
+			Version: server.CanonicalVersion(cur),
+			Config:  cur,
+			Exists:  true,
+		}, nil
+	}
+
+	if requireRaw {
+		return CurrentWriteState{}, errors.New("system unavailable: raw config reader not wired")
+	}
+	if s.deps.LoadConfig == nil {
+		return CurrentWriteState{}, errors.New("system unavailable: config loader not wired")
+	}
+	cur, err := s.deps.LoadConfig()
+	if err != nil {
+		return CurrentWriteState{}, fmt.Errorf("cannot load config: %w", err)
+	}
+	if cur == nil {
+		return CurrentWriteState{}, errors.New("config loader returned nil")
+	}
+	raw, err := config.Marshal(cur)
+	if err != nil {
+		return CurrentWriteState{}, fmt.Errorf("cannot marshal config: %w", err)
+	}
+	return CurrentWriteState{
+		Raw:     raw,
+		Digest:  sha256.Sum256(raw),
+		Version: server.CanonicalVersion(cur),
+		Config:  cur,
+		Exists:  true,
+	}, nil
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

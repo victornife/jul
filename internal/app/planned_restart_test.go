@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"jul/internal/admin"
 	"jul/internal/config"
@@ -1014,6 +1015,167 @@ func TestReconcileUpdateCrashRecoversPreviousStaged(t *testing.T) {
 	// BaseRawSHA256 must be preserved from original.
 	if loaded.BaseRawSHA256 != sha256Hex(original) {
 		t.Errorf("BaseRawSHA256 = %q, want digest of original", loaded.BaseRawSHA256)
+	}
+}
+
+// TestReconcileUpdateCrashRestoresFullPreviousMetadata is the M-01 regression
+// test. A staged-update crash must restore candidate A's version, subsystem
+// list, AND timestamp — not just its bytes — and must clear every Previous*
+// field so no candidate-B metadata leaks into the recovered state.
+func TestReconcileUpdateCrashRestoresFullPreviousMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+
+	original := []byte("original-content")
+	v1 := []byte("staged-v1-content")
+	v2 := []byte("staged-v2-content") // failed write, never on disk
+
+	// Disk holds candidate A (v1) — the v2 update write failed.
+	if err := os.WriteFile(configPath, v1, 0o600); err != nil {
+		t.Fatalf("write v1 to disk: %v", err)
+	}
+
+	// Distinct timestamps prove the restore uses candidate A's time and not
+	// candidate B's failed-attempt time.
+	prevStagedAt := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	failedStagedAt := time.Date(2026, 1, 2, 15, 30, 0, 0, time.UTC)
+
+	store := NewFilePlannedRestartStore(configPath)
+	marker := PlannedRestartMarker{
+		Version:                 plannedRestartMarkerVersion,
+		State:                   plannedRestartStatePrepared,
+		ConfigPath:              configPath,
+		BaseRawSHA256:           sha256Hex(original),
+		BaseServingVersion:      "v0",
+		StagedRawSHA256:         sha256Hex(v2),
+		StagedVersion:           "v2",
+		PendingSubsystems:       []string{"http", "tls"}, // candidate B subsystems
+		StagedAt:                failedStagedAt,
+		PreviousStagedRawSHA256: sha256Hex(v1),
+		PreviousStagedVersion:   "v1",
+		PreviousSubsystems:      []string{"http"}, // candidate A subsystems
+		PreviousStagedAt:        prevStagedAt,
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(store.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if err := os.WriteFile(store.backupPath(), original, 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	if err := store.Reconcile(); err != nil {
+		t.Fatalf("Reconcile should recover without error, got: %v", err)
+	}
+
+	loaded, err := store.LoadMarker()
+	if err != nil || loaded == nil {
+		t.Fatalf("LoadMarker after recovery: %v %v", loaded, err)
+	}
+
+	// Full marker equality: every field must describe candidate A alone.
+	if loaded.State != plannedRestartStateStaged {
+		t.Errorf("state = %q, want staged", loaded.State)
+	}
+	if loaded.StagedRawSHA256 != sha256Hex(v1) {
+		t.Errorf("StagedRawSHA256 = %q, want digest of v1", loaded.StagedRawSHA256)
+	}
+	if loaded.StagedVersion != "v1" {
+		t.Errorf("StagedVersion = %q, want v1", loaded.StagedVersion)
+	}
+	if len(loaded.PendingSubsystems) != 1 || loaded.PendingSubsystems[0] != "http" {
+		t.Errorf("PendingSubsystems = %v, want [http]", loaded.PendingSubsystems)
+	}
+	if !loaded.StagedAt.Equal(prevStagedAt) {
+		t.Errorf("StagedAt = %v, want candidate A time %v (M-01: timestamp must be restored)", loaded.StagedAt, prevStagedAt)
+	}
+	// Base metadata preserved.
+	if loaded.BaseRawSHA256 != sha256Hex(original) {
+		t.Errorf("BaseRawSHA256 = %q, want digest of original", loaded.BaseRawSHA256)
+	}
+	// Every Previous* field must be cleared: no stale candidate metadata.
+	if loaded.PreviousStagedRawSHA256 != "" {
+		t.Errorf("PreviousStagedRawSHA256 = %q, want cleared", loaded.PreviousStagedRawSHA256)
+	}
+	if loaded.PreviousStagedVersion != "" {
+		t.Errorf("PreviousStagedVersion = %q, want cleared", loaded.PreviousStagedVersion)
+	}
+	if loaded.PreviousSubsystems != nil {
+		t.Errorf("PreviousSubsystems = %v, want cleared", loaded.PreviousSubsystems)
+	}
+	if !loaded.PreviousStagedAt.IsZero() {
+		t.Errorf("PreviousStagedAt = %v, want cleared (zero)", loaded.PreviousStagedAt)
+	}
+
+	// The in-memory Status() must also report candidate A's timestamp.
+	status := store.Status()
+	if !status.StagedAt.Equal(prevStagedAt) {
+		t.Errorf("Status().StagedAt = %v, want %v", status.StagedAt, prevStagedAt)
+	}
+}
+
+// TestPromoteToStagedClearsPreviousMetadata is the M-01 happy-path guard: a
+// successful staged-update promote must clear every Previous* field so a later
+// unrelated crash recovery cannot resurrect a superseded candidate.
+func TestPromoteToStagedClearsPreviousMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+
+	original := []byte("original-content")
+	v1 := []byte("staged-v1-content")
+	v2 := []byte("staged-v2-content")
+
+	if err := os.WriteFile(configPath, original, 0o600); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+	store := NewFilePlannedRestartStore(configPath)
+
+	// A prepared update marker carrying candidate A (v1) as the previous staged
+	// content while candidate B (v2) is the new attempt.
+	marker := PlannedRestartMarker{
+		Version:                 plannedRestartMarkerVersion,
+		State:                   plannedRestartStatePrepared,
+		ConfigPath:              configPath,
+		BaseRawSHA256:           sha256Hex(original),
+		StagedRawSHA256:         sha256Hex(v2),
+		StagedVersion:           "v2",
+		StagedAt:                time.Date(2026, 1, 2, 15, 30, 0, 0, time.UTC),
+		PreviousStagedRawSHA256: sha256Hex(v1),
+		PreviousStagedVersion:   "v1",
+		PreviousSubsystems:      []string{"http"},
+		PreviousStagedAt:        time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(store.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	// Candidate B write succeeds and we promote.
+	if err := os.WriteFile(configPath, v2, 0o600); err != nil {
+		t.Fatalf("write v2: %v", err)
+	}
+	if err := store.PromoteToStaged(v2); err != nil {
+		t.Fatalf("PromoteToStaged: %v", err)
+	}
+
+	loaded, err := store.LoadMarker()
+	if err != nil || loaded == nil {
+		t.Fatalf("LoadMarker after promote: %v %v", loaded, err)
+	}
+	if loaded.State != plannedRestartStateStaged {
+		t.Errorf("state = %q, want staged", loaded.State)
+	}
+	if loaded.PreviousStagedRawSHA256 != "" {
+		t.Errorf("PreviousStagedRawSHA256 = %q, want cleared after promote", loaded.PreviousStagedRawSHA256)
+	}
+	if loaded.PreviousStagedVersion != "" {
+		t.Errorf("PreviousStagedVersion = %q, want cleared after promote", loaded.PreviousStagedVersion)
+	}
+	if loaded.PreviousSubsystems != nil {
+		t.Errorf("PreviousSubsystems = %v, want cleared after promote", loaded.PreviousSubsystems)
+	}
+	if !loaded.PreviousStagedAt.IsZero() {
+		t.Errorf("PreviousStagedAt = %v, want cleared after promote", loaded.PreviousStagedAt)
 	}
 }
 

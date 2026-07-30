@@ -4,26 +4,10 @@
 package config
 
 import (
+	"context"
+
 	"jul/internal/redact"
 )
-
-// LifecycleChangeSet mirrors lifecycle.ChangeSet without forcing config to
-// import lifecycle. Preflight.Apply assigns this slice to Candidate.Lifecycle
-// so the coordinator can build the pending-restart marker from the same
-// resolved candidate used for validation (M-02).
-type LifecycleChangeSet = []LifecycleDiffEntry
-
-// LifecycleDiffEntry mirrors lifecycle.DiffEntry. It describes one
-// configuration field whose effective value changed between two resolved
-// configs, according to the lifecycle registry.
-type LifecycleDiffEntry struct {
-	Path      string
-	Class     string
-	Subsystem string
-	Reason    string
-	Before    any
-	After     any
-}
 
 // Candidate is the single immutable configuration object for a startup,
 // preflight, or reload transaction. It carries the raw (on-disk/admin-facing)
@@ -49,24 +33,33 @@ type Candidate struct {
 	// actually consumed, so file-content rotation can be detected even when
 	// the configured path is unchanged.
 	Digests map[string]string
-
-	// Lifecycle is an optional change-set attached by Preflight.Apply in
-	// stage-restart mode. It lets the coordinator build the pending-restart
-	// marker from the same resolved candidate used for validation, avoiding a
-	// second resolution (M-02). The concrete lifecycle types live in
-	// internal/lifecycle; config defines local mirrors to avoid an import cycle.
-	Lifecycle LifecycleChangeSet
 }
 
 // NewCandidate builds a Candidate from raw. It resolves secret references
 // exactly once and returns an immutable view. The raw config is cloned so the
 // candidate cannot be mutated through the caller's pointer.
+//
+// NewCandidate is the context.Background() wrapper around NewCandidateContext;
+// managed apply paths that must be bounded by reload_timeout should call
+// NewCandidateContext directly so secret resolution is cancellable.
 func NewCandidate(raw *Config) (*Candidate, error) {
+	return NewCandidateContext(context.Background(), raw)
+}
+
+// NewCandidateContext builds a Candidate from raw, resolving secret references
+// under ctx so that a slow or blocked secret provider (e.g. a file read on a
+// stalled mount) is bounded by the caller's deadline. When ctx is cancelled or
+// its deadline expires before resolution completes, it returns ctx.Err()
+// (context.DeadlineExceeded or context.Canceled) without persisting anything.
+func NewCandidateContext(ctx context.Context, raw *Config) (*Candidate, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	clone, err := raw.Clone()
 	if err != nil {
 		return nil, err
 	}
-	effective, state, digests, err := Resolve(clone)
+	effective, state, digests, err := ResolveContext(ctx, clone)
 	if err != nil {
 		return nil, err
 	}

@@ -35,3 +35,9 @@ coverage.txt
 /jul-new.exe
 /burn-in-load.exe
 /burn-in-load-test.exe
+
+# Stray root node_modules — the Console's real deps live in
+# internal/admin/ui/node_modules (ignored by that dir's .gitignore).
+# A root-level node_modules only appears if pnpm is run from the repo root
+# by mistake; never track it.
+/node_modules/

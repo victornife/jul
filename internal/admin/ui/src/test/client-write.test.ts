@@ -22,6 +22,8 @@ import {
   ConfigConflictError,
   ConfigRestartRequiredError,
   ConfigAdminChangeError,
+  ConfigApplyOutcomeError,
+  rollback,
   ApiError,
   ValidationResultSchema,
   ApplyResultSchema,
@@ -60,7 +62,7 @@ describe("validateConfig", () => {
     const fn = mockFetch(
       () => new Response(JSON.stringify({ ok: true, message: "ok" }), { status: 200 }),
     );
-    const res = await validateConfig("listen = \":8443\"");
+    const res = await validateConfig('listen = ":8443"');
     expect(res.ok).toBe(true);
     expect(fn.mock.calls[0]?.[0]).toBe("/api/config/validate");
     expect(new Headers(lastInit(fn).headers).get("Content-Type")).toBe("application/toml");
@@ -103,7 +105,7 @@ describe("applyConfig", () => {
           { status: 200 },
         ),
     );
-    const res = await applyConfig("listen = \":8443\"");
+    const res = await applyConfig('listen = ":8443"');
     expect(res.status?.[0]?.name).toBe("TLS");
     expect(fn.mock.calls[0]?.[0]).toBe("/api/config/apply");
     expect(new Headers(lastInit(fn).headers).get("Content-Type")).toBe("application/toml");
@@ -140,9 +142,10 @@ describe("applyConfig", () => {
 
   it("appends base_version as a query param when supplied", async () => {
     const fn = mockFetch(
-      () => new Response(JSON.stringify({ ok: true, status: [], version: "abc123" }), { status: 200 }),
+      () =>
+        new Response(JSON.stringify({ ok: true, status: [], version: "abc123" }), { status: 200 }),
     );
-    const res = await applyConfig("listen = \":8443\"", "feedface");
+    const res = await applyConfig('listen = ":8443"', "feedface");
     expect(res.version).toBe("abc123");
     expect(fn.mock.calls[0]?.[0]).toBe("/api/config/apply?base_version=feedface");
   });
@@ -151,7 +154,7 @@ describe("applyConfig", () => {
     const fn = mockFetch(
       () => new Response(JSON.stringify({ ok: true, status: [] }), { status: 200 }),
     );
-    await applyConfig("listen = \":8443\"");
+    await applyConfig('listen = ":8443"');
     expect(fn.mock.calls[0]?.[0]).toBe("/api/config/apply");
   });
 
@@ -211,8 +214,11 @@ describe("applyConfig", () => {
           JSON.stringify({
             ok: false,
             admin_change: true,
-            message: "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
-            changes: ["the admin token would change (your current session would need to re-authenticate)"],
+            message:
+              "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+            changes: [
+              "the admin token would change (your current session would need to re-authenticate)",
+            ],
           }),
           { status: 409 },
         ),
@@ -234,15 +240,150 @@ describe("applyConfig", () => {
     const fn = mockFetch(
       () => new Response(JSON.stringify({ ok: true, status: [], version: "v2" }), { status: 200 }),
     );
-    await applyConfig("listen = \":8443\"", "feedface", true);
-    expect(fn.mock.calls[0]?.[0]).toBe("/api/config/apply?base_version=feedface&confirm_admin=true");
+    await applyConfig('listen = ":8443"', "feedface", true);
+    expect(fn.mock.calls[0]?.[0]).toBe(
+      "/api/config/apply?base_version=feedface&confirm_admin=true",
+    );
+  });
+
+  it("preserves a structured not-applied/restored result", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            apply_id: "rl_9",
+            mode: "hot",
+            persisted: true,
+            restored: true,
+            final_disk_version: "raw-v1",
+            final_serving_version: "live-v1",
+            reload: {
+              id: "rl_9",
+              outcome: "not_applied",
+              failed_phase: "prepare",
+              http: { status: "" },
+              stream: { status: "" },
+              admin: { status: "" },
+            },
+            message: "candidate rejected and restored",
+          }),
+          { status: 409 },
+        ),
+    );
+    try {
+      await applyConfig("x");
+      expect.fail("expected structured outcome error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigApplyOutcomeError);
+      if (error instanceof ConfigApplyOutcomeError) {
+        expect(error.kind).toBe("not-applied");
+        expect(error.result.restored).toBe(true);
+        expect(error.result.final_serving_version).toBe("live-v1");
+        expect(error.result.reload?.http?.status).toBeUndefined();
+      }
+    }
+  });
+
+  it("classifies a structured enqueue 503", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            apply_id: "rl_10",
+            mode: "hot",
+            restored: true,
+            reload: {
+              id: "rl_10",
+              outcome: "not_applied",
+              failed_phase: "enqueue",
+              http: { status: "" },
+              stream: { status: "" },
+              admin: { status: "" },
+            },
+          }),
+          { status: 503 },
+        ),
+    );
+    await expect(applyConfig("x")).rejects.toMatchObject({ kind: "enqueue" });
+  });
+
+  it("classifies a pre-persistence preflight timeout 504 as kind timeout", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            mode: "hot",
+            timed_out_phase: "preflight_handlers",
+            message:
+              "The configuration apply exceeded reload_timeout during the preflight_handlers phase; nothing was changed.",
+          }),
+          { status: 504 },
+        ),
+    );
+    try {
+      await applyConfig("x");
+      expect.fail("expected structured timeout outcome error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigApplyOutcomeError);
+      if (error instanceof ConfigApplyOutcomeError) {
+        expect(error.kind).toBe("timeout");
+        expect(error.status).toBe(504);
+        expect(error.result.timed_out_phase).toBe("preflight_handlers");
+        // Nothing was persisted: the timeout path never marks the candidate saved.
+        expect(error.result.persisted).toBeUndefined();
+      }
+    }
+  });
+});
+
+describe("rollback", () => {
+  it("returns the structured result and appends confirmation", async () => {
+    const fn = mockFetch(
+      () =>
+        new Response(JSON.stringify({ ok: true, mode: "hot", status: "rolled back", id: "s1" }), {
+          status: 200,
+        }),
+    );
+    const result = await rollback("s1", true);
+    expect(fn.mock.calls[0]?.[0]).toBe("/api/config/rollback?confirm_admin=true");
+    expect(result.mutation_status).toBe("rolled back");
+    expect(result.mutation_id).toBe("s1");
+  });
+
+  it("surfaces an admin confirmation challenge", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            admin_change: true,
+            message: "confirm rollback",
+            changes: ["token changes"],
+          }),
+          { status: 409 },
+        ),
+    );
+    await expect(rollback("s1")).rejects.toBeInstanceOf(ConfigAdminChangeError);
+  });
+
+  it("normalizes the legacy mutation-only response", async () => {
+    mockFetch(
+      () => new Response(JSON.stringify({ status: "rolled back", id: "s1" }), { status: 200 }),
+    );
+    const result = await rollback("s1");
+    expect(result.ok).toBe(true);
+    expect(result.mutation_status).toBe("rolled back");
+    expect(result.mutation_id).toBe("s1");
   });
 });
 
 describe("generateConfig", () => {
   it("posts JSON inputs and returns the generated TOML", async () => {
     const fn = mockFetch(
-      () => new Response(JSON.stringify({ toml: "listen = \":80\"\n" }), { status: 200 }),
+      () => new Response(JSON.stringify({ toml: 'listen = ":80"\n' }), { status: 200 }),
     );
     const toml = await generateConfig({ mode: "proxy", target: "http://x" });
     expect(toml).toContain("listen");
@@ -252,7 +393,10 @@ describe("generateConfig", () => {
 
   it("throws ApiError when the wizard rejects the input", async () => {
     mockFetch(
-      () => new Response(JSON.stringify({ error: "serve mode requires a directory path" }), { status: 400 }),
+      () =>
+        new Response(JSON.stringify({ error: "serve mode requires a directory path" }), {
+          status: 400,
+        }),
     );
     await expect(generateConfig({ mode: "serve" })).rejects.toBeInstanceOf(ApiError);
   });
@@ -320,14 +464,11 @@ describe("subscribeLogs (fetch SSE log tail)", () => {
 
     let opened = false;
     const entries: Array<{ path: string }> = [];
-    const stop = subscribeLogs(
-      (e) => entries.push(e),
-      {
-        onOpen: () => {
-          opened = true;
-        },
+    const stop = subscribeLogs((e) => entries.push(e), {
+      onOpen: () => {
+        opened = true;
       },
-    );
+    });
     await vi.waitFor(() => {
       expect(entries.length).toBe(1);
     });
@@ -346,7 +487,15 @@ describe("fetchLogs", () => {
       () =>
         new Response(
           JSON.stringify([
-            { time: "t", method: "GET", host: "h", path: "/x", status: 200, bytes: 0, duration_ms: 2 },
+            {
+              time: "t",
+              method: "GET",
+              host: "h",
+              path: "/x",
+              status: 200,
+              bytes: 0,
+              duration_ms: 2,
+            },
           ]),
           { status: 200 },
         ),
@@ -377,9 +526,39 @@ describe("schemas", () => {
     expect(() => ValidationResultSchema.parse({ ok: "yes" })).toThrow();
   });
 
-  it("ApplyResultSchema requires ok:true and a status array", () => {
-    expect(() => ApplyResultSchema.parse({ ok: false, status: [] })).toThrow();
+  it("ApplyResultSchema accepts ok:false and normalizes status", () => {
+    const failed = ApplyResultSchema.parse({ ok: false, status: [] });
+    expect(failed.ok).toBe(false);
     const ok = ApplyResultSchema.parse({ ok: true, status: [] });
     expect(ok.status).toHaveLength(0);
+    const wrapped = ApplyResultSchema.parse({ ok: true, status: "rolled back", id: "s1" });
+    expect(wrapped.mutation_status).toBe("rolled back");
+  });
+
+  it("ApplyResultSchema accepts zero-value serialized reload subsystems", () => {
+    const parsed = ApplyResultSchema.safeParse({
+      ok: false,
+      reload: {
+        outcome: "not_applied",
+        http: { status: "" },
+        stream: { status: "" },
+        admin: { status: "" },
+      },
+    });
+    expect(parsed).toEqual(expect.objectContaining({ success: true }));
+  });
+
+  it("ApplyResultSchema accepts a legacy pending-restart mutation shape", () => {
+    const parsed = ApplyResultSchema.parse({
+      ok: false,
+      pending_restart: {
+        managed: true,
+        staged: true,
+        discard_available: true,
+        inconsistent: false,
+      },
+    });
+    expect(parsed.pending_restart?.staged).toBe(true);
+    expect(parsed.pending_restart?.state).toBeUndefined();
   });
 });

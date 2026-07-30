@@ -428,10 +428,14 @@ func TestUIServed(t *testing.T) {
 }
 
 func TestConfigGet(t *testing.T) {
-	raw := []byte("# sample\n")
 	cfg := &config.Config{}
 	cfg.Global.LogLevel = "info"
 	cfg.Global.LogFormat = "json"
+	raw, err := config.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	raw = append([]byte("# sample\n"), raw...)
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		Product:       "Jul.IA",
 		Version:       "9.9.9",
@@ -454,12 +458,58 @@ func TestConfigGet(t *testing.T) {
 	if got["product"] != "Jul.IA" || got["version"] != "9.9.9" {
 		t.Fatalf("metadata mismatch: %v", got)
 	}
-	if got["raw"] != "# sample\n" {
+	if got["raw"] != string(raw) {
 		t.Fatalf("raw mismatch: %v", got["raw"])
 	}
 	st, ok := got["settings"].(map[string]any)
 	if !ok || st["log_format"] != "json" {
 		t.Fatalf("settings mismatch: %v", got["settings"])
+	}
+}
+
+func TestConfigGetUsesOneRawSnapshot(t *testing.T) {
+	cfgA := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	rawA, err := config.Marshal(cfgA)
+	if err != nil {
+		t.Fatalf("marshal A: %v", err)
+	}
+	cfgB := config.ProxyTarget("127.0.0.1:9001", ":8081")
+	rawB, err := config.Marshal(cfgB)
+	if err != nil {
+		t.Fatalf("marshal B: %v", err)
+	}
+	reads := 0
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		ReadConfigRaw: func() ([]byte, error) {
+			reads++
+			if reads == 1 {
+				return rawA, nil
+			}
+			return rawB, nil
+		},
+		LoadConfig: func() (*config.Config, error) {
+			t.Fatal("LoadConfig must not be called when raw bytes are available")
+			return nil, nil
+		},
+	})
+
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("config get = %d, want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Raw         string `json:"raw"`
+		BaseVersion string `json:"base_version"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if reads != 1 {
+		t.Fatalf("raw reads = %d, want exactly 1", reads)
+	}
+	if got.Raw != string(rawA) || got.BaseVersion != server.CanonicalVersion(cfgA) {
+		t.Fatalf("response mixed snapshots: raw A = %t, version = %q", got.Raw == string(rawA), got.BaseVersion)
 	}
 }
 
@@ -506,6 +556,7 @@ func TestConfigSettingsBadInput(t *testing.T) {
 func TestConfigRawValidatesBeforeSaving(t *testing.T) {
 	var written []byte
 	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig:     func() (*config.Config, error) { return &config.Config{}, nil },
 		WriteConfigRaw: func(b []byte) error { written = b; return nil },
 	})
 	h := s.routes()

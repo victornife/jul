@@ -75,14 +75,13 @@ func TestPendingRestartCheckDetectsSecretRotation(t *testing.T) {
 	}
 	startupFP := lifecycle.ComputeFingerprint(startup.Effective)
 
-	// Change only the secret value, not the reference. admin.token is now
-	// hot-reloadable, so rotation no longer triggers a pending restart.
+	// Change only the secret value, not the reference.
 	t.Setenv("PENDING_TOKEN_A", "token-beta")
 	loadFn := func() (*config.Config, error) { return startupRaw, nil }
 
 	got := pendingRestartCheck(startup, startupFP, server.LiveSnapshot{}, loadFn, testLogger(t))
-	if slices.Contains(got, "admin") {
-		t.Fatalf("admin token rotation is hot-reloadable and should not be pending, got %v", got)
+	if !slices.Contains(got, "admin") {
+		t.Fatalf("secret rotation should report admin subsystem, got %v", got)
 	}
 }
 
@@ -184,16 +183,15 @@ func TestPendingRestartCheckDetectsFileBackedSecretRotation(t *testing.T) {
 	}
 	startupFP := lifecycle.ComputeFingerprint(startup.Effective)
 
-	// Rotate the file contents without changing the reference. admin.token is
-	// now hot-reloadable, so this no longer triggers a pending restart.
+	// Rotate the file contents without changing the reference.
 	if err := os.WriteFile(secretPath, []byte("beta"), 0o600); err != nil {
 		t.Fatalf("rotate secret: %v", err)
 	}
 	loadFn := func() (*config.Config, error) { return startupRaw, nil }
 
 	got := pendingRestartCheck(startup, startupFP, server.LiveSnapshot{}, loadFn, testLogger(t))
-	if slices.Contains(got, "admin") {
-		t.Fatalf("admin token rotation is hot-reloadable and should not be pending, got %v", got)
+	if !slices.Contains(got, "admin") {
+		t.Fatalf("file-backed secret rotation should report admin subsystem, got %v", got)
 	}
 }
 

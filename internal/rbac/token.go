@@ -37,6 +37,15 @@ func tokenID(hash []byte) string {
 	return hex.EncodeToString(hash)[:tokenIDLen]
 }
 
+// TokenDigest returns the full non-secret SHA-256 digest used for internal
+// credential equality. Public TokenID remains intentionally short for display.
+func TokenDigest(token string) string {
+	if token == "" {
+		return ""
+	}
+	return hex.EncodeToString(hashToken(token))
+}
+
 // extractBearer returns the raw token from an Authorization header value,
 // stripping the "Bearer " prefix. It normalizes only the prefix, never the
 // token bytes themselves.

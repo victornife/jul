@@ -4,6 +4,7 @@
 package config
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -43,6 +44,17 @@ var secretRefAnyRE = regexp.MustCompile(`\$\{([A-Za-z_]+):([^}]*)\}`)
 // Resolve on the same effective candidate without re-reading secret sources or
 // changing the candidate between validation and publication (R6-07).
 func Resolve(c *Config) (*Config, redact.State, map[string]string, error) {
+	return ResolveContext(context.Background(), c)
+}
+
+// ResolveContext is Resolve bounded by ctx. Secret providers (env lookups and
+// file reads) are consulted while walking the configuration; when ctx is
+// cancelled or its deadline expires the walk stops and ctx.Err() is returned so
+// a stalled provider (e.g. a blocked network mount backing ${file:...}) cannot
+// hang a managed apply past reload_timeout. Cancellation leaves no partial
+// state visible to the caller: the cloned working config is discarded and an
+// error is returned instead of a Config.
+func ResolveContext(ctx context.Context, c *Config) (*Config, redact.State, map[string]string, error) {
 	clone, err := c.Clone()
 	if err != nil {
 		return nil, redact.State{}, nil, fmt.Errorf("clone config for secret resolution: %w", err)
@@ -64,6 +76,10 @@ func Resolve(c *Config) (*Config, redact.State, map[string]string, error) {
 	digests := make(map[string]string)
 
 	walkConfigStrings(clone, func(s string) string {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			return s
+		}
 		out, err := resolveSecretRefs(s, active, digests, minLen)
 		if err != nil {
 			errs = append(errs, err)
@@ -72,6 +88,12 @@ func Resolve(c *Config) (*Config, redact.State, map[string]string, error) {
 		return out
 	})
 
+	// A cancelled or deadline-exceeded context takes precedence over any
+	// provider errors accumulated after the context fired, and never yields a
+	// usable config.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, redact.State{}, nil, ctxErr
+	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, redact.State{}, nil, err
 	}
