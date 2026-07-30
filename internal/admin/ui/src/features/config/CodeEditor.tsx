@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { EditorState, type Extension } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -54,6 +54,8 @@ const julTheme = EditorView.theme(
   { dark: true },
 );
 
+const externalValueUpdate = Annotation.define<boolean>();
+
 export interface CodeEditorProps {
   readonly value: string;
   readonly onChange: (next: string) => void;
@@ -78,6 +80,8 @@ export function CodeEditor({
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const editable = useRef(new Compartment());
+  const stateReadOnly = useRef(new Compartment());
   // Captured once: the editor is created a single time and kept in sync via the
   // value effect below, so these initial inputs are read through a ref to keep
   // the mount effect free of reactive dependencies.
@@ -102,10 +106,15 @@ export function CodeEditor({
       julTheme,
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({ "aria-label": init.current.ariaLabel }),
-      EditorView.editable.of(!init.current.readOnly),
-      EditorState.readOnly.of(init.current.readOnly),
+      editable.current.of(EditorView.editable.of(!init.current.readOnly)),
+      stateReadOnly.current.of(EditorState.readOnly.of(init.current.readOnly)),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) onChangeRef.current(update.state.doc.toString());
+        if (
+          update.docChanged &&
+          !update.transactions.some((transaction) => transaction.annotation(externalValueUpdate))
+        ) {
+          onChangeRef.current(update.state.doc.toString());
+        }
       }),
     ];
     if (nonce) extensions.push(EditorView.cspNonce.of(nonce));
@@ -121,6 +130,17 @@ export function CodeEditor({
     };
   }, []);
 
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor) return;
+    editor.dispatch({
+      effects: [
+        editable.current.reconfigure(EditorView.editable.of(!readOnly)),
+        stateReadOnly.current.reconfigure(EditorState.readOnly.of(readOnly)),
+      ],
+    });
+  }, [readOnly]);
+
   // Propagate external value changes (wizard load, reset) into the document
   // without disturbing the cursor when the value already matches.
   useEffect(() => {
@@ -128,7 +148,10 @@ export function CodeEditor({
     if (!editor) return;
     const current = editor.state.doc.toString();
     if (value !== current) {
-      editor.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+      editor.dispatch({
+        changes: { from: 0, to: current.length, insert: value },
+        annotations: externalValueUpdate.of(true),
+      });
     }
   }, [value]);
 

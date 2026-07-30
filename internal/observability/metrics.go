@@ -75,6 +75,33 @@ type Metrics struct {
 	// (H-05: jul_managed_apply_finalized_total). outcome is the terminal
 	// reload classification; restored is "true", "false", or "n/a".
 	managedApplyFinalized *prometheus.CounterVec
+	// managedApplyFinalizationErrors counts managed-apply finalization/restoration
+	// failures (WS02 §3.6, WS06 §7.5: jul_managed_apply_finalization_errors_total),
+	// labeled by the bounded component that failed: "restoration" (terminal
+	// restoration write), "pending" (pending-registration write), "registry"
+	// (terminal ledger claim/complete), or "callback_panic" (finalization callback
+	// panic). component is a fixed, low-cardinality enum — never an apply ID,
+	// actor, or configuration version. An increment means the failure was made
+	// explicit and surfaced through logs/health/ledger rather than swallowed.
+	managedApplyFinalizationErrors *prometheus.CounterVec
+	// managedApplyHistory counts configuration-history snapshot attempts made by
+	// the terminal finalizer (WS02 §3.7: jul_managed_apply_history_total). result
+	// is the bounded snapshot disposition ("recorded", "skipped", or "failed").
+	// operation is the initiating managed operation; both labels are bounded,
+	// low-cardinality values — never an apply ID, actor, path or version.
+	managedApplyHistory *prometheus.CounterVec
+	// managedApplyRegistryEntries reports the number of terminal managed-apply
+	// records currently retained in the bounded ledger (WS06 §7.5:
+	// jul_managed_apply_terminal_registry_entries). It is an unlabeled gauge — the
+	// retained count is a single bounded number, never keyed by apply ID, actor,
+	// or version.
+	managedApplyRegistryEntries prometheus.Gauge
+	// managedApplyLookup counts exact-ID managed-apply lookups (WS06 §7.5:
+	// jul_managed_apply_terminal_lookup_total), labeled by the bounded result
+	// ("pending", "terminal", "missing", or "invalid"). result is the only label
+	// and is a fixed low-cardinality enum — never an apply ID, actor, source IP,
+	// path, or version.
+	managedApplyLookup *prometheus.CounterVec
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -269,8 +296,24 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}),
 		managedApplyFinalized: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_managed_apply_finalized_total",
-			Help: "Terminal async managed-apply outcomes, labeled by outcome and whether restoration succeeded (true/false/n/a).",
-		}, []string{"outcome", "restored"}),
+			Help: "Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a).",
+		}, []string{"operation", "mode", "outcome", "restored"}),
+		managedApplyFinalizationErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_managed_apply_finalization_errors_total",
+			Help: "Managed-apply finalization/restoration failures, labeled by the bounded component that failed (restoration/pending/registry/callback_panic). An increment means the failure was made explicit and surfaced through logs/health/ledger rather than silently discarded.",
+		}, []string{"component"}),
+		managedApplyHistory: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_managed_apply_history_total",
+			Help: "Configuration-history snapshot attempts made by the terminal managed-apply finalizer (WS02 §3.7), labeled by operation and result (recorded/skipped/failed).",
+		}, []string{"operation", "result"}),
+		managedApplyRegistryEntries: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "jul_managed_apply_terminal_registry_entries",
+			Help: "Number of terminal managed-apply records currently retained in the bounded ledger.",
+		}),
+		managedApplyLookup: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_managed_apply_terminal_lookup_total",
+			Help: "Exact-ID managed-apply lookups, labeled by bounded result (pending/terminal/missing/invalid).",
+		}, []string{"result"}),
 		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_phase_duration_seconds",
 			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
@@ -324,6 +367,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.stageRestarts,
 		m.pendingRestart,
 		m.managedApplyFinalized,
+		m.managedApplyFinalizationErrors,
+		m.managedApplyHistory,
+		m.managedApplyRegistryEntries,
+		m.managedApplyLookup,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -661,10 +708,67 @@ func (m *Metrics) ObserveStageRestart(result string) {
 }
 
 // ObserveManagedApplyFinalized records the terminal async outcome of a managed
-// apply (H-05). outcome is the terminal reload classification; restored is
-// "true", "false", or "n/a" when restoration was not applicable.
-func (m *Metrics) ObserveManagedApplyFinalized(outcome, restored string) {
-	m.managedApplyFinalized.WithLabelValues(outcome, restored).Inc()
+// apply (H-05, AC-04). operation is the initiating managed operation
+// (config.apply/config.patch/config.raw/config.settings/config.rollback);
+// mode is the apply mode (hot/stage_restart); outcome is the terminal reload
+// classification; restored is "true", "false", or "n/a" when restoration was
+// not applicable. All labels are bounded, low-cardinality values — never an
+// apply ID, actor, path or version.
+func (m *Metrics) ObserveManagedApplyFinalized(operation, mode, outcome, restored string) {
+	if operation == "" {
+		operation = "unknown"
+	}
+	if mode == "" {
+		mode = "unknown"
+	}
+	m.managedApplyFinalized.WithLabelValues(operation, mode, outcome, restored).Inc()
+}
+
+// ObserveManagedApplyFinalizationError counts a managed-apply finalization or
+// restoration failure (WS02 §3.6, WS06 §7.5). component is the bounded machinery
+// component that failed: "restoration", "pending", "registry", or
+// "callback_panic". It is a fixed, low-cardinality enum so the failure is
+// visible without leaking apply IDs, actors, or configuration versions as
+// unbounded labels; an empty value is normalized to "unknown".
+func (m *Metrics) ObserveManagedApplyFinalizationError(component string) {
+	if component == "" {
+		component = "unknown"
+	}
+	m.managedApplyFinalizationErrors.WithLabelValues(component).Inc()
+}
+
+// SetManagedApplyRegistryEntries publishes the number of terminal managed-apply
+// records currently retained in the bounded ledger (WS06 §7.5). The value is a
+// single bounded count, never keyed by apply ID, actor, or version.
+func (m *Metrics) SetManagedApplyRegistryEntries(n int) {
+	m.managedApplyRegistryEntries.Set(float64(n))
+}
+
+// ObserveManagedApplyLookup counts one exact-ID managed-apply lookup (WS06
+// §7.5). result is the bounded lookup disposition ("pending", "terminal",
+// "missing", or "invalid"); an empty value is normalized to "unknown". result
+// is the only label and is a fixed low-cardinality enum — never an apply ID,
+// actor, source IP, path, or version.
+func (m *Metrics) ObserveManagedApplyLookup(result string) {
+	if result == "" {
+		result = "unknown"
+	}
+	m.managedApplyLookup.WithLabelValues(result).Inc()
+}
+
+// ObserveManagedApplyHistory records the disposition of a configuration-history
+// snapshot attempt made by the terminal managed-apply finalizer (WS02 §3.7).
+// operation is the initiating managed operation; result is the bounded snapshot
+// disposition ("recorded", "skipped", or "failed"). Both labels are bounded,
+// low-cardinality values — never an apply ID, actor, path or version.
+func (m *Metrics) ObserveManagedApplyHistory(operation, result string) {
+	if operation == "" {
+		operation = "unknown"
+	}
+	if result == "" {
+		result = "unknown"
+	}
+	m.managedApplyHistory.WithLabelValues(operation, result).Inc()
 }
 
 // SetPendingRestart sets the pending-restart gauge to 1 when a managed staged

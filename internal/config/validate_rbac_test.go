@@ -43,6 +43,21 @@ func TestValidateRBACEnabledNoPrincipals(t *testing.T) {
 	}
 }
 
+func TestValidateRBACSharedAdminMigration(t *testing.T) {
+	cfg := AdminRBACConfig{Enabled: true, DefaultRole: "admin"}
+	errs := validateRBAC(cfg, testToken)
+	if len(errs) != 0 {
+		t.Fatalf("admin-capable shared token migration rejected: %v", errs)
+	}
+}
+
+func TestValidateRBACSharedNonAdminStillRequiresAdmin(t *testing.T) {
+	cfg := AdminRBACConfig{Enabled: true, DefaultRole: "operator"}
+	if errs := validateRBAC(cfg, testToken); len(errs) == 0 {
+		t.Fatal("non-admin shared token accepted without an admin-capable principal")
+	}
+}
+
 func TestValidateRBACValidSingleAdmin(t *testing.T) {
 	cfg := AdminRBACConfig{
 		Enabled:    true,

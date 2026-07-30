@@ -6,9 +6,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   patchConfig,
+  patchConfigBatch,
   applyPatchBatch,
+  fetchPatchCandidate,
   ConfigRejectedError,
   ConfigConflictError,
+  ConfigAdminChangeError,
   ApiError,
 } from "@/api/client.ts";
 
@@ -58,6 +61,33 @@ describe("patchConfig", () => {
     expect(res.diff.summary).toBe("1 change");
     expect(res.validation_errors).toBeUndefined();
     expect(JSON.parse(seenBody)).toMatchObject({ op: "route_set_target", target: "http://new" });
+  });
+
+  it("resolves with an undefined candidate when the preview omits it (the production case)", async () => {
+    // N-01 (WS05): the real /api/config/patch preview withholds the candidate
+    // TOML so a principal without config:raw cannot extract secrets from a
+    // preview. The client must tolerate the missing field and never fabricate
+    // one — callers that need the candidate use the config:raw-gated
+    // fetchPatchCandidate instead.
+    mockFetch((url) => {
+      expect(url).toBe("/api/config/patch");
+      return json({
+        ok: true,
+        summary: "route :8080/api proxy_pass set to http://new",
+        diff: { summary: "1 change" },
+        base_version: "deadbeefdeadbeef",
+      });
+    });
+    const res = await patchConfig({
+      op: "route_set_target",
+      listen: ":8080",
+      server_names: [],
+      match_type: "prefix",
+      path: "/api",
+      target: "http://new",
+    });
+    expect(res.candidate).toBeUndefined();
+    expect(res.base_version).toBe("deadbeefdeadbeef");
   });
 
   it("serializes a per-location WAF set with the nested waf payload", async () => {
@@ -180,7 +210,11 @@ describe("patchConfig", () => {
     });
     const res = await patchConfig({ op: "server_toggle_http3", listen: ":443", enabled: true });
     expect(res.summary).toContain("HTTP/3");
-    expect(JSON.parse(seenBody)).toMatchObject({ op: "server_toggle_http3", listen: ":443", enabled: true });
+    expect(JSON.parse(seenBody)).toMatchObject({
+      op: "server_toggle_http3",
+      listen: ":443",
+      enabled: true,
+    });
   });
 
   it("serializes a server h2c toggle by listen", async () => {
@@ -197,7 +231,11 @@ describe("patchConfig", () => {
     });
     const res = await patchConfig({ op: "server_toggle_h2c", listen: ":8080", enabled: false });
     expect(res.summary).toContain("h2c");
-    expect(JSON.parse(seenBody)).toMatchObject({ op: "server_toggle_h2c", listen: ":8080", enabled: false });
+    expect(JSON.parse(seenBody)).toMatchObject({
+      op: "server_toggle_h2c",
+      listen: ":8080",
+      enabled: false,
+    });
   });
 
   it("surfaces validation_errors when the candidate would not build", async () => {
@@ -211,7 +249,7 @@ describe("patchConfig", () => {
           {
             code: "unknown",
             path: "",
-            summary: "proxy_pass references unknown upstream \"ghost\"",
+            summary: 'proxy_pass references unknown upstream "ghost"',
             detail: "",
             severity: "error",
           },
@@ -243,8 +281,50 @@ describe("patchConfig", () => {
   it("throws ApiError on a non-structured transport failure", async () => {
     mockFetch(() => new Response("boom", { status: 500 }));
     await expect(
-      patchConfig({ op: "route_toggle_cache", listen: ":80", server_names: [], match_type: "prefix", path: "/", enabled: true }),
+      patchConfig({
+        op: "route_toggle_cache",
+        listen: ":80",
+        server_names: [],
+        match_type: "prefix",
+        path: "/",
+        enabled: true,
+      }),
     ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("patchConfigBatch", () => {
+  const op = {
+    op: "server_toggle_http3" as const,
+    listen: ":443",
+    enabled: true,
+  };
+
+  it("previews a batch and resolves with an undefined candidate when omitted", async () => {
+    // The batch preview endpoint (/api/config/patch/preview) also withholds the
+    // candidate TOML (N-01, WS05); the client parses the diff for review and
+    // must not surface a fabricated candidate.
+    let seenUrl = "";
+    let seenBody = "";
+    mockFetch((url, init) => {
+      seenUrl = url;
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        summary: "server :443 http/3 enabled",
+        diff: { summary: "1 change" },
+        base_version: "deadbeefdeadbeef",
+      });
+    });
+    const res = await patchConfigBatch([op], "deadbeefdeadbeef");
+    expect(seenUrl).toBe("/api/config/patch/preview");
+    expect(JSON.parse(seenBody)).toMatchObject({
+      base_version: "deadbeefdeadbeef",
+      ops: [{ op: "server_toggle_http3", listen: ":443", enabled: true }],
+    });
+    expect(res.candidate).toBeUndefined();
+    expect(res.diff.summary).toBe("1 change");
+    expect(res.base_version).toBe("deadbeefdeadbeef");
   });
 });
 
@@ -307,7 +387,10 @@ describe("applyPatchBatch", () => {
 
   it("throws ConfigRejectedError on a 400 structured rejection", async () => {
     mockFetch(() =>
-      json({ ok: false, message: "Operation 2 could not be applied; no change was made.", errors: [] }, 400),
+      json(
+        { ok: false, message: "Operation 2 could not be applied; no change was made.", errors: [] },
+        400,
+      ),
     );
     await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ConfigRejectedError);
   });
@@ -316,5 +399,102 @@ describe("applyPatchBatch", () => {
     mockFetch(() => new Response("boom", { status: 500 }));
     await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ApiError);
   });
+
+  it("recognizes admin confirmation and retries with confirm_admin", async () => {
+    let seen = "";
+    mockFetch((url) => {
+      seen = url;
+      return json({ ok: true, mode: "stage_restart", summary: [], diff: { summary: "ok" } });
+    });
+    await applyPatchBatch([op], "base", "stage_restart", true);
+    expect(seen).toBe("/api/config/patch/apply?mode=stage_restart&confirm_admin=true");
+
+    mockFetch(() =>
+      json(
+        {
+          ok: false,
+          admin_change: true,
+          message: "confirm patch",
+          changes: ["admin token changes"],
+        },
+        409,
+      ),
+    );
+    await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ConfigAdminChangeError);
+  });
 });
 
+describe("fetchPatchCandidate", () => {
+  const op = {
+    op: "route_set_target" as const,
+    listen: ":8080",
+    server_names: [],
+    match_type: "prefix",
+    path: "/api",
+    target: "http://new",
+  };
+
+  it("posts ops + base_version and returns the candidate TOML on success", async () => {
+    let seenUrl = "";
+    let seenBody = "";
+    mockFetch((url, init) => {
+      seenUrl = url;
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        candidate: 'listen = ":8080"\n',
+        base_version: "deadbeefdeadbeef",
+      });
+    });
+    const res = await fetchPatchCandidate([op], "deadbeefdeadbeef");
+    expect(seenUrl).toBe("/api/config/patch/candidate");
+    expect(JSON.parse(seenBody)).toMatchObject({
+      base_version: "deadbeefdeadbeef",
+      ops: [{ op: "route_set_target", target: "http://new" }],
+    });
+    expect(res.candidate).toContain('listen = ":8080"');
+    expect(res.base_version).toBe("deadbeefdeadbeef");
+  });
+
+  it("throws ApiError(403) when the token lacks config:raw", async () => {
+    mockFetch(() => json({ error: "forbidden" }, 403));
+    try {
+      await fetchPatchCandidate([op]);
+      expect.unreachable("expected a forbidden error");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(403);
+    }
+  });
+
+  it("throws ConfigConflictError with current_version on a 409 stale preview", async () => {
+    mockFetch(() =>
+      json(
+        {
+          ok: false,
+          conflict: true,
+          message: "The configuration changed since this edit was prepared; reload and try again.",
+          current_version: "abc123abc123abc1",
+        },
+        409,
+      ),
+    );
+    try {
+      await fetchPatchCandidate([op], "stalestalestale0");
+      expect.unreachable("expected a conflict");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigConflictError);
+      expect((err as ConfigConflictError).currentVersion).toBe("abc123abc123abc1");
+    }
+  });
+
+  it("throws ConfigRejectedError on a 400 invalid operation", async () => {
+    mockFetch(() =>
+      json(
+        { ok: false, message: "Operation 1 could not be applied; no change was made.", errors: [] },
+        400,
+      ),
+    );
+    await expect(fetchPatchCandidate([op])).rejects.toBeInstanceOf(ConfigRejectedError);
+  });
+});

@@ -1,14 +1,24 @@
 # Console RBAC — design spec (HP-02 / SEQ-09)
 
-> **Status:** Design (implementable). Precursor to roadmap **Y3-02** (SSO/SAML/OIDC).
-> **Scope:** Role-based access control for the **admin API and Console** — named
-> principals, predefined **and** custom roles, scoped revocable tokens,
-> per-principal audit attribution, and authorization enforced at the API
-> boundary. External identity providers are explicitly **out of scope** here and
-> deferred to Y3-02.
+> **Status:** Implemented (Phase 3), in security remediation. This document
+> remains the authoritative design and permission-matrix reference. The model
+> **built today** in `internal/rbac` and the admin server is: named principals,
+> predefined **and** custom roles, **one config-defined token per principal**
+> (with optional `expires_at` and `disabled`), per-principal audit attribution,
+> API-boundary enforcement, and a hot-reloaded prepared authentication policy.
+> **Runtime token management — multi-token principals, an API to issue/revoke/
+> rotate tokens, one-time plaintext display, and `last_used_at` hygiene — is the
+> future token-management target and is NOT yet implemented** (see [Current
+> implementation vs future token-management target](#current-implementation-vs-future-token-management-target)).
+> Atomicity of the hot-reload policy swap and self-lockout confirmation across
+> every mutation endpoint are the subjects of the active remediation pass; do
+> not treat RBAC as release-ready until that pass and its exact-head CI evidence
+> close. Precursor to roadmap **Y3-02** (SSO/SAML/OIDC); external identity
+> providers remain **out of scope** here and deferred to Y3-02.
 >
-> This document is concrete enough to implement in phases. The permission matrix
-> below is **exhaustive** over every admin endpoint that exists today.
+> The permission matrix below is **exhaustive** over every admin endpoint that
+> exists today. Rows marked *(future)* describe planned management endpoints that
+> are not yet mounted.
 
 ## Contents
 
@@ -62,10 +72,33 @@ posture.
 
 | Concern | Today |
 | --- | --- |
-| AuthN | One constant-time-compared bearer token (`internal/admin/server.go` `auth()`). No token ⇒ open (loopback-bound). |
-| AuthZ | None — the token is all-or-nothing. |
-| Identity | None. Audit `Actor` is hard-coded to `"operator"` (`internal/admin/audit.go`). |
-| Token lifecycle | Static config value; rotation = edit config + reload; no revocation list, no expiry. |
+| AuthN | One constant-time-compared bearer token (`[admin].token`) or RBAC principal tokens (`[[admin.principals]]`, each with exactly one `token`). Zero-token on loopback ⇒ open. |
+| AuthZ | RBAC enforced at the API boundary (`admin:manage`, `config:apply`, etc.). Legacy shared token maps to `shared` principal with `default_role`. |
+| Identity | Principal name (e.g., `alice` or `shared`) assigned per-request; audit `Actor` reflects the authenticated principal. |
+| Token lifecycle | Legacy token: static config. RBAC principal token: **one config-defined token per principal**, with optional `expires_at` and `disabled` for revocation-by-config. Policy (including token set) is hot-reloaded via the prepared atomic authentication snapshot. **API issuance, immediate API revocation, rotation overlap, multi-token, and `last_used_at` are the future target — not yet implemented.** |
+
+### Current implementation vs future token-management target
+
+Only the **current implementation** column below exists in code today
+(`internal/config/schema.go` `AdminPrincipal`, `internal/rbac`, and the admin
+server). The **future target** column is design intent deferred alongside the
+Phase 2 items and Y3-02; nothing in that column is a mounted endpoint or an
+active runtime capability, and it must not be presented to operators as
+deployed.
+
+| Capability | Current implementation | Future token-management target |
+| --- | --- | --- |
+| Principals | Named principals from `[[admin.principals]]`, each with exactly one role. | Unchanged. |
+| Roles | Predefined (`viewer`/`operator`/`admin`/`auditor`) and custom roles. | Unchanged. |
+| Tokens per principal | Exactly **one** config-defined token. | **Multiple** tokens per principal with per-token `label`. |
+| Token source | Config only, as a [secret reference](../secrets.md), hashed in memory at load. | API-minted tokens with one-time plaintext display at creation. |
+| Expiry / disable | `expires_at` and `disabled` on the principal (revocation-by-config, effective on the next hot reload). | Per-token `expires_at`/`disabled`; **immediate** API revocation without a reload. |
+| Rotation | Replace the config token and reload. | Overlapping rotation (issue-then-revoke) with a validity window. |
+| Usage metadata | none. | `created_at` / `last_used_at` for stale-token hygiene. |
+| Management surface | Config file + hot reload. | `/api/admin/rbac/{principals,roles,tokens}` management APIs. |
+| Authorization | Deny-by-default at the API boundary. | Unchanged. |
+| Audit attribution | Per-principal `Actor`; `token_id` when a principal token is used. | Adds per-minted-token attribution. |
+| Policy install | Prepared atomic authentication snapshot swapped at the reload Publish boundary. | Unchanged. |
 
 ## Model overview
 
@@ -108,30 +141,41 @@ Tokens are the only credential in HP-02 (external identity is Y3-02).
   `juladm_<tokenid>_<secret>`.
 - **At rest.** Only a **hash** of the secret is stored (SHA-256 is sufficient and
   fast for high-entropy tokens; bcrypt's work factor is unnecessary here and would
-  add per-request latency). The plaintext is shown **once** at creation and never
-  again. Config-supplied tokens are given as [secret references](../secrets.md)
-  and hashed in memory at load.
+  add per-request latency). Config-supplied tokens are given as
+  [secret references](../secrets.md) and hashed in memory at load. One-time
+  plaintext display at creation is part of the future issuance API and does not
+  exist today (config tokens carry their own plaintext by reference).
 - **Lookup.** Index by token id, then `subtle.ConstantTimeCompare` the secret
   hash — O(1) and timing-safe.
-- **Lifecycle.**
-  - **Issuance** — `admin:manage` creates a token for a principal; optional
-    `label`, `expires_at`.
-  - **Revocation** — disable/delete a token; effect is **immediate** (checked per
-    request against the live store), no reload required.
-  - **Rotation** — issue a new token, then revoke the old; both are valid during
-    an overlap window so automation rotates with zero downtime. `expires_at`
-    enables auto-expiry.
-  - **Metadata** — `created_at`, `last_used_at` (for stale-token hygiene).
+- **Lifecycle.** *Today* a principal has exactly one token supplied in config as
+  a [secret reference](../secrets.md); it is revoked by setting `disabled` or an
+  `expires_at` in the past and reloading. The lifecycle below is the **future
+  token-management target and is not yet implemented** — there is no
+  `/api/admin/rbac/tokens` endpoint, no API-minted token, no one-time plaintext
+  display, and no `last_used_at` tracking in code today.
+  - **Issuance** *(future)* — `admin:manage` creates a token for a principal;
+    optional `label`, `expires_at`.
+  - **Revocation** *(future)* — disable/delete a token; effect is **immediate**
+    (checked per request against the live store), no reload required.
+  - **Rotation** *(future)* — issue a new token, then revoke the old; both are
+    valid during an overlap window so automation rotates with zero downtime.
+    `expires_at` enables auto-expiry.
+  - **Metadata** *(future)* — `created_at`, `last_used_at` (for stale-token
+    hygiene).
+
+The table below describes the **future** per-token model. Today only `hash`
+(from the config token), `expires_at`, and `disabled` exist, and they are
+properties of the single principal token, not of a multi-token store.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `id` | string | Public, non-secret; used in audit + management APIs. |
-| `principal` | string | Owning principal. |
+| `id` | string | *(future)* Public, non-secret; used in audit + management APIs. |
+| `principal` | string | *(future)* Owning principal. |
 | `hash` | string | SHA-256 of the secret. The secret is never stored. |
-| `label` | string | Human note ("alice laptop", "ci"). |
+| `label` | string | *(future)* Human note ("alice laptop", "ci"). |
 | `expires_at` | RFC 3339 | Optional; past ⇒ denied. |
-| `disabled` | bool | Immediate revocation. |
-| `created_at` / `last_used_at` | RFC 3339 | Hygiene. |
+| `disabled` | bool | Revocation (effective on the next hot reload today; immediate in the future API). |
+| `created_at` / `last_used_at` | RFC 3339 | *(future)* Hygiene. |
 
 ## Permissions
 
@@ -266,6 +310,7 @@ granted. Sourced from `internal/admin/routes.go`.
 | `/api/history/get` | GET | `history:read` | ✓ | ✓ | ✓ | · |
 | `/api/config/history` | GET | `history:read` | ✓ | ✓ | ✓ | · |
 | `/api/config/history/{id}` | GET | `history:read` | ✓ | ✓ | ✓ | · |
+| `/api/config/applies/{id}` | GET | `status:read` **or** `config:apply` | ✓ | ✓ | ✓ | ✓ |
 | `/api/observability/requests` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
 | `/api/observability/failing-routes` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
 | `/api/observability/timeline` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
@@ -309,12 +354,19 @@ granted. Sourced from `internal/admin/routes.go`.
 | Route | Method | Required | viewer | operator | admin | auditor |
 | --- | --- | --- | :--: | :--: | :--: | :--: |
 | `/debug/pprof/…` | GET | `admin:manage` | · | · | ✓ | · |
-| `/api/admin/rbac/principals` *(new, Phase 3)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
-| `/api/admin/rbac/roles` *(new, Phase 3)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
-| `/api/admin/rbac/tokens` *(new, Phase 3)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
+| `/api/admin/rbac/principals` *(future — not yet mounted)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
+| `/api/admin/rbac/roles` *(future — not yet mounted)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
+| `/api/admin/rbac/tokens` *(future — not yet mounted)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
 
 Method-sensitive endpoints (`/api/config/settings`) require `config:read` on GET
 and `config:apply` on POST. The matrix lists the write requirement on its own row.
+
+The exact-ID managed-apply result endpoint (`/api/config/applies/{id}`) is
+authorized by **any-of** `status:read` **or** `config:apply`: a principal
+privileged enough to *apply* configuration may read the secret-free result of
+its own managed-apply transaction without also holding `status:read`. The
+projection never exposes actor, source IP, or token digest — those remain
+audit-API only.
 
 ## Enforcement
 

@@ -47,6 +47,7 @@ func BuildAdminDeps(productName, version string, src config.Source, subsystems S
 	deps.FailingRoutes = subsystems.Metrics.FailingRoutes
 	deps.UpstreamHealthHistory = subsystems.Metrics.UpstreamHealthHistory
 	deps.CertRenewalHistory = subsystems.Metrics.CertRenewalHistory
+	deps.ObserveManagedApplyLookup = subsystems.Metrics.ObserveManagedApplyLookup
 	deps.RecentLogs = subsystems.LogTail.Snapshot
 	deps.SubscribeLogs = subsystems.LogTail.Subscribe
 

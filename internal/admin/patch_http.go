@@ -79,11 +79,19 @@ func configVersion(raw []byte) string {
 // safe preview response: summary, diff, base_version, and optional validation
 // diagnostics. It never includes the full candidate TOML (N-01).
 func (s *Server) previewPatchOps(ctx context.Context, ops []patchRequest) (map[string]any, error) {
-	cfg, err := s.deps.LoadConfig()
+	base, err := s.deps.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
-	before, err := config.Marshal(cfg)
+	before, err := config.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	// AC-07: never mutate the object returned by LoadConfig. A loader may
+	// legally return a cached or shared pointer, so applying patch operations
+	// to it would mutate shared state even though a preview claims no change
+	// was made. Apply the ops to an independent deep clone instead.
+	cfg, err := base.Clone()
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +120,7 @@ func (s *Server) previewPatchOps(ctx context.Context, ops []patchRequest) (map[s
 		"diff":         diffConfigs(beforeCfg, cfg),
 		"base_version": configVersion(before),
 	}
-	if verr := validateRaw(candidate); verr != nil {
+	if verr := validateRaw(ctx, candidate); verr != nil {
 		resp["validation_errors"] = humanizeErr(verr.Error())
 	}
 	return resp, nil
@@ -200,7 +208,34 @@ func (s *Server) handleConfigPatchCandidate(w http.ResponseWriter, r *http.Reque
 		})
 		return
 	}
-	cfg, err := s.deps.LoadConfig()
+	base, err := s.deps.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	baseRaw, err := config.Marshal(base)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// AC-07: honor base_version so the source view can never show a candidate
+	// generated from a different baseline than the structured diff. A matching
+	// version generates the candidate; a stale version is a 409 with the
+	// current version; an empty base_version is an explicit force-preview.
+	baseVersion := configVersion(baseRaw)
+	if req.BaseVersion != "" && req.BaseVersion != baseVersion {
+		writeJSON(w, http.StatusConflict, conflictResponse{
+			OK:             false,
+			Conflict:       true,
+			Message:        "The configuration changed since this edit was prepared; reload and try again.",
+			CurrentVersion: baseVersion,
+		})
+		return
+	}
+	// AC-07: never mutate the object returned by LoadConfig. Apply the ops to an
+	// independent deep clone so generating the candidate cannot mutate shared
+	// state.
+	cfg, err := base.Clone()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -221,8 +256,9 @@ func (s *Server) handleConfigPatchCandidate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"candidate": string(candidate),
+		"ok":           true,
+		"candidate":    string(candidate),
+		"base_version": baseVersion,
 	})
 }
 
@@ -265,7 +301,8 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	reqCtx := applyRequestContext(r)
+	reqCtx := applyRequestContext(r, ApplyOperationPatchApply)
+	s.bindManagedApplyDeadline(&reqCtx)
 	// Prefer the new correlated apply path; fall back to the legacy
 	// WriteConfigRaw closure for tests and callers that have not migrated.
 	applyConfig := s.deps.ApplyConfig
@@ -317,24 +354,34 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	cfg, err := s.deps.LoadConfig()
+	// M-06: Fail-closed prerequisite using shared currentWriteState helper.
+	state, err := s.currentWriteState(true)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot load current config: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
 		return
 	}
-	before, err := config.Marshal(cfg)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	reqCtx.Baseline = &state
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
+	// C-01: authorize against a pristine baseline. Never mutate state.Config in
+	// place: LoadConfig may return a shared pointer, so mutating it and then
+	// reloading for authorization would alias current == candidate and skip the
+	// admin:manage guard. Keep the loaded config as the immutable baseline and
+	// apply ops to an independent deep clone.
+	cfg, cloneErr := state.Config.Clone()
+	if cloneErr != nil {
+		s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot clone current config: "+cloneErr.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot prepare configuration candidate: " + cloneErr.Error()})
 		return
 	}
-	currentVersion := configVersion(before)
-	if req.BaseVersion != "" && req.BaseVersion != currentVersion {
+
+	if req.BaseVersion != "" && req.BaseVersion != state.Version {
 		s.recordAudit(r, "config.patch", "config", "failure", "rejected: base version stale (concurrent change)")
 		writeJSON(w, http.StatusConflict, conflictResponse{
 			OK:             false,
 			Conflict:       true,
 			Message:        "The configuration changed since this edit was prepared; reload and try again.",
-			CurrentVersion: currentVersion,
+			CurrentVersion: state.Version,
 		})
 		return
 	}
@@ -354,16 +401,42 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		}
 		summaries = append(summaries, summary)
 	}
+	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+	defer cancel()
+	effectiveCandidate, candidateErr := prepareMutationCandidateContext(opCtx, &reqCtx, cfg)
+	if candidateErr != nil {
+		writeJSON(w, http.StatusBadRequest, validationErrorResponse{OK: false, Message: "The configuration contains errors.", Errors: humanizeErr(candidateErr.Error())})
+		return
+	}
 	// Object-level guard: a structured patch may target [admin] fields (e.g.
 	// rate limits via future ops). Any change in the [admin] subtree requires
-	// admin:manage in addition to config:apply.
-	if !s.authorizeConfigCandidate(w, r, "config.patch", cfg) {
+	// admin:manage in addition to config:apply. Authorize the mutated candidate
+	// against the immutable baseline (no reload) to defeat aliasing (C-01).
+	if !s.authorizeConfigTransition(w, r, "config.patch", currentEffective, effectiveCandidate.Effective) {
 		return
+	}
+	// Self-lockout guard (finding 9): a structured patch can move the admin
+	// listener, rotate the legacy token, disable the console, or invalidate the
+	// current operator's RBAC principal. Require the same explicit confirmation
+	// used by the raw apply/settings endpoints unless confirm_admin=true.
+	if r.URL.Query().Get("confirm_admin") != "true" {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(currentEffective, effectiveCandidate.Effective, id); len(changes) > 0 {
+			s.recordAudit(r, "config.patch", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			s.emit("config", "apply_failed", "warn", "Structured patch would change admin access and was held for confirmation.")
+			writeJSON(w, http.StatusConflict, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     changes,
+			})
+			return
+		}
 	}
 	// Snapshot the prior config, then persist through the authoritative apply
 	// preflight. A rejection here means nothing was written, preserving the
 	// all-or-nothing guarantee.
-	prev := s.currentRaw()
+	prev := state.Raw
 	mode := r.URL.Query().Get("mode")
 	switch mode {
 	case "", "hot":
@@ -379,6 +452,16 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	result, err := applyConfig(reqCtx, cfg, mode)
 	if err != nil {
 		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+err.Error())
+		status := configApplyErrorStatus(result, err)
+		if status == http.StatusServiceUnavailable {
+			if result.Reload != nil && result.Reload.FailedPhase == "enqueue" {
+				s.emit("config", "apply_failed", "error", result.Message)
+			} else {
+				s.emit("config", "apply_failed", "error", "Configuration storage could not be verified; no change was written.")
+			}
+			writeJSON(w, status, result)
+			return
+		}
 		s.emit("config", "apply_failed", "error", "Structured patch apply coordinator failed.")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -405,19 +488,27 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if result.OK {
-		s.recordHistory(prev)
+	if result.TimedOutPhase != "" {
+		// AC-08 / defect 9: a preflight timeout before persistence records a
+		// dedicated failure audit naming the timed-out phase. The shared status
+		// mapping below writes the 504 Gateway Timeout; nothing was persisted.
+		s.recordTimeoutAudit(r, reqCtx.Operation, result)
+	}
+
+	if result.OK && isTerminalApplyResult(result) {
+		// AC-05: skip eager handler-side history when the managed coordinator
+		// records it at terminalization (see handleConfigRaw for rationale).
+		if !s.deps.ManagedHistoryActive {
+			s.recordHistory(prev)
+		}
 		s.recordAudit(r, "config.patch", "config", "success", strings.Join(summaries, "; "))
 		s.emit("config", "apply", "info", "Structured patch validated and saved.")
 	}
 
-	beforeCfg, _ := config.Parse(before)
+	beforeCfg, _ := config.Parse(state.Raw)
 	result.Summary = summaries
 	result.Diff = diffConfigs(beforeCfg, cfg)
 
-	status := http.StatusOK
-	if !result.OK {
-		status = http.StatusConflict
-	}
+	status := configApplyResultStatus(result)
 	writeJSON(w, status, result)
 }

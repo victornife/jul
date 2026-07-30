@@ -58,7 +58,6 @@ function usePatchHandoff() {
         ops: [patch],
         baseVersion: res.base_version,
         previewDiff: res.diff,
-        candidate: res.candidate,
       });
       void navigate("/config");
     } catch (err) {
@@ -166,11 +165,10 @@ export function RouteMatchEditor({ route, loc, onClose }: RouteMatchEditorProps)
 
 // ── Action editor ────────────────────────────────────────────────────────────
 
-const ACTION_KINDS: readonly EditableActionKind[] = ["proxy", "grpc", "static", "redirect", "return", "deny"];
+const ACTION_KINDS: readonly EditableActionKind[] = ["proxy", "static", "redirect", "return", "deny"];
 
 const ACTION_HINT: Record<EditableActionKind, string> = {
   proxy: "Forward matching requests to an app (an upstream reference or URL).",
-  grpc: "Pass matching requests through as native gRPC (HTTP/2 end-to-end).",
   static: "Serve files from a directory on disk.",
   redirect: "Redirect matching requests to another URL (optionally with a 3xx status).",
   return: "Return a fixed HTTP status code.",
@@ -183,9 +181,9 @@ export interface RouteActionEditorProps {
   readonly onClose: () => void;
 }
 
-/** Switch a route's action in place among the editable kinds (proxy / gRPC /
- * static / redirect / return / deny). The backend clears every other action
- * field, so exactly one remains. Richer actions stay read-only. */
+/** Switch a route's action in place among the tag-free kinds (proxy / static /
+ * redirect / return / deny). The backend clears every other action field, so
+ * exactly one remains. Richer actions stay read-only and never reach here. */
 export function RouteActionEditor({ route, loc, onClose }: RouteActionEditorProps) {
   const { runPatch, error, busy } = usePatchHandoff();
   const [draft, setDraft] = useState<ActionDraft>(() => seedAction(loc));

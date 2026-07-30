@@ -13,34 +13,8 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import {
-  deriveApplyOutcome,
-  streamReloadFailure,
-  reloadSubsystemFailures,
-  type ApplyOutcome,
-} from "@/lib/applyOutcome.ts";
+import { deriveApplyOutcome, streamReloadFailure, type ApplyOutcome } from "@/lib/applyOutcome.ts";
 import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
-import type { ReloadResult } from "@/api/client.ts";
-
-function reload(over: Partial<ReloadResult> = {}): ReloadResult {
-  return {
-    id: "rl_1",
-    source: "admin",
-    outcome: "applied_live",
-    desired_version: "v1",
-    serving_version: "v1",
-    started_at: new Date().toISOString(),
-    completed_at: new Date().toISOString(),
-    duration_ms: 12,
-    persisted: true,
-    published: true,
-    timed_out: false,
-    http: { status: "ok" },
-    stream: { status: "ok" },
-    admin: { status: "ok" },
-    ...over,
-  };
-}
 
 afterEach(() => {
   cleanup();
@@ -122,7 +96,7 @@ describe("deriveApplyOutcome", () => {
     const o = deriveApplyOutcome({
       accepted: true,
       pendingReload: true,
-      runtimeObserved: true,
+      runtimeObserved: false,
       streamStatus: "failed: bad config",
     });
     expect(o.kind).toBe("partial-reload");
@@ -151,13 +125,14 @@ describe("deriveApplyOutcome", () => {
     expect(o.message).toMatch(/restart the server/i);
   });
 
-  it("reload-timed-out: accepted but reload exceeded timeout", () => {
+  it("reload-timed-out: accepted but previous reload exceeded timeout", () => {
     const o = deriveApplyOutcome({
       accepted: true,
-      pendingReload: false,
+      pendingReload: true,
       runtimeObserved: true,
       streamStatus: "ok",
-      reload: reload({ outcome: "applied_degraded", timed_out: true }),
+      reloadTimedOut: true,
+      published: true,
     });
     expect(o.kind).toBe("reload-timed-out");
     expect(o.severity).toBe("warning");
@@ -170,75 +145,146 @@ describe("deriveApplyOutcome", () => {
     // A timed-out reload takes precedence over stream failure and pending state.
     const o = deriveApplyOutcome({
       accepted: true,
-      pendingReload: false,
+      pendingReload: true,
       runtimeObserved: false,
       streamStatus: "failed: bind error",
-      reload: reload({ outcome: "applied_degraded", timed_out: true }),
+      reloadTimedOut: true,
+      published: true,
     });
     expect(o.kind).toBe("reload-timed-out");
   });
 
-  it("reports partial-reload from applied_degraded reload outcome", () => {
+  it("preflight-timeout: pre-persistence timeout names the phase and claims nothing served", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: false,
+      preflightTimedOut: true,
+      timedOutPhase: "preflight_handlers",
+    });
+    expect(o.kind).toBe("preflight-timeout");
+    expect(o.severity).toBe("warning");
+    expect(o.blocking).toBe(false);
+    expect(o.title).toMatch(/not changed/i);
+    expect(o.message).toContain("preflight_handlers");
+    expect(o.message).toMatch(/nothing was persisted/i);
+    expect(o.message).toMatch(/reload_timeout/i);
+    // A preflight timeout must never imply the candidate is serving.
+    expect(o.message).not.toMatch(/serving|is now live/i);
+  });
+
+  it("preflight-timeout: renders without a phase name when none is reported", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: false,
+      preflightTimedOut: true,
+    });
+    expect(o.kind).toBe("preflight-timeout");
+    expect(o.message).not.toContain("Phase:");
+  });
+
+  // Finding 5: saved_not_live must never be rendered as "serving".
+  it("saved-not-live: accepted, backend outcome saved_not_live, final outcome unknown", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: true,
+      runtimeObserved: false,
+      savedNotLive: true,
+    });
+    expect(o.kind).toBe("saved-not-live");
+    expect(o.severity).toBe("warning");
+    expect(o.blocking).toBe(false);
+    // The copy must NOT claim the config is serving, and must point the operator
+    // at the runtime overview for the terminal outcome.
+    expect(o.message.toLowerCase()).not.toContain("is now serving");
+    expect(o.message.toLowerCase()).not.toContain("and is now live");
+    expect(o.message).toMatch(/final outcome|runtime overview/i);
+  });
+
+  it("saved-not-live outranks reloadTimedOut so timed-out copy never claims serving", () => {
+    // The backend marks a saved_not_live response as timed_out; without the
+    // precedence guard the operator would see the "is now serving" timeout copy.
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: true,
+      runtimeObserved: false,
+      savedNotLive: true,
+      reloadTimedOut: true,
+    });
+    expect(o.kind).toBe("saved-not-live");
+    expect(o.message.toLowerCase()).not.toContain("is now serving");
+  });
+
+  // AC-11: a legacy (pre-managed) apply carries no correlated per-ID reload
+  // record. Without a version match, the console must NOT claim "Applied and
+  // live" — it downgrades to a truthful "saved, uncorrelated" advisory.
+  it("saved-uncorrelated: legacy uncorrelated apply never claims live", () => {
     const o = deriveApplyOutcome({
       accepted: true,
       pendingReload: false,
       runtimeObserved: true,
-      reload: reload({
-        outcome: "applied_degraded",
-        http: { status: "ok" },
-        admin: { status: "failed", error: "admin listener reload failed" },
-      }),
+      correlated: false,
     });
-    expect(o.kind).toBe("partial-reload");
-    expect(o.failures).toHaveLength(1);
-    expect(o.failures[0]?.name).toBe("Admin subsystem");
+    expect(o.kind).toBe("saved-uncorrelated");
+    expect(o.severity).toBe("info");
+    expect(o.blocking).toBe(false);
+    expect(o.title).toMatch(/uncorrelated/i);
+    // Must not claim the config is live/serving.
+    expect(o.message.toLowerCase()).not.toContain("now live");
+    expect(o.message.toLowerCase()).not.toContain("is now serving");
+    // Must point the operator at the runtime overview to confirm.
+    expect(o.message).toMatch(/runtime overview|serving version/i);
   });
 
-  it("reports restored when the candidate was rolled back", () => {
+  it("saved-uncorrelated: an uncorrelated apply whose versions differ stays uncorrelated", () => {
     const o = deriveApplyOutcome({
       accepted: true,
       pendingReload: false,
-      runtimeObserved: false,
-      restored: true,
+      runtimeObserved: true,
+      correlated: false,
+      persistedVersion: "v-new",
+      servingVersion: "v-old",
     });
-    expect(o.kind).toBe("restored");
-    expect(o.severity).toBe("warning");
+    expect(o.kind).toBe("saved-uncorrelated");
   });
 
-  it("reports restoration-failed when rollback failed", () => {
+  it("full-live: an uncorrelated apply is rescued when persisted and serving versions match", () => {
+    // A version match is proof the running runtime serves exactly what was
+    // persisted, so the live claim is earned even without a per-ID record.
     const o = deriveApplyOutcome({
       accepted: true,
       pendingReload: false,
-      runtimeObserved: false,
-      restoreError: "permission denied",
+      runtimeObserved: true,
+      correlated: false,
+      persistedVersion: "v-42",
+      servingVersion: "v-42",
     });
-    expect(o.kind).toBe("restoration-failed");
-    expect(o.blocking).toBe(true);
+    expect(o.kind).toBe("full-live");
+    expect(o.severity).toBe("success");
   });
 
-  it("reports reload-pending from saved_not_live outcome", () => {
+  it("full-live: a correlated apply (default) is unaffected by the AC-11 gate", () => {
+    // Undefined `correlated` means correlated — the managed path or a unit test
+    // asserting a fully-live apply — so the fully-live branch is still reached.
     const o = deriveApplyOutcome({
       accepted: true,
       pendingReload: false,
+      runtimeObserved: true,
+    });
+    expect(o.kind).toBe("full-live");
+  });
+
+  it("saved-uncorrelated does not fire while the reload is still pending", () => {
+    // reload-pending outranks the AC-11 gate: an in-flight reload is surfaced as
+    // pending, not as an uncorrelated legacy result.
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: true,
       runtimeObserved: false,
-      reload: reload({ outcome: "saved_not_live", persisted: true }),
+      correlated: false,
     });
     expect(o.kind).toBe("reload-pending");
-  });
-});
-
-describe("reloadSubsystemFailures", () => {
-  it("collects failed and timed-out subsystems", () => {
-    const failures = reloadSubsystemFailures(
-      reload({
-        http: { status: "ok" },
-        stream: { status: "failed", error: "bind error" },
-        admin: { status: "timed_out", error: "deadline exceeded" },
-      }),
-    );
-    expect(failures).toHaveLength(2);
-    expect(failures.map((f) => f.name)).toContain("L4 stream proxy");
-    expect(failures.map((f) => f.name)).toContain("Admin subsystem");
   });
 });
 
@@ -250,7 +296,12 @@ describe("ApplyOutcomeBanner", () => {
   it("renders a full-live apply as polite status", () => {
     render(
       <ApplyOutcomeBanner
-        outcome={bannerFor({ accepted: true, pendingReload: true, runtimeObserved: true, streamStatus: "ok" })}
+        outcome={bannerFor({
+          accepted: true,
+          pendingReload: true,
+          runtimeObserved: true,
+          streamStatus: "ok",
+        })}
       />,
     );
     const el = screen.getByRole("status");
@@ -296,15 +347,33 @@ describe("ApplyOutcomeBanner", () => {
       <ApplyOutcomeBanner
         outcome={bannerFor({
           accepted: true,
-          pendingReload: false,
+          pendingReload: true,
           runtimeObserved: true,
           streamStatus: "ok",
-          reload: reload({ outcome: "applied_degraded", timed_out: true }),
+          reloadTimedOut: true,
+          published: true,
         })}
       />,
     );
     const el = screen.getByRole("alert");
     expect(el).toHaveAttribute("data-outcome", "reload-timed-out");
+  });
+
+  it("renders a saved-uncorrelated apply as polite status that does not claim live", () => {
+    render(
+      <ApplyOutcomeBanner
+        outcome={bannerFor({
+          accepted: true,
+          pendingReload: false,
+          runtimeObserved: true,
+          correlated: false,
+        })}
+      />,
+    );
+    const el = screen.getByRole("status");
+    expect(el).toHaveAttribute("data-outcome", "saved-uncorrelated");
+    expect(el).toHaveTextContent(/uncorrelated/i);
+    expect(el).not.toHaveTextContent(/now live/i);
   });
 });
 
@@ -397,15 +466,68 @@ describe("ApplyOutcomeBanner — reload-timed-out and capabilities (continued)",
       <ApplyOutcomeBanner
         outcome={bannerFor({
           accepted: true,
-          pendingReload: false,
+          pendingReload: true,
           runtimeObserved: true,
           streamStatus: "ok",
-          reload: reload({ outcome: "applied_degraded", timed_out: true }),
+          reloadTimedOut: true,
+          published: true,
         })}
       />,
     );
     const el = screen.getByRole("alert");
     expect(el).toHaveTextContent("reload exceeded");
+  });
+
+  it("treats a timed-out subsystem as degradation", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "applied_degraded",
+      published: true,
+      admin: { status: "timed_out", error: "policy install exceeded deadline" },
+    });
+    expect(o.kind).toBe("partial-reload");
+    expect(o.failures[0]?.name).toBe("admin subsystem");
+  });
+
+  it("renders not-applied plus restored without claiming live", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "not_applied",
+      persisted: true,
+      restored: true,
+      reloadError: "prepare failed",
+    });
+    expect(o.kind).toBe("rejected-restored");
+    expect(o.message.toLowerCase()).not.toContain("now live");
+  });
+
+  it("distinguishes restoration failure", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "not_applied",
+      persisted: true,
+      restoreError: "disk digest mismatch",
+    });
+    expect(o.kind).toBe("restoration-failed");
+    expect(o.blocking).toBe(true);
+  });
+
+  it("classifies an enqueue rejection before generic restored handling", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "not_applied",
+      enqueueFailed: true,
+      restored: true,
+    });
+    expect(o.kind).toBe("enqueue-failed");
   });
 
   it("shows the capability tally only for a non-blocking outcome", () => {

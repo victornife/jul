@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestHistorySnapshotAndList(t *testing.T) {
@@ -141,5 +142,65 @@ func TestValidHistoryID(t *testing.T) {
 		if validHistoryID(id) {
 			t.Errorf("validHistoryID(%q) = true, want false", id)
 		}
+	}
+}
+
+// TestParseHistoryID verifies the timestamp is recovered from both plain IDs and
+// the "_N" collision suffix actually appended by snapshot(), and that any
+// malformed-but-safe name degrades to the zero time rather than an error.
+func TestParseHistoryID(t *testing.T) {
+	stamp := "20240101T120000.000Z"
+	base, err := time.Parse(historyTimeLayout, stamp)
+	if err != nil {
+		t.Fatalf("layout parse: %v", err)
+	}
+	cases := []struct {
+		name string
+		id   string
+		want time.Time
+	}{
+		{"plain", stamp, base},
+		{"collision_1", stamp + "_1", base},
+		{"collision_10", stamp + "_10", base},
+		{"non_digit_suffix", stamp + "_x", time.Time{}},
+		{"digit_suffix_bad_prefix", "abc_1", time.Time{}},
+		{"unparseable", "not-a-timestamp", time.Time{}},
+		{"empty", "", time.Time{}},
+	}
+	for _, tc := range cases {
+		if got := parseHistoryID(tc.id); !got.Equal(tc.want) {
+			t.Errorf("%s: parseHistoryID(%q) = %v, want %v", tc.name, tc.id, got, tc.want)
+		}
+	}
+}
+
+// TestHistoryListParsesCollisionSuffix proves list() recovers the time for a
+// snapshot carrying the "_N" collision suffix (previously zeroed by the old
+// "-N" parser) and that newest-first ordering is preserved: the suffixed
+// snapshot sorts after its unsuffixed sibling under the reverse-string sort.
+func TestHistoryListParsesCollisionSuffix(t *testing.T) {
+	dir := t.TempDir()
+	h := newHistory(dir, 50)
+	stamp := "20240101T120000.000Z"
+	for _, name := range []string{stamp + historyExt, stamp + "_1" + historyExt} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("a = 1\n"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	list, err := h.list()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list len = %d, want 2", len(list))
+	}
+	want, _ := time.Parse(historyTimeLayout, stamp)
+	for _, e := range list {
+		if !e.Time.Equal(want) {
+			t.Errorf("entry %q time = %v, want %v (collision suffix must not zero the time)", e.ID, e.Time, want)
+		}
+	}
+	if list[0].ID != stamp+"_1" {
+		t.Errorf("newest = %q, want %q", list[0].ID, stamp+"_1")
 	}
 }

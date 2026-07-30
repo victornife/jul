@@ -158,7 +158,6 @@ function QuickEdits({
         ops: [patch],
         baseVersion: res.base_version,
         previewDiff: res.diff,
-        candidate: res.candidate,
       });
       void navigate("/config");
     } catch (err) {
@@ -436,7 +435,6 @@ function ServerToggles({ route }: { readonly route: RouteProjection }) {
         ops: [patch],
         baseVersion: res.base_version,
         previewDiff: res.diff,
-        candidate: res.candidate,
       });
       void navigate("/config");
     } catch (err) {

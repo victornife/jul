@@ -130,6 +130,12 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	if s.deps.LastManagedApply != nil {
 		out.LastManagedApply = s.deps.LastManagedApply()
 	}
+	// Advisory, non-readiness managed-apply finalization health (WS02 §3.9).
+	// Surfaced independently of AdminHealth so a finalization degradation is
+	// visible in the Overview without ever gating /readyz.
+	if s.deps.ManagedApplyFinalizationHealth != nil {
+		out.ManagedApplyFinalization = s.deps.ManagedApplyFinalizationHealth()
+	}
 	if s.deps.Stats != nil {
 		out.Stats = s.deps.Stats()
 	}
@@ -382,11 +388,18 @@ func restartRequiredMessage(err error) string {
 // applyRequestContext extracts the authenticated identity and source IP from
 // an admin request so it can be threaded through to the coordinator's async
 // finalizer for attribution in the terminal audit event (H-05).
-func applyRequestContext(r *http.Request) ApplyRequestContext {
-	ctx := ApplyRequestContext{SourceIP: adminClientIP(r)}
+func applyRequestContext(r *http.Request, op ApplyOperation) ApplyRequestContext {
+	ctx := ApplyRequestContext{
+		Operation:      op,
+		Resource:       "config",
+		SourceIP:       adminClientIP(r),
+		StartedAt:      time.Now().UTC(),
+		RequestContext: r.Context(),
+	}
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
 		ctx.Actor = id.Principal
 		ctx.TokenID = id.TokenID
+		ctx.TokenDigest = id.TokenDigest
 	}
 	return ctx
 }
@@ -396,7 +409,8 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	reqCtx := applyRequestContext(r)
+	reqCtx := applyRequestContext(r, ApplyOperationConfigApply)
+	s.bindManagedApplyDeadline(&reqCtx)
 	// Prefer the new correlated apply path; fall back to the legacy
 	// WriteConfigRaw closure for tests and callers that have not migrated.
 	applyRaw := s.deps.ApplyConfigRaw
@@ -433,66 +447,97 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
+	// M-06: Fail-closed prerequisite check using shared currentWriteState helper.
+	// A failure to obtain the current configuration MUST block every apply,
+	// regardless of whether base_version was supplied: otherwise the optimistic-
+	// concurrency and self-lockout checks below would be silently skipped on a
+	// transient load error, letting a reachability-changing edit through without
+	// confirmation. This handles both checks atomically against one immutable
+	// baseline, avoiding multiple LoadConfig calls and inconsistent handling.
+	curState, err := s.currentWriteState(false)
+	if err != nil {
+		s.recordAudit(r, "config.apply", "config", "failure", "rejected: cannot load current configuration: "+err.Error())
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
+		return
+	}
+	reqCtx.Baseline = &curState
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, curState.Config)
+
 	// Optimistic concurrency: when the client sends the base_version it read the
 	// config at, reject the write with 409 if the live config changed since, so a
 	// stale raw edit cannot silently clobber a concurrent change. An empty
 	// base_version skips the check (an explicit force-apply). The version basis is
 	// the canonical marshaled form, identical to the structured-patch path, so a
 	// base_version from either editor is interchangeable.
-	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" && s.deps.LoadConfig != nil {
-		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
-			if marshaled, merr := config.Marshal(cur); merr == nil {
-				if currentVersion := configVersion(marshaled); baseVersion != currentVersion {
-					s.recordAudit(r, "config.apply", "config", "failure", "rejected: base version stale (concurrent change)")
-					writeJSON(w, http.StatusConflict, conflictResponse{
-						OK:             false,
-						Conflict:       true,
-						Message:        "The configuration changed since this edit was prepared; reload and try again.",
-						CurrentVersion: currentVersion,
-					})
-					return
-				}
-			}
+	if baseVersion := r.URL.Query().Get("base_version"); baseVersion != "" {
+		if baseVersion != curState.Version {
+			s.recordAudit(r, "config.apply", "config", "failure", "rejected: base version stale (concurrent change)")
+			writeJSON(w, http.StatusConflict, conflictResponse{
+				OK:             false,
+				Conflict:       true,
+				Message:        "The configuration changed since this edit was prepared; reload and try again.",
+				CurrentVersion: curState.Version,
+			})
+			return
+		}
+	}
+
+	// Parse the candidate exactly once and run every prerequisite check against
+	// that single immutable value plus the immutable baseline in curState
+	// (M-06). A parse error is left to the normal validation path in applyRaw,
+	// which reports it without persisting anything.
+	candidate, parseErr := config.Parse(body)
+	var effectiveCandidate *config.Candidate
+	if parseErr == nil && candidate != nil {
+		opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+		defer cancel()
+		effectiveCandidate, parseErr = prepareMutationCandidateContext(opCtx, &reqCtx, candidate)
+	}
+
+	// Object-level admin:manage guard (P3-02 / Wave 1): any change in the
+	// [admin] subtree requires admin:manage in addition to config:apply.
+	// Authorize the single parsed candidate against the immutable baseline so
+	// the decision cannot be aliased by a shared LoadConfig pointer (C-01).
+	//
+	// Authorization MUST precede the reachability/self-lockout confirmation
+	// below: an unauthorized caller must be rejected with 403 regardless of
+	// whether the change happens to touch admin reachability. Running the
+	// confirmation first would leak a 409 "needs confirmation" to a caller who
+	// is not even permitted to make the change, and would let a role-escalation
+	// attempt be classified as a self-lockout instead of an authorization
+	// failure (finding: RBAC same-count role escalation must be 403, not 409).
+	if parseErr == nil && effectiveCandidate != nil {
+		if !s.authorizeConfigTransition(w, r, "config.apply", currentEffective, effectiveCandidate.Effective) {
+			return
 		}
 	}
 
 	// Self-lockout guard: refuse an apply that would change how the operator
 	// reaches the admin console (disabling admin, moving its listen address,
-	// rotating its token, or disabling the web console) unless the client
-	// explicitly confirms with ?confirm_admin=true. This stops an operator from
-	// silently locking themselves out with a single raw edit — the one change
-	// that no rollback can undo from the console, because the console would be
-	// gone. The guard is best-effort: it only runs when both the running config
-	// and the proposed config parse; a parse failure falls through to the normal
-	// validation path below, which reports the error.
-	if r.URL.Query().Get("confirm_admin") != "true" && s.deps.LoadConfig != nil {
-		if cur, lerr := s.deps.LoadConfig(); lerr == nil && cur != nil {
-			if next, perr := config.Parse(body); perr == nil && next != nil {
-				if changes := adminLockoutChanges(cur.Admin, next.Admin); len(changes) > 0 {
-					s.recordAudit(r, "config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation")
-					s.emit("config", "apply_failed", "warn", "Configuration apply would change admin access and was held for confirmation.")
-					writeJSON(w, http.StatusConflict, adminGuardResponse{
-						OK:          false,
-						AdminChange: true,
-						Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
-						Changes:     changes,
-					})
-					return
-				}
-			}
-		}
-	}
-
-	// Object-level admin:manage guard (P3-02 / Wave 1): any change in the
-	// [admin] subtree requires admin:manage in addition to config:apply.
-	if next, perr := config.Parse(body); perr == nil && next != nil {
-		if !s.authorizeConfigCandidate(w, r, "config.apply", next) {
+	// rotating its token, disabling the web console, or invalidating the current
+	// operator's RBAC credential) unless the client explicitly confirms with
+	// ?confirm_admin=true. This stops an operator from silently locking
+	// themselves out with a single raw edit — the one change that no rollback
+	// can undo from the console, because the console would be gone. The current
+	// configuration was obtained fail-closed above, so a missing baseline can
+	// never silently skip this check.
+	if r.URL.Query().Get("confirm_admin") != "true" && parseErr == nil && effectiveCandidate != nil {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(currentEffective, effectiveCandidate.Effective, id); len(changes) > 0 {
+			s.recordAudit(r, "config.apply", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			s.emit("config", "apply_failed", "warn", "Configuration apply would change admin access and was held for confirmation.")
+			writeJSON(w, http.StatusConflict, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This change affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     changes,
+			})
 			return
 		}
 	}
 
 	// Snapshot the current config before applying so the apply is reversible.
-	prev := s.currentRaw()
+	prev := curState.Raw
 
 	mode := r.URL.Query().Get("mode")
 	switch mode {
@@ -509,6 +554,16 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	result, err := applyRaw(reqCtx, body, mode)
 	if err != nil {
 		s.recordAudit(r, "config.apply", "config", "failure", "coordinator error: "+err.Error())
+		status := configApplyErrorStatus(result, err)
+		if status == http.StatusServiceUnavailable {
+			if result.Reload != nil && result.Reload.FailedPhase == "enqueue" {
+				s.emit("config", "apply_failed", "error", result.Message)
+			} else {
+				s.emit("config", "apply_failed", "error", "Configuration storage could not be verified; no change was written.")
+			}
+			writeJSON(w, status, result)
+			return
+		}
 		s.emit("config", "apply_failed", "error", "Configuration apply coordinator failed.")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -537,8 +592,19 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if result.OK {
-		s.recordHistory(prev)
+	if result.TimedOutPhase != "" {
+		// AC-08 / defect 9: a preflight timeout before persistence records a
+		// dedicated failure audit naming the timed-out phase. The shared status
+		// mapping below writes the 504 Gateway Timeout; nothing was persisted.
+		s.recordTimeoutAudit(r, reqCtx.Operation, result)
+	}
+
+	if result.OK && isTerminalApplyResult(result) {
+		// AC-05: when the managed coordinator records history at
+		// terminalization, do not double-record here.
+		if !s.deps.ManagedHistoryActive {
+			s.recordHistory(prev)
+		}
 		// Use distinct audit/timeline events for stage_restart vs hot apply so
 		// the timeline clearly distinguishes which transaction type ran.
 		// StagedRestartIsUpdate is set by the serve.go closure BEFORE the apply
@@ -573,11 +639,15 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 			"Configuration apply was rejected and restoration to the previous configuration failed.")
 	}
 
-	status := http.StatusOK
-	if !result.OK {
-		status = http.StatusConflict
-	}
+	status := configApplyResultStatus(result)
 	writeJSON(w, status, result)
+}
+
+func bindEffectiveBaseline(s *Server, ctx *ApplyRequestContext, fallback *config.Config) *config.Config {
+	if effective := s.bindMutationRuntime(ctx); effective != nil {
+		return effective
+	}
+	return fallback
 }
 
 // adminGuardResponse is the 409 body when an apply would change a setting that
@@ -652,7 +722,7 @@ func rbacPrincipalsEqual(a, b []config.AdminPrincipal) bool {
 			return false
 		}
 		if existing.Role != p.Role ||
-			existing.Token != p.Token ||
+			rbac.TokenDigest(existing.Token) != rbac.TokenDigest(p.Token) ||
 			existing.Disabled != p.Disabled ||
 			!existing.ExpiresAt.Equal(p.ExpiresAt) {
 			return false
@@ -726,35 +796,98 @@ func (s *Server) authorizeConfigCandidate(w http.ResponseWriter, r *http.Request
 		writeForbidden(w, rbac.ConfigApply, id)
 		return false
 	}
-	return s.requireAdminManageForCandidate(w, r, action, next)
+	if err := s.requireAdminManageForCandidate(r, action, next); err != nil {
+		if authErr, ok := err.(*AuthorizationError); ok {
+			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})
+			return false
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
+// authorizeConfigTransition is the alias-safe form of authorizeConfigCandidate
+// (C-01). It authorizes a mutation from an explicit immutable baseline to a
+// candidate WITHOUT reloading the current configuration. Handlers that mutate
+// a candidate derived from LoadConfig MUST use this form and pass a pristine,
+// independent baseline: if LoadConfig returns a shared/cached pointer and the
+// candidate is that same object mutated in place, a reload-based comparison
+// would see current == candidate and silently skip the admin:manage guard.
+// Callers must return immediately on false.
+func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Request, action string, current, next *config.Config) bool {
+	id, ok := rbacIdentityFromRequest(r)
+	if ok && !id.Legacy && !id.Has(rbac.ConfigApply) {
+		s.recordAudit(r, action, "config", "failure", "rejected: lacks config:apply")
+		writeForbidden(w, rbac.ConfigApply, id)
+		return false
+	}
+	if err := s.requireAdminManageAgainst(r, action, current, next); err != nil {
+		if authErr, ok := err.(*AuthorizationError); ok {
+			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})
+			return false
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return false
+	}
+	return true
 }
 
 // requireAdminManageForCandidate enforces only the admin-subtree guard. It is
 // used by write paths whose route-level permission is not config:apply (e.g.
 // history:rollback) but whose candidate may still affect admin settings.
-func (s *Server) requireAdminManageForCandidate(w http.ResponseWriter, r *http.Request, action string, next *config.Config) bool {
+// P1-3: Refactored to return AuthorizationError instead of writing HTTP
+// responses directly, preventing double-response bugs in rollback handlers.
+func (s *Server) requireAdminManageForCandidate(r *http.Request, action string, next *config.Config) error {
 	if s.deps.LoadConfig == nil || next == nil {
-		return true
+		s.recordAudit(r, action, "config", "failure", "rejected: cannot check admin change (LoadConfig unavailable)")
+		return &AuthorizationError{Status: http.StatusServiceUnavailable, Message: "authorization check failed: system unavailable", Reason: "system_unavailable", Required: rbac.AdminManage}
 	}
 	cur, err := s.deps.LoadConfig()
 	if err != nil || cur == nil {
-		return true
+		s.recordAudit(r, action, "config", "failure", "rejected: cannot load current config for admin change check")
+		return &AuthorizationError{Status: http.StatusServiceUnavailable, Message: "authorization check failed: config unavailable", Reason: "config_unavailable", Required: rbac.AdminManage}
 	}
 	if adminConfigEqual(cur.Admin, next.Admin) {
-		return true
+		return nil
 	}
 	id, ok := rbacIdentityFromRequest(r)
 	if !ok {
 		s.recordAudit(r, action, "config", "failure", "rejected: admin change without identity")
-		writeForbidden(w, rbac.AdminManage, rbac.Identity{})
-		return false
+		return &AuthorizationError{Status: http.StatusForbidden, Message: "admin change rejected", Reason: "admin_manage_required", Required: rbac.AdminManage}
 	}
 	if !id.Has(rbac.AdminManage) {
 		s.recordAudit(r, action, "config", "failure", "rejected: admin change lacks admin:manage")
-		writeForbidden(w, rbac.AdminManage, id)
-		return false
+		return &AuthorizationError{Status: http.StatusForbidden, Message: "admin change rejected", Reason: "admin_manage_required", Required: rbac.AdminManage}
 	}
-	return true
+	return nil
+}
+
+// requireAdminManageAgainst enforces the admin-subtree guard using an explicit
+// immutable baseline instead of reloading the current configuration (C-01).
+// current must be a pristine snapshot that the caller has NOT mutated, and next
+// must be an independent candidate (e.g. a clone of current with the requested
+// edits applied). This avoids the aliasing bypass where LoadConfig returns a
+// shared pointer that a handler mutates in place: comparing current.Admin to
+// next.Admin then always reports "equal" and the admin:manage guard is skipped.
+func (s *Server) requireAdminManageAgainst(r *http.Request, action string, current, next *config.Config) error {
+	if current == nil || next == nil {
+		s.recordAudit(r, action, "config", "failure", "rejected: cannot check admin change (nil baseline or candidate)")
+		return &AuthorizationError{Status: http.StatusServiceUnavailable, Message: "authorization check failed: system unavailable", Reason: "system_unavailable", Required: rbac.AdminManage}
+	}
+	if adminConfigEqual(current.Admin, next.Admin) {
+		return nil
+	}
+	id, ok := rbacIdentityFromRequest(r)
+	if !ok {
+		s.recordAudit(r, action, "config", "failure", "rejected: admin change without identity")
+		return &AuthorizationError{Status: http.StatusForbidden, Message: "admin change rejected", Reason: "admin_manage_required", Required: rbac.AdminManage}
+	}
+	if !id.Has(rbac.AdminManage) {
+		s.recordAudit(r, action, "config", "failure", "rejected: admin change lacks admin:manage")
+		return &AuthorizationError{Status: http.StatusForbidden, Message: "admin change rejected", Reason: "admin_manage_required", Required: rbac.AdminManage}
+	}
+	return nil
 }
 
 // authorizeRawCandidate parses body as a candidate config and runs the same
@@ -779,7 +912,7 @@ func (s *Server) authorizeRawCandidate(w http.ResponseWriter, r *http.Request, a
 func adminConfigEqual(a, b config.AdminConfig) bool {
 	if a.Enabled != b.Enabled ||
 		a.Listen != b.Listen ||
-		a.Token != b.Token {
+		rbac.TokenDigest(a.Token) != rbac.TokenDigest(b.Token) {
 		return false
 	}
 	if !adminRBACEqual(a.RBAC, b.RBAC) {

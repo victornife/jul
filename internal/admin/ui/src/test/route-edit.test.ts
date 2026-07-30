@@ -79,10 +79,10 @@ describe("routeEdit — match", () => {
 });
 
 describe("routeEdit — action", () => {
-  it("recognizes the editable actions including grpc", () => {
+  it("recognizes only the tag-free editable actions", () => {
     expect(isEditableAction("proxy")).toBe(true);
-    expect(isEditableAction("grpc")).toBe(true);
     expect(isEditableAction("deny")).toBe(true);
+    expect(isEditableAction("grpc")).toBe(false);
     expect(isEditableAction("fastcgi")).toBe(false);
   });
 
@@ -92,12 +92,7 @@ describe("routeEdit — action", () => {
       target: "/var/www",
       status: "",
     });
-    expect(seedAction(loc({ action: "grpc", target: "grpc://backend:9000" }))).toEqual({
-      kind: "grpc",
-      target: "grpc://backend:9000",
-      status: "",
-    });
-    expect(seedAction(loc({ action: "fastcgi" })).kind).toBe("proxy");
+    expect(seedAction(loc({ action: "grpc" })).kind).toBe("proxy");
   });
 
   it("detects a change of kind, target, or status", () => {
@@ -109,8 +104,6 @@ describe("routeEdit — action", () => {
 
   it("validates per-kind required fields and status ranges", () => {
     expect(actionWarnings({ kind: "proxy", target: "", status: "" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "grpc", target: "", status: "" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "grpc", target: "grpc://backend:9000", status: "" })).toHaveLength(0);
     expect(actionWarnings({ kind: "static", target: "", status: "" })).toHaveLength(1);
     expect(actionWarnings({ kind: "redirect", target: "", status: "" })).toHaveLength(1);
     expect(actionWarnings({ kind: "redirect", target: "https://x", status: "200" })).toHaveLength(1);
@@ -125,10 +118,6 @@ describe("routeEdit — action", () => {
     expect(actionToPatch({ kind: "proxy", target: " http://a ", status: "" })).toEqual({
       kind: "proxy",
       target: "http://a",
-    });
-    expect(actionToPatch({ kind: "grpc", target: " grpc://backend:9000 ", status: "" })).toEqual({
-      kind: "grpc",
-      target: "grpc://backend:9000",
     });
     expect(actionToPatch({ kind: "redirect", target: "https://x", status: "301" })).toEqual({
       kind: "redirect",

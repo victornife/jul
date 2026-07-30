@@ -109,12 +109,26 @@ func TestMetricLabelPolicy(t *testing.T) {
 		"jul_mtls_handshakes_total":              {"result"},
 		// Reload and staged-restart metrics (P2-05): source/outcome labels are
 		// bounded to 3 source values × 4 outcome values = 12 series maximum.
-		"jul_reload_total":               {"outcome", "source"},
-		"jul_reload_duration_seconds":    {"outcome", "source"},
-		"jul_reload_in_progress":         nil,
-		"jul_config_stage_restart_total":   {"result"},
-		"jul_config_pending_restart":       nil,
-		"jul_managed_apply_finalized_total": {"outcome", "restored"},
+		"jul_reload_total":                  {"outcome", "source"},
+		"jul_reload_duration_seconds":       {"outcome", "source"},
+		"jul_reload_in_progress":            nil,
+		"jul_config_stage_restart_total":    {"result"},
+		"jul_config_pending_restart":        nil,
+		"jul_managed_apply_finalized_total": {"mode", "operation", "outcome", "restored"},
+		// WS02 §3.6 / WS06 §7.5: finalization/restoration-error counter labeled by
+		// the bounded component that failed (restoration/pending/registry/
+		// callback_panic). component is a fixed, low-cardinality enum — never an
+		// apply ID, actor, or configuration version.
+		"jul_managed_apply_finalization_errors_total": {"component"},
+		// WS02 §3.7: the terminal finalizer's history-snapshot counter is bounded
+		// to the managed operation and the snapshot disposition
+		// (recorded/skipped/failed) — never an apply ID, actor, path or version.
+		"jul_managed_apply_history_total": {"operation", "result"},
+		// WS06 §7.5: unlabeled gauge of retained terminal ledger records.
+		"jul_managed_apply_terminal_registry_entries": nil,
+		// WS06 §7.5: exact-ID lookup counter bounded to the lookup disposition
+		// (pending/terminal/missing/invalid) — never an apply ID, actor, or IP.
+		"jul_managed_apply_terminal_lookup_total": {"result"},
 	}
 
 	for name, names := range got {
@@ -230,5 +244,9 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveStageRestart("created")
 	m.SetPendingRestart(true)
 	m.SetPendingRestart(false)
-	m.ObserveManagedApplyFinalized("not_applied", "true")
+	m.ObserveManagedApplyFinalized("config.apply", "hot", "not_applied", "true")
+	m.ObserveManagedApplyFinalizationError("restoration")
+	m.ObserveManagedApplyHistory("config.apply", "recorded")
+	m.SetManagedApplyRegistryEntries(1)
+	m.ObserveManagedApplyLookup("terminal")
 }

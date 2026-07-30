@@ -248,9 +248,9 @@ func TestExternalDivergenceBlocksHotApply(t *testing.T) {
 		var out struct {
 			Pending bool `json:"pending"`
 			Status  struct {
-				State    string   `json:"state"`
-				External bool     `json:"external"`
-				Managed  bool     `json:"managed"`
+				State      string   `json:"state"`
+				External   bool     `json:"external"`
+				Managed    bool     `json:"managed"`
 				Subsystems []string `json:"subsystems"`
 			} `json:"status"`
 		}

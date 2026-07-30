@@ -4,6 +4,8 @@
 package rbac
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -173,6 +175,7 @@ func (p *Policy) Authenticate(bearer string, now time.Time) (Identity, error) {
 		Principal:   entry.name,
 		Role:        entry.role,
 		TokenID:     entry.tokenID,
+		TokenDigest: hex.EncodeToString(entry.tokenHash),
 		Permissions: entry.permissions,
 		Legacy:      entry.legacy,
 	}, nil
@@ -188,6 +191,27 @@ func (p *Policy) Enabled() bool { return p.enabled }
 
 // PrincipalCount returns the number of configured principals (including legacy).
 func (p *Policy) PrincipalCount() int { return len(p.all) }
+
+// Fingerprint returns a stable safe digest of the effective policy contents.
+func (p *Policy) Fingerprint() string {
+	h := sha256.New()
+	for _, entry := range p.all {
+		_, _ = h.Write([]byte(entry.name))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(entry.role))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write(entry.tokenHash)
+		for _, permission := range entry.permissions {
+			_, _ = h.Write([]byte{0})
+			_, _ = h.Write([]byte(permission))
+		}
+		if entry.disabled {
+			_, _ = h.Write([]byte{1})
+		}
+		_, _ = h.Write([]byte(entry.expiresAt.UTC().Format(time.RFC3339Nano)))
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
 
 // --- helpers ---
 

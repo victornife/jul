@@ -66,7 +66,7 @@ console = true
 | Bind address | `127.0.0.1` (loopback). If remote access is required, use an SSH tunnel or a mutual-TLS proxy in front — never expose raw admin to the internet. |
 | Token strength | Minimum 32 random bytes (256-bit); use a password manager or `openssl rand -base64 32`. |
 | Token storage | Use `${env:}`, `${file:}`, or `${secret:}` references. See [docs/secrets.md](secrets.md). |
-| Token rotation | Edit `admin.token` and apply; the new token takes effect on the next successful hot reload. Audit log entries do not attribute to a user today, so rotation is the only revocation mechanism. |
+| Token rotation | Edit `admin.token`, restart or reload. Audit log entries do not attribute to a user today, so rotation is the only revocation mechanism. |
 | pprof endpoints | `/debug/pprof/` is mounted behind bearer-token auth. Do not disable auth when pprof is needed — authenticate with the admin token. |
 | Rate limiting | The admin API has a built-in rate limiter (reads, writes, applies separately). Default limits are conservative. |
 

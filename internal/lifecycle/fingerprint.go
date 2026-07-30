@@ -86,6 +86,8 @@ func extractValue(cfg *config.Config, path string) any {
 		return cfg.Admin.Enabled
 	case "admin.listen":
 		return cfg.Admin.Listen
+	case "admin.token":
+		return digestString(cfg.Admin.Token)
 	case "admin.console":
 		if cfg.Admin.Console == nil {
 			return nil
@@ -118,6 +120,11 @@ func extractValue(cfg *config.Config, path string) any {
 			return nil
 		}
 		return *cfg.Admin.PluginUploadEnabled
+	case "admin.rbac.enabled":
+		// Enabling or disabling RBAC changes the auth middleware wiring and
+		// requires a restart. The policy contents (roles, principals) are
+		// hot-swappable and are not fingerprinted here.
+		return cfg.Admin.RBAC.Enabled
 	case "cache.enabled":
 		return cfg.Cache.Enabled
 	case "cache.memory_max_size":

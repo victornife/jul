@@ -35,7 +35,7 @@ releasable increment; later phases build on earlier ones.
 | Phase | Focus | Key deliverables | Status |
 | --- | --- | --- | --- |
 | Phase 2 | Reload results, bounded managed applies, and planned restart | Correlated reload results, exact restoration, planned-restart staging/discard/preflight | 🚧 in progress (remediation pass) |
-| Phase 3 | RBAC Phase 1 | Named principals, predefined + custom roles, scoped tokens, deny-by-default admin routes | 🔒 queued |
+| Phase 3 | RBAC Phase 1 | Named principals, predefined + custom roles, scoped tokens, deny-by-default admin routes | 🚧 implemented; in security remediation |
 | Phase 4 | Egress coverage and hardening | JWKS, forward-auth, discovery, ACME/OCSP, WASM fetch under shared egress policy | 🔒 queued |
 | Phase 5 | Structured CRUD + near-term global-table patch ops | Batch patch preview, entity lifecycle, `global_set`, `compression_set`, `rate_limit_global_set` | 🔒 queued |
 | Phase 6 | AI Gateway MVP | Time-boxed multi-provider routing, failover, streaming, token/cost metrics | ⏳ time-boxed bet |

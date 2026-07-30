@@ -1,60 +1,86 @@
-﻿/**
+/**
  * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
  * SPDX-License-Identifier: agpl
  */
 
-import type { ReloadResult } from "@/api/client.ts";
-
 /**
- * Apply-outcome taxonomy for the configuration write flow (AUX-02 / H-06).
+ * Apply-outcome taxonomy for the configuration write flow (AUX-02).
  *
  * A config apply is not a single yes/no event. The write path validates and
  * persists synchronously, but the swap into the live runtime — and, for the L4
  * stream proxy, the listener rebind — completes asynchronously; a handful of
- * settings cannot be hot-applied at all and need a process restart. The server
- * now returns a structured `reload` result that classifies the terminal outcome
- * (applied_live, applied_degraded, not_applied, saved_not_live) plus per-
- * subsystem status, and restoration fields that report when a rejected candidate
- * was rolled back. This module folds those signals into one explicit, severity-
- * tagged outcome so the panel can render every branch consistently.
+ * settings (the ACME issued-domain set and issuer) cannot be hot-applied at all
+ * and need a process restart. Always painting a green "saved" hides the cases
+ * where an apply is accepted but not yet, or not fully, live. This module folds
+ * the raw signals — accepted vs restart-required, the server's pending_reload
+ * flag, and the post-apply stream_status — into one explicit, severity-tagged
+ * outcome so the panel can render every branch consistently and an operator can
+ * tell them apart at a glance.
  */
 
 export type ApplyOutcomeSeverity = "success" | "info" | "warning" | "blocked";
 
 export type ApplyOutcomeKind =
-  // Applied and fully live: every subsystem reloaded cleanly.
+  // Applied and fully live: HTTP swapped and every subsystem reloaded cleanly.
   | "full-live"
   // Accepted and persisted; the asynchronous runtime swap has not been
   // confirmed live yet (the transient state right after an apply).
   | "reload-pending"
-  // Accepted and live, but a subsystem failed to activate the new config and
-  // is still serving the previous one — a degraded, not failed, apply.
+  // Accepted and persisted, but the synchronous window closed before the live
+  // reload/restoration outcome was known (backend outcome "saved_not_live").
+  // The final result — applied live, or rejected and restored to the previous
+  // config — is NOT yet determined, so the UI must NOT claim the new config is
+  // serving. The Console resolves the terminal outcome by polling the exact-ID
+  // managed-apply ledger record at GET /api/config/applies/{id}; the runtime
+  // overview is only a supplemental signal for the legacy pre-managed path.
+  | "saved-not-live"
+  // AC-11: Accepted and persisted by a legacy (pre-managed) apply path that
+  // returns no correlated per-ID reload record, and whose persisted/serving
+  // versions could not be matched. The change is saved, but this console cannot
+  // prove the running runtime switched to it, so it must NOT claim "live". The
+  // operator confirms the serving version via the runtime overview.
+  | "saved-uncorrelated"
+  // Accepted and live for HTTP, but a subsystem failed to activate the new
+  // config and is still serving the previous one — a degraded, not failed,
+  // apply that needs operator attention.
   | "partial-reload"
   // Accepted, swap completed, but the reload exceeded the operator-configured
-  // reload_timeout. The new config is serving; the timeout is advisory.
+  // reload_timeout. The new config is serving; the timeout is advisory and
+  // a slow reload should be investigated.
   | "reload-timed-out"
-  // Valid but NOT applied: the change is fixed at process start.
+  // AC-08: the apply exceeded the transaction deadline DURING pre-persistence
+  // preflight, so nothing was written and the previous configuration is intact
+  // and still serving. Distinct from "reload-timed-out", where the candidate is
+  // already persisted and serving. The operator investigates the slow component
+  // or raises global.reload_timeout, then retries.
+  | "preflight-timeout"
+  // Valid but NOT applied: the change is fixed at process start, so nothing was
+  // saved and a restart is required for it to take effect.
   | "restart-required"
-  // Configuration saved for the next process restart (first stage).
+  // Configuration saved for the next process restart (first stage). The live
+  // runtime is unchanged; the operator must restart the process.
   | "staged-for-restart"
-  // Staged configuration updated while a staged restart was already pending.
+  // Staged configuration updated (a further stage_restart apply while a staged
+  // restart is already pending). Live runtime is unchanged.
   | "staged-update"
-  // A hot apply was blocked because a staged restart is already pending.
+  // A hot apply was blocked because a managed staged restart is already
+  // pending. The operator must discard or restart before applying hot changes.
   | "pending-restart-blocks-hot"
-  // The staged restart was discarded and the previous config restored.
+  // The staged restart was successfully discarded and the previous configuration
+  // was restored. The live runtime was already serving the previous config.
   | "discard-success"
-  // The candidate was persisted, the live reload rejected it, and the previous
-  // configuration was restored. Nothing is serving the candidate.
-  | "restored"
-  // The candidate was rejected and restoration was attempted but failed. The
-  // on-disk state may not match the running runtime; manual intervention is
-  // required.
+  // Reload enqueue failed; candidate was persisted but never reached the runtime.
+  // Restoration was attempted (and may have succeeded).
+  | "enqueue-failed"
+  // The candidate was rejected before Publish and the previous bytes restored.
+  | "rejected-restored"
+  // The candidate was rejected and restoration did not complete safely.
   | "restoration-failed";
 
 /** One subsystem that did not activate the new config during a partial reload. */
 export interface SubsystemFailure {
   readonly name: string;
-  readonly detail?: string;
+  readonly detail: string | undefined;
 }
 
 export interface ApplyOutcome {
@@ -68,19 +94,17 @@ export interface ApplyOutcome {
   readonly failures: readonly SubsystemFailure[];
 }
 
+/** Per-subsystem reload result from the backend. */
+export interface SubsystemReloadResult {
+  readonly status?: string | undefined;
+  readonly error?: string | undefined;
+  readonly duration_ms?: number | undefined;
+}
+
 export interface ApplyOutcomeInput {
   /** True when the apply was accepted (HTTP 200); false for restart-required. */
   readonly accepted: boolean;
-  /**
-   * The structured reload result for this apply (P2-04 / H-06). Replaces the
-   * legacy pending_reload + previous_reload pair. When absent the caller should
-   * fall back to pending_reload for backward compatibility.
-   */
-  readonly reload?: ReloadResult;
-  /**
-   * The server's legacy pending_reload flag. Used only when `reload` is absent
-   * (older server builds).
-   */
+  /** The server's pending_reload flag: the swap into the live runtime is async. */
   readonly pendingReload: boolean;
   /** True once a post-apply runtime snapshot (overview) has been observed. */
   readonly runtimeObserved: boolean;
@@ -89,12 +113,22 @@ export interface ApplyOutcomeInput {
   /** Operator-facing message for a restart-required (not accepted) apply. */
   readonly restartMessage?: string;
   /**
-   * Restoration fields (F-03). restored is true when the rejected candidate was
-   * rolled back to the previous configuration. restoreError is set when the
-   * rollback itself failed.
+   * True when the server's previous_reload.timed_out flag was set: the swap
+   * completed but exceeded the configured reload_timeout. The new config is
+   * serving; the timeout is advisory and a slow reload should be investigated.
+   * Distinct from restart-required (config not saved) and partial-reload
+   * (subsystem failed to activate).
    */
-  readonly restored?: boolean;
-  readonly restoreError?: string;
+  readonly reloadTimedOut?: boolean;
+  /**
+   * AC-08: True when the backend refused the apply because a pre-persistence
+   * preflight phase exceeded the transaction deadline (top-level
+   * timed_out_phase, HTTP 504). Nothing was persisted and the previous
+   * configuration is still serving — distinct from reloadTimedOut, where the
+   * candidate is already persisted and serving. Paired with timedOutPhase for
+   * the phase name.
+   */
+  readonly preflightTimedOut?: boolean;
   /**
    * The apply mode returned by the server (P2-04). "stage_restart" means the
    * config was saved for the next restart; the live runtime is unchanged.
@@ -106,61 +140,88 @@ export interface ApplyOutcomeInput {
    */
   readonly pendingRestartBlocksHot?: boolean;
   /**
-   * True when deriving the outcome of a discard operation (P2-04).
+   * True when deriving the outcome of a discard operation (P2-04). The server
+   * restores the previous configuration; live runtime was already serving it.
    */
   readonly isDiscard?: boolean;
   /**
-   * True when this is a staged-update.
+   * True when this is a staged-update (a further stage_restart apply while one
+   * is already pending). Derived from pending_restart.staged in the response.
    */
   readonly isStagedUpdate?: boolean;
+  /**
+   * M-03: Per-subsystem reload results from reload.outcome for complete outcome.
+   */
+  readonly http?: SubsystemReloadResult | undefined;
+  readonly stream?: SubsystemReloadResult | undefined;
+  readonly admin?: SubsystemReloadResult | undefined;
+  /** M-03: Whether the reload was persisted (saved to disk) vs published to runtime. */
+  readonly persisted?: boolean | undefined;
+  /** M-03: The reload phase that failed or timed out. */
+  readonly failedPhase?: string | undefined;
+  readonly timedOutPhase?: string | undefined;
+  /** P0-1: Enqueue failure when reload.outcome is "not_applied". */
+  readonly enqueueFailed?: boolean;
+  /**
+   * Finding 5 (M-03): True when the backend returned reload.outcome
+   * "saved_not_live" — the candidate is persisted but the final live-reload /
+   * restoration outcome is not yet known. This is explicitly NOT "serving": the
+   * async finalizer may still restore the previous configuration. It takes
+   * precedence over reloadTimedOut so a saved_not_live response (which the
+   * backend also marks timed_out) is never rendered with "is now serving" copy.
+   */
+  readonly savedNotLive?: boolean;
+  readonly reloadOutcome?: "applied_live" | "applied_degraded" | "not_applied" | "saved_not_live";
+  readonly published?: boolean;
+  readonly restored?: boolean;
+  readonly restoreError?: string;
+  readonly reloadError?: string;
+  /**
+   * AC-11: False when the apply came back from a legacy (pre-managed) path that
+   * carries no correlated per-ID reload record, so the console cannot prove the
+   * running runtime switched to the new config. Undefined (the default) means
+   * the result is correlated — either a managed reload record is present, or the
+   * caller is a unit test asserting a fully-live apply — and the fully-live path
+   * is allowed. Only an explicit `false` downgrades an otherwise-live outcome to
+   * "saved-uncorrelated", and only when a version match cannot rescue it.
+   */
+  readonly correlated?: boolean;
+  /**
+   * AC-11: The config version the apply persisted (response persisted_version /
+   * version). Paired with `servingVersion` to correlate a legacy result: when
+   * both are present and equal, the running runtime demonstrably serves the same
+   * version that was persisted, which is proof enough to claim "live" even
+   * without a per-ID reload record.
+   */
+  readonly persistedVersion?: string;
+  /**
+   * AC-11: The version the running runtime reports serving (overview
+   * serving_version). See `persistedVersion`.
+   */
+  readonly servingVersion?: string;
 }
 
 /**
  * Parses an overview `stream_status` into a subsystem failure, or null when the
  * stream reload is healthy or absent. The backend encodes a rejected L4 reload
- * as "failed: <reason>" (the prior listeners keep serving).
+ * as "failed: <reason>" (the prior listeners keep serving), "ok" when the
+ * running set matches the applied config, and "" when no stream is configured.
  */
 export function streamReloadFailure(streamStatus: string | undefined): SubsystemFailure | null {
   if (streamStatus === undefined || !streamStatus.startsWith("failed:")) return null;
   const detail = streamStatus.replace(/^failed:\s*/, "").trim();
-  return detail.length > 0 ? { name: "L4 stream proxy", detail } : { name: "L4 stream proxy" };
-}
-
-const SUBSYSTEM_NAMES: Record<string, string> = {
-  http: "HTTP proxy",
-  stream: "L4 stream proxy",
-  admin: "Admin subsystem",
-};
-
-/**
- * Collects subsystem failures from the structured reload result. A subsystem is
- * failed when its status is "failed" or "timed_out". The L4 stream proxy is
- * also polled separately via overview stream_status because stream listeners
- * reload asynchronously.
- */
-export function reloadSubsystemFailures(reload: ReloadResult | undefined): SubsystemFailure[] {
-  if (!reload) return [];
-  const failures: SubsystemFailure[] = [];
-  for (const key of ["http", "stream", "admin"] as const) {
-    const sub = reload[key];
-    if (!sub) continue;
-    const status = sub.status;
-    const name = SUBSYSTEM_NAMES[key];
-    if (!name) continue;
-    if (status === "failed" || status === "timed_out") {
-      failures.push(sub.error !== undefined ? { name, detail: sub.error } : { name });
-    }
-  }
-  return failures;
+  return detail.length > 0
+    ? { name: "L4 stream proxy", detail: detail }
+    : { name: "L4 stream proxy", detail: undefined };
 }
 
 /**
  * Folds the raw apply signals into a single explicit outcome. Precedence:
  * discard > pending-restart-blocks-hot > stage_restart > restart-required
- * > restoration-failed > restored > timed-out > partial subsystem failure
- * > still reloading > fully live.
+ * > partial subsystem failure > still reloading > fully live.
  */
 export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
+  // Discard: the staged restart was abandoned and the previous config restored.
   if (input.isDiscard) {
     return {
       kind: "discard-success",
@@ -173,6 +234,7 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
     };
   }
 
+  // Hot apply blocked by pending staged restart.
   if (input.pendingRestartBlocksHot) {
     return {
       kind: "pending-restart-blocks-hot",
@@ -185,6 +247,25 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
     };
   }
 
+  // AC-08: a pre-persistence preflight timeout. The apply exceeded the
+  // transaction deadline before anything was written, so the previous
+  // configuration is intact and still serving. This is NOT "reload timed out":
+  // nothing was persisted, so the copy must not imply the candidate is serving.
+  if (input.preflightTimedOut) {
+    const phaseLine = input.timedOutPhase ? `Phase: ${input.timedOutPhase}. ` : "";
+    return {
+      kind: "preflight-timeout",
+      severity: "warning",
+      blocking: false,
+      title: "Configuration not changed — preflight timed out",
+      message:
+        phaseLine +
+        "Nothing was persisted. Investigate the slow component or raise global.reload_timeout.",
+      failures: [],
+    };
+  }
+
+  // stage_restart mode: configuration saved for the next restart.
   if (input.mode === "stage_restart" && input.accepted) {
     if (input.isStagedUpdate) {
       return {
@@ -208,7 +289,7 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
     };
   }
 
-  if (!input.accepted) {
+  if (!input.accepted && input.reloadOutcome !== "not_applied") {
     const msg = input.restartMessage?.trim();
     return {
       kind: "restart-required",
@@ -223,105 +304,108 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
     };
   }
 
-  // Restoration takes precedence over reload outcomes: if the candidate was
-  // rejected and rolled back, nothing is serving it.
-  if (input.restoreError && input.restoreError.length > 0) {
+  // Finding 5: saved_not_live — the candidate is on disk but the terminal
+  // live-reload/restoration outcome is unknown. This MUST take precedence over
+  // the reloadTimedOut branch below, because the backend marks a saved_not_live
+  // response as timed_out; without this guard the operator would be shown the
+  // "is now serving" copy for a transaction whose new config may never serve.
+  // The message makes the uncertainty explicit; the panel resolves the terminal
+  // state by polling the exact-ID managed-apply ledger (GET /api/config/applies/{id}).
+  if (input.savedNotLive) {
+    return {
+      kind: "saved-not-live",
+      severity: "warning",
+      blocking: false,
+      title: "Saved — final outcome pending",
+      message:
+        "The configuration was validated and saved, but the live reload did not confirm within the timeout window, so its final outcome is not yet known. It may still apply, or be rolled back to the previous configuration. This panel is not claiming the new configuration is serving; check the runtime overview for the final outcome.",
+      failures: [],
+    };
+  }
+
+  if (input.reloadOutcome === "not_applied") {
+    if (input.restoreError) {
+      return {
+        kind: "restoration-failed",
+        severity: "blocked",
+        blocking: true,
+        title: "Apply rejected — restoration failed",
+        message: `The candidate was not published and the previous configuration could not be restored safely: ${input.restoreError}`,
+        failures: [],
+      };
+    }
+    if (input.enqueueFailed) {
+      return {
+        kind: "enqueue-failed",
+        severity: "warning",
+        blocking: false,
+        title: "Reload was not enqueued",
+        message:
+          "The configuration was saved but could not be applied to the running server. The previous configuration was restored if possible. Check the server logs for the queue/submit error.",
+        failures: [],
+      };
+    }
+    if (input.restored) {
+      return {
+        kind: "rejected-restored",
+        severity: "warning",
+        blocking: false,
+        title: "Apply rejected — previous configuration restored",
+        message:
+          input.reloadError ??
+          "The candidate was not published. The previous configuration was restored and remains authoritative.",
+        failures: [],
+      };
+    }
     return {
       kind: "restoration-failed",
       severity: "blocked",
       blocking: true,
-      title: "Apply rejected and restoration failed",
-      message: `The live reload rejected the candidate and the attempt to restore the previous configuration failed: ${input.restoreError}. Check the server logs and the on-disk configuration.`,
+      title: "Apply rejected — disk state needs attention",
+      message:
+        input.reloadError ??
+        "The candidate was not published and restoration could not be confirmed. Inspect the final disk and serving versions before retrying.",
       failures: [],
     };
   }
-  if (input.restored) {
+
+  // A timed-out reload: the config was saved and the swap completed, but it
+  // exceeded the configured reload_timeout. The new config is serving. Surface
+  // this as a warning so the operator investigates slow reload paths or raises
+  // the timeout. Takes precedence over partial-reload and reload-pending.
+  // M-03: Also surface the timed-out phase.
+  if ((input.reloadTimedOut || input.timedOutPhase) && input.published) {
+    const phaseInfo = input.timedOutPhase ? ` (phase: ${input.timedOutPhase})` : "";
     return {
-      kind: "restored",
+      kind: "reload-timed-out",
       severity: "warning",
       blocking: false,
-      title: "Apply rejected - previous configuration restored",
+      title: "Applied — reload exceeded the configured timeout",
       message:
-        "The candidate was saved but the live reload rejected it. The previous configuration has been restored and is serving.",
+        "The configuration was saved and is now serving, but the reload took longer than the configured reload_timeout" +
+        phaseInfo +
+        ". Investigate slow reload paths (WAF rule compilation, WASM plugin loading) or increase reload_timeout in [global].",
       failures: [],
     };
   }
 
-  const reload = input.reload;
-  if (reload) {
-    // A timed-out reload: the config was saved and the swap completed, but it
-    // exceeded reload_timeout. The new config is serving.
-    if (reload.timed_out && reload.outcome !== "not_applied") {
-      return {
-        kind: "reload-timed-out",
-        severity: "warning",
-        blocking: false,
-        title: "Applied - reload exceeded the configured timeout",
-        message:
-          "The configuration was saved and is now serving, but the reload took longer than the configured reload_timeout. " +
-          "Investigate slow reload paths (WAF rule compilation, WASM plugin loading) or increase reload_timeout in [global].",
-        failures: [],
-      };
-    }
-
-    const failures = reloadSubsystemFailures(reload);
-    const streamFailure = streamReloadFailure(input.streamStatus);
-    if (streamFailure && !failures.some((f) => f.name === streamFailure.name)) {
-      failures.push(streamFailure);
-    }
-
-    if (reload.outcome === "applied_degraded" || failures.length > 0) {
-      return {
-        kind: "partial-reload",
-        severity: "warning",
-        blocking: false,
-        title: "Applied with a partial reload",
-        message:
-          "The configuration was saved and the HTTP runtime swapped to it, but a subsystem could not activate the new config and is still serving the previous one. Resolve the issue below, then apply again.",
-        failures,
-      };
-    }
-
-    if (reload.outcome === "saved_not_live") {
-      return {
-        kind: "reload-pending",
-        severity: "info",
-        blocking: false,
-        title: "Applied - runtime reloading",
-        message:
-          "The configuration was validated and saved. The live reload is still in flight; this panel confirms once every subsystem reports the new config is live.",
-        failures: [],
-      };
-    }
-
-    if (reload.outcome === "applied_live") {
-      return {
-        kind: "full-live",
-        severity: "success",
-        blocking: false,
-        title: "Applied and live",
-        message: "The configuration was validated, saved, and is now live across every subsystem.",
-        failures: [],
-      };
-    }
+  const failures: SubsystemFailure[] = [];
+  // M-03: Extract per-subsystem failures from the correlated reload result.
+  if (input.http?.status === "failed" || input.http?.status === "timed_out") {
+    failures.push({ name: "HTTP runtime", detail: input.http.error ?? undefined });
+  }
+  if (input.stream?.status === "failed" || input.stream?.status === "timed_out") {
+    failures.push({ name: "L4 stream proxy", detail: input.stream.error ?? undefined });
+  }
+  if (input.admin?.status === "failed" || input.admin?.status === "timed_out") {
+    failures.push({ name: "admin subsystem", detail: input.admin.error ?? undefined });
   }
 
-  // Legacy fallback for older servers that do not send the structured reload
-  // result. Use pending_reload + stream_status to approximate the outcome.
-  if (!input.runtimeObserved && input.pendingReload) {
-    return {
-      kind: "reload-pending",
-      severity: "info",
-      blocking: false,
-      title: "Applied - runtime reloading",
-      message:
-        "The configuration was validated and saved. The live runtime is swapping to it now; this panel confirms once every subsystem reports the new config is live.",
-      failures: [],
-    };
-  }
-
+  // M-03: Also include stream status from legacy polling for backward compat.
   const streamFailure = streamReloadFailure(input.streamStatus);
-  if (streamFailure) {
+  if (streamFailure) failures.push(streamFailure);
+
+  if (failures.length > 0) {
     return {
       kind: "partial-reload",
       severity: "warning",
@@ -329,8 +413,58 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
       title: "Applied with a partial reload",
       message:
         "The configuration was saved and the HTTP runtime swapped to it, but a subsystem could not activate the new config and is still serving the previous one. Resolve the issue below, then apply again.",
-      failures: [streamFailure],
+      failures,
     };
+  }
+
+  if (input.reloadOutcome === "applied_degraded") {
+    return {
+      kind: "partial-reload",
+      severity: "warning",
+      blocking: false,
+      title: "Applied with degradation",
+      message:
+        input.reloadError ??
+        "The new runtime was published, but the server reported a degraded apply. Review the reload details before continuing.",
+      failures: [],
+    };
+  }
+
+  if (!input.runtimeObserved && input.pendingReload) {
+    return {
+      kind: "reload-pending",
+      severity: "info",
+      blocking: false,
+      title: "Applied — runtime reloading",
+      message:
+        "The configuration was validated and saved. The live runtime is swapping to it now; this panel confirms once every subsystem reports the new config is live.",
+      failures: [],
+    };
+  }
+
+  // AC-11: A legacy (pre-managed) apply carries no correlated per-ID reload
+  // record. Without that proof — and unless the persisted and serving versions
+  // demonstrably match — the console must NOT claim "Applied and live". A
+  // version match is treated as correlation: the running runtime reports serving
+  // exactly the version this apply persisted, so the live claim is earned.
+  // Everything else is downgraded to a truthful "saved, runtime status
+  // uncorrelated" advisory that points the operator at the runtime overview.
+  if (input.correlated === false) {
+    const versionsMatch =
+      input.persistedVersion !== undefined &&
+      input.servingVersion !== undefined &&
+      input.persistedVersion === input.servingVersion;
+    if (!versionsMatch) {
+      return {
+        kind: "saved-uncorrelated",
+        severity: "info",
+        blocking: false,
+        title: "Saved; runtime status uncorrelated",
+        message:
+          "The configuration was validated and saved. This apply came back without a correlated per-operation result, so the console cannot confirm the running runtime switched to it. Check the runtime overview to confirm the serving version before making another change.",
+        failures: [],
+      };
+    }
   }
 
   return {

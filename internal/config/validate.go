@@ -174,7 +174,7 @@ func Validate(c *Config) error {
 		if c.Admin.PluginUploadMaxSize < 0 {
 			errs = append(errs, errors.New("[admin] 'plugin_upload_max_size' must not be negative"))
 		}
-		errs = append(errs, validateRBAC(c.Admin.RBAC)...)
+		errs = append(errs, validateRBAC(c.Admin.RBAC, c.Admin.Token)...)
 	}
 
 	errs = append(errs, validateCompression(c.Compression)...)

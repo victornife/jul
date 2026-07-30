@@ -18,6 +18,43 @@ import (
 	"jul/internal/server"
 )
 
+// Preflight phase names attributed to a reload_timeout breach (AC-08). They are
+// reported through the context phase observer as each gate is entered so the
+// coordinator can surface a phase-specific 504 (timed_out_phase) when the
+// bounded pre-persistence work is aborted by the deadline.
+const (
+	PreflightPhaseResolve          = "resolve"
+	PreflightPhaseAuthorizeAdmin   = "authorize_admin"
+	PreflightPhaseValidate         = "preflight_validate"
+	PreflightPhaseTLS              = "preflight_tls"
+	PreflightPhaseHandlers         = "preflight_handlers"
+	PreflightPhaseStream           = "preflight_stream"
+	PreflightPhaseListeners        = "preflight_listeners"
+	PreflightPhaseStartupResources = "preflight_startup_resources"
+)
+
+// phaseObserverKey is the context key for the pre-persistence phase observer.
+type phaseObserverKey struct{}
+
+// withPhaseObserver returns a context that reports each preflight phase entry to
+// fn. The observer is consumed only by the coordinator's timeout attribution and
+// is a no-op when absent, so a caller that passes context.Background() sees the
+// original unbounded, uninstrumented behaviour.
+func withPhaseObserver(ctx context.Context, fn func(string)) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, phaseObserverKey{}, fn)
+}
+
+// reportPhase notifies the context phase observer, if any, that execution has
+// entered phase. It never blocks meaningfully and is safe with a nil observer.
+func reportPhase(ctx context.Context, phase string) {
+	if fn, ok := ctx.Value(phaseObserverKey{}).(func(string)); ok && fn != nil {
+		fn(phase)
+	}
+}
+
 // PreflightMode selects which validation gates run in Preflight.Apply.
 type PreflightMode int
 
@@ -41,6 +78,8 @@ type PreflightResult struct {
 	// non-nil and mode is PreflightStageRestart; it is used by the coordinator
 	// to build the pending-restart marker without re-running the diff.
 	Lifecycle lifecycle.ChangeSet
+	// PreparedAdmin is the exact immutable auth artifact to install at Publish.
+	PreparedAdmin *server.PreparedCommit
 }
 
 // StreamPreflighter abstracts the stream (L4) server's preflight methods so
@@ -72,10 +111,15 @@ type Preflight struct {
 	// config, bound listener fingerprints, and generation. When nil, preflight
 	// falls back to the on-disk prev baseline (legacy behaviour).
 	LiveSnapshot func() server.LiveSnapshot
+	// PrepareAdmin builds the candidate's immutable effective auth state. In
+	// production it is shared with source-driven reload preparation.
+	PrepareAdmin func(config.AdminConfig) (*server.PreparedCommit, error)
 }
 
 // Apply runs the admin write preflight gates and returns a PreflightResult on
-// success. ctx is reserved for future use and may be context.Background().
+// success. ctx bounds the preflight work (candidate resolution, handler,
+// plugin, stream and listener probing) and is propagated to applyCandidate; a
+// caller that wants an unbounded preflight may pass context.Background().
 //
 // Shared gates (both modes):
 //
@@ -99,19 +143,48 @@ type Preflight struct {
 //
 // Any error aborts the write; the caller must not persist the config.
 func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Config, mode PreflightMode) (*PreflightResult, error) {
-	candidate, err := config.NewCandidate(c)
+	// Build the candidate under ctx so secret resolution and the candidate
+	// build are bounded by the same deadline as the rest of preflight; a
+	// stalled ${file:...} provider cannot hang the managed apply past
+	// reload_timeout (AC-08).
+	reportPhase(ctx, PreflightPhaseResolve)
+	candidate, err := config.NewCandidateContext(ctx, c)
 	if err != nil {
 		return nil, err
 	}
+	return p.applyCandidate(ctx, candidate, prev, mode)
+}
+
+// ApplyCandidate runs preflight on an already-resolved immutable candidate so
+// handler authorization and runtime publication consume the same secret values.
+func (p *Preflight) ApplyCandidate(ctx context.Context, candidate *config.Candidate, prev *config.Config, mode PreflightMode) (*PreflightResult, error) {
+	if candidate == nil || candidate.Raw == nil || candidate.Effective == nil {
+		return nil, fmt.Errorf("preflight candidate is incomplete")
+	}
+	return p.applyCandidate(ctx, candidate, prev, mode)
+}
+
+func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candidate, prev *config.Config, mode PreflightMode) (_ *PreflightResult, retErr error) {
+	reportPhase(ctx, PreflightPhaseValidate)
 	if err := ValidateRuntimeConfig(ctx, candidate.Effective); err != nil {
 		return nil, err
 	}
-	// RBAC policy build is part of the reload contract (F-09): validate it
-	// now, after secrets expansion, so token/role/permission errors that only
-	// surface during policy construction are caught before persistence.
-	if err := validateAdminRBACPolicy(candidate.Effective.Admin); err != nil {
+	reportPhase(ctx, PreflightPhaseAuthorizeAdmin)
+	var preparedAdmin *server.PreparedCommit
+	if p.PrepareAdmin != nil {
+		preparedAdmin, retErr = p.PrepareAdmin(candidate.Effective.Admin)
+		if retErr != nil {
+			return nil, retErr
+		}
+	} else if err := validateAdminRBACPolicy(candidate.Effective.Admin); err != nil {
 		return nil, err
 	}
+	defer func() {
+		if retErr != nil {
+			preparedAdmin.Abort()
+		}
+	}()
+	reportPhase(ctx, PreflightPhaseTLS)
 	if err := server.PreflightTLS(candidate.Effective.Servers); err != nil {
 		return nil, err
 	}
@@ -134,6 +207,7 @@ func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Co
 	// addresses are checked for frozen-setting changes in the hot path only;
 	// the stage-restart path classifies those changes rather than rejecting
 	// them.
+	reportPhase(ctx, PreflightPhaseListeners)
 	if err := server.PreflightListeners(httpBound, http3Bound, candidate.Effective.Servers); err != nil {
 		return nil, err
 	}
@@ -141,32 +215,18 @@ func (p *Preflight) Apply(ctx context.Context, c *config.Config, prev *config.Co
 		return nil, err
 	}
 
-	result := &PreflightResult{Candidate: candidate}
+	result := &PreflightResult{Candidate: candidate, PreparedAdmin: preparedAdmin}
 
 	if mode == PreflightStageRestart {
 		// Classify lifecycle changes; do not reject them.
 		if prev != nil {
 			result.Lifecycle = lifecycle.DiffConfig(prev, candidate.Effective)
-			// Attach the lifecycle diff to the candidate so the stage_restart
-			// path can use the same resolved candidate for the marker without
-			// re-resolving (M-02). Candidate.Lifecycle is the mirror type in
-			// config to avoid an import cycle between config and lifecycle.
-			candidate.Lifecycle = make(config.LifecycleChangeSet, len(result.Lifecycle))
-			for i, e := range result.Lifecycle {
-				candidate.Lifecycle[i] = config.LifecycleDiffEntry{
-					Path:      e.Path,
-					Class:     e.Class.String(),
-					Subsystem: e.Subsystem,
-					Reason:    e.Reason,
-					Before:    e.Before,
-					After:     e.After,
-				}
-			}
 		}
 		// Validate that startup-consumed resources can be applied at the next
 		// restart. These checks are side-effect-minimized: they create and
 		// immediately remove a temp file to prove writability, then close all
 		// handles.
+		reportPhase(ctx, PreflightPhaseStartupResources)
 		if err := startupResourcePreflight(candidate.Effective); err != nil {
 			return nil, err
 		}
@@ -312,8 +372,10 @@ func (p *Preflight) dryRun(ctx context.Context, c *config.Config) (err error) {
 			err = fmt.Errorf("configuration rejected: building it panicked: %v", r)
 		}
 	}()
+	reportPhase(ctx, PreflightPhaseHandlers)
 	if _, _, err = p.BuildHandlers(ctx, c, false); err != nil {
 		return err
 	}
+	reportPhase(ctx, PreflightPhaseStream)
 	return p.Stream.PreflightBuild(ctx, c.Streams, IndexUpstreams(c.Upstreams))
 }

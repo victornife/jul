@@ -65,40 +65,85 @@ func (s *Server) handleHistoryGet(w http.ResponseWriter, r *http.Request) {
 // The admin-subtree guard is enforced inside the lock after loading the
 // snapshot and the current config, so a concurrent admin change cannot
 // invalidate the authorization decision (N-02).
-func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Request) (int, error) {
+func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Request) (ConfigApplyResult, int, error) {
 	raw, err := s.hist.get(id)
 	if err != nil {
-		return http.StatusNotFound, err
+		return ConfigApplyResult{}, http.StatusNotFound, err
 	}
 	next, err := config.Parse(raw)
 	if err != nil {
-		return http.StatusBadRequest, fmt.Errorf("rollback snapshot is not valid configuration: %w", err)
+		return ConfigApplyResult{}, http.StatusBadRequest, fmt.Errorf("rollback snapshot is not valid configuration: %w", err)
 	}
 
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	// Object-level guard: rolling back to a snapshot that changes [admin]
-	// requires admin:manage. This runs inside the lock so the current config
-	// cannot change between the authorization check and the write (N-02).
-	if !s.authorizeConfigCandidate(w, r, "config.rollback", next) {
-		return http.StatusForbidden, errors.New("rollback not authorized")
+	state, err := s.currentWriteState(true)
+	if err != nil {
+		return ConfigApplyResult{}, http.StatusServiceUnavailable, fmt.Errorf("cannot get current config state: %w", err)
+	}
+	reqCtx := applyRequestContext(r, ApplyOperationRollback)
+	s.bindManagedApplyDeadline(&reqCtx)
+	reqCtx.Baseline = &state
+	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
+	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+	defer cancel()
+	effectiveNext, err := prepareMutationCandidateContext(opCtx, &reqCtx, next)
+	if err != nil {
+		return ConfigApplyResult{}, http.StatusBadRequest, err
 	}
 
-	prev := s.currentRaw()
+	// Authorize against the same exact raw-first baseline passed to the
+	// coordinator, not a separate LoadConfig call.
+	if authErr := s.requireAdminManageAgainst(r, "config.rollback", currentEffective, effectiveNext.Effective); authErr != nil {
+		authID, ok := authErr.(*AuthorizationError)
+		if ok {
+			return ConfigApplyResult{}, authID.Status, authErr
+		}
+		return ConfigApplyResult{}, http.StatusForbidden, authErr
+	}
+	prev := state.Raw
+
+	// Self-lockout guard (finding 9): rolling back to an older snapshot can move
+	// the admin listener, change credentials, flip the RBAC/legacy mode, or
+	// disable the console — the same reachability-affecting changes the forward
+	// apply endpoints confirm. admin:manage authorizes the *permission* but does
+	// not confirm the operator accepts losing their own session, so require the
+	// explicit confirmation unless confirm_admin=true.
+	if r.URL.Query().Get("confirm_admin") != "true" {
+		id, _ := rbacIdentityFromRequest(r)
+		if changes := s.reachabilityChanges(currentEffective, effectiveNext.Effective, id); len(changes) > 0 {
+			return ConfigApplyResult{}, http.StatusConflict, &adminReachabilityError{changes: changes}
+		}
+	}
+
+	if s.deps.ApplyConfigRaw != nil {
+		result, applyErr := s.deps.ApplyConfigRaw(reqCtx, raw, "hot")
+		if applyErr != nil {
+			return result, configApplyErrorStatus(result, applyErr), applyErr
+		}
+		status := configApplyResultStatus(result)
+		// AC-05: skip eager handler-side history when the managed coordinator
+		// records it at terminalization (see handleConfigRaw for rationale).
+		if result.OK && isTerminalApplyResult(result) && !s.deps.ManagedHistoryActive {
+			s.recordHistory(prev)
+		}
+		return result, status, nil
+	}
+
 	if err := s.deps.WriteConfigRaw(raw); err != nil {
 		// Map coordinator rejections to the correct HTTP status so the handler
 		// does not report a false success.
 		if errors.Is(err, ErrRestartRequired) {
-			return http.StatusConflict, err
+			return ConfigApplyResult{}, http.StatusConflict, err
 		}
 		if strings.Contains(err.Error(), "staged restart is pending") {
-			return http.StatusConflict, err
+			return ConfigApplyResult{}, http.StatusConflict, err
 		}
-		return http.StatusBadRequest, err
+		return ConfigApplyResult{}, http.StatusBadRequest, err
 	}
 	s.recordHistory(prev)
-	return http.StatusOK, nil
+	return ConfigApplyResult{OK: true, Mode: "hot", Message: "Configuration rolled back."}, http.StatusOK, nil
 }
 
 // handleHistoryRollback re-applies a stored snapshot through the validated raw
@@ -109,7 +154,7 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if s.deps.WriteConfigRaw == nil {
+	if s.deps.ApplyConfigRaw == nil && s.deps.WriteConfigRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -120,12 +165,33 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	code, err := s.rollbackToSnapshot(req.ID, w, r)
+	result, code, err := s.rollbackToSnapshot(req.ID, w, r)
 	if err != nil {
+		if re, ok := err.(*adminReachabilityError); ok {
+			writeJSON(w, code, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This rollback affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     re.changes,
+			})
+			return
+		}
+		if isStructuredApplyError(result) {
+			writeJSON(w, code, result)
+			return
+		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled back", "id": req.ID})
+	if !result.OK {
+		writeJSON(w, code, result)
+		return
+	}
+	if code == http.StatusAccepted {
+		writeJSON(w, code, result)
+		return
+	}
+	writeJSON(w, http.StatusOK, ConfigMutationResponse{Status: "rolled back", ID: req.ID, ConfigApplyResult: result})
 }
 
 // currentRaw reads the running raw configuration, or nil when unavailable. It is
@@ -199,7 +265,7 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if s.deps.WriteConfigRaw == nil {
+	if s.deps.ApplyConfigRaw == nil && s.deps.WriteConfigRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -210,16 +276,48 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	code, err := s.rollbackToSnapshot(req.ID, w, r)
+	result, code, err := s.rollbackToSnapshot(req.ID, w, r)
 	if err != nil {
-		if code == http.StatusBadRequest {
-			s.recordAudit(r, "config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID)
+		if authErr, ok := err.(*AuthorizationError); ok {
+			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})
+			return
 		}
+		if re, ok := err.(*adminReachabilityError); ok {
+			s.recordAudit(r, "config.rollback", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			writeJSON(w, code, adminGuardResponse{
+				OK:          false,
+				AdminChange: true,
+				Message:     "This rollback affects how you reach the admin console; re-apply with confirmation to proceed.",
+				Changes:     re.changes,
+			})
+			return
+		}
+		if isStructuredApplyError(result) {
+			s.recordAudit(r, "config.rollback", "config", "failure", "rollback coordinator failed for snapshot "+req.ID)
+			writeJSON(w, code, result)
+			return
+		}
+		s.recordAudit(r, "config.rollback", "config", "failure", "rollback rejected for snapshot "+req.ID)
 		writeJSON(w, code, map[string]string{"error": err.Error()})
+		return
+	}
+	if !result.OK {
+		if result.TimedOutPhase != "" {
+			// AC-08 / defect 9: a preflight timeout before persistence records a
+			// dedicated failure audit naming the timed-out phase; the 504 result is
+			// written below. Nothing was rolled back to disk.
+			s.recordTimeoutAudit(r, ApplyOperationRollback, result)
+		}
+		writeJSON(w, code, result)
+		return
+	}
+	if code == http.StatusAccepted {
+		s.recordAudit(r, "config.rollback.accepted", "config", "success", "rollback saved; live outcome pending for snapshot "+req.ID)
+		writeJSON(w, code, result)
 		return
 	}
 	s.recordAudit(r, "config.rollback", "config", "success", "rolled back to snapshot "+req.ID)
 
 	s.emit("config", "rollback", "warning", "Configuration rolled back to a previous snapshot.")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled back", "id": req.ID})
+	writeJSON(w, http.StatusOK, ConfigMutationResponse{Status: "rolled back", ID: req.ID, ConfigApplyResult: result})
 }

@@ -75,7 +75,7 @@ var Registry = []Entry{
 	// Admin settings.
 	{Path: "admin.enabled", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin listener is created at startup", StartupConsumed: true},
 	{Path: "admin.listen", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin listener address is chosen at startup", StartupConsumed: true},
-	{Path: "admin.token", Class: HotReloadClass, Subsystem: "admin", Reason: "admin token is updated live via UpdateLiveAdminConfig after each successful hot reload"},
+	{Path: "admin.token", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin token is consumed at startup and its digest is part of the startup fingerprint", StartupConsumed: true},
 	{Path: "admin.console", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin console flag is read at startup", StartupConsumed: true},
 	{Path: "admin.history_dir", Class: RestartRequiredClass, Subsystem: "admin", Reason: "config history directory is opened at startup", StartupConsumed: true},
 	{Path: "admin.history_keep", Class: RestartRequiredClass, Subsystem: "admin", Reason: "config history retention is configured at startup", StartupConsumed: true},

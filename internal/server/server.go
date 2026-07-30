@@ -67,6 +67,16 @@ type ReloadRequest struct {
 	ID        string
 	Source    ReloadSource
 	Candidate *config.Candidate
+	// PreparedAdmin is the immutable admin-auth artifact built from Candidate
+	// before persistence. Managed reloads install this exact artifact at Publish.
+	PreparedAdmin *PreparedCommit
+	// ExpectedGeneration is the live generation against which effective auth
+	// authorization was performed.
+	ExpectedGeneration uint64
+	// AuthGeneration is the effective auth generation observed during handler
+	// authorization. ValidateAuthGeneration rechecks it before Publish.
+	AuthGeneration         string
+	ValidateAuthGeneration func(string) bool
 	// RawDigest, when non-empty, is the SHA-256 of the raw configuration bytes
 	// that Candidate represents. It lets the server reject a stale candidate
 	// if the on-disk file has changed since the candidate was injected.
@@ -77,9 +87,49 @@ type ReloadRequest struct {
 	// Result receives the structured outcome of this reload. When non-nil the
 	// server sends the result once, non-blockingly, after the reload finishes.
 	Result chan<- ReloadResult
+	// Finalized is closed by a managed coordinator after it has consumed Result
+	// and completed any required disk restoration. The server waits for it before
+	// processing another reload so a rejected candidate cannot be reloaded from
+	// disk during the restoration window.
+	Finalized <-chan struct{}
 	// AdminErr, when set by the caller, is reported as a failed admin
 	// subsystem in the reload result. The app layer uses this to surface RBAC
 	// policy update failures independently of stream-proxy reload status.
+}
+
+// PreparedCommit is a no-fail commit artifact built before Publish. Commit
+// installs immutable prepared state; Abort releases it when preparation fails.
+type PreparedCommit struct {
+	commitFn func()
+	abortFn  func()
+	once     sync.Once
+}
+
+// NewPreparedCommit creates an exactly-once prepared artifact.
+func NewPreparedCommit(commit, abort func()) *PreparedCommit {
+	return &PreparedCommit{commitFn: commit, abortFn: abort}
+}
+
+// Commit installs the prepared artifact exactly once.
+func (p *PreparedCommit) Commit() {
+	if p != nil {
+		p.once.Do(func() {
+			if p.commitFn != nil {
+				p.commitFn()
+			}
+		})
+	}
+}
+
+// Abort releases the prepared artifact exactly once without installing it.
+func (p *PreparedCommit) Abort() {
+	if p != nil {
+		p.once.Do(func() {
+			if p.abortFn != nil {
+				p.abortFn()
+			}
+		})
+	}
 }
 
 // HandlerFactory prepares a new handler generation for cfg without committing
@@ -140,6 +190,10 @@ type Server struct {
 	// ReloadResult.Admin and ReloadResult.Stream so RBAC policy failures do
 	// not mask stream-proxy status.
 	OnReloaded func(*config.Config) (adminErr, streamErr error)
+	// PrepareAdmin builds immutable admin-auth state before Publish. Managed
+	// reloads supply their already-prepared artifact on ReloadRequest; other
+	// reload sources invoke this hook during ReloadPlan.Prepare.
+	PrepareAdmin func(config.AdminConfig) (*PreparedCommit, error)
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.
@@ -366,21 +420,7 @@ func (s *Server) LiveSnapshot() LiveSnapshot {
 			Generation:      rs.Generation,
 		}
 	}
-	// Fallback for callers before the first publish (should not happen in
-	// production because Run publishes the initial generation before serving).
-	s.mu.Lock()
-	listeners := copyListenerMapFromEntries(s.listeners)
-	s.mu.Unlock()
-	var gen uint64
-	if g := s.handlers.Load(); g != nil {
-		gen = g.genID
-	}
-	return LiveSnapshot{
-		EffectiveConfig: s.cfg,
-		RawConfig:       s.rawCfg,
-		Listeners:       listeners,
-		Generation:      gen,
-	}
+	return LiveSnapshot{Listeners: map[string]BoundListenerInfo{}}
 }
 
 // publishRuntimeStateDirect atomically publishes a runtimeState from the
@@ -428,7 +468,7 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 			startupFP = lifecycle.ComputeFingerprint(expanded)
 		}
 	}
-	return &Server{
+	s := &Server{
 		log:        log,
 		source:     source,
 		validate:   validate,
@@ -440,6 +480,8 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 		redactGens: make(map[uint64]redact.State),
 		serveErr:   make(chan error, 8),
 	}
+	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg, RawConfig: rawStartupCfg, Listeners: map[string]BoundListenerInfo{}})
+	return s
 }
 
 // Run binds all listeners, serves until ctx is cancelled, reloading on each
@@ -497,7 +539,11 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 			s.shutdownAll(context.Background())
 			s.wg.Wait()
 			return err
-		case req := <-reload:
+		case req, ok := <-reload:
+			if !ok {
+				s.log.Info("reload input closed, draining connections")
+				return s.drain()
+			}
 			s.doReload(req)
 		}
 	}
@@ -910,6 +956,12 @@ func (s *Server) redactUnionLocked() redact.State {
 // 10. PostCommit — log level, GOMAXPROCS, stream reload.
 // On any failure before Publish, plan.Abort() releases candidate resources.
 func (s *Server) doReload(req ReloadRequest) {
+	preparedOwned := req.PreparedAdmin != nil
+	defer func() {
+		if preparedOwned {
+			req.PreparedAdmin.Abort()
+		}
+	}()
 	result := ReloadResult{
 		ID:        req.ID,
 		Source:    req.Source,
@@ -921,7 +973,12 @@ func (s *Server) doReload(req ReloadRequest) {
 	if s.OnReloadStart != nil {
 		s.OnReloadStart()
 	}
-	defer s.sendReloadResult(req.Result, &result)
+	defer func() {
+		s.sendReloadResult(req.Result, &result)
+		if req.Finalized != nil {
+			<-req.Finalized
+		}
+	}()
 
 	if s.source == nil {
 		result.Outcome = ReloadNotApplied
@@ -948,13 +1005,37 @@ func (s *Server) doReload(req ReloadRequest) {
 
 	var plan *ReloadPlan
 	if req.Candidate != nil {
+		if req.AuthGeneration != "" && req.ValidateAuthGeneration != nil && !req.ValidateAuthGeneration(req.AuthGeneration) {
+			result.Outcome = ReloadNotApplied
+			result.FailedPhase = "auth_cas"
+			result.DesiredVersion = CanonicalVersion(req.Candidate.Effective)
+			result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+			result.Error = "admin authentication changed since the managed candidate was authorized"
+			return
+		}
+		if req.ExpectedGeneration != 0 && s.LiveSnapshot().Generation != req.ExpectedGeneration {
+			result.Outcome = ReloadNotApplied
+			result.FailedPhase = "runtime_cas"
+			result.DesiredVersion = CanonicalVersion(req.Candidate.Effective)
+			result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+			result.Error = "live runtime changed since the managed candidate was authorized"
+			return
+		}
 		// Admin apply path: use the exact candidate that passed preflight.
-		// If the on-disk file has diverged from the candidate's raw digest,
-		// fall back to source load so a stale candidate cannot publish.
+		// If the on-disk file has diverged from the candidate's raw digest, reject
+		// this correlated transaction. Loading and publishing a different source
+		// config under the same request ID would make its result untruthful.
 		if s.candidateStillValid(req) {
-			plan = s.newReloadPlan(reloadCtx, req.Candidate.Raw, req.Candidate)
+			plan = s.newReloadPlan(reloadCtx, req.Candidate.Raw, req.Candidate, req.PreparedAdmin)
+			preparedOwned = false
 		} else {
-			s.log.Warn("reload: injected candidate no longer matches persisted file; falling back to source load", "source", s.source.Name(), "reload_id", req.ID)
+			result.Outcome = ReloadNotApplied
+			result.FailedPhase = "persisted_cas"
+			result.DesiredVersion = CanonicalVersion(req.Candidate.Effective)
+			result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+			result.Error = "persisted configuration no longer matches the managed candidate"
+			s.log.Warn("reload: managed candidate no longer matches persisted file; rejecting correlated transaction", "source", s.source.Name(), "reload_id", req.ID)
+			return
 		}
 	}
 	if plan == nil {
@@ -966,7 +1047,7 @@ func (s *Server) doReload(req ReloadRequest) {
 			result.Error = "load: " + err.Error()
 			return
 		}
-		plan = s.newReloadPlan(reloadCtx, newCfg, nil)
+		plan = s.newReloadPlan(reloadCtx, newCfg, nil, nil)
 	}
 	result.StartedAt = plan.start
 
@@ -987,7 +1068,7 @@ func (s *Server) doReload(req ReloadRequest) {
 			result.DurationMS = time.Since(plan.start).Milliseconds()
 			result.Outcome = ReloadNotApplied
 			result.FailedPhase = phase.name
-			if reloadCtx.Err() != nil {
+			if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {
 				result.TimedOut = true
 				result.TimedOutPhase = phase.name
 			}
@@ -997,6 +1078,40 @@ func (s *Server) doReload(req ReloadRequest) {
 		}
 	}
 	result.DesiredVersion = CanonicalVersion(plan.Candidate.Effective)
+	// Preparation may be expensive. Recheck the exact persisted bytes at the
+	// Publish boundary so an external edit during preparation cannot cause this
+	// correlated admin transaction to publish a stale candidate.
+	if req.Candidate != nil && !s.candidateStillValid(req) {
+		plan.Abort()
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNotApplied
+		result.FailedPhase = "persisted_cas"
+		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.Error = "persisted configuration changed while the managed candidate was preparing"
+		s.log.Warn("reload: managed candidate changed during preparation; aborting before publish", "source", s.source.Name(), "reload_id", req.ID)
+		return
+	}
+	if req.Candidate != nil && req.ExpectedGeneration != 0 && s.LiveSnapshot().Generation != req.ExpectedGeneration {
+		plan.Abort()
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNotApplied
+		result.FailedPhase = "runtime_cas"
+		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.Error = "live runtime changed while the managed candidate was preparing"
+		return
+	}
+	if req.Candidate != nil && req.AuthGeneration != "" && req.ValidateAuthGeneration != nil && !req.ValidateAuthGeneration(req.AuthGeneration) {
+		plan.Abort()
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNotApplied
+		result.FailedPhase = "auth_cas"
+		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.Error = "admin authentication changed while the managed candidate was preparing"
+		return
+	}
 
 	// Phase 6: publish — this is the point of no return.
 	if _, err := plan.Publish(); err != nil {
@@ -1005,7 +1120,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNotApplied
 		result.FailedPhase = "publish"
-		if reloadCtx.Err() != nil {
+		if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {
 			result.TimedOut = true
 			result.TimedOutPhase = "publish"
 		}
@@ -1101,7 +1216,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		s.log.Info("configuration reloaded", "duration_ms", result.DurationMS, "reload_id", req.ID)
 	}
 
-	if reloadCtx.Err() != nil {
+	if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
 		result.TimedOutPhase = "post_commit"
 		// A timeout after Publish cannot roll back safely; report the reload
