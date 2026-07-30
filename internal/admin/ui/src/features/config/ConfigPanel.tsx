@@ -13,6 +13,7 @@ import {
   discardPendingRestart,
   fetchOverview,
   fetchPendingRestart,
+  fetchPatchCandidate,
   fetchRawConfig,
   validateConfig,
   ApiError,
@@ -345,8 +346,9 @@ export function ConfigPanel() {
         } else {
           setPatchDraft(handoff);
           setBaseline(raw);
-          // Seed the editor with the candidate so the operator can review the
-          // full context while knowing the apply will be atomic.
+          // Seed with the persisted baseline until the server candidate is
+          // fetched (see the config-patch-candidate query below); the editor
+          // then flips to the read-only proposed candidate.
           setDraft(handoff.candidate ?? raw);
         }
       } else {
@@ -392,6 +394,42 @@ export function ConfigPanel() {
     () => patchDraft?.previewDiff ?? rawDiff.data,
     [patchDraft, rawDiff.data],
   );
+
+  // N-01 (WS05): when a config:raw operator is reviewing a structured patch,
+  // fetch the true server-computed candidate TOML so the source view can show
+  // the PROPOSED configuration instead of the current persisted bytes. The
+  // endpoint is config:raw-gated and pins base_version, so a concurrent change
+  // surfaces as a stale preview (409) rather than being silently clobbered.
+  const patchCandidateQuery = useQuery({
+    queryKey: ["config-patch-candidate", patchDraft?.baseVersion, patchDraft?.ops ?? []],
+    queryFn: () => fetchPatchCandidate(patchDraft?.ops ?? [], patchDraft?.baseVersion),
+    enabled: isPatchMode && !rawForbidden && patchDraft.candidate === undefined,
+    retry: false,
+    staleTime: Infinity,
+  });
+  const candidateError = patchCandidateQuery.error;
+  // A 409 means the persisted config moved since the preview was prepared; a
+  // 403 means this principal cannot read raw config, so the candidate stays
+  // hidden and the change is presented as a diff only.
+  const candidateStale = candidateError instanceof ConfigConflictError;
+  const candidateForbidden = candidateError instanceof ApiError && candidateError.status === 403;
+  const candidateFailed = patchCandidateQuery.isError && !candidateStale && !candidateForbidden;
+  // For a config:raw operator the candidate is unresolved (loading, stale, or
+  // failed) until it either loads or degrades to diff-only; apply is blocked
+  // until then so an operator never applies against an unverified preview.
+  const candidatePending =
+    isPatchMode && !rawForbidden && !candidateForbidden && patchDraft.candidate === undefined;
+
+  // Once the protected candidate arrives, pin it into the draft so the
+  // read-only editor shows the proposed configuration and the source view
+  // flips from "persisted-baseline" to "candidate-readonly".
+  useEffect(() => {
+    const candidate = patchCandidateQuery.data?.candidate;
+    if (candidate === undefined) return;
+    if (patchDraft === null || patchDraft.candidate !== undefined) return;
+    setPatchDraft({ ...patchDraft, candidate });
+    setDraft(candidate);
+  }, [patchCandidateQuery.data, patchDraft, setPatchDraft]);
 
   const applyRaw = useMutation({
     mutationFn: ({ confirmAdmin }: { confirmAdmin: boolean; operationID: number }) =>
@@ -815,40 +853,52 @@ export function ConfigPanel() {
     ? { active: applied.status.filter((s) => s.active).length, total: applied.status.length }
     : undefined;
 
-  // AC-12: label the editor's source truthfully so an operator is never misled
-  // about what they are looking at. There are three distinct sources:
-  //   - live:       the config currently loaded by the server, shown editable
-  //                 in raw mode (config:raw operators authoring a raw change);
-  //   - candidate:  a server-computed PROPOSED candidate (structured patch), shown
-  //                 read-only — it is NOT live and is only applied on confirm;
-  //   - diff-only:  a structured change reviewed by an operator WITHOUT config:raw,
-  //                 who never sees the candidate text, only the diff/summary.
-  // The candidate is computed by the patch-preview endpoint against a pinned
-  // base_version, which is echoed back on apply so a concurrent change is
-  // rejected rather than silently clobbered.
+  // AC-12 / N-01 (WS05): label the editor's source truthfully so an operator is
+  // never misled about what they are looking at. There are four distinct states:
+  //   - persisted-editable: the bytes stored on disk, shown editable in raw mode
+  //                 (config:raw operators authoring a raw change). The runtime
+  //                 may differ from disk, so this is never called "live".
+  //   - candidate-readonly: a server-computed PROPOSED candidate (structured
+  //                 patch), shown read-only — it is NOT applied until confirm.
+  //   - persisted-baseline: patch mode where the candidate is not yet available
+  //                 (still loading, stale, or errored); the editor shows the
+  //                 current persisted bytes and the structured diff is the change.
+  //   - diff-only:  a structured change reviewed WITHOUT config:raw, so the
+  //                 candidate text is hidden and only the diff/summary is shown.
+  // The candidate is computed server-side against a pinned base_version, which is
+  // echoed back on apply so a concurrent change is rejected, not silently
+  // clobbered.
   const sourceView: {
-    readonly tone: "live" | "candidate" | "diff-only";
+    readonly tone: "persisted-editable" | "candidate-readonly" | "persisted-baseline" | "diff-only";
     readonly label: string;
     readonly detail: string;
-  } = isPatchMode
-    ? rawForbidden && !patchDraft.candidate
+  } = !isPatchMode
+    ? {
+        tone: "persisted-editable",
+        label: "Persisted configuration — editable",
+        detail:
+          "These are the bytes currently stored in the configuration file. The runtime may differ while a staged restart or external divergence exists.",
+      }
+    : rawForbidden || candidateForbidden
       ? {
           tone: "diff-only",
           label: "Proposed change — diff only",
           detail:
-            "You are reviewing a structured change as a diff. The full candidate configuration is not shown because you do not have config:raw.",
+            "The full candidate is hidden because this principal lacks config:raw. The structured diff is the proposed change.",
         }
-      : {
-          tone: "candidate",
-          label: "Proposed candidate — read-only",
-          detail:
-            "This is a proposed configuration, not the running one. It is read-only and only takes effect when you apply it.",
-        }
-    : {
-        tone: "live",
-        label: "Live configuration — editable",
-        detail: "You are editing the configuration the server is currently running.",
-      };
+      : patchDraft.candidate !== undefined
+        ? {
+            tone: "candidate-readonly",
+            label: "Proposed candidate — read-only",
+            detail:
+              "This candidate was generated server-side from the reviewed patch and pinned base version. It is not applied until confirmation.",
+          }
+        : {
+            tone: "persisted-baseline",
+            label: "Current persisted baseline",
+            detail:
+              "The structured diff is the proposed change. Candidate TOML is not currently available.",
+          };
 
   if (isLoading) return <Loading label="Loading configuration…" />;
   if ((isError || !data) && !(rawForbidden && isPatchMode))
@@ -960,6 +1010,7 @@ export function ConfigPanel() {
               applyStage.isPending ||
               patchReconciling ||
               patchReconcileError !== null ||
+              candidatePending ||
               (restartBlocked && !hasPendingRestart) ||
               (rawForbidden && !isPatchMode)
             }
@@ -981,18 +1032,18 @@ export function ConfigPanel() {
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
         <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-jul-border bg-jul-surface">
-          {/* AC-12: truthful source-of-truth label — live vs proposed candidate vs diff-only. */}
+          {/* AC-12: truthful source-of-truth label — persisted-editable vs proposed candidate vs persisted baseline vs diff-only. */}
           <div
             data-source-view={sourceView.tone}
             className={`flex flex-shrink-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b px-3 py-1.5 text-xs ${
-              sourceView.tone === "live"
+              sourceView.tone === "persisted-editable"
                 ? "border-jul-border bg-jul-bg/40"
                 : "border-jul-accent/30 bg-jul-accent/5"
             }`}
           >
             <span
               className={`font-semibold ${
-                sourceView.tone === "live" ? "text-jul-text" : "text-jul-accent"
+                sourceView.tone === "persisted-editable" ? "text-jul-text" : "text-jul-accent"
               }`}
             >
               {sourceView.label}
@@ -1041,6 +1092,28 @@ export function ConfigPanel() {
               outcome={outcome}
               {...(appliedCapabilities ? { capabilities: appliedCapabilities } : {})}
             />
+          )}
+          {/* N-01 (WS05): the pinned base_version moved before the candidate
+              could be computed. This is not a success — apply is disabled and the
+              operator must regenerate the preview from the originating editor. */}
+          {isPatchMode && candidateStale && (
+            <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-sm">
+              <p className="font-medium text-jul-warning">Preview is stale</p>
+              <p className="mt-1 text-xs text-jul-muted">
+                The persisted configuration changed since this patch was prepared, so the proposed
+                candidate could not be generated. Return to the originating editor and regenerate the
+                preview before applying.
+              </p>
+            </div>
+          )}
+          {isPatchMode && candidateFailed && (
+            <div className="rounded-md border border-jul-danger/40 bg-jul-danger/5 p-3 text-sm">
+              <p className="font-medium text-jul-danger">Candidate unavailable</p>
+              <p className="mt-1 text-xs text-jul-muted">
+                The proposed candidate configuration could not be loaded. The structured diff below is
+                the proposed change; regenerate the preview from the originating editor to retry.
+              </p>
+            </div>
           )}
           {/* AC-08: deadline-aware finalization hint while a saved-not-live apply
               is still resolving. This is neutral status, not a success claim. */}

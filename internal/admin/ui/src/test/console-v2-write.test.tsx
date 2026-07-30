@@ -188,11 +188,13 @@ describe("ConfigPanel apply flow", () => {
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
     expect(editor.value).toContain('listen = ":8443"');
     // AC-12: a config:raw operator editing raw TOML is told, truthfully, that the
-    // editor holds the LIVE editable configuration — not a proposed candidate.
-    const liveLabel = document.querySelector('[data-source-view="live"]');
-    expect(liveLabel).not.toBeNull();
-    expect(liveLabel?.textContent).toMatch(/live configuration/i);
-    expect(document.querySelector('[data-source-view="candidate"]')).toBeNull();
+    // editor holds the PERSISTED editable configuration — not a proposed candidate,
+    // and never the misleading "live" (runtime may differ from disk).
+    const persistedLabel = document.querySelector('[data-source-view="persisted-editable"]');
+    expect(persistedLabel).not.toBeNull();
+    expect(persistedLabel?.textContent).toMatch(/persisted configuration/i);
+    expect((persistedLabel?.textContent ?? "").toLowerCase()).not.toContain("live configuration");
+    expect(document.querySelector('[data-source-view="candidate-readonly"]')).toBeNull();
 
     // Edit → becomes dirty → validates → Apply enabled.
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
@@ -379,10 +381,10 @@ describe("ConfigPanel apply flow", () => {
     expect(editor.value).toContain('listen = ":9000"');
     // AC-12: the source view is labeled truthfully as a proposed candidate, not
     // the live config — the operator must never mistake it for the running one.
-    const candidateLabel = document.querySelector('[data-source-view="candidate"]');
+    const candidateLabel = document.querySelector('[data-source-view="candidate-readonly"]');
     expect(candidateLabel?.textContent).toMatch(/proposed candidate/i);
     expect((candidateLabel?.textContent ?? "").toLowerCase()).not.toContain("editable");
-    expect(document.querySelector('[data-source-view="live"]')).toBeNull();
+    expect(document.querySelector('[data-source-view="persisted-editable"]')).toBeNull();
     const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
     await waitFor(() => {
       expect(patchBtn).toBeEnabled();
@@ -462,7 +464,7 @@ describe("ConfigPanel apply flow", () => {
     const diffOnlyLabel = document.querySelector('[data-source-view="diff-only"]');
     expect(diffOnlyLabel).not.toBeNull();
     expect(diffOnlyLabel?.textContent).toMatch(/diff only/i);
-    expect(document.querySelector('[data-source-view="candidate"]')).toBeNull();
+    expect(document.querySelector('[data-source-view="candidate-readonly"]')).toBeNull();
 
     const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
     await waitFor(() => {
@@ -473,6 +475,107 @@ describe("ConfigPanel apply flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
     await waitFor(() => {
       expect(patchApplies).toBe(1);
+    });
+  });
+
+  it("fetches the protected candidate and shows it read-only for a config:raw operator", async () => {
+    takePendingDraft(); // clear any leftover handoff state
+    let candidateBody: unknown = null;
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(
+          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }),
+        );
+      }
+      if (url === "/api/config/patch/candidate") {
+        candidateBody = JSON.parse(typeof init?.body === "string" ? init.body : "null");
+        return Promise.resolve(
+          json({ ok: true, candidate: 'listen = ":9000"\n', base_version: "v1" }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    setPendingDraft({
+      kind: "patch",
+      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+      baseVersion: "v1",
+      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+      // No candidate: Slice 01 stopped producers from copying the phantom preview
+      // candidate, so the panel must fetch the true candidate from the server.
+    });
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    // The panel fetches the server candidate and flips the source view to a
+    // truthful read-only "proposed candidate" (never the persisted bytes).
+    await waitFor(() => {
+      const el = document.querySelector('[data-source-view="candidate-readonly"]');
+      expect(el).not.toBeNull();
+      expect(el?.textContent).toMatch(/proposed candidate/i);
+    });
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    await waitFor(() => {
+      expect(editor.value).toContain('listen = ":9000"');
+    });
+    // The candidate request pins the exact reviewed ops + base_version so a
+    // concurrent change is rejected rather than silently clobbered.
+    expect(candidateBody).toEqual({
+      base_version: "v1",
+      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+    });
+    // Apply is enabled only once the candidate has resolved.
+    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(patchBtn).toBeEnabled();
+    });
+  });
+
+  it("keeps the persisted baseline and blocks apply when the candidate preview is stale", async () => {
+    takePendingDraft(); // clear any leftover handoff state
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(
+          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v2" }),
+        );
+      }
+      if (url === "/api/config/patch/candidate") {
+        return Promise.resolve(
+          json({ conflict: true, message: "stale", current_version: "v2" }, 409),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    setPendingDraft({
+      kind: "patch",
+      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+      baseVersion: "v1",
+      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+    });
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    // A stale preview is surfaced honestly: the candidate pane shows the current
+    // persisted baseline (never a fabricated candidate) and apply is blocked.
+    expect(await screen.findByText(/Preview is stale/)).toBeInTheDocument();
+    const baselineLabel = document.querySelector('[data-source-view="persisted-baseline"]');
+    expect(baselineLabel).not.toBeNull();
+    expect(baselineLabel?.textContent).toMatch(/current persisted baseline/i);
+    expect(document.querySelector('[data-source-view="candidate-readonly"]')).toBeNull();
+    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(patchBtn).toBeDisabled();
     });
   });
 
