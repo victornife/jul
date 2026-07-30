@@ -504,4 +504,38 @@
 - Blocker-fix SHA: n/a.
 - Accepted SHA: pending independent review and exact-SHA CI.
 - Next execution file: `/jul-audit-ws03-s03`.
+
+---
+
+## WS03_ABSOLUTE_DEADLINE / Slice 03 — post-persistence obligations, Console timeout contract, and timeout audit
+
+- Parent SHA: `b1b7b4fe52a26563bb768843488549db3f2c7308`
+- Resulting SHA: recorded in the excluded continuity state after commit (not embeddable in the committed entry).
+- Branch: `audit/ws03-absolute-deadline`
+- Agent role/context: GitHub Copilot (Claude Opus 4.8), Jul Audit Implementer mode; single-slice implementation.
+- Files changed:
+  - `internal/admin/config_apply.go`: added `(*Server).recordTimeoutAudit` — the single per-handler helper that records a `config.<operation>` failure audit naming the timed-out preflight phase and, when the coordinator allocated one before the timeout, the apply ID. The detail is transaction metadata only (phase + apply ID); it never carries config bytes, secrets, or token material.
+  - `internal/admin/api.go`: `handleConfigApply` records the timeout audit (via `reqCtx.Operation`) after the validation branch; the shared status mapping writes the 504.
+  - `internal/admin/patch_http.go`: `handleConfigPatchApply` records the timeout audit after the validation branch.
+  - `internal/admin/server.go`: `handleConfigRaw` and `handleConfigSettings` record the timeout audit in the non-OK result branch before writing the status.
+  - `internal/admin/api_history.go`: `handleConfigRollback` records the timeout audit in the `!result.OK` branch (via `ApplyOperationRollback`, since `rollbackToSnapshot` builds its own `reqCtx`).
+  - `internal/admin/config_apply_timeout_audit_test.go` (new): HTTP-integration table test across all five managed write routes.
+  - `internal/admin/ui/src/api/client.ts`: added top-level `timed_out_phase` to `ConfigApplyResultBaseSchema`; added the `"timeout"` `ConfigApplyErrorKind`; `classifyApplyFailure` throws `ConfigApplyOutcomeError(..., "timeout", ...)` when a top-level `timed_out_phase` is present.
+  - `internal/admin/ui/src/lib/applyOutcome.ts`: added the `"preflight-timeout"` `ApplyOutcomeKind`, the `preflightTimedOut` input, and the derive branch that renders the phase, "Nothing was persisted", and the raise-`global.reload_timeout` guidance without implying the candidate serves.
+  - `internal/admin/ui/src/features/config/ConfigPanel.tsx`: routes `errorKind === "timeout"` to the preflight-timeout outcome, passing the top-level `timed_out_phase`.
+  - `internal/admin/ui/src/test/client-write.test.ts`, `internal/admin/ui/src/test/apply-outcome.test.tsx`: new focused tests.
+- Production path verified:
+  - Step 7 (post-persistence obligations): verified — no code change required. `ApplyRaw` nils `ctx.RequestContext` (config_apply.go) immediately after `preflightContext` derivation (Slice 02), so `applyCandidate` never holds the browser-request context. The finalizer goroutine and synchronous wait use only `resultCh`, `c.mu`, `c.BaseCtx`, and the single admission-deadline timer, so a browser disconnect cannot abandon reload/restoration and no second deadline is created.
+  - Steps 8/9: HTTP 504 with top-level `timed_out_phase` → `classifyApplyFailure` → `ConfigApplyOutcomeError("timeout")` → `ConfigPanel` `errorKind==="timeout"` branch → `deriveApplyOutcome({preflightTimedOut})` → `preflight-timeout` banner. Backend: coordinator `timedOutResult` → each handler → `recordTimeoutAudit` → `recordAudit` ring/sink, with the 504 from `configApplyResultStatus`. Proven for all five managed routes (apply, legacy raw, settings, structured-patch apply, rollback).
+- Behavior implemented: every managed write route now records a phase-named failure audit when a pre-persistence timeout occurs (apply ID included only when one exists); the Console classifies the 504 distinctly and renders a truthful "configuration not changed — preflight timed out" outcome that never claims the candidate is serving.
+- Tests added: `TestManagedWriteRoutesRecordTimeoutAudit` (HTTP integration — five routes: 504 + `config.<op>` failure audit naming the phase, with apply_id present or absent per coordinator allocation); `client-write.test.ts` "classifies a pre-persistence preflight timeout 504 as kind timeout" (Console client contract); `apply-outcome.test.tsx` two `preflight-timeout` cases (phase rendered; phase-absent; message never claims serving).
+- Commands run: `go test -count=1 ./internal/admin/... ./internal/config/...` (ok); `go test -count=1 ./internal/app/...` (ok jul/internal/app 306.805s); `pnpm --dir internal/admin/ui run typecheck` (clean); `pnpm --dir internal/admin/ui run lint` (clean); `pnpm --dir internal/admin/ui run test` (37 files, 454 tests pass); `git diff --check` (clean, only benign CRLF notices); `gofmt` on EOL-normalized copies of all changed Go files (clean).
+- Commands unavailable: `go test -race` — `CGO_ENABLED=0`, no C toolchain (`-race requires cgo`); deferred to the exact-SHA CI race matrix. `gofmt -l` reports repo-wide entries because the Windows/OneDrive working tree is CRLF while gofmt normalizes to LF; EOL-normalized `gofmt -d` on the changed files is clean and `git diff --check` is clean.
+- Deviations: (1) Step 9 enumerates "raw, patch, settings, and rollback" handlers but omits the primary `handleConfigApply`; the timeout audit was added there too so timeout-audit evidence is complete per defect 9 — the primary managed apply path must not be the single silent gap. (2) Introduced the shared `recordTimeoutAudit` helper (used at all five call sites) instead of inlining the runbook snippet five times — one formatting/`apply_id` policy, no duplicate truth. (3) Step 7 required no code change (already satisfied by Slices 01/02); it was verified against the production path and documented rather than re-implemented, to avoid introducing a redundant/second deadline.
+- Self-review findings: `recordTimeoutAudit` is wired at all five call sites (no unwired helper) and `preflightTimedOut`/`preflight-timeout` are consumed end-to-end; no error swallowing (a timeout still returns the structured 504); no duplicate truth (top-level `timed_out_phase` is the sole pre-persistence timeout signal; `reload.timed_out_phase` remains the distinct post-persistence signal); no secret exposure (audit detail is phase + apply ID only; the `timed_out_phase` schema field is non-sensitive metadata); no weakened or deleted assertions; no generated assets touched (`internal/admin/assets/dist` untouched); comments explain the pre- vs post-persistence distinction.
+- Independent review status: pending.
+- Reviewer blockers: none recorded.
+- Blocker-fix SHA: n/a.
+- Accepted SHA: pending independent review and exact-SHA CI.
+- Next execution file: `/jul-audit-ws03-s04`.
 </content>

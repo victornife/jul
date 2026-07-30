@@ -488,6 +488,13 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if result.TimedOutPhase != "" {
+		// AC-08 / defect 9: a preflight timeout before persistence records a
+		// dedicated failure audit naming the timed-out phase. The shared status
+		// mapping below writes the 504 Gateway Timeout; nothing was persisted.
+		s.recordTimeoutAudit(r, reqCtx.Operation, result)
+	}
+
 	if result.OK && isTerminalApplyResult(result) {
 		// AC-05: skip eager handler-side history when the managed coordinator
 		// records it at terminalization (see handleConfigRaw for rationale).

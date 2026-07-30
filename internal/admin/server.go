@@ -1011,6 +1011,11 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		}
 		status := configApplyResultStatus(result)
 		if status != http.StatusOK {
+			if result.TimedOutPhase != "" {
+				// AC-08 / defect 9: name the timed-out preflight phase in the audit
+				// trail before writing the 504; nothing was persisted.
+				s.recordTimeoutAudit(r, reqCtx.Operation, result)
+			}
 			writeJSON(w, status, result)
 			return
 		}
@@ -1152,6 +1157,11 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		status := configApplyResultStatus(result)
 		if status != http.StatusOK {
+			if result.TimedOutPhase != "" {
+				// AC-08 / defect 9: name the timed-out preflight phase in the audit
+				// trail before writing the 504; nothing was persisted.
+				s.recordTimeoutAudit(r, reqCtx.Operation, result)
+			}
 			writeJSON(w, status, result)
 			return
 		}

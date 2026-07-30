@@ -1467,6 +1467,11 @@ const ConfigApplyResultBaseSchema = z.object({
   final_disk_version: z.string().optional(),
   final_serving_version: z.string().optional(),
   staged_restart_is_update: z.boolean().optional(),
+  // AC-08: names the pre-persistence preflight phase that exceeded the
+  // transaction deadline. Present only on a 504 timeout where nothing was
+  // persisted; distinct from reload.timed_out_phase, which reports a
+  // post-persistence reload that overran while the candidate is already serving.
+  timed_out_phase: z.string().optional(),
   message: z.string().optional(),
   status: z.union([z.array(FeatureStatusSchema), z.string()]).optional(),
   // previous_reload is the outcome of the most recent reload before this apply.
@@ -1502,6 +1507,7 @@ export type ConfigApplyErrorKind =
   | "not-applied"
   | "enqueue"
   | "unavailable"
+  | "timeout"
   | "rejected";
 
 export class ConfigApplyOutcomeError extends ApiError {
@@ -1646,6 +1652,12 @@ function classifyApplyFailure(path: string, status: number, data: unknown): neve
       rejected.data.message ?? "The configuration was rejected.",
       rejected.data.errors ?? [],
     );
+  }
+  if (result?.timed_out_phase) {
+    // AC-08: a pre-persistence preflight timeout (HTTP 504). Nothing was
+    // persisted, so classify it distinctly from a rejection: the panel renders
+    // the preflight-timeout outcome and must not imply the candidate is serving.
+    throw new ConfigApplyOutcomeError(path, status, "timeout", result);
   }
   if (result) {
     const kind: ConfigApplyErrorKind =

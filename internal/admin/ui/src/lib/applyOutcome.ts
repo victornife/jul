@@ -46,6 +46,12 @@ export type ApplyOutcomeKind =
   // reload_timeout. The new config is serving; the timeout is advisory and
   // a slow reload should be investigated.
   | "reload-timed-out"
+  // AC-08: the apply exceeded the transaction deadline DURING pre-persistence
+  // preflight, so nothing was written and the previous configuration is intact
+  // and still serving. Distinct from "reload-timed-out", where the candidate is
+  // already persisted and serving. The operator investigates the slow component
+  // or raises global.reload_timeout, then retries.
+  | "preflight-timeout"
   // Valid but NOT applied: the change is fixed at process start, so nothing was
   // saved and a restart is required for it to take effect.
   | "restart-required"
@@ -112,6 +118,15 @@ export interface ApplyOutcomeInput {
    * (subsystem failed to activate).
    */
   readonly reloadTimedOut?: boolean;
+  /**
+   * AC-08: True when the backend refused the apply because a pre-persistence
+   * preflight phase exceeded the transaction deadline (top-level
+   * timed_out_phase, HTTP 504). Nothing was persisted and the previous
+   * configuration is still serving — distinct from reloadTimedOut, where the
+   * candidate is already persisted and serving. Paired with timedOutPhase for
+   * the phase name.
+   */
+  readonly preflightTimedOut?: boolean;
   /**
    * The apply mode returned by the server (P2-04). "stage_restart" means the
    * config was saved for the next restart; the live runtime is unchanged.
@@ -226,6 +241,24 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
       title: "Blocked - a staged restart is pending",
       message:
         "A configuration is staged for the next process restart. Hot applies are blocked until it is discarded or the process is restarted. Discard the staged configuration to resume hot applies, or restart the process to apply it.",
+      failures: [],
+    };
+  }
+
+  // AC-08: a pre-persistence preflight timeout. The apply exceeded the
+  // transaction deadline before anything was written, so the previous
+  // configuration is intact and still serving. This is NOT "reload timed out":
+  // nothing was persisted, so the copy must not imply the candidate is serving.
+  if (input.preflightTimedOut) {
+    const phaseLine = input.timedOutPhase ? `Phase: ${input.timedOutPhase}. ` : "";
+    return {
+      kind: "preflight-timeout",
+      severity: "warning",
+      blocking: false,
+      title: "Configuration not changed — preflight timed out",
+      message:
+        phaseLine +
+        "Nothing was persisted. Investigate the slow component or raise global.reload_timeout.",
       failures: [],
     };
   }

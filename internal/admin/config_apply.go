@@ -59,6 +59,21 @@ func isTerminalApplyResult(result ConfigApplyResult) bool {
 	return result.Reload == nil || result.Reload.Outcome != server.ReloadSavedNotLive
 }
 
+// recordTimeoutAudit records a failure audit event for a managed configuration
+// apply that exceeded reload_timeout BEFORE anything was persisted (AC-08 /
+// defect 9). The operation is the per-handler managed operation so the trail
+// distinguishes which mutation path timed out; the apply ID is appended only
+// when the coordinator had allocated one before the timeout. The detail is
+// non-sensitive transaction metadata only — the phase name and apply ID — and
+// never carries configuration bytes, secrets, or token material.
+func (s *Server) recordTimeoutAudit(r *http.Request, op ApplyOperation, result ConfigApplyResult) {
+	detail := "timed out before persistence: phase=" + result.TimedOutPhase
+	if result.ApplyID != "" {
+		detail += " apply_id=" + result.ApplyID
+	}
+	s.recordAudit(r, string(op), "config", "failure", detail)
+}
+
 // ConfigApplyResult is the structured response for a managed configuration
 // apply. It correlates the persisted candidate with its live reload outcome
 // when a hot reload was performed.

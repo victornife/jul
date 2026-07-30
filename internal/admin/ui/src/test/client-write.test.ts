@@ -308,6 +308,35 @@ describe("applyConfig", () => {
     );
     await expect(applyConfig("x")).rejects.toMatchObject({ kind: "enqueue" });
   });
+
+  it("classifies a pre-persistence preflight timeout 504 as kind timeout", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            mode: "hot",
+            timed_out_phase: "preflight_handlers",
+            message:
+              "The configuration apply exceeded reload_timeout during the preflight_handlers phase; nothing was changed.",
+          }),
+          { status: 504 },
+        ),
+    );
+    try {
+      await applyConfig("x");
+      expect.fail("expected structured timeout outcome error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigApplyOutcomeError);
+      if (error instanceof ConfigApplyOutcomeError) {
+        expect(error.kind).toBe("timeout");
+        expect(error.status).toBe(504);
+        expect(error.result.timed_out_phase).toBe("preflight_handlers");
+        // Nothing was persisted: the timeout path never marks the candidate saved.
+        expect(error.result.persisted).toBeUndefined();
+      }
+    }
+  });
 });
 
 describe("rollback", () => {

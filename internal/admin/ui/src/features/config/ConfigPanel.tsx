@@ -693,6 +693,20 @@ export function ConfigPanel() {
           pendingRestartBlocksHot: true,
         });
       }
+      if (appliedState?.errorKind === "timeout") {
+        // AC-08: a pre-persistence preflight timeout (504). Nothing was
+        // persisted; render the dedicated preflight-timeout outcome naming the
+        // phase from the top-level timed_out_phase.
+        return deriveApplyOutcome({
+          accepted: false,
+          pendingReload: false,
+          runtimeObserved: false,
+          preflightTimedOut: true,
+          ...(applied.timed_out_phase !== undefined
+            ? { timedOutPhase: applied.timed_out_phase }
+            : {}),
+        });
+      }
       if (
         appliedState?.errorKind !== null &&
         appliedState?.errorKind !== "not-applied" &&

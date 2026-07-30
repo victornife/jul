@@ -154,6 +154,36 @@ describe("deriveApplyOutcome", () => {
     expect(o.kind).toBe("reload-timed-out");
   });
 
+  it("preflight-timeout: pre-persistence timeout names the phase and claims nothing served", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: false,
+      preflightTimedOut: true,
+      timedOutPhase: "preflight_handlers",
+    });
+    expect(o.kind).toBe("preflight-timeout");
+    expect(o.severity).toBe("warning");
+    expect(o.blocking).toBe(false);
+    expect(o.title).toMatch(/not changed/i);
+    expect(o.message).toContain("preflight_handlers");
+    expect(o.message).toMatch(/nothing was persisted/i);
+    expect(o.message).toMatch(/reload_timeout/i);
+    // A preflight timeout must never imply the candidate is serving.
+    expect(o.message).not.toMatch(/serving|is now live/i);
+  });
+
+  it("preflight-timeout: renders without a phase name when none is reported", () => {
+    const o = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: false,
+      preflightTimedOut: true,
+    });
+    expect(o.kind).toBe("preflight-timeout");
+    expect(o.message).not.toContain("Phase:");
+  });
+
   // Finding 5: saved_not_live must never be rendered as "serving".
   it("saved-not-live: accepted, backend outcome saved_not_live, final outcome unknown", () => {
     const o = deriveApplyOutcome({

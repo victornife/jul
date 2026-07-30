@@ -302,6 +302,12 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !result.OK {
+		if result.TimedOutPhase != "" {
+			// AC-08 / defect 9: a preflight timeout before persistence records a
+			// dedicated failure audit naming the timed-out phase; the 504 result is
+			// written below. Nothing was rolled back to disk.
+			s.recordTimeoutAudit(r, ApplyOperationRollback, result)
+		}
 		writeJSON(w, code, result)
 		return
 	}
