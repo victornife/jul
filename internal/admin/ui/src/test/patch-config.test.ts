@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   patchConfig,
+  patchConfigBatch,
   applyPatchBatch,
   fetchPatchCandidate,
   ConfigRejectedError,
@@ -60,6 +61,33 @@ describe("patchConfig", () => {
     expect(res.diff.summary).toBe("1 change");
     expect(res.validation_errors).toBeUndefined();
     expect(JSON.parse(seenBody)).toMatchObject({ op: "route_set_target", target: "http://new" });
+  });
+
+  it("resolves with an undefined candidate when the preview omits it (the production case)", async () => {
+    // N-01 (WS05): the real /api/config/patch preview withholds the candidate
+    // TOML so a principal without config:raw cannot extract secrets from a
+    // preview. The client must tolerate the missing field and never fabricate
+    // one — callers that need the candidate use the config:raw-gated
+    // fetchPatchCandidate instead.
+    mockFetch((url) => {
+      expect(url).toBe("/api/config/patch");
+      return json({
+        ok: true,
+        summary: "route :8080/api proxy_pass set to http://new",
+        diff: { summary: "1 change" },
+        base_version: "deadbeefdeadbeef",
+      });
+    });
+    const res = await patchConfig({
+      op: "route_set_target",
+      listen: ":8080",
+      server_names: [],
+      match_type: "prefix",
+      path: "/api",
+      target: "http://new",
+    });
+    expect(res.candidate).toBeUndefined();
+    expect(res.base_version).toBe("deadbeefdeadbeef");
   });
 
   it("serializes a per-location WAF set with the nested waf payload", async () => {
@@ -262,6 +290,41 @@ describe("patchConfig", () => {
         enabled: true,
       }),
     ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("patchConfigBatch", () => {
+  const op = {
+    op: "server_toggle_http3" as const,
+    listen: ":443",
+    enabled: true,
+  };
+
+  it("previews a batch and resolves with an undefined candidate when omitted", async () => {
+    // The batch preview endpoint (/api/config/patch/preview) also withholds the
+    // candidate TOML (N-01, WS05); the client parses the diff for review and
+    // must not surface a fabricated candidate.
+    let seenUrl = "";
+    let seenBody = "";
+    mockFetch((url, init) => {
+      seenUrl = url;
+      seenBody = typeof init?.body === "string" ? init.body : "";
+      return json({
+        ok: true,
+        summary: "server :443 http/3 enabled",
+        diff: { summary: "1 change" },
+        base_version: "deadbeefdeadbeef",
+      });
+    });
+    const res = await patchConfigBatch([op], "deadbeefdeadbeef");
+    expect(seenUrl).toBe("/api/config/patch/preview");
+    expect(JSON.parse(seenBody)).toMatchObject({
+      base_version: "deadbeefdeadbeef",
+      ops: [{ op: "server_toggle_http3", listen: ":443", enabled: true }],
+    });
+    expect(res.candidate).toBeUndefined();
+    expect(res.diff.summary).toBe("1 change");
+    expect(res.base_version).toBe("deadbeefdeadbeef");
   });
 });
 

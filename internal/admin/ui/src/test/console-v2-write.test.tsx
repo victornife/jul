@@ -16,10 +16,19 @@ import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 
 vi.mock("@/features/config/CodeEditor.tsx", () => ({
-  CodeEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+  CodeEditor: ({
+    value,
+    onChange,
+    readOnly,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    readOnly?: boolean;
+  }) => (
     <textarea
       aria-label="editor"
       value={value}
+      readOnly={readOnly ?? false}
       onChange={(e) => {
         onChange(e.target.value);
       }}
@@ -421,10 +430,17 @@ describe("ConfigPanel apply flow", () => {
   it("allows structured patch review when raw config is forbidden", async () => {
     takePendingDraft(); // clear any leftover handoff state
     let patchApplies = 0;
+    let candidateCalls = 0;
     globalThis.fetch = vi.fn((input: string) => {
       const url = input;
       if (url === "/api/config") {
         // Operator lacks config:raw.
+        return Promise.resolve(json({ error: "forbidden" }, 403));
+      }
+      if (url === "/api/config/patch/candidate") {
+        // Defensive: if the panel ever requested the protected candidate for a
+        // principal without config:raw it would be counted here. It must not.
+        candidateCalls += 1;
         return Promise.resolve(json({ error: "forbidden" }, 403));
       }
       if (url === "/api/config/patch/apply") {
@@ -476,6 +492,10 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(patchApplies).toBe(1);
     });
+    // The protected candidate endpoint must never be consulted without
+    // config:raw — the diff-only review path applies via server-side atomic
+    // recomputation, so no candidate TOML is ever requested or exposed.
+    expect(candidateCalls).toBe(0);
   });
 
   it("fetches the protected candidate and shows it read-only for a config:raw operator", async () => {
@@ -523,6 +543,9 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(editor.value).toContain('listen = ":9000"');
     });
+    // The candidate is presented read-only — an operator reviews it but cannot
+    // edit the server-computed proposed configuration in place.
+    expect(editor.readOnly).toBe(true);
     // The candidate request pins the exact reviewed ops + base_version so a
     // concurrent change is rejected rather than silently clobbered.
     expect(candidateBody).toEqual({
@@ -577,6 +600,130 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(patchBtn).toBeDisabled();
     });
+  });
+
+  it("degrades to diff-only when the protected candidate endpoint returns 403", async () => {
+    takePendingDraft(); // clear any leftover handoff state
+    let candidateCalls = 0;
+    let patchApplies = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(
+          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }),
+        );
+      }
+      if (url === "/api/config/patch/candidate") {
+        // The endpoint is consulted for a patch review but the principal is
+        // refused the candidate TOML (defense-in-depth 403).
+        candidateCalls += 1;
+        return Promise.resolve(json({ error: "forbidden" }, 403));
+      }
+      if (url === "/api/config/patch/apply") {
+        patchApplies += 1;
+        return Promise.resolve(
+          json({
+            ok: true,
+            version: "v2",
+            summary: ["1 change"],
+            diff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+            status: [{ group: "Traffic", name: "TLS", active: true }],
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    setPendingDraft({
+      kind: "patch",
+      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+      baseVersion: "v1",
+      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+    });
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    // A 403 on the protected candidate collapses the source view to a truthful
+    // diff-only review — the candidate text is never shown and never mislabeled.
+    await waitFor(() => {
+      const el = document.querySelector('[data-source-view="diff-only"]');
+      expect(el).not.toBeNull();
+      expect(el?.textContent).toMatch(/diff only/i);
+    });
+    expect(candidateCalls).toBe(1);
+    expect(document.querySelector('[data-source-view="candidate-readonly"]')).toBeNull();
+
+    // The diff-only operator can still apply — the server recomputes the ops
+    // atomically, so no client-rendered candidate is trusted for apply.
+    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(patchBtn).toBeEnabled();
+    });
+    fireEvent.click(patchBtn);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await waitFor(() => {
+      expect(patchApplies).toBe(1);
+    });
+  });
+
+  it("keeps the persisted/runtime distinction clear during a managed staged restart", async () => {
+    takePendingDraft(); // clear any leftover handoff state
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(
+          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v-persisted" }),
+        );
+      }
+      if (url === "/api/config/pending-restart") {
+        return Promise.resolve(
+          json({
+            pending: true,
+            status: {
+              state: "managed_staged",
+              managed: true,
+              staged: true,
+              external: false,
+              staged_version: "v-staged",
+              serving_version: "v-serving",
+              subsystems: ["listener"],
+              discard_available: true,
+              inconsistent: false,
+            },
+          }),
+        );
+      }
+      if (url === "/api/config/validate") {
+        return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    // The raw editor bytes are the PERSISTED configuration on disk, never called
+    // "live": while a staged restart is pending the runtime differs from disk.
+    const persistedLabel = await waitFor(() => {
+      const el = document.querySelector('[data-source-view="persisted-editable"]');
+      expect(el).not.toBeNull();
+      return el;
+    });
+    expect(persistedLabel?.textContent).toMatch(/persisted configuration/i);
+    expect((persistedLabel?.textContent ?? "").toLowerCase()).not.toContain("live configuration");
+
+    // The staged-restart banner distinguishes the staged (on-disk) version from
+    // the serving (runtime) version so the two are never conflated.
+    expect(await screen.findByText(/Restart required — configuration staged/)).toBeInTheDocument();
+    expect(screen.getByText("v-staged")).toBeInTheDocument();
+    expect(screen.getByText("v-serving")).toBeInTheDocument();
   });
 
   it("blocks hot apply and shows a banner when external disk divergence is reported", async () => {
