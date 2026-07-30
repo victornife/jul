@@ -13,9 +13,18 @@
  *     react-query refetchInterval) read WITHOUT a re-render. operationIDRef and
  *     confirmedAdminOperationRef mirror the reducer's operationGeneration /
  *     adminConfirmedGeneration; postApplyPollAttemptsRef is the sole home of the
- *     post-apply poll counter (the reducer no longer keeps a duplicate).
- *   - startOperation() / cancelOperation() — bump the generation (and mirror ref)
- *     so a superseded operation's late callback is ignored.
+ *     post-apply poll counter (the reducer no longer keeps a duplicate). The
+ *     reducer is the single source of truth: these refs are only ever written
+ *     through the dispatching hook methods below, never mutated ad hoc, so a ref
+ *     can never diverge from the reducer state it mirrors.
+ *   - startOperation() / cancelOperation() — bump the generation, reset the poll
+ *     budget, and clear any admin confirmation (mirror ref + dispatch) so a
+ *     superseded operation's late callback is ignored.
+ *   - confirmAdminForOperation(generation) — record that the operator confirmed
+ *     an admin-affecting change for this exact operation: it dispatches
+ *     confirmAdmin AND mirrors the ref, so a same-operation retry re-sends
+ *     confirm_admin=true without the panel mutating the ref behind the reducer's
+ *     back.
  *   - appliedState / setAppliedState — the correlated apply result, exposed with
  *     the panel's historical `operationID` field name. setAppliedState records a
  *     fresh result (or clears it); the exact-ID terminal merge goes through the
@@ -67,6 +76,7 @@ export interface ConfigMutationMachine {
   // they are plain closures from useCallback, never methods bound to `this`.
   readonly startOperation: () => number;
   readonly cancelOperation: () => void;
+  readonly confirmAdminForOperation: (generation: number) => void;
   readonly setAppliedState: (next: SetApplied) => void;
   readonly mergeTerminalRecord: (record: ManagedApplyRecord) => void;
   readonly setPatchDraft: (draft: PatchDraftState | null) => void;
@@ -116,7 +126,16 @@ export function useConfigMutationMachine(initialBaseVersion?: string): ConfigMut
   const cancelOperation = useCallback((): void => {
     operationIDRef.current += 1;
     confirmedAdminOperationRef.current = null;
+    postApplyPollAttemptsRef.current = 0;
     dispatch({ type: "cancelOperation" });
+  }, []);
+
+  // Record the operator's admin-change confirmation for a specific operation.
+  // The reducer stays authoritative (dispatch confirmAdmin) and the ref mirrors
+  // it for the synchronous read inside the confirm-dialog click handlers.
+  const confirmAdminForOperation = useCallback((generation: number): void => {
+    confirmedAdminOperationRef.current = generation;
+    dispatch({ type: "confirmAdmin", generation });
   }, []);
 
   const setAppliedState = useCallback((next: SetApplied): void => {
@@ -174,6 +193,7 @@ export function useConfigMutationMachine(initialBaseVersion?: string): ConfigMut
     conflictVersion: state.conflictVersion,
     startOperation,
     cancelOperation,
+    confirmAdminForOperation,
     setAppliedState,
     mergeTerminalRecord,
     setPatchDraft,

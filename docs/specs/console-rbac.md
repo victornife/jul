@@ -270,6 +270,7 @@ granted. Sourced from `internal/admin/routes.go`.
 | `/api/history/get` | GET | `history:read` | ✓ | ✓ | ✓ | · |
 | `/api/config/history` | GET | `history:read` | ✓ | ✓ | ✓ | · |
 | `/api/config/history/{id}` | GET | `history:read` | ✓ | ✓ | ✓ | · |
+| `/api/config/applies/{id}` | GET | `status:read` **or** `config:apply` | ✓ | ✓ | ✓ | ✓ |
 | `/api/observability/requests` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
 | `/api/observability/failing-routes` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
 | `/api/observability/timeline` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
@@ -319,6 +320,13 @@ granted. Sourced from `internal/admin/routes.go`.
 
 Method-sensitive endpoints (`/api/config/settings`) require `config:read` on GET
 and `config:apply` on POST. The matrix lists the write requirement on its own row.
+
+The exact-ID managed-apply result endpoint (`/api/config/applies/{id}`) is
+authorized by **any-of** `status:read` **or** `config:apply`: a principal
+privileged enough to *apply* configuration may read the secret-free result of
+its own managed-apply transaction without also holding `status:read`. The
+projection never exposes actor, source IP, or token digest — those remain
+audit-API only.
 
 ## Enforcement
 

@@ -96,9 +96,10 @@ export function initialConfigMutationState(baseVersion?: string): ConfigMutation
 }
 
 export type ConfigMutationAction =
-  // Begin a new operation: bump the generation, clear the prior applied result
-  // and any admin confirmation, and reset the poll budget. Returns the new
-  // generation via the reducer (read state.operationGeneration after dispatch).
+  // Begin a new operation: bump the generation and clear the prior applied
+  // result and any admin confirmation. Returns the new generation via the
+  // reducer (read state.operationGeneration after dispatch). The post-apply poll
+  // budget is a React-binding ref, not reducer state, so it is reset by the hook.
   | { type: "startOperation" }
   // Abandon the in-flight operation without recording a result (e.g. the editor
   // text changed). Bumps the generation so late callbacks are ignored.

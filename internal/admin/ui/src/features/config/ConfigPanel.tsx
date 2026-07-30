@@ -251,6 +251,7 @@ export function ConfigPanel() {
     setConflictVersion,
     startOperation: machineStartOperation,
     cancelOperation: machineCancelOperation,
+    confirmAdminForOperation,
   } = machine;
   const applied = appliedState?.result ?? null;
 
@@ -445,7 +446,6 @@ export function ConfigPanel() {
         patchCandidate: null,
       });
       setConfirming(false);
-      confirmedAdminOperationRef.current = null;
       // Advance the token to the freshly-applied version so a follow-up edit
       // does not trip a spurious conflict.
       setBaseVersion(res.version ?? undefined);
@@ -508,7 +508,6 @@ export function ConfigPanel() {
         patchCandidate: candidate,
       });
       setConfirming(false);
-      confirmedAdminOperationRef.current = null;
       setConflictVersion(undefined);
       void qc.invalidateQueries({ queryKey: ["pending-restart"] });
       void qc.invalidateQueries();
@@ -563,7 +562,6 @@ export function ConfigPanel() {
       setStageConfirming(false);
       setBaseVersion(res.version ?? undefined);
       setConflictVersion(undefined);
-      confirmedAdminOperationRef.current = null;
       applyRaw.reset();
       applyPatch.reset();
       void qc.invalidateQueries({ queryKey: ["pending-restart"] });
@@ -1371,7 +1369,7 @@ export function ConfigPanel() {
           onConfirm={() => {
             const operationID = operationIDRef.current;
             if (adminChangeError) {
-              confirmedAdminOperationRef.current = operationID;
+              confirmAdminForOperation(operationID);
               if (isPatchMode) applyPatch.mutate({ confirmAdmin: true, operationID });
               else applyRaw.mutate({ confirmAdmin: true, operationID });
             } else if (isPatchMode) {
@@ -1444,7 +1442,7 @@ export function ConfigPanel() {
             const confirmAdmin =
               applyStage.error instanceof ConfigAdminChangeError ||
               confirmedAdminOperationRef.current === operationID;
-            if (confirmAdmin) confirmedAdminOperationRef.current = operationID;
+            if (confirmAdmin) confirmAdminForOperation(operationID);
             applyStage.mutate({ confirmAdmin, operationID });
           }}
           onCancel={() => {
