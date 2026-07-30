@@ -5,9 +5,11 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -285,5 +287,127 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 	}
 	if got := rawSnapshotCount(t, histDir); got != 1 {
 		t.Fatalf("raw history snapshots after duplicate finalize = %d, want 1 (exactly-once)", got)
+	}
+}
+
+// scrapeLabeledMetric returns the value token of the Prometheus sample named
+// `name` carrying exactly `labels`, or "" when the series is absent (a zero
+// count that was never incremented). It reads the public exposition handler so a
+// test can assert a labeled metric without touching the metrics package's
+// private registry. Prometheus emits labels in sorted key order, so the expected
+// series string is rebuilt with the label keys sorted.
+func scrapeLabeledMetric(t *testing.T, m *observability.Metrics, name string, labels map[string]string) string {
+	t.Helper()
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(name)
+	b.WriteByte('{')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%s=%q", k, labels[k])
+	}
+	b.WriteByte('}')
+	prefix := b.String() + " "
+
+	rr := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/metrics", nil))
+	for _, line := range strings.Split(rr.Body.String(), "\n") {
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, prefix) {
+			fields := strings.Fields(line)
+			return fields[len(fields)-1]
+		}
+	}
+	return ""
+}
+
+// TestManagedApplyFinalizerHistoryDisposition proves the terminal finalizer
+// emits the bounded jul_managed_apply_history_total{operation,result} counter
+// with the correct snapshot disposition for each terminal outcome, through the
+// real production Finalize path (WS06 §7.9):
+//
+//   - a committed apply with a non-empty prior configuration is "recorded";
+//   - a committed apply with no prior configuration to snapshot is "skipped";
+//   - a committed apply whose trusted history write fails is "failed".
+//
+// The metric is scraped from the public exposition handler; every label is a
+// fixed low-cardinality value (operation + result) — never an apply ID, actor,
+// or version.
+func TestManagedApplyFinalizerHistoryDisposition(t *testing.T) {
+	metrics := observability.NewMetrics()
+	registry := admin.NewManagedApplyRegistry(0, 0)
+
+	// A history-enabled admin server backs the recorded/skipped cases.
+	goodAdmin := admin.New(config.AdminConfig{
+		Enabled: true, Listen: "127.0.0.1:0", HistoryDir: filepath.Join(t.TempDir(), "history"), HistoryKeep: 50,
+	}, nil, admin.Deps{ManagedApplies: registry})
+	if goodAdmin == nil {
+		t.Fatal("admin.New (good) returned nil")
+	}
+	finGood := &managedApplyFinalizer{registry: registry, admin: goodAdmin, metrics: metrics}
+
+	// A finalizer whose configured history directory is actually a regular file
+	// forces the trusted snapshot write to fail deterministically, exercising the
+	// "failed" disposition without weakening any assertion.
+	brokenPath := filepath.Join(t.TempDir(), "history-is-a-file")
+	if err := os.WriteFile(brokenPath, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed broken history path: %v", err)
+	}
+	brokenAdmin := admin.New(config.AdminConfig{
+		Enabled: true, Listen: "127.0.0.1:0", HistoryDir: brokenPath, HistoryKeep: 50,
+	}, nil, admin.Deps{ManagedApplies: registry})
+	if brokenAdmin == nil {
+		t.Fatal("admin.New (broken) returned nil")
+	}
+	finBroken := &managedApplyFinalizer{registry: registry, admin: brokenAdmin, metrics: metrics}
+
+	committed := func(id string) admin.ConfigApplyResult {
+		return admin.ConfigApplyResult{
+			ApplyID: id, OK: true, Mode: "hot",
+			Reload: &server.ReloadResult{Outcome: server.ReloadAppliedLive},
+		}
+	}
+	reqCtx := admin.ApplyRequestContext{Operation: admin.ApplyOperationConfigApply}
+
+	// recorded: committed apply with a prior configuration to snapshot.
+	if fin := finGood.Finalize(admin.ManagedApplyCompletion{
+		Context: reqCtx, Result: committed("rl_101"), PreviousRaw: []byte("listen = \":8080\"\n"),
+	}); fin.HistorySnapshotID == "" || fin.HistoryError != "" {
+		t.Fatalf("recorded case: id=%q err=%q, want a snapshot id and no error", fin.HistorySnapshotID, fin.HistoryError)
+	}
+
+	// skipped: committed apply with no prior configuration (nothing to record).
+	if fin := finGood.Finalize(admin.ManagedApplyCompletion{
+		Context: reqCtx, Result: committed("rl_102"), PreviousRaw: nil,
+	}); fin.HistorySnapshotID != "" || fin.HistoryError != "" {
+		t.Fatalf("skipped case: id=%q err=%q, want neither a snapshot id nor an error", fin.HistorySnapshotID, fin.HistoryError)
+	}
+
+	// failed: committed apply whose trusted history write fails.
+	if fin := finBroken.Finalize(admin.ManagedApplyCompletion{
+		Context: reqCtx, Result: committed("rl_103"), PreviousRaw: []byte("listen = \":8080\"\n"),
+	}); fin.HistoryError == "" {
+		t.Fatal("failed case: expected a history error when the snapshot write fails")
+	}
+
+	op := string(admin.ApplyOperationConfigApply)
+	for _, tc := range []struct{ result, want string }{
+		{"recorded", "1"},
+		{"skipped", "1"},
+		{"failed", "1"},
+	} {
+		got := scrapeLabeledMetric(t, metrics, "jul_managed_apply_history_total",
+			map[string]string{"operation": op, "result": tc.result})
+		if got != tc.want {
+			t.Errorf("jul_managed_apply_history_total{operation=%q,result=%q} = %q, want %q", op, tc.result, got, tc.want)
+		}
 	}
 }

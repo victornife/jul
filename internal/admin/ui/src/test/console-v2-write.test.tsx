@@ -2076,6 +2076,41 @@ describe("HistoryPanel provenance projection", () => {
     const preRow = screen.getByText("pre1").closest("tr");
     expect(preRow?.className).not.toContain("bg-jul-danger/5");
   });
+
+  it("renders a legacy raw-only entry with no provenance sidecar", async () => {
+    // A snapshot written by an older release carries only id/time/size and no
+    // provenance fields. It must still list and render (an em dash in the Origin
+    // column) rather than being dropped or degraded to a metadata warning.
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history") {
+        return Promise.resolve(
+          json([
+            {
+              id: "legacy1",
+              time: "2026-01-01T00:00:00Z",
+              size: 64,
+            },
+          ]),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+
+    // The legacy row renders and is not mistaken for a malformed sidecar.
+    expect(await screen.findByText("legacy1")).toBeInTheDocument();
+    expect(screen.queryByText("Metadata unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recovery")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pre-apply")).not.toBeInTheDocument();
+    // Its Origin cell degrades to an em dash rather than any provenance badge.
+    const legacyRow = screen.getByText("legacy1").closest("tr");
+    expect(legacyRow?.textContent).toContain("—");
+  });
 });
 
 describe("WizardPanel", () => {
