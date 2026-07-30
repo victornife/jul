@@ -123,3 +123,81 @@ func TestHistorySnapshotWithNilMetaSkipsSidecar(t *testing.T) {
 		t.Errorf("nil-meta snapshot wrote a sidecar: %v", err)
 	}
 }
+
+// TestHistoryListProjectsMetadata verifies AC-05: list() projects the redacted
+// provenance sidecar (operation, actor, reason, outcome, apply id, versions)
+// onto the listing entry so the Console can attribute a snapshot without a
+// second round-trip, and no MetadataError is set for a well-formed sidecar.
+func TestHistoryListProjectsMetadata(t *testing.T) {
+	dir := t.TempDir()
+	h := newHistory(dir, 50)
+	id, metaErr, err := h.snapshotWithMeta([]byte("listen = \":8080\"\n"), &HistoryMetadata{
+		ApplyID:          "rl_9",
+		Operation:        ApplyOperationRollback,
+		Mode:             "hot",
+		Outcome:          "applied_live",
+		Actor:            "bob",
+		Reason:           historyReasonRecovery,
+		PreviousVersion:  "v-prev",
+		CandidateVersion: "v-next",
+	})
+	if err != nil || metaErr != nil {
+		t.Fatalf("snapshotWithMeta err=%v metaErr=%v", err, metaErr)
+	}
+	list, err := h.list()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("list len = %d, want 1", len(list))
+	}
+	e := list[0]
+	if e.ID != id || e.ApplyID != "rl_9" || e.Operation != ApplyOperationRollback {
+		t.Errorf("projection mismatch: %+v", e)
+	}
+	if e.Mode != "hot" || e.Outcome != "applied_live" || e.Actor != "bob" || e.Reason != historyReasonRecovery {
+		t.Errorf("projection mismatch: %+v", e)
+	}
+	if e.PreviousVersion != "v-prev" || e.CandidateVersion != "v-next" {
+		t.Errorf("version projection mismatch: %+v", e)
+	}
+	if e.MetadataError != "" {
+		t.Errorf("unexpected metadata error: %q", e.MetadataError)
+	}
+}
+
+// TestHistoryListMalformedSidecarDegradesOneRow verifies AC-05: a corrupt
+// metadata sidecar degrades only its own listing row (via MetadataError) and
+// never fails the whole list() call or contaminates a sibling snapshot.
+func TestHistoryListMalformedSidecarDegradesOneRow(t *testing.T) {
+	dir := t.TempDir()
+	h := newHistory(dir, 50)
+	good, err := h.snapshot([]byte("a = 1\n"))
+	if err != nil {
+		t.Fatalf("good snapshot: %v", err)
+	}
+	bad, err := h.snapshot([]byte("a = 2\n"))
+	if err != nil {
+		t.Fatalf("bad snapshot: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, bad+historyMetaExt), []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("seed corrupt sidecar: %v", err)
+	}
+	list, err := h.list()
+	if err != nil {
+		t.Fatalf("list must not fail on a malformed sidecar: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list len = %d, want 2", len(list))
+	}
+	byID := make(map[string]historyEntry, len(list))
+	for _, e := range list {
+		byID[e.ID] = e
+	}
+	if byID[bad].MetadataError == "" {
+		t.Errorf("expected MetadataError on the corrupt-sidecar row")
+	}
+	if byID[good].MetadataError != "" {
+		t.Errorf("good row should have no metadata error, got %q", byID[good].MetadataError)
+	}
+}

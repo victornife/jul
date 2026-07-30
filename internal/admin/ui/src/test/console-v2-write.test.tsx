@@ -2013,6 +2013,71 @@ describe("HistoryPanel empty state", () => {
   });
 });
 
+describe("HistoryPanel provenance projection", () => {
+  it("renders the redacted provenance and marks a recovery snapshot distinctly", async () => {
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history") {
+        return Promise.resolve(
+          json([
+            {
+              id: "rec1",
+              time: "2026-01-02T00:00:00Z",
+              size: 200,
+              apply_id: "rl_42",
+              operation: "config.rollback",
+              mode: "hot",
+              outcome: "reload_failed",
+              actor: "alice",
+              reason: "recovery",
+            },
+            {
+              id: "pre1",
+              time: "2026-01-01T00:00:00Z",
+              size: 120,
+              apply_id: "rl_7",
+              operation: "config.apply",
+              outcome: "applied_live",
+              actor: "bob",
+              reason: "pre_apply",
+            },
+            {
+              id: "bad1",
+              time: "2025-12-31T00:00:00Z",
+              size: 90,
+              metadata_error: "decode history metadata: unexpected end of JSON input",
+            },
+          ]),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+
+    // Redacted provenance is projected onto the row.
+    expect(await screen.findByText("Recovery")).toBeInTheDocument();
+    expect(screen.getByText("Pre-apply")).toBeInTheDocument();
+    expect(screen.getByText("by alice")).toBeInTheDocument();
+    expect(screen.getByText("rl_42")).toBeInTheDocument();
+    expect(screen.getByText("reload_failed")).toBeInTheDocument();
+
+    // A malformed sidecar degrades its single row without failing the listing.
+    expect(screen.getByText("Metadata unavailable")).toBeInTheDocument();
+    expect(screen.getByText("rec1")).toBeInTheDocument();
+    expect(screen.getByText("pre1")).toBeInTheDocument();
+
+    // The recovery snapshot's row is visually distinct (danger tint).
+    const recoveryRow = screen.getByText("rec1").closest("tr");
+    expect(recoveryRow?.className).toContain("bg-jul-danger/5");
+    const preRow = screen.getByText("pre1").closest("tr");
+    expect(preRow?.className).not.toContain("bg-jul-danger/5");
+  });
+});
+
 describe("WizardPanel", () => {
   it("generates a config and hands it off to the editor", async () => {
     render(

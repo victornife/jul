@@ -37,6 +37,74 @@ function formatTime(iso: string): string {
   }
 }
 
+// ReasonBadge renders the snapshot's provenance reason. A recovery snapshot —
+// written when a failed apply's restoration also failed, so the prior config
+// stays recoverable while the candidate lingers on disk — is visually prominent
+// (danger) and distinct from the ordinary pre-apply snapshot (muted).
+function ReasonBadge({ reason }: { readonly reason: string }) {
+  if (reason === "recovery") {
+    return (
+      <span className="inline-flex items-center rounded border border-jul-danger/50 bg-jul-danger/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-jul-danger">
+        Recovery
+      </span>
+    );
+  }
+  if (reason === "pre_apply") {
+    return (
+      <span className="inline-flex items-center rounded border border-jul-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-jul-muted">
+        Pre-apply
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded border border-jul-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-jul-muted">
+      {reason}
+    </span>
+  );
+}
+
+// ProvenanceCell projects the redacted attribution carried on a snapshot entry
+// (AC-05). Raw-only snapshots (older releases) render an em dash; a malformed
+// metadata sidecar degrades this single row to an inline notice without failing
+// the listing.
+function ProvenanceCell({ entry }: { readonly entry: HistoryEntry }) {
+  if (entry.metadata_error) {
+    return (
+      <span className="text-xs text-jul-danger" title={entry.metadata_error}>
+        Metadata unavailable
+      </span>
+    );
+  }
+  const hasProvenance =
+    entry.reason !== undefined ||
+    entry.operation !== undefined ||
+    entry.actor !== undefined ||
+    entry.outcome !== undefined ||
+    entry.apply_id !== undefined;
+  if (!hasProvenance) {
+    return <span className="text-xs text-jul-muted">—</span>;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        {entry.reason !== undefined && <ReasonBadge reason={entry.reason} />}
+        {entry.operation !== undefined && (
+          <span className="font-mono text-xs text-jul-text">{entry.operation}</span>
+        )}
+        {entry.outcome !== undefined && (
+          <span className="text-xs text-jul-muted">{entry.outcome}</span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-jul-muted">
+        {entry.actor !== undefined && <span>by {entry.actor}</span>}
+        {entry.apply_id !== undefined && (
+          <span className="font-mono">{entry.apply_id}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SnapshotViewer({ id, onClose }: { readonly id: string; readonly onClose: () => void }) {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["history-snap", id],
@@ -162,10 +230,18 @@ function EntryRow({
   readonly onRollback: (id: string) => void;
   readonly rolling: boolean;
 }) {
+  const isRecovery = entry.reason === "recovery";
   return (
-    <tr className="border-b border-jul-border last:border-b-0 hover:bg-jul-surface/60">
+    <tr
+      className={`border-b border-jul-border last:border-b-0 hover:bg-jul-surface/60${
+        isRecovery ? " bg-jul-danger/5" : ""
+      }`}
+    >
       <td className="px-4 py-3 font-mono text-xs text-jul-muted">{entry.id}</td>
       <td className="px-4 py-3 text-sm text-jul-text">{formatTime(entry.time)}</td>
+      <td className="px-4 py-3">
+        <ProvenanceCell entry={entry} />
+      </td>
       <td className="px-4 py-3 text-sm text-jul-muted">{formatBytes(entry.size)}</td>
       <td className="px-4 py-3">
         <div className="flex gap-2">
@@ -413,6 +489,7 @@ export function HistoryPanel() {
               <tr className="border-b border-jul-border text-xs text-jul-muted">
                 <th className="px-4 py-2">ID</th>
                 <th className="px-4 py-2">Time</th>
+                <th className="px-4 py-2">Origin</th>
                 <th className="px-4 py-2">Size</th>
                 <th className="px-4 py-2">Actions</th>
               </tr>

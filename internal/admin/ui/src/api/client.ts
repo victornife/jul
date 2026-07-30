@@ -899,6 +899,18 @@ export const HistoryEntrySchema = z.object({
   id: z.string(),
   time: z.string(),
   size: z.number(),
+  // Optional, redacted provenance projected from the snapshot's metadata
+  // sidecar (AC-05). Older raw-only snapshots omit every field; a malformed
+  // sidecar surfaces as metadata_error on that single entry.
+  apply_id: z.string().optional(),
+  operation: z.string().optional(),
+  mode: z.string().optional(),
+  outcome: z.string().optional(),
+  actor: z.string().optional(),
+  reason: z.string().optional(),
+  previous_version: z.string().optional(),
+  candidate_version: z.string().optional(),
+  metadata_error: z.string().optional(),
 });
 export type HistoryEntry = z.infer<typeof HistoryEntrySchema>;
 

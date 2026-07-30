@@ -83,11 +83,29 @@ func newHistory(dir string, keep int) *history {
 // enabled reports whether snapshotting is active.
 func (h *history) enabled() bool { return h != nil && h.dir != "" }
 
-// historyEntry describes one stored snapshot for the API listing.
+// historyEntry describes one stored snapshot for the API listing. Beyond the
+// intrinsic id/time/size it carries the optional, redacted provenance projected
+// from the snapshot's metadata sidecar (AC-05): every extra field is
+// low-cardinality attribution — never raw configuration, secret values, or
+// credentials — and is emitted only when present so raw-only snapshots keep the
+// original three-field shape. MetadataError records a per-entry sidecar read or
+// decode failure so a single malformed sidecar degrades one row instead of
+// failing the whole listing.
 type historyEntry struct {
 	ID   string    `json:"id"`
 	Time time.Time `json:"time"`
 	Size int64     `json:"size"`
+
+	ApplyID          string         `json:"apply_id,omitempty"`
+	Operation        ApplyOperation `json:"operation,omitempty"`
+	Mode             string         `json:"mode,omitempty"`
+	Outcome          string         `json:"outcome,omitempty"`
+	Actor            string         `json:"actor,omitempty"`
+	Reason           string         `json:"reason,omitempty"`
+	PreviousVersion  string         `json:"previous_version,omitempty"`
+	CandidateVersion string         `json:"candidate_version,omitempty"`
+
+	MetadataError string `json:"metadata_error,omitempty"`
 }
 
 // snapshot writes raw to a new timestamped file and prunes the directory to the
@@ -195,7 +213,25 @@ func (h *history) list() ([]historyEntry, error) {
 			continue // removed concurrently; skip
 		}
 		id := strings.TrimSuffix(name, historyExt)
-		out = append(out, historyEntry{ID: id, Time: parseHistoryID(id), Size: fi.Size()})
+		entry := historyEntry{ID: id, Time: parseHistoryID(id), Size: fi.Size()}
+		// Project the optional provenance sidecar. A missing sidecar (older
+		// raw-only snapshot) leaves the projection empty; a malformed sidecar
+		// degrades only this row via MetadataError so one bad file never fails
+		// the whole listing (AC-05).
+		switch meta, metaErr := h.getMeta(id); {
+		case metaErr != nil:
+			entry.MetadataError = metaErr.Error()
+		case meta != nil:
+			entry.ApplyID = meta.ApplyID
+			entry.Operation = meta.Operation
+			entry.Mode = meta.Mode
+			entry.Outcome = meta.Outcome
+			entry.Actor = meta.Actor
+			entry.Reason = meta.Reason
+			entry.PreviousVersion = meta.PreviousVersion
+			entry.CandidateVersion = meta.CandidateVersion
+		}
+		out = append(out, entry)
 	}
 	return out, nil
 }
@@ -275,14 +311,21 @@ func validHistoryID(id string) bool {
 }
 
 // parseHistoryID recovers the snapshot time from its ID, tolerating the optional
-// "-N" collision suffix. A parse failure yields the zero time rather than an
-// error so listing never fails on a malformed-but-safe name.
+// "_N" collision suffix appended by snapshot() when two writes land in the same
+// millisecond. A parse failure yields the zero time rather than an error so
+// listing never fails on a malformed-but-safe name. The suffix is stripped only
+// when it is a trailing run of decimal digits AND the remaining prefix is itself
+// a valid timestamp, so an underscore that is genuinely part of an unexpected
+// name is never mistaken for a counter.
 func parseHistoryID(id string) time.Time {
 	base := id
-	if i := strings.IndexByte(base, '-'); i >= 0 {
-		// Only strip a trailing "-N" counter, not characters inside the stamp.
-		if _, err := time.Parse(historyTimeLayout, base[:i]); err == nil {
-			base = base[:i]
+	if i := strings.LastIndexByte(base, '_'); i > 0 {
+		suffix := base[i+1:]
+		if isDecimalDigits(suffix) {
+			candidate := base[:i]
+			if _, err := time.Parse(historyTimeLayout, candidate); err == nil {
+				base = candidate
+			}
 		}
 	}
 	t, err := time.Parse(historyTimeLayout, base)
@@ -290,4 +333,18 @@ func parseHistoryID(id string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// isDecimalDigits reports whether value is a non-empty run of ASCII decimal
+// digits. It backs parseHistoryID's collision-suffix detection.
+func isDecimalDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
