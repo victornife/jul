@@ -967,6 +967,15 @@ describe("ConfigPanel apply flow", () => {
     );
     // The banner remains the live outcome after the terminal record merges.
     expect(await screen.findByText("Applied and live")).toBeInTheDocument();
+    // AC-14: the retained provenance renders as an advisory beside — never
+    // replacing — the immediate live outcome, and surfaces the history snapshot.
+    expect(
+      await screen.findByText("Configuration applied, but recovery/audit finalization degraded"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Managed apply finalization degraded: history sidecar append degraded"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("snap-42")).toBeInTheDocument();
   });
 
   it("shows the deadline hint while pending and a finalization advisory once terminal", async () => {
@@ -1062,6 +1071,61 @@ describe("ConfigPanel apply flow", () => {
     expect(screen.getByText("snap-77")).toBeInTheDocument();
     // The hint disappears once the transaction is terminal.
     expect(screen.queryByText(/Finalization expected by/)).not.toBeInTheDocument();
+  });
+
+  it("renders the preflight timeout phase and claims nothing was persisted", async () => {
+    // AC-08: a pre-persistence preflight timeout (504) names the phase, states
+    // nothing was persisted, and never claims the candidate is serving. No
+    // exact-id ledger record is polled because nothing was written.
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
+      }
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/apply?base_version=v1") {
+        return Promise.resolve(
+          json(
+            {
+              ok: false,
+              mode: "hot",
+              timed_out_phase: "preflight_handlers",
+              message:
+                "The configuration apply exceeded reload_timeout during the " +
+                "preflight_handlers phase; nothing was changed.",
+            },
+            504,
+          ),
+        );
+      }
+      // A preflight timeout persisted nothing, so the console must not poll an
+      // exact-id ledger record for it; reaching this branch would be a defect.
+      if (input.startsWith("/api/config/applies/")) {
+        throw new Error(`must not poll a ledger record for a preflight timeout: ${input}`);
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    expect(
+      await screen.findByText("Configuration not changed — preflight timed out"),
+    ).toBeInTheDocument();
+    // The exact phase name is surfaced and nothing is claimed as serving.
+    expect(screen.getByText(/Phase: preflight_handlers/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing was persisted/)).toBeInTheDocument();
+    expect(screen.queryByText("Applied and live")).not.toBeInTheDocument();
+    expect(screen.queryByText("Saved — final outcome pending")).not.toBeInTheDocument();
   });
 });
 
@@ -1353,6 +1417,168 @@ describe("HistoryPanel rollback flow", () => {
     expect(screen.getByText(/stream subsystem reloaded degraded/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Roll back" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Confirm and roll back" })).not.toBeInTheDocument();
+  });
+
+  it("closes the dialog on a delayed degraded rollback that first polled pending", async () => {
+    // AC-09/AC-10: a degraded (committed, ok=true, non-applied_live) outcome that
+    // only becomes terminal after a pending poll must still keep the dialog open
+    // while pending and then close it — never leaving it stuck or claiming a
+    // premature failure.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input.startsWith("/api/config/rollback")) {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_ddeg",
+              mode: "hot",
+              reload: {
+                id: "rl_ddeg",
+                outcome: "saved_not_live",
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      if (input === "/api/config/applies/rl_ddeg") {
+        recordReads += 1;
+        if (recordReads === 1) {
+          return Promise.resolve(
+            json(
+              {
+                id: "rl_ddeg",
+                state: "pending",
+                operation: "config.rollback",
+                result: { ok: true, apply_id: "rl_ddeg", mode: "hot" },
+              },
+              202,
+            ),
+          );
+        }
+        return Promise.resolve(
+          json({
+            id: "rl_ddeg",
+            state: "terminal",
+            operation: "config.rollback",
+            result: {
+              ok: true,
+              apply_id: "rl_ddeg",
+              mode: "hot",
+              reload: {
+                id: "rl_ddeg",
+                outcome: "applied_degraded",
+                error: "admin subsystem reloaded degraded",
+              },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    // While the exact-id record is still pending, the dialog stays open.
+    expect(await screen.findByText(/live result is still pending/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Roll back to this snapshot?" })).toBeInTheDocument();
+    // Once the delayed terminal (degraded) record arrives, the dialog closes and
+    // the persistent degraded banner appears.
+    expect(
+      await screen.findByText("Rollback applied — degraded reload", undefined, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Roll back to this snapshot?" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/admin subsystem reloaded degraded/)).toBeInTheDocument();
+    expect(recordReads).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps polling through missing (404) grace and never closes until the terminal record", async () => {
+    // AC-09: a not-yet-visible exact-id record (404) must keep the dialog open —
+    // a missing record is never a success — and only the correlated terminal
+    // record resolves and closes it.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input.startsWith("/api/config/rollback")) {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_miss",
+              mode: "hot",
+              reload: {
+                id: "rl_miss",
+                outcome: "saved_not_live",
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      if (input === "/api/config/applies/rl_miss") {
+        recordReads += 1;
+        // The record is not yet visible for the first reads (read-after-write).
+        if (recordReads <= 2) return Promise.resolve(new Response(null, { status: 404 }));
+        return Promise.resolve(
+          json({
+            id: "rl_miss",
+            state: "terminal",
+            operation: "config.rollback",
+            result: {
+              ok: true,
+              apply_id: "rl_miss",
+              mode: "hot",
+              reload: { id: "rl_miss", outcome: "applied_live" },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    // The 404s keep the dialog open with the pending notice — never a success.
+    expect(await screen.findByText(/live result is still pending/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Roll back to this snapshot?" })).toBeInTheDocument();
+    // The exact terminal record eventually resolves and closes the dialog.
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByRole("dialog", { name: "Roll back to this snapshot?" }),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+    expect(recordReads).toBeGreaterThanOrEqual(3);
   });
 });
 

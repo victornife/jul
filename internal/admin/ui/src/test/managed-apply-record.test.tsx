@@ -12,7 +12,7 @@
  */
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ManagedApplyRecordSchema, fetchManagedApply } from "@/api/client.ts";
 import {
@@ -324,6 +324,58 @@ describe("useManagedApplyRecord — hook wiring", () => {
     });
     expect(result.current.record).toBeNull();
     expect(result.current.status).not.toBe("terminal");
+    unmount();
+  });
+
+  it("polls through an initial 404 then a pending record to the terminal record", async () => {
+    // AC-09: the read-after-write 404 grace, the pending poll, and terminalization
+    // are one continuous lifecycle — a first-miss transaction still resolves to
+    // terminal without ever being reported as missing/expired along the way.
+    let calls = 0;
+    globalThis.fetch = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve(new Response(null, { status: 404 }));
+      if (calls === 2) return Promise.resolve(json(pendingRecord(BOOT_ID), 202));
+      return Promise.resolve(json(terminalRecord(BOOT_ID)));
+    });
+    const { result, unmount } = renderHook(() => useManagedApplyRecord(BOOT_ID), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(
+      () => {
+        expect(result.current.status).toBe("terminal");
+      },
+      { timeout: 4000 },
+    );
+    expect(result.current.record?.id).toBe(BOOT_ID);
+    expect(calls).toBeGreaterThanOrEqual(3);
+    unmount();
+  });
+
+  it("manual retry resets terminal lookup state and re-fetches the record", async () => {
+    // A completed terminal lookup stops polling; an explicit retry must clear
+    // that terminal state and re-observe the exact id — never leaving a stale
+    // terminal reported after the operator re-checks.
+    let calls = 0;
+    globalThis.fetch = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve(json(terminalRecord(BOOT_ID)));
+      return Promise.resolve(json(pendingRecord(BOOT_ID), 202));
+    });
+    const { result, unmount } = renderHook(() => useManagedApplyRecord(BOOT_ID), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe("terminal");
+    });
+    act(() => {
+      result.current.retry();
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe("polling");
+    });
+    expect(result.current.record?.state).toBe("pending");
+    expect(calls).toBeGreaterThanOrEqual(2);
     unmount();
   });
 });
