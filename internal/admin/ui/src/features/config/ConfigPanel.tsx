@@ -11,7 +11,6 @@ import {
   applyPatchBatch,
   diffConfig,
   discardPendingRestart,
-  fetchManagedApply,
   fetchOverview,
   fetchPendingRestart,
   fetchRawConfig,
@@ -26,7 +25,7 @@ import {
   type PendingRestartStatus,
 } from "@/api/client.ts";
 import { deriveApplyOutcome, type ApplyOutcome } from "@/lib/applyOutcome.ts";
-import { MISSING_GRACE_ATTEMPTS } from "@/lib/useManagedApplyRecord.ts";
+import { useManagedApplyRecord } from "@/lib/useManagedApplyRecord.ts";
 import { deriveFinalizationAdvisory } from "@/lib/finalizationAdvisory.ts";
 import { useConfigMutationMachine } from "@/features/config/useConfigMutationMachine.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
@@ -166,14 +165,12 @@ function PendingRestartBanner({
   );
 }
 
-// AC-09 exact-ID poll cadence for a saved-not-live managed apply: an immediate
-// first read, a 1s cadence for the first ~10 reads (~10s), then a 2s cadence up
-// to a bounded deadline+margin. LEGACY_OVERVIEW_MAX_POLLS bounds the best-effort
-// runtime-overview poll used only for pre-managed hot applies (stream_status).
+// The exact-ID managed-apply poll (cadence, grace, and deadline expiry) is
+// centralized in useManagedApplyRecord; the panel consumes that shared hook
+// rather than owning a second poll loop. POLL_FAST_INTERVAL_MS and
+// LEGACY_OVERVIEW_MAX_POLLS bound only the best-effort runtime-overview poll used
+// for pre-managed (legacy) hot applies (stream_status).
 const POLL_FAST_INTERVAL_MS = 1000;
-const POLL_SLOW_INTERVAL_MS = 2000;
-const POLL_FAST_POLLS = 10;
-const POLL_MAX_ATTEMPTS = 25;
 const LEGACY_OVERVIEW_MAX_POLLS = 3;
 
 // formatLocalTime renders a server-provided ISO deadline in the operator's local
@@ -255,11 +252,6 @@ export function ConfigPanel() {
     cancelOperation: machineCancelOperation,
   } = machine;
   const applied = appliedState?.result ?? null;
-  // Consecutive 404s while fetching an immediate result's ledger record. The
-  // record is written before the synchronous response returns, but a brief
-  // read-after-write gap is tolerated as a short grace rather than treated as a
-  // gone record (a saved-not-live poll keeps its own stop-on-404 semantics).
-  const immediateRecordMissesRef = useRef(0);
 
   // Patch-reconcile status is pure editor-text UI concern, so it stays local.
   const [patchReconciling, setPatchReconciling] = useState(false);
@@ -270,7 +262,6 @@ export function ConfigPanel() {
   // semantics.
   const startOperation = useCallback((): number => {
     setPatchReconcileError(null);
-    immediateRecordMissesRef.current = 0;
     return machineStartOperation();
   }, [machineStartOperation]);
 
@@ -619,53 +610,20 @@ export function ConfigPanel() {
   // AC-09/AC-14: a managed apply's terminal ledger record is retrieved by its
   // EXACT apply id at GET /api/config/applies/{id} — never the runtime
   // overview's global last_managed_apply, which a newer unrelated apply could
-  // overwrite. A saved-not-live (202) apply is polled to a terminal record on a
-  // bounded schedule (immediate first read, 1s cadence for ~10s, then 2s). An
-  // immediate terminal result (200/409/503) is fetched too — at least once — to
-  // retain finalization provenance, tolerating a short read-after-write 404 gap
-  // via a small grace. A missing record is NEVER treated as success.
-  const applyRecord = useQuery({
-    queryKey: ["config-apply-record", managedApplyID],
-    queryFn: async () => {
-      postApplyPollAttemptsRef.current += 1;
-      const lookup = await fetchManagedApply(managedApplyID as string);
-      if (lookup.kind === "missing") immediateRecordMissesRef.current += 1;
-      else immediateRecordMissesRef.current = 0;
-      // A missing (404) record maps to null so the existing terminal/expiry
-      // logic below is unchanged; a missing record is never a success.
-      return lookup.kind === "record" ? lookup.record : null;
-    },
-    enabled: managedApplyID !== undefined,
-    retry: false,
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnWindowFocus: false,
-    refetchInterval: (query) => {
-      const record = query.state.data;
-      if (record?.state === "terminal") return false;
-      // null == 404. For a saved-not-live poll the record is gone (e.g. after a
-      // restart): stop and show the expired banner rather than any success
-      // claim. For an immediate result the ledger record may just not be visible
-      // yet: retry within a short grace before giving up.
-      if (record === null) {
-        if (pendingApplyID !== undefined) return false;
-        if (immediateRecordMissesRef.current > MISSING_GRACE_ATTEMPTS) return false;
-        return POLL_FAST_INTERVAL_MS;
-      }
-      if (postApplyPollAttemptsRef.current >= POLL_MAX_ATTEMPTS) return false;
-      return postApplyPollAttemptsRef.current >= POLL_FAST_POLLS
-        ? POLL_SLOW_INTERVAL_MS
-        : POLL_FAST_INTERVAL_MS;
-    },
-  });
-  // The pending managed apply stopped resolving to a terminal result within the
-  // bounded budget (deadline reached) or its record vanished (404). Either way
-  // the console must not claim the new configuration is serving. Gated on
-  // pendingApplyID so an immediate result's supplemental fetch never trips it.
-  const pollingExpired =
-    pendingApplyID !== undefined &&
-    applyRecord.data?.state !== "terminal" &&
-    (applyRecord.data === null || postApplyPollAttemptsRef.current >= POLL_MAX_ATTEMPTS);
+  // overwrite. The exact-ID poll (immediate first read, deadline-bounded
+  // cadence, read-after-write 404 grace, and expiry) is owned by the shared
+  // useManagedApplyRecord hook so this panel and HistoryPanel observe one
+  // lifecycle. A missing record is NEVER treated as success. Both a
+  // saved-not-live (202) and an immediate terminal result (200/409/503) carry an
+  // exact apply id whose finalization provenance lives only on the ledger record,
+  // so the hook is enabled for any managed apply id.
+  const managedApply = useManagedApplyRecord(managedApplyID);
+  const applyRecord = managedApply.record;
+  // The pending managed apply did not reach a terminal result by its deadline
+  // (deadline-driven, not attempt-count-driven). The console must not claim the
+  // new configuration is serving. Gated on pendingApplyID so an immediate
+  // result's supplemental fetch never trips the pending/expired UI.
+  const pollingExpired = pendingApplyID !== undefined && managedApply.status === "expired";
 
   // AC-14: finalization provenance is advisory, never readiness-affecting. It is
   // derived from the retained full terminal record (Slice 02) and rendered as a
@@ -678,11 +636,11 @@ export function ConfigPanel() {
   // exact-ID ledger record (pending 202 records carry it); it is dropped once
   // the poll expires so the UI switches to the past-deadline message instead.
   const pendingDeadline =
-    pendingApplyID !== undefined && !pollingExpired ? applyRecord.data?.deadline : undefined;
+    pendingApplyID !== undefined && !pollingExpired ? applyRecord?.deadline : undefined;
 
   useEffect(() => {
     if (managedApplyID === undefined || !appliedState) return;
-    const record = applyRecord.data;
+    const record = applyRecord;
     // AC-09: only a *terminal* record for the EXACT awaited id is retained. A
     // pending (202) record, a missing record (null/404), or a record for any
     // other id is never treated as success.
@@ -713,7 +671,7 @@ export function ConfigPanel() {
     appliedState,
     managedApplyID,
     pendingApplyID,
-    applyRecord.data,
+    applyRecord,
     reconcilePatchEditor,
     refreshEditorAfterFailure,
     operationIDRef,
@@ -1133,9 +1091,7 @@ export function ConfigPanel() {
                   onClick={() => {
                     // Re-check the exact-ID ledger record without inventing a new
                     // operation, so the original result is preserved.
-                    postApplyPollAttemptsRef.current = 0;
-                    immediateRecordMissesRef.current = 0;
-                    void applyRecord.refetch();
+                    managedApply.retry();
                   }}
                   className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
                 >

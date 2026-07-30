@@ -9,7 +9,6 @@ import {
   fetchHistory,
   fetchHistorySnapshot,
   diffConfig,
-  fetchManagedApply,
   rollback,
   describeApiError,
   ConfigAdminChangeError,
@@ -19,6 +18,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { EmptyState, Loading } from "@/components/ui.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
+import { useManagedApplyRecord } from "@/lib/useManagedApplyRecord.ts";
 import {
   deriveFinalizationAdvisory,
   type FinalizationAdvisory,
@@ -201,7 +201,6 @@ export function HistoryPanel() {
   const [adminChanges, setAdminChanges] = useState<string[]>([]);
   const [pendingApplyID, setPendingApplyID] = useState<string | null>(null);
   const [terminalError, setTerminalError] = useState<Error | null>(null);
-  const [pollingExpired, setPollingExpired] = useState(false);
   // AC-10: a committed-but-degraded rollback surfaces here as a persistent,
   // dismissable warning banner (distinct from an error) with no retry action.
   const [degradedNotice, setDegradedNotice] = useState<string | null>(null);
@@ -209,7 +208,6 @@ export function HistoryPanel() {
   // reload outcome. Rendered as a non-blocking banner. Never affects readiness.
   const [finalizationNotice, setFinalizationNotice] = useState<FinalizationAdvisory | null>(null);
   const rollbackAttemptRef = useRef(0);
-  const rollbackPollAttemptsRef = useRef(0);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["history"],
@@ -227,8 +225,6 @@ export function HistoryPanel() {
       if (rollbackAttemptRef.current !== variables.attempt) return;
       setRollingId(null);
       if (result.reload?.outcome === "saved_not_live" && result.apply_id) {
-        rollbackPollAttemptsRef.current = 0;
-        setPollingExpired(false);
         setPendingApplyID(result.apply_id);
         setTerminalError(null);
         return;
@@ -269,44 +265,24 @@ export function HistoryPanel() {
   // AC-09: poll the terminal ledger by the EXACT apply ID rather than reading
   // the runtime overview's global last_managed_apply. The overview reflects the
   // most recent managed apply process-wide, so a newer, unrelated apply could
-  // masquerade as this rollback's result; the exact-ID endpoint cannot. A 404
-  // (record not yet visible) resolves to null and keeps polling — a missing
-  // record is never mistaken for success.
-  const rollbackTerminal = useQuery({
-    queryKey: ["rollback-apply-record", pendingApplyID],
-    queryFn: async () => {
-      rollbackPollAttemptsRef.current += 1;
-      if (rollbackPollAttemptsRef.current >= 20) setPollingExpired(true);
-      if (!pendingApplyID) return null;
-      const lookup = await fetchManagedApply(pendingApplyID);
-      // A missing (404) record maps to null so the terminal-only resolution
-      // below keeps waiting; a missing record is never mistaken for success.
-      return lookup.kind === "record" ? lookup.record : null;
-    },
-    enabled: pendingApplyID !== null,
-    retry: false,
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnWindowFocus: false,
-    refetchInterval: (query) => {
-      const record = query.state.data;
-      // Stop once the exact-ID record is terminal, or polling has expired; a
-      // null (404) or pending record keeps the interval alive.
-      return record?.state === "terminal" || rollbackPollAttemptsRef.current >= 20
-        ? false
-        : 1500;
-    },
-  });
+  // masquerade as this rollback's result; the exact-ID endpoint cannot. The
+  // shared useManagedApplyRecord hook owns the read-after-write 404 grace,
+  // deadline-bounded cadence, and expiry so this panel and ConfigPanel observe
+  // one lifecycle. A missing record is never mistaken for success.
+  const rollbackManaged = useManagedApplyRecord(pendingApplyID ?? undefined);
+  const rollbackRecord = rollbackManaged.record;
+  // The rollback did not reach a terminal result by its deadline. Gated on a
+  // pending apply id so the idle hook never trips the expired UI.
+  const pollingExpired = pendingApplyID !== null && rollbackManaged.status === "expired";
 
   useEffect(() => {
     if (!pendingApplyID || !confirmId) return;
-    const record = rollbackTerminal.data;
+    const record = rollbackRecord;
     // Only a terminal record for the exact ID resolves the wait. null (404, not
     // yet recorded) and state==="pending" both keep the dialog open — the
     // console never claims success from a missing or in-flight record.
     if (!record || record.id !== pendingApplyID || record.state !== "terminal") return;
     setPendingApplyID(null);
-    setPollingExpired(false);
     setConfirmAdmin(false);
     setAdminChanges([]);
     // AC-14: surface finalization provenance whenever the terminal record
@@ -344,7 +320,7 @@ export function HistoryPanel() {
       ),
     );
     void qc.invalidateQueries();
-  }, [confirmId, pendingApplyID, qc, rollbackTerminal.data]);
+  }, [confirmId, pendingApplyID, qc, rollbackRecord]);
 
   if (isLoading) return <Loading label="Loading history…" />;
   if (isError || !data)
@@ -456,10 +432,8 @@ export function HistoryPanel() {
                     setAdminChanges([]);
                     setPendingApplyID(null);
                     setTerminalError(null);
-                    setPollingExpired(false);
                     setDegradedNotice(null);
                     setFinalizationNotice(null);
-                    rollbackPollAttemptsRef.current = 0;
                     rollbackMutation.reset();
                   }}
                   rolling={rollingId === entry.id}
@@ -488,7 +462,6 @@ export function HistoryPanel() {
             setAdminChanges([]);
             setPendingApplyID(null);
             setTerminalError(null);
-            setPollingExpired(false);
             rollbackMutation.reset();
           }}
           adminChanges={adminChanges}
@@ -501,7 +474,7 @@ export function HistoryPanel() {
                 : null)
           }
           pending={pendingApplyID !== null}
-          pollingExpired={pendingApplyID !== null && pollingExpired}
+          pollingExpired={pollingExpired}
         />
       )}
     </div>

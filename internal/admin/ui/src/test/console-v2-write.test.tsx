@@ -756,7 +756,90 @@ describe("ConfigPanel apply flow", () => {
     });
   });
 
-  it("does not claim success when the exact apply-id record is gone (404 after restart)", async () => {
+  it("tolerates a brief read-after-write 404 on the saved-not-live path then finalizes", async () => {
+    // BLOCKER 3: a saved-not-live (202) apply whose ledger record is not yet
+    // visible must pass through the shared hook's read-after-write 404 grace —
+    // never tripping the "not a success" expiry banner on the first 404 — and
+    // still resolve once the correlated terminal record appears.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
+      }
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/apply?base_version=v1") {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_grace",
+              mode: "hot",
+              version: "v2",
+              persisted: true,
+              reload: {
+                id: "rl_grace",
+                outcome: "saved_not_live",
+                persisted: true,
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      // The record is briefly not visible (read-after-write): 404 for the first
+      // two reads, then the correlated terminal record appears.
+      if (input === "/api/config/applies/rl_grace") {
+        recordReads += 1;
+        if (recordReads <= 2) return Promise.resolve(new Response(null, { status: 404 }));
+        return Promise.resolve(
+          json({
+            id: "rl_grace",
+            state: "terminal",
+            operation: "config.apply",
+            result: {
+              ok: true,
+              apply_id: "rl_grace",
+              mode: "hot",
+              reload: { id: "rl_grace", outcome: "applied_live", published: true },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
+    // The brief 404s never trip the expiry banner: the shared grace keeps
+    // polling until the terminal record arrives.
+    await waitFor(
+      () => {
+        expect(recordReads).toBeGreaterThanOrEqual(3);
+      },
+      { timeout: 4000 },
+    );
+    expect(screen.queryByText("Final result still unavailable")).not.toBeInTheDocument();
+  });
+
+  it("expires on the ledger deadline (not an attempt count) and never claims success", async () => {
+    // BLOCKER 2/4: the shipped poll must stop and surface the "not a success"
+    // banner when the exact-ID record's deadline has passed — driven by the
+    // deadline the shared hook reads, not a fixed attempt count.
     globalThis.fetch = vi.fn((input: string) => {
       if (input === "/api/config") {
         return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
@@ -785,10 +868,21 @@ describe("ConfigPanel apply flow", () => {
           ),
         );
       }
-      // The record vanished (e.g. the process restarted): 404. A missing record
-      // must NEVER be upgraded to a success claim (AC-09).
+      // The record is still pending but its absolute deadline has already
+      // elapsed: the poll must stop and NEVER upgrade to a success claim (AC-09).
       if (input === "/api/config/applies/rl_8") {
-        return Promise.resolve(new Response(null, { status: 404 }));
+        return Promise.resolve(
+          json(
+            {
+              id: "rl_8",
+              state: "pending",
+              operation: "config.apply",
+              deadline: "2000-01-01T00:00:00Z",
+              result: { ok: true, apply_id: "rl_8", mode: "hot" },
+            },
+            202,
+          ),
+        );
       }
       throw new Error(`unexpected fetch: ${input}`);
     }) as unknown as typeof fetch;
@@ -1012,7 +1106,9 @@ describe("ConfigPanel apply flow", () => {
         recordReads += 1;
         // AC-08: the pending record carries the absolute deadline used for the
         // "Finalization expected by" hint; the terminal record then carries
-        // finalization provenance (AC-14) that must render as an advisory.
+        // finalization provenance (AC-14) that must render as an advisory. The
+        // deadline is far in the future so the hint (not the past-deadline
+        // expiry) is the observed state while pending, independent of wall clock.
         if (recordReads === 1) {
           return Promise.resolve(
             json(
@@ -1020,7 +1116,7 @@ describe("ConfigPanel apply flow", () => {
                 id: "rl_fin",
                 state: "pending",
                 operation: "config.apply",
-                deadline: "2026-07-30T12:00:00Z",
+                deadline: "2099-01-01T12:00:00Z",
                 result: { ok: true, apply_id: "rl_fin", mode: "hot" },
               },
               202,
@@ -1579,6 +1675,72 @@ describe("HistoryPanel rollback flow", () => {
       { timeout: 5000 },
     );
     expect(recordReads).toBeGreaterThanOrEqual(3);
+  });
+
+  it("expires a pending rollback on its ledger deadline without claiming success", async () => {
+    // BLOCKER 2/4: HistoryPanel and ConfigPanel share one deadline-driven poll.
+    // A rollback whose exact-id record is still pending past its absolute
+    // deadline must surface the "final rollback result still unavailable" notice
+    // and re-enable Cancel — driven by the deadline the shared hook reads, not a
+    // fixed attempt count — and never claim the rollback succeeded.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input.startsWith("/api/config/rollback")) {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_rbexp",
+              mode: "hot",
+              reload: {
+                id: "rl_rbexp",
+                outcome: "saved_not_live",
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      // The record stays pending but its absolute deadline has already elapsed.
+      if (input === "/api/config/applies/rl_rbexp") {
+        recordReads += 1;
+        return Promise.resolve(
+          json(
+            {
+              id: "rl_rbexp",
+              state: "pending",
+              operation: "config.rollback",
+              deadline: "2000-01-01T00:00:00Z",
+              result: { ok: true, apply_id: "rl_rbexp", mode: "hot" },
+            },
+            202,
+          ),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    // The past-deadline record surfaces the expiry notice, not a success — and
+    // the dialog stays open so the operator can dismiss it deliberately.
+    expect(
+      await screen.findByText(/final rollback result is still unavailable/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Roll back to this snapshot?" })).toBeInTheDocument();
+    expect(recordReads).toBeGreaterThanOrEqual(1);
   });
 });
 
