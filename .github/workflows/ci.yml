@@ -1,6 +1,10 @@
 name: CI
 
 on:
+  # Manual dispatch lets the audit-closure SHA be re-run on demand so the exact
+  # commit under review can be certified green without a new push (see
+  # docs/audit/2026-07-25-configuration-audit-closure.md, release gate step 2).
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
