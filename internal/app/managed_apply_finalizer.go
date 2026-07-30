@@ -179,6 +179,12 @@ func (f *managedApplyFinalizer) Finalize(completion admin.ManagedApplyCompletion
 		}
 	}
 
+	// WS06 §7.5: publish the retained terminal-ledger depth after every terminal
+	// completion so the gauge tracks the bounded ledger's current size.
+	if f.metrics != nil {
+		f.metrics.SetManagedApplyRegistryEntries(f.registry.TerminalCount())
+	}
+
 	f.updateLatestIfNewest(result, managedOutcome)
 	// WS02 §3.9: publish the advisory, non-readiness finalization-health state
 	// for this terminal ID. Every terminalization publishes exactly one advisory:
@@ -249,7 +255,7 @@ func (f *managedApplyFinalizer) reportFinalizationError(applyID string, err erro
 		)
 	}
 	if f.metrics != nil {
-		f.metrics.ObserveManagedApplyFinalizationError()
+		f.metrics.ObserveManagedApplyFinalizationError("registry")
 	}
 	if f.setAdvisory != nil {
 		f.setAdvisory(admin.ManagedApplyAdvisory{

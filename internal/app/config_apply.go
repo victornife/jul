@@ -172,6 +172,18 @@ type ConfigApplyCoordinator struct {
 	// context-free and unit-test callers are unaffected.
 	OnManagedApplyFinalizationError func(applyID string, err error)
 
+	// ReportManagedApplyError makes a managed-apply machinery failure that
+	// happens OUTSIDE the unified completion callback explicit (WS06 §7.6). The
+	// coordinator calls it with the apply ID, a bounded phase ("restoration" for
+	// a terminal restoration write failure, "pending" for a pending-registration
+	// write failure), and the underlying error so the composition root can emit a
+	// structured error log and a bounded finalization-error metric instead of
+	// silently swallowing the failure. It carries only the bounded error message
+	// — never raw TOML, secrets, or actor metadata. Nil leaves the failure
+	// recorded on the returned result only, so context-free and unit-test callers
+	// are unaffected.
+	ReportManagedApplyError func(applyID string, phase string, err error)
+
 	// beforePersist is a deterministic test barrier invoked after preflight and,
 	// for staging, after the prepared marker is written but before the final
 	// expected-baseline comparison. Production leaves it nil.
@@ -1073,6 +1085,10 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// by the runtime. Carry the error into terminal finalization and make it
 		// visible through logs/health/ledger.
 		trackingErr = fmt.Errorf("register managed apply pending record: %w", err)
+		// WS06 §7.6: also make the pending-registration failure explicit at the
+		// failure point through the composition root's structured log and bounded
+		// finalization-error metric, not only on the terminal result.
+		c.logPendingRegistrationFailure(id, trackingErr)
 	}
 
 	// Finalizer goroutine: sole owner of the reload result and restoration. It
@@ -1328,14 +1344,26 @@ func (c *ConfigApplyCoordinator) conflictResult(mode ApplyMode, persistedVersion
 	}
 }
 
-// logRestorationFailure records a restoration failure in a best-effort way.
-// The synchronous path uses withRestorationOutcome to surface the same error
-// when it is still waiting; this method covers the saved_not_live path.
+// logRestorationFailure makes a saved_not_live restoration write failure
+// explicit (WS06 §7.6). The synchronous path uses withRestorationOutcome to
+// surface the same error when it is still waiting; this method covers the
+// saved_not_live path where no synchronous waiter remains, routing the failure
+// to the composition root's structured log and finalization-error metric.
 func (c *ConfigApplyCoordinator) logRestorationFailure(id string, err error) {
-	// Placeholder for future metric/structured-log emission; kept minimal to
-	// avoid importing logging packages into the coordinator.
-	_ = id
-	_ = err
+	if c.ReportManagedApplyError != nil {
+		c.ReportManagedApplyError(id, "restoration", err)
+	}
+}
+
+// logPendingRegistrationFailure makes a post-persistence pending-registration
+// write failure explicit (WS06 §7.6). The error is still carried onto the
+// terminal result for the ledger/overview; this routes the same failure to the
+// composition root's structured log and finalization-error metric at the point
+// it happens.
+func (c *ConfigApplyCoordinator) logPendingRegistrationFailure(id string, err error) {
+	if c.ReportManagedApplyError != nil {
+		c.ReportManagedApplyError(id, "pending", err)
+	}
 }
 
 // withRestorationOutcome populates the restoration fields of an ApplyResult

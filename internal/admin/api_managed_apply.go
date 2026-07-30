@@ -67,21 +67,35 @@ func (s *Server) handleManagedApplyGet(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	if !validManagedApplyID(id) {
+		s.observeManagedApplyLookup("invalid")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid apply id"})
 		return
 	}
 	if s.deps.ManagedApplies == nil {
+		s.observeManagedApplyLookup("missing")
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "managed apply not found"})
 		return
 	}
 	rec, ok := s.deps.ManagedApplies.Get(id)
 	if !ok {
+		s.observeManagedApplyLookup("missing")
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "managed apply not found"})
 		return
 	}
 	if rec.State == ManagedApplyPending {
+		s.observeManagedApplyLookup("pending")
 		writeJSON(w, http.StatusAccepted, rec.toPublic())
 		return
 	}
+	s.observeManagedApplyLookup("terminal")
 	writeJSON(w, http.StatusOK, rec.toPublic())
+}
+
+// observeManagedApplyLookup records one exact-ID lookup outcome when the
+// composition root wired a bounded lookup metric (WS06 §7.5). result is a fixed
+// low-cardinality enum: "pending", "terminal", "missing", or "invalid".
+func (s *Server) observeManagedApplyLookup(result string) {
+	if s.deps.ObserveManagedApplyLookup != nil {
+		s.deps.ObserveManagedApplyLookup(result)
+	}
 }

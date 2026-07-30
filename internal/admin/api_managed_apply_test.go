@@ -95,6 +95,64 @@ func TestManagedApplyGet_TerminalBody(t *testing.T) {
 	}
 }
 
+// TestManagedApplyGet_LookupMetric proves the GET /api/config/applies/{id}
+// handler records exactly one bounded lookup outcome per request through the
+// injected observer: "terminal", "pending", "missing", or "invalid" (WS06 §7.5).
+func TestManagedApplyGet_LookupMetric(t *testing.T) {
+	reg := NewManagedApplyRegistry(0, 0)
+	_ = reg.BeginPending(ManagedApplyRecord{ID: "rl_1", Operation: ApplyOperationConfigApply})
+	_ = reg.Complete(ManagedApplyRecord{
+		ID:        "rl_2",
+		Operation: ApplyOperationPatchApply,
+		Result:    ConfigApplyResult{ApplyID: "rl_2"},
+	})
+
+	var got []string
+	deps := Deps{
+		ManagedApplies:            reg,
+		ObserveManagedApplyLookup: func(result string) { got = append(got, result) },
+	}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+	h := s.routes()
+
+	cases := []struct {
+		id   string
+		want string
+	}{
+		{"rl_2", "terminal"},
+		{"rl_1", "pending"},
+		{"rl_9999", "missing"},
+		{"rl_bad", "invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			got = nil
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/config/applies/"+tc.id, nil)
+			h.ServeHTTP(rr, req)
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("lookup observations = %v, want exactly [%q]", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestManagedApplyGet_LookupMetricMissingRegistry proves a nil ledger records a
+// "missing" lookup outcome rather than skipping the metric (WS06 §7.5).
+func TestManagedApplyGet_LookupMetricMissingRegistry(t *testing.T) {
+	var got []string
+	deps := Deps{ObserveManagedApplyLookup: func(result string) { got = append(got, result) }}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+	h := s.routes()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/config/applies/rl_1", nil)
+	h.ServeHTTP(rr, req)
+	if len(got) != 1 || got[0] != "missing" {
+		t.Fatalf("lookup observations = %v, want exactly [\"missing\"]", got)
+	}
+}
+
 // TestManagedApplyGet_NilRegistry proves a nil ledger yields 404 for all IDs
 // rather than panicking (AC-02).
 func TestManagedApplyGet_NilRegistry(t *testing.T) {

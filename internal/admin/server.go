@@ -435,6 +435,12 @@ type Deps struct {
 	// precise outcome of a recent accepted apply regardless of later
 	// transactions. Nil yields 404 for all IDs.
 	ManagedApplies *ManagedApplyRegistry
+	// ObserveManagedApplyLookup counts one exact-ID managed-apply lookup by
+	// bounded result ("pending", "terminal", "missing", or "invalid") for the
+	// GET /api/config/applies/{id} endpoint (WS06 §7.5). It carries no apply ID,
+	// actor, or source IP. Nil disables lookup metrics so context-free callers
+	// and tests are unaffected.
+	ObserveManagedApplyLookup func(result string)
 	// AdminHealth reports the health of admin-subsystem concerns that are owned
 	// by the composition root (e.g., the most recent reload's admin subsystem
 	// result). It returns nil when healthy. When it returns an error, /readyz

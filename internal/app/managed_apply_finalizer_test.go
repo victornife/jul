@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,27 @@ func rawSnapshotCount(t *testing.T, dir string) int {
 		n++
 	}
 	return n
+}
+
+// scrapeMetricLine returns the value token of the single unlabeled Prometheus
+// sample named `name` exported by m, or fails when it is absent. It reads the
+// public exposition handler so a test can assert a metric without touching the
+// metrics package's private registry.
+func scrapeMetricLine(t *testing.T, m *observability.Metrics, name string) string {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/metrics", nil))
+	for _, line := range strings.Split(rr.Body.String(), "\n") {
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == name {
+			return fields[1]
+		}
+	}
+	t.Fatalf("metric %q not found in exposition output", name)
+	return ""
 }
 
 // TestManagedApplyFinalizerExactlyOnce is the WS02 §3.7 orchestrator test
@@ -218,6 +240,13 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 	}
 	if rec.FinalizationError != "" {
 		t.Errorf("ledger finalization_error = %q, want empty", rec.FinalizationError)
+	}
+
+	// WS06 §7.5: the terminal completion published the retained-ledger gauge from
+	// the real registry depth (TerminalCount == 1) through the production
+	// finalizer wiring.
+	if got := scrapeMetricLine(t, finalizer.metrics, "jul_managed_apply_terminal_registry_entries"); got != "1" {
+		t.Errorf("jul_managed_apply_terminal_registry_entries = %q, want 1", got)
 	}
 
 	// The singular latest-outcome pointer advanced to this finalized outcome.

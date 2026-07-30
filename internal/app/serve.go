@@ -715,7 +715,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				"apply_id", applyID,
 				"error", detail,
 			)
-			metrics.ObserveManagedApplyFinalizationError()
+			metrics.ObserveManagedApplyFinalizationError("callback_panic")
 			// WS02 §3.9: publish the advisory, non-readiness finalization health.
 			// A panic aborts the normal completion path, so this is the only
 			// advisory write for the ID; it never gates /readyz.
@@ -734,7 +734,29 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 					CompletedAt:       time.Now().UTC(),
 					FinalizationError: detail,
 				})
+				// WS06 §7.5: keep the retained-ledger gauge in sync after this
+				// out-of-band terminal completion.
+				metrics.SetManagedApplyRegistryEntries(managedApplies.TerminalCount())
 			}
+		}
+		// WS06 §7.6: make managed-apply machinery failures that happen OUTSIDE
+		// the unified completion callback explicit — a saved_not_live terminal
+		// restoration write failure and a post-persistence pending-registration
+		// write failure. The coordinator supplies a bounded phase; the hook emits
+		// a structured error log and the bounded finalization-error metric so the
+		// failure is observable instead of silently swallowed. It never fails an
+		// already-committed apply: the raw configuration stays roll-back-able.
+		coordinator.ReportManagedApplyError = func(applyID, phase string, err error) {
+			detail := "managed apply " + phase + " failed"
+			if err != nil {
+				detail = err.Error()
+			}
+			log.Error("managed apply "+phase+" failed",
+				"apply_id", applyID,
+				"phase", phase,
+				"error", detail,
+			)
+			metrics.ObserveManagedApplyFinalizationError(phase)
 		}
 		// WS02 §3.7: the unified completion callback owns terminal finalization
 		// through the single managedApplyFinalizer orchestrator. It claims the
