@@ -7,6 +7,7 @@ package server
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
 	"jul/internal/config"
@@ -21,7 +22,7 @@ const ACMECompiled = false
 // ACME it returns (nil, nil) so static-TLS and plain-HTTP configurations build
 // and run normally. The signature matches the acme-tagged build so the
 // composition root is identical regardless of build tags.
-func NewACMEManager(servers []config.ServerConfig, _ func(domain string, notAfter time.Time)) (ACMEManager, error) {
+func NewACMEManager(servers []config.ServerConfig, _ func(domain string, notAfter time.Time), _, _ *http.Client) (ACMEManager, error) {
 	for _, srv := range servers {
 		if srv.TLS != nil && srv.TLS.Enabled && srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
 			return nil, fmt.Errorf("tls.acme is enabled but this build was compiled without the %q build tag (rebuild with -tags acme)", "acme")

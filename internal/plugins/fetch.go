@@ -181,6 +181,27 @@ func ipBlocked(ip net.IP) bool {
 	return false
 }
 
+// fetchDial builds the plugin fetch DialContext: an SSRF-validating dialer
+// (resolve, refuse loopback/private/CGNAT, dial a validated IP) composed beneath
+// the optional global egress guard, so a fetch must satisfy both. When present,
+// the egress guard evaluates the requested host and every resolved IP first and
+// refuses a destination outside the [egress] allow-list before the SSRF dialer
+// runs; its refusals wrap egress.ErrBlocked so the host maps them to a distinct
+// guest code.
+func (p *plugin) fetchDial(d dialer, resolver ipResolver) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	ssrf := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		return dialValidatedIPs(ctx, d, resolver, network, host, port)
+	}
+	if p.egressWrap != nil {
+		return p.egressWrap(ssrf)
+	}
+	return ssrf
+}
+
 // newFetchClient builds a temporary http.Client for doFetch when p.client is
 // nil (backwards-compat for tests that construct bare plugin structs).
 func newFetchClient(p *plugin) *http.Client {
@@ -190,16 +211,8 @@ func newFetchClient(p *plugin) *http.Client {
 		resolver = net.DefaultResolver
 	}
 	return &http.Client{
-		Timeout: p.fetchTimeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				host, port, err := net.SplitHostPort(addr)
-				if err != nil {
-					return nil, err
-				}
-				return dialValidatedIPs(ctx, dialer, resolver, network, host, port)
-			},
-		},
+		Timeout:   p.fetchTimeout,
+		Transport: &http.Transport{DialContext: p.fetchDial(dialer, resolver)},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return errors.New("too many redirects")

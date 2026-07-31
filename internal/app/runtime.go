@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -31,6 +32,12 @@ type RuntimeBuilder struct {
 	Config  *config.Config
 	Logger  *slog.Logger
 	Metrics *observability.Metrics
+	// ACMEClient guards the ACME directory/order/challenge HTTP calls when the
+	// egress allow-list is enabled; nil keeps the acme package's default client.
+	ACMEClient *http.Client
+	// OCSPClient guards the OCSP responder fetch when the egress allow-list is
+	// enabled; nil keeps the default client.
+	OCSPClient *http.Client
 }
 
 // Runtime holds the process-lifetime subsystems built by RuntimeBuilder. It is
@@ -96,7 +103,7 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 	// and answers HTTP-01 challenges. nil means no block enables ACME; an error
 	// means ACME is enabled but this binary lacks the "acme" build tag. Enabling
 	// ACME after startup requires a restart (the domain set is fixed here).
-	acmeMgr, err := server.NewACMEManager(cfg.Servers, b.Metrics.ObserveCertExpiry)
+	acmeMgr, err := server.NewACMEManager(cfg.Servers, b.Metrics.ObserveCertExpiry, b.ACMEClient, b.OCSPClient)
 	if err != nil {
 		return fail(fmt.Errorf("initialize ACME: %w", err))
 	}

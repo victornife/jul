@@ -31,18 +31,22 @@ const letsEncryptStagingURL = "https://acme-staging-v02.api.letsencrypt.org/dire
 // Server.listenerNextProtos); autocert detects the challenge from the
 // ClientHello and returns the special challenge certificate.
 type acmeManager struct {
-	mgr     *autocert.Manager
-	onIssue func(domain string, notAfter time.Time)
-	ocsp    bool // staple OCSP responses onto issued certificates
+	mgr        *autocert.Manager
+	onIssue    func(domain string, notAfter time.Time)
+	ocsp       bool         // staple OCSP responses onto issued certificates
+	ocspClient *http.Client // guarded OCSP responder client; nil = default
 }
 
 // NewACMEManager builds an ACME manager covering every acme-enabled server
 // block, or returns (nil, nil) when no block enables ACME. onIssue, if non-nil,
-// is invoked with each served certificate's leaf expiry for metrics. The first
-// block's email, CA, cache directory, and OCSP-stapling setting configure the
-// shared account and on-disk cache (validation keeps these consistent for a
-// single listener).
-func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, notAfter time.Time)) (ACMEManager, error) {
+// is invoked with each served certificate's leaf expiry for metrics. acmeClient,
+// when non-nil, guards the ACME directory/order/challenge HTTP calls through the
+// egress allow-list; ocspClient likewise guards OCSP responder fetches. Both nil
+// preserve the default (unguarded) clients so an egress-disabled build is
+// unchanged. The first block's email, CA, cache directory, and OCSP-stapling
+// setting configure the shared account and on-disk cache (validation keeps these
+// consistent for a single listener).
+func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, notAfter time.Time), acmeClient, ocspClient *http.Client) (ACMEManager, error) {
 	var domains []string
 	var email, ca, cacheDir string
 	ocsp, ocspSet := true, false
@@ -75,14 +79,18 @@ func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, n
 	if len(domains) == 0 {
 		return nil, nil // no ACME configured
 	}
+	client := &acme.Client{DirectoryURL: directoryURL(ca)}
+	if acmeClient != nil {
+		client.HTTPClient = acmeClient
+	}
 	m := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Cache:      autocert.DirCache(cacheDir),
 		HostPolicy: autocert.HostWhitelist(domains...),
 		Email:      email,
-		Client:     &acme.Client{DirectoryURL: directoryURL(ca)},
+		Client:     client,
 	}
-	return &acmeManager{mgr: m, onIssue: onIssue, ocsp: ocsp}, nil
+	return &acmeManager{mgr: m, onIssue: onIssue, ocsp: ocsp, ocspClient: ocspClient}, nil
 }
 
 // directoryURL maps a configured CA name to its ACME directory URL. The empty
@@ -110,7 +118,7 @@ func (a *acmeManager) Provider(domains []string) CertProvider {
 	if !a.ocsp {
 		return base
 	}
-	return newOCSPStapler(base)
+	return newOCSPStapler(base, a.ocspClient)
 }
 
 // ChallengeHandler returns autocert's HTTP-01 handler, which answers challenge

@@ -61,4 +61,3 @@ func TestServerTimeoutOverrides(t *testing.T) {
 		t.Errorf("maxHeaderBytes = %d, want 4096", got)
 	}
 }
-

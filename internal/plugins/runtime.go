@@ -44,7 +44,16 @@ type Options struct {
 	OnPanic func(plugin string)
 	// KV overrides the key/value backing store. Defaults to an in-memory store.
 	KV KVStore
+	// EgressWrap, when set, wraps a plugin fetch dialer with the global egress
+	// allow-list so a plugin fetch must satisfy both its own allowed_hosts/SSRF
+	// guard and the server-wide [egress] policy. It is nil when egress is
+	// disabled, leaving plugin fetches guarded only by their local rules.
+	EgressWrap func(base DialFunc) DialFunc
 }
+
+// DialFunc matches net.Dialer.DialContext. The plugin fetch client composes an
+// SSRF-validating dialer beneath the optional global egress guard.
+type DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // Manager owns the process-wide plugin runtime resources: the shared
 // compilation cache (so unchanged modules are recompiled cheaply across
@@ -55,6 +64,9 @@ type Manager struct {
 	kv       KVStore
 	onInvoke func(string, string, time.Duration)
 	onPanic  func(string)
+	// egressWrap composes the global egress guard beneath each plugin's fetch
+	// SSRF guard; nil when egress is disabled.
+	egressWrap func(base DialFunc) DialFunc
 }
 
 // NewManager creates a Manager. It never fails in the compiled build, but
@@ -76,11 +88,12 @@ func NewManager(opts Options) (*Manager, error) {
 		onPanic = func(string) {}
 	}
 	return &Manager{
-		log:      opts.Logger,
-		cache:    wazero.NewCompilationCache(),
-		kv:       kv,
-		onInvoke: onInvoke,
-		onPanic:  onPanic,
+		log:        opts.Logger,
+		cache:      wazero.NewCompilationCache(),
+		kv:         kv,
+		onInvoke:   onInvoke,
+		onPanic:    onPanic,
+		egressWrap: opts.EgressWrap,
 	}, nil
 }
 
@@ -146,6 +159,10 @@ type plugin struct {
 	// guard; nil uses net.DefaultResolver.
 	resolver ipResolver
 
+	// egressWrap composes the global egress allow-list beneath the SSRF guard for
+	// outbound fetches; nil when egress is disabled.
+	egressWrap func(base DialFunc) DialFunc
+
 	// client is the reusable HTTP client for guarded outbound fetches.
 	// Created once per plugin to enable connection pooling.
 	client *http.Client
@@ -199,6 +216,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		log:          m.log,
 		onInvoke:     m.onInvoke,
 		onPanic:      m.onPanic,
+		egressWrap:   m.egressWrap,
 	}
 	if p.fetchTimeout <= 0 {
 		p.fetchTimeout = 5 * time.Second
@@ -216,16 +234,8 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		resolver = net.DefaultResolver
 	}
 	p.client = &http.Client{
-		Timeout: p.fetchTimeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				host, port, err := net.SplitHostPort(addr)
-				if err != nil {
-					return nil, err
-				}
-				return dialValidatedIPs(ctx, dialer, resolver, network, host, port)
-			},
-		},
+		Timeout:   p.fetchTimeout,
+		Transport: &http.Transport{DialContext: p.fetchDial(dialer, resolver)},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return errors.New("too many redirects")

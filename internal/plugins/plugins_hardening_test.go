@@ -16,6 +16,9 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"jul/internal/config"
+	"jul/internal/egress"
 )
 
 func TestHostAllowed(t *testing.T) {
@@ -85,6 +88,107 @@ func TestFetchBlocksDNSRebinding(t *testing.T) {
 	}
 	if _, _, err := p.doFetch(context.Background(), "GET", "https://api.example.com/", nil); err == nil {
 		t.Fatal("doFetch to rebound private IP succeeded, want SSRF guard rejection")
+	}
+}
+
+// dialerFunc adapts a function to the dialer interface so tests can observe the
+// address the fetch chain would connect to without a real network dial.
+type dialerFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+func (f dialerFunc) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return f(ctx, network, addr)
+}
+
+// TestFetchDialIntersection proves the WASM plugin fetch enforces both its own
+// SSRF guard and the global [egress] allow-list: a destination must satisfy both
+// to connect, a global-policy refusal wraps egress.ErrBlocked (distinct from the
+// local errFetchBlocked), and the SSRF guard still refuses a private address
+// even when the global policy would allow it.
+func TestFetchDialIntersection(t *testing.T) {
+	pluginWrap := func(allow ...string) (func(base DialFunc) DialFunc, ipResolver) {
+		res := rebindResolver{ip: "8.8.8.8"} // public, passes the SSRF guard
+		pol, err := egress.New(config.EgressConfig{Enabled: true, Allow: allow}, egress.WithResolver(res))
+		if err != nil {
+			t.Fatalf("egress.New: %v", err)
+		}
+		return pol.For(egress.SubsystemPlugin).DialContextWith, res
+	}
+
+	var dialed string
+	base := dialerFunc(func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialed = addr
+		c, _ := net.Pipe()
+		return c, nil
+	})
+
+	t.Run("both allowed reaches the dialer", func(t *testing.T) {
+		dialed = ""
+		wrap, res := pluginWrap("8.0.0.0/8")
+		p := &plugin{resolver: res, egressWrap: wrap}
+		conn, err := p.fetchDial(base, res)(context.Background(), "tcp", "api.example.com:443")
+		if err != nil {
+			t.Fatalf("both allowed: %v", err)
+		}
+		_ = conn.Close()
+		if dialed != "8.8.8.8:443" {
+			t.Errorf("dialed = %q, want 8.8.8.8:443", dialed)
+		}
+	})
+
+	t.Run("global policy blocks before the dialer", func(t *testing.T) {
+		dialed = ""
+		wrap, res := pluginWrap("10.0.0.0/8") // 8.8.8.8 is outside
+		p := &plugin{resolver: res, egressWrap: wrap}
+		_, err := p.fetchDial(base, res)(context.Background(), "tcp", "api.example.com:443")
+		if !errors.Is(err, egress.ErrBlocked) {
+			t.Fatalf("global blocked: err = %v, want egress.ErrBlocked", err)
+		}
+		if errors.Is(err, errFetchBlocked) {
+			t.Error("a global block must not be reported as a local block")
+		}
+		if dialed != "" {
+			t.Error("base dialer must not run when the global policy blocks")
+		}
+	})
+
+	t.Run("SSRF guard blocks a globally allowed private address", func(t *testing.T) {
+		loop := rebindResolver{ip: "127.0.0.1"}
+		pol, err := egress.New(config.EgressConfig{Enabled: true, Allow: []string{"127.0.0.0/8"}}, egress.WithResolver(loop))
+		if err != nil {
+			t.Fatalf("egress.New: %v", err)
+		}
+		p := &plugin{resolver: loop, egressWrap: pol.For(egress.SubsystemPlugin).DialContextWith}
+		_, err = p.fetchDial(base, loop)(context.Background(), "tcp", "api.example.com:443")
+		if !errors.Is(err, errFetchBlocked) {
+			t.Fatalf("ssrf blocked: err = %v, want errFetchBlocked", err)
+		}
+	})
+}
+
+// TestFetchGlobalEgressBlocksDoFetch proves the intersection end-to-end through
+// doFetch: a host permitted by the plugin's allowed_hosts is still refused by
+// the global policy, and the error wraps egress.ErrBlocked so the host maps it
+// to the distinct guest code.
+func TestFetchGlobalEgressBlocksDoFetch(t *testing.T) {
+	res := rebindResolver{ip: "8.8.8.8"}
+	pol, err := egress.New(config.EgressConfig{Enabled: true, Allow: []string{"10.0.0.0/8"}}, egress.WithResolver(res))
+	if err != nil {
+		t.Fatalf("egress.New: %v", err)
+	}
+	p := &plugin{
+		capFetch:     true,
+		allowedHosts: []string{"api.example.com"}, // local rule allows
+		fetchTimeout: time.Second,
+		maxFetchResp: 1 << 10,
+		resolver:     res,
+		egressWrap:   pol.For(egress.SubsystemPlugin).DialContextWith,
+	}
+	_, _, err = p.doFetch(context.Background(), "GET", "https://api.example.com/", nil)
+	if !errors.Is(err, egress.ErrBlocked) {
+		t.Fatalf("err = %v, want wrapping egress.ErrBlocked", err)
+	}
+	if errors.Is(err, errFetchBlocked) {
+		t.Error("global egress block must not be reported as a local block")
 	}
 }
 

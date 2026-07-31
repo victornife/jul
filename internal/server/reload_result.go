@@ -71,11 +71,11 @@ type ReloadResult struct {
 	// (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate) in
 	// milliseconds. Present only when phases ran; absent if the result comes
 	// from a cached store.
-	PhaseDurations map[string]int64 `json:"phase_durations_ms,omitempty"`
-	HTTP           ReloadSubsystemResult    `json:"http"`
-	Stream         ReloadSubsystemResult    `json:"stream"`
-	Admin          ReloadSubsystemResult    `json:"admin"`
-	Error          string                   `json:"error,omitempty"`
+	PhaseDurations map[string]int64      `json:"phase_durations_ms,omitempty"`
+	HTTP           ReloadSubsystemResult `json:"http"`
+	Stream         ReloadSubsystemResult `json:"stream"`
+	Admin          ReloadSubsystemResult `json:"admin"`
+	Error          string                `json:"error,omitempty"`
 }
 
 // CanonicalVersion returns a short, stable fingerprint of a configuration

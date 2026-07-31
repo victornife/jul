@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -28,6 +29,9 @@ const Compiled = false
 // ABIJulV1 is the native Jul.IA ABI identifier (declared for API symmetry).
 const ABIJulV1 = "jul-abi/v1"
 
+// DialFunc matches net.Dialer.DialContext (declared for API symmetry).
+type DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error)
+
 // KVStore mirrors the compiled build's interface for API symmetry.
 type KVStore interface {
 	Get(key string) ([]byte, bool)
@@ -40,6 +44,8 @@ type Options struct {
 	OnInvocation func(plugin, result string, d time.Duration)
 	OnPanic      func(plugin string)
 	KV           KVStore
+	// EgressWrap mirrors the compiled build's global egress guard hook.
+	EgressWrap func(base DialFunc) DialFunc
 }
 
 // Manager is a no-op plugin manager in the lean build.

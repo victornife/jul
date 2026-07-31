@@ -55,12 +55,14 @@ type ocspStaple struct {
 	refreshing  bool
 }
 
-// newOCSPStapler wraps base with default (HTTP) OCSP fetching and a real clock.
-func newOCSPStapler(base CertProvider) *ocspStapler {
+// newOCSPStapler wraps base with HTTP OCSP fetching and a real clock. client,
+// when non-nil, guards the responder fetch through the egress allow-list; nil
+// uses the default client so an egress-disabled build is unchanged.
+func newOCSPStapler(base CertProvider, client *http.Client) *ocspStapler {
 	return &ocspStapler{
 		base:  base,
 		now:   time.Now,
-		fetch: httpOCSPFetch,
+		fetch: ocspFetchWith(client),
 		cache: make(map[string]*ocspStaple),
 	}
 }
@@ -173,22 +175,29 @@ func ocspCacheKey(leaf *x509.Certificate) string {
 	return string(sum[:])
 }
 
-// httpOCSPFetch POSTs a DER-encoded OCSP request to responder and returns the
-// raw DER response. It is the default ocspStapler.fetch; tests substitute it.
-func httpOCSPFetch(ctx context.Context, reqDER []byte, responder string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responder, bytes.NewReader(reqDER))
-	if err != nil {
-		return nil, err
+// ocspFetchWith returns an OCSP fetch function bound to client. A nil client
+// uses http.DefaultClient, matching the pre-egress behavior. The returned
+// function POSTs a DER-encoded OCSP request to responder and returns the raw DER
+// response; tests substitute the ocspStapler.fetch field directly.
+func ocspFetchWith(client *http.Client) func(ctx context.Context, reqDER []byte, responder string) ([]byte, error) {
+	if client == nil {
+		client = http.DefaultClient
 	}
-	req.Header.Set("Content-Type", "application/ocsp-request")
-	req.Header.Set("Accept", "application/ocsp-response")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
+	return func(ctx context.Context, reqDER []byte, responder string) ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, responder, bytes.NewReader(reqDER))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/ocsp-request")
+		req.Header.Set("Accept", "application/ocsp-response")
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("ocsp: responder returned %s", resp.Status)
+		}
+		return io.ReadAll(io.LimitReader(resp.Body, ocspMaxResponseBytes))
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ocsp: responder returned %s", resp.Status)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, ocspMaxResponseBytes))
 }
