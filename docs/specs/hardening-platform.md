@@ -7,7 +7,7 @@
 
 # JUL Engineering Execution Plan — Hardening & platform (pre-1.0)
 
-> Version 1.1 · Updated 2026-07-20
+> Version 1.6 · Updated 2026-07-31
 >
 > Scope note: this is the home for cross-cutting robustness work that was
 > **scoped out** of the pre-1.0 hardening pass (the Console v2 robustness phases:
@@ -30,7 +30,7 @@ to committed roadmap features — notably **HP-02 Console RBAC** feeds
 | ID | Item | Precursor to | Phase mapping | Effort |
 | --- | --- | --- | --- | --- |
 | HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | — | Partially delivered; Phase 2 remediation completes it | M |
-| HP-02 | Console RBAC + multi-user | [Y3-02](../roadmap/) | Design complete; Phase 3 implements it | L |
+| HP-02 | Console RBAC + multi-user | [Y3-02](../roadmap/) | ✅ Delivered (Phase 3, local-token RBAC) | L |
 | HP-03 | Metric-cardinality & relabel strategy | — | ✅ Delivered | M |
 | HP-04 | Pre-commit hooks / local gate parity | — | ✅ Delivered | M |
 | HP-05 | Container & process-supervision hardening | [Y3-06](../roadmap/) | ✅ Delivered | M |
@@ -110,6 +110,18 @@ with operator override mitigates.
 **Objective.** Replace the single shared admin bearer token with named principals,
 roles, and scoped tokens, so multiple operators can use the console under
 least-privilege with attributable audit entries.
+
+**Status (2026 — delivered, local-token RBAC).** Shipped in Phase 3 ([#73](https://github.com/victornife/jul/issues/73)):
+an opt-in `[admin.rbac]` layer with predefined `viewer`/`operator`/`admin`/`auditor`
+roles (plus custom roles), scoped revocable per-principal tokens (hashed at rest,
+constant-time compared), deny-by-default authorization at the API boundary derived
+from an authoritative route catalog, a `GET /api/admin/me` identity endpoint,
+proactive Console permission gating (controls disabled with the missing permission
+explained), per-principal audit attribution, atomic hot policy swap, and last-admin
+lockout protection. The legacy shared token remains supported (maps to a synthetic
+`shared` admin principal) for gradual migration. Proven by a route/role matrix, a
+real-server role-matrix E2E, and browser gating scenarios. **External identity
+(OIDC/SSO) stays [Y3-02](../roadmap/) horizon.**
 
 **Current state.** The console authenticates with one constant-time-compared admin
 token (`server.go`); there is one implicit super-user. The
@@ -427,6 +439,7 @@ already covered when the register was actioned (see notes).
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.6 | 2026-07-31 | **HP-02 Console RBAC delivered (local-token RBAC), Phase 3 ([#73](https://github.com/victornife/jul/issues/73)).** Opt-in `[admin.rbac]` with predefined viewer/operator/admin/auditor roles + custom roles, scoped revocable hashed tokens, deny-by-default route-catalog authorization, `GET /api/admin/me` identity, proactive Console permission gating, per-principal audit attribution, atomic hot policy swap, and last-admin lockout protection; the legacy shared token stays supported for migration. Backlog row and HP-02 section marked delivered. External identity (OIDC/SSO) stays Y3-02 horizon. |
 | 1.5 | 2026-07-20 | Reconciled HP-01..HP-07 against the active Phases 1-7 programme: HP-03/04/05 and HP-06A backend entity CRUD are delivered; HP-01 is partially delivered and completed in Phase 2; HP-02 design is complete and implemented in Phase 3; HP-06B Console entity CRUD and HP-06C near-term global tables (`global_set`, `compression_set`, `rate_limit_global_set`) are Phase 5 active, with `cache_set`, decomposed admin operations, and `access_log_set` deferred; HP-07 core egress policy is delivered, with Phase 4 completing integration and diagnostics. Updated the relationship table with a Phase mapping column. |
 | 1.4 | 2026 | HP-05 completed: both deferred container items delivered. The [Dockerfile](../../Dockerfile) pins both base images by tag + `@sha256` digest (Dependabot-maintained) and declares a shell-less `HEALTHCHECK` running `jul healthcheck`. The image bakes a self-consistent container config ([deploy/docker/server.toml](../../deploy/docker/server.toml) + placeholder `/var/www` site) that enables the admin listener on loopback, so the server starts unmounted and the probe passes out of the box (also fixing the latent non-existent `/srv/www/example` root). |
 | 1.3 | 2026 | HP-03 delivered: the request `method` label is folded to a fixed set (unknown → `other`) so every client-derived metric label is now bounded by construction; published the full label-cardinality policy table + operator relabel cookbook in [core-http.md](../core-http.md#metrics); enforced by `TestMetricLabelPolicy` / `TestHTTPMethodLabelBounded` in `internal/observability/cardinality_test.go`. |

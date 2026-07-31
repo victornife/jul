@@ -33,21 +33,28 @@ changes, upload WASM, view pprof, purge cache, and roll back history.
 - For multi-operator teams, today's option is to share the token (all operators
   are superusers) or run separate instances (each with their own token).
 
-### Roadmap: Console RBAC (HP-02 / ADR 0010)
+### Console RBAC (HP-02 / ADR 0010) — delivered (opt-in)
 
-The full RBAC design — named principals, predefined and custom roles, scoped
-revocable tokens, deny-by-default enforcement, per-principal audit attribution,
-and a backward-compatible migration path — is **designed and implementable**. It
-is not yet shipped. See:
+Named-principal RBAC — predefined (`viewer`/`operator`/`admin`/`auditor`) and
+custom roles, scoped revocable tokens (hashed at rest), deny-by-default
+enforcement at the API boundary, per-principal audit attribution, proactive
+Console permission gating, and a backward-compatible migration path — **ships as
+an opt-in `[admin.rbac]` layer** (Phase 3). When it is disabled the single
+shared-token model above applies; enabling it replaces all-or-nothing access
+with least-privilege roles and attributable audit. External identity (OIDC/SSO)
+remains a [Y3-02](roadmap/) horizon item. See:
 
 - Design spec: [docs/specs/console-rbac.md](specs/console-rbac.md)
 - ADR: [docs/adr/0010-console-rbac.md](adr/0010-console-rbac.md)
+- Migration: the numbered enable → migrate → revoke procedure in [docs/console.md](console.md)
 
-Until RBAC ships:
-- Treat the admin token as a root credential with no audit trail.
+When running with the legacy shared token (RBAC disabled):
+- Treat the admin token as a root credential with no audit trail — or enable
+  `[admin.rbac]` to get named principals and attribution.
 - Do not expose the admin listener to untrusted networks under any circumstances.
-- For CI/automation tokens, use a dedicated instance or restrict network access
-  so only the automation host can reach the admin port.
+- For CI/automation tokens, prefer a scoped RBAC principal; otherwise use a
+  dedicated instance or restrict network access so only the automation host can
+  reach the admin port.
 
 ---
 

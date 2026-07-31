@@ -58,7 +58,7 @@ each carries a dated status banner and lives under [`previous_reviews/`](previou
 - [ADR 0004 — Console-first / UI invariants (Operable by design)](../adr/0004-console-ui-invariants.md).
 - [ADR 0006 — Console v2: build-time SPA substrate (single-binary preserved)](../adr/0006-console-v2-stack.md).
 - [ADR 0007 — Composition-root extraction](../adr/0007-composition-root-monolith.md) — **closed 2026-07-15** (`main.go` < 100 LOC; all composition helpers in `internal/app/`).
-- [ADR 0010 — Console RBAC design](../adr/0010-console-rbac.md) — design accepted; implementation pending (backlog D1).
+- [ADR 0010 — Console RBAC design](../adr/0010-console-rbac.md) — accepted and **delivered** (local-token RBAC, Phase 3 / #73); external identity remains Y3-02 horizon.
 
 ## Synthesis
 

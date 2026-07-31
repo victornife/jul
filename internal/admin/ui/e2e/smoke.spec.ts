@@ -260,3 +260,92 @@ test.describe("Console SPA smoke (UI-1)", () => {
     await expect(page.getByText("Roll back to this snapshot?")).not.toBeVisible();
   });
 });
+
+// ── Role-based gating (P3-04) ─────────────────────────────────────────────────
+//
+// These scenarios mock GET /api/admin/me with a concrete identity so the
+// PermissionProvider resolves a role and the Console gates controls proactively.
+// The server remains authoritative (proven by the Go role-matrix E2E); here we
+// assert only the browser-visible half: the identity is shown and mutating
+// controls the caller cannot use are disabled, with the reason surfaced.
+
+/** Identity fixtures mirror IdentitySchema; permission sets match the predefined roles. */
+const VIEWER_IDENTITY = {
+  principal: "auditbot",
+  role: "viewer",
+  token_id: "0f1e2d3c",
+  permissions: [
+    "status:read",
+    "metrics:read",
+    "config:read",
+    "history:read",
+    "observability:read",
+    "audit:read",
+  ],
+  legacy: false,
+};
+
+const OPERATOR_IDENTITY = {
+  principal: "op",
+  role: "operator",
+  token_id: "a1b2c3d4",
+  permissions: [
+    "status:read",
+    "metrics:read",
+    "config:read",
+    "config:write",
+    "config:apply",
+    "history:read",
+    "history:rollback",
+    "plugins:upload",
+    "observability:read",
+    "audit:read",
+    "audit:export",
+    "cache:purge",
+    "reload:trigger",
+  ],
+  legacy: false,
+};
+
+/** mockIdentity overrides GET /api/admin/me with a concrete identity fixture. */
+async function mockIdentity(page: Page, identity: unknown): Promise<void> {
+  await page.route("/api/admin/me", (route) => json(route, identity));
+}
+
+test.describe("Console RBAC gating (P3-04)", () => {
+  test("viewer sees its identity and cannot roll back", async ({ page }) => {
+    await setupApiMocks(page);
+    await mockIdentity(page, VIEWER_IDENTITY);
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+    // The identity badge reflects the authenticated principal and role.
+    await expect(page.locator('[title*="role: viewer"]').first()).toBeVisible();
+
+    // History: a viewer lacks history:rollback, so the control is disabled and
+    // the required permission is surfaced as its title. The server would reject
+    // the call too — this only avoids leading the operator into a certain 403.
+    await page.getByRole("link", { name: "History" }).click();
+    await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
+    await expect(page.getByText("snap-001")).toBeVisible();
+    const rollback = page.getByRole("button", { name: "Rollback" });
+    await expect(rollback).toBeDisabled();
+    await expect(rollback).toHaveAttribute("title", /history:rollback permission/);
+  });
+
+  test("operator identity enables the rollback control", async ({ page }) => {
+    await setupApiMocks(page);
+    await mockIdentity(page, OPERATOR_IDENTITY);
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.locator('[title*="role: operator"]').first()).toBeVisible();
+
+    // An operator holds history:rollback, so the same control is enabled.
+    await page.getByRole("link", { name: "History" }).click();
+    await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
+    await expect(page.getByText("snap-001")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Rollback" })).toBeEnabled();
+  });
+});

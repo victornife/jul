@@ -65,7 +65,7 @@ features:
     maturity: GA
     doc: console.md
     criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
-    notes: "Single-operator GA. RBAC Phase 1 (named principals, scoped tokens) not yet shipped."
+    notes: "Single-operator GA. Named-principal RBAC (roles, scoped revocable tokens, per-principal audit attribution, Console permission gating) delivered as opt-in [admin.rbac] (Phase 3 / #73); external identity (OIDC/SSO) remains Y3-02 horizon."
 
   - id: Y1-08
     name: "Zero-config + jul lint"

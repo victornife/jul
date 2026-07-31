@@ -39,6 +39,7 @@ import {
   PluginsProjectionSchema,
   ValidationResultSchema,
   PendingRestartStatusSchema,
+  IdentitySchema,
 } from "../src/api/client.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -114,6 +115,23 @@ test("GET /api/tls matches CertProjectionSchema[]", async ({ request }) => {
       `Schema drift on /api/tls:\n${parsed.error.toString()}\n\nRaw:\n${JSON.stringify(data, null, 2)}`,
     );
   }
+});
+
+// ── Identity (/api/admin/me) ─────────────────────────────────────────────────
+
+test("GET /api/admin/me matches IdentitySchema (legacy-token compatibility)", async ({
+  request,
+}) => {
+  const resp = await request.get("/api/admin/me");
+  expect(resp.status()).toBe(200);
+  const data: unknown = await resp.json();
+  const id = assertShape(IdentitySchema, data, "/api/admin/me");
+  // The e2e server runs with the legacy shared token (RBAC disabled), so the
+  // caller is reported as the synthetic admin-role legacy principal with a
+  // non-empty permission set — the compatibility mode the migration relies on.
+  expect(id.legacy).toBe(true);
+  expect(id.role).toBe("admin");
+  expect(id.permissions.length).toBeGreaterThan(0);
 });
 
 // ── Auth gate ─────────────────────────────────────────────────────────────────

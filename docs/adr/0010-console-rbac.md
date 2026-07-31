@@ -1,6 +1,6 @@
 # ADR 0010 — Console RBAC: local principals, roles, and scoped tokens
 
-- **Status:** Accepted (design) — implementation phased under HP-02 / #35
+- **Status:** Accepted — **delivered** (local-token RBAC) in Phase 3 (#73); external identity remains Y3-02 horizon
 - **Date:** 2026-07-08
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** the admin API and Console v2 authorization model

@@ -205,13 +205,16 @@ before a feature is labelled GA; this page is the consolidated index.
 
 ---
 
-## Admin console — single shared token
+## Admin console — single shared token by default
 
-- **No RBAC or per-user attribution.** The current admin model is a single
-  shared bearer token that grants full access. Multi-user workflows, audit
-  attribution, and least-privilege operation are not available until Console
-  RBAC (HP-02 / ADR 0010) ships. See [docs/specs/console-rbac.md](specs/console-rbac.md)
-  for the design.
+- **Single shared token by default; RBAC is opt-in.** The **default** admin
+  model is a single shared bearer token that grants full access with no per-user
+  attribution. Named-principal RBAC — roles, scoped revocable tokens,
+  least-privilege enforcement, and per-principal audit attribution — is now
+  available as an **opt-in `[admin.rbac]` layer** (HP-02 / ADR 0010); enable it
+  for multi-user workflows. External identity (OIDC/SSO) remains a Y3-02 horizon
+  item. See [docs/specs/console-rbac.md](specs/console-rbac.md) and the migration
+  steps in [docs/console.md](console.md).
 
 ---
 
