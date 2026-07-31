@@ -395,6 +395,12 @@ type Deps struct {
 	// preflight rejects an enabled WAF on a non-waf build.
 	WAFCompiled bool
 
+	// EgressBlocked returns the bounded per-subsystem/reason tally of egress
+	// allow-list blocks for the Console Security panel (P4-01). Nil omits the
+	// recent-blocked breakdown (e.g. on a build/test without a live metrics
+	// source). It exposes no destination host or IP.
+	EgressBlocked func() []observability.EgressBlockedCount
+
 	// LastReload reports the structured outcome of the most recent runtime
 	// reload. Nil when no reload has been attempted yet. Used by the apply
 	// handler to include the previous reload snapshot in the apply response.

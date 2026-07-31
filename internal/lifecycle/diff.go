@@ -60,4 +60,3 @@ func extractRegisteredValue(cfg *config.Config, path string) any {
 	}
 	return nil
 }
-

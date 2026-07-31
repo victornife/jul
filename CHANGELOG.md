@@ -10,6 +10,33 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **Phase 4 — Egress allow-list completion and integration hardening** (P4-01, HP-07, #74):
+  - `internal/egress` refactored into `policy`/`normalize`/`error`/`http` modules with a
+    typed decision contract: `BlockError{Subsystem,Host,IP,Reason}` wrapping the
+    `ErrBlocked` sentinel, and bounded `Reason` constants (`host_not_allowed`,
+    `ip_not_allowed`, `mixed_dns_answers`, `no_dns_answers`, `invalid_address`).
+  - Allow-entry normalization: lowercasing, a single trailing dot, IDNA→ASCII for
+    internationalized names, IPv6 bracket/zone handling, CIDR canonicalization,
+    de-duplication, and rejection of ambiguous/malformed entries instead of silently
+    treating them as hostnames.
+  - Immutable subsystem-scoped guards via `Policy.For(subsystem)` (bounded name
+    constants), a `Decision` observer seam, and guarded HTTP clients that pin
+    `Proxy=nil` (ignoring `HTTP(S)_PROXY`/`NO_PROXY`) plus a `RoundTripper` that
+    re-validates the request URL so redirects are re-checked.
+  - Consistent coverage across every config-driven auxiliary client: ACME
+    directory/order/challenge (`acme.Client.HTTPClient`) and OCSP responder fetches are
+    now guarded when `[egress]` is enabled (nil clients preserve the default,
+    proxy-aware behavior when it is off); WASM plugin `fetch` is the **intersection** of
+    the plugin's `allowed_hosts` + SSRF guard and the global allow-list, with a distinct
+    guest return code `-5` for a global-policy denial (additive `jul-abi/v1` change).
+  - Observability: `jul_egress_decisions_total{subsystem,result,reason}` and
+    `jul_egress_dns_answers_total{subsystem,result}` metrics (never labelled by
+    destination), and a Console **Security** panel row showing the enabled state,
+    allow-rule count, and a recent-blocked breakdown by subsystem/reason.
+  - Docs: rewritten [egress.md](docs/egress.md) inventory, ACME/OCSP prerequisites in
+    [tls-acme.md](docs/tls-acme.md), the plugin-intersection and `-5` code in
+    [plugins.md](docs/plugins.md), and an egress troubleshooting section. HP-07 marked
+    Delivered.
 - **Phase 3 — Current-identity endpoint, Console permission gating, and secret-safe RBAC diff/projections** (P3-03, #72):
   - `GET /api/admin/me` (new, `internal/admin/api_identity.go`): returns the caller's
     own server-derived identity — principal, role, public token ID, resolved concrete

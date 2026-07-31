@@ -203,7 +203,7 @@ v1, golden-pinned, prebuilt-guest tested) are documented in
   | `get_config` | `(buf, limit u32) -> u32` | Caller-allocates; JSON object |
   | `kv_get` | `(keyPtr, keyLen, buf, limit u32) -> i32` | `-1` absent, `-2` capability denied |
   | `kv_set` | `(keyPtr, keyLen, valPtr, valLen u32) -> i32` | `0` ok, `-2` capability denied, `-3` quota exceeded |
-  | `fetch` | `(methodPtr,methodLen,urlPtr,urlLen,bodyPtr,bodyLen,buf,limit u32) -> i32` | status on success, `-2` denied, `-3` blocked, `-4` error |
+  | `fetch` | `(methodPtr,methodLen,urlPtr,urlLen,bodyPtr,bodyLen,buf,limit u32) -> i32` | status on success, `-2` denied (no `fetch` capability), `-3` blocked (plugin `allowed_hosts` / SSRF guard), `-4` error, `-5` blocked by the global `[egress]` allow-list |
   | `last_fetch_len` | `() -> u32` | Retained/capped length of the last `fetch` response |
   | `last_fetch_truncated` | `() -> i32` | `1` if the last `fetch` response was capped at `max_fetch_response`, else `0` |
   | `fetch_read` | `(buf, limit u32) -> u32` | Caller-allocates; re-reads the last retained/capped `fetch` body without another outbound call |
@@ -230,7 +230,11 @@ the guest grows it and calls again. The SDK helpers (`readInto`, `KVGet`,
     `allowed_hosts`. The host validates each URL against the allow-list, refuses
     addresses that resolve to loopback/private/link-local/CGNAT/multicast ranges
     (SSRF guard), re-checks the allow-list on every redirect, and caps the
-    response at `max_fetch_response` within `fetch_timeout`.
+    response at `max_fetch_response` within `fetch_timeout`. When the server-wide
+    [egress allow-list](egress.md#plugin-fetch) is enabled, a fetch must ALSO
+    satisfy it — the two are intersected, so a destination the plugin allows but
+    the global policy refuses is blocked at dial time and returns the distinct
+    `-5` code (versus `-3` for a plugin-local block).
 
   Capability grants are evaluated on every activation/build of a plugin. A new
   generation re-checks the current config's capability policy instead of carrying
@@ -314,6 +318,7 @@ The `jul-abi/v1` ABI is request-phase only in v1:
 | Fetch blocked (evil host) | `allowed_hosts = ["api.example.com"]`, fetch evil.com | `errFetchBlocked` | TestFetchBlocksDisallowedHost |
 | Fetch blocks loopback | `allowed_hosts = ["127.0.0.1"]`, fetch loopback | Blocked by SSRF guard | TestFetchBlocksLoopbackEvenIfAllowed |
 | Fetch blocks DNS rebinding | Allow-listed host resolves to `127.0.0.1` | Blocked by SSRF guard after resolution | TestFetchBlocksDNSRebinding |
+| Fetch honours global egress | Plugin allows host, global `[egress]` does not | Blocked (`-5`) before dial; SSRF still applies when global allows | TestFetchDialIntersection / TestFetchGlobalEgressBlocksDoFetch |
 | KV enforces max entries | `kv_max_entries = 2`, three distinct keys | Third `kv_set` rejected | TestKVSetEnforcesBounds |
 | KV enforces max bytes | `kv_max_bytes = 100`, 200-byte value | `kv_set` rejected | TestKVSetEnforcesBounds |
 | Flush rejects invalid status | Guest status `700` | Host replaces with `500` | TestFlushRejectsInvalidStatus |

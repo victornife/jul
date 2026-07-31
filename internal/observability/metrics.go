@@ -131,6 +131,7 @@ type Metrics struct {
 	routeFailures *routeFailureTracker
 	health        *healthHistoryTracker
 	certs         *certHistoryTracker
+	egressBlocks  *egressBlockTracker
 
 	// statsMu guards the rolling state used by Snapshot to derive
 	// rate-over-time figures (requests/sec and the windowed error rate) from
@@ -338,6 +339,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		routeFailures: newRouteFailureTracker(routeFailureCap),
 		health:        newHealthHistoryTracker(),
 		certs:         newCertHistoryTracker(),
+		egressBlocks:  newEgressBlockTracker(),
 	}
 	m.startTime = time.Now()
 	reg.MustRegister(
@@ -553,6 +555,16 @@ func (m *Metrics) ObserveEgressDecision(subsystem, result, reason string, dnsAns
 	if dnsAnswers > 0 {
 		m.egressDNSAnswers.WithLabelValues(subsystem, result).Inc()
 	}
+	if result == "block" {
+		m.egressBlocks.add(subsystem, reason)
+	}
+}
+
+// EgressBlocked returns the bounded per-subsystem/reason tally of egress
+// allow-list blocks for the Console Security panel. It carries no destination
+// host or IP.
+func (m *Metrics) EgressBlocked() []EgressBlockedCount {
+	return m.egressBlocks.snapshot()
 }
 
 // ObserveProbe records the outcome and latency of a single active health-check

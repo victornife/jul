@@ -116,9 +116,13 @@ A client request cannot cause Jul.IA to connect to a different host.
 
 **Defense-in-depth:** the optional `[egress]` allow-list
 ([docs/egress.md](egress.md)) constrains all config-driven auxiliary fetches
-(JWKS, forward-auth, discovery) to an operator-approved set of
-hosts/CIDRs, reducing the blast radius of a misconfigured or compromised config.
-It is disabled by default (opt-in hardening).
+(JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP, and the WASM plugin
+`fetch` intersection) to an operator-approved set of hosts/CIDRs, reducing the
+blast radius of a misconfigured or compromised config. Enforcement is at dial
+time (so redirects are re-checked), guarded clients ignore `HTTP(S)_PROXY`, and
+blocks are surfaced with typed, secret-safe reasons and bounded
+`jul_egress_decisions_total` metrics. It is disabled by default (opt-in
+hardening).
 
 ---
 

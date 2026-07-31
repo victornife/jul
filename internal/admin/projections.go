@@ -442,12 +442,30 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 		}
 	}
 	sp.SecretRefs = config.CountSecretRefs(c)
+	// Outbound egress allow-list posture (P4-01). Counts only; the recent-blocked
+	// breakdown is overlaid from the running process by the HTTP handler.
+	sp.Egress = EgressProjection{
+		Enabled:        c.Egress.Enabled,
+		AllowRuleCount: countEgressAllow(c.Egress.Allow),
+	}
 	// Default posture: serving == persisted. The HTTP handler overlays the real
 	// installed (serving) snapshot; this default keeps the pure projection
 	// self-contained for callers/tests without a live server.
 	persisted := rbacStatusFromAdmin(c.Admin)
 	sp.RBAC = RBACPostureProjection{Serving: persisted, Persisted: persisted}
 	return sp
+}
+
+// countEgressAllow counts the non-blank [egress].allow entries for the Security
+// panel without inspecting or exposing any destination.
+func countEgressAllow(allow []string) int {
+	n := 0
+	for _, a := range allow {
+		if strings.TrimSpace(a) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // projectRBAC summarises the admin RBAC posture for the Security/Overview

@@ -2,7 +2,8 @@
 
 > Optional hardening that constrains the destinations the server itself connects
 > to for its **config-driven auxiliary fetches** — JWKS retrieval, forward-auth
-> subrequests, and Consul/Kubernetes service discovery. It is disabled by
+> subrequests, Consul/Kubernetes service discovery, ACME/OCSP certificate
+> issuance and revocation checks, and WASM plugin `fetch`. It is disabled by
 > default and fully backward-compatible.
 
 ## Why
@@ -37,13 +38,22 @@ destination is refused **at connect time**, before any bytes are sent.
 
 | Path | Guarded | Notes |
 | --- | --- | --- |
-| JWKS retrieval (`[…auth.jwt] jwks_url`) | ✅ | |
-| Forward-auth subrequest (`[…auth.forward_auth] url`) | ✅ | Redirect relay preserved |
-| Consul discovery (`[…discovery.consul] address`) | ✅ | `-tags consul` |
-| Kubernetes discovery (`[…discovery.kubernetes] api_server`) | ✅ | `-tags kubernetes`; TLS preserved |
+| JWKS retrieval (`[…auth.jwt] jwks_url`) | ✅ | Subsystem `auth` |
+| Forward-auth subrequest (`[…auth.forward_auth] url`) | ✅ | Subsystem `auth`; redirect relay preserved |
+| Consul discovery (`[…discovery.consul] address`) | ✅ | Subsystem `discovery`; `-tags consul` |
+| Kubernetes discovery (`[…discovery.kubernetes] api_server`) | ✅ | Subsystem `discovery`; `-tags kubernetes`; TLS preserved |
+| ACME directory/order/challenge (`[…tls.acme]`) | ✅ | Subsystem `acme`; `-tags acme`; guarded only when `[egress]` is enabled — see [ACME & OCSP prerequisites](#acme--ocsp-prerequisites) |
+| OCSP responder fetch (stapling) | ✅ | Subsystem `ocsp`; `-tags acme`; guarded only when `[egress]` is enabled |
+| WASM plugin `fetch` (`[[plugins]] allowed_hosts`) | ✅ | Subsystem `plugin`; `-tags wasmplugins`; **intersection** of the plugin's `allowed_hosts` + SSRF guard **and** the global allow-list — see [Plugin fetch](#plugin-fetch) |
 | DNS / DNS-SRV discovery | — | Uses the system resolver, not an HTTP client |
 | **Upstream proxying / active health checks** | — | This *is* the intended traffic; the allow-list is for auxiliary fetches, not backends |
-| **ACME issuance** | — | Talks to a well-known, multi-host CA; guarding it risks breaking issuance for little SSRF value |
+| **Console / browser calls** | — | Browser-originated, not server egress |
+
+When `[egress]` is **disabled** (the default) none of these is restricted and the
+ACME/OCSP clients keep their standard behaviour, including `HTTP_PROXY` /
+`HTTPS_PROXY` support. When it is **enabled**, guarded clients pin `Proxy = nil`
+and therefore ignore `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`, so a proxy
+address can never hide the real destination from the allow-list.
 
 ## Quick start
 
@@ -114,9 +124,53 @@ A blocked fetch fails the operation with a clear cause:
 - Forward-auth: the auth service is unreachable, surfaced as `503` (fail-closed,
   never a silent allow).
 - Discovery: the resolve fails and the pool keeps its last-good backend set.
+- ACME: certificate issuance/renewal fails until the CA hosts are allow-listed.
+- OCSP: the staple cannot be refreshed, so the certificate is served unstapled
+  (graceful) rather than failing the handshake.
+- Plugin `fetch`: the guest receives a distinct blocked return code (`-5`) for a
+  global-policy denial, separate from a plugin-local `allowed_hosts`/SSRF block
+  (`-3`).
 
-The underlying error is `egress blocked: destination not in the [egress]
-allow-list`.
+The underlying error names the subsystem, the normalized destination host, and a
+bounded reason (`host_not_allowed`, `ip_not_allowed`, `mixed_dns_answers`,
+`no_dns_answers`, `invalid_address`); it never includes credentials or query
+strings. Every denial wraps the `egress blocked: destination not in the [egress]
+allow-list` sentinel.
+
+## ACME & OCSP prerequisites
+
+When `[egress]` is enabled, the ACME client (directory, order, and challenge
+calls) and the OCSP responder client are guarded like every other auxiliary
+fetch. Certificate issuance therefore **requires the CA and OCSP hosts to be in
+`allow`** — otherwise issuance and stapling fail closed. Public ACME CAs front
+their endpoints with CDNs whose IPs rotate, so prefer **name** entries (or a
+covering suffix) over fixed CIDRs. See
+[tls-acme.md](tls-acme.md#egress-allow-list-prerequisites) for the concrete
+Let's Encrypt host set.
+
+## Plugin fetch
+
+A WASM plugin's `fetch` must satisfy **both** its plugin-local rules (the
+`allowed_hosts` list and the always-on SSRF guard that refuses loopback, private,
+and CGNAT addresses) **and** the global allow-list. The global guard evaluates
+the requested host and every resolved IP before the plugin's SSRF dialer runs, so
+a destination the plugin allows but the server does not is refused. The guest
+sees the distinct return code `-5` for a global-policy denial; see
+[plugins.md](plugins.md).
+
+## Metrics and diagnostics
+
+Every decision is reported to bounded Prometheus counters — labelled only by
+subsystem, result, and reason, **never** by destination host or IP:
+
+- `jul_egress_decisions_total{subsystem,result,reason}` — allow/block decisions
+  (`reason` is empty on an allow);
+- `jul_egress_dns_answers_total{subsystem,result}` — CIDR-only hostname
+  resolutions evaluated.
+
+The Console **Security** panel surfaces whether the allow-list is enabled, the
+allow-rule count, and a recent-blocked breakdown by subsystem and reason. No
+destination history is retained.
 
 ## Security notes
 
@@ -124,18 +178,22 @@ allow-list`.
 | --- | --- | --- |
 | SSRF via `jwks_url` / forward-auth `url` to an internal endpoint | 🟢 mitigated | Dial-time allow-list on the auth clients |
 | SSRF via discovery `address` / `api_server` | 🟢 mitigated | Dial-time allow-list on the Consul/K8s clients |
+| SSRF via ACME/OCSP or plugin `fetch` | 🟢 mitigated | Dial-time allow-list on the PKI and plugin clients (plugin: intersected with its own SSRF guard) |
 | Redirect to a blocked host | 🟢 mitigated | Guard runs per connection, so redirected dials are re-checked |
+| Environment proxy hides the target | 🟢 mitigated | Guarded clients pin `Proxy = nil` and ignore `HTTP(S)_PROXY`/`NO_PROXY` |
 | DNS rebinding of a name-trusted host | 🟠 out of scope | Trust by name is explicit; use CIDR entries for IP-level enforcement |
 | Config file compromise | 🟠 out of scope | The config is the trust boundary; this narrows, not replaces, it |
 
 ## Limits
 
-- Guards only the auxiliary fetch paths above — **not** upstream proxying, active
-  health checks, or ACME (see the table).
+- Guards the auxiliary fetch paths above — **not** upstream proxying or active
+  health checks (see the table).
 - Port is not part of a host rule: a name-allowed host is reachable on any port.
 - Applied at startup; changes need a restart.
 
 ## Build tags
 
-Egress is **core** — no build tag. The Consul/Kubernetes guard is only reachable
-in builds that compile those discoverers (`-tags consul` / `-tags kubernetes`).
+Egress is **core** — no build tag. The subsystem guards that live behind build
+tags are only reachable in builds that compile them: Consul/Kubernetes discovery
+(`-tags consul` / `-tags kubernetes`), ACME/OCSP (`-tags acme`), and WASM plugin
+`fetch` (`-tags wasmplugins`).

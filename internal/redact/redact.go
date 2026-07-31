@@ -112,7 +112,6 @@ func (rw *dynamicRedactingWriter) Write(p []byte) (int, error) {
 // rotation via Install takes effect immediately.
 func Writer(w io.Writer) io.Writer { return &dynamicRedactingWriter{w: w} }
 
-
 // Replace replaces the entire secret registry with newSecrets.
 // It is used on config reload to prune secrets that were deleted from the
 // configuration so their values no longer get redacted from logs.

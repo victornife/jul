@@ -64,7 +64,12 @@ a set of **operator-chosen** upstreams. The boundaries are:
 **Core invariant — request input never widens the attack surface.** The upstream
 target, the JWKS URL, the certificate set, and the FastCGI root are all
 **operator configuration**, never derived from a request. This is why proxying,
-JWKS fetching, and ACME are SSRF-safe by design rather than by filtering.
+JWKS fetching, and ACME are SSRF-safe by design rather than by filtering. For
+defense-in-depth against a mistaken or compromised config, the optional
+[`[egress]` allow-list](docs/egress.md) additionally constrains every
+config-driven auxiliary fetch (JWKS, forward-auth, discovery, ACME/OCSP, and the
+WASM plugin `fetch` intersection) to an operator-approved host/CIDR set; it is
+disabled by default.
 
 ## Hardening defaults & recommendations
 

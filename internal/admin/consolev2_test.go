@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/observability"
 	"jul/internal/rbac"
 	"jul/internal/server"
 )
@@ -770,6 +771,53 @@ func TestSecurityProjection(t *testing.T) {
 	}
 	if out.SecretRefs != 1 {
 		t.Errorf("secret_refs = %d, want 1", out.SecretRefs)
+	}
+}
+
+// TestSecurityProjectionEgress proves the Security panel reports the outbound
+// egress allow-list posture — enabled state and rule count from config, and the
+// recent-blocked breakdown overlaid from the running process — without exposing
+// any destination host or IP.
+func TestSecurityProjectionEgress(t *testing.T) {
+	cfg := &config.Config{
+		Egress: config.EgressConfig{
+			Enabled: true,
+			Allow:   []string{"idp.example.com", ".internal.corp", "10.0.0.0/8", "   "},
+		},
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+		EgressBlocked: func() []observability.EgressBlockedCount {
+			return []observability.EgressBlockedCount{
+				{Subsystem: "auth", Reason: "host_not_allowed", Count: 3},
+				{Subsystem: "plugin", Reason: "ip_not_allowed", Count: 1},
+			}
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/security", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out SecurityProjection
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.Egress.Enabled {
+		t.Error("egress.enabled should be true")
+	}
+	if out.Egress.AllowRuleCount != 3 {
+		t.Errorf("egress.allow_rule_count = %d, want 3 (blank entry ignored)", out.Egress.AllowRuleCount)
+	}
+	if len(out.Egress.RecentBlocked) != 2 {
+		t.Fatalf("egress.recent_blocked = %d entries, want 2", len(out.Egress.RecentBlocked))
+	}
+	if out.Egress.RecentBlocked[0].Subsystem != "auth" || out.Egress.RecentBlocked[0].Count != 3 {
+		t.Errorf("recent_blocked[0] = %+v, want auth/host_not_allowed/3", out.Egress.RecentBlocked[0])
+	}
+	// The projection must never carry a destination; only bounded labels.
+	if bytes.Contains(rr.Body.Bytes(), []byte("idp.example.com")) {
+		t.Error("security projection leaked a destination host")
 	}
 }
 

@@ -199,6 +199,33 @@ go test -run '^$' -bench 'SNICertSelection|TLSHandshakeServerAuth' -benchmem ./i
   `ca`, `challenge`, `cache_dir`, or `ocsp_stapling`; keep them identical across
   ACME blocks.
 
+## Egress allow-list prerequisites
+
+The optional [egress allow-list](egress.md) is **disabled by default**, and while
+it is off ACME/OCSP behave exactly as above (including `HTTP_PROXY` support). When
+you enable `[egress]`, the ACME directory/order/challenge client and the OCSP
+responder client are guarded like every other auxiliary fetch, so **issuance and
+stapling fail until the CA and OCSP hosts are in `allow`**.
+
+Public ACME CAs front their endpoints with CDNs whose IP addresses rotate, so
+list them by **name** (or a covering suffix) rather than by CIDR. For Let's
+Encrypt the minimal set is:
+
+```toml
+[egress]
+enabled = true
+allow = [
+  ".api.letsencrypt.org",      # directory, order, and challenge endpoints
+  ".acme-v02.api.letsencrypt.org",
+  ".o.lencr.org",              # OCSP responder
+  # add ".acme-staging-v02.api.letsencrypt.org" when using the staging CA
+]
+```
+
+If ACME issuance suddenly fails right after enabling `[egress]`, an unlisted CA
+host is the first thing to check — the block is reported with subsystem `acme`
+(or `ocsp`). See [troubleshooting.md](troubleshooting.md#egress-blocks-an-outbound-fetch).
+
 ## Limits
 
 - **No DNS-01 challenge.** Wildcard issuance via DNS is not implemented; the

@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSecurity, type SecurityProjection, type LocationWAF, type RBACPosture } from "@/api/client.ts";
+import { fetchSecurity, type SecurityProjection, type LocationWAF, type RBACPosture, type EgressProjection } from "@/api/client.ts";
 import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
@@ -117,6 +117,49 @@ function RBACStatusCell({ posture }: { readonly posture: RBACPosture | undefined
   );
 }
 
+// EgressCell renders the outbound egress allow-list posture (P4-01): whether the
+// allow-list is enabled, the number of allow rules, and a bounded breakdown of
+// what it has recently refused by subsystem and reason. It never names a
+// destination host or IP.
+function EgressCell({ egress }: { readonly egress: EgressProjection | undefined }) {
+  if (!egress) {
+    return <span className="text-jul-muted text-xs">unknown</span>;
+  }
+  if (!egress.enabled) {
+    return (
+      <span className="flex flex-col gap-0.5">
+        <OnOff on={false} />
+        <span className="text-jul-muted text-xs">
+          No outbound-destination restriction; the server&apos;s config-driven fetches may reach any
+          host.
+        </span>
+      </span>
+    );
+  }
+  const blocked = egress.recent_blocked ?? [];
+  return (
+    <span className="flex w-full flex-col gap-1">
+      <span className="flex items-center gap-2">
+        <OnOff on={true} />
+        <span className="text-jul-muted text-xs">
+          {egress.allow_rule_count} allow rule{egress.allow_rule_count === 1 ? "" : "s"}
+        </span>
+      </span>
+      {blocked.length > 0 ? (
+        <span className="flex flex-col gap-0.5">
+          {blocked.map((b, i) => (
+            <span key={`egblk-${String(i)}`} className="text-jul-muted text-xs">
+              Blocked {b.count} in <span className="font-mono">{b.subsystem}</span> ({b.reason})
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span className="text-jul-muted text-xs">No blocked destinations recorded.</span>
+      )}
+    </span>
+  );
+}
+
 export function SecurityPanel() {
   const [editingWAF, setEditingWAF] = useState(false);
   const [editingLocationWAF, setEditingLocationWAF] = useState<LocationWAF | null>(null);
@@ -137,8 +180,9 @@ export function SecurityPanel() {
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">Security</h1>
         <p className="max-w-3xl text-sm text-jul-muted">
-          Authentication, mutual TLS, and WAF posture across all listeners and locations.
-          Verify which routes are protected and how requests are inspected before they reach backends.
+          Authentication, mutual TLS, WAF, and outbound egress posture across all listeners and
+          locations. Verify which routes are protected, how requests are inspected before they reach
+          backends, and what outbound destinations the server may reach.
         </p>
       </div>
       {!data.waf_compiled && (
@@ -262,6 +306,9 @@ export function SecurityPanel() {
           ) : (
             <span className="text-jul-muted text-xs">unlimited</span>
           )}
+        </Row>
+        <Row label="Outbound egress">
+          <EgressCell egress={data.egress} />
         </Row>
       </div>
 

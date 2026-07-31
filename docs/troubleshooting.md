@@ -192,6 +192,33 @@ runbook (and the CI lane that automates the Consul path):
 [service-discovery.md](service-discovery.md#local-live-integration-runbook-issue-24).
 
 
+## Egress allow-list
+
+### Egress blocks an outbound fetch
+
+When the optional [`[egress]`](egress.md) allow-list is enabled, the server's own
+config-driven fetches — JWKS, forward-auth, discovery, ACME/OCSP, and WASM plugin
+`fetch` — may only reach the destinations in `allow`. A newly enabled allow-list
+that omits a required host is the usual cause of an auxiliary fetch failing right
+after turning it on. Symptoms by subsystem:
+
+- **`auth`** — token validation returns `401` (JWKS unreachable) or forward-auth
+  returns `503`.
+- **`discovery`** — the pool logs a resolve failure and keeps its last-good set.
+- **`acme` / `ocsp`** — certificate issuance fails, or certificates are served
+  unstapled. See [tls-acme.md](tls-acme.md#egress-allow-list-prerequisites) for
+  the CA/OCSP hosts to allow.
+- **`plugin`** — the guest's `fetch` returns `-5` (distinct from a plugin-local
+  `-3`).
+
+Diagnose it without exposing any destination: the log line names the subsystem,
+the normalized host, and a bounded reason, and the metrics
+`jul_egress_decisions_total{subsystem,result,reason}` count blocks. The Console
+**Security** panel shows the enabled state, allow-rule count, and a recent-blocked
+breakdown by subsystem and reason. Add the missing host (prefer a **name** or
+suffix for CDN-fronted CAs) to `allow` and restart — `[egress]` is startup-bound.
+
+
 ## Plugins
 
 ### An uploaded plugin was rejected
