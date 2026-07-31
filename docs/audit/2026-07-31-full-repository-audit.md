@@ -452,7 +452,7 @@ R9-14.4 (never-draining shutdown test) and R9-14.5 (hot-added TLS rotation test)
 
 ### Finding F-08: Reopened configuration audit is remediated in code but not formally closed
 - **Severity:** medium
-- **Area:** [docs/audit/2026-07-25-configuration-audit-closure.md](2026-07-25-configuration-audit-closure.md)
+- **Area:** [docs/audit/old/2026-07-25-configuration-audit-closure.md](old/2026-07-25-configuration-audit-closure.md)
 - **Evidence:** all AC-01…AC-16 are "Reopened → remediated" with named workstream SHAs (WS01–WS07)
   and existing test files (`internal/app/managed_apply_finalizer_test.go`, `config_apply_deadline_
   test.go`, `managed_apply_id_test.go`, `promote_verified_test.go`, plus Console tests). Outstanding
@@ -660,7 +660,7 @@ mgmt, then demand-gated bets) · **marketing** (egress release headline, four de
 - **`docs/status.md`, `docs/feature-status.yaml`, `docs/roadmap/README.md`, `CHANGELOG.md`,
   `README.md`** — adopt the maturity vocabulary; mark egress "merged, release pending" (F-02).
 - **`docs/ga-push.md`** — bump version stamp to 1.37 (F-07).
-- **`docs/audit/2026-07-25-configuration-audit-closure.md`** — run exact-SHA CI + sign-offs to close,
+- **`docs/audit/old/2026-07-25-configuration-audit-closure.md`** — run exact-SHA CI + sign-offs to close,
   or propagate "closure pending" to status/roadmap (F-08).
 - **`docs/audit-register.md`** — land R9-14.4 / R9-14.5 deferred tests.
 

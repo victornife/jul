@@ -49,7 +49,7 @@ A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on 
   complete and tested: treat it as *merged, release pending*.
 - **Configuration write/apply/reload subsystem** — *remediated* across workstreams
   WS01–WS07 with tests, but the reopened
-  [configuration-audit closure](audit/2026-07-25-configuration-audit-closure.md) is
+  [configuration-audit closure](audit/old/2026-07-25-configuration-audit-closure.md) is
   **not formally Closed** (exact-SHA CI + two sign-offs outstanding). Treat it as
   *remediated, closure pending*. Context: the
   [Full Repository Audit (2026-07-31)](audit/2026-07-31-full-repository-audit.md).

@@ -102,14 +102,20 @@ fi
 
 # 7. Docs schema check.
 step "docs-check"
-if command -v python >/dev/null 2>&1; then
-	if python scripts/docs-check.py; then
+py=""
+if command -v python3 >/dev/null 2>&1; then
+	py=python3
+elif command -v python >/dev/null 2>&1; then
+	py=python
+fi
+if [ -n "$py" ]; then
+	if "$py" scripts/docs-check.py; then
 		echo "OK"
 	else
 		fail=1
 	fi
 else
-	echo "skipped (python not installed)"
+	echo "skipped (python/python3 not installed)"
 fi
 
 if [ "$fail" -ne 0 ]; then

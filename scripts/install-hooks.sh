@@ -13,6 +13,14 @@ cd "$root"
 git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit .githooks/pre-push 2>/dev/null || true
 
+# A stale hand-installed hook under .git/hooks once masked the gofmt gate. Setting
+# core.hooksPath makes Git ignore .git/hooks, but warn so the dormant file is removed.
+for h in pre-commit pre-push; do
+	if [ -f ".git/hooks/$h" ]; then
+		echo "note: .git/hooks/$h is now superseded by core.hooksPath and will be ignored; delete it to avoid confusion."
+	fi
+done
+
 echo "Installed Git hooks: core.hooksPath -> .githooks"
 echo "  pre-commit : gofmt on staged Go files"
 echo "  pre-push   : gofmt + go vet/build/test (lean) [+ golangci-lint / frontend if available]"

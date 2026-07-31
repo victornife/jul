@@ -6,10 +6,25 @@
 **Baseline branch:** `main`
 **Baseline commit:** `1daf8c32e49c6a6706becff75ad8e29fecaf39ae`
 **Prepared:** 2026-07-19
-**Updated:** 2026-07-19
+**Updated:** 2026-07-31 (implementation status added)
 **Execution model:** Solo maintainer, AI-assisted implementation, small reviewable changes, minimal process overhead
 **Primary scope:** Exhaustive implementation plan for Phases 1–5
 **Secondary scope:** Refined but intentionally lighter plans for Phases 6–7
+
+> **Implementation status (2026-07-31).** Phases **1–4 are delivered and merged to `main`**:
+> Phase 1 (product/documentation hardening), Phase 2 (correlated reload results, bounded
+> managed applies, planned restart), Phase 3 (Console/admin RBAC Phase 1), and Phase 4
+> (outbound-egress policy completion + hardening) are implemented with tests. Honest caveats
+> per the [delivery-state vocabulary](../status.md): the Phase 4 egress work is *merged; first
+> tagged release pending*, and the Phase 2/3 configuration write/apply/reload subsystem is
+> *remediated; formal audit closure pending* (exact-SHA CI + two sign-offs) — see the
+> [reopened configuration-audit report](../audit/old/2026-07-25-configuration-audit-closure.md)
+> and the [2026-07-31 repository audit](../audit/2026-07-31-full-repository-audit.md). One
+> Phase 3 item stays **deferred**: interactive RBAC token management (mint/revoke from the
+> Console/API), now surfaced in the Console as **Preview**. **Phase 5** is next; Phases 6–7
+> stay evidence-gated. The canonical, continuously-updated status lives in
+> [docs/status.md](../status.md), [docs/roadmap/README.md](../roadmap/README.md), and
+> [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
