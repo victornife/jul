@@ -47,8 +47,8 @@ func TestDiffRBACEnableWarns(t *testing.T) {
 
 func TestDiffRBACRoleAndPrincipalChanges(t *testing.T) {
 	before := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
-		Enabled:     true,
-		Roles:       []config.AdminRole{{Name: "writer", Permissions: []string{"config:apply", "config:write"}}},
+		Enabled: true,
+		Roles:   []config.AdminRole{{Name: "writer", Permissions: []string{"config:apply", "config:write"}}},
 		Principals: []config.AdminPrincipal{
 			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
 			{Name: "alice", Role: "writer", Token: "SECRET-alice-token-32-chars-pad--"},
@@ -58,8 +58,8 @@ func TestDiffRBACRoleAndPrincipalChanges(t *testing.T) {
 	after := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
 		Enabled: true,
 		Roles: []config.AdminRole{
-			{Name: "writer", Permissions: []string{"config:apply"}},           // permission removed
-			{Name: "reader", Permissions: []string{"status:read"}},            // role added
+			{Name: "writer", Permissions: []string{"config:apply"}}, // permission removed
+			{Name: "reader", Permissions: []string{"status:read"}},  // role added
 		},
 		Principals: []config.AdminPrincipal{
 			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
