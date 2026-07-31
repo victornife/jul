@@ -117,6 +117,12 @@ audit_log_rotate_keep = 0
 plugin_upload_dir = ''
 plugin_upload_max_size = 0
 
+[admin.rbac]
+enabled = false
+default_role = ''
+roles = []
+principals = []
+
 [compression]
 encoders = []
 level = 0

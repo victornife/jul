@@ -193,6 +193,24 @@ before a feature is labelled GA; this page is the consolidated index.
 
 ---
 
+## Egress allow-list ([egress.md](egress.md))
+
+- **Startup-bound.** The `[egress]` policy is built once from the startup config;
+  changing `enabled`/`allow` takes effect only after a **restart** (it is
+  restart-required, staged through `stage_restart`).
+- **Auxiliary fetches only.** It guards the server's own config-driven fetches
+  (JWKS, forward-auth, discovery, ACME/OCSP, plugin `fetch`). The **data-plane
+  reverse proxy** — upstream proxying and active health checks — is out of scope.
+- **DNS/DNS-SRV discovery is not guarded.** Those use the system resolver rather
+  than an HTTP client.
+- **Trust-by-name.** A host listed by name is resolved normally; DNS rebinding of
+  an explicitly name-trusted host is out of scope — use CIDR entries for IP-level
+  enforcement.
+- **Port is not part of a host rule.** A name-allowed host is reachable on any
+  port.
+
+---
+
 ## NGINX importer ([nginx-importer.md](nginx-importer.md))
 
 - **`include` is not followed.** The importer processes a single file; split

@@ -559,16 +559,18 @@ max_conns = 1000
 
 An optional outbound-destination **allow-list** that constrains the
 config-driven auxiliary fetches the server makes on its own — JWKS retrieval
-(`jwks_url`), forward-auth subrequests (`url`), and Consul/Kubernetes service
-discovery (`address`/`api_server`). When enabled, those fetches may only reach a
+(`jwks_url`), forward-auth subrequests (`url`), Consul/Kubernetes service
+discovery (`address`/`api_server`), ACME/OCSP certificate calls, and WASM plugin
+`fetch`. When enabled, those fetches may only reach a
 destination that matches an `allow` entry; every other destination is refused at
 dial time, before any bytes are sent. This bounds the SSRF blast radius of a
 mistyped or maliciously edited config value.
 
 It is **disabled by default** and compiled into every build — no build tag
-required — so the block is fully backward-compatible. Upstream proxying, active
-health checks, and ACME are intentionally out of scope. See [egress.md](egress.md)
-for the full trust model and examples.
+required — so the block is fully backward-compatible. The **data-plane reverse
+proxy** — upstream proxying and active health checks — is intentionally out of
+scope: that is the traffic the server exists to carry, not an auxiliary fetch.
+See [egress.md](egress.md) for the full trust model and examples.
 
 ```toml
 [egress]

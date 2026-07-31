@@ -7,12 +7,15 @@ package upstream
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/egress"
 )
 
 func TestK8sDiscovererResolve(t *testing.T) {
@@ -109,5 +112,68 @@ func TestK8sSelectPort(t *testing.T) {
 func TestK8sRequiresNamespaceAndService(t *testing.T) {
 	if _, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{Service: "web", APIServer: "https://x"}}, nil); err == nil {
 		t.Fatal("expected error: kubernetes without namespace")
+	}
+}
+
+// k8sDiscoverer builds a discoverer against srv guarded by an egress policy that
+// allows the given entry. It shares the payload/setup of TestK8sDiscovererResolve.
+func newK8sEgressDiscoverer(t *testing.T, apiServer string, allow ...string) Discoverer {
+	t.Helper()
+	pol, err := egress.New(config.EgressConfig{Enabled: true, Allow: allow})
+	if err != nil {
+		t.Fatalf("egress.New: %v", err)
+	}
+	dial := pol.For(egress.SubsystemDiscovery).DialContext(&net.Dialer{Timeout: 2 * time.Second})
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{
+		Type: "kubernetes",
+		Kubernetes: &config.KubernetesDiscovery{
+			Namespace:             "default",
+			Service:               "web",
+			Port:                  "http",
+			APIServer:             apiServer,
+			Token:                 "tok",
+			InsecureSkipTLSVerify: true,
+		},
+	}, dial)
+	if err != nil {
+		t.Fatalf("newKubernetesDiscoverer: %v", err)
+	}
+	return d
+}
+
+// TestK8sDiscovererEgressAllowed proves the Kubernetes API client honours an
+// allowing egress guard: the endpointslice fetch to a permitted API server
+// resolves normally.
+func TestK8sDiscovererEgressAllowed(t *testing.T) {
+	const payload = `{"items":[{"ports":[{"name":"http","port":8080}],"endpoints":[{"addresses":["10.1.0.1"],"conditions":{"ready":true}}]}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	// srv listens on 127.0.0.1, inside the allow-list.
+	d := newK8sEgressDiscoverer(t, srv.URL, "127.0.0.0/8")
+	targets, err := d.Resolve(context.Background())
+	if err != nil {
+		t.Fatalf("Resolve through an allowing egress guard: %v", err)
+	}
+	if len(targets) != 1 || targets[0].Address != "10.1.0.1:8080" {
+		t.Errorf("targets = %+v, want one 10.1.0.1:8080", targets)
+	}
+}
+
+// TestK8sDiscovererEgressBlocked proves a disallowed API server address fails
+// the resolve rather than reaching an unapproved Kubernetes endpoint.
+func TestK8sDiscovererEgressBlocked(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	}))
+	defer srv.Close()
+
+	// srv is on 127.0.0.1 but the allow-list only permits 10.0.0.0/8.
+	d := newK8sEgressDiscoverer(t, srv.URL, "10.0.0.0/8")
+	if _, err := d.Resolve(context.Background()); err == nil {
+		t.Error("expected Resolve to fail when the API server is outside the egress allow-list")
 	}
 }

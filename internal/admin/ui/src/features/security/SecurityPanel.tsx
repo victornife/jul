@@ -133,6 +133,7 @@ function EgressCell({ egress }: { readonly egress: EgressProjection | undefined 
           No outbound-destination restriction; the server&apos;s config-driven fetches may reach any
           host.
         </span>
+        <EgressDocsLink />
       </span>
     );
   }
@@ -156,7 +157,24 @@ function EgressCell({ egress }: { readonly egress: EgressProjection | undefined 
       ) : (
         <span className="text-jul-muted text-xs">No blocked destinations recorded.</span>
       )}
+      <EgressDocsLink />
     </span>
+  );
+}
+
+// EgressDocsLink points the operator at the canonical egress documentation
+// (trust semantics, redirects, DNS, proxy, and ACME/plugin behavior). It is the
+// Console's documentation pointer for the startup-bound [egress] policy.
+function EgressDocsLink() {
+  return (
+    <a
+      href="https://github.com/victornife/jul/blob/main/docs/egress.md"
+      target="_blank"
+      rel="noreferrer"
+      className="text-jul-accent text-xs hover:underline"
+    >
+      Egress documentation
+    </a>
   );
 }
 

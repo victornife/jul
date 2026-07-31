@@ -158,7 +158,7 @@ a destination the plugin allows but the server does not is refused. The guest
 sees the distinct return code `-5` for a global-policy denial; see
 [plugins.md](plugins.md).
 
-## Metrics and diagnostics
+## Metrics, logs, and diagnostics
 
 Every decision is reported to bounded Prometheus counters — labelled only by
 subsystem, result, and reason, **never** by destination host or IP:
@@ -168,9 +168,18 @@ subsystem, result, and reason, **never** by destination host or IP:
 - `jul_egress_dns_answers_total{subsystem,result}` — CIDR-only hostname
   resolutions evaluated.
 
+On a **block**, the server also emits a structured, rate-limited log line so an
+operator can act on a refusal without scraping metrics. Each entry carries the
+`subsystem`, the normalized `host`, an optional `resolved_ip`, and the bounded
+`reason` — **never** a URL, query string, or credential. Identity, discovery, and
+PKI blocks (`auth`, `discovery`, `acme`, `ocsp`) log at **warning**; plugin-fetch
+denials (`plugin`), which are guest-triggered and expected, log at **info**.
+Identical events (same subsystem, host, and reason) are collapsed within a short
+window so a retry loop cannot flood the log.
+
 The Console **Security** panel surfaces whether the allow-list is enabled, the
-allow-rule count, and a recent-blocked breakdown by subsystem and reason. No
-destination history is retained.
+allow-rule count, a recent-blocked breakdown by subsystem and reason, and a link
+to this page. No destination history is retained.
 
 ## Security notes
 
@@ -187,7 +196,10 @@ destination history is retained.
 ## Limits
 
 - Guards the auxiliary fetch paths above — **not** upstream proxying or active
-  health checks (see the table).
+  health checks (see the table). The **data-plane reverse proxy** (routing client
+  traffic to your backends) is deliberately **out of scope**: that is the traffic
+  the server exists to carry, and it is governed by routing/upstream config, not
+  the egress allow-list.
 - Port is not part of a host rule: a name-allowed host is reachable on any port.
 - Applied at startup; changes need a restart.
 

@@ -125,8 +125,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// calls, and WASM plugin fetches). It is built before the process-lifetime
 	// runtime so the ACME/OCSP clients can be guarded. Changing [egress] takes
 	// effect after a restart.
+	// A rate-limited, secret-free block logger complements the bounded metrics:
+	// it names the subsystem, normalized host, optional resolved IP, and reason
+	// so an operator can act on a refusal, and rate-limits identical events so a
+	// retry loop cannot flood the log.
+	egressBlockLog := egress.NewBlockLogObserver(log)
 	egressPolicy, err := egress.New(cfg.Egress, egress.WithObserver(func(d egress.Decision) {
 		metrics.ObserveEgressDecision(d.Subsystem, string(d.Result), string(d.Reason), d.DNSAnswers)
+		egressBlockLog(d)
 	}))
 	if err != nil {
 		log.Error("failed to build egress allow-list", "error", err)

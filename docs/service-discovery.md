@@ -436,6 +436,13 @@ provider so operators can choose the right source for their deployment.
   control plane, they can redirect traffic to arbitrary backends. This is an
   **infrastructure-compromise** scenario, not a Jul.IA code bug. Protect the
   provider infrastructure with the same rigour as the proxy itself.
+- **Defense-in-depth (egress allow-list).** The Consul `address` and Kubernetes
+  `api_server` are URLs the server fetches on its own. When the optional
+  [`[egress]`](egress.md) allow-list is enabled, discovery fetches are constrained
+  to an operator-approved set of hosts/CIDRs and refused at dial time otherwise
+  (subsystem `discovery`), so a mistyped or compromised provider address cannot
+  reach an unintended host. It is disabled by default. (DNS/DNS-SRV discovery uses
+  the system resolver and is out of the allow-list's scope.)
 
 ### Stale-backend risk
 

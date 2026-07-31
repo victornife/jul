@@ -173,6 +173,19 @@ Each access-log entry includes:
 - `trace_id` — when tracing is active
 - `error` — when the request failed with an error
 
+### Egress block logs
+
+When the optional `[egress]` allow-list refuses an outbound auxiliary fetch
+(JWKS, forward-auth, discovery, ACME/OCSP, or plugin `fetch`), the server emits a
+structured, rate-limited log line alongside the `jul_egress_decisions_total`
+counter. Each entry carries the `subsystem`, the normalized `host`, an optional
+`resolved_ip`, and a bounded `reason` (`host_not_allowed`, `ip_not_allowed`,
+`mixed_dns_answers`, `no_dns_answers`, `invalid_address`) — never a URL, query
+string, or credential. Identity, discovery, and PKI blocks log at **warning**;
+plugin-fetch denials log at **info**. Identical events are collapsed within a
+short window so a retry loop cannot flood the log. See
+[egress.md](egress.md#metrics-logs-and-diagnostics).
+
 ## Health and readiness
 
 The admin listener exposes health endpoints:

@@ -104,6 +104,54 @@ func TestRestartRequiredDetectsExistingListenerTLSChange(t *testing.T) {
 	}
 }
 
+// TestRestartRequiredDetectsEgressChange pins the startup-bound lifecycle of the
+// [egress] allow-list: enabling it, and later changing its entries, each require
+// a restart, and the reason names the egress subsystem so the operator sees why.
+func TestRestartRequiredDetectsEgressChange(t *testing.T) {
+	off := ComputeFingerprint(&config.Config{})
+	on := ComputeFingerprint(&config.Config{Egress: config.EgressConfig{Enabled: true, Allow: []string{"idp.example.com"}}})
+	reason, need := RestartRequired(off, on)
+	if !need {
+		t.Fatal("enabling [egress] should require a restart")
+	}
+	if !strings.Contains(reason, "egress") {
+		t.Errorf("reason = %q, want it to name the egress subsystem", reason)
+	}
+
+	// Changing only the allow-list (policy still enabled) also requires a restart.
+	changed := ComputeFingerprint(&config.Config{Egress: config.EgressConfig{Enabled: true, Allow: []string{"idp.example.com", "10.0.0.0/8"}}})
+	if _, need := RestartRequired(on, changed); !need {
+		t.Fatal("changing the [egress] allow-list should require a restart")
+	}
+
+	// An unchanged policy requires no restart.
+	if _, need := RestartRequired(on, on); need {
+		t.Fatal("an unchanged [egress] policy must not require a restart")
+	}
+}
+
+// TestDiffConfigClassifiesEgressAsRestart proves the pending-restart machinery
+// classifies an [egress] change as a restart-required change attributed to the
+// egress subsystem, so the Console pending-restart banner includes it.
+func TestDiffConfigClassifiesEgressAsRestart(t *testing.T) {
+	before := &config.Config{}
+	after := &config.Config{Egress: config.EgressConfig{Enabled: true, Allow: []string{"idp.example.com"}}}
+	var found *DiffEntry
+	diffs := DiffConfig(before, after)
+	for i := range diffs {
+		if diffs[i].Subsystem == "egress" {
+			found = &diffs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("egress change not reported by DiffConfig; the pending-restart banner would omit it")
+	}
+	if found.Class != RestartRequiredClass {
+		t.Errorf("egress class = %v, want RestartRequiredClass", found.Class)
+	}
+}
+
 // TestDiffAddressAwareReaddedAddress (R10-05) verifies that a startup address
 // removed and then re-added with the same settings is not reported as a diff.
 func TestDiffAddressAwareReaddedAddress(t *testing.T) {

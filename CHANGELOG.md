@@ -10,7 +10,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
-- **Phase 4 — Egress allow-list completion and integration hardening** (P4-01, P4-02, HP-07, #74, #75):
+- **Phase 4 — Egress allow-list completion and integration hardening** (P4-01, P4-02, P4-03, HP-07, #74, #75, #76):
   - `internal/egress` refactored into `policy`/`normalize`/`error`/`http` modules with a
     typed decision contract: `BlockError{Subsystem,Host,IP,Reason}` wrapping the
     `ErrBlocked` sentinel, and bounded `Reason` constants (`host_not_allowed`,
@@ -40,7 +40,23 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
     `jul_egress_dns_answers_total{subsystem,result}` metrics (never labelled by
     destination), and a Console **Security** panel row showing the enabled state,
     allow-rule count, and a recent-blocked breakdown by subsystem/reason.
-  - Docs: rewritten [egress.md](docs/egress.md) inventory, ACME/OCSP prerequisites in
+  - Egress **block logs** (P4-03, #76): on a block the server emits a rate-limited,
+    secret-safe structured log line carrying `subsystem`, normalized `host`, optional
+    `resolved_ip`, and bounded `reason` — never a URL, query string, or credential.
+    Identity/discovery/PKI blocks (`auth`, `discovery`, `acme`, `ocsp`) log at warning;
+    guest-triggered `plugin` fetch denials log at info; identical events are collapsed
+    within a short window so a retry loop cannot flood the log. The Console Security
+    panel gained an **egress documentation link**.
+  - Phase 4 test matrix (P4-03, #76): added negative/integration coverage —
+    redirect-to-allowed-host, TLS SNI/Host preserved when dialing a resolved IP,
+    connection-reuse re-checks a new host, timeout/cancellation propagation,
+    resolver-seam race and no-connection/goroutine-leak on repeated blocks, Consul and
+    Kubernetes allow+block, ACME directory allow+block, secret-referenced
+    `[egress].allow` resolution, and egress restart-required/pending-restart lifecycle
+    classification.
+  - Docs: rewritten [egress.md](docs/egress.md) inventory (with block-log behavior and
+    an explicit data-plane-reverse-proxy out-of-scope note), egress block logs in
+    [observability.md](docs/observability.md), ACME/OCSP prerequisites in
     [tls-acme.md](docs/tls-acme.md), the plugin-intersection and `-5` code in
     [plugins.md](docs/plugins.md), and an egress troubleshooting section. HP-07 marked
     Delivered.

@@ -189,6 +189,13 @@ go test -run '^$' -bench 'BenchmarkBasicVerify|BenchmarkJWTValidate' -benchmem .
 | Token leakage in logs | 🟢 safe | tokens are never logged (only "jwt validation failed") |
 | Forward-auth response flooding | 🟢 mitigated | response body capped at 64 KiB |
 
+**Defense-in-depth (egress allow-list).** `jwks_url` and the forward-auth `url`
+are URLs the server dereferences on its own. When the optional
+[`[egress]`](egress.md) allow-list is enabled, both fetches are additionally
+constrained to an operator-approved set of hosts/CIDRs and refused at dial time
+otherwise (subsystem `auth`), bounding the blast radius of a mistyped or
+compromised config. It is disabled by default.
+
 ## Limits
 
 - **At most one credential method per location** (no Basic **AND** JWT).

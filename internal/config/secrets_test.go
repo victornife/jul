@@ -112,6 +112,26 @@ func TestExpandSecretsNoRefIsNoop(t *testing.T) {
 	}
 }
 
+// TestExpandSecretsResolvesEgressAllow proves a secret-referenced [egress].allow
+// entry resolves through the same reflection walk as every other string field,
+// so a startup-bound egress policy sees consistent, resolved destinations. The
+// resolved allow-list must then validate as an ordinary host entry.
+func TestExpandSecretsResolvesEgressAllow(t *testing.T) {
+	t.Setenv("JUL_TEST_EGRESS_IDP", "idp.example.com")
+	c := &Config{
+		Egress: EgressConfig{Enabled: true, Allow: []string{"${env:JUL_TEST_EGRESS_IDP}", "10.0.0.0/8"}},
+	}
+	if err := ExpandSecrets(c); err != nil {
+		t.Fatalf("ExpandSecrets: %v", err)
+	}
+	if c.Egress.Allow[0] != "idp.example.com" {
+		t.Errorf("egress.allow[0] = %q, want the resolved env value", c.Egress.Allow[0])
+	}
+	if errs := validateEgress(c.Egress); len(errs) != 0 {
+		t.Errorf("validateEgress after secret resolution: %v", errs)
+	}
+}
+
 func TestCountSecretRefs(t *testing.T) {
 	c := &Config{
 		Admin: AdminConfig{Token: "${env:A}"},

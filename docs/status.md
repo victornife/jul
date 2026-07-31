@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 1.36 · Updated 2026-07-31
+> Version 1.37 · Updated 2026-07-31
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -150,6 +150,7 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-07-31 | 1.37 | Bumped version to keep the status page in sync with the roadmap after **Phase 4 egress was delivered** (P4-03, #76): rate-limited secret-safe egress block logs, a Console Security documentation link, and the full negative/integration/lifecycle/race test matrix land on top of the P4-01/P4-02 wiring, moving the roadmap Phase 4 row from *in progress* to *delivered*. No feature maturity or GA criteria changed. | [roadmap/README.md](roadmap/README.md), Issue #76 |
 | 2026-07-31 | 1.36 | Bumped version to keep the status page in sync with the roadmap after the Phase 4 egress-coverage reconciliation: the shared `[egress]` allow-list is now injected through every config-driven auxiliary client (ACME/OCSP #74; JWKS/forward-auth, Consul/Kubernetes discovery, WASM `fetch` wiring #75), so the roadmap Phase 4 row moved from *queued* to *in progress* (P4-03 observability/tests remain). No feature maturity or GA criteria changed. | [roadmap/README.md](roadmap/README.md), Issues #74, #75 |
 | 2026-07-31 | 1.35 | **Console RBAC delivered (HP-02).** Named-principal RBAC — viewer/operator/admin/auditor + custom roles, scoped revocable tokens, deny-by-default authorization, `GET /api/admin/me` identity, proactive Console permission gating, and per-principal audit attribution — shipped as an opt-in `[admin.rbac]` layer (Phase 3 / #73); the Console feature note reflects it. No feature maturity or GA criteria changed. | [roadmap/README.md](roadmap/README.md), [feature-status.yaml](feature-status.yaml), Issue #73 |
 | 2026-07-20 | 1.34 | Bumped version to keep the status page in sync with the roadmap after the Phase 1 normalization (active sequence, evidence gates, target users). No feature maturity or GA criteria changed. | [roadmap/README.md](roadmap/README.md), Issue #63 |

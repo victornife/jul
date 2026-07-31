@@ -300,3 +300,44 @@ func TestOCSPFetchRespectsEgressGuard(t *testing.T) {
 		t.Errorf("body = %q, want the responder payload", body)
 	}
 }
+
+// TestACMEDirectoryFetchRespectsEgressGuard proves the guarded HTTP client that
+// NewACMEManager assigns to acme.Client.HTTPClient enforces the allow-list on
+// the ACME directory fetch: a directory outside the allow-list is refused at
+// dial time, while one inside it is reached and parsed. It uses a local test
+// server so no external ACME endpoint is contacted.
+func TestACMEDirectoryFetchRespectsEgressGuard(t *testing.T) {
+	var base string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"newNonce":"` + base + `/nonce","newAccount":"` + base + `/acct","newOrder":"` + base + `/order"}`))
+	}))
+	defer srv.Close()
+	base = srv.URL
+
+	ctx := context.Background()
+
+	// Blocked: the loopback directory is not inside 10.0.0.0/8.
+	blocked, err := egress.New(config.EgressConfig{Enabled: true, Allow: []string{"10.0.0.0/8"}})
+	if err != nil {
+		t.Fatalf("egress.New: %v", err)
+	}
+	blockedClient := &acme.Client{HTTPClient: blocked.For(egress.SubsystemACME).Client(0), DirectoryURL: srv.URL}
+	if _, err := blockedClient.Discover(ctx); !errors.Is(err, egress.ErrBlocked) {
+		t.Fatalf("blocked directory: err = %v, want ErrBlocked", err)
+	}
+
+	// Allowed: the loopback directory is inside 127.0.0.0/8.
+	allowed, err := egress.New(config.EgressConfig{Enabled: true, Allow: []string{"127.0.0.0/8"}})
+	if err != nil {
+		t.Fatalf("egress.New: %v", err)
+	}
+	allowedClient := &acme.Client{HTTPClient: allowed.For(egress.SubsystemACME).Client(0), DirectoryURL: srv.URL}
+	dir, err := allowedClient.Discover(ctx)
+	if err != nil {
+		t.Fatalf("allowed directory: %v", err)
+	}
+	if dir.OrderURL != base+"/order" {
+		t.Errorf("directory OrderURL = %q, want %q", dir.OrderURL, base+"/order")
+	}
+}

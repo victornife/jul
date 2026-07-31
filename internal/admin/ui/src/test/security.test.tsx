@@ -207,6 +207,8 @@ describe("SecurityPanel outbound egress", () => {
     expect(await screen.findByText(/3 allow rules/)).toBeInTheDocument();
     expect(screen.getByText(/Blocked 4 in/)).toBeInTheDocument();
     expect(screen.getByText(/host_not_allowed/)).toBeInTheDocument();
+    const docs = screen.getByRole("link", { name: /Egress documentation/i });
+    expect(docs).toHaveAttribute("href", "https://github.com/victornife/jul/blob/main/docs/egress.md");
   });
 
   it("reports the unrestricted state when egress is disabled", async () => {

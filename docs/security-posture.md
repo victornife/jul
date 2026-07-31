@@ -120,9 +120,9 @@ A client request cannot cause Jul.IA to connect to a different host.
 `fetch` intersection) to an operator-approved set of hosts/CIDRs, reducing the
 blast radius of a misconfigured or compromised config. Enforcement is at dial
 time (so redirects are re-checked), guarded clients ignore `HTTP(S)_PROXY`, and
-blocks are surfaced with typed, secret-safe reasons and bounded
-`jul_egress_decisions_total` metrics. It is disabled by default (opt-in
-hardening).
+blocks are surfaced with typed, secret-safe reasons, bounded
+`jul_egress_decisions_total` metrics, and rate-limited structured block logs
+(subsystem/host/reason only). It is disabled by default (opt-in hardening).
 
 ---
 

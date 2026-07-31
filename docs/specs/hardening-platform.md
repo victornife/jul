@@ -37,7 +37,7 @@ to committed roadmap features — notably **HP-02 Console RBAC** feeds
 | HP-06A | Structured-config parity — backend entity CRUD | [Y2-09](../specs/console-v2.md) | ✅ Delivered | L |
 | HP-06B | Structured-config parity — Console entity CRUD | [Y2-09](../specs/console-v2.md) | Phase 5 active | L |
 | HP-06C | Structured-config parity — near-term global tables | [Y2-09](../specs/console-v2.md) | `global_set`, `compression_set`, `rate_limit_global_set` Phase 5 active; `cache_set`, decomposed admin ops, and `access_log_set` deferred | L |
-| HP-07 | SSRF allow-list hardening (defense-in-depth) | — | ✅ Delivered (P4-01: typed decisions, normalization, scoped guards, ACME/OCSP/plugin integration, metrics, Console) | M |
+| HP-07 | SSRF allow-list hardening (defense-in-depth) | — | ✅ Delivered (P4-01: typed decisions, normalization, scoped guards, ACME/OCSP/plugin integration, metrics, Console; P4-03: rate-limited block logs + full negative/integration test matrix) | M |
 
 Effort: **M** ≈ weeks · **L** ≈ ~a quarter (per the roadmap T-shirt sizing).
 
@@ -401,14 +401,21 @@ config + validation.
 **Tests.** allow-listed host permitted; non-listed blocked; default-off unchanged;
 redirect/proxy/DNS semantics; ACME/OCSP and plugin-intersection paths.
 
-**Status — Delivered (P4-01).** Split `internal/egress` package with typed
-`BlockError`/`Reason`, hostname normalization (IDNA, trailing dot, IPv6
-brackets/zones, CIDR canonicalization, dedup), immutable subsystem-scoped
-`Policy.For(...)` guards, `Proxy=nil` guarded transports with a redirect-checking
-`RoundTripper`, ACME/OCSP client injection, the plugin fetch intersection (guest
-code `-5`), bounded `jul_egress_decisions_total{subsystem,result,reason}` /
-`jul_egress_dns_answers_total{subsystem,result}` metrics, and Console Security
-visibility. See [egress.md](../egress.md).
+**Status — Delivered (P4-01 wiring, P4-03 observability + tests).** Split
+`internal/egress` package with typed `BlockError`/`Reason`, hostname
+normalization (IDNA, trailing dot, IPv6 brackets/zones, CIDR canonicalization,
+dedup), immutable subsystem-scoped `Policy.For(...)` guards, `Proxy=nil` guarded
+transports with a redirect-checking `RoundTripper`, ACME/OCSP client injection,
+the plugin fetch intersection (guest code `-5`), bounded
+`jul_egress_decisions_total{subsystem,result,reason}` /
+`jul_egress_dns_answers_total{subsystem,result}` metrics, rate-limited secret-safe
+block logs (warn for auth/discovery/acme/ocsp, info for plugin), and Console
+Security visibility with a documentation link. P4-03 (#76) completed the Phase 4
+negative/integration test matrix: redirect-to-allowed, TLS SNI/Host preservation
+when dialing an IP, connection-reuse re-checks, timeout/cancellation propagation,
+Consul/Kubernetes/ACME allow+block, egress lifecycle (restart-bound, secret-ref
+resolution, pending-restart classification), and resolver-seam/no-leak race
+tests. See [egress.md](../egress.md).
 
 **DoD.** opt-in, default-off, no behavior change unless configured; documented as
 defense-in-depth in [SECURITY.md](../../SECURITY.md).
