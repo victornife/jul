@@ -6,6 +6,7 @@
 package waf
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +26,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 // but no rules are configured (empty engine). This gives a floor for the
 // Coraza-request lifecycle cost (phase evaluation, transaction creation).
 func BenchmarkWAF_NoRules(b *testing.B) {
-	fw, err := New(config.WAFConfig{Enabled: true, InlineRules: `SecRuleEngine On`}, Options{})
+	fw, err := New(context.Background(), config.WAFConfig{Enabled: true, InlineRules: `SecRuleEngine On`}, Options{})
 	if err != nil {
 		b.Fatalf("New: %v", err)
 	}
@@ -48,7 +49,7 @@ func BenchmarkWAF_NoRules(b *testing.B) {
 // active in block mode for a benign request (no rule matches). This is the
 // steady-state cost of running the full rule set.
 func BenchmarkWAF_CRSBlock_Pass(b *testing.B) {
-	fw, err := New(config.WAFConfig{
+	fw, err := New(context.Background(), config.WAFConfig{
 		Enabled:    true,
 		Mode:       "block",
 		CRSEnabled: true,
@@ -76,7 +77,7 @@ func BenchmarkWAF_CRSBlock_Pass(b *testing.B) {
 // (path-traversal probe). This is a blocked request, so it never reaches the
 // upstream handler.
 func BenchmarkWAF_CRSBlock_Block(b *testing.B) {
-	fw, err := New(config.WAFConfig{
+	fw, err := New(context.Background(), config.WAFConfig{
 		Enabled:    true,
 		Mode:       "block",
 		CRSEnabled: true,
@@ -104,7 +105,7 @@ func BenchmarkWAF_CRSBlock_Block(b *testing.B) {
 // mode for a benign request. Detect mode evaluates rules but never interrupts,
 // so it exercises the full rule set without the short-circuit path.
 func BenchmarkWAF_CRSDetect_Pass(b *testing.B) {
-	fw, err := New(config.WAFConfig{
+	fw, err := New(context.Background(), config.WAFConfig{
 		Enabled:    true,
 		Mode:       "detect",
 		CRSEnabled: true,

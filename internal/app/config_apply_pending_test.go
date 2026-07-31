@@ -105,10 +105,10 @@ func TestApplyRegistersPendingRecordBeforeSavedNotLive(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond)
+			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond * raceTimeScale)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
-		waitMargin:     10 * time.Millisecond,
+		waitMargin:     10 * time.Millisecond * raceTimeScale,
 		PlannedRestart: &PlannedRestartStore{},
 	}
 	registry, startedCh, completedCh := wireProductionLedger(c)

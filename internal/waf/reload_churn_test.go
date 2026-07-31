@@ -6,6 +6,7 @@
 package waf
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -57,7 +58,7 @@ func TestWAFReloadChurnNoLeak(t *testing.T) {
 		t.Helper()
 		applyTestDefaults(&cfg)
 		rec := &eventRecorder{}
-		fw, err := New(cfg, Options{Hooks: Hooks{OnEvent: rec.onEvent}})
+		fw, err := New(context.Background(), cfg, Options{Hooks: Hooks{OnEvent: rec.onEvent}})
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}

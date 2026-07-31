@@ -33,11 +33,11 @@ import (
 // upper bound.
 func TestManagedApplyEnforcesSingleReloadTimeoutBudget(t *testing.T) {
 	const (
-		servingTimeout  = 200 * time.Millisecond
-		preflightSpend  = 150 * time.Millisecond
-		waitMargin      = 15 * time.Millisecond
-		singleBudgetMax = 300 * time.Millisecond // < reset (~365ms), well above one-budget (~215ms)
-		singleBudgetMin = 150 * time.Millisecond // proves the wait ran ~the budget, not just preflight
+		servingTimeout  = 200 * time.Millisecond * raceTimeScale
+		preflightSpend  = 150 * time.Millisecond * raceTimeScale
+		waitMargin      = 15 * time.Millisecond * raceTimeScale
+		singleBudgetMax = 300 * time.Millisecond * raceTimeScale // < reset (~365ms), well above one-budget (~215ms)
+		singleBudgetMin = 150 * time.Millisecond * raceTimeScale // proves the wait ran ~the budget, not just preflight
 	)
 
 	tmp := t.TempDir()

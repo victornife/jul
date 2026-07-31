@@ -6,6 +6,7 @@
 package waf
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -49,7 +50,7 @@ func buildAndServe(t *testing.T, cfg config.WAFConfig, req *http.Request) (*http
 	t.Helper()
 	applyTestDefaults(&cfg)
 	rec := &eventRecorder{}
-	fw, err := New(cfg, Options{Hooks: Hooks{OnEvent: rec.onEvent}})
+	fw, err := New(context.Background(), cfg, Options{Hooks: Hooks{OnEvent: rec.onEvent}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestNewRejectsBadDirectives(t *testing.T) {
 		InlineRules: `this is not valid seclang @@@`,
 	}
 	applyTestDefaults(&cfg)
-	if _, err := New(cfg, Options{}); err == nil {
+	if _, err := New(context.Background(), cfg, Options{}); err == nil {
 		t.Error("expected an error compiling invalid SecLang directives")
 	}
 }
@@ -233,7 +234,7 @@ func TestFirewallDoesNotRewriteDownstream403(t *testing.T) {
 		InlineRules: `SecRule REQUEST_URI "@contains /forbidden" "id:100,phase:1,deny,status:403,log,msg:'blocked path'"`,
 	}
 	applyTestDefaults(&cfg)
-	fw, err := New(cfg, Options{})
+	fw, err := New(context.Background(), cfg, Options{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -337,7 +338,7 @@ func TestBuildDirectivesOrder(t *testing.T) {
 }
 
 func TestFirewallClose(t *testing.T) {
-	fw, err := New(config.WAFConfig{Enabled: true, Mode: "detect"}, Options{})
+	fw, err := New(context.Background(), config.WAFConfig{Enabled: true, Mode: "detect"}, Options{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
