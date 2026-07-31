@@ -1620,6 +1620,65 @@ describe("HistoryPanel rollback flow", () => {
     expect(recordReads).toBeGreaterThanOrEqual(2);
   });
 
+  it("re-enables Cancel and shows the advisory when the exact-record poll is forbidden", async () => {
+    // N-01 regression: a rollback-only role's saved_not_live rollback whose exact
+    // ledger record cannot be fetched (e.g. a 403) must not trap the operator with
+    // Cancel disabled forever. A persistently erroring poll is treated like an
+    // expiry: Cancel re-enables and the "still unavailable" advisory replaces the
+    // "still pending" message.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input.startsWith("/api/config/rollback")) {
+        return Promise.resolve(
+          json(
+            {
+              ok: true,
+              apply_id: "rl_403",
+              mode: "hot",
+              reload: {
+                id: "rl_403",
+                outcome: "saved_not_live",
+                http: { status: "" },
+                stream: { status: "" },
+                admin: { status: "" },
+              },
+            },
+            202,
+          ),
+        );
+      }
+      if (input === "/api/config/applies/rl_403") {
+        recordReads += 1;
+        return Promise.resolve(json({ error: "forbidden", required: "history:rollback" }, 403));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    // The forbidden poll surfaces the "still unavailable" advisory rather than
+    // leaving the dialog stuck on "still pending".
+    expect(
+      await screen.findByText(/final rollback result is still unavailable/i),
+    ).toBeInTheDocument();
+    // The dialog remains open, but Cancel must be usable so the operator is never
+    // trapped by a poll that can never succeed.
+    expect(
+      screen.getByRole("dialog", { name: "Roll back to this snapshot?" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toBeDisabled();
+    expect(recordReads).toBeGreaterThanOrEqual(1);
+  });
+
   it("renders the shared finalization advisory after a live rollback whose sidecar degraded", async () => {
     // AC-14: a fully-live rollback (terminal, result.ok=true, applied_live) whose
     // finalization sidecar degraded must surface the shared advisory — never as a

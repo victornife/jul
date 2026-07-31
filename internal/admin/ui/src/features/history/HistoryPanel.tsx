@@ -380,9 +380,14 @@ export function HistoryPanel() {
   // deadline-bounded cadence, and expiry so this panel and ConfigPanel observe
   // one lifecycle. A missing record is never mistaken for success.
   const rollbackManaged = useManagedApplyRecord(trackedRollback?.applyID ?? undefined);
-  // The rollback did not reach a terminal RUNTIME result by its deadline. Gated
-  // on a pending apply id so the idle hook never trips the expired UI.
-  const pollingExpired = pendingApplyID !== null && rollbackManaged.status === "expired";
+  // The rollback did not reach a terminal RUNTIME result. Gated on a pending
+  // apply id so the idle hook never trips the UI. A poll that expires OR that
+  // repeatedly errors (e.g. an authorization failure fetching the exact record)
+  // is treated the same way: re-enable Cancel and show the advisory, so the
+  // dialog can never trap the operator with Cancel disabled forever (N-01).
+  const pollingExpired =
+    pendingApplyID !== null &&
+    (rollbackManaged.status === "expired" || rollbackManaged.status === "error");
 
   useEffect(() => {
     if (trackedRollback === null) return;
@@ -448,13 +453,14 @@ export function HistoryPanel() {
   // AC-14: for an immediate rollback whose supplemental provenance lookup expires
   // before the terminal record is retrieved, the runtime outcome is already
   // known — keep it and surface a distinct advisory rather than a rollback
-  // failure.
+  // failure. A persistently erroring lookup (e.g. a 403) is treated like an
+  // expiry so the tracker is cleared instead of polling forever (N-01).
   useEffect(() => {
     if (
       trackedRollback !== null &&
       !trackedRollback.pendingRuntime &&
       rollbackAttemptRef.current === trackedRollback.attempt &&
-      rollbackManaged.status === "expired"
+      (rollbackManaged.status === "expired" || rollbackManaged.status === "error")
     ) {
       setFinalizationNotice({
         title: "Rollback applied, but finalization status is unavailable",
