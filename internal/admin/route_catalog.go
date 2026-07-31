@@ -243,6 +243,17 @@ var Catalog = []RouteSpec{
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigHistoryGet) },
 	},
+	// Snapshot rollback preview (history:rollback). Reads the snapshot
+	// server-side and diffs it against the running config, so a least-privilege
+	// rollback-only role can preview what a rollback would change without
+	// holding config:write and without POSTing arbitrary candidate TOML to the
+	// generic /api/config/diff endpoint (N-02).
+	{
+		Pattern:    "/api/config/history/{id}/diff",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.HistoryRollback,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigHistoryDiff) },
+	},
 
 	// ── Config write/preview (config:write) ───────────────────────────────────
 	{

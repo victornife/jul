@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -118,5 +119,41 @@ func TestManagedApplyGet_RollbackOnlyScoped(t *testing.T) {
 				t.Fatalf("code = %d, want %d (body %s)", rr.Code, tc.wantCode, rr.Body.String())
 			}
 		})
+	}
+}
+
+// TestManagedApplyGet_OwnershipDenialBodyIsHonest proves the ownership/scope
+// denial for a rollback-only principal reports that the record is inaccessible
+// to the current credential — not that history:rollback is required, which the
+// caller already holds and was admitted through. The body names no permission
+// the caller has and leaks neither the record nor another principal.
+func TestManagedApplyGet_OwnershipDenialBodyIsHonest(t *testing.T) {
+	h := managedApplyRollbackAuthzServer(t)
+
+	// rl_4 is a rollback owned by a DIFFERENT principal: an ownership denial,
+	// not a missing permission.
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/config/applies/rl_4", nil)
+	req.Header.Set("Authorization", "Bearer "+rbRollbackOnlyTok)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, want 403 (%s)", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "forbidden" {
+		t.Errorf("error = %v, want forbidden", body["error"])
+	}
+	if msg, _ := body["message"].(string); msg == "" {
+		t.Error("expected an explanatory message about record accessibility")
+	}
+	// The denial must not claim a permission the caller already holds, nor leak
+	// the record or another principal.
+	for _, forbidden := range []string{"required", "role", "principal", "result", "state", "id"} {
+		if _, present := body[forbidden]; present {
+			t.Errorf("ownership 403 body leaked/misreported %q", forbidden)
+		}
 	}
 }

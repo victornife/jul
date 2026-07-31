@@ -312,6 +312,7 @@ granted. Sourced from `internal/admin/routes.go`.
 | `/api/history/get` | GET | `history:read` | ✓ | ✓ | ✓ | · |
 | `/api/config/history` | GET | `history:read` | ✓ | ✓ | ✓ | · |
 | `/api/config/history/{id}` | GET | `history:read` | ✓ | ✓ | ✓ | · |
+| `/api/config/history/{id}/diff` | GET | `history:rollback` | · | ✓ | ✓ | · |
 | `/api/config/applies/{id}` | GET | `status:read` **or** `config:apply` **or** `history:rollback` (own rollbacks only) | ✓ | ✓ | ✓ | ✓ |
 | `/api/observability/requests` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
 | `/api/observability/failing-routes` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
@@ -375,6 +376,14 @@ records whose operation is a rollback **and** whose owner token matches its own,
 so it can never read the result of an unrelated apply or patch transaction. The
 projection never exposes actor, source IP, or token digest — those remain
 audit-API only.
+
+The rollback preview endpoint (`GET /api/config/history/{id}/diff`) is gated by
+`history:rollback` rather than `config:write`, so a least-privilege rollback-only
+role can review exactly what rolling back to a snapshot would change before it
+confirms. The server reads the snapshot itself and diffs it against the running
+config; unlike the generic `POST /api/config/diff` it accepts no request body,
+so a rollback-only caller can never submit an arbitrary candidate configuration
+through it.
 
 ## Enforcement
 

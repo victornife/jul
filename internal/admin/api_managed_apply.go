@@ -96,8 +96,15 @@ func (s *Server) handleManagedApplyGet(w http.ResponseWriter, r *http.Request) {
 	if !ident.Has(rbac.StatusRead) && !ident.Has(rbac.ConfigApply) {
 		if rec.Operation != ApplyOperationRollback ||
 			rec.OwnerTokenID == "" || rec.OwnerTokenID != ident.TokenID {
+			// The caller already holds history:rollback (it was admitted through
+			// it); the denial is ownership or operation scope, not a missing
+			// permission. Report that truthfully instead of naming a permission
+			// the caller has, without revealing whether the record exists.
 			s.observeManagedApplyLookup("forbidden")
-			writeForbidden(w, rbac.HistoryRollback, ident)
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":   "forbidden",
+				"message": "This managed apply record is not accessible to the current credential.",
+			})
 			return
 		}
 	}

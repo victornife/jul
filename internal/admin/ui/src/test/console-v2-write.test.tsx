@@ -63,6 +63,18 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+// confirmRollback opens the rollback confirmation for the single seeded snapshot
+// and clicks Confirm only once its diff preview has loaded — Confirm is disabled
+// until the rollback-scoped diff resolves (N-02).
+async function confirmRollback(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+  const confirm = await screen.findByRole("button", { name: "Roll back" });
+  await waitFor(() => {
+    expect(confirm).not.toBeDisabled();
+  });
+  fireEvent.click(confirm);
+}
+
 interface Counters {
   apply: number;
   rollback: number;
@@ -99,6 +111,9 @@ function installRouter(): Counters {
     }
     if (url === "/api/config/history/s1") {
       return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+    }
+    if (url === "/api/config/history/s1/diff") {
+      return Promise.resolve(json({ summary: "1 change" }));
     }
     if (url === "/api/config/rollback") {
       counters.rollback += 1;
@@ -1490,7 +1505,11 @@ describe("HistoryPanel rollback flow", () => {
     expect(await screen.findByText("Roll back to this snapshot?")).toBeInTheDocument();
     expect(counters.rollback).toBe(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Roll back" }));
+    const confirmBtn = screen.getByRole("button", { name: "Roll back" });
+    await waitFor(() => {
+      expect(confirmBtn).not.toBeDisabled();
+    });
+    fireEvent.click(confirmBtn);
     await waitFor(() => {
       expect(counters.rollback).toBe(1);
     });
@@ -1505,7 +1524,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "admin change" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "admin change" }));
       if (input.startsWith("/api/config/rollback")) {
         rollbacks += 1;
         if (rollbacks === 1)
@@ -1529,8 +1549,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
     expect(await screen.findByText("Confirm admin access rollback?")).toBeInTheDocument();
     expect(screen.getByText("admin token changes")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Confirm and roll back" }));
@@ -1546,7 +1565,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json(
@@ -1605,8 +1625,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
     expect(await screen.findByText(/live result is still pending/i)).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Roll back to this snapshot?" })).toBeInTheDocument();
     await waitFor(
@@ -1632,7 +1651,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json(
@@ -1663,8 +1683,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
     // The forbidden poll surfaces the "still unavailable" advisory rather than
     // leaving the dialog stuck on "still pending".
     expect(
@@ -1689,7 +1708,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json(
@@ -1734,8 +1754,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
     expect(
       await screen.findByText("Configuration applied, but recovery/audit finalization degraded"),
     ).toBeInTheDocument();
@@ -1757,7 +1776,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json({
@@ -1794,8 +1814,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
 
     // The dialog closes immediately (immediate live), not held for the lookup.
     await waitFor(() => {
@@ -1826,7 +1845,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json({
@@ -1869,8 +1889,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
 
     // The committed-degraded warning shows immediately.
     expect(await screen.findByText("Rollback applied — degraded reload")).toBeInTheDocument();
@@ -1893,7 +1912,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json(
@@ -1942,8 +1962,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
 
     // The committed-degraded terminal record closes the dialog and surfaces a
     // persistent warning banner (not an error).
@@ -1971,7 +1990,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json(
@@ -2031,8 +2051,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
     // While the exact-id record is still pending, the dialog stays open.
     expect(await screen.findByText(/live result is still pending/i)).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Roll back to this snapshot?" })).toBeInTheDocument();
@@ -2060,7 +2079,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json(
@@ -2105,8 +2125,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
     // The 404s keep the dialog open with the pending notice — never a success.
     expect(await screen.findByText(/live result is still pending/i)).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Roll back to this snapshot?" })).toBeInTheDocument();
@@ -2134,7 +2153,8 @@ describe("HistoryPanel rollback flow", () => {
         return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
       if (input === "/api/config/history/s1")
         return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "rollback" }));
       if (input.startsWith("/api/config/rollback")) {
         return Promise.resolve(
           json(
@@ -2177,8 +2197,7 @@ describe("HistoryPanel rollback flow", () => {
         <HistoryPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+    await confirmRollback();
     // The past-deadline record surfaces the expiry notice, not a success — and
     // the dialog stays open so the operator can dismiss it deliberately.
     expect(

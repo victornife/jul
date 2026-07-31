@@ -24,6 +24,7 @@ import {
   ConfigAdminChangeError,
   ConfigApplyOutcomeError,
   rollback,
+  diffHistorySnapshot,
   ApiError,
   ValidationResultSchema,
   ApplyResultSchema,
@@ -377,6 +378,25 @@ describe("rollback", () => {
     expect(result.ok).toBe(true);
     expect(result.mutation_status).toBe("rolled back");
     expect(result.mutation_id).toBe("s1");
+  });
+});
+
+describe("diffHistorySnapshot", () => {
+  it("GETs the rollback-scoped history diff endpoint with no body", async () => {
+    const fn = mockFetch(
+      () => new Response(JSON.stringify({ summary: "1 change" }), { status: 200 }),
+    );
+    const diff = await diffHistorySnapshot("20260101-000000-abcd");
+    expect(fn.mock.calls[0]?.[0]).toBe("/api/config/history/20260101-000000-abcd/diff");
+    expect(lastInit(fn).method ?? "GET").toBe("GET");
+    expect(lastInit(fn).body ?? null).toBeNull();
+    expect(diff.summary).toBe("1 change");
+  });
+
+  it("encodes the snapshot id into the path", async () => {
+    const fn = mockFetch(() => new Response(JSON.stringify({ summary: "x" }), { status: 200 }));
+    await diffHistorySnapshot("a/b");
+    expect(fn.mock.calls[0]?.[0]).toBe("/api/config/history/a%2Fb/diff");
   });
 });
 

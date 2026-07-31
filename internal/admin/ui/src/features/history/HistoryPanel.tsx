@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchHistory,
   fetchHistorySnapshot,
-  diffConfig,
+  diffHistorySnapshot,
   rollback,
   describeApiError,
   ConfigAdminChangeError,
@@ -158,14 +158,12 @@ function RollbackConfirm({
   readonly pending: boolean;
   readonly pollingExpired: boolean;
 }) {
-  const snap = useQuery({
-    queryKey: ["history-snap", id],
-    queryFn: () => fetchHistorySnapshot(id),
-  });
+  // The preview reads the snapshot server-side and diffs it against the running
+  // config through the rollback-scoped endpoint, so a least-privilege
+  // rollback-only role can review the change without config:write (N-02).
   const diff = useQuery({
     queryKey: ["history-rollback-diff", id],
-    queryFn: () => diffConfig(snap.data?.raw ?? ""),
-    enabled: snap.data !== undefined,
+    queryFn: () => diffHistorySnapshot(id),
     staleTime: 0,
     refetchInterval: false,
     refetchOnWindowFocus: false,
@@ -179,15 +177,16 @@ function RollbackConfirm({
       confirmLabel={adminChanges.length > 0 ? "Confirm and roll back" : "Roll back"}
       danger
       busy={busy}
-      confirmDisabled={pending}
+      confirmDisabled={pending || !diff.isSuccess}
       cancelDisabled={pending && !pollingExpired}
       onConfirm={onConfirm}
       onCancel={onCancel}
     >
       <p>
         Re-applies snapshot <span className="font-mono text-jul-text">{id}</span> as the live
-        configuration and triggers a reload. The current config is snapshotted first, so this is
-        reversible.
+        configuration and triggers a reload. The current configuration is retained for recovery and
+        recorded in configuration history during terminal finalization. If history storage is
+        unavailable, the rollback can still apply and the Console will show a recovery warning.
       </p>
       <div className="mt-3">
         {adminChanges.length > 0 && (
@@ -197,10 +196,14 @@ function RollbackConfirm({
             ))}
           </ul>
         )}
-        {snap.isLoading && <p className="text-xs">Loading snapshot…</p>}
         {diff.isFetching && <p className="text-xs text-jul-muted">Computing changes vs running…</p>}
         {diff.data && <DiffView diff={diff.data} />}
-        {diff.isError && <p className="text-xs text-jul-danger">Unable to compute diff preview.</p>}
+        {diff.isError && (
+          <p className="text-xs text-jul-danger">
+            Unable to compute the rollback preview. Confirmation stays disabled until the preview
+            loads.
+          </p>
+        )}
         {error && <p className="mt-2 text-xs text-jul-danger">{error.message}</p>}
         {pending && !pollingExpired && (
           <p className="mt-2 text-xs text-jul-warning">

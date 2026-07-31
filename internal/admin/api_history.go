@@ -273,9 +273,48 @@ func (s *Server) handleConfigHistoryGet(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "raw": string(raw)})
 }
 
-// handleConfigRollback re-applies a stored snapshot via the validated write path
-// at POST /api/config/rollback. The running config is snapshotted first so the
-// rollback is itself reversible.
+// handleConfigHistoryDiff serves a structured diff between the running config
+// and a stored snapshot at GET /api/config/history/{id}/diff. It reads the
+// snapshot server-side and accepts no request body, so a least-privilege
+// rollback-only role (history:rollback) can preview exactly what its rollback
+// would change without holding config:write and without submitting arbitrary
+// candidate TOML — unlike the generic POST /api/config/diff (N-02). The id is
+// validated against path traversal by history.get; an unknown id is a 404.
+func (s *Server) handleConfigHistoryDiff(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if s.deps.LoadConfig == nil {
+		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		id = r.URL.Query().Get("id")
+	}
+	raw, err := s.hist.get(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	after, err := config.Parse(raw)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "stored snapshot is not valid configuration",
+		})
+		return
+	}
+	before, err := s.deps.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "cannot load current config: " + err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, diffConfigs(before, after))
+}
 func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)

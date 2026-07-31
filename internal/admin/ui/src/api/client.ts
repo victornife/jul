@@ -1048,6 +1048,17 @@ export async function diffConfig(candidate: string): Promise<ConfigDiff> {
   return ConfigDiffSchema.parse(data);
 }
 
+/**
+ * diffHistorySnapshot previews what rolling back to a stored snapshot would
+ * change. The server reads the snapshot itself and diffs it against the running
+ * config, so a least-privilege rollback-only role (history:rollback) can obtain
+ * the preview without config:write and without submitting candidate TOML (N-02).
+ */
+export async function diffHistorySnapshot(id: string): Promise<ConfigDiff> {
+  const data = await api<unknown>(`/config/history/${encodeURIComponent(id)}/diff`);
+  return ConfigDiffSchema.parse(data);
+}
+
 // ── Structured config patch (Wave B) ─────────────────────────────────────────
 
 /**
