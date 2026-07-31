@@ -1632,6 +1632,89 @@ describe("HistoryPanel rollback flow", () => {
     });
   });
 
+  it("resets a stale admin confirmation after a version conflict and re-challenges V2 (R-01)", async () => {
+    let currentVersion = "v1";
+    const rollbacks: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "admin change", base_version: currentVersion }));
+      if (input.startsWith("/api/config/rollback")) {
+        const body = JSON.parse((init?.body as string | undefined) ?? "{}") as Record<
+          string,
+          unknown
+        >;
+        rollbacks.push({ url: input, body });
+        const confirmed = input.includes("confirm_admin=true");
+        const base = body.base_version as string | undefined;
+        if (confirmed) {
+          // The confirmed request is bound to the reviewed version; a concurrent
+          // change advanced the live config, so the stale confirmation is a 409.
+          if (base !== currentVersion)
+            return Promise.resolve(
+              json(
+                { ok: false, conflict: true, message: "changed", current_version: currentVersion },
+                409,
+              ),
+            );
+          return Promise.resolve(json({ ok: true, mode: "hot", status: "rolled back", id: "s1" }));
+        }
+        // Unconfirmed: the backend raises the reachability challenge for the
+        // version actually being rolled back against.
+        const changes = base === "v1" ? ["admin token rotated"] : ["rbac role demoted"];
+        return Promise.resolve(json({ ok: false, admin_change: true, message: "confirm", changes }, 409));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+
+    // Preview V1 → first (unconfirmed) rollback → admin challenge C1.
+    await confirmRollback();
+    expect(await screen.findByText("Confirm admin access rollback?")).toBeInTheDocument();
+    expect(screen.getByText("admin token rotated")).toBeInTheDocument();
+
+    // A concurrent change advances the live config to V2, then the operator
+    // confirms the now-stale V1 challenge → backend 409 conflict.
+    currentVersion = "v2";
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and roll back" }));
+
+    // The preview refreshes to V2 and the stale confirmation is dropped: the old
+    // challenge disappears and the dialog reverts to an unconfirmed rollback.
+    await screen.findByText(/configuration changed after this rollback was reviewed/i);
+    await waitFor(() => {
+      expect(screen.queryByText("admin token rotated")).not.toBeInTheDocument();
+    });
+    const reConfirm = await screen.findByRole("button", { name: "Roll back" });
+    await waitFor(() => {
+      expect(reConfirm).not.toBeDisabled();
+    });
+
+    // The next attempt is UNCONFIRMED and bound to V2, so the backend returns a
+    // fresh challenge C2 rather than applying unreviewed admin changes.
+    fireEvent.click(reConfirm);
+    expect(await screen.findByText("rbac role demoted")).toBeInTheDocument();
+
+    // Exactly one confirmed request was sent, bound to V1; the post-conflict
+    // retry was unconfirmed and bound to V2 — the stale confirmation never
+    // authorized V2's unreviewed admin changes.
+    const confirmedReqs = rollbacks.filter((r) => r.url.includes("confirm_admin=true"));
+    expect(confirmedReqs).toHaveLength(1);
+    const confirmed = confirmedReqs[0];
+    const postConflict = rollbacks.at(-1);
+    if (confirmed === undefined || postConflict === undefined)
+      throw new Error("expected a confirmed and a post-conflict rollback request");
+    expect(confirmed.body.base_version).toBe("v1");
+    expect(postConflict.url).not.toContain("confirm_admin=true");
+    expect(postConflict.body.base_version).toBe("v2");
+  });
+
   it("keeps a provisional rollback open until its correlated terminal record", async () => {
     let recordReads = 0;
     globalThis.fetch = vi.fn((input: string) => {

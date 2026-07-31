@@ -146,16 +146,16 @@ function RollbackConfirm({
   busy,
   onConfirm,
   onCancel,
-  adminChanges,
+  adminChallenge,
   error,
   pending,
   pollingExpired,
 }: {
   readonly id: string;
   readonly busy: boolean;
-  readonly onConfirm: (baseVersion?: string) => void;
+  readonly onConfirm: (baseVersion: string | undefined, confirmed: boolean) => void;
   readonly onCancel: () => void;
-  readonly adminChanges: readonly string[];
+  readonly adminChallenge: AdminChallenge | null;
   readonly error: Error | null;
   readonly pending: boolean;
   readonly pollingExpired: boolean;
@@ -174,12 +174,20 @@ function RollbackConfirm({
     refetchOnWindowFocus: false,
     retry: false,
   });
+  // An admin-reachability challenge authorizes exactly the preview version that
+  // produced it. When a concurrent change refreshes the preview to a new
+  // base_version, a challenge raised against the old version must not carry over
+  // and silently confirm the new one, so confirmation is offered only while the
+  // challenge still matches the live preview (R-01).
+  const challengeActive =
+    adminChallenge !== null && adminChallenge.baseVersion === diff.data?.base_version;
+  const adminChanges = challengeActive ? adminChallenge.changes : [];
   return (
     <ConfirmDialog
       title={
-        adminChanges.length > 0 ? "Confirm admin access rollback?" : "Roll back to this snapshot?"
+        challengeActive ? "Confirm admin access rollback?" : "Roll back to this snapshot?"
       }
-      confirmLabel={adminChanges.length > 0 ? "Confirm and roll back" : "Roll back"}
+      confirmLabel={challengeActive ? "Confirm and roll back" : "Roll back"}
       danger
       busy={busy}
       // Keep confirmation disabled while a fresh preview is in flight: React
@@ -189,7 +197,7 @@ function RollbackConfirm({
       confirmDisabled={pending || diff.isFetching || !diff.isSuccess}
       cancelDisabled={pending && !pollingExpired}
       onConfirm={() => {
-        onConfirm(diff.data?.base_version);
+        onConfirm(diff.data?.base_version, challengeActive);
       }}
       onCancel={onCancel}
     >
@@ -302,13 +310,22 @@ interface TrackedRollback {
   readonly pendingRuntime: boolean;
 }
 
+// AdminChallenge is a pending admin-reachability confirmation bound to the exact
+// preview version that raised it. baseVersion is undefined only in the legacy
+// no-optimistic-concurrency path (no version to bind to); otherwise a mismatch
+// against the live preview version invalidates the challenge so a stale
+// confirmation can never authorize a configuration the operator did not review.
+interface AdminChallenge {
+  readonly baseVersion: string | undefined;
+  readonly changes: readonly string[];
+}
+
 export function HistoryPanel() {
   const qc = useQueryClient();
   const [viewing, setViewing] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [rollingId, setRollingId] = useState<string | null>(null);
-  const [confirmAdmin, setConfirmAdmin] = useState(false);
-  const [adminChanges, setAdminChanges] = useState<string[]>([]);
+  const [adminChallenge, setAdminChallenge] = useState<AdminChallenge | null>(null);
   const [trackedRollback, setTrackedRollback] = useState<TrackedRollback | null>(null);
   // A saved_not_live rollback still has a pending RUNTIME outcome that keeps the
   // dialog open; an immediate result is tracked only to fetch finalization
@@ -376,8 +393,7 @@ export function HistoryPanel() {
         // trackedRollback is intentionally NOT cleared: its exact-ID lookup is
         // still needed for finalization provenance.
         setConfirmId(null);
-        setConfirmAdmin(false);
-        setAdminChanges([]);
+        setAdminChallenge(null);
         setTerminalError(null);
         setDegradedNotice(
           result.reload.error ??
@@ -389,23 +405,33 @@ export function HistoryPanel() {
       // Immediate applied_live: close the dialog and refresh as before, but keep
       // trackedRollback until the exact ledger record is retrieved.
       setConfirmId(null);
-      setConfirmAdmin(false);
-      setAdminChanges([]);
+      setAdminChallenge(null);
       void qc.invalidateQueries();
     },
     onError: (error, variables) => {
       if (rollbackAttemptRef.current !== variables.attempt) return;
       setRollingId(null);
       if (error instanceof ConfigAdminChangeError) {
-        setConfirmAdmin(true);
-        setAdminChanges([...error.changes]);
+        // Bind the challenge to the exact preview version it was raised for so a
+        // later preview refresh cannot silently reuse this confirmation (R-01).
+        setAdminChallenge({
+          baseVersion: variables.baseVersion,
+          changes: [...error.changes],
+        });
         return;
       }
       if (error instanceof ConfigConflictError) {
-        // The persisted config changed since the preview was computed. Refetch
-        // the rollback preview so the operator reviews the new baseline (and its
-        // fresh base_version) before retrying; confirmation stays disabled while
-        // it refetches (Net-new issue 1).
+        // The persisted config changed since the preview was computed. Drop the
+        // prior admin confirmation — it approved a now-superseded version — and
+        // refetch the preview so the operator reviews and re-confirms the fresh
+        // baseline before retrying (R-01, Net-new issue 1).
+        setAdminChallenge(null);
+        setTerminalError(
+          new Error(
+            "The configuration changed after this rollback was reviewed. " +
+              "Review the refreshed preview and confirm again.",
+          ),
+        );
         void qc.invalidateQueries({ queryKey: ["history-rollback-diff", variables.id] });
       }
     },
@@ -452,8 +478,7 @@ export function HistoryPanel() {
     }
 
     // The remainder handles a rollback that originally returned 202 saved_not_live.
-    setConfirmAdmin(false);
-    setAdminChanges([]);
+    setAdminChallenge(null);
     const result = record.result;
     if (result.ok && result.reload?.outcome === "applied_live") {
       setConfirmId(null);
@@ -618,8 +643,7 @@ export function HistoryPanel() {
                   onRollback={(id) => {
                     rollbackAttemptRef.current += 1;
                     setConfirmId(id);
-                    setConfirmAdmin(false);
-                    setAdminChanges([]);
+                    setAdminChallenge(null);
                     setTrackedRollback(null);
                     setTerminalError(null);
                     setDegradedNotice(null);
@@ -638,10 +662,10 @@ export function HistoryPanel() {
         <RollbackConfirm
           id={confirmId}
           busy={rollbackMutation.isPending}
-          onConfirm={(baseVersion) => {
+          onConfirm={(baseVersion, confirmed) => {
             rollbackMutation.mutate({
               id: confirmId,
-              confirmed: confirmAdmin,
+              confirmed,
               baseVersion,
               attempt: rollbackAttemptRef.current,
             });
@@ -649,13 +673,12 @@ export function HistoryPanel() {
           onCancel={() => {
             rollbackAttemptRef.current += 1;
             setConfirmId(null);
-            setConfirmAdmin(false);
-            setAdminChanges([]);
+            setAdminChallenge(null);
             setTrackedRollback(null);
             setTerminalError(null);
             rollbackMutation.reset();
           }}
-          adminChanges={adminChanges}
+          adminChallenge={adminChallenge}
           error={
             terminalError ??
             (rollbackMutation.error instanceof ConfigAdminChangeError
