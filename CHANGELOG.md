@@ -10,7 +10,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
-- **Phase 4 — Egress allow-list completion and integration hardening** (P4-01, HP-07, #74):
+- **Phase 4 — Egress allow-list completion and integration hardening** (P4-01, P4-02, HP-07, #74, #75):
   - `internal/egress` refactored into `policy`/`normalize`/`error`/`http` modules with a
     typed decision contract: `BlockError{Subsystem,Host,IP,Reason}` wrapping the
     `ErrBlocked` sentinel, and bounded `Reason` constants (`host_not_allowed`,
@@ -29,6 +29,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
     proxy-aware behavior when it is off); WASM plugin `fetch` is the **intersection** of
     the plugin's `allowed_hosts` + SSRF guard and the global allow-list, with a distinct
     guest return code `-5` for a global-policy denial (additive `jul-abi/v1` change).
+  - End-to-end injection wired at the composition root (P4-02, #75): `serve.go` builds
+    the policy before every process-lifetime outbound client and passes subsystem-scoped
+    guards/clients into the runtime (ACME/OCSP), handler factory (JWKS/forward-auth),
+    upstream registry (Consul/Kubernetes), and plugin manager, keeping the policy
+    startup-bound and fingerprinted. Auth and discovery constructors accept a generic
+    `DialContext`/client so `internal/auth` and `internal/upstream` never import
+    `internal/egress`.
   - Observability: `jul_egress_decisions_total{subsystem,result,reason}` and
     `jul_egress_dns_answers_total{subsystem,result}` metrics (never labelled by
     destination), and a Console **Security** panel row showing the enabled state,
