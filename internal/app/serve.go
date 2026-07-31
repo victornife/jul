@@ -157,12 +157,19 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// The optional egress allow-list guards the server's config-driven
 	// auxiliary fetches (JWKS, forward-auth, Consul/Kubernetes discovery).
 	// Changing [egress] takes effect after a restart.
-	egressPolicy, err := egress.New(cfg.Egress)
+	egressPolicy, err := egress.New(cfg.Egress, egress.WithObserver(func(d egress.Decision) {
+		metrics.ObserveEgressDecision(d.Subsystem, string(d.Result), string(d.Reason), d.DNSAnswers)
+	}))
 	if err != nil {
 		log.Error("failed to build egress allow-list", "error", err)
 		return 1
 	}
-	egressDial := egressPolicy.DialContext(&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second})
+	// Subsystem-scoped guards attribute blocks and metrics without call sites
+	// importing the egress enforcement internals. All guards share one base
+	// dialer (safe for concurrent use).
+	egressBase := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	discoveryDial := egressPolicy.For(egress.SubsystemDiscovery).DialContext(egressBase)
+	authDial := egressPolicy.For(egress.SubsystemAuth).DialContext(egressBase)
 
 	// The upstream pool registry persists across reloads so named-upstream
 	// pools (and their health-check goroutines) have a defined lifetime.
@@ -172,7 +179,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		OnProbe:          metrics.ObserveProbe,
 		OnBackends:       metrics.ObserveUpstreamBackends,
 		OnDiscoveryError: metrics.ObserveDiscoveryError,
-		DialContext:      egressDial,
+		DialContext:      discoveryDial,
 	})
 	defer poolReg.CloseAll()
 
@@ -210,7 +217,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		Cache:       responseCache,
 		AccessSinks: accessSinks,
 		RLStore:     rlStore,
-		EgressDial:  egressDial,
+		EgressDial:  authDial,
 		PoolReg:     poolReg,
 		PluginMgr:   pluginMgr,
 		GenRes:      genRes,
