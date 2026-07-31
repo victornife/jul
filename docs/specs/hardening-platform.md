@@ -37,7 +37,7 @@ to committed roadmap features — notably **HP-02 Console RBAC** feeds
 | HP-06A | Structured-config parity — backend entity CRUD | [Y2-09](../specs/console-v2.md) | ✅ Delivered | L |
 | HP-06B | Structured-config parity — Console entity CRUD | [Y2-09](../specs/console-v2.md) | Phase 5 active | L |
 | HP-06C | Structured-config parity — near-term global tables | [Y2-09](../specs/console-v2.md) | `global_set`, `compression_set`, `rate_limit_global_set` Phase 5 active; `cache_set`, decomposed admin ops, and `access_log_set` deferred | L |
-| HP-07 | SSRF allow-list hardening (defense-in-depth) | — | Core policy delivered; Phase 4 completes integration and diagnostics | M |
+| HP-07 | SSRF allow-list hardening (defense-in-depth) | — | ✅ Delivered (P4-01: typed decisions, normalization, scoped guards, ACME/OCSP/plugin integration, metrics, Console) | M |
 
 Effort: **M** ≈ weeks · **L** ≈ ~a quarter (per the roadmap T-shirt sizing).
 
@@ -379,24 +379,36 @@ from config, not from request data). HP-07 is therefore **defense-in-depth**, no
 fix for a request-driven hole — it limits blast radius from operator error or a
 compromised config source.
 
-**Design.** An optional egress allow-list (host/CIDR) consulted by the shared HTTP
-client used for JWKS (`auth`), forward-auth, ACME directory/order fetches, and
-service discovery. Default off (no behavior change); when set, a fetch to a
-non-allow-listed destination is refused and logged.
+**Design.** An optional egress allow-list (host/suffix/IP/CIDR) enforced at dial
+time on every config-driven auxiliary client: JWKS and forward-auth (`auth`),
+Consul/Kubernetes discovery (`discovery`), ACME directory/order/challenge
+(`acme`), OCSP stapling (`ocsp`), and the WASM plugin `fetch` (`plugin`). Default
+off (no behavior change); when enabled, a fetch to a non-allow-listed destination
+is refused at connect time and reported with a typed, secret-safe reason.
 
 ```toml
-[global.egress]
-# Optional. When non-empty, outbound config-driven fetches (JWKS, forward-auth,
-# ACME, discovery) may only reach these hosts/CIDRs. Empty = unrestricted.
+[egress]
+# Optional. When enabled, outbound config-driven fetches (JWKS, forward-auth,
+# discovery, ACME/OCSP, plugin fetch) may only reach these hosts/CIDRs.
+enabled = true
 allow = ["auth.example.com", "10.0.0.0/8"]
 ```
 
-**Tasks.** shared egress guard (resolve + CIDR/host match, block link-local/loopback
-by default when the list is set); wire into the JWKS/forward-auth/ACME/discovery
-dialers; config + validation.
+**Tasks.** shared egress guard (resolve + CIDR/host match, reject mixed/no DNS
+answers); wire into the JWKS/forward-auth/discovery/ACME/OCSP/plugin dialers;
+config + validation.
 
 **Tests.** allow-listed host permitted; non-listed blocked; default-off unchanged;
-loopback/link-local blocked when the list is active.
+redirect/proxy/DNS semantics; ACME/OCSP and plugin-intersection paths.
+
+**Status — Delivered (P4-01).** Split `internal/egress` package with typed
+`BlockError`/`Reason`, hostname normalization (IDNA, trailing dot, IPv6
+brackets/zones, CIDR canonicalization, dedup), immutable subsystem-scoped
+`Policy.For(...)` guards, `Proxy=nil` guarded transports with a redirect-checking
+`RoundTripper`, ACME/OCSP client injection, the plugin fetch intersection (guest
+code `-5`), bounded `jul_egress_decisions_total{subsystem,result,reason}` /
+`jul_egress_dns_answers_total{subsystem,result}` metrics, and Console Security
+visibility. See [egress.md](../egress.md).
 
 **DoD.** opt-in, default-off, no behavior change unless configured; documented as
 defense-in-depth in [SECURITY.md](../../SECURITY.md).

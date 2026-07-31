@@ -61,8 +61,6 @@ func (l *leastConn) pick(a []*Backend) *Backend {
 
 func (l *leastConn) updateBackends([]*Backend) {}
 
-
-
 // weightedRR implements smooth weighted round-robin (the algorithm NGINX uses),
 // which distributes load proportional to weight while avoiding bursts.
 // The per-backend currentWeight state is owned by the balancer instance so

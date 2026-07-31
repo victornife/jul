@@ -16,6 +16,8 @@ import (
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+
+	"jul/internal/egress"
 )
 
 // maxRequestBodyBuffer caps how much of a request body the host buffers so a
@@ -315,10 +317,17 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		status, respBody, err := p.doFetch(ctx, method, rawURL, body)
 		if err != nil {
 			inv.log.Warn("plugin: fetch denied", "name", p.name, "url", rawURL, "err", err)
-			if errors.Is(err, errFetchBlocked) {
+			switch {
+			case errors.Is(err, egress.ErrBlocked):
+				// Refused by the server-wide [egress] allow-list. Distinct from a
+				// plugin-local block so a guest can tell the two apart; no network
+				// detail is exposed to the guest.
+				return -5
+			case errors.Is(err, errFetchBlocked):
 				return -3
+			default:
+				return -4
 			}
-			return -4
 		}
 		writeInto(m, buf, limit, respBody)
 		return int32(status)

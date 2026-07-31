@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewACMEManagerStubRejectsEnabledWithoutTag(t *testing.T) {
-	mgr, err := NewACMEManager(acmeServerCfg().Servers, nil)
+	mgr, err := NewACMEManager(acmeServerCfg().Servers, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error: acme enabled but binary lacks the acme build tag")
 	}
@@ -26,7 +26,7 @@ func TestNewACMEManagerStubRejectsEnabledWithoutTag(t *testing.T) {
 
 func TestNewACMEManagerStubNilWhenNoACME(t *testing.T) {
 	cfg := &config.Config{Servers: []config.ServerConfig{{Listen: ":80"}}}
-	mgr, err := NewACMEManager(cfg.Servers, nil)
+	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

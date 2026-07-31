@@ -171,3 +171,59 @@ describe("SecurityPanel RBAC status", () => {
     expect(screen.getByText(/2 principals, 1 custom role/)).toBeInTheDocument();
   });
 });
+
+// ── outbound egress posture (P4-01) ──────────────────────────────────────────
+
+describe("SecurityPanel outbound egress", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("defaults egress to undefined when the field is omitted", () => {
+    const parsed = SecurityProjectionSchema.parse(projection);
+    expect(parsed.egress).toBeUndefined();
+  });
+
+  it("summarises an enabled allow-list and its recent block breakdown", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            ...projection,
+            egress: {
+              enabled: true,
+              allow_rule_count: 3,
+              recent_blocked: [
+                { subsystem: "auth", reason: "host_not_allowed", count: 4 },
+                { subsystem: "plugin", reason: "ip_not_allowed", count: 1 },
+              ],
+            },
+          }),
+      }),
+    );
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText(/3 allow rules/)).toBeInTheDocument();
+    expect(screen.getByText(/Blocked 4 in/)).toBeInTheDocument();
+    expect(screen.getByText(/host_not_allowed/)).toBeInTheDocument();
+  });
+
+  it("reports the unrestricted state when egress is disabled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            ...projection,
+            egress: { enabled: false, allow_rule_count: 0 },
+          }),
+      }),
+    );
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    expect(
+      await screen.findByText(/No outbound-destination restriction/i),
+    ).toBeInTheDocument();
+  });
+});

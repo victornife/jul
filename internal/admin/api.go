@@ -209,6 +209,17 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 		// Overlay the real serving posture from the installed auth snapshot so a
 		// staged-but-not-live policy is never shown as active (N-03).
 		sp.RBAC = s.rbacPosture(c)
+		// Overlay the running process's bounded egress block tally (P4-01); the
+		// pure config projection only knows enabled/rule-count.
+		if s.deps.EgressBlocked != nil {
+			for _, b := range s.deps.EgressBlocked() {
+				sp.Egress.RecentBlocked = append(sp.Egress.RecentBlocked, EgressBlockedCount{
+					Subsystem: b.Subsystem,
+					Reason:    b.Reason,
+					Count:     b.Count,
+				})
+			}
+		}
 		writeJSON(w, http.StatusOK, sp)
 	})(w, r)
 }

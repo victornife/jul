@@ -60,6 +60,8 @@ type Metrics struct {
 	certRenewals     prometheus.Counter
 	mtlsHandshakes   *prometheus.CounterVec
 	wafEvents        *prometheus.CounterVec
+	egressDecisions  *prometheus.CounterVec
+	egressDNSAnswers *prometheus.CounterVec
 
 	// Reload and staged-restart metrics (P2-05).
 	reloadTotal      *prometheus.CounterVec
@@ -129,6 +131,7 @@ type Metrics struct {
 	routeFailures *routeFailureTracker
 	health        *healthHistoryTracker
 	certs         *certHistoryTracker
+	egressBlocks  *egressBlockTracker
 
 	// statsMu guards the rolling state used by Snapshot to derive
 	// rate-over-time figures (requests/sec and the windowed error rate) from
@@ -188,6 +191,14 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_waf_events_total",
 			Help: "Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID.",
 		}, []string{"action", "rule"}),
+		egressDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_egress_decisions_total",
+			Help: "Outbound egress allow-list decisions, labeled by subsystem, result (allow/block), and reason (empty on allow).",
+		}, []string{"subsystem", "result", "reason"}),
+		egressDNSAnswers: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_egress_dns_answers_total",
+			Help: "Egress CIDR-only hostname resolutions evaluated, labeled by subsystem and result (allow/block).",
+		}, []string{"subsystem", "result"}),
 		upstreamUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_upstream_healthy",
 			Help: "Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend.",
@@ -328,6 +339,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		routeFailures: newRouteFailureTracker(routeFailureCap),
 		health:        newHealthHistoryTracker(),
 		certs:         newCertHistoryTracker(),
+		egressBlocks:  newEgressBlockTracker(),
 	}
 	m.startTime = time.Now()
 	reg.MustRegister(
@@ -359,6 +371,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.certRenewals,
 		m.mtlsHandshakes,
 		m.wafEvents,
+		m.egressDecisions,
+		m.egressDNSAnswers,
 		m.reloadTotal,
 		m.reloadDuration,
 		m.reloadInProgress,
@@ -529,6 +543,28 @@ func (m *Metrics) ObserveUpstreamBackends(pool string, n int) {
 // pool keeps its last-good backends when this fires.
 func (m *Metrics) ObserveDiscoveryError(pool string) {
 	m.discoveryErrors.WithLabelValues(pool).Inc()
+}
+
+// ObserveEgressDecision records an outbound egress allow-list decision. The
+// labels are the bounded subsystem/result/reason set only; the destination host
+// and IP are deliberately never labels. reason is empty on an allow. It is wired
+// as the egress policy observer via a small adapter so this package need not
+// import internal/egress.
+func (m *Metrics) ObserveEgressDecision(subsystem, result, reason string, dnsAnswers int) {
+	m.egressDecisions.WithLabelValues(subsystem, result, reason).Inc()
+	if dnsAnswers > 0 {
+		m.egressDNSAnswers.WithLabelValues(subsystem, result).Inc()
+	}
+	if result == "block" {
+		m.egressBlocks.add(subsystem, reason)
+	}
+}
+
+// EgressBlocked returns the bounded per-subsystem/reason tally of egress
+// allow-list blocks for the Console Security panel. It carries no destination
+// host or IP.
+func (m *Metrics) EgressBlocked() []EgressBlockedCount {
+	return m.egressBlocks.snapshot()
 }
 
 // ObserveProbe records the outcome and latency of a single active health-check

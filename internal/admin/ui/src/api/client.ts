@@ -662,6 +662,25 @@ export const RBACPostureSchema = z.object({
 });
 export type RBACPosture = z.infer<typeof RBACPostureSchema>;
 
+// EgressBlockedCountSchema mirrors admin.EgressBlockedCount: a secret-free
+// egress block tally by subsystem and reason. No destination host or IP.
+export const EgressBlockedCountSchema = z.object({
+  subsystem: z.string(),
+  reason: z.string(),
+  count: z.number(),
+});
+export type EgressBlockedCount = z.infer<typeof EgressBlockedCountSchema>;
+
+// EgressProjectionSchema mirrors admin.EgressProjection: the outbound egress
+// allow-list posture. Counts and a bounded block breakdown only — never a
+// destination.
+export const EgressProjectionSchema = z.object({
+  enabled: z.boolean(),
+  allow_rule_count: z.number(),
+  recent_blocked: z.array(EgressBlockedCountSchema).optional(),
+});
+export type EgressProjection = z.infer<typeof EgressProjectionSchema>;
+
 export const SecurityProjectionSchema = z.object({
   auth_enabled: z.boolean(),
   client_auth: z.string().optional(),
@@ -699,6 +718,9 @@ export const SecurityProjectionSchema = z.object({
   // rbac summarises the admin access-control posture as serving vs persisted.
   // Optional for forward compatibility with older servers that predate it.
   rbac: RBACPostureSchema.optional(),
+  // egress is the outbound egress allow-list posture (P4-01). Optional for
+  // forward compatibility with servers that predate it.
+  egress: EgressProjectionSchema.optional(),
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
 

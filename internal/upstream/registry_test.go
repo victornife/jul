@@ -190,7 +190,7 @@ func TestRegistryPreflightSeedsDiscoveryPool(t *testing.T) {
 
 	var backendEvents atomic.Int64
 	r := NewRegistry(RegistryOptions{
-		OnBackends: func(string, int) { backendEvents.Add(1) },
+		OnBackends:    func(string, int) { backendEvents.Add(1) },
 		NewDiscoverer: func(config.DiscoveryConfig, DialFunc) (Discoverer, error) { return d, nil },
 	})
 

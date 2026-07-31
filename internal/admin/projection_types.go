@@ -246,6 +246,36 @@ type SecurityProjection struct {
 	// they differ, so the Security panel never presents a staged-but-not-live
 	// policy as active (N-03). It exposes no credential material.
 	RBAC RBACPostureProjection `json:"rbac"`
+	// Egress is the outbound egress allow-list posture (P4-01). It exposes only
+	// bounded counts and booleans; no destination host or IP is ever projected.
+	Egress EgressProjection `json:"egress"`
+}
+
+// EgressProjection is the outbound egress allow-list posture for the Security
+// panel. When enabled, the server constrains its own config-driven auxiliary
+// fetches (JWKS, forward-auth, discovery, ACME/OCSP, and plugin fetch) to the
+// allow-list. It carries only counts and a bounded block breakdown, never a
+// destination host or IP.
+type EgressProjection struct {
+	// Enabled reports whether the [egress] allow-list is active. When false the
+	// server imposes no outbound-destination restriction.
+	Enabled bool `json:"enabled"`
+	// AllowRuleCount is the number of configured allow entries (hostnames, IPs,
+	// and CIDRs).
+	AllowRuleCount int `json:"allow_rule_count"`
+	// RecentBlocked tallies recent egress blocks by subsystem and reason so the
+	// panel can show what the policy is refusing without naming any destination.
+	// It is overlaid from the running process and is empty on a pure config
+	// projection.
+	RecentBlocked []EgressBlockedCount `json:"recent_blocked,omitempty"`
+}
+
+// EgressBlockedCount is a secret-free egress block tally by subsystem and
+// reason, mirroring observability.EgressBlockedCount for the Security panel JSON.
+type EgressBlockedCount struct {
+	Subsystem string `json:"subsystem"`
+	Reason    string `json:"reason"`
+	Count     int    `json:"count"`
 }
 
 // RBACPostureProjection reports the serving vs persisted admin RBAC posture.

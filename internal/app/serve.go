@@ -120,10 +120,43 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Metrics persist across reloads so counters are not reset on config edits.
 	metrics := observability.NewMetrics(observability.WithHostLabel(cfg.Observability.Metrics.HostLabel))
 
+	// The optional egress allow-list guards the server's config-driven auxiliary
+	// fetches (JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP PKI
+	// calls, and WASM plugin fetches). It is built before the process-lifetime
+	// runtime so the ACME/OCSP clients can be guarded. Changing [egress] takes
+	// effect after a restart.
+	egressPolicy, err := egress.New(cfg.Egress, egress.WithObserver(func(d egress.Decision) {
+		metrics.ObserveEgressDecision(d.Subsystem, string(d.Result), string(d.Reason), d.DNSAnswers)
+	}))
+	if err != nil {
+		log.Error("failed to build egress allow-list", "error", err)
+		return 1
+	}
+	// Subsystem-scoped guards attribute blocks and metrics without call sites
+	// importing the egress enforcement internals. All guards share one base
+	// dialer (safe for concurrent use).
+	egressBase := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	discoveryDial := egressPolicy.For(egress.SubsystemDiscovery).DialContext(egressBase)
+	authDial := egressPolicy.For(egress.SubsystemAuth).DialContext(egressBase)
+	// PKI clients are guarded only when egress is enabled; when disabled they are
+	// nil so ACME/OCSP keep their default clients (including HTTP(S)_PROXY
+	// support), preserving backward-compatible behavior.
+	var acmeClient, ocspClient *http.Client
+	if egressPolicy.Enabled() {
+		acmeClient = egressPolicy.For(egress.SubsystemACME).Client(0)
+		ocspClient = egressPolicy.For(egress.SubsystemOCSP).Client(0)
+	}
+
 	// The process-lifetime runtime subsystems (tracing, ACME, stream server,
 	// build-tag feature gates) are built once at startup and outlive every
 	// reload. rt.Close (deferred) shuts them down on graceful exit.
-	rt, err := RuntimeBuilder{Config: cfg, Logger: log, Metrics: metrics}.Build()
+	rt, err := RuntimeBuilder{
+		Config:     cfg,
+		Logger:     log,
+		Metrics:    metrics,
+		ACMEClient: acmeClient,
+		OCSPClient: ocspClient,
+	}.Build()
 	if err != nil {
 		log.Error("failed to initialize server runtime", "error", err)
 		return 1
@@ -154,16 +187,6 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// baseCtx) so token buckets survive config edits.
 	rlStore := middleware.NewRateLimiterStore(baseCtx, 0, 0)
 
-	// The optional egress allow-list guards the server's config-driven
-	// auxiliary fetches (JWKS, forward-auth, Consul/Kubernetes discovery).
-	// Changing [egress] takes effect after a restart.
-	egressPolicy, err := egress.New(cfg.Egress)
-	if err != nil {
-		log.Error("failed to build egress allow-list", "error", err)
-		return 1
-	}
-	egressDial := egressPolicy.DialContext(&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second})
-
 	// The upstream pool registry persists across reloads so named-upstream
 	// pools (and their health-check goroutines) have a defined lifetime.
 	poolReg := upstream.NewRegistry(upstream.RegistryOptions{
@@ -172,16 +195,23 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		OnProbe:          metrics.ObserveProbe,
 		OnBackends:       metrics.ObserveUpstreamBackends,
 		OnDiscoveryError: metrics.ObserveDiscoveryError,
-		DialContext:      egressDial,
+		DialContext:      discoveryDial,
 	})
 	defer poolReg.CloseAll()
 
 	// The WASM plugin manager persists across reloads so the compilation
-	// cache and KV store survive config edits.
+	// cache and KV store survive config edits. Plugin fetches are guarded by
+	// both their local allowed_hosts/SSRF rules and, when egress is enabled, the
+	// server-wide allow-list via EgressWrap.
+	var pluginEgressWrap func(plugins.DialFunc) plugins.DialFunc
+	if egressPolicy.Enabled() {
+		pluginEgressWrap = egressPolicy.For(egress.SubsystemPlugin).DialContextWith
+	}
 	pluginMgr, err := plugins.NewManager(plugins.Options{
 		Logger:       log,
 		OnInvocation: metrics.ObservePluginInvocation,
 		OnPanic:      metrics.ObservePluginPanic,
+		EgressWrap:   pluginEgressWrap,
 	})
 	if err != nil {
 		log.Error("failed to initialize plugin manager", "error", err)
@@ -210,7 +240,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		Cache:       responseCache,
 		AccessSinks: accessSinks,
 		RLStore:     rlStore,
-		EgressDial:  egressDial,
+		EgressDial:  authDial,
 		PoolReg:     poolReg,
 		PluginMgr:   pluginMgr,
 		GenRes:      genRes,

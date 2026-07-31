@@ -51,6 +51,8 @@ Changing this setting requires a restart.
 | `jul_auth_decisions_total` | Counter | `method`, `result` (allow / deny) | Authentication decisions |
 | `jul_http_ratelimited_total` | Counter | `key` (ip / header / jwt) | Requests rejected by rate limiter |
 | `jul_waf_events_total` | Counter | `mode`, `severity` | WAF rule matches (block or detect) |
+| `jul_egress_decisions_total` | Counter | `subsystem`, `result` (allow / block), `reason` | Outbound egress allow-list decisions (never labelled by destination) |
+| `jul_egress_dns_answers_total` | Counter | `subsystem`, `result` | Egress CIDR-only hostname resolutions evaluated |
 
 ### gRPC metrics
 

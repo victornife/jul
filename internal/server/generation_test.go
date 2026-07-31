@@ -289,4 +289,3 @@ func TestRedactionMovedToTombstoneOnGraceTimeout(t *testing.T) {
 		t.Fatal("new-secret not masked after drain")
 	}
 }
-

@@ -686,4 +686,3 @@ func TestCheckEmpty(t *testing.T) {
 		t.Fatalf("Check(empty): %v", err)
 	}
 }
-

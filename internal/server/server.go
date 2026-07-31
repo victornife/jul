@@ -151,7 +151,7 @@ type HandlerFactory func(ctx context.Context, cfg *config.Config) (handlers map[
 // graceful shutdown and configuration reload.
 type Server struct {
 	log      *slog.Logger
-	source   config.Source              // reload source; nil disables reload
+	source   config.Source                               // reload source; nil disables reload
 	validate func(context.Context, *config.Config) error // validation applied before swapping
 	factory  HandlerFactory
 

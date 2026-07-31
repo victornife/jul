@@ -16,11 +16,16 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/ocsp"
+
+	"jul/internal/config"
+	"jul/internal/egress"
 )
 
 // ocspTestCA is a throwaway CA that mints leaf certificates and signs OCSP
@@ -242,7 +247,7 @@ func TestProviderOCSPWrapping(t *testing.T) {
 
 	cfgOn := acmeServerCfg()
 	cfgOn.Servers[0].TLS.ACME.OCSPStapling = &on
-	mOn, err := NewACMEManager(cfgOn.Servers, nil)
+	mOn, err := NewACMEManager(cfgOn.Servers, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewACMEManager (ocsp on): %v", err)
 	}
@@ -252,11 +257,46 @@ func TestProviderOCSPWrapping(t *testing.T) {
 
 	cfgOff := acmeServerCfg()
 	cfgOff.Servers[0].TLS.ACME.OCSPStapling = &off
-	mOff, err := NewACMEManager(cfgOff.Servers, nil)
+	mOff, err := NewACMEManager(cfgOff.Servers, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewACMEManager (ocsp off): %v", err)
 	}
 	if _, ok := mOff.Provider(nil).(*acmeProvider); !ok {
 		t.Errorf("expected *acmeProvider when ocsp stapling is disabled, got %T", mOff.Provider(nil))
+	}
+}
+
+// TestOCSPFetchRespectsEgressGuard proves the OCSP responder fetch is enforced
+// by the injected guarded client: a responder outside the egress allow-list is
+// refused at dial time, while one inside it is reached.
+func TestOCSPFetchRespectsEgressGuard(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ocsp-response-bytes"))
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	reqDER := []byte{0x30, 0x00} // opaque; the stub responder does not parse it
+
+	// Blocked: the loopback responder is not inside 10.0.0.0/8.
+	blocked, err := egress.New(config.EgressConfig{Enabled: true, Allow: []string{"10.0.0.0/8"}})
+	if err != nil {
+		t.Fatalf("egress.New: %v", err)
+	}
+	if _, err := ocspFetchWith(blocked.For(egress.SubsystemOCSP).Client(0))(ctx, reqDER, srv.URL); !errors.Is(err, egress.ErrBlocked) {
+		t.Fatalf("blocked responder: err = %v, want ErrBlocked", err)
+	}
+
+	// Allowed: the loopback responder is inside 127.0.0.0/8.
+	allowed, err := egress.New(config.EgressConfig{Enabled: true, Allow: []string{"127.0.0.0/8"}})
+	if err != nil {
+		t.Fatalf("egress.New: %v", err)
+	}
+	body, err := ocspFetchWith(allowed.For(egress.SubsystemOCSP).Client(0))(ctx, reqDER, srv.URL)
+	if err != nil {
+		t.Fatalf("allowed responder: %v", err)
+	}
+	if string(body) != "ocsp-response-bytes" {
+		t.Errorf("body = %q, want the responder payload", body)
 	}
 }
