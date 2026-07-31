@@ -14,6 +14,27 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 > "merged" is not "released" or "soaked"; the Phase 4 egress hardening becomes
 > **GA** only after its first tagged release passes the post-GA soak gate.
 
+### Changed
+- **Post-audit remediation (2026-07-31):** activated the canonical Git hooks
+  (`make hooks`) so the `gofmt` pre-commit gate runs locally — a stale
+  hand-installed `.git/hooks/pre-commit` with `core.hooksPath` unset had been
+  masking it; reformatted `cmd/jul/capabilities.go`. `jul capabilities` now reports
+  every optional build tag (not just `waf`/`stream_proxy`/`wasm_plugins`). The
+  Console Security panel now labels interactive RBAC token management as
+  **Preview** (planned; not yet available) so the surface is honest about what
+  ships today.
+
+### Security
+- **Dependency advisory remediation (2026-07-31):** bumped `klauspost/compress`
+  1.18.6 → 1.18.7 (GO-2026-5841) and forced patched transitive frontend deps via
+  pnpm overrides — `brace-expansion` → 5.0.8 (ReDoS) and `postcss` → ≥8.5.18
+  (GHSA-r28c-9q8g-f849, build-time only). Two advisories are **accepted with
+  rationale**, not fixable today: `golang.org/x/crypto` GO-2026-5932 (no patched
+  release published; `govulncheck` confirms it is **not called**) and
+  `react-router` GHSA-qwww-vcr4-c8h2 (CSRF in **RSC/server mode**, which this
+  client-only SPA does not use; no compatible `react-router-dom` 8.x release
+  exists). `govulncheck` reports **0 called** vulnerabilities.
+
 ### Added
 - **Phase 4 — Egress allow-list completion and integration hardening** (P4-01, P4-02, P4-03, HP-07, #74, #75, #76):
   - `internal/egress` refactored into `policy`/`normalize`/`error`/`http` modules with a

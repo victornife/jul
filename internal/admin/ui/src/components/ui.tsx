@@ -105,13 +105,14 @@ export function Badge({
 // ── MaturityBadge ───────────────────────────────────────────────────────────-
 // Honest feature-maturity labeling per ADR 0003. Tooltip explains the level;
 // the link to the maturity model is in the Console guide.
-type Maturity = "ga" | "beta" | "best-effort" | "experimental";
+type Maturity = "ga" | "beta" | "best-effort" | "experimental" | "preview";
 
 const MATURITY_HINT: Record<Maturity, string> = {
   ga: "GA — meets the GA bar and is stable for production use.",
   beta: "Beta — usable, with known limitations; config/API may change before GA.",
   "best-effort": "Best-effort — no stability or completeness guarantees.",
   experimental: "Experimental — may change or be removed.",
+  preview: "Preview — planned; not yet available in this release.",
 };
 
 const MATURITY_STYLE: Record<Maturity, string> = {
@@ -119,6 +120,7 @@ const MATURITY_STYLE: Record<Maturity, string> = {
   beta: "bg-jul-warning/15 text-jul-warning",
   "best-effort": "bg-jul-warning/15 text-jul-warning",
   experimental: "bg-jul-danger/15 text-jul-danger",
+  preview: "bg-jul-accent/15 text-jul-accent",
 };
 
 export function MaturityBadge({ level = "beta" }: { readonly level?: Maturity }) {

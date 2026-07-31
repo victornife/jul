@@ -26,7 +26,7 @@ has landed on `main` since; open items carry forward to the backlog in §13.
 
 | Finding | Status | Commit | Notes |
 |---|---|---|---|
-| **F-01** gofmt / gate integrity | ✅ Resolved | `1f4488d1` | `cmd/jul/capabilities.go` reformatted; `gofmt -l` is clean tree-wide. Root cause confirmed during remediation: the pre-commit hook runs tests + `docs-check` but **not** `gofmt`, so the violation slipped in — see the F-01 follow-up. |
+| **F-01** gofmt / gate integrity | ✅ Resolved | `1f4488d1` + hooks activated | `cmd/jul/capabilities.go` reformatted; `gofmt -l` is clean tree-wide. **Corrected root cause:** the canonical `.githooks/pre-commit` **already** runs `gofmt` and CI already has a `gofmt` job — but this clone ran a stale hand-installed `.git/hooks/pre-commit` (no gofmt) with `core.hooksPath` unset, so the canonical gate never fired. Fixed by activating it (`make hooks`). |
 | **F-02** maturity vocabulary | ✅ Resolved | `1f4488d1` | "Delivery state vs. maturity" table added to [status.md](../status.md) (implemented → merged → released → soaked → audit-closed) and reconciled across roadmap, `CHANGELOG.md`, `feature-status.yaml`, and README. |
 | **F-04** SECURITY.md RBAC drift | ✅ Resolved | `1f4488d1` | RBAC now documented as delivered opt-in `[admin.rbac]` (Phase 3); only interactive token management is future. |
 | **F-05** capabilities under-reports | ✅ Resolved | `73466263` | `jul capabilities` now reports all 13 optional subsystems (verified: lean all-false, full all-true) via tag-gated files, plus a regression test. |
@@ -35,14 +35,22 @@ has landed on `main` since; open items carry forward to the backlog in §13.
 | **F-08** config-audit closure | ◐ Annotated (closure still pending) | `1f4488d1` | status.md/roadmap now mark the subsystem "remediated, closure pending"; the exact-SHA CI + two sign-offs remain the real closing step (unchanged). |
 | **F-03** security-pkg coverage | ☐ Open | — | plugins/waf/rbac coverage floors + negative tests — see §13 (P2). |
 
-**Also surfaced during remediation.** Pushing to `main` reported **4 high**
-GitHub Dependabot advisories on the default branch (dependency-level; consistent
-with `govulncheck`'s "uncalled" required modules). Triage as a P1 dependency-bump.
+**Dependabot advisories (triaged 2026-07-31).** GitHub reported **4 high**
+dependency advisories on the default branch. Two are fixed — `klauspost/compress`
+→ 1.18.7 and, via pnpm overrides, `brace-expansion` → 5.0.8 and `postcss` → ≥8.5.18
+(build-time only). Two are **accepted with rationale**: `golang.org/x/crypto`
+GO-2026-5932 (no patched release; `govulncheck` confirms it is not called) and
+`react-router` GHSA-qwww-vcr4-c8h2 (CSRF in RSC/server mode, unused by this
+client-only SPA; no compatible `react-router-dom` 8.x exists). `govulncheck`
+reports 0 called vulnerabilities.
 
-**Remaining follow-up specifically for F-01.** Formatting the file removes the
-symptom; the *gate* is still incomplete. Add `gofmt`/`format-check` to the
-pre-commit hook (`.githooks`) and make `format-check` a **required** GitHub check,
-so a non-formatted file cannot reach `main` again.
+**Remaining follow-up specifically for F-01.** The gate itself already exists —
+the canonical `.githooks/pre-commit` runs `gofmt` (see `CONTRIBUTING.md`) and CI has
+a `gofmt` job. The violation slipped in only because this clone ran a stale
+hand-installed `.git/hooks/pre-commit` with `core.hooksPath` unset; the canonical
+hooks are now activated (`make hooks`). Residual follow-up: confirm the CI `gofmt`
+job is a **required** status check on `main`, and consider a setup guard that warns
+when `core.hooksPath` is unset so a stale local hook cannot mask the gate again.
 
 ---
 
@@ -92,8 +100,8 @@ management* — not because they are broken, but because their coverage/negative
 RBAC token management) feature-completeness do not yet match the "GA" label's implied bar.
 
 **Top 5 things to fix next** *(updated 2026-07-31 — see the Remediation status section above):*
-1. ~~**F-01** — gofmt/format-check gate~~ **Done** (`1f4488d1`); follow-up: add `gofmt` to the
-   pre-commit hook and make `format-check` a required GitHub check.
+1. ~~**F-01** — gofmt/format-check gate~~ **Done** (`1f4488d1`; canonical hooks activated via
+   `make hooks`); residual: confirm the CI `gofmt` job is a required status check on `main`.
 2. ~~**F-02** — maturity vocabulary + doc reconciliation~~ and ~~**F-04** — `SECURITY.md` RBAC
    status~~ **Done** (`1f4488d1`).
 3. **F-03** — add dedicated coverage floors + negative tests for `plugins`, `waf`, `rbac` *(now the
@@ -212,8 +220,10 @@ cross-cutting policies (e.g., future quotas) are added.
 - **Effort:** S
 - **Dependencies:** none
 - **Status (2026-07-31):** ✅ File reformatted in `1f4488d1`; `gofmt -l` is now clean tree-wide.
-  Open follow-up: add `gofmt` to the pre-commit hook and make `format-check` a required CI check
-  (the hook currently runs tests + docs-check but not `gofmt`, which is how this slipped in).
+  Root cause corrected: the canonical `.githooks/pre-commit` already runs `gofmt` and CI has a
+  `gofmt` job; the violation slipped in only because a stale hand-installed `.git/hooks/pre-commit`
+  ran with `core.hooksPath` unset. Canonical hooks re-activated via `make hooks`. Residual
+  follow-up: confirm the CI `gofmt` job is a required status check on `main`.
 
 ### Finding F-03: Security-sensitive packages have the lowest coverage and no dedicated floors
 - **Severity:** medium
@@ -365,9 +375,10 @@ four-state `sourceView` so a candidate is never mistaken for live config.
 (72 kB gz). Reasonable; CodeMirror is correctly split out.
 
 **Gaps.**
-- **No honest "preview" affordance.** Grep finds zero Beta/experimental/preview labels. Everything
-  presents as fully GA, including RBAC *token management* which is admittedly "future" (§9, F-04).
-  A calm "Preview" badge on incomplete surfaces would improve operator trust.
+- **Preview affordance (added 2026-07-31).** Previously the Console carried zero Beta/experimental/
+  preview labels — everything presented as fully GA. The shared `MaturityBadge` now has a `preview`
+  level, and the Security panel labels interactive RBAC *token management* as **Preview** (planned;
+  not yet available). Extend the same badge to any other not-fully-complete surface.
 - **e2e not run in this audit** (specs exist; no live browser). Recommend wiring Playwright e2e into
   CI if not already required.
 

@@ -10,7 +10,7 @@ import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
-import { Loading } from "@/components/ui.tsx";
+import { Loading, MaturityBadge } from "@/components/ui.tsx";
 
 // wafIsMixed reports whether protected locations run a mix of block and detect
 // modes, in which case a single mode badge would mislead.
@@ -94,6 +94,14 @@ function RBACStatusCell({ posture }: { readonly posture: RBACPosture | undefined
               <span className="font-mono">admin.token</span> to fully migrate to named principals.
             </span>
           )}
+          <span className="flex items-start gap-2 text-jul-muted text-xs">
+            <MaturityBadge level="preview" />
+            <span>
+              Interactive token management — creating and revoking scoped tokens from the
+              Console — is planned. Principals, roles, and tokens are defined in{" "}
+              <span className="font-mono">[admin.rbac]</span> in the configuration today.
+            </span>
+          </span>
         </>
       ) : (
         <span className="flex flex-col gap-0.5">

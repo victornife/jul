@@ -122,6 +122,9 @@ describe("SecurityPanel RBAC status", () => {
     expect(
       screen.getByText(/legacy shared admin token is still active/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Interactive token management/i),
+    ).toBeInTheDocument();
   });
 
   it("reports the disabled state when RBAC is off", async () => {
