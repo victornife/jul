@@ -21,8 +21,10 @@ import (
 // either Permissions or Permission declared; there is no implicit default-allow.
 func TestCatalogNoRouteDefaultsToPublic(t *testing.T) {
 	for _, spec := range Catalog {
-		if spec.Public {
-			continue // public routes don't need a permission
+		if spec.Public || spec.Authenticated {
+			// Public routes need no auth; Authenticated routes require a valid
+			// credential but no specific permission (e.g. /api/admin/me).
+			continue
 		}
 		if spec.Permission == "" && len(spec.Permissions) == 0 && len(spec.AnyPermissions) == 0 {
 			t.Errorf("route %q is non-public but has no Permission/Permissions/AnyPermissions declared; add permissions to route_catalog.go", spec.Pattern)
@@ -40,6 +42,9 @@ func TestCatalogExactlyOneAuthorizationMode(t *testing.T) {
 		if spec.Public {
 			modes++
 		}
+		if spec.Authenticated {
+			modes++
+		}
 		if spec.Permission != "" {
 			modes++
 		}
@@ -50,7 +55,7 @@ func TestCatalogExactlyOneAuthorizationMode(t *testing.T) {
 			modes++
 		}
 		if modes != 1 {
-			t.Errorf("route %q configures %d authorization modes; exactly one of Public, Permission, Permissions, or AnyPermissions must be set", spec.Pattern, modes)
+			t.Errorf("route %q configures %d authorization modes; exactly one of Public, Authenticated, Permission, Permissions, or AnyPermissions must be set", spec.Pattern, modes)
 		}
 	}
 }

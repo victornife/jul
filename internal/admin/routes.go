@@ -16,6 +16,8 @@ func (s *Server) routes() http.Handler {
 		switch {
 		case spec.Public:
 			h = spec.Handler(s)
+		case spec.Authenticated:
+			h = s.authWithRBAC(spec.Handler(s))
 		case len(spec.AnyPermissions) > 0:
 			h = s.requireAnyPermission(spec.AnyPermissions, spec.Handler(s))
 		case spec.Permissions != nil:

@@ -10,8 +10,10 @@ package admin
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/rbac"
 )
 
 // diffGlobalSettings compares the [global] block. All fields are hot-reloadable
@@ -602,6 +604,199 @@ func boolPtrEqDiff(a, b *bool) bool {
 		return false
 	}
 	return *a == *b
+}
+
+// diffGlobalRBAC compares the [admin.rbac] block. It reports only role,
+// principal, and token-ID-level structure: which roles/principals were added,
+// removed, or changed, whether RBAC is enabled, and whether a credential was
+// rotated. It NEVER emits a plaintext token, a token digest, or any other
+// secret — only names, roles, counts, disabled/expiry state, and the fact that
+// a credential changed. Enabling/disabling RBAC is restart-required (the auth
+// wiring is chosen at startup); the policy contents are hot-reloadable via
+// atomic swap on a successful apply.
+func diffGlobalRBAC(before, after *config.Config, d *ConfigDiff) {
+	b, a := before.Admin.RBAC, after.Admin.RBAC
+
+	// Every RBAC lifecycle registry path is represented here, so mark them all
+	// covered up front and let the completeness pass skip them regardless of
+	// which specific sub-change (or none) is emitted below.
+	d.cover("admin.rbac.enabled")
+	d.cover("admin.rbac.default_role")
+	d.cover("admin.rbac.principals.*")
+	d.cover("admin.rbac.roles.*")
+
+	if b.Enabled != a.Enabled {
+		action := "Enable"
+		if !a.Enabled {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "rbac", Name: "admin", Detail: action + " admin RBAC — restart required to change the authentication mode"}, "rbac enabled")
+		if a.Enabled {
+			d.warn("Enabling RBAC replaces shared-token access with named principals; ensure at least one enabled principal holds admin:manage before applying, or you may lock yourself out of the admin API.")
+		}
+	}
+
+	if b.DefaultRole != a.DefaultRole {
+		d.mod(DiffEntry{Kind: "rbac", Name: "admin", Before: orNone(b.DefaultRole), After: orNone(a.DefaultRole), Detail: "Change RBAC default role for the legacy shared identity"}, "rbac default_role")
+	}
+
+	diffRBACRoles(b, a, d)
+	diffRBACPrincipals(b, a, d)
+
+	// Whole-config warnings evaluated against the candidate as a whole.
+	if a.Enabled && !rbacHasAdminCapable(a, after.Admin.Token) {
+		d.warn("This change would leave no enabled, admin-capable principal; applying it removes admin access. Keep at least one enabled principal (or the shared token) with admin:manage.")
+	}
+	if a.Enabled && strings.TrimSpace(after.Admin.Token) != "" {
+		d.warn("A legacy shared admin token is still configured while RBAC is enabled; the shared credential stays valid alongside named principals. Remove admin.token to fully migrate to per-principal credentials.")
+	}
+}
+
+// diffRBACRoles reports custom-role additions, removals, and permission changes
+// between two RBAC configs. Permission strings are non-secret catalog values;
+// the diff summarizes them by count so a role change is legible without listing
+// every grant.
+func diffRBACRoles(b, a config.AdminRBACConfig, d *ConfigDiff) {
+	bRoles := rbacRoleMap(b.Roles)
+	aRoles := rbacRoleMap(a.Roles)
+	for _, name := range sortedKeys(aRoles) {
+		ar := aRoles[name]
+		br, ok := bRoles[name]
+		if !ok {
+			d.add(DiffEntry{Kind: "rbac_role", Name: name, After: rbacPermCount(ar.Permissions), Detail: "Add RBAC role " + name}, "rbac role "+name)
+			continue
+		}
+		if !rbacStringSetEqual(br.Permissions, ar.Permissions) {
+			d.mod(DiffEntry{Kind: "rbac_role", Name: name, Before: rbacPermCount(br.Permissions), After: rbacPermCount(ar.Permissions), Detail: "Change permissions for RBAC role " + name}, "rbac role "+name+" permissions")
+		}
+	}
+	for _, name := range sortedKeys(bRoles) {
+		if _, ok := aRoles[name]; !ok {
+			d.del(DiffEntry{Kind: "rbac_role", Name: name, Before: rbacPermCount(bRoles[name].Permissions), Detail: "Remove RBAC role " + name}, "rbac role "+name)
+		}
+	}
+}
+
+// diffRBACPrincipals reports principal additions, removals, role changes,
+// disabled/expiry transitions, and credential rotation between two RBAC configs.
+// It never emits token values or hashes: a rotation is reported as a fact, not a
+// value.
+func diffRBACPrincipals(b, a config.AdminRBACConfig, d *ConfigDiff) {
+	bP := rbacPrincipalMap(b.Principals)
+	aP := rbacPrincipalMap(a.Principals)
+	for _, name := range sortedKeys(aP) {
+		ap := aP[name]
+		bp, ok := bP[name]
+		if !ok {
+			d.add(DiffEntry{Kind: "rbac_principal", Name: name, After: "role " + ap.Role, Detail: "Add RBAC principal " + name}, "rbac principal "+name)
+			continue
+		}
+		if bp.Role != ap.Role {
+			d.mod(DiffEntry{Kind: "rbac_principal", Name: name, Before: "role " + bp.Role, After: "role " + ap.Role, Detail: "Change role for RBAC principal " + name}, "rbac principal "+name+" role")
+		}
+		if bp.Disabled != ap.Disabled {
+			action := "Enable"
+			if ap.Disabled {
+				action = "Disable"
+			}
+			d.mod(DiffEntry{Kind: "rbac_principal", Name: name, Detail: action + " RBAC principal " + name}, "rbac principal "+name+" disabled")
+		}
+		if !bp.ExpiresAt.Equal(ap.ExpiresAt) {
+			d.mod(DiffEntry{Kind: "rbac_principal", Name: name, Before: rbacExpiryLabel(bp.ExpiresAt), After: rbacExpiryLabel(ap.ExpiresAt), Detail: "Change expiry for RBAC principal " + name}, "rbac principal "+name+" expiry")
+		}
+		if bp.Token != ap.Token {
+			d.mod(DiffEntry{Kind: "rbac_principal", Name: name, Detail: "Rotate credential for RBAC principal " + name + " (token value not shown)"}, "rbac principal "+name+" token")
+		}
+	}
+	for _, name := range sortedKeys(bP) {
+		if _, ok := aP[name]; !ok {
+			d.del(DiffEntry{Kind: "rbac_principal", Name: name, Before: "role " + bP[name].Role, Detail: "Remove RBAC principal " + name}, "rbac principal "+name)
+		}
+	}
+}
+
+// rbacRoleMap indexes custom roles by name for diffing.
+func rbacRoleMap(roles []config.AdminRole) map[string]config.AdminRole {
+	out := make(map[string]config.AdminRole, len(roles))
+	for _, r := range roles {
+		out[r.Name] = r
+	}
+	return out
+}
+
+// rbacPrincipalMap indexes principals by name for diffing.
+func rbacPrincipalMap(principals []config.AdminPrincipal) map[string]config.AdminPrincipal {
+	out := make(map[string]config.AdminPrincipal, len(principals))
+	for _, p := range principals {
+		out[p.Name] = p
+	}
+	return out
+}
+
+// rbacPermCount renders a permission-set size for a role diff entry.
+func rbacPermCount(perms []string) string {
+	if len(perms) == 1 {
+		return "1 permission"
+	}
+	return fmt.Sprintf("%d permissions", len(perms))
+}
+
+// rbacExpiryLabel renders a principal expiry for a diff entry without leaking
+// anything sensitive: "never" for the zero time, otherwise an RFC3339 UTC stamp.
+func rbacExpiryLabel(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// rbacStringSetEqual reports order-independent set equality of two permission
+// lists (duplicates collapsed), so reordering a role's permissions is not
+// flagged as a change.
+func rbacStringSetEqual(x, y []string) bool {
+	xs := make(map[string]struct{}, len(x))
+	for _, s := range x {
+		xs[s] = struct{}{}
+	}
+	ys := make(map[string]struct{}, len(y))
+	for _, s := range y {
+		ys[s] = struct{}{}
+	}
+	if len(xs) != len(ys) {
+		return false
+	}
+	for s := range xs {
+		if _, ok := ys[s]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// rbacHasAdminCapable reports whether the candidate RBAC config retains at least
+// one enabled, non-expired identity that grants admin:manage — either the
+// synthetic legacy shared identity (when a shared token is configured) or a
+// named principal. It mirrors the invariant rbac.Build enforces so the diff can
+// warn before the operator applies a lockout.
+func rbacHasAdminCapable(cfg config.AdminRBACConfig, legacyToken string) bool {
+	if strings.TrimSpace(legacyToken) != "" {
+		role := cfg.DefaultRole
+		if role == "" {
+			role = rbac.RoleAdmin
+		}
+		if roleGrantsAdminManage(cfg, role) {
+			return true
+		}
+	}
+	for _, p := range cfg.Principals {
+		if p.Disabled || principalExpired(p) {
+			continue
+		}
+		if roleGrantsAdminManage(cfg, p.Role) {
+			return true
+		}
+	}
+	return false
 }
 
 // diffGlobalMetrics compares the [observability.metrics] block. Changes are

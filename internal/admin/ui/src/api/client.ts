@@ -623,6 +623,17 @@ export const LocationWAFSchema = z.object({
 });
 export type LocationWAF = z.infer<typeof LocationWAFSchema>;
 
+// RBACStatusSchema mirrors admin.RBACStatusProjection: the secret-free summary
+// of the admin RBAC posture. It carries only counts and booleans — never a
+// token, token ID, or hash.
+export const RBACStatusSchema = z.object({
+  enabled: z.boolean(),
+  principal_count: z.number(),
+  role_count: z.number(),
+  legacy_token_active: z.boolean(),
+});
+export type RBACStatus = z.infer<typeof RBACStatusSchema>;
+
 export const SecurityProjectionSchema = z.object({
   auth_enabled: z.boolean(),
   client_auth: z.string().optional(),
@@ -657,6 +668,9 @@ export const SecurityProjectionSchema = z.object({
   // implying the single global policy governs every route.
   location_wafs: z.array(LocationWAFSchema).optional(),
   secret_refs: z.number(),
+  // rbac summarises the admin access-control posture. Optional for forward
+  // compatibility with older servers that predate the projection.
+  rbac: RBACStatusSchema.optional(),
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
 
@@ -852,6 +866,26 @@ export function fetchTLS(): Promise<CertProjection[]> {
 
 export function fetchSecurity(): Promise<SecurityProjection> {
   return api<unknown>("/security").then((d) => SecurityProjectionSchema.parse(d));
+}
+
+// ── Current identity (GET /api/admin/me) ─────────────────────────────────────
+//
+// IdentitySchema mirrors admin.identityResponse: the secret-free view of the
+// authenticated caller used to display the current principal/role and gate
+// controls proactively. `permissions` is the resolved concrete permission set
+// (wildcards already expanded server-side), so the Console gates with a simple
+// set-membership test. It never carries the raw token or its digest.
+export const IdentitySchema = z.object({
+  principal: z.string(),
+  role: z.string(),
+  token_id: z.string().optional().default(""),
+  permissions: z.array(z.string()),
+  legacy: z.boolean(),
+});
+export type Identity = z.infer<typeof IdentitySchema>;
+
+export function fetchMe(): Promise<Identity> {
+  return api<unknown>("/admin/me").then((d) => IdentitySchema.parse(d));
 }
 
 export function fetchTrafficControls(): Promise<TrafficControls> {
@@ -2228,6 +2262,10 @@ export const AuditEventSchema = z.object({
   id: z.number(),
   time: z.string(),
   actor: z.string(),
+  // token_id is the public, non-secret credential identifier the server derives
+  // from the presented token. It is safe to display and never contains secret
+  // bytes. Optional for compatibility with events recorded before attribution.
+  token_id: z.string().optional().default(""),
   operation: z.string(),
   resource: z.string().optional(),
   result: z.string(),

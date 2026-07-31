@@ -70,6 +70,24 @@ refetches in place; re-authentication, permission, and availability errors do
 not, because retrying the identical request cannot succeed. A 401 from any panel
 also raises the console-wide token prompt described above.
 
+### Identity and permission gating
+
+The app chrome shows the **current principal and role** the console is acting as,
+read from `GET /api/admin/me` (which returns only server-derived, secret-free
+identity — principal, role, public token ID, resolved permissions, and whether
+the credential is the legacy shared token). When RBAC is enabled, the console
+**gates controls proactively**: actions the current role cannot perform —
+configuration apply, history rollback, plugin upload, cache purge, and audit
+export — are disabled with a short note explaining which permission is required,
+instead of letting the operator click through to a guaranteed 403.
+
+Gating is a UX hint only; the **server remains authoritative** and authorizes
+every request. It fails open until the identity is known, so the console is never
+blanked during load or when running without RBAC, and a 403 is handled inline
+without re-triggering the token prompt. When the credential is rejected (401) the
+cached identity is dropped so a stale permission set never lingers.
+
+
 ### Overview
 
 The landing page of the console and the primary monitoring surface. Answers
@@ -533,8 +551,11 @@ and Streams panels.
 
 Security- and config-relevant actions (apply, rollback, reload, auth failures)
 are recorded as attributable, metadata-only events — never tokens, credentials,
-or bodies. By default they live in a bounded in-memory ring buffer (10,000
-events) queryable at `GET /api/audit` and exportable as JSON/CSV.
+or bodies. Each event carries the server-authenticated **actor** and the
+non-secret **token ID** of the credential used (both shown as columns in the
+Audit panel), so a change can be traced to the principal that made it without
+exposing any secret. By default they live in a bounded in-memory ring buffer
+(10,000 events) queryable at `GET /api/audit` and exportable as JSON/CSV.
 
 For compliance or incident review, set a durable sink so the trail survives
 restarts and ring-buffer overwrite:

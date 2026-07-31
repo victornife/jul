@@ -241,6 +241,32 @@ type SecurityProjection struct {
 	// SecretRefs is the number of ${env:}/${file:} secret references in the
 	// configuration. The values themselves are never projected.
 	SecretRefs int `json:"secret_refs"`
+	// RBAC summarises the admin RBAC posture (enabled, principal/role counts,
+	// legacy-token presence) so the Security/Overview surfaces can show the
+	// access-control state without exposing any credential. It is always present
+	// so the panel can render "RBAC disabled" as an explicit state.
+	RBAC RBACStatusProjection `json:"rbac"`
+}
+
+// RBACStatusProjection is the secret-free summary of the admin RBAC posture
+// (P3-03 §35). It carries only counts and booleans derived from the effective
+// [admin] configuration: it never includes principal tokens, token IDs, hashes,
+// or any other credential material.
+type RBACStatusProjection struct {
+	// Enabled reports whether named-principal RBAC is active. When false the
+	// server uses the legacy shared-token (or open) path.
+	Enabled bool `json:"enabled"`
+	// PrincipalCount is the number of named principals declared under
+	// [admin.rbac]. It is a count only; no principal names or tokens are shown.
+	PrincipalCount int `json:"principal_count"`
+	// RoleCount is the number of custom roles declared under [admin.rbac]
+	// (predefined roles are always available and are not counted here).
+	RoleCount int `json:"role_count"`
+	// LegacyTokenActive reports whether a shared admin.token is still configured.
+	// When RBAC is enabled and this is true, the legacy credential remains valid
+	// alongside named principals, which the Security panel surfaces as a
+	// migration warning.
+	LegacyTokenActive bool `json:"legacy_token_active"`
 }
 
 // LocationWAFProjection describes one location whose [waf] override differs from

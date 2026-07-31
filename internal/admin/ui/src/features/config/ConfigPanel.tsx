@@ -34,6 +34,8 @@ import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, Spinner } from "@/components/ui.tsx";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { usePermission } from "@/auth/usePermission.ts";
 import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 
@@ -185,6 +187,12 @@ function formatLocalTime(iso: string): string {
 export function ConfigPanel() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  // canApplyPerm proactively gates the primary apply action for principals that
+  // lack config:apply, complementing the reactive 403 handling below. The server
+  // remains authoritative; this only avoids leading the operator into a certain
+  // rejection.
+  const { has: hasPermission } = usePermission();
+  const canApplyPerm = hasPermission("config:apply");
   // rawForbidden is true when the current principal is authenticated but lacks
   // config:raw. Structured patch review (config:write) must still work in that
   // case, so the panel degrades gracefully instead of failing outright.
@@ -1006,7 +1014,8 @@ export function ConfigPanel() {
               patchReconcileError !== null ||
               candidatePending ||
               (restartBlocked && !hasPendingRestart) ||
-              (rawForbidden && !isPatchMode)
+              (rawForbidden && !isPatchMode) ||
+              !canApplyPerm
             }
             className="inline-flex items-center gap-2 rounded-md bg-jul-accent px-3 py-1 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
@@ -1023,6 +1032,7 @@ export function ConfigPanel() {
           </button>
         </div>
       </div>
+      <ForbiddenAction permission="config:apply" className="justify-end" />
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
         <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-jul-border bg-jul-surface">

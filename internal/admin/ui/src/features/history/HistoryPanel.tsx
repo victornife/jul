@@ -18,6 +18,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { EmptyState, Loading } from "@/components/ui.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
+import { usePermission } from "@/auth/usePermission.ts";
 import { useManagedApplyRecord } from "@/lib/useManagedApplyRecord.ts";
 import {
   deriveFinalizationAdvisory,
@@ -234,6 +235,8 @@ function EntryRow({
   readonly rolling: boolean;
 }) {
   const isRecovery = entry.reason === "recovery";
+  const { has, ready } = usePermission();
+  const canRollback = has("history:rollback");
   return (
     <tr
       className={`border-b border-jul-border last:border-b-0 hover:bg-jul-surface/60${
@@ -260,7 +263,12 @@ function EntryRow({
             onClick={() => {
               onRollback(entry.id);
             }}
-            disabled={rolling}
+            disabled={rolling || !canRollback}
+            title={
+              ready && !canRollback
+                ? "Requires the history:rollback permission; your role does not grant it."
+                : undefined
+            }
             className="rounded-md border border-jul-danger/40 px-2 py-0.5 text-xs text-jul-danger hover:bg-jul-danger/10 disabled:opacity-50"
           >
             {rolling ? "Rolling back…" : "Rollback"}

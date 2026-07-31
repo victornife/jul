@@ -16,6 +16,8 @@ import {
 } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import { patchConfig, ConfigRejectedError } from "@/api/client.ts";
+import { usePermission } from "@/auth/usePermission.ts";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import {
   upsertTopLevelTable,
   generateCompressionToml,
@@ -83,6 +85,8 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [purgeMsg, setPurgeMsg] = useState<string | null>(null);
+  const { has, ready } = usePermission();
+  const canPurge = has("cache:purge");
 
   // Live observability for the cache and rate-limit editors (Milestones 3.2/3.3):
   // the cache hit ratio and the rate-limited request counts come from the runtime
@@ -412,15 +416,22 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
               <div className="flex items-center gap-3">
                 <button
                   type="button"
+                  disabled={!canPurge}
+                  title={
+                    ready && !canPurge
+                      ? "Requires the cache:purge permission; your role does not grant it."
+                      : undefined
+                  }
                   onClick={() => {
                     void onPurge();
                   }}
-                  className="rounded-md border border-jul-danger/50 px-3 py-1 text-xs font-medium text-jul-danger hover:bg-jul-danger/10"
+                  className="rounded-md border border-jul-danger/50 px-3 py-1 text-xs font-medium text-jul-danger hover:bg-jul-danger/10 disabled:opacity-50"
                 >
                   Purge cache now
                 </button>
                 {purgeMsg && <span className="text-xs text-jul-muted">{purgeMsg}</span>}
               </div>
+              <ForbiddenAction permission="cache:purge" />
             </div>
           </>
         )}

@@ -93,3 +93,58 @@ describe("SecurityPanel WAF build-tag degradation", () => {
     });
   });
 });
+
+// ── RBAC status projection (P3-03 §35) ───────────────────────────────────────
+
+describe("SecurityPanel RBAC status", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("summarises an enabled RBAC posture and warns about a retained legacy token", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            ...projection,
+            rbac: {
+              enabled: true,
+              principal_count: 3,
+              role_count: 2,
+              legacy_token_active: true,
+            },
+          }),
+      }),
+    );
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText(/3 principals, 2 custom roles/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/legacy shared admin token is still active/i),
+    ).toBeInTheDocument();
+  });
+
+  it("reports the disabled state when RBAC is off", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            ...projection,
+            rbac: {
+              enabled: false,
+              principal_count: 0,
+              role_count: 0,
+              legacy_token_active: false,
+            },
+          }),
+      }),
+    );
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    expect(
+      await screen.findByText(/named principals are off/i),
+    ).toBeInTheDocument();
+  });
+});

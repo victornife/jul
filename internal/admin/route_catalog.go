@@ -40,6 +40,12 @@ type RouteSpec struct {
 	// Public, when true, skips authentication entirely. Only use this for
 	// truly public endpoints (health, readiness, and console static shell).
 	Public bool
+	// Authenticated, when true, requires any valid credential but no specific
+	// permission. It is used by endpoints that only expose the caller's own
+	// server-derived identity (e.g. /api/admin/me), where authentication is the
+	// authorization: every authenticated principal may read who it is. It is
+	// mutually exclusive with Permission/Permissions/AnyPermissions/Public.
+	Authenticated bool
 	// Handler returns the http.Handler for this route bound to the server.
 	Handler func(*Server) http.Handler
 }
@@ -73,6 +79,18 @@ var Catalog = []RouteSpec{
 		Handler: func(s *Server) http.Handler { return s.handleConsoleOrRoot() },
 	},
 
+	// ── Identity (authenticated, any credential) ─────────────────────────────
+	// Returns the caller's own server-derived identity so the Console can
+	// display the current principal/role and gate controls proactively. It
+	// requires authentication but no specific permission, so even a
+	// least-privileged principal can discover who it is.
+	{
+		Pattern:       "/api/admin/me",
+		Methods:       []string{http.MethodGet},
+		Authenticated: true,
+		Handler:       func(s *Server) http.Handler { return http.HandlerFunc(s.handleIdentity) },
+	},
+
 	// ── Observability (metrics:read) ──────────────────────────────────────────
 	{
 		Pattern:    "/metrics",
@@ -80,8 +98,6 @@ var Catalog = []RouteSpec{
 		Permission: rbac.MetricsRead,
 		Handler:    func(s *Server) http.Handler { return s.handleMetrics() },
 	},
-
-	// ── Status / projections (status:read) ───────────────────────────────────
 	{
 		Pattern:    "/api/stats",
 		Methods:    []string{http.MethodGet},

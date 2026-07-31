@@ -294,6 +294,7 @@ granted. Sourced from `internal/admin/routes.go`.
 | `/api/stats` | GET | `status:read` | ✓ | ✓ | ✓ | ✓ |
 | `/api/status` | GET | `status:read` | ✓ | ✓ | ✓ | ✓ |
 | `/api/runtime/overview` | GET | `status:read` | ✓ | ✓ | ✓ | ✓ |
+| `/api/admin/me` | GET | authenticated (any valid credential; no specific permission) | ✓ | ✓ | ✓ | ✓ |
 | `/api/certs` | GET | `status:read` | ✓ | ✓ | ✓ | ✓ |
 | `/api/config` | GET | `config:read` | ✓ | ✓ | ✓ | · |
 | `/api/config/raw` | GET | `config:read` | ✓ | ✓ | ✓ | · |
@@ -384,6 +385,58 @@ confirms. The server reads the snapshot itself and diffs it against the running
 config; unlike the generic `POST /api/config/diff` it accepts no request body,
 so a rollback-only caller can never submit an arbitrary candidate configuration
 through it.
+
+## Current-identity endpoint and Console gating
+
+`GET /api/admin/me` returns the caller's own server-derived identity so the
+Console can display the current principal/role and gate controls proactively. It
+requires authentication but **no specific permission**, so even a least-privilege
+principal (or a role granting no permissions at all) can discover who it is. The
+response is secret-free:
+
+```json
+{
+  "principal": "alice",
+  "role": "operator",
+  "token_id": "9f32a1b4c921",
+  "permissions": ["status:read", "config:read", "config:write", "config:apply"],
+  "legacy": false
+}
+```
+
+`permissions` is the resolved **concrete** permission set with wildcards already
+expanded server-side, so the Console gates each control with a plain
+set-membership test. The identity is read exclusively from the request context
+populated by the auth middleware; no client-supplied identity metadata is ever
+trusted. In legacy single-token mode the response reports the synthetic `shared`
+principal with `legacy: true`; in open (loopback, no-token) mode it reports an
+unrestricted anonymous identity so the Console is not gated to nothing.
+
+The Console consumes this through a `PermissionProvider` (fetching `/api/admin/me`
+once and caching it), a `usePermission()` hook, and a `ForbiddenAction`
+component that explains why a control is unavailable. Gating **fails open until
+the identity is known** so the UI is never blanked during load or when running
+without RBAC — the server remains authoritative and still authorizes every
+request. A 401 drops the cached identity so a stale permission set never lingers,
+and a 403 is handled inline without re-triggering the token prompt. The gated
+controls are configuration apply, history rollback, plugin upload, cache purge,
+and audit export; the current principal and role are shown in the app chrome.
+
+## Secret-safe diff and status projections
+
+The structured configuration diff (`POST /api/config/diff` and the rollback
+preview) reports `[admin.rbac]` changes at the role/principal/token-ID level
+only: RBAC enabled/disabled, roles added/removed/permission-count changed,
+principals added/removed/role-changed/disabled/expiry-changed, and credential
+rotation reported as a fact ("token value not shown"). It **never** emits a
+plaintext token, a token digest, or any other secret. It warns when a change
+enables RBAC, would leave no enabled admin-capable principal, or retains a legacy
+shared token after RBAC is enabled.
+
+The Security projection (`GET /api/security`) carries a secret-free `rbac`
+summary — `enabled`, `principal_count`, `role_count` (custom roles), and
+`legacy_token_active` — so the Security/Overview surfaces can show the
+access-control posture without exposing any credential, principal name, or hash.
 
 ## Enforcement
 

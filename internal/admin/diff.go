@@ -98,6 +98,7 @@ func diffConfigs(before, after *config.Config) ConfigDiff {
 	diffGlobalSettings(before, after, &d)
 	diffGlobalEgress(before, after, &d)
 	diffGlobalAdmin(before, after, &d)
+	diffGlobalRBAC(before, after, &d)
 	diffGlobalMetrics(before, after, &d)
 
 	// Registry-driven completeness pass. Any registered path that differs and

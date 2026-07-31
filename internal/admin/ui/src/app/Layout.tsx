@@ -13,6 +13,7 @@ import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
 import { openCommandPalette } from "@/app/commandPaletteBus.ts";
 import { fetchOverview, type CertRisk } from "@/api/client.ts";
+import { usePermission } from "@/auth/usePermission.ts";
 
 type NavLayout = "top" | "side";
 
@@ -135,6 +136,33 @@ function CommandPaletteButton({ compact = false }: { readonly compact?: boolean 
         </>
       )}
     </button>
+  );
+}
+
+// IdentityBadge shows the current principal and role so the operator always
+// knows which credential the Console is acting as (P3-03 §33). It reads the
+// identity from the PermissionProvider and renders nothing until a concrete
+// identity is known, so it adds no chrome before authentication or when running
+// without RBAC.
+function IdentityBadge({ compact = false }: { readonly compact?: boolean }) {
+  const { identity, ready } = usePermission();
+  if (!ready || !identity) return null;
+  const title = `Signed in as ${identity.principal} (role: ${identity.role}${identity.legacy ? ", legacy shared token" : ""})`;
+  return (
+    <span
+      title={title}
+      className={`flex items-center gap-1 rounded-md border border-jul-border bg-jul-bg text-xs text-jul-text ${
+        compact ? "w-full justify-center px-2 py-1" : "px-2.5 py-1"
+      }`}
+    >
+      <span aria-hidden>👤</span>
+      {!compact && (
+        <span className="truncate">
+          <span className="font-medium">{identity.principal}</span>
+          <span className="text-jul-muted"> · {identity.role}</span>
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -456,6 +484,7 @@ export function Layout() {
 
   const controlsTop = (
     <div className="flex items-center gap-2">
+      <IdentityBadge />
       <ConsoleHealthBadge />
       <CommandPaletteButton />
       <PreferenceMenu
@@ -469,6 +498,7 @@ export function Layout() {
 
   const controlsSide = (
     <div className="flex flex-col items-stretch gap-y-2">
+      <IdentityBadge compact={collapsed} />
       <ConsoleHealthBadge compact={collapsed} />
       <CommandPaletteButton compact={collapsed} />
       <PreferenceMenu

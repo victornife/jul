@@ -13,6 +13,8 @@ import {
   type PluginAttachment,
 } from "@/api/client.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
+import { usePermission } from "@/auth/usePermission.ts";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { PluginEditorDrawer } from "./PluginEditorDrawer.tsx";
 import { AttachPluginDrawer } from "./AttachPluginDrawer.tsx";
 import { UploadPluginDrawer } from "./UploadPluginDrawer.tsx";
@@ -29,6 +31,8 @@ export function PluginsPanel() {
   const [creating, setCreating] = useState(false);
   const [attaching, setAttaching] = useState<PluginProjection | null>(null);
   const [uploading, setUploading] = useState(false);
+  const { has, ready } = usePermission();
+  const canUpload = has("plugins:upload");
 
   if (isLoading) return <Loading label="Loading plugins…" />;
   if (isError || !data)
@@ -64,13 +68,22 @@ export function PluginsPanel() {
         </div>
         <div className="flex shrink-0 gap-2">
           {data.upload_enabled ? (
-            <button
-              type="button"
-              onClick={() => { setUploading(true); }}
-              className="rounded-md border border-jul-border px-3 py-1.5 text-sm font-medium text-jul-text hover:border-jul-accent"
-            >
-              Upload .wasm
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                type="button"
+                disabled={!canUpload}
+                title={
+                  ready && !canUpload
+                    ? "Requires the plugins:upload permission; your role does not grant it."
+                    : undefined
+                }
+                onClick={() => { setUploading(true); }}
+                className="rounded-md border border-jul-border px-3 py-1.5 text-sm font-medium text-jul-text hover:border-jul-accent disabled:opacity-50"
+              >
+                Upload .wasm
+              </button>
+              <ForbiddenAction permission="plugins:upload" />
+            </div>
           ) : (
             <span className="rounded-md border border-jul-border/40 bg-jul-surface px-3 py-1.5 text-sm text-jul-muted">
               Uploads disabled by admin config

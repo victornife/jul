@@ -10,6 +10,35 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- **Phase 3 — Current-identity endpoint, Console permission gating, and secret-safe RBAC diff/projections** (P3-03, #72):
+  - `GET /api/admin/me` (new, `internal/admin/api_identity.go`): returns the caller's
+    own server-derived identity — principal, role, public token ID, resolved concrete
+    permission set (wildcards expanded), and `legacy` flag. It is authenticated-only
+    (any valid credential, no specific permission) via a new `RouteSpec.Authenticated`
+    mode wired through `authWithRBAC`. The identity comes solely from the request
+    context; no client-supplied identity is trusted, and no secret is ever returned.
+  - Console permission layer: `PermissionProvider` (fetches `/api/admin/me` once),
+    `usePermission()` hook, and a `ForbiddenAction` note. The app chrome shows the
+    current principal/role, and the apply, history-rollback, plugin-upload,
+    cache-purge, and audit-export controls are disabled up front for principals that
+    lack the permission, each explaining which permission is required. Gating fails
+    open until the identity is known and a 403 no longer triggers the token prompt;
+    the cached identity is dropped on 401. The server remains authoritative.
+  - Structured RBAC diff (`internal/admin/diff_global.go` `diffGlobalRBAC`): the config
+    diff now reports `[admin.rbac]` changes at the role/principal/token-ID level —
+    enabled/disabled, roles added/removed/permission-count changed, principals
+    added/removed/role-changed/disabled/expiry-changed, and credential rotation as a
+    fact — and warns on enabling RBAC, leaving no admin-capable principal, or retaining
+    a legacy shared token after RBAC is enabled. It never emits a token value or hash.
+  - Safe RBAC status projection (`RBACStatusProjection`): `GET /api/security` now
+    carries a secret-free `rbac` summary (enabled, principal count, custom-role count,
+    legacy-token-active), surfaced on the Security panel.
+  - Audit UI: the Audit panel now shows the non-secret **Token ID** column alongside
+    the actor, completing the §32 attribution projection (`AuditEvent.token_id`).
+  - Tests: `TestIdentityEndpoint*` (admin), `TestDiffRBAC*` / `TestProjectRBAC*`
+    (admin, including a secret-leak guard over the serialized diff), and console
+    `permission.test.tsx` / Security-panel RBAC-status tests.
+
 ### Fixed
 - **Post-audit remediation (reload result contract, RBAC lifecycle, context propagation):**
   - `server.ReloadResult` now carries `admin` subsystem status so RBAC policy update

@@ -439,7 +439,20 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 		}
 	}
 	sp.SecretRefs = config.CountSecretRefs(c)
+	sp.RBAC = projectRBAC(c)
 	return sp
+}
+
+// projectRBAC summarises the admin RBAC posture for the Security/Overview
+// surfaces. It exposes only counts and booleans derived from the effective
+// [admin] configuration and never any credential, token ID, or hash.
+func projectRBAC(c *config.Config) RBACStatusProjection {
+	return RBACStatusProjection{
+		Enabled:           c.Admin.RBAC.Enabled,
+		PrincipalCount:    len(c.Admin.RBAC.Principals),
+		RoleCount:         len(c.Admin.RBAC.Roles),
+		LegacyTokenActive: strings.TrimSpace(c.Admin.Token) != "",
+	}
 }
 
 // wafBodyLimitStr renders a WAF request-body limit as a size string (e.g.

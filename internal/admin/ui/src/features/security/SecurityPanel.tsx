@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSecurity, type SecurityProjection, type LocationWAF } from "@/api/client.ts";
+import { fetchSecurity, type SecurityProjection, type LocationWAF, type RBACStatus } from "@/api/client.ts";
 import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
@@ -67,6 +67,43 @@ function OnOff({ on }: { readonly on: boolean }) {
   );
 }
 
+// RBACStatusCell renders the secret-free admin RBAC posture (P3-03 §35): whether
+// named-principal RBAC is active, the principal/custom-role counts, and whether a
+// legacy shared token is still accepted. It exposes no principal names, tokens,
+// or hashes.
+function RBACStatusCell({ rbac }: { readonly rbac: RBACStatus | undefined }) {
+  if (!rbac) {
+    return <span className="text-jul-muted text-xs">unknown</span>;
+  }
+  if (!rbac.enabled) {
+    return (
+      <span className="flex flex-col gap-0.5">
+        <OnOff on={false} />
+        <span className="text-jul-muted text-xs">
+          Using the legacy shared token or open (loopback) access; named principals are off.
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="flex w-full flex-col gap-1">
+      <span className="flex items-center gap-2">
+        <OnOff on={true} />
+        <span className="text-jul-muted text-xs">
+          {rbac.principal_count} principal{rbac.principal_count === 1 ? "" : "s"},{" "}
+          {rbac.role_count} custom role{rbac.role_count === 1 ? "" : "s"}
+        </span>
+      </span>
+      {rbac.legacy_token_active && (
+        <span className="text-jul-warning text-xs">
+          A legacy shared admin token is still active alongside RBAC. Remove{" "}
+          <span className="font-mono">admin.token</span> to fully migrate to named principals.
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function SecurityPanel() {
   const [editingWAF, setEditingWAF] = useState(false);
   const [editingLocationWAF, setEditingLocationWAF] = useState<LocationWAF | null>(null);
@@ -101,6 +138,9 @@ export function SecurityPanel() {
       <div className="rounded-lg border border-jul-border bg-jul-surface">
         <Row label="Authentication">
           <OnOff on={data.auth_enabled} />
+        </Row>
+        <Row label="Access control (RBAC)">
+          <RBACStatusCell rbac={data.rbac} />
         </Row>
         <Row label="Mutual TLS">
           {data.client_auth ? (
