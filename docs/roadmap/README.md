@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 1.35 · Updated 2026-07-31
+> Version 1.36 · Updated 2026-07-31
 
 This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
 the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
@@ -36,7 +36,7 @@ releasable increment; later phases build on earlier ones.
 | --- | --- | --- | --- |
 | Phase 2 | Reload results, bounded managed applies, and planned restart | Correlated reload results, exact restoration, planned-restart staging/discard/preflight | 🚧 in progress (remediation pass) |
 | Phase 3 | RBAC Phase 1 | Named principals, predefined + custom roles, scoped tokens, deny-by-default admin routes | 🚧 implemented; in security remediation |
-| Phase 4 | Egress coverage and hardening | JWKS, forward-auth, discovery, ACME/OCSP, WASM fetch under shared egress policy | 🔒 queued |
+| Phase 4 | Egress coverage and hardening | JWKS, forward-auth, discovery, ACME/OCSP, WASM fetch under shared egress policy | &#x1F6A7; in progress (P4-01 + P4-02 delivered; P4-03 observability/tests remaining) |
 | Phase 5 | Structured CRUD + near-term global-table patch ops | Batch patch preview, entity lifecycle, `global_set`, `compression_set`, `rate_limit_global_set` | 🔒 queued |
 | Phase 6 | AI Gateway MVP | Time-boxed multi-provider routing, failover, streaming, token/cost metrics | ⏳ time-boxed bet |
 | Phase 7 | Activate at most one evidence-backed horizon | Fleet, K8s/Gateway API, AI continuation, Cloud, or GraphQL — only if gate trips | 🔒 demand-gated |
@@ -259,6 +259,7 @@ committed roadmap with a Maturity state.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-07-31 | 1.36 | **Phase 4 egress coverage → in progress (P4-01 + P4-02 delivered).** Reconciled the active-operating-roadmap Phase 4 row from *queued* to *in progress*: the shared egress policy is now injected at the composition root through every config-driven auxiliary client — ACME/OCSP ([#74](https://github.com/victornife/jul/issues/74)) plus JWKS/forward-auth, Consul/Kubernetes discovery, and WASM `fetch` end-to-end wiring ([#75](https://github.com/victornife/jul/issues/75)). P4-03 (egress observability + negative/integration tests, [#76](https://github.com/victornife/jul/issues/76)) remains, so the phase is not yet fully delivered. | HP-07 stays ✅ Delivered; all other phase rows, IDs, and maturity states. | Issues #74, #75; [specs/hardening-platform.md](../specs/hardening-platform.md); [egress.md](../egress.md) |
 | 2026-07-31 | 1.35 | **HP-02 Console RBAC → Delivered (local-token RBAC).** Phase 3 ([#73](https://github.com/victornife/jul/issues/73)) shipped named-principal RBAC end to end: predefined viewer/operator/admin/auditor roles, scoped revocable tokens, per-route authorization at the API boundary, `GET /api/admin/me` identity, proactive Console permission gating (disable + reason), per-principal audit attribution, hot policy swap, and last-admin lockout protection — proven by a real-server role-matrix E2E and browser gating scenarios. | External identity (OIDC/SSO) stays [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core) horizon; all other feature rows, IDs, and maturity states. | Issue #73; [console-rbac.md](../specs/console-rbac.md); [ADR 0010](../adr/0010-console-rbac.md) |
 | 2026-07-20 | 1.34 | **Phase 1 roadmap normalization.** Added the [active operating roadmap](#active-operating-roadmap) with the strict Phase 2→7 sequence; reconciled HP-01..HP-07 against the phase plan (delivered/partially-delivered/phase-active/deferred); added [evidence gates and lightweight product signals](#evidence-gates-and-product-signals) with quantitative thresholds for Fleet, K8s/Gateway API, AI continuation, Cloud, and GraphQL. | All Year 1–5 feature rows, IDs, and descriptions; the vision horizon remains demand-gated. | Issue #63; [specs/hardening-platform.md](../specs/hardening-platform.md) |
 | 2026-06-30 | 1.27 | Added the **Hardening & platform** pre-1.0 robustness backlog (HP-01..HP-07) under *Planned*, with a dedicated [engineering spec](../specs/hardening-platform.md): unified reload transaction + `[global].reload_timeout`, Console RBAC/multi-user, metric-cardinality strategy, pre-commit gate parity, container/supervision hardening (image digest pinning + a `jul healthcheck` target), structured-config parity patch-ops, and an optional SSRF allow-list. This records the strategic items and work deferred out of the pre-1.0 hardening pass so they are tracked, not lost. | All Delivered/Planned feature rows, IDs, and maturity states; the 5-year vision horizon is unchanged and nothing moved to Delivered. | [specs/hardening-platform.md](../specs/hardening-platform.md) |
