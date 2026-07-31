@@ -9,10 +9,12 @@ package admin
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/rbac"
 )
 
@@ -610,10 +612,11 @@ func boolPtrEqDiff(a, b *bool) bool {
 // principal, and token-ID-level structure: which roles/principals were added,
 // removed, or changed, whether RBAC is enabled, and whether a credential was
 // rotated. It NEVER emits a plaintext token, a token digest, or any other
-// secret — only names, roles, counts, disabled/expiry state, and the fact that
-// a credential changed. Enabling/disabling RBAC is restart-required (the auth
-// wiring is chosen at startup); the policy contents are hot-reloadable via
-// atomic swap on a successful apply.
+// secret — only names, roles, permissions, disabled/expiry state, and the fact
+// that a credential changed. Enabling/disabling RBAC and the policy contents
+// are all hot-reloadable: the authentication mode and policy are rebuilt and
+// atomically installed on a successful apply (lifecycle.HotReloadClass), so no
+// restart is required to change them.
 func diffGlobalRBAC(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Admin.RBAC, after.Admin.RBAC
 
@@ -630,7 +633,12 @@ func diffGlobalRBAC(before, after *config.Config, d *ConfigDiff) {
 		if !a.Enabled {
 			action = "Disable"
 		}
-		d.mod(DiffEntry{Kind: "rbac", Name: "admin", Detail: action + " admin RBAC — restart required to change the authentication mode"}, "rbac enabled")
+		d.mod(DiffEntry{
+			Kind:           "rbac",
+			Name:           "admin",
+			Detail:         action + " admin RBAC — takes effect atomically on the next successful reload",
+			LifecycleClass: lifecycle.HotReloadClass.String(),
+		}, "rbac enabled")
 		if a.Enabled {
 			d.warn("Enabling RBAC replaces shared-token access with named principals; ensure at least one enabled principal holds admin:manage before applying, or you may lock yourself out of the admin API.")
 		}
@@ -653,9 +661,11 @@ func diffGlobalRBAC(before, after *config.Config, d *ConfigDiff) {
 }
 
 // diffRBACRoles reports custom-role additions, removals, and permission changes
-// between two RBAC configs. Permission strings are non-secret catalog values;
-// the diff summarizes them by count so a role change is legible without listing
-// every grant.
+// between two RBAC configs. Permission strings are non-secret catalog values
+// (also surfaced to the caller by /api/admin/me), so the diff lists the actual
+// permissions and, for a change, the explicit added/removed delta — never an
+// opaque count that would hide a privilege swap such as status:read → admin:manage
+// (N-01). Lists are bounded so a very large role cannot flood the diff.
 func diffRBACRoles(b, a config.AdminRBACConfig, d *ConfigDiff) {
 	bRoles := rbacRoleMap(b.Roles)
 	aRoles := rbacRoleMap(a.Roles)
@@ -663,16 +673,16 @@ func diffRBACRoles(b, a config.AdminRBACConfig, d *ConfigDiff) {
 		ar := aRoles[name]
 		br, ok := bRoles[name]
 		if !ok {
-			d.add(DiffEntry{Kind: "rbac_role", Name: name, After: rbacPermCount(ar.Permissions), Detail: "Add RBAC role " + name}, "rbac role "+name)
+			d.add(DiffEntry{Kind: "rbac_role", Name: name, After: rbacPermList(ar.Permissions), Detail: "Add RBAC role " + name}, "rbac role "+name)
 			continue
 		}
 		if !rbacStringSetEqual(br.Permissions, ar.Permissions) {
-			d.mod(DiffEntry{Kind: "rbac_role", Name: name, Before: rbacPermCount(br.Permissions), After: rbacPermCount(ar.Permissions), Detail: "Change permissions for RBAC role " + name}, "rbac role "+name+" permissions")
+			d.mod(DiffEntry{Kind: "rbac_role", Name: name, Detail: "Change permissions for RBAC role " + name + " — " + rbacPermChange(br.Permissions, ar.Permissions)}, "rbac role "+name+" permissions")
 		}
 	}
 	for _, name := range sortedKeys(bRoles) {
 		if _, ok := aRoles[name]; !ok {
-			d.del(DiffEntry{Kind: "rbac_role", Name: name, Before: rbacPermCount(bRoles[name].Permissions), Detail: "Remove RBAC role " + name}, "rbac role "+name)
+			d.del(DiffEntry{Kind: "rbac_role", Name: name, Before: rbacPermList(bRoles[name].Permissions), Detail: "Remove RBAC role " + name}, "rbac role "+name)
 		}
 	}
 }
@@ -733,12 +743,80 @@ func rbacPrincipalMap(principals []config.AdminPrincipal) map[string]config.Admi
 	return out
 }
 
-// rbacPermCount renders a permission-set size for a role diff entry.
-func rbacPermCount(perms []string) string {
-	if len(perms) == 1 {
-		return "1 permission"
+// rbacPermListMax bounds how many permission names a single diff entry lists
+// before summarizing the remainder, so a very large role cannot flood the diff.
+const rbacPermListMax = 8
+
+// rbacPermList renders a permission set as a sorted, de-duplicated, bounded list
+// of the actual (non-secret) permission names — never an opaque count —
+// summarizing any overflow beyond rbacPermListMax as "+N more".
+func rbacPermList(perms []string) string {
+	norm := rbacSortedUniq(perms)
+	if len(norm) == 0 {
+		return "none"
 	}
-	return fmt.Sprintf("%d permissions", len(perms))
+	if len(norm) <= rbacPermListMax {
+		return strings.Join(norm, ", ")
+	}
+	return fmt.Sprintf("%s, +%d more", strings.Join(norm[:rbacPermListMax], ", "), len(norm)-rbacPermListMax)
+}
+
+// rbacPermChange renders the explicit permission delta between two sets as
+// "added …; removed …", listing the actual names so a security reviewer sees
+// exactly what access a role gains or loses (N-01). rbacStringSetEqual has
+// already established the sets differ, so at least one side is non-empty.
+func rbacPermChange(before, after []string) string {
+	added, removed := permissionSetDiff(before, after)
+	var parts []string
+	if len(added) > 0 {
+		parts = append(parts, "added "+rbacPermList(added))
+	}
+	if len(removed) > 0 {
+		parts = append(parts, "removed "+rbacPermList(removed))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// permissionSetDiff returns the permissions added and removed going from before
+// to after, as sorted, de-duplicated sets.
+func permissionSetDiff(before, after []string) (added, removed []string) {
+	bs := make(map[string]struct{}, len(before))
+	for _, p := range before {
+		bs[p] = struct{}{}
+	}
+	as := make(map[string]struct{}, len(after))
+	for _, p := range after {
+		as[p] = struct{}{}
+	}
+	for p := range as {
+		if _, ok := bs[p]; !ok {
+			added = append(added, p)
+		}
+	}
+	for p := range bs {
+		if _, ok := as[p]; !ok {
+			removed = append(removed, p)
+		}
+	}
+	sort.Strings(added)
+	sort.Strings(removed)
+	return added, removed
+}
+
+// rbacSortedUniq returns the permission set sorted with duplicates collapsed, so
+// reordering or repeating a grant does not change how it is displayed.
+func rbacSortedUniq(perms []string) []string {
+	seen := make(map[string]struct{}, len(perms))
+	out := make([]string, 0, len(perms))
+	for _, p := range perms {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // rbacExpiryLabel renders a principal expiry for a diff entry without leaking

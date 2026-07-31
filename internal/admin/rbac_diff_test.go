@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/rbac"
 )
 
@@ -42,6 +43,197 @@ func TestDiffRBACEnableWarns(t *testing.T) {
 	}
 	if !warnHas(d, "Enabling RBAC replaces shared-token access") {
 		t.Errorf("expected RBAC-enable warning, got %+v", d.Warnings)
+	}
+}
+
+// findRBACEnableEntry returns the single [admin.rbac].enabled modification entry.
+func findRBACEnableEntry(t *testing.T, d ConfigDiff) DiffEntry {
+	t.Helper()
+	for _, e := range d.Modifications {
+		if e.Kind == "rbac" && strings.Contains(e.Detail, "admin RBAC") {
+			return e
+		}
+	}
+	t.Fatalf("no RBAC enable/disable entry in %+v", d.Modifications)
+	return DiffEntry{}
+}
+
+// findRoleChange returns the permission-change modification entry for a role.
+func findRoleChange(t *testing.T, d ConfigDiff, name string) DiffEntry {
+	t.Helper()
+	for _, e := range d.Modifications {
+		if e.Kind == "rbac_role" && e.Name == name {
+			return e
+		}
+	}
+	t.Fatalf("no permission-change entry for role %q in %+v", name, d.Modifications)
+	return DiffEntry{}
+}
+
+// TestDiffRBACEnableIsHotReload proves the RBAC enable diff entry is classified
+// hot_reload and never claims a restart — matching the authoritative lifecycle
+// registry (admin.rbac.enabled = HotReloadClass). The authentication mode is
+// rebuilt and atomically installed on a successful reload, so telling an
+// operator to restart would be wrong (R-02).
+func TestDiffRBACEnableIsHotReload(t *testing.T) {
+	before := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{Enabled: false}, ""))
+	after := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled: true,
+		Principals: []config.AdminPrincipal{
+			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
+		},
+	}, ""))
+	d := diffConfigs(before, after)
+
+	e := findRBACEnableEntry(t, d)
+	if e.LifecycleClass != lifecycle.HotReloadClass.String() {
+		t.Errorf("RBAC enable lifecycle_class = %q, want %q", e.LifecycleClass, lifecycle.HotReloadClass.String())
+	}
+	if strings.Contains(strings.ToLower(e.Detail), "restart") {
+		t.Errorf("RBAC enable detail must not mention a restart, got %q", e.Detail)
+	}
+	// The diff must never tell the operator to restart for this change.
+	if warnHas(d, "restart") {
+		t.Errorf("RBAC enable produced a restart warning: %+v", d.Warnings)
+	}
+	// Consistency with the authoritative lifecycle registry.
+	if got := lifecycle.FieldClass("admin.rbac.enabled"); got != lifecycle.HotReloadClass {
+		t.Errorf("registry classifies admin.rbac.enabled as %v, want HotReloadClass", got)
+	}
+}
+
+// TestDiffRBACDisableIsHotReload proves the disable direction is equally hot and
+// restart-free.
+func TestDiffRBACDisableIsHotReload(t *testing.T) {
+	before := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled: true,
+		Principals: []config.AdminPrincipal{
+			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
+		},
+	}, "SECRET-shared-token-32-chars-pad-"))
+	after := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{Enabled: false}, "SECRET-shared-token-32-chars-pad-"))
+	d := diffConfigs(before, after)
+
+	e := findRBACEnableEntry(t, d)
+	if e.LifecycleClass != lifecycle.HotReloadClass.String() {
+		t.Errorf("RBAC disable lifecycle_class = %q, want hot_reload", e.LifecycleClass)
+	}
+	if strings.Contains(strings.ToLower(e.Detail), "restart") {
+		t.Errorf("RBAC disable detail must not mention a restart, got %q", e.Detail)
+	}
+}
+
+// TestDiffRBACPermissionSwapShowsDelta proves a same-count permission swap (the
+// N-01 regression) surfaces the exact privilege change rather than "1 → 1".
+func TestDiffRBACPermissionSwapShowsDelta(t *testing.T) {
+	before := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled: true,
+		Roles:   []config.AdminRole{{Name: "ops", Permissions: []string{"status:read"}}},
+		Principals: []config.AdminPrincipal{
+			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
+		},
+	}, ""))
+	after := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled: true,
+		Roles:   []config.AdminRole{{Name: "ops", Permissions: []string{"admin:manage"}}},
+		Principals: []config.AdminPrincipal{
+			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
+		},
+	}, ""))
+	d := diffConfigs(before, after)
+
+	e := findRoleChange(t, d, "ops")
+	if !strings.Contains(e.Detail, "added admin:manage") {
+		t.Errorf("expected the gained permission to be listed, got %q", e.Detail)
+	}
+	if !strings.Contains(e.Detail, "removed status:read") {
+		t.Errorf("expected the lost permission to be listed, got %q", e.Detail)
+	}
+	// It must never fall back to opaque counts in the before/after fields.
+	if e.Before != "" || e.After != "" {
+		t.Errorf("permission change must not carry count fields, got before=%q after=%q", e.Before, e.After)
+	}
+}
+
+// TestDiffRBACWildcardAdditionListed proves gaining a full-access wildcard is
+// shown explicitly (it must never hide behind an unchanged count).
+func TestDiffRBACWildcardAdditionListed(t *testing.T) {
+	before := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled:    true,
+		Roles:      []config.AdminRole{{Name: "power", Permissions: []string{"status:read"}}},
+		Principals: []config.AdminPrincipal{{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"}},
+	}, ""))
+	after := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled:    true,
+		Roles:      []config.AdminRole{{Name: "power", Permissions: []string{"status:read", "*"}}},
+		Principals: []config.AdminPrincipal{{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"}},
+	}, ""))
+	d := diffConfigs(before, after)
+
+	e := findRoleChange(t, d, "power")
+	if !strings.Contains(e.Detail, "added *") {
+		t.Errorf("wildcard grant must be listed explicitly, got %q", e.Detail)
+	}
+}
+
+// TestDiffRBACResourceWildcardAdditionListed proves a resource-scoped wildcard
+// grant (config:*) is listed, not summarized.
+func TestDiffRBACResourceWildcardAdditionListed(t *testing.T) {
+	before := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled:    true,
+		Roles:      []config.AdminRole{{Name: "cfg", Permissions: []string{"config:read"}}},
+		Principals: []config.AdminPrincipal{{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"}},
+	}, ""))
+	after := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled:    true,
+		Roles:      []config.AdminRole{{Name: "cfg", Permissions: []string{"config:read", "config:*"}}},
+		Principals: []config.AdminPrincipal{{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"}},
+	}, ""))
+	d := diffConfigs(before, after)
+
+	e := findRoleChange(t, d, "cfg")
+	if !strings.Contains(e.Detail, "added config:*") {
+		t.Errorf("resource wildcard grant must be listed explicitly, got %q", e.Detail)
+	}
+}
+
+// TestDiffRBACPermissionReorderIsNoChange proves reordering a role's permissions
+// is not reported as a change (order-independent set comparison).
+func TestDiffRBACPermissionReorderIsNoChange(t *testing.T) {
+	before := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled:    true,
+		Roles:      []config.AdminRole{{Name: "r", Permissions: []string{"a:b", "c:d"}}},
+		Principals: []config.AdminPrincipal{{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"}},
+	}, ""))
+	after := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled:    true,
+		Roles:      []config.AdminRole{{Name: "r", Permissions: []string{"c:d", "a:b"}}},
+		Principals: []config.AdminPrincipal{{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"}},
+	}, ""))
+	d := diffConfigs(before, after)
+
+	if diffHas(d, "Change permissions for RBAC role r") {
+		t.Errorf("reordering permissions must not be reported as a change: %+v", d.Modifications)
+	}
+}
+
+// TestDiffRBACDuplicatePermissionNormalized proves a duplicated permission
+// normalizes to no change rather than a phantom diff.
+func TestDiffRBACDuplicatePermissionNormalized(t *testing.T) {
+	before := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled:    true,
+		Roles:      []config.AdminRole{{Name: "r", Permissions: []string{"a:b"}}},
+		Principals: []config.AdminPrincipal{{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"}},
+	}, ""))
+	after := cfgWithAdmin(rbacAdmin(config.AdminRBACConfig{
+		Enabled:    true,
+		Roles:      []config.AdminRole{{Name: "r", Permissions: []string{"a:b", "a:b"}}},
+		Principals: []config.AdminPrincipal{{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"}},
+	}, ""))
+	d := diffConfigs(before, after)
+
+	if diffHas(d, "Change permissions for RBAC role r") {
+		t.Errorf("a duplicated permission must normalize to no change: %+v", d.Modifications)
 	}
 }
 
