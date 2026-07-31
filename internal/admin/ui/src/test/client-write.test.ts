@@ -379,6 +379,40 @@ describe("rollback", () => {
     expect(result.mutation_status).toBe("rolled back");
     expect(result.mutation_id).toBe("s1");
   });
+
+  it("sends the reviewed base_version in the body when provided", async () => {
+    const fn = mockFetch(
+      () =>
+        new Response(JSON.stringify({ ok: true, status: "rolled back", id: "s1" }), { status: 200 }),
+    );
+    await rollback("s1", false, "v-reviewed");
+    expect(JSON.parse(lastInit(fn).body as string)).toEqual({ id: "s1", base_version: "v-reviewed" });
+  });
+
+  it("omits base_version when none was reviewed", async () => {
+    const fn = mockFetch(
+      () =>
+        new Response(JSON.stringify({ ok: true, status: "rolled back", id: "s1" }), { status: 200 }),
+    );
+    await rollback("s1");
+    expect(JSON.parse(lastInit(fn).body as string)).toEqual({ id: "s1" });
+  });
+
+  it("raises ConfigConflictError when the reviewed baseline is stale (409)", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            conflict: true,
+            message: "The configuration changed since this rollback was previewed.",
+            current_version: "v2",
+          }),
+          { status: 409 },
+        ),
+    );
+    await expect(rollback("s1", false, "v1")).rejects.toBeInstanceOf(ConfigConflictError);
+  });
 });
 
 describe("diffHistorySnapshot", () => {
@@ -397,6 +431,17 @@ describe("diffHistorySnapshot", () => {
     const fn = mockFetch(() => new Response(JSON.stringify({ summary: "x" }), { status: 200 }));
     await diffHistorySnapshot("a/b");
     expect(fn.mock.calls[0]?.[0]).toBe("/api/config/history/a%2Fb/diff");
+  });
+
+  it("parses the base_version the preview was computed against", async () => {
+    mockFetch(
+      () =>
+        new Response(JSON.stringify({ summary: "1 change", base_version: "v-reviewed" }), {
+          status: 200,
+        }),
+    );
+    const diff = await diffHistorySnapshot("20260101-000000-abcd");
+    expect(diff.base_version).toBe("v-reviewed");
   });
 });
 

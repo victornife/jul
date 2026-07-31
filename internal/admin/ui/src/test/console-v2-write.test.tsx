@@ -1515,6 +1515,80 @@ describe("HistoryPanel rollback flow", () => {
     });
   });
 
+  it("submits the reviewed base_version with the rollback (Net-new issue 1)", async () => {
+    let rollbackBody: string | null = null;
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1/diff")
+        return Promise.resolve(json({ summary: "1 change", base_version: "v-reviewed" }));
+      if (input.startsWith("/api/config/rollback")) {
+        rollbackBody = (init?.body as string | undefined) ?? null;
+        return Promise.resolve(json({ ok: true, mode: "hot", status: "rolled back", id: "s1" }));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    await confirmRollback();
+    await waitFor(() => {
+      expect(rollbackBody).not.toBeNull();
+    });
+    expect(JSON.parse(rollbackBody ?? "")).toEqual({
+      id: "s1",
+      base_version: "v-reviewed",
+    });
+  });
+
+  it("refetches the preview and keeps the dialog open on a version conflict", async () => {
+    let diffReads = 0;
+    let rollbacks = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1/diff") {
+        diffReads += 1;
+        return Promise.resolve(
+          json({ summary: "1 change", base_version: diffReads === 1 ? "v1" : "v2" }),
+        );
+      }
+      if (input.startsWith("/api/config/rollback")) {
+        rollbacks += 1;
+        if (rollbacks === 1)
+          return Promise.resolve(
+            json(
+              {
+                ok: false,
+                conflict: true,
+                message: "The configuration changed since this rollback was previewed.",
+                current_version: "v2",
+              },
+              409,
+            ),
+          );
+        return Promise.resolve(json({ ok: true, mode: "hot", status: "rolled back", id: "s1" }));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    await confirmRollback();
+    // The stale rollback conflicts; the panel refetches the preview so the
+    // operator reviews the fresh baseline before retrying.
+    await waitFor(() => {
+      expect(diffReads).toBeGreaterThanOrEqual(2);
+    });
+    // The dialog stays open (a committed rollback would close it).
+    expect(screen.getByText("Roll back to this snapshot?")).toBeInTheDocument();
+    expect(rollbacks).toBe(1);
+  });
+
   it("keeps rollback open and retries the same snapshot after admin confirmation", async () => {
     let rollbacks = 0;
     const urls: string[] = [];

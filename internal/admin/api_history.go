@@ -65,7 +65,13 @@ func (s *Server) handleHistoryGet(w http.ResponseWriter, r *http.Request) {
 // The admin-subtree guard is enforced inside the lock after loading the
 // snapshot and the current config, so a concurrent admin change cannot
 // invalidate the authorization decision (N-02).
-func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Request) (ConfigApplyResult, int, error) {
+//
+// baseVersion is the canonical configuration the operator reviewed in the
+// preview. When non-empty it is compared, under applyMu, against the persisted
+// config before authorization or persistence, so a rollback reviewed against an
+// older baseline is rejected with 409 rather than silently reverting a change a
+// concurrent writer made in the interim (Net-new issue 1).
+func (s *Server) rollbackToSnapshot(id, baseVersion string, w http.ResponseWriter, r *http.Request) (ConfigApplyResult, int, error) {
 	raw, err := s.hist.get(id)
 	if err != nil {
 		return ConfigApplyResult{}, http.StatusNotFound, err
@@ -82,6 +88,26 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 	if err != nil {
 		return ConfigApplyResult{}, http.StatusServiceUnavailable, fmt.Errorf("cannot get current config state: %w", err)
 	}
+
+	// Optimistic concurrency (Net-new issue 1): bind the rollback to the exact
+	// configuration the operator reviewed in the preview. When the Console sends
+	// the base_version the preview reported, reject with 409 if the persisted
+	// config changed since — so a concurrent edit by another operator or by
+	// automation cannot be silently reverted by a rollback reviewed against an
+	// older baseline. The check runs on every attempt, including the confirm_admin
+	// retry, so a confirmed admin-reachability transition stays bound to the
+	// operation that was reviewed. An empty base_version skips the check (an
+	// explicit force-rollback or a legacy client).
+	if baseVersion != "" && baseVersion != state.Version {
+		s.recordAudit(r, string(ApplyOperationRollback), "config", "failure", "rejected: base version stale (concurrent change)")
+		return ConfigApplyResult{
+			OK:             false,
+			Conflict:       true,
+			CurrentVersion: state.Version,
+			Message:        "The configuration changed since this rollback was previewed; refresh the preview and try again.",
+		}, http.StatusConflict, nil
+	}
+
 	reqCtx := applyRequestContext(r, ApplyOperationRollback)
 	s.bindManagedApplyDeadline(&reqCtx)
 	reqCtx.Baseline = &state
@@ -175,13 +201,14 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ID string `json:"id"`
+		ID          string `json:"id"`
+		BaseVersion string `json:"base_version"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	result, code, err := s.rollbackToSnapshot(req.ID, w, r)
+	result, code, err := s.rollbackToSnapshot(req.ID, req.BaseVersion, w, r)
 	if err != nil {
 		if re, ok := err.(*adminReachabilityError); ok {
 			writeJSON(w, code, adminGuardResponse{
@@ -273,20 +300,39 @@ func (s *Server) handleConfigHistoryGet(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "raw": string(raw)})
 }
 
-// handleConfigHistoryDiff serves a structured diff between the running config
-// and a stored snapshot at GET /api/config/history/{id}/diff. It reads the
-// snapshot server-side and accepts no request body, so a least-privilege
-// rollback-only role (history:rollback) can preview exactly what its rollback
-// would change without holding config:write and without submitting arbitrary
-// candidate TOML — unlike the generic POST /api/config/diff (N-02). The id is
-// validated against path traversal by history.get; an unknown id is a 404.
+// historyRollbackDiff is the rollback-preview response: the structured diff plus
+// the canonical base_version it was computed against. The Console retains
+// base_version and submits it with the rollback so rollbackToSnapshot can reject
+// a rollback whose reviewed baseline no longer matches the persisted config
+// (optimistic concurrency; Net-new issue 1). The embedded ConfigDiff promotes
+// its fields to the top level, preserving the pre-existing response shape.
+type historyRollbackDiff struct {
+	ConfigDiff
+	BaseVersion string `json:"base_version"`
+}
+
+// handleConfigHistoryDiff serves a structured diff between the persisted
+// configuration and a stored snapshot at GET /api/config/history/{id}/diff,
+// together with the canonical base_version the diff was computed against so the
+// Console can bind a subsequent rollback to the exact configuration the operator
+// reviewed (Net-new issue 1). It reads the snapshot server-side and accepts no
+// request body, so a least-privilege rollback-only role (history:rollback) can
+// preview exactly what its rollback would change without holding config:write
+// and without submitting arbitrary candidate TOML — unlike the generic POST
+// /api/config/diff (N-02). The id is validated against path traversal by
+// history.get; an unknown id is a 404.
+//
+// The baseline is the persisted source configuration (currentWriteState), not
+// the live serving runtime; the two are normally identical and diverge only
+// while a staged restart or external divergence is pending, when a hot rollback
+// is already refused.
 func (s *Server) handleConfigHistoryDiff(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if s.deps.LoadConfig == nil {
+	if s.deps.LoadConfig == nil && s.deps.ReadConfigRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -306,14 +352,21 @@ func (s *Server) handleConfigHistoryDiff(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
-	before, err := s.deps.LoadConfig()
+	// Diff against the persisted configuration and return the canonical version
+	// the diff was computed against. base_version is derived identically to the
+	// rollbackToSnapshot concurrency check (currentWriteState), so the value the
+	// preview reports is exactly what a subsequent rollback is validated against.
+	state, err := s.currentWriteState(false)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "cannot load current config: " + err.Error(),
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, diffConfigs(before, after))
+	writeJSON(w, http.StatusOK, historyRollbackDiff{
+		ConfigDiff:  diffConfigs(state.Config, after),
+		BaseVersion: state.Version,
+	})
 }
 func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -325,13 +378,14 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ID string `json:"id"`
+		ID          string `json:"id"`
+		BaseVersion string `json:"base_version"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	result, code, err := s.rollbackToSnapshot(req.ID, w, r)
+	result, code, err := s.rollbackToSnapshot(req.ID, req.BaseVersion, w, r)
 	if err != nil {
 		if authErr, ok := err.(*AuthorizationError); ok {
 			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})

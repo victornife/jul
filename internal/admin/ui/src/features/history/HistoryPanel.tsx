@@ -12,6 +12,7 @@ import {
   rollback,
   describeApiError,
   ConfigAdminChangeError,
+  ConfigConflictError,
   type HistoryEntry,
 } from "@/api/client.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
@@ -152,16 +153,19 @@ function RollbackConfirm({
 }: {
   readonly id: string;
   readonly busy: boolean;
-  readonly onConfirm: () => void;
+  readonly onConfirm: (baseVersion?: string) => void;
   readonly onCancel: () => void;
   readonly adminChanges: readonly string[];
   readonly error: Error | null;
   readonly pending: boolean;
   readonly pollingExpired: boolean;
 }) {
-  // The preview reads the snapshot server-side and diffs it against the running
-  // config through the rollback-scoped endpoint, so a least-privilege
-  // rollback-only role can review the change without config:write (N-02).
+  // The preview reads the snapshot server-side and diffs it against the
+  // persisted config through the rollback-scoped endpoint, so a least-privilege
+  // rollback-only role can review the change without config:write (N-02). It
+  // also carries base_version, the exact configuration the operator reviews
+  // here, which is submitted with the rollback so the server rejects a stale
+  // rollback with 409 rather than reverting a concurrent change (Net-new issue 1).
   const diff = useQuery({
     queryKey: ["history-rollback-diff", id],
     queryFn: () => diffHistorySnapshot(id),
@@ -178,9 +182,15 @@ function RollbackConfirm({
       confirmLabel={adminChanges.length > 0 ? "Confirm and roll back" : "Roll back"}
       danger
       busy={busy}
-      confirmDisabled={pending || !diff.isSuccess}
+      // Keep confirmation disabled while a fresh preview is in flight: React
+      // Query can serve the previous successful preview during a background
+      // refetch, so gating on diff.isSuccess alone could confirm against a stale
+      // baseline (Net-new issue 1, cached-preview manifestation).
+      confirmDisabled={pending || diff.isFetching || !diff.isSuccess}
       cancelDisabled={pending && !pollingExpired}
-      onConfirm={onConfirm}
+      onConfirm={() => {
+        onConfirm(diff.data?.base_version);
+      }}
       onCancel={onCancel}
     >
       <p>
@@ -197,7 +207,9 @@ function RollbackConfirm({
             ))}
           </ul>
         )}
-        {diff.isFetching && <p className="text-xs text-jul-muted">Computing changes vs running…</p>}
+        {diff.isFetching && (
+          <p className="text-xs text-jul-muted">Computing changes vs persisted configuration…</p>
+        )}
         {diff.data && <DiffView diff={diff.data} />}
         {diff.isError && (
           <p className="text-xs text-jul-danger">
@@ -317,8 +329,16 @@ export function HistoryPanel() {
   });
 
   const rollbackMutation = useMutation({
-    mutationFn: ({ id, confirmed }: { id: string; confirmed: boolean; attempt: number }) =>
-      rollback(id, confirmed),
+    mutationFn: ({
+      id,
+      confirmed,
+      baseVersion,
+    }: {
+      id: string;
+      confirmed: boolean;
+      baseVersion: string | undefined;
+      attempt: number;
+    }) => rollback(id, confirmed, baseVersion),
     onMutate: ({ id }) => {
       setRollingId(id);
       setTerminalError(null);
@@ -379,6 +399,14 @@ export function HistoryPanel() {
       if (error instanceof ConfigAdminChangeError) {
         setConfirmAdmin(true);
         setAdminChanges([...error.changes]);
+        return;
+      }
+      if (error instanceof ConfigConflictError) {
+        // The persisted config changed since the preview was computed. Refetch
+        // the rollback preview so the operator reviews the new baseline (and its
+        // fresh base_version) before retrying; confirmation stays disabled while
+        // it refetches (Net-new issue 1).
+        void qc.invalidateQueries({ queryKey: ["history-rollback-diff", variables.id] });
       }
     },
   });
@@ -610,10 +638,11 @@ export function HistoryPanel() {
         <RollbackConfirm
           id={confirmId}
           busy={rollbackMutation.isPending}
-          onConfirm={() => {
+          onConfirm={(baseVersion) => {
             rollbackMutation.mutate({
               id: confirmId,
               confirmed: confirmAdmin,
+              baseVersion,
               attempt: rollbackAttemptRef.current,
             });
           }}

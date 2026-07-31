@@ -964,15 +964,22 @@ export function fetchHistorySnapshot(id: string): Promise<HistorySnapshot> {
   );
 }
 
-export async function rollback(id: string, confirmAdmin = false): Promise<ApplyResult> {
+export async function rollback(
+  id: string,
+  confirmAdmin = false,
+  baseVersion?: string,
+): Promise<ApplyResult> {
   const headers = new Headers({ "Content-Type": "application/json", Accept: "application/json" });
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const query = confirmAdmin ? "?confirm_admin=true" : "";
+  // base_version binds the rollback to the exact configuration the operator
+  // reviewed in the preview; the server rejects it with 409 if the persisted
+  // config changed since, so a concurrent edit is never silently reverted.
   const resp = await fetch(`/api/config/rollback${query}`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ id }),
+    body: JSON.stringify(baseVersion ? { id, base_version: baseVersion } : { id }),
   });
   let data: unknown = null;
   try {
@@ -1082,15 +1089,27 @@ export async function diffConfig(candidate: string): Promise<ConfigDiff> {
   return ConfigDiffSchema.parse(data);
 }
 
+// The rollback-preview endpoint returns the diff fields at the top level plus
+// base_version — the canonical configuration the preview was computed against.
+// The Console retains base_version and submits it with the rollback so the
+// server can reject a rollback whose reviewed baseline no longer matches the
+// persisted config (optimistic concurrency; Net-new issue 1).
+export const HistoryRollbackDiffSchema = ConfigDiffSchema.extend({
+  base_version: z.string().optional(),
+});
+export type HistoryRollbackDiff = z.infer<typeof HistoryRollbackDiffSchema>;
+
 /**
  * diffHistorySnapshot previews what rolling back to a stored snapshot would
- * change. The server reads the snapshot itself and diffs it against the running
- * config, so a least-privilege rollback-only role (history:rollback) can obtain
- * the preview without config:write and without submitting candidate TOML (N-02).
+ * change. The server reads the snapshot itself and diffs it against the
+ * persisted config, so a least-privilege rollback-only role (history:rollback)
+ * can obtain the preview without config:write and without submitting candidate
+ * TOML (N-02). The response carries base_version so the caller can bind the
+ * subsequent rollback to the exact configuration reviewed here (Net-new issue 1).
  */
-export async function diffHistorySnapshot(id: string): Promise<ConfigDiff> {
+export async function diffHistorySnapshot(id: string): Promise<HistoryRollbackDiff> {
   const data = await api<unknown>(`/config/history/${encodeURIComponent(id)}/diff`);
-  return ConfigDiffSchema.parse(data);
+  return HistoryRollbackDiffSchema.parse(data);
 }
 
 // ── Structured config patch (Wave B) ─────────────────────────────────────────
