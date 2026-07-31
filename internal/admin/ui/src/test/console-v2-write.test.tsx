@@ -1537,7 +1537,7 @@ describe("HistoryPanel rollback flow", () => {
     await waitFor(() => {
       expect(rollbackBody).not.toBeNull();
     });
-    expect(JSON.parse(rollbackBody ?? "")).toEqual({
+    expect(JSON.parse(typeof rollbackBody === "string" ? rollbackBody : "null")).toEqual({
       id: "s1",
       base_version: "v-reviewed",
     });
