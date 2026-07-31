@@ -6,6 +6,8 @@ package admin
 import (
 	"net/http"
 	"time"
+
+	"jul/internal/rbac"
 )
 
 // publicManagedApplyRecord is the status:read view of a terminal ledger record.
@@ -86,6 +88,19 @@ func (s *Server) handleManagedApplyGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "managed apply not found"})
 		return
 	}
+	// A principal admitted only via history:rollback — a rollback-only custom
+	// role that holds neither status:read nor config:apply — may read only the
+	// rollback records it owns, never the result of an unrelated apply or patch
+	// transaction it could otherwise probe by ID (N-01).
+	ident, _ := rbacIdentityFromRequest(r)
+	if !ident.Has(rbac.StatusRead) && !ident.Has(rbac.ConfigApply) {
+		if rec.Operation != ApplyOperationRollback ||
+			rec.OwnerTokenID == "" || rec.OwnerTokenID != ident.TokenID {
+			s.observeManagedApplyLookup("forbidden")
+			writeForbidden(w, rbac.HistoryRollback, ident)
+			return
+		}
+	}
 	switch rec.State {
 	case ManagedApplyPending:
 		s.observeManagedApplyLookup("pending")
@@ -111,8 +126,8 @@ func (s *Server) handleManagedApplyGet(w http.ResponseWriter, r *http.Request) {
 
 // observeManagedApplyLookup records one exact-ID lookup outcome when the
 // composition root wired a bounded lookup metric (WS06 §7.5). result is a fixed
-// low-cardinality enum: "pending", "finalizing", "terminal", "missing", or
-// "invalid".
+// low-cardinality enum: "pending", "finalizing", "terminal", "missing",
+// "forbidden", or "invalid".
 func (s *Server) observeManagedApplyLookup(result string) {
 	if s.deps.ObserveManagedApplyLookup != nil {
 		s.deps.ObserveManagedApplyLookup(result)

@@ -746,9 +746,9 @@ func (m *Metrics) SetManagedApplyRegistryEntries(n int) {
 
 // ObserveManagedApplyLookup counts one exact-ID managed-apply lookup (WS06
 // §7.5). result is the bounded lookup disposition ("pending", "finalizing",
-// "terminal", "missing", or "invalid"); an empty value is normalized to
-// "unknown". result is the only label and is a fixed low-cardinality enum —
-// never an apply ID, actor, source IP, path, or version.
+// "terminal", "missing", "forbidden", or "invalid"); an empty value is
+// normalized to "unknown". result is the only label and is a fixed
+// low-cardinality enum — never an apply ID, actor, source IP, path, or version.
 func (m *Metrics) ObserveManagedApplyLookup(result string) {
 	if result == "" {
 		result = "unknown"

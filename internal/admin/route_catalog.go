@@ -211,17 +211,21 @@ var Catalog = []RouteSpec{
 	// Exact-ID managed apply lookup (AC-02). Retrieves the terminal (or
 	// pending) result of a managed apply transaction by its rl_N id. The
 	// secret-free public view is authorized for EITHER status:read OR
-	// config:apply: a principal privileged enough to mutate configuration is
-	// more privileged than one that can read the secret-free transaction
-	// result, so a custom config:apply automation role can poll the outcome of
-	// its own apply without also holding status:read. Actor and source IP
-	// remain available only through the audit API.
+	// config:apply OR history:rollback: a principal privileged enough to mutate
+	// configuration is more privileged than one that can read the secret-free
+	// transaction result, so a custom config:apply automation role can poll the
+	// outcome of its own apply without also holding status:read. A rollback-only
+	// custom role is likewise admitted here so it can retrieve the result of the
+	// rollback it just submitted (N-01); the handler restricts such a principal
+	// to its own rollback records. Actor and source IP remain available only
+	// through the audit API.
 	{
 		Pattern: "/api/config/applies/{id}",
 		Methods: []string{http.MethodGet},
 		AnyPermissions: []rbac.Permission{
 			rbac.StatusRead,
 			rbac.ConfigApply,
+			rbac.HistoryRollback,
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleManagedApplyGet) },
 	},

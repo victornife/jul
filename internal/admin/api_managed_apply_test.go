@@ -379,9 +379,13 @@ func TestManagedApplyGet_ForbiddenBodyListsAcceptedPermissions(t *testing.T) {
 	if !ok {
 		t.Fatalf("required_any missing or not a list: %v", got["required_any"])
 	}
-	want := map[string]bool{string(rbac.StatusRead): true, string(rbac.ConfigApply): true}
+	want := map[string]bool{
+		string(rbac.StatusRead):      true,
+		string(rbac.ConfigApply):     true,
+		string(rbac.HistoryRollback): true,
+	}
 	if len(anyRaw) != len(want) {
-		t.Fatalf("required_any = %v, want the two accepted permissions", anyRaw)
+		t.Fatalf("required_any = %v, want the three accepted permissions", anyRaw)
 	}
 	for _, v := range anyRaw {
 		if !want[v.(string)] {
