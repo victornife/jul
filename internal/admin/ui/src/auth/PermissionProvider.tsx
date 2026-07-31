@@ -4,8 +4,8 @@
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchMe, UNAUTHORIZED_EVENT, type Identity } from "@/api/client.ts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchMe, UNAUTHORIZED_EVENT, FORBIDDEN_EVENT, type Identity } from "@/api/client.ts";
 import { PermissionContext, type PermissionState } from "@/auth/usePermission.ts";
 
 // IDENTITY_KEY names the cached current-identity query.
@@ -25,6 +25,7 @@ const IDENTITY_KEY = ["identity"] as const;
  * token) clears the rejected flag and restores gating.
  */
 export function PermissionProvider({ children }: { readonly children: ReactNode }) {
+  const qc = useQueryClient();
   const query = useQuery({
     queryKey: IDENTITY_KEY,
     queryFn: fetchMe,
@@ -32,6 +33,12 @@ export function PermissionProvider({ children }: { readonly children: ReactNode 
     // retry it, and keep the identity fresh for a minute otherwise.
     retry: false,
     staleTime: 60_000,
+    // RBAC roles/principals are hot-reloadable, so another operator can change
+    // this principal's permissions while the tab stays open. A short background
+    // refetch (and a refetch on focus) keeps proactive gating from drifting
+    // from the server's authoritative decision (N-02).
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
   const [rejected, setRejected] = useState(false);
 
@@ -39,11 +46,19 @@ export function PermissionProvider({ children }: { readonly children: ReactNode 
     function onUnauthorized(): void {
       setRejected(true);
     }
+    // A gated action was forbidden (403): the credential is still valid but its
+    // permissions may have changed under a hot RBAC reload, so refetch identity
+    // to refresh gating rather than trusting the cached set (N-02).
+    function onForbidden(): void {
+      void qc.invalidateQueries({ queryKey: IDENTITY_KEY });
+    }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    window.addEventListener(FORBIDDEN_EVENT, onForbidden);
     return () => {
       window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+      window.removeEventListener(FORBIDDEN_EVENT, onForbidden);
     };
-  }, []);
+  }, [qc]);
 
   // A fresh successful fetch (dataUpdatedAt advances only on success) means the
   // credential is accepted again, so clear any prior rejection.

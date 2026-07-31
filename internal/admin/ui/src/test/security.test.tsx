@@ -110,10 +110,9 @@ describe("SecurityPanel RBAC status", () => {
           Promise.resolve({
             ...projection,
             rbac: {
-              enabled: true,
-              principal_count: 3,
-              role_count: 2,
-              legacy_token_active: true,
+              serving: { enabled: true, principal_count: 3, role_count: 2, legacy_token_active: true },
+              persisted: { enabled: true, principal_count: 3, role_count: 2, legacy_token_active: true },
+              pending: false,
             },
           }),
       }),
@@ -134,10 +133,9 @@ describe("SecurityPanel RBAC status", () => {
           Promise.resolve({
             ...projection,
             rbac: {
-              enabled: false,
-              principal_count: 0,
-              role_count: 0,
-              legacy_token_active: false,
+              serving: { enabled: false, principal_count: 0, role_count: 0, legacy_token_active: false },
+              persisted: { enabled: false, principal_count: 0, role_count: 0, legacy_token_active: false },
+              pending: false,
             },
           }),
       }),
@@ -146,5 +144,30 @@ describe("SecurityPanel RBAC status", () => {
     expect(
       await screen.findByText(/named principals are off/i),
     ).toBeInTheDocument();
+  });
+
+  it("shows the serving policy and warns when a staged change is not yet live (N-03)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            ...projection,
+            rbac: {
+              serving: { enabled: true, principal_count: 1, role_count: 0, legacy_token_active: false },
+              persisted: { enabled: true, principal_count: 2, role_count: 1, legacy_token_active: false },
+              pending: true,
+            },
+          }),
+      }),
+    );
+    render(<SecurityPanel />, { wrapper: Wrapper });
+    // The staged-change warning discloses the persisted (not-yet-serving) policy
+    // so the operator never mistakes it for the active one.
+    expect(
+      await screen.findByText(/staged configuration change is not yet serving/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/2 principals, 1 custom role/)).toBeInTheDocument();
   });
 });

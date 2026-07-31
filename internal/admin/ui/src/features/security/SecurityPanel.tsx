@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSecurity, type SecurityProjection, type LocationWAF, type RBACStatus } from "@/api/client.ts";
+import { fetchSecurity, type SecurityProjection, type LocationWAF, type RBACPosture } from "@/api/client.ts";
 import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
@@ -69,35 +69,48 @@ function OnOff({ on }: { readonly on: boolean }) {
 
 // RBACStatusCell renders the secret-free admin RBAC posture (P3-03 §35): whether
 // named-principal RBAC is active, the principal/custom-role counts, and whether a
-// legacy shared token is still accepted. It exposes no principal names, tokens,
-// or hashes.
-function RBACStatusCell({ rbac }: { readonly rbac: RBACStatus | undefined }) {
-  if (!rbac) {
+// legacy shared token is still accepted. It shows the SERVING (installed) state
+// as active and warns when a staged persisted change is not yet live (N-03). It
+// exposes no principal names, tokens, or hashes.
+function RBACStatusCell({ posture }: { readonly posture: RBACPosture | undefined }) {
+  if (!posture) {
     return <span className="text-jul-muted text-xs">unknown</span>;
   }
-  if (!rbac.enabled) {
-    return (
-      <span className="flex flex-col gap-0.5">
-        <OnOff on={false} />
-        <span className="text-jul-muted text-xs">
-          Using the legacy shared token or open (loopback) access; named principals are off.
-        </span>
-      </span>
-    );
-  }
+  const serving = posture.serving;
   return (
     <span className="flex w-full flex-col gap-1">
-      <span className="flex items-center gap-2">
-        <OnOff on={true} />
-        <span className="text-jul-muted text-xs">
-          {rbac.principal_count} principal{rbac.principal_count === 1 ? "" : "s"},{" "}
-          {rbac.role_count} custom role{rbac.role_count === 1 ? "" : "s"}
+      {serving.enabled ? (
+        <>
+          <span className="flex items-center gap-2">
+            <OnOff on={true} />
+            <span className="text-jul-muted text-xs">
+              {serving.principal_count} principal{serving.principal_count === 1 ? "" : "s"},{" "}
+              {serving.role_count} custom role{serving.role_count === 1 ? "" : "s"}
+            </span>
+          </span>
+          {serving.legacy_token_active && (
+            <span className="text-jul-warning text-xs">
+              A legacy shared admin token is still active alongside RBAC. Remove{" "}
+              <span className="font-mono">admin.token</span> to fully migrate to named principals.
+            </span>
+          )}
+        </>
+      ) : (
+        <span className="flex flex-col gap-0.5">
+          <OnOff on={false} />
+          <span className="text-jul-muted text-xs">
+            Using the legacy shared token or open (loopback) access; named principals are off.
+          </span>
         </span>
-      </span>
-      {rbac.legacy_token_active && (
+      )}
+      {posture.pending && (
         <span className="text-jul-warning text-xs">
-          A legacy shared admin token is still active alongside RBAC. Remove{" "}
-          <span className="font-mono">admin.token</span> to fully migrate to named principals.
+          A staged configuration change is not yet serving. The values above are what the admin API
+          enforces now; the persisted configuration (
+          {posture.persisted.enabled
+            ? `RBAC with ${String(posture.persisted.principal_count)} principal${posture.persisted.principal_count === 1 ? "" : "s"}, ${String(posture.persisted.role_count)} custom role${posture.persisted.role_count === 1 ? "" : "s"}`
+            : "the legacy shared token or open access"}
+          ) takes effect after the next restart.
         </span>
       )}
     </span>
@@ -140,7 +153,7 @@ export function SecurityPanel() {
           <OnOff on={data.auth_enabled} />
         </Row>
         <Row label="Access control (RBAC)">
-          <RBACStatusCell rbac={data.rbac} />
+          <RBACStatusCell posture={data.rbac} />
         </Row>
         <Row label="Mutual TLS">
           {data.client_auth ? (

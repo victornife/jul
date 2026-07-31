@@ -241,11 +241,22 @@ type SecurityProjection struct {
 	// SecretRefs is the number of ${env:}/${file:} secret references in the
 	// configuration. The values themselves are never projected.
 	SecretRefs int `json:"secret_refs"`
-	// RBAC summarises the admin RBAC posture (enabled, principal/role counts,
-	// legacy-token presence) so the Security/Overview surfaces can show the
-	// access-control state without exposing any credential. It is always present
-	// so the panel can render "RBAC disabled" as an explicit state.
-	RBAC RBACStatusProjection `json:"rbac"`
+	// RBAC summarises the admin RBAC posture as both the SERVING (installed,
+	// actively-enforced) and PERSISTED (on-disk) state, with a pending flag when
+	// they differ, so the Security panel never presents a staged-but-not-live
+	// policy as active (N-03). It exposes no credential material.
+	RBAC RBACPostureProjection `json:"rbac"`
+}
+
+// RBACPostureProjection reports the serving vs persisted admin RBAC posture.
+// Serving is derived from the installed authentication snapshot — what the
+// admin API enforces right now — while Persisted reflects the on-disk
+// configuration. Pending is true when a staged change (e.g. a stage_restart
+// that wrote a new policy) has not yet been installed, so the two differ.
+type RBACPostureProjection struct {
+	Serving   RBACStatusProjection `json:"serving"`
+	Persisted RBACStatusProjection `json:"persisted"`
+	Pending   bool                 `json:"pending"`
 }
 
 // RBACStatusProjection is the secret-free summary of the admin RBAC posture
@@ -267,6 +278,10 @@ type RBACStatusProjection struct {
 	// alongside named principals, which the Security panel surfaces as a
 	// migration warning.
 	LegacyTokenActive bool `json:"legacy_token_active"`
+	// Generation is a secret-free digest of the authentication-relevant posture,
+	// used to detect when the serving and persisted states differ (N-03). It
+	// carries no credential material.
+	Generation string `json:"generation,omitempty"`
 }
 
 // LocationWAFProjection describes one location whose [waf] override differs from

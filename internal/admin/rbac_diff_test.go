@@ -393,8 +393,63 @@ func TestProjectRBAC(t *testing.T) {
 	if strings.Contains(string(blob), "SECRET-") {
 		t.Errorf("security projection leaked a token: %s", blob)
 	}
-	if !sp.RBAC.Enabled {
+	if !sp.RBAC.Serving.Enabled || !sp.RBAC.Persisted.Enabled {
 		t.Error("security projection missing embedded RBAC status")
+	}
+}
+
+// TestRBACPostureFlagsStagedDivergence proves the Security posture distinguishes
+// the installed (serving) policy from a persisted change that is not yet live,
+// so a stage_restart cannot make the panel show a future policy as active (N-03).
+func TestRBACPostureFlagsStagedDivergence(t *testing.T) {
+	serving := config.AdminConfig{
+		Enabled: true, Listen: "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{Enabled: true, Principals: []config.AdminPrincipal{
+			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
+		}},
+	}
+	s := newTestServer(t, serving, Deps{})
+	// Persisted config adds a principal — a staged change not yet installed.
+	persisted := cfgWithAdmin(config.AdminConfig{
+		Enabled: true, Listen: "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{Enabled: true, Principals: []config.AdminPrincipal{
+			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
+			{Name: "vic", Role: rbac.RoleViewer, Token: "SECRET-vic-token-32-chars-pad----"},
+		}},
+	})
+
+	p := s.rbacPosture(persisted)
+	if p.Serving.PrincipalCount != 1 {
+		t.Errorf("serving principal_count = %d, want 1 (the installed policy)", p.Serving.PrincipalCount)
+	}
+	if p.Persisted.PrincipalCount != 2 {
+		t.Errorf("persisted principal_count = %d, want 2 (the staged policy)", p.Persisted.PrincipalCount)
+	}
+	if !p.Pending {
+		t.Error("expected pending=true when the serving and persisted policies differ")
+	}
+	if p.Serving.Generation == p.Persisted.Generation {
+		t.Error("serving and persisted generations must differ when the policies differ")
+	}
+}
+
+// TestRBACPostureStableWhenInSync proves an in-sync server reports no pending
+// change and identical, non-empty generations.
+func TestRBACPostureStableWhenInSync(t *testing.T) {
+	admin := config.AdminConfig{
+		Enabled: true, Listen: "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{Enabled: true, Principals: []config.AdminPrincipal{
+			{Name: "root", Role: rbac.RoleAdmin, Token: "SECRET-root-token-32-chars-pad---"},
+		}},
+	}
+	s := newTestServer(t, admin, Deps{})
+
+	p := s.rbacPosture(cfgWithAdmin(admin))
+	if p.Pending {
+		t.Errorf("expected pending=false when serving matches persisted, got %+v", p)
+	}
+	if p.Serving.Generation == "" || p.Serving.Generation != p.Persisted.Generation {
+		t.Errorf("in-sync generations must be equal and non-empty, got %q vs %q", p.Serving.Generation, p.Persisted.Generation)
 	}
 }
 

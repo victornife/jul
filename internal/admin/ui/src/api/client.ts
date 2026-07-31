@@ -109,6 +109,21 @@ export function notifyUnauthorized(): void {
   }
 }
 
+/**
+ * FORBIDDEN_EVENT signals a gated action was rejected with 403: the credential
+ * is valid but lacks the required permission. The permission layer listens for
+ * it to refresh the cached identity so proactive gating recovers after a hot
+ * RBAC policy change instead of trusting a stale permission set (N-02).
+ */
+export const FORBIDDEN_EVENT = "jul:forbidden";
+
+/** Broadcasts that the admin API forbade a gated action (403). */
+export function notifyForbidden(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(FORBIDDEN_EVENT));
+  }
+}
+
 // ── Typed fetch client ───────────────────────────────────────────────────────
 
 export class ApiError extends Error {
@@ -150,6 +165,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`/api${path}`, { ...init, headers });
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
+    else if (resp.status === 403) notifyForbidden();
     let msg = `${String(resp.status)} ${resp.statusText}`;
     try {
       const body = (await resp.json()) as { error?: string };
@@ -631,8 +647,20 @@ export const RBACStatusSchema = z.object({
   principal_count: z.number(),
   role_count: z.number(),
   legacy_token_active: z.boolean(),
+  // Secret-free posture digest, used to detect serving-vs-persisted drift.
+  generation: z.string().optional().default(""),
 });
 export type RBACStatus = z.infer<typeof RBACStatusSchema>;
+
+// RBACPostureSchema mirrors admin.RBACPostureProjection: the serving (installed,
+// actively-enforced) vs persisted (on-disk) RBAC posture, with pending set when
+// a staged change is not yet live (N-03).
+export const RBACPostureSchema = z.object({
+  serving: RBACStatusSchema,
+  persisted: RBACStatusSchema,
+  pending: z.boolean(),
+});
+export type RBACPosture = z.infer<typeof RBACPostureSchema>;
 
 export const SecurityProjectionSchema = z.object({
   auth_enabled: z.boolean(),
@@ -668,9 +696,9 @@ export const SecurityProjectionSchema = z.object({
   // implying the single global policy governs every route.
   location_wafs: z.array(LocationWAFSchema).optional(),
   secret_refs: z.number(),
-  // rbac summarises the admin access-control posture. Optional for forward
-  // compatibility with older servers that predate the projection.
-  rbac: RBACStatusSchema.optional(),
+  // rbac summarises the admin access-control posture as serving vs persisted.
+  // Optional for forward compatibility with older servers that predate it.
+  rbac: RBACPostureSchema.optional(),
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
 
@@ -1793,6 +1821,8 @@ export async function fetchManagedApply(id: string): Promise<ManagedApplyLookup>
 }
 
 function classifyApplyFailure(path: string, status: number, data: unknown): never {
+  // A gated write was forbidden: refresh proactive gating (N-02).
+  if (status === 403) notifyForbidden();
   const result = parseApplyResult(data);
   const conflict = ConflictBodySchema.safeParse(data);
   if (conflict.success && conflict.data.admin_change) {

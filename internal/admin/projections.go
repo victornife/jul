@@ -8,9 +8,12 @@ package admin
 // projection_types.go. Types live there; logic lives here.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"jul/internal/config"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -439,7 +442,11 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 		}
 	}
 	sp.SecretRefs = config.CountSecretRefs(c)
-	sp.RBAC = projectRBAC(c)
+	// Default posture: serving == persisted. The HTTP handler overlays the real
+	// installed (serving) snapshot; this default keeps the pure projection
+	// self-contained for callers/tests without a live server.
+	persisted := rbacStatusFromAdmin(c.Admin)
+	sp.RBAC = RBACPostureProjection{Serving: persisted, Persisted: persisted}
 	return sp
 }
 
@@ -447,12 +454,72 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 // surfaces. It exposes only counts and booleans derived from the effective
 // [admin] configuration and never any credential, token ID, or hash.
 func projectRBAC(c *config.Config) RBACStatusProjection {
+	return rbacStatusFromAdmin(c.Admin)
+}
+
+// rbacStatusFromAdmin builds the secret-free RBAC status from an admin config.
+func rbacStatusFromAdmin(a config.AdminConfig) RBACStatusProjection {
 	return RBACStatusProjection{
-		Enabled:           c.Admin.RBAC.Enabled,
-		PrincipalCount:    len(c.Admin.RBAC.Principals),
-		RoleCount:         len(c.Admin.RBAC.Roles),
-		LegacyTokenActive: strings.TrimSpace(c.Admin.Token) != "",
+		Enabled:           a.RBAC.Enabled,
+		PrincipalCount:    len(a.RBAC.Principals),
+		RoleCount:         len(a.RBAC.Roles),
+		LegacyTokenActive: strings.TrimSpace(a.Token) != "",
 	}
+}
+
+// rbacPosture reports the serving vs persisted RBAC authentication posture.
+// Serving is derived from the installed authentication snapshot — what the
+// admin API actually enforces right now — while persisted reflects the on-disk
+// configuration. Pending is true when a staged change has not yet been
+// installed, so the Security panel never presents a staged policy as active
+// (N-03).
+func (s *Server) rbacPosture(persisted *config.Config) RBACPostureProjection {
+	snap := s.currentAuth()
+	serving := rbacStatusFromAdmin(snap.cfg)
+	serving.Generation = rbacAuthSignature(snap.cfg)
+	persistedStatus := rbacStatusFromAdmin(persisted.Admin)
+	persistedStatus.Generation = rbacAuthSignature(persisted.Admin)
+	return RBACPostureProjection{
+		Serving:   serving,
+		Persisted: persistedStatus,
+		Pending:   serving.Generation != persistedStatus.Generation,
+	}
+}
+
+// rbacAuthSignature is a deterministic, secret-free digest of the
+// authentication-relevant admin configuration: whether the admin API and RBAC
+// are enabled, the default role, each role's permission set, and each
+// principal's role/disabled/expiry plus token PRESENCE (never the value). It is
+// used only to detect whether the serving snapshot differs from the persisted
+// config (N-03); excluding token values keeps it robust to secret-reference
+// expansion and free of any credential material.
+func rbacAuthSignature(a config.AdminConfig) string {
+	h := sha256.New()
+	field := func(v string) { _, _ = h.Write([]byte(v)); _, _ = h.Write([]byte{0}) }
+	field(strconv.FormatBool(a.Enabled))
+	field(strconv.FormatBool(strings.TrimSpace(a.Token) != ""))
+	field(strconv.FormatBool(a.RBAC.Enabled))
+	field(a.RBAC.DefaultRole)
+	roles := append([]config.AdminRole(nil), a.RBAC.Roles...)
+	sort.Slice(roles, func(i, j int) bool { return roles[i].Name < roles[j].Name })
+	for _, r := range roles {
+		field("role")
+		field(r.Name)
+		for _, p := range rbacSortedUniq(r.Permissions) {
+			field(p)
+		}
+	}
+	principals := append([]config.AdminPrincipal(nil), a.RBAC.Principals...)
+	sort.Slice(principals, func(i, j int) bool { return principals[i].Name < principals[j].Name })
+	for _, p := range principals {
+		field("principal")
+		field(p.Name)
+		field(p.Role)
+		field(strconv.FormatBool(p.Disabled))
+		field(p.ExpiresAt.UTC().Format(time.RFC3339))
+		field(strconv.FormatBool(strings.TrimSpace(p.Token) != ""))
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 
 // wafBodyLimitStr renders a WAF request-body limit as a size string (e.g.

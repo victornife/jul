@@ -10,14 +10,14 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { PermissionProvider } from "@/auth/PermissionProvider.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
-import { IdentitySchema, UNAUTHORIZED_EVENT } from "@/api/client.ts";
+import { IdentitySchema, UNAUTHORIZED_EVENT, FORBIDDEN_EVENT } from "@/api/client.ts";
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -104,6 +104,42 @@ describe("PermissionProvider gating", () => {
       expect(screen.getByTestId("ready").textContent).toBe("true");
     });
     expect(screen.getByTestId("can").textContent).toBe("true");
+  });
+
+  it("refetches identity and updates gating when a gated action is forbidden (N-02)", async () => {
+    const withApply = {
+      principal: "op",
+      role: "operator",
+      token_id: "9f32a1b4c921",
+      permissions: ["status:read", "config:apply"],
+      legacy: false,
+    };
+    const withoutApply = { ...withApply, permissions: ["status:read"] };
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => {
+        call += 1;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(call === 1 ? withApply : withoutApply),
+        });
+      }),
+    );
+    render(<Probe permission="config:apply" />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByTestId("ready").textContent).toBe("true");
+    });
+    expect(screen.getByTestId("can").textContent).toBe("true");
+
+    // A gated action returns 403 after a hot RBAC change; the permission layer
+    // refetches identity and the control reflects the now-revoked permission.
+    act(() => {
+      window.dispatchEvent(new CustomEvent(FORBIDDEN_EVENT));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("can").textContent).toBe("false");
+    });
   });
 });
 
