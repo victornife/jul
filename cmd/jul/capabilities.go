@@ -24,19 +24,44 @@ type capabilitiesOutput struct {
 
 // capFeatureFlags reports which optional features are compiled into this binary.
 // Each flag corresponds to a Go build tag that must be specified at build time.
-// False means the feature is absent from this binary and its config keys will
-// be rejected at runtime; true means it is compiled in and available.
+// False means the feature is absent from this binary and its config keys are
+// rejected at preflight; true means it is compiled in and available.
 //
-// Three features expose a runtime boolean today (waf, stream_proxy,
-// wasm_plugins). Other optional tags (acme, grpc, http3, otel, console,
-// brotli, zstd, importer, consul, kubernetes) are enforced at config-validation
-// time rather than exposed as runtime booleans; they will be added here as
-// runtime detection is implemented.
+// Every optional build tag is reported. waf/stream_proxy/wasm_plugins are read
+// from their package-level Compiled constants; the remaining tags are detected
+// by the tag-gated capabilities_tag_*.go files in this package.
 type capFeatureFlags struct {
 	WAF         bool `json:"waf"`
 	StreamProxy bool `json:"stream_proxy"`
 	WASMPlugins bool `json:"wasm_plugins"`
+	ACME        bool `json:"acme"`
+	GRPC        bool `json:"grpc"`
+	HTTP3       bool `json:"http3"`
+	OTel        bool `json:"otel"`
+	Console     bool `json:"console"`
+	Brotli      bool `json:"brotli"`
+	Zstd        bool `json:"zstd"`
+	Importer    bool `json:"importer"`
+	Consul      bool `json:"consul"`
+	Kubernetes  bool `json:"kubernetes"`
 }
+
+// Optional build tags compiled into this binary, detected by the tag-gated
+// capabilities_tag_*.go files: each sets its flag true only when its build tag
+// is present at build time, so `jul capabilities` reports exactly what the
+// binary supports.
+var (
+	tagACME       bool
+	tagGRPC       bool
+	tagHTTP3      bool
+	tagOTel       bool
+	tagConsole    bool
+	tagBrotli     bool
+	tagZstd       bool
+	tagImporter   bool
+	tagConsul     bool
+	tagKubernetes bool
+)
 
 // capExitCode is one row of the canonical exit-code table.
 type capExitCode struct {
@@ -50,7 +75,7 @@ type capExitCode struct {
 var exitCodes = []capExitCode{
 	{0, "success / clean shutdown / healthy probe"},
 	{1, "error / validation failed / unhealthy probe / fmt would change the file"},
-	{2, "usage or config error (bad flags, missing required argument, disabled admin)"},
+	{2, "usage or config error (bad flags, missing required argument, disabled admin), or lint -strict warnings"},
 }
 
 // cmdCapabilities reports which optional features are compiled into this binary
@@ -74,6 +99,16 @@ func cmdCapabilities(args []string) int {
 			WAF:         waf.Compiled,
 			StreamProxy: stream.Compiled,
 			WASMPlugins: plugins.Compiled,
+			ACME:        tagACME,
+			GRPC:        tagGRPC,
+			HTTP3:       tagHTTP3,
+			OTel:        tagOTel,
+			Console:     tagConsole,
+			Brotli:      tagBrotli,
+			Zstd:        tagZstd,
+			Importer:    tagImporter,
+			Consul:      tagConsul,
+			Kubernetes:  tagKubernetes,
 		},
 		ExitCodes: exitCodes,
 	}
@@ -87,7 +122,7 @@ func cmdCapabilities(args []string) int {
 
 	// Human-readable output for interactive use.
 	fmt.Fprintf(stdout, "%s %s\n", out.Product, out.Version)
-	fmt.Fprintf(stdout, "\ncompiled features (runtime-detectable):\n")
+	fmt.Fprintf(stdout, "\ncompiled features:\n")
 	for _, row := range []struct {
 		key string
 		val bool
@@ -95,6 +130,16 @@ func cmdCapabilities(args []string) int {
 		{"waf", out.Features.WAF},
 		{"stream_proxy", out.Features.StreamProxy},
 		{"wasm_plugins", out.Features.WASMPlugins},
+		{"acme", out.Features.ACME},
+		{"grpc", out.Features.GRPC},
+		{"http3", out.Features.HTTP3},
+		{"otel", out.Features.OTel},
+		{"console", out.Features.Console},
+		{"brotli", out.Features.Brotli},
+		{"zstd", out.Features.Zstd},
+		{"importer", out.Features.Importer},
+		{"consul", out.Features.Consul},
+		{"kubernetes", out.Features.Kubernetes},
 	} {
 		mark := "✓"
 		if !row.val {
@@ -102,8 +147,6 @@ func cmdCapabilities(args []string) int {
 		}
 		fmt.Fprintf(stdout, "  %s  %-20s\n", mark, row.key)
 	}
-	fmt.Fprintf(stdout, "\n  (other tags: acme grpc http3 otel console brotli zstd importer\n")
-	fmt.Fprintf(stdout, "   consul kubernetes — enforced at config-validation time)\n")
 	fmt.Fprintf(stdout, "\nexit codes:\n")
 	for _, ec := range out.ExitCodes {
 		fmt.Fprintf(stdout, "  %d  %s\n", ec.Code, ec.Meaning)

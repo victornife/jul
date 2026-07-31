@@ -92,7 +92,7 @@ Usage:
 Exit codes:
   0  success / clean shutdown / healthy probe
   1  error / validation failed / unhealthy probe / fmt would change the file
-  2  usage or config error (bad flags, missing required argument)
+  2  usage or config error (bad flags, missing required argument), or lint -strict warnings
 
 Flags:
 `)
