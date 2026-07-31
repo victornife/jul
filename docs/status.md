@@ -25,6 +25,35 @@ Maturity ladder: **Alpha · Beta · GA — soak pending · GA · Deprecated**. P
 is a **post-GA gate**, so a feature that meets the other eight criteria is
 labelled **GA — soak pending** until its soak run completes.
 
+### Delivery state vs. maturity
+
+Maturity answers *"how good is this feature?"* A separate axis answers *"where is
+this change in the release pipeline?"* — a feature can be fully implemented and
+tested yet not in a tagged release. Keep the two distinct:
+
+| Delivery state | Meaning |
+| --- | --- |
+| **implemented** | Code exists and its tests pass on a working branch. |
+| **merged** | Landed on `main`; listed under `[Unreleased]` in [CHANGELOG.md](../CHANGELOG.md), not yet tagged. |
+| **released** | Shipped in a tagged `vX.Y` build with cross-compiled artifacts. |
+| **soaked** | The post-GA soak gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) has passed for the released build. |
+| **audit-closed** | Any reopened audit finding covering it is formally Closed (exact-SHA CI + two human sign-offs). |
+
+A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on the
+[roadmap](roadmap/README.md) means *merged*, which is not the same as *released*.
+
+**Current exceptions:**
+
+- **Egress allow-list (Phase 4)** — *merged* to `main` (see [CHANGELOG.md](../CHANGELOG.md)
+  `[Unreleased]`); its first tagged **release** is pending. The implementation is
+  complete and tested: treat it as *merged, release pending*.
+- **Configuration write/apply/reload subsystem** — *remediated* across workstreams
+  WS01–WS07 with tests, but the reopened
+  [configuration-audit closure](audit/2026-07-25-configuration-audit-closure.md) is
+  **not formally Closed** (exact-SHA CI + two sign-offs outstanding). Treat it as
+  *remediated, closure pending*. Context: the
+  [Full Repository Audit (2026-07-31)](audit/2026-07-31-full-repository-audit.md).
+
 ## GA criteria legend
 
 | # | Criterion |

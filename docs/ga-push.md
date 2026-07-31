@@ -1,6 +1,6 @@
 # Jul.IA — GA push (Beta → GA)
 
-> - Version 1.32 · Updated 2026-07-09
+> - Version 1.37 · Updated 2026-07-31
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)

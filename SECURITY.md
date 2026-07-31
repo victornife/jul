@@ -86,14 +86,18 @@ disabled by default.
   `auth` modifier (CIDR / Basic / JWT / forward-auth). At most one credential
   method per location; see [docs/auth.md](docs/auth.md).
 - **Lock down the admin console.** Always set `[admin].token` (constant-time
-  compare; strict CSP, `X-Frame-Options: DENY`, same-origin `/api`). There is
-  only a single shared token — no per-user keys, scopes, or audit attribution —
-  so treat it as a shared secret and rotate it promptly on team changes.
-  **This is a known GA limitation** ([#59](https://github.com/victornife/jul/issues/59)):
-  the Console GA label covers the current single-token model; full RBAC
-  (predefined + custom roles, revocable tokens, per-principal audit) is designed
-  in [docs/specs/console-rbac.md](docs/specs/console-rbac.md)
-  ([ADR 0010](docs/adr/0010-console-rbac.md)) and remains a future milestone.
+  compare; strict CSP, `X-Frame-Options: DENY`, same-origin `/api`). The default
+  admin model is a **single shared token** — no per-user keys, scopes, or audit
+  attribution — so treat it as a shared secret and rotate it promptly on team
+  changes ([#59](https://github.com/victornife/jul/issues/59)). **RBAC is
+  available as an opt-in `[admin.rbac]` feature**, delivered in Phase 3
+  ([#73](https://github.com/victornife/jul/issues/73)): named principals,
+  predefined + custom roles, scoped tokens, per-principal audit, and
+  deny-by-default admin routes ([ADR 0010](docs/adr/0010-console-rbac.md),
+  [docs/specs/console-rbac.md](docs/specs/console-rbac.md)). **Interactive token
+  management** — minting and revoking scoped tokens from the Console/API — is the
+  remaining future milestone; external identity (OIDC/SSO) stays a separate
+  Y3-02 milestone.
   Edits that change admin reachability (disabling admin, moving its listen
   address, rotating its token, or disabling the web console) are held for
   explicit confirmation so a single apply cannot silently lock you out. See the

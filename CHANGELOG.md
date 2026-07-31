@@ -9,6 +9,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+> **Release state:** these changes are **merged to `main`** but **not yet tagged
+> or released**. Per the delivery-state vocabulary in [docs/status.md](docs/status.md),
+> "merged" is not "released" or "soaked"; the Phase 4 egress hardening becomes
+> **GA** only after its first tagged release passes the post-GA soak gate.
+
 ### Added
 - **Phase 4 — Egress allow-list completion and integration hardening** (P4-01, P4-02, P4-03, HP-07, #74, #75, #76):
   - `internal/egress` refactored into `policy`/`normalize`/`error`/`http` modules with a

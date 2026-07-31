@@ -16,9 +16,9 @@ import (
 // capabilitiesOutput is the stable JSON contract of `jul capabilities`.
 // Fields are additive; existing keys are never renamed or removed.
 type capabilitiesOutput struct {
-	Product  string           `json:"product"`
-	Version  string           `json:"version"`
-	Features capFeatureFlags  `json:"features"`
+	Product   string          `json:"product"`
+	Version   string          `json:"version"`
+	Features  capFeatureFlags `json:"features"`
 	ExitCodes []capExitCode   `json:"exit_codes"`
 }
 

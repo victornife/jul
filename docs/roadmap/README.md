@@ -26,6 +26,9 @@ Alpha · **Beta** · **GA** · Deprecated. *Implemented ≠ GA:* a shipped featu
 shipped features to GA; the soak test is a post-GA gate per
 [ADR 0005](../adr/0005-soak-post-ga-gate.md). All Year 1 and Year 2 shipped
 features have now reached **GA**; the soak test post-GA gate is **fully closed**.
+**Delivery state ≠ maturity:** "delivered"/✅ below means *merged to `main`*, which
+is not necessarily *released* or *soaked* — see the delivery-state table in the
+[status matrix](../status.md).
 
 ## Active operating roadmap
 
@@ -36,7 +39,7 @@ releasable increment; later phases build on earlier ones.
 | --- | --- | --- | --- |
 | Phase 2 | Reload results, bounded managed applies, and planned restart | Correlated reload results, exact restoration, planned-restart staging/discard/preflight | 🚧 in progress (remediation pass) |
 | Phase 3 | RBAC Phase 1 | Named principals, predefined + custom roles, scoped tokens, deny-by-default admin routes | 🚧 implemented; in security remediation |
-| Phase 4 | Egress coverage and hardening | JWKS, forward-auth, discovery, ACME/OCSP, WASM fetch under shared egress policy | ✅ delivered (P4-01 wiring; P4-02 coverage; P4-03 observability, tests, docs) |
+| Phase 4 | Egress coverage and hardening | JWKS, forward-auth, discovery, ACME/OCSP, WASM fetch under shared egress policy | ✅ delivered — merged to `main`; first tagged release pending (P4-01 wiring; P4-02 coverage; P4-03 observability, tests, docs) |
 | Phase 5 | Structured CRUD + near-term global-table patch ops | Batch patch preview, entity lifecycle, `global_set`, `compression_set`, `rate_limit_global_set` | 🔒 queued |
 | Phase 6 | AI Gateway MVP | Time-boxed multi-provider routing, failover, streaming, token/cost metrics | ⏳ time-boxed bet |
 | Phase 7 | Activate at most one evidence-backed horizon | Fleet, K8s/Gateway API, AI continuation, Cloud, or GraphQL — only if gate trips | 🔒 demand-gated |

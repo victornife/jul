@@ -17,6 +17,14 @@
 #
 # maturity: GA | GA-soak-pending | Beta | Alpha | Deprecated
 #
+# Delivery state is a SEPARATE axis from maturity. A change moves implemented ->
+# merged (on main, under CHANGELOG [Unreleased]) -> released (tagged) -> soaked ->
+# audit-closed; a feature is GA only when released AND soaked. See the
+# "Delivery state vs. maturity" table in docs/status.md. As of 2026-07-31 the
+# Phase 4 egress hardening is merged but not yet released, and the configuration
+# write/apply/reload subsystem is remediated but its reopened audit is not
+# formally closed.
+#
 # NOTE: Keep in sync with docs/status.md. When a feature's maturity or any
 # criterion changes, update both files. docs-check.py validates this file
 # automatically on every CI run.
