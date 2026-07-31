@@ -120,7 +120,9 @@ export function computePollDelayMs(elapsedMs: number): number {
  * deriveManagedApplyStatus maps a lookup snapshot onto the poll status. It is the
  * single source of truth for the invariant that a missing, expired, or errored
  * lookup is NEVER reported as terminal (success): only a `record` whose state is
- * "terminal" yields "terminal".
+ * "terminal" yields "terminal". Both non-terminal record states — "pending" and
+ * "finalizing" — map to "polling" (or "expired" past the deadline), so an
+ * in-flight finalization keeps polling instead of resolving early.
  */
 export function deriveManagedApplyStatus(input: {
   readonly enabled: boolean;

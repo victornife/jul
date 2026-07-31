@@ -4,10 +4,12 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 	"jul/internal/rbac"
@@ -24,6 +26,7 @@ func TestManagedApplyGet_ResponseRules(t *testing.T) {
 		Operation: ApplyOperationPatchApply,
 		Result:    ConfigApplyResult{ApplyID: "rl_2"},
 	})
+	seedFinalizing(t, reg, "rl_3")
 
 	s := newTestServer(t, config.AdminConfig{}, Deps{ManagedApplies: reg})
 	h := s.routes()
@@ -35,6 +38,7 @@ func TestManagedApplyGet_ResponseRules(t *testing.T) {
 	}{
 		{"terminal", "rl_2", http.StatusOK},
 		{"pending", "rl_1", http.StatusAccepted},
+		{"finalizing", "rl_3", http.StatusAccepted},
 		{"unknown", "rl_9999", http.StatusNotFound},
 		{"invalid", "rl_bad", http.StatusBadRequest},
 	}
@@ -95,6 +99,111 @@ func TestManagedApplyGet_TerminalBody(t *testing.T) {
 	}
 }
 
+// TestManagedApplyGet_FinalizingBody proves a claimed-but-not-completed
+// transaction is served as 202 with state=finalizing so the console keeps
+// polling instead of treating the still-running finalization as terminal.
+func TestManagedApplyGet_FinalizingBody(t *testing.T) {
+	reg := NewManagedApplyRegistry(0, 0)
+	seedFinalizing(t, reg, "rl_3")
+
+	s := newTestServer(t, config.AdminConfig{}, Deps{ManagedApplies: reg})
+	h := s.routes()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/config/applies/rl_3", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("code = %d, want 202 (body %s)", rr.Code, rr.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["state"] != string(ManagedApplyFinalizing) {
+		t.Errorf("state = %v, want finalizing", got["state"])
+	}
+}
+
+// TestManagedApplyGet_FailFinalizationBody proves that after a finalization
+// callback fails, a browser retrieving the exact ID still sees a terminal record
+// that preserves the operation and complete apply result and carries the
+// finalization error — never a zeroed emergency record — and that the public
+// projection leaks no private ownership, credential, source, or raw-config bytes.
+func TestManagedApplyGet_FailFinalizationBody(t *testing.T) {
+	reg := NewManagedApplyRegistry(0, 0)
+	id := "rl_9f01c0b451d2_7"
+	if err := reg.BeginPending(ManagedApplyRecord{
+		ID:           id,
+		Operation:    ApplyOperationConfigApply,
+		Result:       ConfigApplyResult{ApplyID: id, Mode: "hot", OK: true},
+		OwnerTokenID: "token-secret",
+	}); err != nil {
+		t.Fatalf("begin pending: %v", err)
+	}
+	if err := reg.FailFinalization(ManagedApplyRecord{
+		ID:                id,
+		CompletedAt:       time.Now().UTC(),
+		FinalizationError: "managed apply finalization panic: boom",
+	}); err != nil {
+		t.Fatalf("fail finalization: %v", err)
+	}
+
+	s := newTestServer(t, config.AdminConfig{}, Deps{ManagedApplies: reg})
+	h := s.routes()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/config/applies/"+id, nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 (body %s)", rr.Code, rr.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["state"] != string(ManagedApplyTerminal) {
+		t.Errorf("state = %v, want terminal", got["state"])
+	}
+	if got["operation"] != string(ApplyOperationConfigApply) {
+		t.Errorf("operation = %v, want %s (operation must be preserved)", got["operation"], ApplyOperationConfigApply)
+	}
+	if fe, _ := got["finalization_error"].(string); fe == "" {
+		t.Errorf("finalization_error = %v, want the recovered panic", got["finalization_error"])
+	}
+	result, _ := got["result"].(map[string]any)
+	if result == nil || result["apply_id"] != id || result["mode"] != "hot" {
+		t.Errorf("result = %v, want it to preserve apply_id/mode", got["result"])
+	}
+	for _, forbidden := range []string{"owner_token_id", "token_digest", "source_ip", "previous_raw"} {
+		if _, present := got[forbidden]; present {
+			t.Errorf("public record leaked %q", forbidden)
+		}
+	}
+	if bytes.Contains(rr.Body.Bytes(), []byte("token-secret")) {
+		t.Error("public record leaked the owner token value")
+	}
+}
+
+// seedFinalizing drives a record through the production BeginPending →
+// ClaimFinalization transition so tests observe the exact finalizing state the
+// terminal finalizer produces, rather than constructing it by hand.
+func seedFinalizing(t *testing.T, reg *ManagedApplyRegistry, id string) {
+	t.Helper()
+	if err := reg.BeginPending(ManagedApplyRecord{
+		ID:        id,
+		Operation: ApplyOperationConfigApply,
+		Result:    ConfigApplyResult{ApplyID: id, Mode: "hot", OK: true},
+	}); err != nil {
+		t.Fatalf("begin pending: %v", err)
+	}
+	claimed, err := reg.ClaimFinalization(ManagedApplyRecord{ID: id, Operation: ApplyOperationConfigApply})
+	if err != nil || !claimed {
+		t.Fatalf("claim finalization = (%v, %v)", claimed, err)
+	}
+}
+
 // TestManagedApplyGet_LookupMetric proves the GET /api/config/applies/{id}
 // handler records exactly one bounded lookup outcome per request through the
 // injected observer: "terminal", "pending", "missing", or "invalid" (WS06 §7.5).
@@ -106,6 +215,7 @@ func TestManagedApplyGet_LookupMetric(t *testing.T) {
 		Operation: ApplyOperationPatchApply,
 		Result:    ConfigApplyResult{ApplyID: "rl_2"},
 	})
+	seedFinalizing(t, reg, "rl_3")
 
 	var got []string
 	deps := Deps{
@@ -121,6 +231,7 @@ func TestManagedApplyGet_LookupMetric(t *testing.T) {
 	}{
 		{"rl_2", "terminal"},
 		{"rl_1", "pending"},
+		{"rl_3", "finalizing"},
 		{"rl_9999", "missing"},
 		{"rl_bad", "invalid"},
 	}

@@ -71,6 +71,10 @@ var (
 	// ErrManagedApplyInvalidID is returned when a lookup ID does not match the
 	// strict rl_N format.
 	ErrManagedApplyInvalidID = errors.New("managed apply: invalid id")
+	// ErrManagedApplyRecordIncomplete is returned by FailFinalization when the
+	// emergency terminal record cannot be reconstructed into a valid, parseable
+	// terminal result (no existing record and no complete original result).
+	ErrManagedApplyRecordIncomplete = errors.New("managed apply: terminal record is incomplete")
 )
 
 // defaultManagedApplyMaxTerminal and defaultManagedApplyTTL implement the
@@ -357,19 +361,109 @@ func (r *ManagedApplyRegistry) Complete(rec ManagedApplyRecord) error {
 	r.byID[rec.ID] = &cp
 
 	// Append to terminal order only once per ID.
-	alreadyOrdered := false
-	for _, id := range r.order {
-		if id == rec.ID {
-			alreadyOrdered = true
-			break
-		}
-	}
-	if !alreadyOrdered {
-		r.order = append(r.order, rec.ID)
-	}
+	r.addTerminalOrderLocked(rec.ID)
 
 	r.pruneLocked(time.Now().UTC())
 	return nil
+}
+
+// FailFinalization transitions a transaction to terminal after its finalization
+// callback failed (e.g. panicked). Unlike Complete it preserves the established
+// transaction identity and complete result IN PLACE instead of overwriting the
+// record with the incomplete emergency fallback carried by the panic path, and
+// it refuses to publish a record that cannot be reconstructed into a valid
+// terminal result. The resulting record must stay parseable by
+// ManagedApplyRecordSchema; it may change only state, completion time, and the
+// finalization error.
+func (r *ManagedApplyRegistry) FailFinalization(rec ManagedApplyRecord) error {
+	if !validManagedApplyID(rec.ID) {
+		return ErrManagedApplyInvalidID
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if existing, exists := r.byID[rec.ID]; exists {
+		if existing.Operation != "" &&
+			rec.Operation != "" &&
+			existing.Operation != rec.Operation {
+			return ErrManagedApplyIDMismatch
+		}
+
+		// Preserve established transaction identity and metadata.
+		if rec.Operation == "" {
+			rec.Operation = existing.Operation
+		}
+		if rec.StartedAt.IsZero() {
+			rec.StartedAt = existing.StartedAt
+		}
+		if rec.Deadline.IsZero() {
+			rec.Deadline = existing.Deadline
+		}
+		if rec.OwnerTokenID == "" {
+			rec.OwnerTokenID = existing.OwnerTokenID
+		}
+
+		// Never replace a valid result with an empty fallback result.
+		if rec.Result.ApplyID == "" || rec.Result.Mode == "" {
+			rec.Result = existing.Result
+		}
+		if rec.HistorySnapshotID == "" {
+			rec.HistorySnapshotID = existing.HistorySnapshotID
+		}
+		if rec.HistoryError == "" {
+			rec.HistoryError = existing.HistoryError
+		}
+
+		rec.FinalizationError = joinManagedApplyErrors(existing.FinalizationError, rec.FinalizationError)
+	}
+
+	// A missing existing record is allowed only when the caller supplied a
+	// complete original terminal result: a bare ID/error fallback cannot be
+	// reconstructed into a parseable terminal record.
+	if rec.Result.ApplyID == "" {
+		rec.Result.ApplyID = rec.ID
+	}
+	if rec.Result.Mode != "hot" && rec.Result.Mode != "stage_restart" {
+		return ErrManagedApplyRecordIncomplete
+	}
+
+	rec.State = ManagedApplyTerminal
+	if rec.CompletedAt.IsZero() {
+		rec.CompletedAt = time.Now().UTC()
+	}
+
+	cp := rec
+	r.byID[rec.ID] = &cp
+	r.addTerminalOrderLocked(rec.ID)
+	r.pruneLocked(time.Now().UTC())
+	return nil
+}
+
+// addTerminalOrderLocked appends id to the terminal eviction order exactly once.
+// The caller must hold r.mu.
+func (r *ManagedApplyRegistry) addTerminalOrderLocked(id string) {
+	for _, existingID := range r.order {
+		if existingID == id {
+			return
+		}
+	}
+	r.order = append(r.order, id)
+}
+
+// joinManagedApplyErrors concatenates two finalization-error strings, dropping
+// empties, so a prior finalization error is preserved alongside a new one.
+func joinManagedApplyErrors(existing, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	switch {
+	case existing == "":
+		return next
+	case next == "":
+		return existing
+	default:
+		return existing + "; " + next
+	}
 }
 
 // SetLatest updates the convenience "latest" pointer to the record for id. It

@@ -127,7 +127,8 @@ func TestMetricLabelPolicy(t *testing.T) {
 		// WS06 §7.5: unlabeled gauge of retained terminal ledger records.
 		"jul_managed_apply_terminal_registry_entries": nil,
 		// WS06 §7.5: exact-ID lookup counter bounded to the lookup disposition
-		// (pending/terminal/missing/invalid) — never an apply ID, actor, or IP.
+		// (pending/finalizing/terminal/missing/invalid) — never an apply ID, actor,
+		// or IP.
 		"jul_managed_apply_terminal_lookup_total": {"result"},
 	}
 
@@ -248,5 +249,6 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveManagedApplyFinalizationError("restoration")
 	m.ObserveManagedApplyHistory("config.apply", "recorded")
 	m.SetManagedApplyRegistryEntries(1)
+	m.ObserveManagedApplyLookup("finalizing")
 	m.ObserveManagedApplyLookup("terminal")
 }

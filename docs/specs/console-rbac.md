@@ -110,7 +110,9 @@ Request ──Bearer token──▶ Token store (hashed) ──▶ Principal ─
 
 - A **principal** is a named identity with exactly one **role**.
 - A **role** (predefined or custom) is a set of **permissions**.
-- A **token** is a credential bound to a principal; a principal may hold several.
+- A **token** is a credential bound to a principal. *Today* each principal has
+  exactly one config-defined token; multiple independently issued tokens per
+  principal are the future token-management target (not yet implemented).
 - Every admin route declares a **required permission**; the middleware allows the
   request only if the principal's role grants it. **Deny-by-default.**
 

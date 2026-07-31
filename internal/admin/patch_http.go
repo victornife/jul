@@ -403,8 +403,28 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	}
 	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
 	defer cancel()
+	// Validate the apply mode before candidate resolution so a resolution
+	// deadline can be classified against the mode the client requested.
+	mode := r.URL.Query().Get("mode")
+	switch mode {
+	case "", "hot":
+		mode = "hot"
+	case "stage_restart":
+		// valid
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("unknown apply mode %q; valid values: hot, stage_restart", mode),
+		})
+		return
+	}
 	effectiveCandidate, candidateErr := prepareMutationCandidateContext(opCtx, &reqCtx, cfg)
 	if candidateErr != nil {
+		// A resolution deadline is a pre-persistence timeout (504), not a
+		// validation error; a cancellation is a client abort (408). Only a
+		// genuine invalid value falls through to the 400 validation response.
+		if s.writeCandidatePreparationFailure(w, r, reqCtx, mode, candidateErr) {
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{OK: false, Message: "The configuration contains errors.", Errors: humanizeErr(candidateErr.Error())})
 		return
 	}
@@ -437,18 +457,6 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	// preflight. A rejection here means nothing was written, preserving the
 	// all-or-nothing guarantee.
 	prev := state.Raw
-	mode := r.URL.Query().Get("mode")
-	switch mode {
-	case "", "hot":
-		mode = "hot"
-	case "stage_restart":
-		// valid
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("unknown apply mode %q; valid values: hot, stage_restart", mode),
-		})
-		return
-	}
 	result, err := applyConfig(reqCtx, cfg, mode)
 	if err != nil {
 		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+err.Error())

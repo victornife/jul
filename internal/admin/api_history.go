@@ -90,6 +90,17 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 	defer cancel()
 	effectiveNext, err := prepareMutationCandidateContext(opCtx, &reqCtx, next)
 	if err != nil {
+		// A resolution deadline is a pre-persistence timeout (504), a
+		// cancellation is a client abort (408); both are audited here so the two
+		// rollback routes behave identically. Any other error is an ordinary 400.
+		if result, status, handled := candidatePreparationFailure("hot", err); handled {
+			if result.TimedOutPhase != "" {
+				s.recordTimeoutAudit(r, reqCtx.Operation, result)
+			} else {
+				s.recordAudit(r, string(reqCtx.Operation), "config", "failure", "canceled before persistence: phase=resolve")
+			}
+			return result, status, nil
+		}
 		return ConfigApplyResult{}, http.StatusBadRequest, err
 	}
 
@@ -121,6 +132,11 @@ func (s *Server) rollbackToSnapshot(id string, w http.ResponseWriter, r *http.Re
 		result, applyErr := s.deps.ApplyConfigRaw(reqCtx, raw, "hot")
 		if applyErr != nil {
 			return result, configApplyErrorStatus(result, applyErr), applyErr
+		}
+		if result.TimedOutPhase != "" {
+			// Centralize the coordinator-returned rollback timeout audit here so
+			// /api/history/rollback and /api/config/rollback record it exactly once.
+			s.recordTimeoutAudit(r, reqCtx.Operation, result)
 		}
 		status := configApplyResultStatus(result)
 		// AC-05: skip eager handler-side history when the managed coordinator
@@ -302,12 +318,9 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !result.OK {
-		if result.TimedOutPhase != "" {
-			// AC-08 / defect 9: a preflight timeout before persistence records a
-			// dedicated failure audit naming the timed-out phase; the 504 result is
-			// written below. Nothing was rolled back to disk.
-			s.recordTimeoutAudit(r, ApplyOperationRollback, result)
-		}
+		// Timeout and cancellation audits are recorded centrally in
+		// rollbackToSnapshot so both rollback routes behave identically; here we
+		// only write the structured result.
 		writeJSON(w, code, result)
 		return
 	}

@@ -118,28 +118,44 @@ func (h *history) snapshot(raw []byte) (string, error) {
 	if err := os.MkdirAll(h.dir, 0o750); err != nil {
 		return "", fmt.Errorf("create history dir: %w", err)
 	}
-	id := time.Now().UTC().Format(historyTimeLayout)
-	name := id + historyExt
-	// Guard against the unlikely sub-millisecond collision by appending a
-	// counter so a rapid pair of writes never clobbers an earlier snapshot. The
-	// separator must sort lexicographically after '.' (the extension delimiter)
-	// so a suffixed snapshot still orders as newer than its unsuffixed sibling
-	// under the reverse-string sort in snapshotFiles; '_' (0x5F) satisfies this
-	// where '-' (0x2D) would not.
-	path := filepath.Join(h.dir, name)
-	for i := 1; ; i++ {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			break
-		}
-		name = fmt.Sprintf("%s_%d%s", id, i, historyExt)
-		id = strings.TrimSuffix(name, historyExt)
-		path = filepath.Join(h.dir, name)
+	id, path, err := h.nextSnapshotID(time.Now())
+	if err != nil {
+		return "", err
 	}
 	if err := atomicfile.Write(path, raw, 0o600); err != nil {
 		return "", fmt.Errorf("write snapshot: %w", err)
 	}
 	h.prune()
 	return id, nil
+}
+
+// nextSnapshotID allocates a stable, collision-free snapshot id for now: the
+// millisecond timestamp, or that timestamp plus an incrementing "_<n>" suffix
+// when earlier snapshots already occupy the same millisecond. Unlike the former
+// loop, the base timestamp is fixed and only the integer suffix advances, so a
+// third same-millisecond snapshot is "<ts>_2" (not the nested "<ts>_1_2" that
+// parsed back to a zero time). Every generated id therefore parses to a valid
+// timestamp. The '_' separator (0x5F) sorts lexicographically after the '.'
+// extension delimiter, so a suffixed snapshot still orders as newer than its
+// unsuffixed sibling under the reverse-string sort in snapshotFiles. A stat
+// error other than not-exist stops the walk instead of looping forever.
+func (h *history) nextSnapshotID(now time.Time) (id string, path string, err error) {
+	baseID := now.UTC().Format(historyTimeLayout)
+	for suffix := 0; ; suffix++ {
+		candidateID := baseID
+		if suffix > 0 {
+			candidateID = fmt.Sprintf("%s_%d", baseID, suffix)
+		}
+		candidatePath := filepath.Join(h.dir, candidateID+historyExt)
+		switch _, statErr := os.Stat(candidatePath); {
+		case statErr == nil:
+			continue // collision; try the next stable suffix
+		case os.IsNotExist(statErr):
+			return candidateID, candidatePath, nil
+		default:
+			return "", "", fmt.Errorf("check snapshot collision: %w", statErr)
+		}
+	}
 }
 
 // snapshotWithMeta writes raw as a new snapshot and, when meta is non-nil, an

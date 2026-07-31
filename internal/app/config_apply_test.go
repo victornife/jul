@@ -948,10 +948,10 @@ func TestCompletionCallbackPanicDoesNotBlockHTTP(t *testing.T) {
 		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
 			panic("callback panic")
 		},
-		OnManagedApplyFinalizationError: func(applyID string, err error) {
+		OnManagedApplyFinalizationError: func(completion admin.ManagedApplyCompletion, err error) {
 			hookMu.Lock()
 			hookCalls++
-			hookApplyID = applyID
+			hookApplyID = completion.Result.ApplyID
 			hookErr = err
 			hookMu.Unlock()
 			close(errHookDone)

@@ -162,15 +162,18 @@ type ConfigApplyCoordinator struct {
 	// OnManagedApplyFinalizationError is invoked when the unified completion
 	// callback panics during terminal finalization (WS02 §3.6). The coordinator
 	// recovers the panic, threads a FinalizationError onto the terminal result,
-	// and calls this hook with the apply ID and the reconstructed panic error so
-	// the composition root can make the degradation explicit — a structured
-	// error log, a finalization-error metric, an advisory health state, and a
-	// best-effort terminal ledger record carrying the FinalizationError — instead
-	// of silently swallowing the panic. A finalization panic never fails an
-	// already-committed apply: the raw configuration stays roll-back-able. Nil
-	// leaves the recovered panic recorded on the returned finalization only, so
-	// context-free and unit-test callers are unaffected.
-	OnManagedApplyFinalizationError func(applyID string, err error)
+	// and calls this hook with the full ManagedApplyCompletion (request context,
+	// terminal result, prior raw) and the reconstructed panic error so the
+	// composition root can make the degradation explicit — a structured error
+	// log, a finalization-error metric, an advisory health state, and a
+	// best-effort terminal ledger record that preserves the operation and
+	// complete apply result — instead of silently swallowing the panic. A
+	// finalization panic never fails an already-committed apply: the raw
+	// configuration stays roll-back-able. The completion's PreviousRaw is
+	// sensitive and must never be logged, serialized, or retained by the hook.
+	// Nil leaves the recovered panic recorded on the returned finalization only,
+	// so context-free and unit-test callers are unaffected.
+	OnManagedApplyFinalizationError func(completion admin.ManagedApplyCompletion, err error)
 
 	// ReportManagedApplyError makes a managed-apply machinery failure that
 	// happens OUTSIDE the unified completion callback explicit (WS06 §7.6). The
@@ -1240,7 +1243,7 @@ func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(comp admin.ManagedAp
 			)
 			if c.OnManagedApplyFinalizationError != nil {
 				c.OnManagedApplyFinalizationError(
-					comp.Result.ApplyID,
+					comp,
 					errors.New(fin.FinalizationError),
 				)
 			}

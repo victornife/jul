@@ -1687,6 +1687,142 @@ describe("HistoryPanel rollback flow", () => {
     expect(recordReads).toBeGreaterThanOrEqual(1);
   });
 
+  it("fetches provenance for an immediate live rollback and shows the history advisory", async () => {
+    // Item 4 / AC-14: an immediate live rollback (200, applied_live — NOT
+    // saved_not_live) closes the dialog right away, yet its exact-ID ledger
+    // record is still fetched so a degraded history sidecar surfaces as an
+    // advisory without reopening or failing the rollback.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input.startsWith("/api/config/rollback")) {
+        return Promise.resolve(
+          json({
+            ok: true,
+            apply_id: "rl_ilive",
+            mode: "hot",
+            reload: { id: "rl_ilive", outcome: "applied_live", published: true },
+          }),
+        );
+      }
+      if (input === "/api/config/applies/rl_ilive") {
+        recordReads += 1;
+        if (recordReads === 1) return Promise.resolve(new Response(null, { status: 404 }));
+        return Promise.resolve(
+          json({
+            id: "rl_ilive",
+            state: "terminal",
+            operation: "config.rollback",
+            history_snapshot_id: "snap-il",
+            history_error: "history filesystem is full",
+            result: {
+              ok: true,
+              apply_id: "rl_ilive",
+              mode: "hot",
+              reload: { id: "rl_ilive", outcome: "applied_live", published: true },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+
+    // The dialog closes immediately (immediate live), not held for the lookup.
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Roll back to this snapshot?" }),
+      ).not.toBeInTheDocument();
+    });
+    // The supplemental exact-ID lookup still runs (through a read-after-write 404
+    // grace) and surfaces the history advisory.
+    expect(
+      await screen.findByText("Configuration history degraded: history filesystem is full", undefined, {
+        timeout: 4000,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("snap-il")).toBeInTheDocument();
+    expect(recordReads).toBeGreaterThanOrEqual(2);
+    // The success outcome is never turned into a retry action.
+    expect(screen.queryByRole("button", { name: "Roll back" })).not.toBeInTheDocument();
+  });
+
+  it("shows both the degraded warning and finalization advisory for an immediate degraded rollback", async () => {
+    // Item 4: an immediate degraded rollback (200, applied_degraded) shows the
+    // committed-degraded warning AND, from its exact-ID record, a finalization
+    // advisory — with no retry action.
+    let recordReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config/history")
+        return Promise.resolve(json([{ id: "s1", time: "2026-01-01T00:00:00Z", size: 120 }]));
+      if (input === "/api/config/history/s1")
+        return Promise.resolve(json({ id: "s1", raw: 'listen = ":80"\n' }));
+      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "rollback" }));
+      if (input.startsWith("/api/config/rollback")) {
+        return Promise.resolve(
+          json({
+            ok: true,
+            apply_id: "rl_ideg",
+            mode: "hot",
+            reload: {
+              id: "rl_ideg",
+              outcome: "applied_degraded",
+              error: "stream reloaded degraded",
+            },
+          }),
+        );
+      }
+      if (input === "/api/config/applies/rl_ideg") {
+        recordReads += 1;
+        return Promise.resolve(
+          json({
+            id: "rl_ideg",
+            state: "terminal",
+            operation: "config.rollback",
+            finalization_error: "audit sink unavailable",
+            result: {
+              ok: true,
+              apply_id: "rl_ideg",
+              mode: "hot",
+              reload: {
+                id: "rl_ideg",
+                outcome: "applied_degraded",
+                error: "stream reloaded degraded",
+              },
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    render(
+      <Wrapper>
+        <HistoryPanel />
+      </Wrapper>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back" }));
+
+    // The committed-degraded warning shows immediately.
+    expect(await screen.findByText("Rollback applied — degraded reload")).toBeInTheDocument();
+    // The exact-ID lookup adds the finalization advisory in the same banner.
+    expect(
+      await screen.findByText("Managed apply finalization degraded: audit sink unavailable"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Roll back" })).not.toBeInTheDocument();
+    expect(recordReads).toBeGreaterThanOrEqual(1);
+  });
+
   it("closes the dialog and shows a persistent degraded banner without a retry action", async () => {
     // AC-10: a committed-but-degraded rollback (terminal, result.ok=true, reload
     // outcome != applied_live) is NOT a failure. The dialog — and its repeatable

@@ -129,7 +129,14 @@ rules:
 | malformed ID (not `rl_<instance>_<sequence>`) | `400 Bad Request` |
 | unknown or evicted ID | `404 Not Found` |
 | record present, still `pending` | `202 Accepted` with `state=pending` |
+| record present, `finalizing` | `202 Accepted` with `state=finalizing` |
 | record present, `terminal` | `200 OK` with the terminal record |
+| record in an invalid lifecycle state | `500 Internal Server Error` |
+
+`finalizing` is externally observable but remains **non-terminal**: the runtime
+outcome exists while history, audit, metrics and terminal-ledger completion are
+still running. A record is terminal only when `state=terminal` — HTTP 200 alone
+is never the terminal test — so clients must keep polling until then.
 
 Each pending record also carries the **absolute transaction deadline** (see
 [Reload timeout and deadlines](#reload-timeout-and-deadlines-globalreload_timeout)),
@@ -155,11 +162,22 @@ endpoint.
 Every terminal transaction is finalized **exactly once**. The finalizer claims
 the terminal callback through the ledger's `finalizing` state; a duplicate
 callback for the same ID is rejected without producing duplicate history, audit,
-or metric side effects. The terminal side effects run in a fixed order — record
-the terminal result in the ledger, emit terminal metrics, emit the terminal
-audit event, record history per the reversibility rules, update
-health/finalization status — and **only then** is it decided whether this record
-replaces the singular latest pointer.
+or metric side effects. The terminal side effects then run in a fixed order:
+
+1. Claim `pending` → `finalizing`.
+2. Record history according to the snapshot decision matrix.
+3. Record the history-outcome metric.
+4. Record the terminal managed-apply metric.
+5. Emit the operation-specific terminal audit event.
+6. Complete the per-ID terminal ledger record.
+7. Update the convenience latest pointer only when this record is the newest.
+8. Publish the advisory finalization-health state.
+9. Release the in-flight gate and expose terminal completion.
+
+The per-ID terminal ledger is deliberately completed **after** history so a
+browser retrieving the exact ID observes the record only once its history and
+audit provenance are attached; the `finalizing` state (step 1) is the externally
+observable window during which those steps run.
 
 **History rules.** A committed apply (`applied_live` or `applied_degraded`) and
 a rollback each receive a history snapshot. A restoration failure creates an

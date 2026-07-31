@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -72,6 +73,64 @@ func (s *Server) recordTimeoutAudit(r *http.Request, op ApplyOperation, result C
 		detail += " apply_id=" + result.ApplyID
 	}
 	s.recordAudit(r, string(op), "config", "failure", detail)
+}
+
+// managedApplyResolvePhase is the phase name reported when handler-side
+// candidate resolution (secret/filesystem provider reads) exceeds the absolute
+// managed-apply deadline before anything is persisted (AC-08).
+const managedApplyResolvePhase = "resolve"
+
+// candidatePreparationFailure classifies an error returned by handler-side
+// candidate preparation (secret/config resolution under the absolute
+// managed-apply deadline). A resolution deadline is a pre-persistence timeout
+// (504 with a structured resolve-phase ConfigApplyResult), a cancellation is a
+// client-abort (408), and any other error is an ordinary validation/rejection
+// left to the caller (handled=false). No apply ID is set because the coordinator
+// has not allocated one yet. It never reports persistence.
+func candidatePreparationFailure(mode string, err error) (ConfigApplyResult, int, bool) {
+	if mode == "" {
+		mode = "hot"
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return ConfigApplyResult{
+			OK:            false,
+			Mode:          mode,
+			TimedOutPhase: managedApplyResolvePhase,
+			Message: "The configuration apply exceeded reload_timeout during the resolve phase; " +
+				"nothing was changed. Investigate the slow secret or filesystem provider, " +
+				"or raise global.reload_timeout.",
+		}, http.StatusGatewayTimeout, true
+	case errors.Is(err, context.Canceled):
+		return ConfigApplyResult{
+			OK:   false,
+			Mode: mode,
+			Message: "The configuration apply was canceled during the resolve phase " +
+				"before anything was persisted.",
+		}, http.StatusRequestTimeout, true
+	default:
+		return ConfigApplyResult{}, 0, false
+	}
+}
+
+// writeCandidatePreparationFailure writes the structured timeout/cancel response
+// for a candidate-preparation error and records the matching failure audit,
+// returning true when it handled the error. A resolution deadline records the
+// dedicated timeout audit (phase=resolve) and writes 504; a cancellation records
+// a canceled-before-persistence audit and writes 408. Any other error is left to
+// the caller's ordinary validation path (returns false). Nothing is persisted.
+func (s *Server) writeCandidatePreparationFailure(w http.ResponseWriter, r *http.Request, reqCtx ApplyRequestContext, mode string, err error) bool {
+	result, status, handled := candidatePreparationFailure(mode, err)
+	if !handled {
+		return false
+	}
+	if result.TimedOutPhase != "" {
+		s.recordTimeoutAudit(r, reqCtx.Operation, result)
+	} else {
+		s.recordAudit(r, string(reqCtx.Operation), "config", "failure", "canceled before persistence: phase=resolve")
+	}
+	writeJSON(w, status, result)
+	return true
 }
 
 // ConfigApplyResult is the structured response for a managed configuration

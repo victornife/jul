@@ -61,6 +61,16 @@ function pendingRecord(id: string, deadline?: string): unknown {
   };
 }
 
+function finalizingRecord(id: string, deadline?: string): unknown {
+  return {
+    id,
+    state: "finalizing",
+    operation: "config.apply",
+    ...(deadline !== undefined ? { deadline } : {}),
+    result: { ok: true, apply_id: id, mode: "hot" },
+  };
+}
+
 // parsedRecord runs a raw fixture through the real schema so the derive-status
 // tests hold a full ManagedApplyRecord rather than a hand-typed partial.
 function parsedRecord(raw: unknown) {
@@ -94,6 +104,13 @@ describe("fetchManagedApply — discriminated lookup", () => {
     if (lookup.kind === "record") expect(lookup.record.state).toBe("pending");
   });
 
+  it("returns kind=record for a finalizing (202) transaction", async () => {
+    globalThis.fetch = vi.fn(() => Promise.resolve(json(finalizingRecord(BOOT_ID), 202)));
+    const lookup = await fetchManagedApply(BOOT_ID);
+    expect(lookup.kind).toBe("record");
+    if (lookup.kind === "record") expect(lookup.record.state).toBe("finalizing");
+  });
+
   it("returns kind=missing for a 404 — never a record", async () => {
     globalThis.fetch = vi.fn(() => Promise.resolve(new Response(null, { status: 404 })));
     const lookup = await fetchManagedApply(BOOT_ID);
@@ -103,6 +120,28 @@ describe("fetchManagedApply — discriminated lookup", () => {
   it("still throws for a non-404 transport failure", async () => {
     globalThis.fetch = vi.fn(() => Promise.resolve(json({ error: "bad id" }, 400)));
     await expect(fetchManagedApply(BOOT_ID)).rejects.toThrow();
+  });
+});
+
+describe("ManagedApplyRecordSchema — finalization panic fallback", () => {
+  it("parses a terminal record that carries a finalization_error", () => {
+    // The panic fallback preserves the operation and complete result and adds a
+    // finalization_error; it must remain parseable by the wire schema.
+    const raw = {
+      id: BOOT_ID,
+      state: "terminal",
+      operation: "config.apply",
+      result: { ok: true, apply_id: BOOT_ID, mode: "hot" },
+      finalization_error: "managed apply finalization panic: boom",
+    };
+    const record = ManagedApplyRecordSchema.parse(raw);
+    expect(record.state).toBe("terminal");
+    expect(record.operation).toBe("config.apply");
+    expect(record.result.apply_id).toBe(BOOT_ID);
+    expect(record.finalization_error).toContain("finalization panic");
+    for (const forbidden of ["owner_token_id", "token_digest", "source_ip", "previous_raw"]) {
+      expect(Object.keys(record)).not.toContain(forbidden);
+    }
   });
 });
 
@@ -223,6 +262,15 @@ describe("deriveManagedApplyStatus", () => {
       deriveManagedApplyStatus({
         ...base,
         lookup: { kind: "record", record: parsedRecord(pendingRecord(BOOT_ID)) },
+      }),
+    ).toBe("polling");
+  });
+
+  it("is polling for a finalizing record before the deadline", () => {
+    expect(
+      deriveManagedApplyStatus({
+        ...base,
+        lookup: { kind: "record", record: parsedRecord(finalizingRecord(BOOT_ID)) },
       }),
     ).toBe("polling");
   });
@@ -348,6 +396,35 @@ describe("useManagedApplyRecord — hook wiring", () => {
       { timeout: 4000 },
     );
     expect(result.current.record?.id).toBe(BOOT_ID);
+    expect(calls).toBeGreaterThanOrEqual(3);
+    unmount();
+  });
+
+  it("polls through pending then finalizing to terminal, never terminal early", async () => {
+    // The finalizing state is externally observable but non-terminal: the hook
+    // must keep polling through it and only report terminal once the record
+    // actually reaches state=terminal.
+    let calls = 0;
+    const seen: string[] = [];
+    globalThis.fetch = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve(json(pendingRecord(BOOT_ID), 202));
+      if (calls === 2) return Promise.resolve(json(finalizingRecord(BOOT_ID), 202));
+      return Promise.resolve(json(terminalRecord(BOOT_ID)));
+    });
+    const { result, unmount } = renderHook(() => useManagedApplyRecord(BOOT_ID), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(
+      () => {
+        seen.push(result.current.status);
+        expect(result.current.status).toBe("terminal");
+      },
+      { timeout: 4000 },
+    );
+    // Terminal was never reported while the record was pending or finalizing.
+    expect(seen.slice(0, -1)).not.toContain("terminal");
+    expect(result.current.record?.state).toBe("terminal");
     expect(calls).toBeGreaterThanOrEqual(3);
     unmount();
   });

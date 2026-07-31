@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -170,6 +171,94 @@ func TestParseHistoryID(t *testing.T) {
 	for _, tc := range cases {
 		if got := parseHistoryID(tc.id); !got.Equal(tc.want) {
 			t.Errorf("%s: parseHistoryID(%q) = %v, want %v", tc.name, tc.id, got, tc.want)
+		}
+	}
+}
+
+// TestHistoryNextSnapshotIDThirdCollision proves the third same-millisecond
+// snapshot allocates a stable "<ts>_2" id — never the nested "<ts>_1_2" the old
+// loop produced, which parsed back to a zero time (defect 5A).
+func TestHistoryNextSnapshotIDThirdCollision(t *testing.T) {
+	dir := t.TempDir()
+	h := newHistory(dir, 50)
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	base := now.UTC().Format(historyTimeLayout)
+
+	for _, id := range []string{base, base + "_1"} {
+		if err := os.WriteFile(filepath.Join(dir, id+historyExt), []byte("a = 1\n"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+
+	id, _, err := h.nextSnapshotID(now)
+	if err != nil {
+		t.Fatalf("nextSnapshotID: %v", err)
+	}
+	if want := base + "_2"; id != want {
+		t.Fatalf("id = %q, want %q (must not nest suffixes)", id, want)
+	}
+	if got := parseHistoryID(id); got.IsZero() {
+		t.Fatalf("parseHistoryID(%q) returned the zero time", id)
+	}
+}
+
+// TestHistoryNextSnapshotIDManyCollisions proves the suffix stays flat past ten
+// same-millisecond collisions: after _1.._10 the next id is _11, confirming no
+// nested suffix is ever produced.
+func TestHistoryNextSnapshotIDManyCollisions(t *testing.T) {
+	dir := t.TempDir()
+	h := newHistory(dir, 50)
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	base := now.UTC().Format(historyTimeLayout)
+
+	if err := os.WriteFile(filepath.Join(dir, base+historyExt), []byte("a = 1\n"), 0o600); err != nil {
+		t.Fatalf("seed base: %v", err)
+	}
+	for i := 1; i <= 10; i++ {
+		id := fmt.Sprintf("%s_%d", base, i)
+		if err := os.WriteFile(filepath.Join(dir, id+historyExt), []byte("a = 1\n"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+
+	id, _, err := h.nextSnapshotID(now)
+	if err != nil {
+		t.Fatalf("nextSnapshotID: %v", err)
+	}
+	if want := base + "_11"; id != want {
+		t.Fatalf("id = %q, want %q", id, want)
+	}
+	if got := parseHistoryID(id); got.IsZero() {
+		t.Fatalf("parseHistoryID(%q) returned the zero time", id)
+	}
+}
+
+// TestHistoryNextSnapshotIDParsesAcrossThreeCollisions proves every id produced
+// across three same-millisecond snapshots (base, _1, _2) parses back to the same
+// non-zero timestamp, closing the nested-suffix zero-time regression end to end.
+func TestHistoryNextSnapshotIDParsesAcrossThreeCollisions(t *testing.T) {
+	dir := t.TempDir()
+	h := newHistory(dir, 50)
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	base := now.UTC().Format(historyTimeLayout)
+	want := parseHistoryID(base)
+	if want.IsZero() {
+		t.Fatal("base timestamp did not parse")
+	}
+
+	for _, expect := range []string{base, base + "_1", base + "_2"} {
+		id, path, err := h.nextSnapshotID(now)
+		if err != nil {
+			t.Fatalf("nextSnapshotID: %v", err)
+		}
+		if id != expect {
+			t.Fatalf("id = %q, want %q", id, expect)
+		}
+		if got := parseHistoryID(id); !got.Equal(want) {
+			t.Fatalf("parseHistoryID(%q) = %v, want %v", id, got, want)
+		}
+		if err := os.WriteFile(path, []byte("a = 1\n"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
 }

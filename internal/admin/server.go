@@ -1126,6 +1126,12 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	effectiveCandidate, candidateErr := prepareMutationCandidateContext(opCtx, &reqCtx, candidate)
 	if candidateErr != nil {
+		// A resolution deadline is a pre-persistence timeout (504); a
+		// cancellation is a client abort (408). Only a genuine invalid value
+		// falls through to the 400 response. Settings is always hot mode.
+		if s.writeCandidatePreparationFailure(w, r, reqCtx, "hot", candidateErr) {
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": candidateErr.Error()})
 		return
 	}

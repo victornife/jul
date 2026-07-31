@@ -1647,13 +1647,15 @@ function parseConfigMutationResult(data: unknown): ApplyResult {
 // the runtime overview's global last_managed_apply — closes the window where a
 // newer, unrelated apply could be mistaken for the awaited one (AC-09).
 //
-// A record is `pending` (HTTP 202) until it reaches exactly one terminal result
-// (HTTP 200, state=terminal). `result` is the same structured ConfigApplyResult
-// the apply response carries; it already omits secrets, actor, and source IP.
-// The three finalization fields are advisory provenance (AC-14): a committed
-// apply can be ok=true while history_error is non-empty (its history sidecar
-// degraded) — that is NOT an apply failure.
-export const ManagedApplyStateSchema = z.enum(["pending", "terminal"]);
+// A record is `pending` or `finalizing` (both HTTP 202, both non-terminal) until
+// it reaches exactly one terminal result (HTTP 200, state=terminal). `finalizing`
+// means the runtime outcome already exists but history/audit/ledger finalization
+// is still running; clients must keep polling until state=terminal. `result` is
+// the same structured ConfigApplyResult the apply response carries; it already
+// omits secrets, actor, and source IP. The three finalization fields are advisory
+// provenance (AC-14): a committed apply can be ok=true while history_error is
+// non-empty (its history sidecar degraded) — that is NOT an apply failure.
+export const ManagedApplyStateSchema = z.enum(["pending", "finalizing", "terminal"]);
 export type ManagedApplyState = z.infer<typeof ManagedApplyStateSchema>;
 
 export const ManagedApplyRecordSchema = z.object({

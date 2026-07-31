@@ -268,6 +268,17 @@ function EntryRow({
   );
 }
 
+// TrackedRollback tracks a submitted rollback so its exact-ID ledger record can
+// be fetched. pendingRuntime is true only for a saved_not_live result whose
+// runtime outcome is still in flight (keeps the dialog open); immediate results
+// are tracked solely to retrieve finalization provenance. attempt guards against
+// a late record from a superseded rollback attempt updating the current UI.
+interface TrackedRollback {
+  readonly applyID: string;
+  readonly attempt: number;
+  readonly pendingRuntime: boolean;
+}
+
 export function HistoryPanel() {
   const qc = useQueryClient();
   const [viewing, setViewing] = useState<string | null>(null);
@@ -275,7 +286,11 @@ export function HistoryPanel() {
   const [rollingId, setRollingId] = useState<string | null>(null);
   const [confirmAdmin, setConfirmAdmin] = useState(false);
   const [adminChanges, setAdminChanges] = useState<string[]>([]);
-  const [pendingApplyID, setPendingApplyID] = useState<string | null>(null);
+  const [trackedRollback, setTrackedRollback] = useState<TrackedRollback | null>(null);
+  // A saved_not_live rollback still has a pending RUNTIME outcome that keeps the
+  // dialog open; an immediate result is tracked only to fetch finalization
+  // provenance, so it never gates the pending/expired dialog UI.
+  const pendingApplyID = trackedRollback?.pendingRuntime === true ? trackedRollback.applyID : null;
   const [terminalError, setTerminalError] = useState<Error | null>(null);
   // AC-10: a committed-but-degraded rollback surfaces here as a persistent,
   // dismissable warning banner (distinct from an error) with no retry action.
@@ -300,8 +315,25 @@ export function HistoryPanel() {
     onSuccess: (result, variables) => {
       if (rollbackAttemptRef.current !== variables.attempt) return;
       setRollingId(null);
+
+      // Track every managed rollback (immediate or deferred) that carries an
+      // apply id so its exact-ID ledger record can be fetched for finalization
+      // provenance. Only a saved_not_live result still has a pending RUNTIME
+      // outcome that keeps the dialog open (pendingRuntime); immediate results
+      // are already terminal at runtime and tracked for provenance only.
+      if (result.apply_id !== undefined) {
+        setTrackedRollback({
+          applyID: result.apply_id,
+          attempt: variables.attempt,
+          pendingRuntime: result.reload?.outcome === "saved_not_live",
+        });
+      } else {
+        setTrackedRollback(null);
+      }
+
       if (result.reload?.outcome === "saved_not_live" && result.apply_id) {
-        setPendingApplyID(result.apply_id);
+        // The dialog stays open because pendingRuntime is true; the terminal
+        // record effect drives the rest of the lifecycle.
         setTerminalError(null);
         return;
       }
@@ -310,10 +342,11 @@ export function HistoryPanel() {
         // snapshot is now live; some subsystems reloaded degraded. Close the
         // dialog (and its repeatable rollback action), refresh dependent views,
         // and leave a separate, persistent warning banner — never a retry.
+        // trackedRollback is intentionally NOT cleared: its exact-ID lookup is
+        // still needed for finalization provenance.
         setConfirmId(null);
         setConfirmAdmin(false);
         setAdminChanges([]);
-        setPendingApplyID(null);
         setTerminalError(null);
         setDegradedNotice(
           result.reload.error ??
@@ -322,10 +355,11 @@ export function HistoryPanel() {
         void qc.invalidateQueries();
         return;
       }
+      // Immediate applied_live: close the dialog and refresh as before, but keep
+      // trackedRollback until the exact ledger record is retrieved.
       setConfirmId(null);
       setConfirmAdmin(false);
       setAdminChanges([]);
-      setPendingApplyID(null);
       void qc.invalidateQueries();
     },
     onError: (error, variables) => {
@@ -345,31 +379,42 @@ export function HistoryPanel() {
   // shared useManagedApplyRecord hook owns the read-after-write 404 grace,
   // deadline-bounded cadence, and expiry so this panel and ConfigPanel observe
   // one lifecycle. A missing record is never mistaken for success.
-  const rollbackManaged = useManagedApplyRecord(pendingApplyID ?? undefined);
-  const rollbackRecord = rollbackManaged.record;
-  // The rollback did not reach a terminal result by its deadline. Gated on a
-  // pending apply id so the idle hook never trips the expired UI.
+  const rollbackManaged = useManagedApplyRecord(trackedRollback?.applyID ?? undefined);
+  // The rollback did not reach a terminal RUNTIME result by its deadline. Gated
+  // on a pending apply id so the idle hook never trips the expired UI.
   const pollingExpired = pendingApplyID !== null && rollbackManaged.status === "expired";
 
   useEffect(() => {
-    if (!pendingApplyID || !confirmId) return;
-    const record = rollbackRecord;
-    // Only a terminal record for the exact ID resolves the wait. null (404, not
-    // yet recorded) and state==="pending" both keep the dialog open — the
-    // console never claims success from a missing or in-flight record.
-    if (!record || record.id !== pendingApplyID || record.state !== "terminal") return;
-    setPendingApplyID(null);
-    setConfirmAdmin(false);
-    setAdminChanges([]);
-    // AC-14: surface finalization provenance whenever the terminal record
-    // carries it, including on a fully-live rollback — it is advisory and
-    // independent of the reload outcome (a committed rollback can be ok=true
+    if (trackedRollback === null) return;
+    // Ignore a ledger record belonging to a superseded rollback attempt.
+    if (rollbackAttemptRef.current !== trackedRollback.attempt) return;
+
+    const record = rollbackManaged.record;
+    if (record === null || record.id !== trackedRollback.applyID || record.state !== "terminal") {
+      return;
+    }
+
+    // AC-14: always retrieve and render finalization provenance from the exact
+    // terminal record, including for an immediate 200 rollback. It is advisory
+    // and independent of the reload outcome (a committed rollback can be ok=true
     // while its history sidecar degraded). Never readiness-affecting.
     setFinalizationNotice(deriveFinalizationAdvisory(record));
+
+    // Supplemental lookup for an already-handled immediate result: the runtime
+    // UI was driven in onSuccess, so do not replay the rollback state machine.
+    if (!trackedRollback.pendingRuntime) {
+      setTrackedRollback(null);
+      return;
+    }
+
+    // The remainder handles a rollback that originally returned 202 saved_not_live.
+    setConfirmAdmin(false);
+    setAdminChanges([]);
     const result = record.result;
     if (result.ok && result.reload?.outcome === "applied_live") {
       setConfirmId(null);
       setTerminalError(null);
+      setTrackedRollback(null);
       void qc.invalidateQueries();
       return;
     }
@@ -383,6 +428,7 @@ export function HistoryPanel() {
         result.reload?.error ??
           "Rollback applied with a degraded reload. The snapshot is now the live configuration, but one or more subsystems reloaded degraded — review Runtime Overview.",
       );
+      setTrackedRollback(null);
       void qc.invalidateQueries();
       return;
     }
@@ -395,8 +441,30 @@ export function HistoryPanel() {
             : "Rollback was rejected and restoration could not be confirmed. Check Runtime Overview.",
       ),
     );
+    setTrackedRollback(null);
     void qc.invalidateQueries();
-  }, [confirmId, pendingApplyID, qc, rollbackRecord]);
+  }, [trackedRollback, rollbackManaged.record, qc]);
+
+  // AC-14: for an immediate rollback whose supplemental provenance lookup expires
+  // before the terminal record is retrieved, the runtime outcome is already
+  // known — keep it and surface a distinct advisory rather than a rollback
+  // failure.
+  useEffect(() => {
+    if (
+      trackedRollback !== null &&
+      !trackedRollback.pendingRuntime &&
+      rollbackAttemptRef.current === trackedRollback.attempt &&
+      rollbackManaged.status === "expired"
+    ) {
+      setFinalizationNotice({
+        title: "Rollback applied, but finalization status is unavailable",
+        messages: [
+          "The exact terminal ledger record was not available before its deadline. Check Runtime Overview and configuration history before relying on rollback history.",
+        ],
+      });
+      setTrackedRollback(null);
+    }
+  }, [trackedRollback, rollbackManaged.status]);
 
   if (isLoading) return <Loading label="Loading history…" />;
   if (isError || !data)
@@ -507,7 +575,7 @@ export function HistoryPanel() {
                     setConfirmId(id);
                     setConfirmAdmin(false);
                     setAdminChanges([]);
-                    setPendingApplyID(null);
+                    setTrackedRollback(null);
                     setTerminalError(null);
                     setDegradedNotice(null);
                     setFinalizationNotice(null);
@@ -537,7 +605,7 @@ export function HistoryPanel() {
             setConfirmId(null);
             setConfirmAdmin(false);
             setAdminChanges([]);
-            setPendingApplyID(null);
+            setTrackedRollback(null);
             setTerminalError(null);
             rollbackMutation.reset();
           }}

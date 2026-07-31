@@ -708,10 +708,15 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// writes a terminal ledger record carrying the FinalizationError. A
 		// finalization panic never fails an already-committed apply: the raw
 		// config stays roll-back-able.
-		coordinator.OnManagedApplyFinalizationError = func(applyID string, err error) {
+		coordinator.OnManagedApplyFinalizationError = func(completion admin.ManagedApplyCompletion, finalizationErr error) {
+			applyID := completion.Result.ApplyID
+			if applyID == "" && completion.Result.Reload != nil {
+				applyID = completion.Result.Reload.ID
+			}
+
 			detail := "managed apply finalization callback failed"
-			if err != nil {
-				detail = err.Error()
+			if finalizationErr != nil {
+				detail = finalizationErr.Error()
 			}
 			log.Error("managed apply finalization callback panicked",
 				"apply_id", applyID,
@@ -727,19 +732,35 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				ApplyID: applyID,
 				Detail:  detail,
 			})
-			// Best-effort terminal ledger record so a browser retrieving the
-			// exact apply ID sees the finalization failure. The panic aborted the
-			// normal completion path, so this is the only record for the ID.
-			if applyID != "" {
-				_ = managedApplies.Complete(admin.ManagedApplyRecord{
-					ID:                applyID,
-					CompletedAt:       time.Now().UTC(),
-					FinalizationError: detail,
-				})
-				// WS06 §7.5: keep the retained-ledger gauge in sync after this
-				// out-of-band terminal completion.
-				metrics.SetManagedApplyRegistryEntries(managedApplies.TerminalCount())
+			if applyID == "" {
+				return
 			}
+			// Best-effort terminal ledger record so a browser retrieving the
+			// exact apply ID sees the finalization failure. FailFinalization
+			// preserves the operation and complete apply result in place instead
+			// of overwriting them with this incomplete emergency fallback; the
+			// completion's PreviousRaw is sensitive and is never forwarded here.
+			fallback := admin.ManagedApplyRecord{
+				ID:                applyID,
+				Operation:         completion.Context.Operation,
+				StartedAt:         completion.Context.StartedAt,
+				Deadline:          completion.Context.Deadline,
+				CompletedAt:       time.Now().UTC(),
+				Result:            completion.Result,
+				OwnerTokenID:      completion.Context.TokenID,
+				FinalizationError: detail,
+			}
+			if err := managedApplies.FailFinalization(fallback); err != nil {
+				log.Error("managed apply panic fallback could not complete ledger",
+					"apply_id", applyID,
+					"error", err.Error(),
+				)
+				metrics.ObserveManagedApplyFinalizationError("registry")
+				return
+			}
+			// WS06 §7.5: keep the retained-ledger gauge in sync after this
+			// out-of-band terminal completion.
+			metrics.SetManagedApplyRegistryEntries(managedApplies.TerminalCount())
 		}
 		// WS06 §7.6: make managed-apply machinery failures that happen OUTSIDE
 		// the unified completion callback explicit — a saved_not_live terminal

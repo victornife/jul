@@ -98,9 +98,9 @@ type Metrics struct {
 	managedApplyRegistryEntries prometheus.Gauge
 	// managedApplyLookup counts exact-ID managed-apply lookups (WS06 §7.5:
 	// jul_managed_apply_terminal_lookup_total), labeled by the bounded result
-	// ("pending", "terminal", "missing", or "invalid"). result is the only label
-	// and is a fixed low-cardinality enum — never an apply ID, actor, source IP,
-	// path, or version.
+	// ("pending", "finalizing", "terminal", "missing", or "invalid"). result is
+	// the only label and is a fixed low-cardinality enum — never an apply ID,
+	// actor, source IP, path, or version.
 	managedApplyLookup *prometheus.CounterVec
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
@@ -312,7 +312,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}),
 		managedApplyLookup: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_managed_apply_terminal_lookup_total",
-			Help: "Exact-ID managed-apply lookups, labeled by bounded result (pending/terminal/missing/invalid).",
+			Help: "Exact-ID managed-apply lookups, labeled by bounded result (pending/finalizing/terminal/missing/invalid).",
 		}, []string{"result"}),
 		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_phase_duration_seconds",
@@ -745,10 +745,10 @@ func (m *Metrics) SetManagedApplyRegistryEntries(n int) {
 }
 
 // ObserveManagedApplyLookup counts one exact-ID managed-apply lookup (WS06
-// §7.5). result is the bounded lookup disposition ("pending", "terminal",
-// "missing", or "invalid"); an empty value is normalized to "unknown". result
-// is the only label and is a fixed low-cardinality enum — never an apply ID,
-// actor, source IP, path, or version.
+// §7.5). result is the bounded lookup disposition ("pending", "finalizing",
+// "terminal", "missing", or "invalid"); an empty value is normalized to
+// "unknown". result is the only label and is a fixed low-cardinality enum —
+// never an apply ID, actor, source IP, path, or version.
 func (m *Metrics) ObserveManagedApplyLookup(result string) {
 	if result == "" {
 		result = "unknown"

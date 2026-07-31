@@ -53,16 +53,20 @@ accepted apply regardless of later transactions.
 
 For every unique terminal transaction, in this order:
 
-1. Record the terminal result in the per-ID ledger.
-2. Emit terminal metrics.
-3. Emit the terminal audit event.
-4. Record history according to the reversibility rules.
-5. Update health/finalization status.
-6. **Only then** decide whether this record replaces the singular latest
-   pointer.
+1. Claim `pending → finalizing`.
+2. Record history according to the reversibility rules.
+3. Emit the history-outcome metric.
+4. Emit the terminal managed-apply metric.
+5. Emit the terminal audit event.
+6. Complete the per-ID terminal ledger record.
+7. Update health/finalization status and, **only then**, decide whether this
+   record replaces the singular latest pointer.
 
-The high-water guard must not wrap the first five operations. A duplicate
-terminal callback produces no duplicate side effects.
+The per-ID ledger is completed **after** history so a retrieval observes the
+record only once its history/audit provenance is attached; the `finalizing`
+state (step 1) is the externally observable window during which these steps run.
+The high-water guard must not wrap these operations. A duplicate terminal
+callback produces no duplicate side effects.
 
 ### 4. Coordinator ordering
 
@@ -120,6 +124,13 @@ outcome. A finalization-callback panic is caught, converted into a finalization
 error, surfaced through admin health, and must not wedge the coordinator.
 Finalization failure is an observability/compliance degradation, not a runtime
 rollback.
+
+A callback panic does **not** create a replacement zero-value record. The
+registry transitions the existing record to terminal **in place**, preserving
+the operation and complete apply result while attaching `finalization_error`; a
+bare ID/error fallback that cannot be reconstructed into a valid terminal result
+is rejected rather than published, so the public record stays parseable and
+never loses its operation or result.
 
 ## Consequences
 

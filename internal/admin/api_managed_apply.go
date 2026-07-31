@@ -57,11 +57,15 @@ func (rec ManagedApplyRecord) toPublic() publicManagedApplyRecord {
 // Response rules:
 //
 //	pending          → 202 with state=pending
+//	finalizing       → 202 with state=finalizing
 //	terminal         → 200 with the complete terminal record
 //	unknown/expired  → 404 structured error
 //	invalid ID       → 400 structured error
+//	invalid state    → 500 structured error
 //
-// The response is always Cache-Control: no-store and omits actor and source IP.
+// A record is terminal only when state == terminal; HTTP 200 alone is never the
+// terminal test. The response is always Cache-Control: no-store and omits actor
+// and source IP.
 func (s *Server) handleManagedApplyGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 
@@ -82,18 +86,33 @@ func (s *Server) handleManagedApplyGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "managed apply not found"})
 		return
 	}
-	if rec.State == ManagedApplyPending {
+	switch rec.State {
+	case ManagedApplyPending:
 		s.observeManagedApplyLookup("pending")
 		writeJSON(w, http.StatusAccepted, rec.toPublic())
-		return
+	case ManagedApplyFinalizing:
+		// The runtime outcome exists, but history, audit, metrics and the
+		// terminal-ledger completion are still running: still in-flight to the
+		// client, which must keep polling until state=terminal.
+		s.observeManagedApplyLookup("finalizing")
+		writeJSON(w, http.StatusAccepted, rec.toPublic())
+	case ManagedApplyTerminal:
+		s.observeManagedApplyLookup("terminal")
+		writeJSON(w, http.StatusOK, rec.toPublic())
+	default:
+		// A state outside the bounded enum is a server consistency error; it is
+		// never reported as a completed transaction.
+		s.observeManagedApplyLookup("invalid")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "managed apply has an invalid lifecycle state",
+		})
 	}
-	s.observeManagedApplyLookup("terminal")
-	writeJSON(w, http.StatusOK, rec.toPublic())
 }
 
 // observeManagedApplyLookup records one exact-ID lookup outcome when the
 // composition root wired a bounded lookup metric (WS06 §7.5). result is a fixed
-// low-cardinality enum: "pending", "terminal", "missing", or "invalid".
+// low-cardinality enum: "pending", "finalizing", "terminal", "missing", or
+// "invalid".
 func (s *Server) observeManagedApplyLookup(result string) {
 	if s.deps.ObserveManagedApplyLookup != nil {
 		s.deps.ObserveManagedApplyLookup(result)
