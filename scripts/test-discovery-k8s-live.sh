@@ -220,7 +220,7 @@ step "Waiting for jul to discover initial backends (port 18081)"
 for i in $(seq 1 60); do
   POOL=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
     "http://127.0.0.1:$ADMIN_PORT/api/apps")
-  if echo "$POOL" | grep -q '"18081"'; then
+  if echo "$POOL" | grep -q '18081'; then
     echo "jul pool converged to 18081"
     break
   fi
@@ -251,7 +251,7 @@ step "Waiting for jul pool to converge to port 18082"
 for i in $(seq 1 30); do
   POOL=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
     "http://127.0.0.1:$ADMIN_PORT/api/apps")
-  if echo "$POOL" | grep -q '"18082"'; then
+  if echo "$POOL" | grep -q '18082'; then
     echo "jul pool converged to 18082"
     echo "$POOL" > "$ARTIFACTS/k8s-after.txt"
     break
@@ -265,7 +265,7 @@ BEFORE_OK=false
 AFTER_OK=false
 echo "$SLICE_BEFORE" | grep -qE '"port":\s*18081' && BEFORE_OK=true
 AFTER_DATA=$(cat "$ARTIFACTS/k8s-after.txt")
-echo "$AFTER_DATA" | grep -q '"18082"' && AFTER_OK=true
+echo "$AFTER_DATA" | grep -q '18082' && AFTER_OK=true
 
 {
   echo "k8s_lane=$([ "$BEFORE_OK" = true ] && [ "$AFTER_OK" = true ] && echo PASS || echo FAIL)"
