@@ -957,11 +957,6 @@ func (s *Server) redactUnionLocked() redact.State {
 // On any failure before Publish, plan.Abort() releases candidate resources.
 func (s *Server) doReload(req ReloadRequest) {
 	preparedOwned := req.PreparedAdmin != nil
-	defer func() {
-		if preparedOwned {
-			req.PreparedAdmin.Abort()
-		}
-	}()
 	result := ReloadResult{
 		ID:        req.ID,
 		Source:    req.Source,
@@ -973,10 +968,18 @@ func (s *Server) doReload(req ReloadRequest) {
 	if s.OnReloadStart != nil {
 		s.OnReloadStart()
 	}
+	// Send the result only after any prepared resources have been released.
+	// The abort defer is registered second so it runs first (LIFO), ensuring
+	// callers observe the abort callback before the result is delivered.
 	defer func() {
 		s.sendReloadResult(req.Result, &result)
 		if req.Finalized != nil {
 			<-req.Finalized
+		}
+	}()
+	defer func() {
+		if preparedOwned {
+			req.PreparedAdmin.Abort()
 		}
 	}()
 

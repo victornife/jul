@@ -560,8 +560,14 @@ func TestLiveSnapshotCoherentDuringReload(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("timed out sending reload %d", i)
 		}
+		// Yield so the snapshot reader goroutine can run even on a single
+		// CPU or under heavy load (flaky on Windows CI otherwise).
+		runtime.Gosched()
 	}
 
+	// Give the reader a moment to perform its first check before we signal it
+	// to stop, ensuring checks is non-zero on slower schedulers.
+	time.Sleep(50 * time.Millisecond)
 	close(stop)
 	wg.Wait()
 	close(errs)
