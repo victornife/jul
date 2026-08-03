@@ -9,10 +9,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +49,7 @@ func TestHTTP3RequiresConfiguredClientCertificate(t *testing.T) {
 			http.Error(w, "verified client certificate missing", http.StatusUnauthorized)
 			return
 		}
+		w.Header().Set("X-Client-CN", r.TLS.PeerCertificates[0].Subject.CommonName)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -61,15 +64,7 @@ func TestHTTP3RequiresConfiguredClientCertificate(t *testing.T) {
 	defer func() { _ = h3.Close(context.Background()) }()
 	addr := h3.(*h3Conn).ln.Addr().String()
 
-	serverRoots := x509.NewCertPool()
-	serverPEM, err := os.ReadFile(serverCertPath)
-	if err != nil {
-		t.Fatalf("read server certificate: %v", err)
-	}
-	if !serverRoots.AppendCertsFromPEM(serverPEM) {
-		t.Fatal("append server certificate")
-	}
-
+	serverRoots := certificatePool(t, serverCertPath)
 	tests := []struct {
 		name         string
 		certificates []tls.Certificate
@@ -108,6 +103,9 @@ func TestHTTP3RequiresConfiguredClientCertificate(t *testing.T) {
 			if resp.ProtoMajor != 3 {
 				t.Fatalf("protocol = %q, want HTTP/3", resp.Proto)
 			}
+			if got := resp.Header.Get("X-Client-CN"); got != "valid-client" {
+				t.Fatalf("client identity = %q, want valid-client", got)
+			}
 		})
 	}
 }
@@ -143,10 +141,7 @@ func TestHTTP3RequestClientCertificateAllowsAnonymousButRejectsUntrusted(t *test
 	defer func() { _ = h3.Close(context.Background()) }()
 	addr := h3.(*h3Conn).ln.Addr().String()
 
-	serverRoots := x509.NewCertPool()
-	serverPEM, _ := os.ReadFile(serverCertPath)
-	serverRoots.AppendCertsFromPEM(serverPEM)
-
+	serverRoots := certificatePool(t, serverCertPath)
 	anonymous := &http3.Transport{TLSClientConfig: &tls.Config{RootCAs: serverRoots, ServerName: "localhost"}}
 	client := &http.Client{Transport: anonymous, Timeout: 3 * time.Second}
 	resp, err := client.Get("https://" + addr + "/")
@@ -166,4 +161,95 @@ func TestHTTP3RequestClientCertificateAllowsAnonymousButRejectsUntrusted(t *test
 	if err == nil {
 		t.Fatal("expected an untrusted presented certificate to fail in request mode")
 	}
+}
+
+func TestHTTP3PreservesAdditionalClientCertificateVerifier(t *testing.T) {
+	dir := t.TempDir()
+	serverCertPath, serverKeyPath := writeSelfSigned(t, dir, "h3-mtls-verifier", "localhost")
+	serverCert, err := tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := newCA(t)
+	_, allowed := ca.clientCert(t, "allowed", 30, []string{"allowed.example"}, nil)
+	_, denied := ca.clientCert(t, "denied", 31, []string{"denied.example"}, nil)
+	clientRoots := x509.NewCertPool()
+	clientRoots.AddCert(ca.cert)
+
+	var verified atomic.Int64
+	serverTLS := &tls.Config{
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &serverCert, nil },
+		ClientAuth:     tls.RequireAndVerifyClientCert,
+		ClientCAs:      clientRoots,
+		VerifyPeerCertificate: func(_ [][]byte, chains [][]*x509.Certificate) error {
+			if len(chains) == 0 || len(chains[0]) == 0 {
+				return errors.New("verified client chain missing")
+			}
+			if err := chains[0][0].VerifyHostname("allowed.example"); err != nil {
+				return err
+			}
+			verified.Add(1)
+			return nil
+		},
+	}
+
+	h3, err := newStagedHTTP3WithTLS("127.0.0.1:0", serverTLS, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h3.Activate(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = h3.Close(context.Background()) }()
+	addr := h3.(*h3Conn).ln.Addr().String()
+	serverRoots := certificatePool(t, serverCertPath)
+
+	request := func(cert tls.Certificate) error {
+		tr := &http3.Transport{TLSClientConfig: &tls.Config{
+			RootCAs:      serverRoots,
+			ServerName:   "localhost",
+			Certificates: []tls.Certificate{cert},
+		}}
+		defer func() { _ = tr.Close() }()
+		resp, err := (&http.Client{Transport: tr, Timeout: 3 * time.Second}).Get("https://" + addr + "/")
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		return err
+	}
+
+	if err := request(allowed); err != nil {
+		t.Fatalf("allowed certificate failed: %v", err)
+	}
+	if err := request(denied); err == nil {
+		t.Fatal("expected additional peer verifier to reject denied SAN")
+	}
+	if verified.Load() != 1 {
+		t.Fatalf("successful verifier calls = %d, want 1", verified.Load())
+	}
+}
+
+func TestNewStagedHTTP3WithTLSRejectsInvalidTemplates(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if _, err := newStagedHTTP3WithTLS("127.0.0.1:0", nil, http.NotFoundHandler(), nil, logger); err == nil {
+		t.Fatal("expected nil TLS template to fail")
+	}
+	if _, err := newStagedHTTP3WithTLS("127.0.0.1:0", &tls.Config{MaxVersion: tls.VersionTLS12}, http.NotFoundHandler(), nil, logger); err == nil {
+		t.Fatal("expected a TLS 1.2 maximum to fail for HTTP/3")
+	}
+}
+
+func certificatePool(t *testing.T, certPath string) *x509.CertPool {
+	t.Helper()
+	pool := x509.NewCertPool()
+	pemBytes, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		t.Fatal("append server certificate")
+	}
+	return pool
 }
