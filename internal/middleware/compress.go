@@ -195,10 +195,13 @@ func (cw *compressWriter) WriteHeader(code int) {
 	}
 	cw.sawHeader = true
 	cw.code = code
-	// Responses without a body, or already encoded, never get compressed. The
-	// Vary header is added in flushHeader so it is guaranteed even for responses
-	// that never call WriteHeader (e.g. an empty body).
-	if !bodyAllowed(code) || cw.Header().Get("Content-Encoding") != "" {
+	// Responses without a body, responses already encoded, and representations
+	// that prohibit intermediary transformation never get compressed. The Vary
+	// header is added in flushHeader so it is guaranteed even for empty bodies.
+	if !bodyAllowed(code) ||
+		cw.Header().Get("Content-Encoding") != "" ||
+		cacheControlNoTransform(cw.r.Header) ||
+		cacheControlNoTransform(cw.Header()) {
 		cw.startPassthrough()
 	}
 }
@@ -251,12 +254,15 @@ func (cw *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 // decide chooses compression vs pass-through once enough bytes are buffered or a
-// flush forces the choice. It applies the Range, Content-Type and MIME gates.
+// flush forces the choice. It applies the Range, no-transform, Content-Type and
+// MIME gates.
 func (cw *compressWriter) decide() {
 	if cw.decided {
 		return
 	}
-	if cw.r.Header.Get("Range") != "" {
+	if cw.r.Header.Get("Range") != "" ||
+		cacheControlNoTransform(cw.r.Header) ||
+		cacheControlNoTransform(cw.Header()) {
 		cw.startPassthrough()
 		return
 	}
