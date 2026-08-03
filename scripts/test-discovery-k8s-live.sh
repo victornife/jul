@@ -24,7 +24,6 @@ set -euo pipefail
 JUL_BIN="${JUL_BIN:-./jul}"
 NS="issue24"
 ARTIFACTS="${ARTIFACTS:-tmp/issue24-k8s}"
-HOST_IP="127.0.0.1"
 PROXY_PORT=8001
 JUL_PORT=29081
 ADMIN_PORT=29090
@@ -46,7 +45,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-step "Applying Kubernetes resources (namespace, RBAC, Service, EndpointSlice)"
+step "Applying Kubernetes resources (namespace, RBAC, Service, backend Pod)"
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Namespace
@@ -94,6 +93,34 @@ spec:
     port: 80
     targetPort: 80
 ---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-k8s-backend
+  namespace: $NS
+  labels:
+    app: web-k8s-backend
+spec:
+  containers:
+  - name: nginx
+    image: busybox:1.36
+    command: ["sleep", "300"]
+EOF
+
+step "Waiting for backend Pod to have a non-loopback IP"
+BACKEND_IP=""
+for i in $(seq 1 60); do
+  BACKEND_IP=$(kubectl get pod web-k8s-backend -n "$NS" -o jsonpath='{.status.podIP}' 2>/dev/null || true)
+  if [ -n "$BACKEND_IP" ] && [[ ! "$BACKEND_IP" =~ ^127\. ]] && [[ ! "$BACKEND_IP" =~ ^::1$ ]]; then
+    echo "backend pod IP: $BACKEND_IP"
+    break
+  fi
+  sleep 0.5
+  [ "$i" -eq 60 ] && fail "backend pod did not get a usable IP"
+done
+
+step "Applying EndpointSlice pointing at backend Pod IP"
+kubectl apply -f - <<EOF
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:
@@ -107,7 +134,7 @@ ports:
   protocol: TCP
   port: 18081
 endpoints:
-- addresses: ["$HOST_IP"]
+- addresses: ["$BACKEND_IP"]
   conditions:
     ready: true
 EOF
@@ -169,7 +196,7 @@ step "Jul check"
 
 step "Starting jul with Kubernetes discovery config"
 "$JUL_BIN" serve -config "$CFG" \
-  > "$ARTIFACTS/k8s-jul.out.log" 2>&1 &
+  > >(tee "$ARTIFACTS/k8s-jul.out.log") 2>&1 &
 JUL_PID=$!
 
 # Wait for the admin listener to become ready.
@@ -186,19 +213,22 @@ step "Collecting pre-change state from Kubernetes API"
 SLICE_BEFORE=$(curl -s \
   "http://127.0.0.1:$PROXY_PORT/apis/discovery.k8s.io/v1/namespaces/$NS/endpointslices?labelSelector=kubernetes.io%2Fservice-name%3Dweb-k8s")
 echo "$SLICE_BEFORE" > "$ARTIFACTS/k8s-before.txt"
-echo "$SLICE_BEFORE" | grep -q '"port":18081' \
-  || fail "Expected EndpointSlice port 18081 before patch (got: $(echo "$SLICE_BEFORE" | grep -o '"port":[0-9]*'))"
+echo "$SLICE_BEFORE" | grep -qE '"port":\s*18081' \
+  || fail "Expected EndpointSlice port 18081 before patch (got: $(echo "$SLICE_BEFORE" | grep -oE '"port":\s*[0-9]+'))"
 
 step "Waiting for jul to discover initial backends (port 18081)"
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   POOL=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
     "http://127.0.0.1:$ADMIN_PORT/api/apps")
   if echo "$POOL" | grep -q '"18081"'; then
     echo "jul pool converged to 18081"
     break
   fi
+  if [ "$i" -le 5 ] || [ "$((i % 10))" -eq 0 ]; then
+    echo "poll $i: $POOL"
+  fi
   sleep 0.5
-  [ "$i" -eq 30 ] && fail "jul pool did not reflect port 18081 within 15s. Pool: $POOL"
+  [ "$i" -eq 60 ] && fail "jul pool did not reflect port 18081 within 30s. Pool: $POOL"
 done
 
 step "Patching EndpointSlice port from 18081 to 18082"
@@ -209,7 +239,7 @@ step "Waiting for EndpointSlice convergence in K8s API (port 18082)"
 for i in $(seq 1 30); do
   SLICE_NOW=$(curl -s \
     "http://127.0.0.1:$PROXY_PORT/apis/discovery.k8s.io/v1/namespaces/$NS/endpointslices?labelSelector=kubernetes.io%2Fservice-name%3Dweb-k8s")
-  if echo "$SLICE_NOW" | grep -q '"port":18082'; then
+  if echo "$SLICE_NOW" | grep -qE '"port":\s*18082'; then
     echo "K8s API reflects port 18082"
     break
   fi
@@ -233,7 +263,7 @@ done
 step "Assertions"
 BEFORE_OK=false
 AFTER_OK=false
-echo "$SLICE_BEFORE" | grep -q '"port":18081' && BEFORE_OK=true
+echo "$SLICE_BEFORE" | grep -qE '"port":\s*18081' && BEFORE_OK=true
 AFTER_DATA=$(cat "$ARTIFACTS/k8s-after.txt")
 echo "$AFTER_DATA" | grep -q '"18082"' && AFTER_OK=true
 

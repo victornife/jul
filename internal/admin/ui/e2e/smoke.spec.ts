@@ -149,6 +149,13 @@ async function setupApiMocks(page: Page): Promise<void> {
 
   // Write endpoints — handled per-step so we can await them explicitly.
   await page.route("/api/config/patch", (route) => json(route, PATCH_RESULT));
+  await page.route("/api/config/patch/candidate", (route) =>
+    json(route, {
+      ok: true,
+      candidate: PATCH_RESULT.candidate,
+      base_version: PATCH_RESULT.base_version,
+    }),
+  );
   await page.route("/api/config/patch/apply", (route) => json(route, PATCH_APPLY_RESULT));
   await page.route("/api/config/rollback", (route) => json(route, { ok: true }));
 

@@ -64,15 +64,20 @@ jobs:
       # kind: Kubernetes in Docker — spins up a single-node K8s cluster using
       # the Docker daemon that ships on ubuntu-latest runners. No Docker Desktop
       # or Windows cmdlets required.
+      - name: write kind cluster config
+        run: |
+          cat > /tmp/kind-config.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+          EOF
+
       - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc  # v1
         with:
           cluster_name: jul-discovery-test
           # Single-node cluster; we only need the API server + RBAC.
-          config: |
-            kind: Cluster
-            apiVersion: kind.x-k8s.io/v1alpha4
-            nodes:
-            - role: control-plane
+          config: /tmp/kind-config.yaml
 
       - name: verify kind cluster is ready
         run: |

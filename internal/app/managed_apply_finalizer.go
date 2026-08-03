@@ -316,7 +316,12 @@ func managedReloadOutcome(result admin.ConfigApplyResult) string {
 	if result.Reload != nil {
 		return string(result.Reload.Outcome)
 	}
-	return ""
+	// stage_restart and other saved-but-not-live paths have no live reload
+	// result, but the terminal outcome must still be a valid ReloadOutcome.
+	if result.OK {
+		return string(server.ReloadSavedNotLive)
+	}
+	return string(server.ReloadNotApplied)
 }
 
 // managedRestoredLabel returns the bounded restoration label ("true", "false",

@@ -966,7 +966,7 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if next != nil {
 		opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
 		defer cancel()
-		effectiveNext, parseErr = prepareMutationCandidateContext(opCtx, &reqCtx, next)
+		effectiveNext, _ = prepareMutationCandidateContext(opCtx, &reqCtx, next)
 	}
 
 	// Object-level guard: a caller with config:apply still must hold admin:manage

@@ -95,9 +95,8 @@ func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
 			return nil, nil
 		}
 		abortFn := func() {
-			if !committed {
-				// nothing to discard
-			}
+			// nothing to discard when commit was not called
+			_ = committed
 		}
 		return m, 1, commitFn, abortFn, nil
 	}
@@ -285,9 +284,8 @@ func TestReloadDrainsBeforeRetiringClosers(t *testing.T) {
 			return nil, retire
 		}
 		abortFn := func() {
-			if !committed {
-				// nothing to discard
-			}
+			// nothing to discard when commit was not called
+			_ = committed
 		}
 		return m, uint64(n), commitFn, abortFn, nil
 	}

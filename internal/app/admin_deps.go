@@ -4,6 +4,7 @@
 package app
 
 import (
+	"sort"
 	"sync/atomic"
 
 	"jul/internal/admin"
@@ -87,11 +88,16 @@ func AdminCache(c *cache.Cache) admin.Purger {
 }
 
 // AdaptUpstreams maps the upstream registry snapshot onto the admin console's
-// decoupled view types so the admin package needs no upstream import.
+// decoupled view types so the admin package needs no upstream import. Pools
+// that differ only by scheme are merged under the upstream name so the console
+// shows one logical app with the combined backends.
 func AdaptUpstreams(in []upstream.PoolStatus) []admin.UpstreamStatus {
-	out := make([]admin.UpstreamStatus, 0, len(in))
+	byName := make(map[string]admin.UpstreamStatus, len(in))
 	for _, p := range in {
-		ps := admin.UpstreamStatus{Name: p.Name, Strategy: p.Strategy}
+		ps, ok := byName[p.Name]
+		if !ok {
+			ps = admin.UpstreamStatus{Name: p.Name, Strategy: p.Strategy}
+		}
 		for _, b := range p.Backends {
 			ps.Backends = append(ps.Backends, admin.BackendStatus{
 				Address:  b.Address,
@@ -100,8 +106,13 @@ func AdaptUpstreams(in []upstream.PoolStatus) []admin.UpstreamStatus {
 				Inflight: b.Inflight,
 			})
 		}
+		byName[p.Name] = ps
+	}
+	out := make([]admin.UpstreamStatus, 0, len(byName))
+	for _, ps := range byName {
 		out = append(out, ps)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

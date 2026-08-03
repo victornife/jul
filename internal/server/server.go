@@ -1132,7 +1132,10 @@ func (s *Server) doReload(req ReloadRequest) {
 
 	// Phase 7–10: activation and post-commit side effects. After Publish we
 	// complete the minimum safe work even if the deadline has expired.
-	plan.Activate()
+	if err := plan.Activate(); err != nil {
+		// Activation failure after publish is non-recoverable; log only.
+		s.log.Error("reload activate failed", "error", err, "reload_id", req.ID)
+	}
 	plan.RetireRemovedListeners()
 	plan.FinalizeRuntimeState()
 	certErrs := plan.RefreshCerts()
