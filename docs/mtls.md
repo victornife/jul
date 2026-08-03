@@ -9,7 +9,8 @@ foundation for zero-trust ingress: only callers holding a certificate signed by
 your CA reach the backend, and the backend can authorize on *who* they are.
 
 mTLS is in **core** — no build tag — and uses only the standard library's
-`crypto/x509`.
+`crypto/x509`. The same server-level policy is applied to HTTP/1.1, HTTP/2 and,
+when the `http3` tag is present, HTTP/3 over QUIC.
 
 > **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). It coexists
 > with ACME/static server certificates; the server certificate and the client CA
@@ -44,6 +45,12 @@ mTLS is in **core** — no build tag — and uses only the standard library's
    rejected with **403**.
 5. When the request is proxied, any `$ssl_client_*` variable referenced in a
    header is substituted from that identity.
+
+The TCP and QUIC listeners are built from the same complete prepared TLS policy.
+HTTP/3 applies its mandatory TLS 1.3 floor and h3 ALPN after cloning that policy,
+so client-auth mode, CA verification, SAN allow-list, CRL checks, result metrics,
+and the verified peer certificate exposed to middleware are equivalent across
+HTTP/1.1, HTTP/2, and HTTP/3.
 
 ## Configuration
 
@@ -219,11 +226,11 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
 ## Operational notes
 
 - **Bind-time, not hot-reload.** Like `tls.min_version`, `client_auth` (mode, CA
-  bundle, CRL, SAN list) is read when the listener starts. Editing it and
-  reloading swaps HTTP routing immediately, but the new client-auth settings
-  apply to **newly bound listeners** — restart Jul.IA (or change the listen
-  address) to roll a CA or CRL. Per-location `require_client_cert` *is* part of
-  normal routing and takes effect on reload.
+  bundle, CRL, SAN list) is read when the TCP and QUIC listeners start. Editing
+  it and reloading swaps HTTP routing immediately, but the new client-auth
+  settings apply after the planned process restart and to subsequent TLS/QUIC
+  handshakes. Per-location `require_client_cert` is part of normal routing and
+  takes effect on reload.
 - **Server vs client certificates are separate.** The server certificate can
   come from ACME or static `cert`/`key`; `ca_file` is only the trust anchor for
   *client* certificates. They do not interfere.
@@ -235,8 +242,7 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
   per-route **require client certificate** toggle (also on the Routes detail)
   sets `require_client_cert`. Both go through Validate → Diff → Apply. The editor
   and the diff repeat the bind-time caveat above: saving the server-level block
-  reloads routing but applies the new client-auth on the next restart, while the
-  per-location toggle takes effect on reload.
+  stages a restart, while the per-location toggle takes effect on reload.
 
 ## Limits
 
@@ -273,3 +279,5 @@ All GA criteria are satisfied.
 
 ## Build tags
 
+mTLS is part of the core binary and has no build tag. HTTP/3 parity is exercised
+when the separate `http3` tag is enabled.
