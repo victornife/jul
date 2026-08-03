@@ -1,8 +1,33 @@
 # Audit Register
 
-This page tracks every audit finding from Rounds 9–13, the code change that
-closes it, the test that demonstrates the fix, and the current status. It is
-intended as a lightweight compliance artifact for reviewers and releases.
+This page identifies the current authoritative audit and preserves the evidence register for earlier audit rounds. It is a lightweight compliance artifact for reviewers and releases; issue status alone is not closure evidence.
+
+## Current authoritative audit
+
+| Audit | Source baseline | Role | Current status | Programme |
+|---|---|---|---|---|
+| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a` | Current implementation and planning source of truth | Active; implementation underway through staged PRs | #62, #107-#162 |
+| [2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediation commits | Historical audit and remediation evidence | Historical; formal closure evidence tracked by #130 | #130 |
+
+The current combined audit does not rewrite the historical record. It supersedes the July audit only for current prioritisation, sequencing, capability truth and implementation planning.
+
+## Current programme gates
+
+- Documentation truth: #119 and #130.
+- Immediate correctness/security: #120-#127 and #129.
+- Cache correctness: #107 and #131-#134.
+- Lifecycle authority: #89 and #128.
+- Core Gateway Completeness decisions: #114-#118.
+- Core implementation: #135-#151.
+- Selected runtime dynamics: #88-#106 and #157-#161.
+- Migration/diagnostics: #112 and #152-#156.
+- Bounded experiment: #113 and #162.
+
+A release closure entry must record the exact SHA, commands actually run, CI runs, unavailable lanes and residual risk.
+
+---
+
+## Rounds 9-13 evidence register
 
 | Finding | Title | Fix location | Test | Evidence | Status | Date |
 |---|---|---|---|---|---|---|
@@ -26,7 +51,7 @@ intended as a lightweight compliance artifact for reviewers and releases.
 | R9-14.5 | Hot-added TLS rotation test | — | *(deferred)* | — | ⏸ Deferred | — |
 | R9-14.6 | Reflection A→B migration acceptance test | — | Covered by R9-06 / R9-10 | — | ✅ N/A (duplicate) | Phase 2 |
 
-## Round 10 Register
+### Round 10
 
 | Finding | Title | Fix location | Test | Evidence | Status | Commit |
 |---|---|---|---|---|---|---|
@@ -37,9 +62,9 @@ intended as a lightweight compliance artifact for reviewers and releases.
 | R10-05 | Address-aware lifecycle diff and pending-restart alignment | `internal/lifecycle/lifecycle.go`, `internal/app/serve.go` | `TestDiffAddressAwareReaddedAddress` | Unit test output | ✅ Implemented | `6cb1a2d` |
 | R10-06 | Evict stale gRPC transcoder connections | `internal/transcode/invoke.go` | `TestTranscoderEvictsStaleConnections` | Unit test output | ✅ Implemented | `957d838` |
 | R10-07 | HTTP/3 UDP bind probe in preflight | `internal/server/server.go`, `internal/app/preflight.go` | `TestPreflightListenersHTTP3UDP` | Unit test output | ✅ Implemented | `b7ba281` |
-| R10-08 | Round 10 audit register | `docs/audit-register.md` | `scripts/docs-check.py` | Docs check output | ✅ Implemented | *(this commit)* |
+| R10-08 | Round 10 audit register | `docs/audit-register.md` | `scripts/docs-check.py` | Docs check output | ✅ Implemented | historical audit commit |
 
-## Round 11 Register
+### Round 11
 
 | Finding | Title | Fix location | Test | Evidence | Status | Commit |
 |---|---|---|---|---|---|---|
@@ -49,14 +74,14 @@ intended as a lightweight compliance artifact for reviewers and releases.
 | R11-04 | Discovery-only upstream candidate snapshot for reflection | `internal/upstream/registry.go` | `TestTranscodeReflectionWithDiscoveryUpstream` | Integration test output | ✅ Implemented | `c2549df` |
 | R11-05 | Graceful retirement of removed gRPC backend connections | `internal/transcode/invoke.go` | `TestTranscoderRetiresStaleConnectionsDuringRequest`, `TestTranscoderEvictsStaleConnections` | Unit/integration test output | ✅ Implemented | `d1b5b92` |
 
-## Round 12 Register
+### Round 12
 
 | Finding | Title | Fix location | Test | Evidence | Status | Commit |
 |---|---|---|---|---|---|---|
 | R12-01 | Reused discovery pool loses reflection candidate backends | `internal/upstream/registry.go` | `TestTranscodeReflectionWithReusedDiscoveryUpstream` | Integration test output | ✅ Implemented | `a63ad49` |
 | R12-02 | Retired connection promotion closes the connection it returns | `internal/transcode/invoke.go` | `TestTranscoderRetiredConnectionReappearsUsable` | Unit test output | ✅ Implemented | `2457aea` |
 
-## Round 13 Register
+### Round 13
 
 | Finding | Title | Fix location | Test | Evidence | Status | Commit |
 |---|---|---|---|---|---|---|
@@ -64,15 +89,10 @@ intended as a lightweight compliance artifact for reviewers and releases.
 
 ## Deferred work rationale
 
-- **R9-14.4 (never-draining shutdown test)** — Timing-sensitive, high flakiness
-  risk in CI. Better addressed as a dedicated soak/retirement test with
-  generous timeouts after GA. The underlying shutdown draining behavior is
-  covered by R9-03 unit tests.
-- **R9-14.5 (hot-added TLS rotation)** — Requires cert fixture generation and
-  multi-SNI verification; large test with moderate fragility. Deferred to a
-  standalone TLS soak or post-GA hardening sprint.
+- **R9-14.4 (never-draining shutdown test)** — timing-sensitive and better handled through the current lifecycle/soak closure programme. The underlying shutdown behavior has focused unit coverage, but exact final evidence remains tracked by #130 and later closure work.
+- **R9-14.5 (hot-added TLS rotation)** — now related to the selected static-certificate generation work in #100 and the current HTTP/3 correctness work in #121. Do not close it based only on the old audit wording.
 
-## Running the evidence tests
+## Running the historical evidence tests
 
 ```bash
 # R9-11 + R9-14.1 + R9-14.2
@@ -89,12 +109,9 @@ go test ./internal/lifecycle -run TestDiffAddressAwareReaddedAddress -race -coun
 go test -tags grpc ./internal/transcode -run TestTranscoderEvictsStaleConnections -race -count=1
 go test -tags grpc ./internal/server -run TestPreflightListenersHTTP3UDP -race -count=1
 
-# Full matrix
-go test ./... -race -count=1
-
 # Round 11
 go test ./internal/app -run 'TestMergeReloadConsumesAdminDigest|TestPreflightApplyUsesLiveSnapshotWithoutPrev' -race -count=1
-go test ./internal/server -run 'TestAdminReloadRawDigestMatchesRawBytes' -race -count=1
+go test ./internal/server -run TestAdminReloadRawDigestMatchesRawBytes -race -count=1
 go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithDiscoveryUpstream|TestTranscoderRetiresStaleConnectionsDuringRequest|TestTranscoderEvictsStaleConnections' -race -count=1
 
 # Round 12
@@ -102,11 +119,6 @@ go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithReusedD
 
 # Round 13
 go test -tags grpc ./internal/transcode -run TestTranscoderRetiredConnectionConcurrentReappearance -race -count=1
-
-# Full matrix
-go test ./... -race -count=1
 ```
 
-## Semantics reference
-
-For the authoritative reload contract, see [reload-semantics.md](reload-semantics.md).
+For the authoritative reload contract, see [reload-semantics.md](reload-semantics.md). For current programme sequencing, see [the combined audit](audit/combined-audit-2026-08-03.md) and #62.
