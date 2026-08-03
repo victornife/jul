@@ -26,12 +26,18 @@ const letsEncryptStagingURL = "https://acme-staging-v02.api.letsencrypt.org/dire
 
 // acmeManager adapts autocert.Manager to the ACMEManager seam. A single manager
 // covers the union of ACME domains across all server blocks; it caches and
-// auto-renews certificates and answers HTTP-01 challenges. TLS-ALPN-01 is
-// served on the TLS listener itself once "acme-tls/1" is advertised (see
-// Server.listenerNextProtos); autocert detects the challenge from the
-// ClientHello and returns the special challenge certificate.
+// auto-renews certificates. The validated process-wide challenge setting is
+// captured once so only the configured challenge surface is activated:
+//
+//   - http-01 installs autocert's HTTP challenge handler;
+//   - tls-alpn-01 leaves the HTTP handler untouched and relies on
+//     Server.listenerNextProtos advertising acme-tls/1.
+//
+// Configuration validation requires every enabled ACME block to use the same
+// challenge, matching the single shared manager model.
 type acmeManager struct {
 	mgr        *autocert.Manager
+	challenge  string
 	onIssue    func(domain string, notAfter time.Time)
 	ocsp       bool         // staple OCSP responses onto issued certificates
 	ocspClient *http.Client // guarded OCSP responder client; nil = default
@@ -43,12 +49,12 @@ type acmeManager struct {
 // when non-nil, guards the ACME directory/order/challenge HTTP calls through the
 // egress allow-list; ocspClient likewise guards OCSP responder fetches. Both nil
 // preserve the default (unguarded) clients so an egress-disabled build is
-// unchanged. The first block's email, CA, cache directory, and OCSP-stapling
-// setting configure the shared account and on-disk cache (validation keeps these
-// consistent for a single listener).
+// unchanged. The first block's email, CA, challenge, cache directory, and
+// OCSP-stapling setting configure the shared manager (validation requires every
+// enabled block to agree on those values).
 func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, notAfter time.Time), acmeClient, ocspClient *http.Client) (ACMEManager, error) {
 	var domains []string
-	var email, ca, cacheDir string
+	var email, ca, challenge, cacheDir string
 	ocsp, ocspSet := true, false
 	seen := make(map[string]bool)
 	for _, srv := range servers {
@@ -67,6 +73,9 @@ func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, n
 		}
 		if ca == "" {
 			ca = a.CA
+		}
+		if challenge == "" {
+			challenge = a.Challenge
 		}
 		if cacheDir == "" {
 			cacheDir = a.CacheDir
@@ -90,7 +99,13 @@ func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, n
 		Email:      email,
 		Client:     client,
 	}
-	return &acmeManager{mgr: m, onIssue: onIssue, ocsp: ocsp, ocspClient: ocspClient}, nil
+	return &acmeManager{
+		mgr:        m,
+		challenge:  challenge,
+		onIssue:    onIssue,
+		ocsp:       ocsp,
+		ocspClient: ocspClient,
+	}, nil
 }
 
 // directoryURL maps a configured CA name to its ACME directory URL. The empty
@@ -121,9 +136,13 @@ func (a *acmeManager) Provider(domains []string) CertProvider {
 	return newOCSPStapler(base, a.ocspClient)
 }
 
-// ChallengeHandler returns autocert's HTTP-01 handler, which answers challenge
-// requests and delegates everything else to next.
+// ChallengeHandler installs autocert's HTTP-01 handler only when HTTP-01 is the
+// configured challenge. TLS-ALPN-01 leaves the plain HTTP handler unchanged so
+// the non-selected challenge surface is not exposed.
 func (a *acmeManager) ChallengeHandler(next http.Handler) http.Handler {
+	if a.challenge != "http-01" {
+		return next
+	}
 	return a.mgr.HTTPHandler(next)
 }
 
