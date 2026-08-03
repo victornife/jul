@@ -113,6 +113,7 @@ license-check:
 	  -ignore "**/node_modules/**" \
 	  -ignore "**/.git/**" \
 	  -ignore "**/assets/dist/**" \
+	  -ignore "**/coverage/**" \
 	  -ignore "**/pnpm-lock.yaml" \
 	  -ignore "**/*.log" \
 	  -ignore "**/*.exe" \
@@ -120,4 +121,5 @@ license-check:
 	  -ignore "**/go.sum" \
 	  -ignore "**/tmp/**" \
 	  -ignore "**/jul-data/**" \
+	  -ignore "**/*-golden.*" \
 	  cmd/ internal/ examples/

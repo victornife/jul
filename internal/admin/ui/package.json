@@ -13,7 +13,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
-    "e2e:ci": "playwright test --reporter=github"
+    "e2e:ci": "playwright test --project=chromium --reporter=github"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
