@@ -397,6 +397,7 @@ func (r *Registry) CloseAll() {
 // inspection (the admin console upstream panel).
 type PoolStatus struct {
 	Name     string
+	Scheme   string
 	Strategy string
 	Backends []BackendStatus
 }
@@ -417,11 +418,7 @@ func (r *Registry) Snapshot() []PoolStatus {
 	defer r.mu.Unlock()
 	out := make([]PoolStatus, 0, len(r.live))
 	for key, e := range r.live {
-		name := key.name
-		if key.scheme != "" {
-			name = name + "(" + key.scheme + ")"
-		}
-		ps := PoolStatus{Name: name, Strategy: e.meta.strategy}
+		ps := PoolStatus{Name: key.name, Scheme: key.scheme, Strategy: e.meta.strategy}
 		for _, b := range e.pool.Backends() {
 			ps.Backends = append(ps.Backends, BackendStatus{
 				Address:  b.Address,

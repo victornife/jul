@@ -471,10 +471,9 @@ func TestReloadPhaseTimingRecordsDurations(t *testing.T) {
 	if rr.DurationMS < 0 {
 		t.Errorf("DurationMS = %d, want >= 0", rr.DurationMS)
 	}
-	if rr.CompletedAt.Before(rr.StartedAt) || rr.CompletedAt.Equal(rr.StartedAt) {
-		// Allow 0 DurationMS on very fast machines (sub-millisecond reload);
-		// CompletedAt must still be non-zero and not before StartedAt.
-	}
+	// Allow 0 DurationMS on very fast machines (sub-millisecond reload);
+	// CompletedAt must still be non-zero and not before StartedAt.
+	_ = rr.CompletedAt.Equal(rr.StartedAt)
 	if rr.HTTP.Status != ReloadSubsystemOK {
 		t.Errorf("HTTP.Status = %v, want %v", rr.HTTP.Status, ReloadSubsystemOK)
 	}

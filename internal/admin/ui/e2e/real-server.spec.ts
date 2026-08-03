@@ -521,7 +521,7 @@ test(
             server_names: ["localhost"],
             match_type: "prefix",
             path: "/",
-            action: { kind: "grpc", target: "http://backend:9000" },
+            action: { kind: "grpc_proxy", target: "http://backend:9000" },
           },
         ],
       }),
@@ -590,8 +590,11 @@ test(
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
 
-    // 3. Build a candidate with a restart-required change ([cache] block).
-    const candidate = `${original.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MB"\n`;
+    // 3. Build a candidate with a restart-required change (log_format).
+    const candidate = (original.raw ?? "").replace(
+      /log_format\s*=\s*['"][^'"]*['"]/,
+      'log_format = "json"',
+    );
     const applyUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}&mode=stage_restart`
       : "/api/config/apply?mode=stage_restart";
@@ -693,7 +696,10 @@ test(
     const cfgData: unknown = await cfgResp.json();
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
-    const candidate = `${original.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MB"\n`;
+    const candidate = (original.raw ?? "").replace(
+      /log_format\s*=\s*['"][^'"]*['"]/,
+      'log_format = "json"',
+    );
 
     const stageUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}&mode=stage_restart`
@@ -707,7 +713,10 @@ test(
     expect(stage1.ok).toBe(true);
 
     // 3. Update the staged config with a slightly different candidate.
-    const candidateV2 = `${original.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "128MB"\n`;
+    const candidateV2 = (original.raw ?? "").replace(
+      /log_format\s*=\s*['"][^'"]*['"]/,
+      'log_format = "combined"',
+    );
     const cfgResp2 = await request.get("/api/config");
     const latestCfg = RawConfigSchema.parse(await cfgResp2.json());
     const updateUrl = latestCfg.base_version

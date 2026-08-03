@@ -20,6 +20,14 @@ const baseURL = `http://localhost:${String(PREVIEW_PORT)}`;
 const REAL_SERVER_PORT = 9291;
 const realServerURL = `http://127.0.0.1:${String(REAL_SERVER_PORT)}`;
 
+// Determine whether the real-server project is selected so the browser-smoke
+// job does not need a pre-built jul binary (exit 127).
+const selectedProjects = process.argv
+  .filter((arg) => arg.startsWith("--project="))
+  .map((arg) => arg.slice("--project=".length));
+const runRealServer =
+  selectedProjects.length === 0 || selectedProjects.includes("real-server");
+
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
@@ -58,13 +66,18 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },
-    {
-      // Path to the pre-built jul binary is relative to the ui/ directory.
-      // In CI, the console-e2e job builds it into the repo root first.
-      command: "cd ../../../ && ./jul serve -config testdata/console-e2e.toml",
-      url: `${realServerURL}/healthz`,
-      reuseExistingServer: !process.env.CI,
-      timeout: 30_000,
-    },
+    ...(runRealServer
+      ? [
+          {
+            // Path to the pre-built jul binary is relative to the ui/ directory.
+            // In CI, the real-server job builds it into the repo root first.
+            command:
+              "cd ../../../ && ./jul serve -config testdata/console-e2e.toml",
+            url: `${realServerURL}/healthz`,
+            reuseExistingServer: !process.env.CI,
+            timeout: 30_000,
+          },
+        ]
+      : []),
   ],
 });

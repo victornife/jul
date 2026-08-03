@@ -159,7 +159,7 @@ func parseManagedApplyID(id string) (managedApplyID, error) {
 			return managedApplyID{}, ErrManagedApplyInvalidID
 		}
 		for _, r := range instance {
-			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
 				return managedApplyID{}, ErrManagedApplyInvalidID
 			}
 		}

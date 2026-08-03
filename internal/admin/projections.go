@@ -252,13 +252,28 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 		for _, b := range livePool.Backends {
 			liveMap[b.Address] = b
 		}
+		seen := make(map[string]bool, len(up.Servers))
 		for _, b := range up.Servers {
+			seen[b.Address] = true
 			bp := BackendProjection{Address: b.Address, Weight: b.Weight}
 			if lb, ok := liveMap[b.Address]; ok {
 				healthy := lb.Healthy
 				bp.Healthy = &healthy
 				bp.Inflight = lb.Inflight
 			}
+			ap.Backends = append(ap.Backends, bp)
+		}
+		// Discovery-only upstreams have no static servers; include live backends
+		// discovered from Consul, Kubernetes, DNS, etc. so the console reflects
+		// the actual pool contents.
+		for _, b := range livePool.Backends {
+			if seen[b.Address] {
+				continue
+			}
+			bp := BackendProjection{Address: b.Address, Weight: b.Weight}
+			healthy := b.Healthy
+			bp.Healthy = &healthy
+			bp.Inflight = b.Inflight
 			ap.Backends = append(ap.Backends, bp)
 		}
 		ap.Warnings = appWarnings(up)

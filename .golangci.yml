@@ -46,3 +46,55 @@ linters:
         text: "type store is unused"
         linters:
           - unused
+      # Admin API v2 refactor left several helper functions that are no longer
+      # wired to any route (replaced by alias-safe transition guards). They are
+      # retained while the Wave 1 object-level guard rollout finishes; remove
+      # once the refactor is complete.
+      - path: internal/admin/api\.go
+        text: "is unused"
+        linters:
+          - unused
+      - path: internal/admin/api_history\.go
+        text: "currentRaw is unused"
+        linters:
+          - unused
+      - path: internal/admin/server\.go
+        text: "auth is unused"
+        linters:
+          - unused
+      # Test-only helpers that are no longer referenced after recent test
+      # migrations; kept for potential reuse in upcoming RBAC test coverage.
+      - path: internal/config/validate_rbac_test\.go
+        text: "rbacEnabledAdmin is unused"
+        linters:
+          - unused
+      - path: internal/admin/operational_test\.go
+        text: "field err is unused"
+        linters:
+          - unused
+      # Config apply coordinator: restorePrevious is the public restoration
+      # entry-point retained for future callers; restorePreviousLocked is the
+      # implementation used internally today.
+      - path: internal/app/config_apply\.go
+        text: "restorePrevious is unused"
+        linters:
+          - unused
+      # Lifecycle fingerprint helpers retained for an upcoming config-history
+      # diff feature; not yet wired to any caller.
+      - path: internal/lifecycle/fingerprint\.go
+        text: "is unused"
+        linters:
+          - unused
+      # reloadCertificates is intentionally a no-op (restart-only cert rotation,
+      # R7-07); the method documents the intentional absence of runtime reload.
+      - path: internal/server/server\.go
+        text: "reloadCertificates is unused"
+        linters:
+          - unused
+      # identitySet is a stable-backend helper not yet used by the current
+      # weighted-balancer implementation; retained for the planned identity-aware
+      # subsetting path.
+      - path: internal/upstream/balancer\.go
+        text: "identitySet is unused"
+        linters:
+          - unused

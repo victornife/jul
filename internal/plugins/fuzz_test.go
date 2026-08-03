@@ -60,17 +60,23 @@ func FuzzPluginInvoke(f *testing.F) {
 	f.Add([]byte("DELETE"), []byte("/api/items/999"), []byte(""), make([]byte, 1<<10), []byte(""))
 
 	f.Fuzz(func(t *testing.T, method, uri, headers, body, configJSON []byte) {
-		req := httptest.NewRequest(string(method), string(uri), bytes.NewReader(body))
-		parseHeaders(headers, req)
-		rec := httptest.NewRecorder()
-		// The middleware may panic inside the guest; the host must contain it.
+		var rec *httptest.ResponseRecorder
+		// The middleware may panic inside the guest, and httptest.NewRequest may
+		// panic on malformed fuzz input; the host must contain all panics.
 		func() {
 			defer func() {
-				_ = recover() // guest panics are contained; no host panic escapes
+				_ = recover() // no host panic escapes, regardless of origin
 			}()
+			req := httptest.NewRequest(string(method), string(uri), bytes.NewReader(body))
+			parseHeaders(headers, req)
+			rec = httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
 		}()
 
+		if rec == nil {
+			// Request creation or handler panicked; contained above.
+			return
+		}
 		if rec.Code < 100 || rec.Code > 599 {
 			t.Fatalf("invalid HTTP status %d", rec.Code)
 		}
