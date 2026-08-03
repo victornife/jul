@@ -88,6 +88,12 @@ func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, n
 	if len(domains) == 0 {
 		return nil, nil // no ACME configured
 	}
+	if challenge == "" {
+		// Normal parsed configurations receive this default in applyDefaults.
+		// Keep the manager defensive for direct programmatic Config values used
+		// by tests and embedders so the documented default remains consistent.
+		challenge = "http-01"
+	}
 	client := &acme.Client{DirectoryURL: directoryURL(ca)}
 	if acmeClient != nil {
 		client.HTTPClient = acmeClient
