@@ -1,256 +1,274 @@
-# Jul.IA — Known limitations
+# Jul.IA — Known limitations and current correction notices
 
-This page aggregates the per-feature limitation lists from the individual
-feature docs into one place so evaluators can see the full picture without
-reading every document. Each item links to the detailed feature doc where
-the limitation is discussed in context.
+This page aggregates bounded product limitations and current known defects so
+evaluators can see the full operational picture without reading every feature
+document.
 
-Nothing here is a correctness bug — these are explicit, bounded scope
-decisions. The maturity bar (ADR 0003) requires limitations to be documented
-before a feature is labelled GA; this page is the consolidated index.
+> **Current truth notice (2026-08-03).** Some entries below are correctness,
+> security or product-contract defects under active remediation; they are not
+> intentional scope decisions. The authoritative current register is
+> [current-product-truth.md](current-product-truth.md) and the
+> [combined audit](audit/combined-audit-2026-08-03.md).
+
+A feature may remain useful while a specific defect or lifecycle limitation is
+open. Do not interpret a historical GA label as evidence that an open regression
+is harmless or already fixed.
+
+---
+
+## Immediate correctness and security notices
+
+- **HTTP/3 server-level mTLS parity is under correction (#121).** Do not rely on
+  QUIC for a listener whose security boundary requires server-level client
+  certificates. Disable HTTP/3 on that listener or terminate QUIC in a trusted
+  front end until the fix is deployed.
+- **ACME challenge selection is not currently a proven exclusive runtime switch
+  (#122).** Do not use `challenge = "http-01"` or `"tls-alpn-01"` as a guarantee
+  that the other challenge seam is absent.
+- **The response cache is under a correctness recertification programme
+  (#107, #131-#134).** Open work covers generation-owned revalidation,
+  immutable entries, shared-cache semantics, invalidation, `304` metadata,
+  Range bypass and transparent WebSocket/stream wrappers.
+- **Unknown and invalid configuration values do not yet have the intended
+  closed-world failure behavior on every entry path (#120, #123).** Validate
+  candidates with `jul check` and review preview output carefully.
+- **Compression does not yet have complete `Cache-Control: no-transform`
+  enforcement (#125).** Avoid compression on representations that depend on
+  that directive until the fix is deployed.
+- **Prometheus code and documentation are being reconciled against the released
+  contract (#126).** Pin dashboards to the released metric names and labels.
 
 ---
 
 ## Configuration reload ([reload-semantics.md](reload-semantics.md))
 
-- **Some fields cannot be hot-reloaded.** The authoritative classification is
-  [`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go) and
-  the machine-readable copy in [config-lifecycle.yaml](config-lifecycle.yaml).
-  Restart-required fields are rejected by the admin apply path and by
-  SIGHUP/file-watch reloads; the new value is saved but takes effect only after
-  a process restart. New-listener-only fields (e.g. a different listen address)
-  apply to brand-new listeners on reload, but changing them on an already-bound
-  listener requires restart.
-- **Reload is Publish-then-Activate.** New listeners are bound during staging
-  but do not accept traffic until after the new handler generation is
-  published, so clients never see requests routed by a listener before the
-  handlers that should serve them are live. The transaction is implemented in
-  the `ReloadPlan` value in [`internal/server/reload_plan.go`](../internal/server/reload_plan.go).
-- **In-flight requests stay on their generation's pool snapshot.** When an
-  upstream pool changes, active requests that started on the previous
-  generation continue to use the old backend set until they drain; new
-  requests use the updated pool. This prevents a request from observing
-  backends that were added or removed after it began.
-- **Restart-required changes on saved-but-not-yet-active config are surfaced
-  by the Console.** `PendingRestartCheck` compares the startup-bound
-  effective values (including digests of file-backed secrets) against the
-  current on-disk config, so operators see a banner when a saved change needs
-  a restart.
+- **Some fields cannot be hot-reloaded.** The current classification is
+  implemented in [`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go)
+  and mirrored in [config-lifecycle.yaml](config-lifecycle.yaml). #89 will make
+  that model closed-world and generated/checkable. Until then, an unlisted field
+  must not be assumed hot.
+- **Restart-required changes use the planned-restart path.** Structural settings
+  such as listener protocol mode, startup-owned providers and several
+  process-lifetime resources may deliberately remain restart-bound.
+- **Reload is Publish-then-Activate.** New listeners are staged before handler
+  publication and activated afterward through `ReloadPlan`.
+- **In-flight requests stay on their generation's resources.** New requests use
+  the candidate generation; old requests may finish with their captured pool,
+  handler and other generation-owned resources.
+- **Mixed candidates are not partially applied.** A complete candidate is hot,
+  staged or rejected as one operation; a hot subset is not silently published
+  while another field remains pending restart.
+- **Pending restart is surfaced by the Console.** File-backed effective values
+  and startup fingerprints are compared against the running state.
 
 ---
 
 ## Authentication ([auth.md](auth.md))
 
-- **One credential method per location.** Basic, JWT, forward-auth, or CIDR —
-  not combined. Use multiple layers (mTLS + JWT) at different paths if you need
-  defence-in-depth.
-- **No OAuth2 / OIDC flows.** No opaque-token introspection, no cookie sessions,
-  no refresh tokens. JWT bearer with JWKS validation is the supported pattern.
-- **No RBAC or scope enforcement.** Claims are forwarded downstream; the
-  upstream service is responsible for authorization logic.
-- **One issuer/audience per location.** Multi-issuer validation is not supported.
-- **Forward-auth is a GET probe.** It mirrors the Traefik / NGINX `auth_request`
-  pattern — not a full OAuth2 exchange.
+- **One request-authentication method per location.** Basic, JWT, forward-auth,
+  or CIDR are not combined within one location. mTLS can provide a separate TLS
+  layer.
+- **No OAuth2 / OIDC flows.** No opaque-token introspection, browser sessions or
+  refresh-token flow is built in.
+- **Application authorization remains upstream-owned.** Route authentication
+  validates caller credentials but does not implement arbitrary application
+  scopes/policies for the proxied service.
+- **Admin RBAC is shipped and opt-in.** `[admin.rbac]` supports named
+  principals, roles, scoped revocable tokens and audit attribution. External
+  identity (OIDC/SAML/SCIM) and interactive token management remain future work.
+- **One issuer/audience per JWT location.** Multi-issuer validation is not
+  supported.
+- **Forward-auth is a GET probe.** It follows the `auth_request` pattern rather
+  than implementing a complete OAuth exchange.
 
 ---
 
 ## Response cache ([cache.md](cache.md))
 
-- **No tag or pattern purge.** The admin API purges a single exact key or the
-  entire cache. There is no prefix, host, or tag-based purge (e.g. all
-  `/api/v1/*`). Use short TTLs or application-layer cache busting for
-  selective invalidation.
-- **Orphaned `Vary` variants are not auto-cleaned.** If an upstream changes its
-  `Vary` header, stale variant entries accumulate until TTL expiry or a full
-  purge.
-- **Disk tier is best-effort.** A disk-write failure does not error the request;
-  the entry serves from memory or the upstream.
-- **No distributed / shared cache.** Cache state is local to the single Jul.IA
-  process. Multi-node setups each maintain independent cache pools.
+> **Current defect notice:** the current cache documentation and historical GA
+> matrix overstate the implementation while #107 remains open.
+
+- **Avoid cache on WebSocket/upgrade routes.** Response-writer capability
+  preservation and `101 Switching Protocols` bypass are being corrected in
+  #133.
+- **Treat authenticated/shared-cache behavior conservatively.** Authorization,
+  `no-cache`, `must-revalidate`, `proxy-revalidate`, unsafe-method invalidation
+  and `304` metadata merging are being completed in #132.
+- **Background revalidation and shared entries are being made generation-safe
+  and immutable.** Until #131, do not treat repeated reload/revalidation stress
+  as recertified.
+- **Range/If-Range will bypass cache in the corrected first tranche.** Cached
+  multipart/partial-range serving is not part of the current completeness
+  target.
+- **No tag or pattern purge.** Purge is exact-key or full-cache only.
+- **Orphaned `Vary` variants are not auto-cleaned.** Old variants remain until
+  expiry or eviction.
+- **Disk tier is best-effort.** A disk-write failure does not fail the client
+  request.
+- **No distributed cache.** State is local to one process.
 
 ---
 
 ## Compression ([compression.md](compression.md))
 
+- **`no-transform` enforcement is under correction (#125).** Do not compress
+  responses that depend on `Cache-Control: no-transform` until the fixed build
+  is deployed.
 - **Response body only.** Request body decompression is not implemented.
-- **BREACH / CRIME advisory.** Do not compress responses that contain
-  authenticated secrets (e.g. CSRF tokens) alongside attacker-controlled
-  reflected input. See the threat note in [compression.md](compression.md).
+- **BREACH / CRIME advisory.** Do not compress authenticated secrets alongside
+  attacker-controlled reflected input.
 
 ---
 
 ## gRPC ↔ JSON transcoding ([grpc-transcoding.md](grpc-transcoding.md))
 
-- **No `response_body` field selection.** The full reply proto message is
-  rendered; mapping a single field to the HTTP body is not implemented.
-- **Maps not settable from path/query parameters.** Map fields can only be
-  populated from the JSON request body.
-- **No field masks.** `google.protobuf.FieldMask` is not applied on
-  transcoded responses.
-- **Server reflection requires a live upstream.** When `use_reflection = true`,
-  the descriptor is fetched from the upstream at startup; a down upstream
-  prevents the location from initialising.
-- **RPCs may be cut at the retired-connection grace boundary.**
-  Dynamic upstream churn retires removed backend connections for 30 seconds so
-  in-flight RPCs can drain. RPCs that outlast that grace period may be
-  interrupted when the retired connection is closed; this primarily affects
-  long-lived streams and unusually long unary calls. Clients should be prepared
-  to reconnect.
+- **No `response_body` field selection.** The complete reply message is
+  rendered.
+- **Maps are not settable from path/query parameters.** Use the JSON body.
+- **No field-mask application.** `google.protobuf.FieldMask` is not applied to
+  responses.
+- **Reflection needs a live upstream.** Descriptor acquisition can fail when
+  the reflection target is unavailable.
+- **RPCs may be cut at the retired-connection grace boundary.** Very long calls
+  or streams should reconnect after backend-generation retirement.
 
 ---
 
 ## Native gRPC passthrough ([grpc-proxy.md](grpc-proxy.md))
 
-- **gRPC settings require a restart.** Like TLS, the h2c flag is set at bind
-  time; changing `h2c = true` or `grpc = true` on a running server requires a
-  restart.
-- **No gRPC-Web support.** Clients using the `grpc-web` framing protocol need a
-  separate transcoder; Jul.IA passes native gRPC (HTTP/2 + proto framing) only.
+- **h2c/listener protocol settings are restart-bound.** Dynamic retained-address
+  protocol transitions are gated architecture work (#105).
+- **No gRPC-Web support.** Jul.IA handles native gRPC framing only.
 
 ---
 
 ## HTTP/3 over QUIC ([http3.md](http3.md))
 
-- **No WebSocket over HTTP/3.** WebSocket requires HTTP/1.1 or HTTP/2; a
-  WebSocket upgrade over HTTP/3 will be rejected.
-- **HTTP/3 settings require a restart.** The QUIC listener is built at bind
-  time; changes to `[servers.http3]` take effect only after a full restart.
-- **QUIC path MTU discovery.** Some networks drop oversized UDP packets; QUIC
-  PMTUD mitigates this, but a few firewall configurations may block or
-  rate-limit QUIC traffic, causing clients to fall back to TCP.
+- **Server-level mTLS parity is not currently proven (#121).** HTTP/3 must be
+  disabled on listeners whose trust boundary depends on handshake-level client
+  certificates until the fix is deployed.
+- **No WebSocket over HTTP/3.** Use HTTP/1.1 or HTTP/2 for WebSocket upgrades.
+- **HTTP/3 listener enable/disable remains restart-bound.** The dynamic
+  advertisement/max-age subset is separately tracked by #161; the UDP listener
+  transition remains gated in #102.
+- **QUIC may be blocked or rate-limited by networks.** Clients need TCP fallback.
+- **HTTP/3 requests use the current dynamic request-handler generation.** The
+  open defect is TLS/client-auth parity, not stale route-handler publication.
 
 ---
 
 ## Rate limiting ([ratelimit.md](ratelimit.md))
 
-- **Local only.** Rate-limit state is per-process. A fleet of Jul.IA nodes
-  each enforce their own bucket independently — there is no distributed token
-  bucket.
-- **IP spoofing.** IP-keyed limiting trusts `RemoteAddr`; operators behind a
-  trusted reverse proxy should key on a trusted header (e.g. `X-Real-IP`).
-- **In-memory only.** Rate-limit state is lost on restart; token buckets reset.
+- **Local only.** Buckets are per process and reset on restart.
+- **Canonical trusted-proxy identity is not yet implemented.** IP-keyed policy
+  currently starts from the direct connection peer. Do not trust arbitrary
+  forwarding headers as client identity. The accepted trusted-proxy model is
+  tracked by #115, #135 and #136.
+- **In-memory only.** There is no distributed bucket store.
 
 ---
 
 ## L4 stream proxy ([stream.md](stream.md))
 
-- **No application-layer inspection.** TCP/UDP relay is byte-for-byte; Jul.IA
-  cannot read HTTP headers, terminate TLS (only SNI passthrough), or parse
-  wire protocols.
-- **SNI routing reads only the first TLS record.** A ClientHello that spans
-  multiple records or omits SNI falls back to the default route.
-- **UDP sessions are memory-backed.** Spoofed source addresses can fill the
-  session table up to the configured cap; monitor `jul_stream_udp_sessions_active`.
-- **No UDP load balancing.** UDP streams have a single backend per listener;
-  multi-backend round-robin is TCP only.
+- **No application-layer inspection.** TCP/UDP relay is byte-for-byte; TLS is
+  passthrough/SNI routing rather than termination.
+- **SNI routing reads only the first TLS record.** Multi-record ClientHello or
+  missing SNI uses the default route.
+- **UDP sessions are memory-backed.** Monitor the configured cap and active
+  session metric.
+- **No UDP load balancing.** UDP listeners have one backend; multi-backend
+  strategies are TCP-only.
 
 ---
 
 ## Service discovery ([service-discovery.md](service-discovery.md))
 
-- **Keep-last-good preserves stale backends indefinitely.** A permanently down
-  provider leaves the pool with the last-known backend set. Pair with active
-  health checks to eject unreachable backends; monitor
-  `jul_discovery_errors_total`.
-- **DNS TTL is not respected.** Jul.IA polls on a fixed `refresh` interval
-  regardless of TTL; fast DNS changes propagate only when the poll fires.
-- **Kubernetes discovery requires a token.** The `kubernetes` tag needs a
-  service-account token with EndpointSlice read permission; misconfigured RBAC
-  returns an empty pool without an obvious error.
+- **Keep-last-good can preserve stale backends indefinitely.** Pair it with
+  health checks and monitor discovery errors.
+- **DNS TTL is not respected.** Refresh uses the configured polling interval.
+- **Kubernetes discovery requires EndpointSlice permissions.** Authentication
+  and RBAC failures must be diagnosed from discovery status/logging.
 
 ---
 
 ## WAF ([waf.md](waf.md))
 
-- **Body inspection adds latency and memory.** Coraza buffers the full request
-  (and optionally response) body to inspect it. Large uploads or responses
-  consume proportional memory. Tune `request_body_limit` and
-  `response_body_check` for your workload.
-- **Detect mode does not block.** Requests in `detect` mode always reach the
-  upstream; WAF findings are logged/metrics-only.
-- **CRS rule updates require a rebuild.** The OWASP Core Rule Set is embedded
-  in the binary; updating it requires rebuilding with the `waf` tag.
-- **SecLang parser errors fail closed at startup.** A malformed directive file
-  prevents the WAF engine from building, and the server refuses to start so the
-  misconfigured location cannot be exposed without protection.
+- **URI/query logging is under security review (#127).** Avoid secrets in URLs
+  and restrict log access/retention.
+- **Body inspection adds latency and memory.** Tune request/response limits.
+- **Detect mode does not block.** It records findings while allowing traffic.
+- **CRS updates require a rebuild.** Rules are embedded.
+- **SecLang parse errors fail startup.** A malformed policy does not expose the
+  location without the configured protection.
 
 ---
 
 ## WASM plugins ([plugins.md](plugins.md))
 
-- **Request phase only.** The v1 ABI has no `handle_response` export; response
-  inspection or mutation after the upstream responds is not possible.
-- **No shared state across plugin names.** Each plugin name has its own wazero
-  runtime and KV namespace; two plugins cannot share memory or KV keys even if
-  they load the same `.wasm` file.
-- **No streaming bodies.** The host buffers the full request body before passing
-  it to the guest; very large bodies increase per-request memory pressure.
-- **WASM binary must be pre-compiled.** There is no JIT — modules are compiled
-  at startup, not on first use. A malformed WASM binary will prevent the server
-  from starting.
-- **Fetch capability requires allow-list.** Plugins with `fetch = true` can only
-  call hosts in `allowed_hosts`; unconstrained outbound fetch is not available.
+- **Request phase only.** The v1 ABI has no response-phase hook.
+- **No shared state across plugin names.** Runtimes/KV namespaces are isolated.
+- **No streaming bodies.** Request bodies are buffered for the guest.
+- **Modules are compiled during startup/generation build.** Invalid modules
+  reject the candidate.
+- **Fetch requires both plugin-local and global policy.** `allowed_hosts`, SSRF
+  checks and optional global egress policy all apply.
 
 ---
 
 ## Egress allow-list ([egress.md](egress.md))
 
-- **Startup-bound.** The `[egress]` policy is built once from the startup config;
-  changing `enabled`/`allow` takes effect only after a **restart** (it is
-  restart-required, staged through `stage_restart`).
-- **Auxiliary fetches only.** It guards the server's own config-driven fetches
-  (JWKS, forward-auth, discovery, ACME/OCSP, plugin `fetch`). The **data-plane
-  reverse proxy** — upstream proxying and active health checks — is out of scope.
-- **DNS/DNS-SRV discovery is not guarded.** Those use the system resolver rather
-  than an HTTP client.
-- **Trust-by-name.** A host listed by name is resolved normally; DNS rebinding of
-  an explicitly name-trusted host is out of scope — use CIDR entries for IP-level
-  enforcement.
-- **Port is not part of a host rule.** A name-allowed host is reachable on any
-  port.
+- **Startup-bound.** Changing `[egress]` requires a restart. The optional live
+  transition is gated because every client, worker and pooled connection must
+  move coherently (#94).
+- **Auxiliary fetches only.** It guards JWKS, forward-auth, discovery, ACME/OCSP
+  and plugin fetch; data-plane reverse proxy and active health are separate.
+- **DNS/DNS-SRV resolver behavior is separate.** Those paths do not use the
+  guarded HTTP client.
+- **Name trust and CIDR trust differ.** Use CIDR rules for IP-level policy.
+- **Port is not part of a host rule.** A name rule does not constrain port.
 
 ---
 
 ## NGINX importer ([nginx-importer.md](nginx-importer.md))
 
-- **`include` is not followed.** The importer processes a single file; split
-  configs must be concatenated or imported individually.
-- **`stream`, `mail`, and Lua are not translated.** Module-specific directives
-  are reported as untranslated and must be ported manually.
-- **Many directives are not mapped.** `add_header`, `proxy_set_header`,
-  `client_max_body_size`, `autoindex`, and others are reported for manual
-  porting. Translation is a best-effort aid, not a 1:1 converter.
+- **Current import is a best-effort subset.** It is not a cutover
+  certification.
+- **Include traversal and durable source provenance are not complete.** The
+  assessment/provenance programme is #152-#153.
+- **Many directives are unsupported or approximate.** Security-significant
+  omissions must be reported as blocking by the new assessment model.
+- **No compatibility percentage is authoritative.** #154 will compare only
+  explicit selected dimensions in sanitized E2E fixtures.
 
 ---
 
-## Admin console — single shared token by default
+## Admin console and control plane
 
-- **Single shared token by default; RBAC is opt-in.** The **default** admin
-  model is a single shared bearer token that grants full access with no per-user
-  attribution. Named-principal RBAC — roles, scoped revocable tokens,
-  least-privilege enforcement, and per-principal audit attribution — is now
-  available as an **opt-in `[admin.rbac]` layer** (HP-02 / ADR 0010); enable it
-  for multi-user workflows. External identity (OIDC/SSO) remains a Y3-02 horizon
-  item. See [docs/specs/console-rbac.md](specs/console-rbac.md) and the migration
-  steps in [docs/console.md](console.md).
+- **Single shared token by default; local RBAC is opt-in and shipped.** Use
+  `[admin.rbac]` for named principals and least privilege.
+- **No external identity provider.** OIDC/SAML/SCIM and browser-login flows are
+  future work.
+- **Admin listener enable/address is structural.** Dynamic self-disable or
+  relocation is gated in #97; planned restart remains the supported path.
+- **Configuration authority is currently managed behavior.** Explicit
+  `managed`/`file_owned` modes and external automation contracts are planned in
+  #118 and #148-#151.
 
 ---
 
 ## Single-node only
 
-- **No fleet management.** Jul.IA operates as a single-node server. Multi-node
-  config sync, staged rollout, and a fleet control plane are demand-gated
-  roadmap items (Year 3). See [docs/roadmap/README.md](roadmap/README.md).
-- **No distributed rate limiting or cache.** Rate-limit buckets and response
-  cache are per-process. A multi-node setup requires an external shared store
-  (demand-gated Year 3).
+- **No fleet management.** Jul.IA is a standalone single-node server.
+- **No distributed rate limiting, cache, circuit or configuration state.** A
+  multi-node deployment needs external orchestration/shared infrastructure.
+- **AI Gateway is a gated experiment, not the active next phase.** See #162.
 
 ---
 
 ## See also
 
-- [docs/status.md](status.md) — full GA criteria matrix with per-feature
-  evidence
-- [docs/compatibility.md](compatibility.md) — versioning and stability policy
-- [docs/roadmap/README.md](roadmap/README.md) — what is planned, what is
-  deferred, and what is demand-gated
+- [Current product truth](current-product-truth.md)
+- [Combined repository audit](audit/combined-audit-2026-08-03.md)
+- [Feature status](status.md)
+- [Compatibility policy](compatibility.md)
+- [Current roadmap programme](https://github.com/victornife/jul/issues/62)

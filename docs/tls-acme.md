@@ -1,273 +1,219 @@
-# TLS & automatic HTTPS (ACME)
+# TLS and automatic HTTPS (ACME)
 
-> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). Mutual TLS
-> (client certificates) is documented separately in [mtls.md](mtls.md).
+Jul.IA terminates TLS for HTTP/1.1 and HTTP/2 and, with the `http3` build tag,
+can use the same server-certificate provider for HTTP/3. Certificates come from
+static PEM files or a process-lifetime ACME manager.
 
-Jul.IA terminates TLS for HTTP/1.1, HTTP/2, and (with the `http3` tag) HTTP/3 on
-the same certificates. Certificates come from one of two sources per listener:
-**static PEM files** or **ACME** (Let's Encrypt and compatible CAs) for automatic
-issuance and renewal. Selection is by SNI, so one listener can serve many names.
+> [!WARNING]
+> **Current correction notices:**
+>
+> - static `cert`/`key` changes on a retained listener require restart; the live
+>   provider is not atomically replaced by an ordinary config reload (#100);
+> - `acme.challenge` does not currently provide proven exclusive HTTP-01 versus
+>   TLS-ALPN-01 runtime behavior (#122);
+> - HTTP/3 does not yet have proven parity with TCP TLS for the complete
+>   server-level client-auth policy (#121).
+>
+> Read [current-product-truth.md](current-product-truth.md) before relying on
+> historical maturity or hot-reload claims.
 
-## Quick start
-
-### Static certificate
+## Static certificate
 
 ```toml
 [[servers]]
-listen       = "0.0.0.0:443"
+listen = "0.0.0.0:443"
 server_names = ["example.com", "www.example.com"]
 
   [servers.tls]
-  enabled     = true
-  cert        = "/etc/jul/example.com.crt"
-  key         = "/etc/jul/example.com.key"
-  min_version = "1.2"            # "1.2" (default) or "1.3"
+  enabled = true
+  cert = "/etc/jul/example.com.crt"
+  key = "/etc/jul/example.com.key"
+  min_version = "1.2"
 ```
 
-### Automatic HTTPS (ACME)
+The certificate/key pair is loaded for the listener's TLS provider. Replacing
+the file contents or changing the paths does not rotate the provider on an
+already-bound listener. Use a planned restart until #100 is released.
 
-ACME requires a binary built with the `acme` tag. A plain HTTP listener on :80 is
-needed for the HTTP-01 challenge (or use TLS-ALPN-01 on :443 only).
+## Automatic HTTPS
+
+ACME requires a binary built with the `acme` tag.
 
 ```toml
 [[servers]]
-listen       = "0.0.0.0:443"
+listen = "0.0.0.0:443"
 server_names = ["example.com", "www.example.com"]
 
   [servers.tls]
   enabled = true
 
     [servers.tls.acme]
-    enabled   = true
-    email     = "ops@example.com"          # required (ACME account contact)
-    ca        = "letsencrypt-staging"       # default; use "letsencrypt" in prod
-    challenge = "http-01"                   # or "tls-alpn-01"
-    cache_dir = "./jul-data/certs"          # issued certs + account key
+    enabled = true
+    email = "ops@example.com"
+    ca = "letsencrypt-staging"
+    challenge = "http-01"
+    cache_dir = "./jul-data/certs"
 ```
 
-> The CA defaults to **staging** so an accidental deployment never burns
-> production rate limits. Set `ca = "letsencrypt"` for trusted certificates.
+The default CA is staging. Set `ca = "letsencrypt"` deliberately for trusted
+production certificates.
 
 ## Configuration reference
 
 ### `[servers.tls]`
 
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `enabled` | bool | `false` | Enables TLS on the listener. Promoted to `true` automatically when ACME is enabled. |
-| `cert` | string | — | Path to the PEM certificate (chain). Mutually exclusive with `acme`. |
-| `key` | string | — | Path to the PEM private key. |
-| `min_version` | string | `"1.2"` | Minimum TLS version: `"1.2"` or `"1.3"`. |
-| `acme` | table | — | ACME block (below). Mutually exclusive with `cert`/`key`. |
-| `client_auth` | table | — | Mutual TLS — see [mtls.md](mtls.md). |
+| Key | Default | Current behavior |
+| --- | --- | --- |
+| `enabled` | `false` | Listener protocol choice; retained-address transition is restart-bound/gated |
+| `cert` / `key` | — | Static PEM pair; restart required to rotate on a retained listener |
+| `min_version` | `"1.2"` | Startup/listener-owned; optional live transition remains gated |
+| `acme` | — | Startup-owned ACME manager policy |
+| `client_auth` | — | See [mtls.md](mtls.md); server-level policy is restart-bound and H3 parity is under correction |
 
 ### `[servers.tls.acme]`
 
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `enabled` | bool | `false` | Turns on ACME issuance for this listener. |
-| `email` | string | — | **Required.** ACME account contact. |
-| `ca` | string | `"letsencrypt-staging"` | `"letsencrypt"`, `"letsencrypt-staging"`, or a full `https://` directory URL. |
-| `domains` | []string | server_names | Names to request. Falls back to the block's `server_names`. |
-| `challenge` | string | `"http-01"` | `"http-01"` or `"tls-alpn-01"`. `"dns-01"` is **reserved for a future release** and rejected today. |
-| `dns_provider` | string | — | Reserved for a future DNS-01 release; setting it is rejected. |
-| `cache_dir` | string | `"./jul-data/certs"` | Directory cache for issued certs and the account key. |
-| `ocsp_stapling` | bool | `true` | Staple OCSP responses for ACME-issued certificates. |
-
-## Behaviour matrix
-
-| Capability | Status | Notes |
+| Key | Default | Current behavior |
 | --- | --- | --- |
-| TLS 1.2 / 1.3 termination | ✅ | `min_version` selects the floor; 1.3 always offered |
-| HTTP/1.1 + HTTP/2 over TLS | ✅ | ALPN advertises `h2`, `http/1.1` |
-| HTTP/3 (QUIC) on same certs | ✅ (`http3`) | shares the certificate provider |
-| SNI multi-certificate | ✅ | one listener serves many `server_names` |
-| Wildcard SNI (`*.example.com`) | ✅ | single label; exact match wins over wildcard |
-| SNI fallback | ✅ | first-loaded certificate when no name matches |
-| Static PEM certificates | ✅ | `cert` / `key` |
-| Static cert **hot reload** | ✅ | atomic provider swap on config reload, no rebind |
-| ACME HTTP-01 | ✅ (`acme`) | default; needs a plain HTTP listener |
-| ACME TLS-ALPN-01 | ✅ (`acme`) | answered on the TLS listener (`acme-tls/1`) |
-| ACME DNS-01 | ❌ | not implemented; reserved for a future release (rejected in validation) |
-| ACME staging / production / custom CA | ✅ (`acme`) | via `ca` |
-| ACME domain set **hot reload** | ❌ | fixed at startup; restart to change domains. The console refuses such an apply with a *restart required* notice rather than recording a no-op (see below) |
-| OCSP stapling (ACME certs) | ✅ (`acme`) | default on; degrades gracefully on fetch failure |
-| OCSP stapling (static certs) | ❌ | ACME-issued certificates only |
-| Custom cipher suites / ordering | ❌ | Go stdlib defaults (safe for TLS 1.2/1.3) |
-| Session tickets / 0-RTT control | ❌ | stdlib default tickets; 0-RTT not exposed server-side |
+| `enabled` | `false` | Builds/uses the process ACME manager; restart-bound |
+| `email` | — | ACME account contact; required by current validation |
+| `ca` | `"letsencrypt-staging"` | Staging, production, or HTTPS directory URL |
+| `domains` | `server_names` | Startup-owned HostPolicy/domain set |
+| `challenge` | `"http-01"` | Accepted values include HTTP-01 and TLS-ALPN-01, but exclusive runtime selection is under correction in #122 |
+| `dns_provider` | — | Reserved/unimplemented; must be rejected rather than ignored |
+| `cache_dir` | `"./jul-data/certs"` | Stores account and certificate material; owner-restricted |
+| `ocsp_stapling` | `true` | ACME-certificate stapling policy; startup-owned |
 
-### SNI certificate selection
+## Current capability matrix
 
-On each handshake the provider matches the client's SNI name in order:
-
-1. **Exact** `server_name` (e.g. `api.example.com`).
-2. **Wildcard** one label up (`*.example.com` matches `api.example.com`).
-3. **Fallback** to the first-loaded certificate.
-
-Names are lower-cased; an empty SNI goes straight to the fallback.
-
-### ACME challenges
-
-| Challenge | Port needed | How it is answered |
-| --- | --- | --- |
-| `http-01` (default) | plain HTTP (:80) | `/.well-known/acme-challenge/*` is served on the HTTP listener; all other requests fall through to the normal handler. |
-| `tls-alpn-01` | the TLS listener (:443) | the listener advertises `acme-tls/1`; the challenge certificate is served only for handshakes that negotiate it, so normal clients are unaffected. |
-
-`dns-01` is rejected at config-validation time with a clear error.
-
-### Certificate reload semantics
-
-| Source | On config reload |
+| Capability | Current status |
 | --- | --- |
-| Static `cert`/`key` | **Not reloaded** — certificates are bound at listener start; restart to pick up new `cert`/`key` files. |
-| ACME domain set | **Not reloaded** — the issued-domain set is fixed when the manager starts. ACME *renewal* still happens in the background while running. Restart to add/remove domains. |
-| `client_auth` (mTLS) | **Not reloaded** — bound at listener start (see [mtls.md](mtls.md)). |
+| TLS 1.2/1.3 termination | supported |
+| HTTP/1.1 and HTTP/2 ALPN | supported |
+| SNI multi-certificate selection | supported |
+| Static PEM certificate serving | supported; rotation requires restart |
+| ACME issuance and background renewal | supported with `acme` build tag under the running manager |
+| HTTP-01 versus TLS-ALPN-01 exclusivity | **correction pending (#122)** |
+| DNS-01 | not implemented; reserved configuration must be rejected |
+| ACME domain/account/issuer/cache transition | restart-bound; optional architecture work is gated |
+| HTTP/3 certificate provider | supported with `http3`; server-level mTLS parity correction pending (#121) |
+| OCSP stapling for ACME certs | supported with graceful unstapled fallback according to current manager behavior |
+| Static certificate OCSP stapling | not implemented |
+| Custom cipher ordering/session-ticket controls | not exposed |
 
-When a configuration is applied (through the console or any validated write
-path), every file-based `cert`/`key` pair it references is parsed **before** the
-file is persisted. A broken or mismatched pair fails the apply up front with a
-clear error, rather than surfacing only at the asynchronous reload where the
-previous certificates would keep serving. ACME-served addresses are skipped by
-this check because their certificates are obtained at handshake time.
+## ACME challenge warning
 
-#### Restart-required ACME changes
+The intended product contract is:
 
-Because the autocert manager's issued-domain set and issuer (email/CA) are fixed
-when it is built at startup, a hot apply cannot enable ACME, add or remove
-domains, or change the issuer. The console (and every validated write path)
-detects such a change by comparing the candidate against the running
-configuration and **refuses it without writing**, returning a *restart required*
-result (HTTP 409 with `restart_required: true`) instead of silently recording a
-change that the live runtime would ignore. Update the configuration file
-directly and restart the server to apply it.
+- **HTTP-01:** answer only the HTTP challenge route; do not advertise
+  `acme-tls/1` solely for ACME;
+- **TLS-ALPN-01:** advertise/serve the reserved ALPN challenge; do not install
+  the HTTP challenge handler solely for ACME;
+- **DNS-01:** reject until implemented.
 
-Removing ACME entirely is *not* restart-required: the per-address provider
-selection swaps to the static `cert`/`key` certificates on the next reload (which
-the apply-time validation above confirms will load).
+That exclusive behavior is the target of #122. Until the fix is deployed, do
+not use the configured selector as proof that the non-selected challenge surface
+is absent. Review listener exposure and firewall rules accordingly.
 
-## Metrics
+## Reload and lifecycle semantics
 
-| Metric | Type | Labels | Meaning |
-| --- | --- | --- | --- |
-| `jul_tls_cert_expiry_seconds` | gauge | `domain` | Leaf certificate expiry (Unix seconds), updated on each handshake. Alert when it approaches now. |
-| `jul_acme_renewals_total` | counter | — | ACME renewals observed (a domain's expiry advanced); cache hits are filtered out. |
-| `jul_mtls_handshakes_total` | counter | `result` | Mutual-TLS handshakes — see [mtls.md](mtls.md). |
+| Change | Current operational action |
+| --- | --- |
+| Static `cert`/`key` path or contents | validate candidate where supported, stage complete config and restart |
+| ACME enable/disable | restart |
+| ACME domains, challenge, email, CA, cache or OCSP policy | restart |
+| Server-level mTLS mode/CA/SAN/CRL | restart; disable H3 for protected listener until #121 |
+| Route/middleware/upstream changes | ordinary handler-generation reload when otherwise hot |
+| ACME certificate renewal | performed by the already-running manager; not equivalent to config hot reload |
 
-The Console **Status** panel reports **TLS** and **Automatic HTTPS (ACME)** as
-active capabilities with a per-block count.
+A mixed candidate is not partially applied: route changes must not be published
+while a restart-bound TLS/ACME change is merely recorded as though the complete
+candidate were live.
 
-## Benchmarks
+The selected static-certificate issue #100 and gated ACME issues #103-#104 may
+change exact field lifecycles later. #89 remains the authority for the final
+closed-world lifecycle model.
 
-From the in-tree benchmarks in `internal/server` (loopback, TLS 1.3, P-256 ECDSA;
-indicative of cost, not a throughput claim):
+## Security and operations
 
-| Benchmark | Result | Notes |
-| --- | --- | --- |
-| `BenchmarkTLSHandshakeServerAuth` | ~2 ms/op, ~122 KB/op, 866 allocs/op | full server-auth TLS 1.3 handshake (per-connection, loopback-noisy on latency; allocations are stable) |
-| `BenchmarkSNICertSelection/exact` | ~114 ns/op, **0 allocs/op** | exact-name lookup on the `GetCertificate` hot path |
-| `BenchmarkSNICertSelection/wildcard` | ~411 ns/op, **0 allocs/op** | wildcard match |
-| `BenchmarkSNICertSelection/fallback` | ~323 ns/op, **0 allocs/op** | no-match fallback |
+- Protect `cache_dir`; it contains ACME account and private-key material.
+- Use staging for testing and deterministic local ACME infrastructure in CI.
+- Do not run production certificate orders as a validation side effect.
+- HTTP-01 requires a reachable plain HTTP challenge path; redirect or constrain
+  all other traffic appropriately.
+- TLS-ALPN-01 uses the TLS listener and reserved ALPN behavior; treat exclusivity
+  as pending #122.
+- ACME/OCSP outbound traffic is affected by the optional egress allow-list.
+  Ensure CA and responder names are allowed before enabling egress.
+- OCSP fetch failure must not expose responder URLs or domains as metric labels.
+- ACME configuration applied successfully is not the same as a certificate
+  being issued and available for every domain.
+- Do not enable HTTP/3 on a server-level mTLS listener until #121.
 
-SNI selection is allocation-free and runs once per handshake (not per request).
-Reproduce with:
-
-```sh
-go test -run '^$' -bench 'SNICertSelection|TLSHandshakeServerAuth' -benchmem ./internal/server/
-```
-
-## Security / threat notes
-
-- **Terminate at the edge.** TLS is terminated by Jul.IA; traffic to upstreams
-  follows the proxy configuration. Front untrusted networks with TLS and keep
-  backends on a trusted network (or use mTLS to them where supported).
-- **Use TLS 1.3 where you can.** Set `min_version = "1.3"` for internet-facing
-  listeners that do not need legacy 1.2 clients. The default floor is 1.2.
-- **ACME defaults to staging on purpose** to avoid leaking production rate limits
-  from test deployments; this means an unconfigured `ca` issues **untrusted**
-  certificates. Set `ca = "letsencrypt"` deliberately for production.
-- **HTTP-01 exposes :80.** The plain HTTP listener answering the challenge should
-  forward or redirect everything else to HTTPS. Prefer `tls-alpn-01` if you do
-  not want a plain HTTP port.
-- **Protect the cache directory.** `cache_dir` holds the ACME account key and
-  issued private keys; restrict it to the service user.
-- **OCSP stapling fails open.** If an OCSP responder is unreachable the
-  certificate is served **unstapled** rather than failing the handshake; clients
-  fall back to their own revocation behaviour.
-- **One ACME issuer per process.** A single autocert manager is built at startup
-  and shared by every ACME-enabled server block, so the issuer settings come from
-  the first block. Validation rejects an apply where blocks disagree on `email`,
-  `ca`, `challenge`, `cache_dir`, or `ocsp_stapling`; keep them identical across
-  ACME blocks.
-
-## Egress allow-list prerequisites
-
-The optional [egress allow-list](egress.md) is **disabled by default**, and while
-it is off ACME/OCSP behave exactly as above (including `HTTP_PROXY` support). When
-you enable `[egress]`, the ACME directory/order/challenge client and the OCSP
-responder client are guarded like every other auxiliary fetch, so **issuance and
-stapling fail until the CA and OCSP hosts are in `allow`**.
-
-Public ACME CAs front their endpoints with CDNs whose IP addresses rotate, so
-list them by **name** (or a covering suffix) rather than by CIDR. For Let's
-Encrypt the minimal set is:
+## Egress example
 
 ```toml
 [egress]
 enabled = true
 allow = [
-  ".api.letsencrypt.org",      # directory, order, and challenge endpoints
+  ".api.letsencrypt.org",
   ".acme-v02.api.letsencrypt.org",
-  ".o.lencr.org",              # OCSP responder
-  # add ".acme-staging-v02.api.letsencrypt.org" when using the staging CA
+  ".acme-staging-v02.api.letsencrypt.org",
+  ".o.lencr.org",
 ]
 ```
 
-If ACME issuance suddenly fails right after enabling `[egress]`, an unlisted CA
-host is the first thing to check — the block is reported with subsystem `acme`
-(or `ocsp`). See [troubleshooting.md](troubleshooting.md#egress-blocks-an-outbound-fetch).
+Actual CA/CDN endpoints can evolve. Treat the configured CA directory and
+observed block reason as authoritative rather than copying this list blindly.
 
-## Limits
+## Metrics and status
 
-- **No DNS-01 challenge.** Wildcard issuance via DNS is not implemented; the
-  `dns-01` challenge and `dns_provider` are reserved for a future release and
-  rejected by validation. Use per-name HTTP-01/TLS-ALPN-01.
-- **ACME domain set is fixed at startup.** Adding or removing ACME domains needs
-  a restart; static-file certificates and ACME *renewals* are unaffected.
-- **OCSP stapling is ACME-only.** Static file certificates are served without a
-  stapled OCSP response.
-- **No cipher-suite, session-ticket, or 0-RTT configuration.** Jul.IA uses the Go
-  standard library's TLS defaults; these are not tunable via config.
-- **No pre-flight cert/key validation.** A bad static `cert`/`key` pair surfaces
-  as a bind-time error, not during `jul -check`.
+Certificate-expiry, ACME renewal and mTLS metrics are described in the current
+observability reference, but names/labels are subject to the released-contract
+reconciliation in #126. Never add domain, responder URL, certificate subject,
+SAN, path or raw error as an unbounded metric label.
 
-## GA status
+Runtime status should distinguish:
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), TLS + automatic HTTPS is **GA**. The
-soak test (criterion 5) was completed on 2026-07-05 via Phase 2A.
+- TLS configured and listener active;
+- ACME manager configured;
+- certificate currently available/expiry;
+- issuance/renewal/OCSP outcome;
+- H3 compiled/active;
+- client-auth configured and effective by protocol.
 
-| # | GA criterion | Status |
-| --- | --- | --- |
-| 1 | Behaviour matrix published | ✅ [behaviour matrix](#behaviour-matrix) (cert source × challenge × feature) |
-| 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) (`BenchmarkTLSHandshakeServerAuth`, `BenchmarkSNICertSelection`) |
-| 3 | Documented known-limitations | ✅ [Limits](#limits) |
-| 4 | Stable config/API contract (semver-guarded) | ✅ [compatibility policy](compatibility.md) (v1 tag at release) |
-| 5 | Long-running soak test passed | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
-| 6 | Runnable example + docs | ✅ [testdata/tls.toml](../testdata/tls.toml) + this doc |
-| 7 | Security / threat note | ✅ [Security / threat notes](#security--threat-notes) |
-| 8 | Fuzzing where parsing is involved | n/a — certificate/CA parsing is stdlib `crypto/x509`; config parsing is covered by the shared TOML/`validate` tests (no custom parser) |
-| 9 | Self-explanatory Console surface | ✅ Console **Status** panel reports *TLS* and *Automatic HTTPS (ACME)* |
+## Current limitations
 
-All GA criteria are satisfied.
+- static certificate/key rotation requires restart;
+- ACME manager policy/domain/account/cache changes require restart;
+- challenge selection is not yet a reliable exclusive runtime switch;
+- DNS-01 is not implemented;
+- server-level mTLS parity on H3 is under correction;
+- no static-certificate OCSP stapling;
+- no operator-configurable cipher ordering, ticket policy or 0-RTT policy;
+- external DNS, firewall and CA reachability cannot be guaranteed by local
+  config validation.
+
+## Maturity status
+
+Historical TLS and ACME benchmark/soak evidence remains useful, but the
+unconditional GA statement is temporarily qualified while #121 and #122 are
+open and static rotation claims are corrected. Re-certification must update the
+behavior matrix, security notes, lifecycle reference, status sources, examples
+and changelog with actual command and real-protocol evidence.
 
 ## Build tags
 
-- TLS termination (static certs, SNI, `min_version`, reload) is **core** — no tag.
-- **ACME** issuance requires the `acme` build tag; without it, enabling ACME in
-  config fails fast with a clear error.
-- **HTTP/3** over the same certificates requires the `http3` tag.
+- static TLS termination is core;
+- ACME requires `acme`;
+- HTTP/3 requires `http3`;
+- enabling a tagged feature in a binary without its tag must fail before
+  persistence/live mutation.
 
 ## See also
 
-- [mtls.md](mtls.md) — mutual TLS / client-certificate authentication
-- [compatibility.md](compatibility.md) — config/API stability policy
-- [testdata/tls.toml](../testdata/tls.toml) — `jul -check` sample
+- [Mutual TLS](mtls.md)
+- [HTTP/3](http3.md)
+- [Current product truth](current-product-truth.md)
+- [Combined audit](audit/combined-audit-2026-08-03.md)
+- [Compatibility policy](compatibility.md)
+- [TLS example](../testdata/tls.toml)

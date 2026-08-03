@@ -6,6 +6,7 @@ binary.
 
 ## Current audit and programme
 
+- **[Current product truth](current-product-truth.md)** — Temporary, source-backed correction notices for protocol security, cache, configuration, metrics, lifecycle and roadmap claims while remediation issues remain open.
 - **[2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md)** — Current source of truth for repository health, confirmed defects, architecture decisions and implementation sequencing.
 - **[Audit register](audit-register.md)** — Current audit pointer plus historical findings, fixes, tests and closure evidence.
 - **[Master implementation tracker](https://github.com/victornife/jul/issues/62)** — Current staged execution programme and decision register.
@@ -21,7 +22,7 @@ binary.
 - **[Concepts appendix](vision/appendix.md)** — New to HTTP, proxies, TLS, caching, or observability? Start here.
 
 ### Evaluating or operating?
-- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit while correction issues remain open.
+- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current product-truth notices while correction issues remain open.
 - **[Known limitations](known-limitations.md)** — Documented gaps and current correction notices.
 - **[Deployment guide](deployment.md)** — systemd, Windows service, Docker, and log rotation.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
@@ -95,6 +96,7 @@ go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins st
 ## Status of this documentation
 
 Code remains the runtime source of truth. The current documentation contract is governed by the
+[current product-truth notices](current-product-truth.md) and
 [combined audit](audit/combined-audit-2026-08-03.md) while #119 corrects known capability,
 security, lifecycle, maturity and operational contradictions. Historical GA-push and year-horizon
 documents are context, not the active implementation sequence. Please open an issue or PR when a
