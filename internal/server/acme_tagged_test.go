@@ -37,6 +37,9 @@ func TestNewACMEManagerBuildsManager(t *testing.T) {
 	if !ACMECompiled {
 		t.Error("ACMECompiled must be true with the acme tag")
 	}
+	if got := mgr.(*acmeManager).challenge; got != "http-01" {
+		t.Fatalf("manager challenge = %q, want http-01", got)
+	}
 }
 
 func TestNewACMEManagerWiresGuardedClient(t *testing.T) {
@@ -98,5 +101,31 @@ func TestACMEChallengeHandlerRouting(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if !fallbackHit {
 		t.Error("non-challenge request must reach the fallback")
+	}
+}
+
+func TestACMETLSALPNChallengeDoesNotInstallHTTPHandler(t *testing.T) {
+	cfg := acmeServerCfg()
+	cfg.Servers[0].TLS.ACME.Challenge = "tls-alpn-01"
+	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mgr.(*acmeManager).challenge; got != "tls-alpn-01" {
+		t.Fatalf("manager challenge = %q, want tls-alpn-01", got)
+	}
+
+	fallbackHit := false
+	h := mgr.ChallengeHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fallbackHit = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/acme-challenge/not-installed", nil))
+	if !fallbackHit {
+		t.Fatal("TLS-ALPN-01 must leave the plain HTTP challenge path on the normal handler")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
 	}
 }
