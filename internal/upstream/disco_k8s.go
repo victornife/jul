@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -38,6 +39,12 @@ type k8sDiscoverer struct {
 	token    string
 	port     string // selected port name or number ("" = first port)
 	describe string
+	log      *slog.Logger
+}
+
+// SetLogger attaches a logger for detailed resolve diagnostics.
+func (d *k8sDiscoverer) SetLogger(log *slog.Logger) {
+	d.log = log
 }
 
 func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer, error) {
@@ -123,6 +130,9 @@ type k8sEndpointSliceList struct {
 }
 
 func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
+	if d.log != nil {
+		d.log.Warn("kubernetes resolve request", "url", d.url)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url, nil)
 	if err != nil {
 		return nil, err
@@ -133,9 +143,15 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 	}
 	resp, err := d.client.Do(req)
 	if err != nil {
+		if d.log != nil {
+			d.log.Warn("kubernetes resolve request failed", "url", d.url, "error", err)
+		}
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if d.log != nil {
+		d.log.Warn("kubernetes resolve response", "url", d.url, "status", resp.Status)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("kubernetes: unexpected status %s", resp.Status)
 	}
@@ -145,8 +161,11 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 	}
 
 	var out []Target
-	for _, slice := range list.Items {
+	for i, slice := range list.Items {
 		port := d.selectPort(slice.Ports)
+		if d.log != nil {
+			d.log.Warn("kubernetes resolve slice", "index", i, "ports", len(slice.Ports), "selected_port", port, "endpoints", len(slice.Endpoints))
+		}
 		if port == 0 {
 			continue
 		}
@@ -163,6 +182,9 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 				out = append(out, Target{Address: net.JoinHostPort(addr, strconv.Itoa(port))})
 			}
 		}
+	}
+	if d.log != nil {
+		d.log.Warn("kubernetes resolve result", "url", d.url, "targets", len(out))
 	}
 	return out, nil
 }

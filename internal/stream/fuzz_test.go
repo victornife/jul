@@ -30,13 +30,13 @@ func FuzzReadProxyHeader(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		br := bufio.NewReaderSize(bytes.NewReader(data), 256)
 		addr, err := readProxyHeader(br)
-		if addr == nil && err == nil {
-			// nil addr + nil err is only valid for LOCAL/UNKNOWN in v1 or
-			// LOCAL in v2, both of which have specific well-formed prefixes.
-			// A generic empty/fuzz input should not reach this state.
-			// We accept it silently because the function contract allows it
-			// for UNKNOWN/LOCAL, and we do not want to over-constrain.
-		}
+		// nil addr + nil err is only valid for LOCAL/UNKNOWN in v1 or
+		// LOCAL in v2, both of which have specific well-formed prefixes.
+		// A generic empty/fuzz input should not reach this state.
+		// We accept it silently because the function contract allows it
+		// for UNKNOWN/LOCAL, and we do not want to over-constrain.
+		_ = addr
+		_ = err
 	})
 }
 

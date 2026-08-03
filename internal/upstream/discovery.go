@@ -51,6 +51,12 @@ type DiscoveryHooks struct {
 	OnError func(pool string)
 }
 
+// loggingDiscoverer lets a Discoverer accept a logger for detailed diagnostics.
+// It is optional; only the Kubernetes discoverer implements it today.
+type loggingDiscoverer interface {
+	SetLogger(*slog.Logger)
+}
+
 // discoveryEnabled reports whether a discovery config selects a dynamic provider
 // (as opposed to the static Servers list).
 func discoveryEnabled(d *config.DiscoveryConfig) bool {
@@ -94,6 +100,12 @@ func (p *Pool) StartDiscovery(d Discoverer, refresh time.Duration, hooks Discove
 	if refresh <= 0 {
 		refresh = 30 * time.Second
 	}
+	if log != nil {
+		log.Warn("starting discovery refresher", "upstream", p.name, "discoverer", d.Describe(), "refresh", refresh.String())
+	}
+	if ld, ok := d.(loggingDiscoverer); ok && log != nil {
+		ld.SetLogger(log)
+	}
 	go func() {
 		p.refreshOnce(d, hooks, log)
 		timer := time.NewTimer(jitter(refresh))
@@ -101,6 +113,9 @@ func (p *Pool) StartDiscovery(d Discoverer, refresh time.Duration, hooks Discove
 		for {
 			select {
 			case <-p.Done():
+				if log != nil {
+					log.Warn("stopping discovery refresher", "upstream", p.name)
+				}
 				return
 			case <-timer.C:
 				p.refreshOnce(d, hooks, log)
@@ -115,10 +130,16 @@ func (p *Pool) StartDiscovery(d Discoverer, refresh time.Duration, hooks Discove
 // backends. Errors and empty results are logged and skip the update (keep
 // last-good) so transient provider issues do not drop all backends at once.
 func (p *Pool) refreshOnce(d Discoverer, hooks DiscoveryHooks, log *slog.Logger) {
+	if log != nil {
+		log.Warn("discovery refresh starting", "upstream", p.name, "discoverer", d.Describe())
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout)
 	defer cancel()
 
 	targets, err := d.Resolve(ctx)
+	if log != nil {
+		log.Warn("discovery refresh completed", "upstream", p.name, "targets", len(targets), "error", err)
+	}
 	if err != nil {
 		if hooks.OnError != nil {
 			hooks.OnError(p.name)

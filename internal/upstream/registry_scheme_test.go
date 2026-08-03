@@ -28,9 +28,9 @@ func TestRegistryKeysPoolsByNameAndScheme(t *testing.T) {
 	if httpPool == httpsPool {
 		t.Fatal("http and https pools for the same name must be distinct")
 	}
-	if !closed(httpPool.Done()) && !closed(httpsPool.Done()) {
-		// Both live, good.
-	}
+	// Both pools should still be live at this point.
+	_ = httpPool
+	_ = httpsPool
 
 	// A later build that drops the https reference closes only the https pool.
 	r.Begin()
