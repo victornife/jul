@@ -89,6 +89,12 @@ func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	if !waitForURL(t, adminHealthURL, 5*time.Second) {
 		t.Fatalf("admin server did not become ready")
 	}
+	// AC-XX: wait for the initial auth snapshot to be committed by the startup
+	// reload so the AuthGeneration captured by the apply handler matches the
+	// value checked by the reload coroutine. Without this pause the apply can
+	// authorize against the pre-commit snapshot and then fail auth_cas when the
+	// reload runs concurrently.
+	time.Sleep(50 * time.Millisecond)
 
 	// Admin apply: change return code from 200 to 201.
 	writeConfig(201)
