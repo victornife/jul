@@ -1,0 +1,79 @@
+name: Verify exclusive ACME challenge selection
+
+on:
+  push:
+    branches:
+      - fix/acme-challenge-selection
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/acme-challenge-selection
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Update challenge documentation and changelog
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          docs_path = Path("docs/tls-acme.md")
+          docs = docs_path.read_text()
+          old = '''| `http-01` (default) | plain HTTP (:80) | `/.well-known/acme-challenge/*` is served on the HTTP listener; all other requests fall through to the normal handler. |
+| `tls-alpn-01` | the TLS listener (:443) | the listener advertises `acme-tls/1`; the challenge certificate is served only for handshakes that negotiate it, so normal clients are unaffected. |
+
+`dns-01` is rejected at config-validation time with a clear error.
+'''
+          new = '''| `http-01` (default) | plain HTTP (:80) | `/.well-known/acme-challenge/*` is served on the HTTP listener; all other requests fall through to the normal handler. TLS listeners do not advertise `acme-tls/1` solely for ACME. |
+| `tls-alpn-01` | the TLS listener (:443) | the listener advertises `acme-tls/1`; the challenge certificate is served only for handshakes that negotiate it. The plain HTTP challenge path is not installed by ACME. |
+
+The two modes are exclusive: Jul.IA activates only the challenge surface selected
+by `challenge`. `dns-01` is rejected at config-validation time with a clear error.
+'''
+          if docs.count(old) != 1:
+              raise SystemExit("challenge documentation block did not match exactly once")
+          docs_path.write_text(docs.replace(old, new))
+
+          changelog_path = Path("CHANGELOG.md")
+          changelog = changelog_path.read_text()
+          marker = "### Security\n"
+          fixed = '''### Fixed
+- **ACME challenge selection:** `challenge = "http-01"` now installs only the
+  plain HTTP challenge handler and does not advertise `acme-tls/1`; `challenge =
+  "tls-alpn-01"` advertises the reserved ALPN protocol and leaves the plain HTTP
+  challenge path on the normal handler. The two modes are exclusive.
+
+'''
+          if changelog.count(marker) != 1:
+              raise SystemExit("Unreleased Security section did not match exactly once")
+          changelog_path.write_text(changelog.replace(marker, fixed + marker, 1))
+          PY
+          gofmt -w internal/server/acme.go internal/server/tls.go internal/server/acme_test.go internal/server/acme_tagged_test.go
+
+      - name: Run focused ACME tests
+        run: |
+          go test -tags acme ./internal/server -run 'TestACME|TestAcme|TestListenerNextProtos|TestNewACMEManager|TestDirectoryURL' -count=1
+          go test ./internal/config -run 'ACME|Acme' -count=1
+
+      - name: Commit verified result and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/verify-acme-challenge-selection.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add internal/server/acme.go internal/server/tls.go internal/server/acme_test.go internal/server/acme_tagged_test.go docs/tls-acme.md CHANGELOG.md .github/workflows/verify-acme-challenge-selection.yml
+          git commit -m "acme: verify exclusive challenge selection"
+          git push origin HEAD:fix/acme-challenge-selection
