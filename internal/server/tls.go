@@ -237,9 +237,9 @@ type ACMEManager interface {
 	// Provider returns a CertProvider that obtains and renews certificates for
 	// the given domains on demand during the TLS handshake.
 	Provider(domains []string) CertProvider
-	// ChallengeHandler wraps next so HTTP-01 challenge requests under
-	// /.well-known/acme-challenge/ are answered on the plain HTTP listener and
-	// every other request falls through to next.
+	// ChallengeHandler wraps next with the configured plain HTTP challenge
+	// behavior. In HTTP-01 mode it answers requests under
+	// /.well-known/acme-challenge/; in TLS-ALPN-01 mode it returns next unchanged.
 	ChallengeHandler(next http.Handler) http.Handler
 }
 
@@ -256,14 +256,13 @@ func (s *Server) certProviderFor(addr string, bindings []certBinding) (CertProvi
 }
 
 // listenerNextProtos returns the ALPN protocols to advertise on addr's TLS
-// listener. When ACME is active for the address, "acme-tls/1" is prepended so
-// the TLS-ALPN-01 challenge can be answered on the same listener: autocert
-// serves the special challenge certificate for handshakes that negotiate that
-// protocol, while normal clients never select it. Otherwise only HTTP/2 and
-// HTTP/1.1 are offered. The s.ACME nil-guard keeps this tag-free — lean builds
-// have no ACME manager and so never advertise acme-tls/1.
+// listener. The reserved "acme-tls/1" protocol is exposed only when ACME is
+// active and TLS-ALPN-01 is the configured challenge. HTTP-01 listeners offer
+// only the ordinary HTTP protocols so the non-selected challenge surface is
+// absent. The s.ACME nil-guard keeps this tag-free — lean builds never
+// advertise acme-tls/1.
 func (s *Server) listenerNextProtos(addr string) []string {
-	if s.ACME != nil && acmeEnabledForAddr(s.cfg.Servers, addr) {
+	if s.ACME != nil && acmeChallengeForAddr(s.cfg.Servers, addr) == "tls-alpn-01" {
 		return []string{"acme-tls/1", "h2", "http/1.1"}
 	}
 	return []string{"h2", "http/1.1"}
@@ -278,6 +277,25 @@ func acmeEnabledForAddr(servers []config.ServerConfig, addr string) bool {
 		}
 	}
 	return false
+}
+
+// acmeChallengeForAddr returns the selected challenge for an ACME-enabled TLS
+// address. Configuration validation requires all enabled ACME blocks to agree;
+// the empty value is treated as the documented HTTP-01 default for defensive
+// callers that construct Config values without running applyDefaults.
+func acmeChallengeForAddr(servers []config.ServerConfig, addr string) string {
+	for _, srv := range servers {
+		if srv.Listen != addr || srv.TLS == nil || !srv.TLS.Enabled ||
+			srv.TLS.ACME == nil || !srv.TLS.ACME.Enabled {
+			continue
+		}
+		challenge := strings.TrimSpace(srv.TLS.ACME.Challenge)
+		if challenge == "" {
+			return "http-01"
+		}
+		return challenge
+	}
+	return ""
 }
 
 // acmeDomainsForAddr collects the de-duplicated ACME domains across every
