@@ -42,6 +42,18 @@ func TestNewACMEManagerBuildsManager(t *testing.T) {
 	}
 }
 
+func TestNewACMEManagerDefaultsEmptyChallengeToHTTP01(t *testing.T) {
+	cfg := acmeServerCfg()
+	cfg.Servers[0].TLS.ACME.Challenge = ""
+	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewACMEManager: %v", err)
+	}
+	if got := mgr.(*acmeManager).challenge; got != "http-01" {
+		t.Fatalf("manager challenge = %q, want defensive http-01 default", got)
+	}
+}
+
 func TestNewACMEManagerWiresGuardedClient(t *testing.T) {
 	guarded := &http.Client{}
 	m, err := NewACMEManager(acmeServerCfg().Servers, nil, guarded, nil)
