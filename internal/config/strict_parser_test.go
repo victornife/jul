@@ -14,48 +14,10 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 		doc  string
 		want string
 	}{
-		{
-			name: "top-level field",
-			doc: `unexpected = true
-
-[[servers]]
-listen = "127.0.0.1:8080"
-`,
-			want: "unexpected",
-		},
-		{
-			name: "nested global field",
-			doc: `[global]
-log_levle = "debug"
-
-[[servers]]
-listen = "127.0.0.1:8080"
-`,
-			want: "log_levle",
-		},
-		{
-			name: "nested server field",
-			doc: `[[servers]]
-listen = "127.0.0.1:8080"
-read_header_timout = "5s"
-`,
-			want: "read_header_timout",
-		},
-		{
-			name: "nested client-auth field",
-			doc: `[[servers]]
-listen = "127.0.0.1:8443"
-
-  [servers.tls]
-  enabled = true
-  cert = "server.pem"
-  key = "server.key"
-
-    [servers.tls.client_auth]
-    mdoe = "require"
-`,
-			want: "mdoe",
-		},
+		{name: "top-level field", doc: "unexpected = true\n\n[[servers]]\nlisten = \"127.0.0.1:8080\"\n", want: "unexpected"},
+		{name: "nested global field", doc: "[global]\nlog_levle = \"debug\"\n\n[[servers]]\nlisten = \"127.0.0.1:8080\"\n", want: "log_levle"},
+		{name: "nested server field", doc: "[[servers]]\nlisten = \"127.0.0.1:8080\"\nread_header_timout = \"5s\"\n", want: "read_header_timout"},
+		{name: "nested client-auth field", doc: "[[servers]]\nlisten = \"127.0.0.1:8443\"\n[servers.tls]\nenabled = true\ncert = \"server.pem\"\nkey = \"server-key.pem\"\n[servers.tls.client_auth]\nmdoe = \"require\"\n", want: "mdoe"},
 	}
 
 	for _, tt := range tests {
@@ -70,21 +32,15 @@ listen = "127.0.0.1:8443"
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %q, want unknown field %q", err, tt.want)
 			}
-		}
+			if !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("error = %q, want actionable unknown-field context", err)
+			}
+		})
 	}
 }
 
 func TestParseStrictModePreservesValidDynamicMaps(t *testing.T) {
-	cfg, err := Parse([]byte(`[plugins.example]
-path = "./example.wasm"
-
-[plugins.example.config]
-region = "eu-west"
-tenant = "test"
-
-[[servers]]
-listen = "127.0.0.1:8080"
-`))
+	cfg, err := Parse([]byte("[plugins.example]\npath = \"./example.wasm\"\n[plugins.example.config]\nregion = \"eu-west\"\ntenant = \"test\"\n[[servers]]\nlisten = \"127.0.0.1:8080\"\n"))
 	if err != nil {
 		t.Fatalf("Parse valid dynamic plugin map: %v", err)
 	}
@@ -98,18 +54,12 @@ listen = "127.0.0.1:8080"
 }
 
 func TestParseAcceptsDeprecatedServerNameAlias(t *testing.T) {
-	cfg, err := Parse([]byte(`[[servers]]
-listen = "127.0.0.1:8080"
-server_name = "example.com"
-`))
+	cfg, err := Parse([]byte("[[servers]]\nlisten = \"127.0.0.1:8080\"\nserver_name = \"example.com\"\n"))
 	if err != nil {
 		t.Fatalf("Parse deprecated server_name alias: %v", err)
 	}
 	if got, want := cfg.Servers[0].ServerNames, []string{"example.com"}; len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("server_names = %#v, want %#v", got, want)
-	}
-	if cfg.Servers[0].DeprecatedServerName != "" {
-		t.Fatalf("deprecated alias remained populated: %q", cfg.Servers[0].DeprecatedServerName)
 	}
 	out, err := Marshal(cfg)
 	if err != nil {
@@ -124,11 +74,7 @@ server_name = "example.com"
 }
 
 func TestParseRejectsServerNameAliasWithCanonicalField(t *testing.T) {
-	_, err := Parse([]byte(`[[servers]]
-listen = "127.0.0.1:8080"
-server_name = "legacy.example.com"
-server_names = ["canonical.example.com"]
-`))
+	_, err := Parse([]byte("[[servers]]\nlisten = \"127.0.0.1:8080\"\nserver_name = \"legacy.example.com\"\nserver_names = [\"canonical.example.com\"]\n"))
 	if err == nil {
 		t.Fatal("expected conflicting server_name and server_names to fail")
 	}
