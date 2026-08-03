@@ -3,7 +3,7 @@ name: Apply deterministic HTTP3 UDP preflight test
 on:
   pull_request:
     branches:
-      - fix/brace-expansion-5.0.9
+      - main
 
 permissions:
   contents: write
