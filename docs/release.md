@@ -10,6 +10,7 @@
 - [What ships](#what-ships)
 - [Variants](#variants)
 - [How a release is produced](#how-a-release-is-produced)
+- [Release candidates](#release-candidates)
 - [Verifying a download](#verifying-a-download)
 - [Installing](#installing)
 
@@ -73,7 +74,41 @@ flowchart LR
    **draft** GitHub Release. A maintainer reviews the assets and publishes it.
 
 Because the release is created as a draft, publishing is a deliberate human
-step, not an automatic side effect of pushing a tag.
+step, not an automatic side effect of pushing a tag. GitHub-generated release
+notes are a starting point: before publication they must be reconciled with
+`CHANGELOG.md`, the current security/status/known-limitations documents, and the
+actual artifacts produced for the tagged SHA.
+
+## Release candidates
+
+A release-candidate tag uses the normal semantic-version pre-release form:
+
+```text
+vX.Y.Z-rc.N
+```
+
+It runs the **same** release gate, soak, cross-platform lean/full matrix,
+checksums, SBOM generation, and provenance/SBOM attestation as a stable tag. The
+workflow still creates a **draft** GitHub Release. An RC draft remains
+unpublished unless a maintainer explicitly decides otherwise; it is an artifact
+and release-path validation point, not a claim that all selected correctness or
+maturity work is complete.
+
+The [current roadmap checkpoint](roadmap/README.md#release-candidate-checkpoint)
+is `v1.32.1-rc.1`, to be tagged from the exact integrated `main` SHA only after
+PRs #165 and #166 merge and the complete CI pipeline is green. A later stable
+`v1.32.1` tag requires a separate publication decision and a fresh release run;
+the RC tag is never renamed or reused.
+
+Before creating any tag:
+
+1. confirm the target commit is the intended integrated `main` SHA;
+2. confirm required CI is green for that exact SHA;
+3. confirm `CHANGELOG.md`, README, security, status, known-limitations and release
+   notes describe both delivered fixes and unresolved limitations truthfully;
+4. push the immutable tag;
+5. review the resulting draft release, assets, checksums, SBOMs, attestations and
+   soak artifact before any publication decision.
 
 ## Verifying a download
 

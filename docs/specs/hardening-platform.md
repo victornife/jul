@@ -15,7 +15,7 @@
 > degradation, a11y, edge-timeout/observability fixes, and ops/supply-chain
 > readiness) so the items are **tracked, not lost**. Several HP items are now
 > delivered; the rest are mapped to the active phase sequence in
-> [../roadmap/README.md](../roadmap/README.md#active-operating-roadmap). Each entry
+> [../roadmap/README.md](../roadmap/README.md#current-execution-sequence). Each entry
 > records what the hardening pass **already delivered** versus what remains, so
 > this spec does not re-litigate solved problems.
 

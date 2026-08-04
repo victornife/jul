@@ -57,6 +57,19 @@ NGINX who want a gentler on-ramp.
 
 ---
 
+## Current direction
+
+Jul.IA is completing the bounded standalone gateway first: current correctness,
+trusted client/backend identity, generic resilience, safe configuration
+automation, and selected high-value runtime dynamics. Fleet, hosted cloud,
+GraphQL composition and AI remain optional horizons or bounded experiments; none
+is required for the single-node product to remain useful. See the
+[operating model](docs/operating-model.md),
+[Core Gateway Completeness](docs/specs/core-gateway-completeness.md), and
+[roadmap v2.0](docs/roadmap/README.md).
+
+---
+
 ## Feature maturity
 
 The canonical maturity matrix lives in [`docs/status.md`](docs/status.md). At a

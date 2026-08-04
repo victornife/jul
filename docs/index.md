@@ -9,6 +9,8 @@ binary.
 - **[2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md)** — Current source of truth for repository health, confirmed defects, architecture decisions and implementation sequencing.
 - **[Audit register](audit-register.md)** — Current audit pointer plus historical findings, fixes, tests and closure evidence.
 - **[Master implementation tracker](https://github.com/victornife/jul/issues/62)** — Current staged execution programme and decision register.
+- **[Project operating model](operating-model.md)** — Durable portfolio, execution, evidence and experiment rules.
+- **[Core Gateway Completeness](specs/core-gateway-completeness.md)** — Bounded standalone-product completion contract.
 - **[2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md)** — Preserved historical audit and remediation evidence; no longer the active implementation plan.
 
 ## Choose your path
@@ -52,7 +54,7 @@ binary.
 - **[ADRs](adr/)** — Architecture Decision Records for durable design choices.
 - **[Reviews & decision log](reviews/)** — Dated architecture reviews, product direction changes, and historical audit findings.
 - **[Engineering specs](specs/)** — Detailed feature and implementation specifications.
-- **[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Long-term direction. Current implementation sequencing is governed by the combined audit and #62 while the durable operating-model documents are updated.
+- **[Roadmap v2.0](roadmap/README.md)** & **[Vision](vision/README.md)** — Current portfolio and durable direction; #62 owns issue-level sequencing.
 - **[Release process](release.md)** — How releases are cut, versioned, and signed.
 - **[Soak evidence log](soak-evidence.md)** — Dated soak runs and where CI/release soak artifacts are published.
 - **[Changelog](../CHANGELOG.md)** — Release history.
