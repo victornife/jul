@@ -1,0 +1,63 @@
+name: Rebase PR 166 onto final PR 165 head
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    if: github.head_ref == 'automation/rebase-pr166-final'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out preserved PR branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: docs/core-gateway-completeness
+          fetch-depth: 0
+
+      - name: Restore final validated strategy layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/pr166-final-source
+          files=(
+            CHANGELOG.md
+            README.md
+            docs/adr/0003-maturity-and-ga.md
+            docs/adr/0004-console-ui-invariants.md
+            docs/adr/0013-project-operating-model-and-completeness.md
+            docs/adr/0014-operability-surfaces.md
+            docs/index.md
+            docs/operating-model.md
+            docs/release.md
+            docs/roadmap/README.md
+            docs/specs/README.md
+            docs/specs/core-gateway-completeness.md
+            docs/specs/hardening-platform.md
+            docs/specs/year-3.md
+            docs/specs/year-4.md
+            docs/specs/year-5.md
+            docs/status.md
+            docs/vision/README.md
+          )
+          for path in "${files[@]}"; do
+            mkdir -p "$(dirname "$path")"
+            git show "origin/automation/pr166-final-source:$path" > "$path"
+          done
+
+      - name: Validate documentation
+        run: |
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Commit clean stacked branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md CHANGELOG.md docs/
+          git commit -m "docs: define operating model and core completeness"
+          git push origin HEAD:docs/core-gateway-completeness
