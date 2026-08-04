@@ -1,0 +1,43 @@
+name: Export exact main source
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'automation/export-main-source'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact integrated main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify exact source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          expected="8f0100820c7f2f1cbf0f4e961e35a121034f0c8c"
+          echo "main=${actual}"
+          test "${actual}" = "${expected}"
+          test -z "$(git status --short)"
+
+      - name: Package repository source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git -czf /tmp/jul-main-source.tar.gz .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: jul-main-source
+          path: /tmp/jul-main-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
