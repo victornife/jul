@@ -159,9 +159,9 @@ closed-world lifecycle registry and documented atomically.
 | `jul_mtls_handshakes_total` | counter | `result` | Mutual-TLS handshakes — see [mtls.md](mtls.md). |
 
 The Console **Status** panel reports TLS and Automatic HTTPS (ACME) as active
-capabilities with a per-block count. The Prometheus contract remains subject to
-the compatibility reconciliation tracked by #126; destination, domain, subject,
-SAN, responder URL, or raw error values must not become unbounded labels.
+capabilities with a per-block count. These metric names and labels are frozen by
+the [Prometheus contract](metrics-contract.json); destination, subject, SAN,
+responder URL, or raw error values must not become unbounded labels.
 
 ## Benchmarks
 

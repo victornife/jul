@@ -189,9 +189,11 @@ failures a backend is parked for `fail_timeout` (default 10s). There is **no**
 jul exposes Prometheus metrics on the admin `/metrics` endpoint from a private
 registry (only `jul_*` series plus the standard Go/process collectors). Every
 label is **bounded by construction** — the label set below is a policy, enforced
-by a regression test (`internal/observability/cardinality_test.go`,
-`TestMetricLabelPolicy`) that fails if a metric gains an unexpected label. This
-keeps Prometheus series counts predictable as the feature set grows.
+by the machine-readable [metric contract](metrics-contract.json) and regression
+tests in `internal/observability`. CI freezes the released `v1.32.0` families,
+checks every current name/type/help/label tuple, and fails if documentation or
+collectors drift. This keeps Prometheus series counts predictable as the feature
+set grows.
 
 ### Label cardinality policy
 
@@ -219,6 +221,8 @@ Labels fall into three classes by what bounds them:
 | `jul_http_ratelimited_total` | `key` | fixed (`ip`/`header`/`jwt`) |
 | `jul_auth_decisions_total` | `method`, `result` | fixed gate × `allow`/`deny` |
 | `jul_waf_events_total` | `action`, `rule` | `block`/`detect` × loaded rule IDs |
+| `jul_egress_decisions_total` | `subsystem`, `result`, `reason` | fixed subsystem/result/reason enums |
+| `jul_egress_dns_answers_total` | `subsystem`, `result` | fixed subsystem/result enums |
 | `jul_upstream_healthy` | `pool`, `backend` | pool membership |
 | `jul_upstream_backends` | `pool` | configured pools |
 | `jul_discovery_errors_total` | `pool` | configured pools |
@@ -239,6 +243,18 @@ Labels fall into three classes by what bounds them:
 | `jul_tls_cert_expiry_seconds` | `domain` | configured/served domains |
 | `jul_acme_renewals_total` | — | single series |
 | `jul_mtls_handshakes_total` | `result` | `verified`/`rejected` |
+| `jul_reload_total` | `source`, `outcome` | fixed trigger/outcome enums |
+| `jul_reload_duration_seconds` | `source`, `outcome` | fixed trigger/outcome enums; buckets fixed |
+| `jul_reload_in_progress` | — | single series |
+| `jul_reload_phase_duration_seconds` | `phase`, `outcome` | fixed phase/outcome enums; buckets fixed |
+| `jul_reload_timeout_total` | `phase` | fixed reload-phase enum |
+| `jul_config_stage_restart_total` | `result` | fixed stage/discard result enum |
+| `jul_config_pending_restart` | — | single series |
+| `jul_managed_apply_finalized_total` | `operation`, `mode`, `outcome`, `restored` | fixed managed-operation/lifecycle enums |
+| `jul_managed_apply_finalization_errors_total` | `component` | fixed finalizer-component enum |
+| `jul_managed_apply_history_total` | `operation`, `result` | fixed managed-operation/history-result enums |
+| `jul_managed_apply_terminal_registry_entries` | — | single bounded count |
+| `jul_managed_apply_terminal_lookup_total` | `result` | fixed lookup-result enum |
 
 Notably absent from every label set — deliberately — are the request **path**,
 **query string**, **client IP**, **user-agent**, and raw **Host**: those are

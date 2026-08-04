@@ -147,7 +147,7 @@ references.
 - **SNI routing reads only the first TLS record.** A ClientHello that spans
   multiple records or omits SNI falls back to the default route.
 - **UDP sessions are memory-backed.** Spoofed source addresses can fill the
-  session table up to the configured cap; monitor `jul_stream_udp_sessions_active`.
+  session table up to the configured cap; monitor `jul_stream_active_conns{proto="udp"}`.
 - **No UDP load balancing.** UDP streams have a single backend per listener;
   multi-backend round-robin is TCP only.
 

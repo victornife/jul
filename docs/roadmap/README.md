@@ -57,7 +57,7 @@ v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
     ↓
 #124 — explicit access-log enablement
     ↓
-#126 metrics contract / #127 WAF request-target logging
+#127 — WAF request-target logging
     ↓
 #131 → #133 / #132 → #134 — cache correctness and recertification
     ↓
@@ -70,7 +70,7 @@ v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
 selected core implementations
 ```
 
-#126 and #127 may proceed in parallel when they do not overlap the active shared
+#127 may proceed independently while it does not overlap the active shared
 configuration or cache work. Shared edits to the configuration schema, lifecycle,
 composition root, reload transaction, or Console patch contracts remain serial.
 
@@ -84,12 +84,12 @@ composition root, reload transaction, or Console patch contracts remain serial.
 - `Cache-Control: no-transform` enforcement in dynamic compression.
 - Deterministic HTTP/3 UDP preflight testing on Windows.
 - Frontend dependency and CodeQL reflected-output hardening.
+- Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).
 
 ### Remaining immediate correctness
 
 - Reject invalid known enum, duration, worker and scalar values (#123).
 - Add explicit access-log enablement and retire ignored destination fields (#124).
-- Reconcile the released Prometheus contract (#126).
 - Bound/redact WAF matched request-target logging (#127).
 - Restore cache concurrency, lifecycle, protocol and HTTP conformance (#107, #131–#134).
 - Establish closed-world generated lifecycle authority (#89).

@@ -1,0 +1,390 @@
+{
+  "version": 1,
+  "released_baseline": {
+    "tag": "v1.32.0",
+    "commit": "6bb76a08846150663d7eeb9661edb718ef357a7c"
+  },
+  "metrics": [
+    {
+      "name": "jul_acme_renewals_total",
+      "type": "counter",
+      "help": "ACME certificate renewals observed (expiry advanced for a domain).",
+      "labels": [],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_auth_decisions_total",
+      "type": "counter",
+      "help": "Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny).",
+      "labels": [
+        "method",
+        "result"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_cache_events_total",
+      "type": "counter",
+      "help": "Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS).",
+      "labels": [
+        "state"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_config_pending_restart",
+      "type": "gauge",
+      "help": "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_config_stage_restart_total",
+      "type": "counter",
+      "help": "Staged-restart apply operations, labeled by result (created/updated/discarded/failed).",
+      "labels": [
+        "result"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_discovery_errors_total",
+      "type": "counter",
+      "help": "Failed or empty service-discovery resolves, labeled by pool (last-good backends are kept).",
+      "labels": [
+        "pool"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_egress_decisions_total",
+      "type": "counter",
+      "help": "Outbound egress allow-list decisions, labeled by subsystem, result (allow/block), and reason (empty on allow).",
+      "labels": [
+        "reason",
+        "result",
+        "subsystem"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_egress_dns_answers_total",
+      "type": "counter",
+      "help": "Egress CIDR-only hostname resolutions evaluated, labeled by subsystem and result (allow/block).",
+      "labels": [
+        "result",
+        "subsystem"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_grpc_proxy_streams_total",
+      "type": "counter",
+      "help": "Native gRPC calls forwarded by the HTTP/2 passthrough proxy (one per call, including each streaming call).",
+      "labels": [],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_grpc_transcode_requests_total",
+      "type": "counter",
+      "help": "gRPC-JSON transcoding requests, labeled by gRPC method full name and HTTP status code.",
+      "labels": [
+        "code",
+        "method"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_grpc_transcode_stream_msgs_total",
+      "type": "counter",
+      "help": "gRPC-JSON transcoding streamed messages, labeled by gRPC method full name and direction (sent to backend / received from backend).",
+      "labels": [
+        "direction",
+        "method"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_http3_connections",
+      "type": "gauge",
+      "help": "Current open HTTP/3 (QUIC) connections across all listeners.",
+      "labels": [],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_http_ratelimited_total",
+      "type": "counter",
+      "help": "Requests rejected by rate limiting, labeled by key kind (ip/header/jwt).",
+      "labels": [
+        "key"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_http_request_duration_seconds",
+      "type": "histogram",
+      "help": "HTTP request latency in seconds.",
+      "labels": [
+        "host",
+        "method"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_http_requests_in_flight",
+      "type": "gauge",
+      "help": "Number of HTTP requests currently being served.",
+      "labels": [],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_http_requests_total",
+      "type": "counter",
+      "help": "Total HTTP requests handled, labeled by method, host, and status code.",
+      "labels": [
+        "code",
+        "host",
+        "method"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_http_response_compressed_total",
+      "type": "counter",
+      "help": "Responses compressed by the edge, labeled by content coding.",
+      "labels": [
+        "encoding"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_listener_conns",
+      "type": "gauge",
+      "help": "Current concurrent connections across all listeners.",
+      "labels": [],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_managed_apply_finalization_errors_total",
+      "type": "counter",
+      "help": "Managed-apply finalization/restoration failures, labeled by the bounded component that failed (restoration/pending/registry/callback_panic). An increment means the failure was made explicit and surfaced through logs/health/ledger rather than silently discarded.",
+      "labels": [
+        "component"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_managed_apply_finalized_total",
+      "type": "counter",
+      "help": "Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a).",
+      "labels": [
+        "mode",
+        "operation",
+        "outcome",
+        "restored"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_managed_apply_history_total",
+      "type": "counter",
+      "help": "Configuration-history snapshot attempts made by the terminal managed-apply finalizer (WS02 §3.7), labeled by operation and result (recorded/skipped/failed).",
+      "labels": [
+        "operation",
+        "result"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_managed_apply_terminal_lookup_total",
+      "type": "counter",
+      "help": "Exact-ID managed-apply lookups, labeled by bounded result (pending/finalizing/terminal/missing/invalid).",
+      "labels": [
+        "result"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_managed_apply_terminal_registry_entries",
+      "type": "gauge",
+      "help": "Number of terminal managed-apply records currently retained in the bounded ledger.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_mtls_handshakes_total",
+      "type": "counter",
+      "help": "Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total.",
+      "labels": [
+        "result"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_plugin_duration_seconds",
+      "type": "histogram",
+      "help": "WASM plugin invocation latency in seconds, labeled by plugin name.",
+      "labels": [
+        "plugin"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_plugin_invocations_total",
+      "type": "counter",
+      "help": "WASM plugin invocations, labeled by plugin name and result (continue/stop/error).",
+      "labels": [
+        "plugin",
+        "result"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_plugin_panics_total",
+      "type": "counter",
+      "help": "WASM plugin traps/panics contained by the host, labeled by plugin name.",
+      "labels": [
+        "plugin"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_reload_duration_seconds",
+      "type": "histogram",
+      "help": "Configuration reload latency in seconds, labeled by source and outcome.",
+      "labels": [
+        "outcome",
+        "source"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_reload_in_progress",
+      "type": "gauge",
+      "help": "1 while a configuration reload transaction is in flight; 0 otherwise.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_reload_phase_duration_seconds",
+      "type": "histogram",
+      "help": "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
+      "labels": [
+        "outcome",
+        "phase"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_reload_timeout_total",
+      "type": "counter",
+      "help": "Configuration reloads that exceeded their deadline, labeled by the phase that timed out.",
+      "labels": [
+        "phase"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_reload_total",
+      "type": "counter",
+      "help": "Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/not_applied/saved_not_live).",
+      "labels": [
+        "outcome",
+        "source"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_stream_active_conns",
+      "type": "gauge",
+      "help": "Current active L4 stream connections/sessions, labeled by protocol (tcp/udp).",
+      "labels": [
+        "proto"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_stream_bytes_total",
+      "type": "counter",
+      "help": "Bytes relayed by the L4 stream proxy, labeled by protocol (tcp/udp) and direction (up to backend / down to client).",
+      "labels": [
+        "direction",
+        "proto"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_stream_udp_sessions_evicted_total",
+      "type": "counter",
+      "help": "UDP sessions removed by the L4 stream proxy to enforce limits, labeled by reason: 'idle' (reaped after idle_timeout) or 'lru' (reclaimed to admit a new client at the session cap).",
+      "labels": [
+        "reason"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_stream_udp_sessions_rejected_total",
+      "type": "counter",
+      "help": "New UDP clients dropped because a listener's max_udp_sessions cap was reached and no session was reclaimable.",
+      "labels": [],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_tls_cert_expiry_seconds",
+      "type": "gauge",
+      "help": "Leaf certificate expiry as a Unix timestamp, labeled by domain.",
+      "labels": [
+        "domain"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_upstream_backends",
+      "type": "gauge",
+      "help": "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",
+      "labels": [
+        "pool"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_upstream_healthy",
+      "type": "gauge",
+      "help": "Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend.",
+      "labels": [
+        "backend",
+        "pool"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_upstream_probe_duration_seconds",
+      "type": "histogram",
+      "help": "Active health-check probe latency in seconds, labeled by pool.",
+      "labels": [
+        "pool"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_upstream_probes_total",
+      "type": "counter",
+      "help": "Active health-check probes, labeled by pool and result (success/failure).",
+      "labels": [
+        "pool",
+        "result"
+      ],
+      "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_waf_events_total",
+      "type": "counter",
+      "help": "Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID.",
+      "labels": [
+        "action",
+        "rule"
+      ],
+      "state": "released_v1.32.0"
+    }
+  ]
+}

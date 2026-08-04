@@ -27,6 +27,7 @@ binary.
 - **[Known limitations](known-limitations.md)** — Documented gaps and current correction notices.
 - **[Deployment guide](deployment.md)** — systemd, Windows service, Docker, and log rotation.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
+- **[Prometheus metric contract](metrics-contract.json)** — Machine-readable names, types, help strings, labels, and released/additive state.
 - **[Reload semantics](reload-semantics.md)** — What reloads safely, what needs a restart, and how zero-downtime reload works.
 - **[Security model](../SECURITY.md)** — Threat model, hardening defaults, and per-feature security notes.
 - **[Security posture](security-posture.md)** — Admin auth model, current limits, shipped local RBAC, and production hardening checklist.
