@@ -143,7 +143,7 @@ func reachable(url string) bool {
 	return true
 }
 
-// waitForServe blocks until url serves want, failing the test on timeout.
+// waitForServe blocks until url serves want, failing on timeout.
 func waitForServe(t *testing.T, url, want string) {
 	t.Helper()
 	if !eventually(t, url, want) {
@@ -768,9 +768,11 @@ func TestPreflightListenersHTTP3UDP(t *testing.T) {
 	}
 
 	t.Run("adding a bindable http3 address passes", func(t *testing.T) {
-		a := freePort(t)
-		if err := PreflightListeners(nil, nil, serversH3(a)); err != nil {
-			t.Fatalf("a free new http3 address should pass: %v", err)
+		// Port 0 asks the operating system to allocate valid ephemeral TCP and
+		// UDP sockets independently. Reusing a numeric port released by a TCP
+		// probe is not a UDP reservation and is flaky on Windows excluded ranges.
+		if err := PreflightListeners(nil, nil, serversH3("127.0.0.1:0")); err != nil {
+			t.Fatalf("an OS-assigned http3 address should pass: %v", err)
 		}
 	})
 
