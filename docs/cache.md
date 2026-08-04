@@ -6,9 +6,10 @@ on-disk overflow tier that survives process restarts. Both tiers are part of the
 core binary — there is no build tag to enable.
 
 The cache is opt-in per location (`cache = true`) and gated by the global
-`[cache].enabled` switch. Cacheability follows standard HTTP semantics
-(`Cache-Control`, `Expires`, `Vary`), so an upstream stays in control of what may
-be stored and for how long.
+`[cache].enabled` switch. Cacheability is designed around standard HTTP semantics (`Cache-Control`,
+`Expires`, `Vary`), but the shared-cache contract is currently under active
+recertification. The historical behavior matrix below is not complete release
+evidence until #107 and #131–#134 close.
 
 ## Contents
 
@@ -81,9 +82,14 @@ Responses report their disposition in the `X-Cache` header:
 | `HIT` | Served fresh from cache |
 | `STALE` | Served stale under `stale-while-revalidate` while refreshing |
 
-## Behaviour matrix
+## Historical behaviour matrix — under recertification
 
-The cache's behaviour for each major scenario:
+The table records the intended and previously documented behavior. Rows covering
+background revalidation ownership, shared-entry immutability, `no-cache`,
+`must-revalidate`/`proxy-revalidate`, authenticated reuse, unsafe-method
+invalidation, `304` metadata, Range requests and upgrade transparency are being
+revalidated and corrected by #107 and #131–#134. Do not treat an unchecked
+interaction as a current conformance guarantee.
 
 | Scenario | Rule | Detail |
 | --- | --- | --- |
@@ -103,6 +109,19 @@ The cache's behaviour for each major scenario:
 | POST / PUT / DELETE / PATCH | Bypass | Only GET and HEAD are cached |
 | Oversized responses (> `memory_max_size`) | Not stored in that tier | Silently dropped; client still served |
 | Memory eviction → disk | Overflow to disk tier (when configured) | Eviction runs outside the memory lock |
+
+## Current correction contract
+
+The active cache programme requires:
+
+- generation-owned, cancellable background revalidation;
+- immutable published entries and race-free metadata replacement;
+- synchronous validation for request/response `no-cache`;
+- correct `must-revalidate`, `proxy-revalidate`, authenticated reuse, unsafe-method invalidation and `304` metadata handling;
+- initial bypass for requests carrying `Range` or `If-Range` (cached byte-range serving remains a future enhancement);
+- transparent WebSocket/`101`, SSE and optional `http.ResponseWriter` interface behavior.
+
+Until that programme closes, avoid cache on upgrade routes and treat authenticated or user-specific responses conservatively (`private`/`no-store`).
 
 ## Freshness and stale-while-revalidate
 
@@ -270,11 +289,14 @@ integrity, and availability:
    hop-by-hop headers but does not inspect application-level headers beyond
    `Cache-Control` semantics.
 
-## GA status
+## GA status — recertification open
+
+The feature retains its historical release record, but the current correctness findings reopen its conformance evidence. #134 must publish the corrected executable matrix, race/protocol evidence, benchmarks, soak result and final maturity/status decision before the cache is described as recertified.
+
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| 1 — Conformance / behaviour matrix | ✅ | 14-row matrix above (key, Vary, TTL, status codes, conditional requests, eviction) |
+| 1 — Conformance / behaviour matrix | ⚠️ recertification open | #107 and #131–#134 own the corrected executable matrix |
 | 2 — Published benchmark numbers | ✅ | `BenchmarkCacheHit` / `Miss` / `VaryHit` / `MemOverflow` in `internal/cache/bench_test.go` |
 | 3 — Known-limitations list | ✅ | 4-item limitation list above |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |

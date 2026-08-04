@@ -8,30 +8,20 @@ production deployment today.
 
 ## Admin authentication model
 
-### Current state (single shared token)
+### Current state
 
-The admin API and Console authenticate with a **single shared bearer token**
-(`[admin].token`), compared in constant-time in `internal/admin/server.go`.
-That token is an implicit super-user: any holder can read config, apply
-changes, upload WASM, view pprof, purge cache, and roll back history.
+Jul.IA supports two local admin authentication modes:
 
-| Property | Today |
-| --- | --- |
-| Authentication | Constant-time Bearer token comparison |
-| Authorization | All-or-nothing (token = full access) |
-| Identity / audit attribution | Hard-coded as `"operator"` in all audit events |
-| Token lifecycle | Static config value; rotation = edit config + reload |
-| Multi-user | Not supported |
+| Mode | Authentication and authorization | Attribution |
+| --- | --- | --- |
+| Legacy shared token (default) | One bearer token with full control-plane access | Legacy operator identity; no per-person attribution |
+| Opt-in `[admin.rbac]` | Named principals, predefined/custom roles, scoped revocable token hashes and deny-by-default route permissions | Principal, role and public token ID in audit/status projections |
 
-**What this means in practice:**
-- The token should be treated as a shared secret. Rotate it promptly on team
-  changes.
-- Store it in a secrets manager or `${env:}` / `${file:}` reference (see
-  [docs/secrets.md](secrets.md)) — never commit it to version control.
-- Keep the admin listener on loopback (`127.0.0.1`). `jul lint` warns when
-  admin is bound off-loopback without a token.
-- For multi-operator teams, today's option is to share the token (all operators
-  are superusers) or run separate instances (each with their own token).
+The shared token remains a bootstrap/compatibility mode, not the only shipped
+model. External OIDC/SAML/SCIM identity and browser login flows are not shipped.
+Admin token rotation is tracked by the selected runtime-dynamics issue #95; use
+the lifecycle result returned by the running server rather than assuming every
+admin setting is already live-applicable.
 
 ### Console RBAC (HP-02 / ADR 0010) — delivered (opt-in)
 
@@ -73,7 +63,7 @@ console = true
 | Bind address | `127.0.0.1` (loopback). If remote access is required, use an SSH tunnel or a mutual-TLS proxy in front — never expose raw admin to the internet. |
 | Token strength | Minimum 32 random bytes (256-bit); use a password manager or `openssl rand -base64 32`. |
 | Token storage | Use `${env:}`, `${file:}`, or `${secret:}` references. See [docs/secrets.md](secrets.md). |
-| Token rotation | Edit `admin.token`, restart or reload. Audit log entries do not attribute to a user today, so rotation is the only revocation mechanism. |
+| Token rotation | Rotate through the validated configuration lifecycle; legacy shared-token cutover remains tracked by #95. RBAC token IDs can be revoked independently. |
 | pprof endpoints | `/debug/pprof/` is mounted behind bearer-token auth. Do not disable auth when pprof is needed — authenticate with the admin token. |
 | Rate limiting | The admin API has a built-in rate limiter (reads, writes, applies separately). Default limits are conservative. |
 
@@ -93,6 +83,15 @@ close). This is intentional:
 
 The practical risk is low for a loopback-bound admin listener with no external
 access.
+
+---
+
+## Current trust-boundary limitations
+
+- **Forwarded client identity:** the direct socket peer remains authoritative. Jul.IA does not yet provide a complete trusted-proxy CIDR/chain model for `Forwarded` and `X-Forwarded-For`; do not let arbitrary request headers redefine CIDR or rate-limit identity.
+- **Backend peer identity:** HTTPS/gRPC upstreams use the current default transport verification, but Jul.IA does not yet expose a unified private-CA, backend client-certificate, SNI override or explicit peer-identity policy across proxy, gRPC and health checks.
+- **Auxiliary egress is separate:** `[egress]` constrains configuration-driven auxiliary destinations; it is not backend certificate authentication and does not govern the data-plane reverse proxy.
+- **WAF request targets:** matched-rule URI/query logging remains under redaction/bounding review in #127. Avoid secrets in URLs and restrict log retention/access.
 
 ---
 

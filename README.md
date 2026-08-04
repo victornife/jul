@@ -11,29 +11,28 @@
 [![Codecov](https://codecov.io/gh/victornife/jul/graph/badge.svg?branch=main)](https://codecov.io/gh/victornife/jul)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/victornife/jul)
 
-**Jul.IA** is an NGINX-inspired HTTP edge server written in Go and configured
-entirely through TOML. It bundles reverse-proxying with load balancing, static
-file serving, FastCGI/uWSGI application gateways, a two-tier response cache, TLS
-termination, hot configuration reload, and a built-in admin/observability
-interface — all in a single static, dependency-free binary.
+**Jul.IA** is a self-contained edge and protocol gateway written in Go and
+configured through TOML. It combines reverse proxying, load balancing, static
+serving, FastCGI/uWSGI, HTTP and gRPC gateway behavior, optional L4 proxying,
+TLS/mTLS, policy, observability, configuration lifecycle, and an embedded
+operations Console in a single static, dependency-free binary.
 
 - **Binary / module / service name:** `jul`
 - **Product name:** `Jul.IA`
 - **Language:** Go 1.26.5
 - **License:** AGPL-3.0
 
-> Where this is headed: see the [vision](docs/vision/) (including who Jul.IA is
-> for and the standalone-single-node product promise) and the
-> [roadmap](docs/roadmap/) (including the active Phase 2→7 sequence and the
-> evidence-gated horizon), with detailed per-feature
-> [engineering specs](docs/specs/). Durable technical decisions are
-> recorded as [ADRs](docs/adr/), and how the direction evolves is tracked in
-> the [reviews & decision log](docs/reviews/). The OSS/open-core boundary is
-> defined in [ADR 0012](docs/adr/0012-oss-open-core-boundary.md).
+> Current direction and sequencing are governed by the
+> [combined repository audit](docs/audit/combined-audit-2026-08-03.md) and the
+> [master programme](https://github.com/victornife/jul/issues/62). The durable
+> product direction remains in the [vision](docs/vision/), [roadmap](docs/roadmap/),
+> [engineering specs](docs/specs/), and [ADRs](docs/adr/). The permanent
+> OSS/open-core boundary is defined in
+> [ADR 0012](docs/adr/0012-oss-open-core-boundary.md).
 >
 > New to HTTP, proxies, TLS, caching, or observability? The
-> [concepts appendix](docs/vision/appendix.md) walks through how a request
-> travels through modern edge infrastructure, from first principles.
+> [concepts appendix](docs/vision/appendix.md) walks through how a request travels
+> through modern edge infrastructure from first principles.
 
 ---
 
@@ -77,13 +76,14 @@ glance:
 > soak-evidence links. A soak failure on a GA feature is a release-blocking
 > regression, not a reason to retract the label.
 
-> **Delivery state ≠ maturity.** "GA" above means *released and soaked*. Changes
-> merged to `main` but not yet in a tagged release are tracked under
-> [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]` and the delivery-state table in
-> [`docs/status.md`](docs/status.md). Currently the **Phase 4 egress hardening**
-> is *merged, release pending*, and the configuration apply/reload subsystem is
-> *remediated, closure pending* (see the
-> [2026-07-31 repository audit](docs/audit/2026-07-31-full-repository-audit.md)).
+> **Delivery state ≠ maturity.** "GA" describes the released maturity
+> contract; changes merged to `main` but not yet tagged remain under
+> [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]`. The current correction tranche
+> has merged strict unknown-field rejection, HTTP/3 mTLS parity, compression
+> `no-transform`, exclusive ACME challenge selection, dependency and CI fixes.
+> The response cache remains under a documented correctness recertification; see
+> [`docs/cache.md`](docs/cache.md), [`docs/status.md`](docs/status.md), and the
+> [combined audit](docs/audit/combined-audit-2026-08-03.md).
 
 Many features require an opt-in **build tag** (e.g. `grpc`, `acme`,
 `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default
@@ -105,23 +105,23 @@ with `-tags "…"` or download the `full` release profile to enable everything.
 | **App gateways** | `fastcgi_pass` (e.g. PHP-FPM) and `uwsgi_pass` (Python/WSGI) with full CGI parameter mapping |
 | **gRPC transcoding** | Expose a gRPC service as a RESTful JSON API via `google.api.http` annotations (`grpc_transcode`) — unary and streaming (server/client/bidi, NDJSON or SSE) — from a compiled descriptor set or server reflection, opt-in `grpc` build tag |
 | **gRPC passthrough** | Reverse-proxy **native gRPC** end to end over HTTP/2 (`grpc = true`) — trailers preserved, streaming frames flushed immediately, load balancing and health checks applied — with cleartext **h2c** inbound (`h2c = true`) for clients without TLS, opt-in `grpc` build tag |
-| **Response cache** | Two-tier (in-memory + optional disk overflow) cache with TTL, `stale-while-revalidate`, and admin purge |
-| **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecar serving for static files |
+| **Response cache** | Two-tier (in-memory + optional disk overflow) cache with TTL, `stale-while-revalidate`, and admin purge; currently under correctness recertification — see [docs/cache.md](docs/cache.md) |
+| **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, `Cache-Control: no-transform`, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecars |
 | **Rate limiting** | Token-bucket request limiting keyed by client IP, a request header, or a JWT claim, with burst, global or per-location policy, and `429` + `Retry-After`; plus a per-listener concurrent-connection cap |
 | **Access control** | Per-location CIDR allow/deny lists plus one credential method — HTTP Basic (bcrypt `htpasswd`), JWT bearer tokens validated against a JWKS endpoint (asymmetric algorithms only, `none` rejected), or forward-auth to an external service |
 | **WAF** | ModSecurity-compatible web application firewall ([Coraza](https://github.com/corazawaf/coraza)) with the **OWASP Core Rule Set embedded** in the binary (`[waf]`, global or per-location): `block`/`detect` modes, paranoia levels, your own SecLang files or inline rules, request/response body inspection, and a `jul_waf_events_total` metric — opt-in `waf` build tag ([docs/waf.md](docs/waf.md)) |
 | **Secrets references** | Keep credentials out of the config file: any string field accepts `${env:NAME}`, `${file:/path}`, or `${secret:/path}` references resolved at serve time, resolved values are **masked from logs**, and `jul lint` flags literal admin/Consul/Kubernetes tokens — core, no build tag ([docs/secrets.md](docs/secrets.md)) |
 | **Egress allow-list** | Optional hardening (`[egress]`) that constrains the server's own config-driven fetches — JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP, and the WASM plugin `fetch` intersection — to an approved set of hosts/CIDRs, refused at connect time; bounds the SSRF blast radius of a misconfigured or compromised config, disabled by default — core, no build tag ([docs/egress.md](docs/egress.md)) |
 | **TLS** | TLS 1.2/1.3 termination per server block, configurable minimum version, optional HTTP→HTTPS redirect |
-| **Automatic HTTPS** | ACME (Let's Encrypt) certificate issuance and auto-renewal via the HTTP-01 challenge, on-disk cache — opt-in `acme` build tag |
-| **HTTP/3** | HTTP/3 over QUIC on the same address (UDP), sharing the server's TLS certificates (static or ACME, including reloads), advertised to clients via an `Alt-Svc` header — opt-in `http3` build tag |
+| **Automatic HTTPS** | ACME certificate issuance and auto-renewal using the configured exclusive HTTP-01 or TLS-ALPN-01 challenge, with on-disk account/certificate cache — opt-in `acme` build tag |
+| **HTTP/3** | HTTP/3 over QUIC on the same address (UDP), sharing the complete server TLS/mTLS policy and certificate provider, advertised through `Alt-Svc`; static certificate-file changes remain restart-bound — opt-in `http3` build tag |
 | **Routing** | `exact`, `prefix`, and `regex` location matching; regex rewrites with `last`/`break`/`redirect`/`permanent` flags |
 | **Virtual hosts** | Multiple `server_names` per listener; multiple listen addresses |
 | **Limits & timeouts** | `client_max_body_size`, header size caps, read/write/idle/header timeouts (per-server, location overrides for body size) |
 | **Redirects** | `return`, `redirect`, and `deny` (403) location actions; custom error pages |
 | **Hot reload** | Zero-downtime config reload via SIGHUP, file-watch, or the admin API — invalid configs are rejected and the old config keeps serving |
 | **Observability** | Structured logging (text/JSON), pluggable access-log sinks (file/syslog with rotation), Prometheus metrics, OpenTelemetry tracing, health/readiness probes |
-| **Admin GUI** | Loopback-bound web console (token-auth): live metrics dashboard, upstream health, certificate inventory, config history with one-click rollback, and a setup wizard (`console` build tag) plus health, metrics, cache purge, reload, and config editing. A single shared token today; scoped multi-principal **RBAC** (predefined + custom roles) is designed in [docs/specs/console-rbac.md](docs/specs/console-rbac.md) |
+| **Admin GUI** | Loopback-bound web console with live metrics, upstream/certificate status, config history and rollback, setup and structured editors. Legacy shared-token mode remains available; opt-in local multi-principal RBAC with predefined/custom roles, scoped revocable tokens and per-principal audit attribution is shipped (`console` build tag). External OIDC/SAML/SCIM identity is not shipped. |
 | **Developer experience** | Zero-config `jul run --serve`/`--proxy` (no file needed), `jul lint` best-practice checks with CI-friendly exit codes, and `jul fmt` canonical formatting |
 | **Migration** | `jul import nginx` translates an existing NGINX config to Jul.IA TOML, reporting every directive it could not map — opt-in `importer` build tag |
 | **WebAssembly plugins** | Sandboxed request middleware and handlers compiled to WASM and run on the embedded [wazero](https://wazero.io) runtime (pure Go, no cgo): per-plugin memory and time limits, panic isolation, capability-gated key/value store, hot-reloadable — opt-in `wasmplugins` build tag |

@@ -1,13 +1,23 @@
 # Jul.IA — Known limitations
 
-This page aggregates the per-feature limitation lists from the individual
-feature docs into one place so evaluators can see the full picture without
-reading every document. Each item links to the detailed feature doc where
-the limitation is discussed in context.
+This page aggregates both deliberate product limitations and current known
+correctness/contract defects. A historical GA label does not make an open
+regression harmless or already fixed. The
+[combined audit](audit/combined-audit-2026-08-03.md) and linked issues own the
+current remediation state; stable feature guides remain the detailed operational
+references.
 
-Nothing here is a correctness bug — these are explicit, bounded scope
-decisions. The maturity bar (ADR 0003) requires limitations to be documented
-before a feature is labelled GA; this page is the consolidated index.
+## Current defects and recertification work
+
+- **Response cache:** generation ownership, immutable entries, shared-cache semantics, invalidation, `304` metadata, Range bypass and protocol-transparent wrappers are being corrected under #107 and #131–#134.
+- **Known-value validation:** unknown TOML fields now fail, while invalid known enum/duration/worker/scalar values remain under #123.
+- **Access-log disablement:** `sinks = []` is not a supported off switch; explicit `enabled` semantics are owned by #124.
+- **Prometheus compatibility:** collector names/labels and the released reference are being reconciled by #126.
+- **WAF request-target logging:** URI/query redaction and bounding remain under #127.
+- **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
+- **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
+
+---
 
 ---
 
@@ -46,8 +56,7 @@ before a feature is labelled GA; this page is the consolidated index.
   defence-in-depth.
 - **No OAuth2 / OIDC flows.** No opaque-token introspection, no cookie sessions,
   no refresh tokens. JWT bearer with JWKS validation is the supported pattern.
-- **No RBAC or scope enforcement.** Claims are forwarded downstream; the
-  upstream service is responsible for authorization logic.
+- **Application authorization remains upstream-owned.** Route authentication forwards validated identity/claims but does not implement arbitrary application scopes. The admin control plane separately ships opt-in local named-principal RBAC; external OIDC/SAML/SCIM identity is not available.
 - **One issuer/audience per location.** Multi-issuer validation is not supported.
 - **Forward-auth is a GET probe.** It mirrors the Traefik / NGINX `auth_request`
   pattern — not a full OAuth2 exchange.
@@ -126,8 +135,7 @@ before a feature is labelled GA; this page is the consolidated index.
 - **Local only.** Rate-limit state is per-process. A fleet of Jul.IA nodes
   each enforce their own bucket independently — there is no distributed token
   bucket.
-- **IP spoofing.** IP-keyed limiting trusts `RemoteAddr`; operators behind a
-  trusted reverse proxy should key on a trusted header (e.g. `X-Real-IP`).
+- **Trusted-proxy identity is not yet first-class.** IP-keyed limiting uses the direct transport peer. Do not switch security identity to an arbitrary forwarding header; canonical trusted-proxy chain handling is tracked by #115, #135 and #136.
 - **In-memory only.** Rate-limit state is lost on restart; token buckets reset.
 
 ---

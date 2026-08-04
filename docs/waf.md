@@ -15,6 +15,11 @@ engine or rule-set weight.
 > **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). It is off by
 > default; turn it on per scope. The recommended rollout is **detect → block**.
 
+> **Logging privacy notice:** matched-rule request-target logging is under
+> explicit URI/query redaction and bounding review in #127. Avoid credentials or
+> personal data in URLs, restrict log access/retention, and do not use raw request
+> targets as metric labels.
+
 ## Contents
 
 - [Build tag](#build-tag)
@@ -66,9 +71,10 @@ to run it. The check is performed once at startup by `waf.Check`.
    short-circuited with the configured status (default **403**) and never
    reaches the upstream. In **detect** mode the same match is recorded but the
    request proceeds.
-4. Every matched rule that logs is reported to the metrics and structured-log
-   hooks: it increments `jul_waf_events_total{action,rule}` and emits a
-   `waf rule matched` warning with the rule ID, URI, and message.
+4. Every matched rule that logs is reported to metrics and structured-log
+   hooks. Rule/action labels must remain bounded. The warning currently includes
+   diagnostic request-target context; #127 owns the final path-only/redacted URI
+   contract so query secrets cannot enter logs.
 
 ## Configuration
 
