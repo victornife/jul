@@ -20,6 +20,7 @@ import (
 // that any referenced resources are well-formed.
 func validateLocation(loc LocationConfig, where string, upstreamNames map[string]int, plugins map[string]PluginConfig) []error {
 	var errs []error
+	errs = append(errs, validateLocationValues(loc, where)...)
 
 	// Count configured actions to catch conflicts (e.g. root + proxy_pass).
 	var actions []string

@@ -1,6 +1,6 @@
 # Jul.IA — compatibility & versioning policy
 
-> Version 1.0 · Updated 2026-06-21
+> Version 1.1 · Updated 2026-08-04
 
 This document defines what "stable" means for Jul.IA and what a **GA** label
 guarantees about a feature's contract. It is the fleet-wide answer to GA
@@ -38,6 +38,24 @@ bump (with a deprecation period, below):
 
 Within a MAJOR line these are additive-only: new optional keys, new metrics, and
 new endpoints may appear in MINOR releases, but existing ones keep their meaning.
+
+### Invalid values are not a compatibility contract
+
+The stable configuration contract covers the documented keys, types, defaults,
+accepted value sets, and explicit zero/disabled meanings. It does **not** make an
+implementation bug that silently accepted an undocumented invalid value part of
+the v1 contract. A PATCH release may therefore reject a value that previously
+failed open to a default, provided that:
+
+- the value was never documented as valid;
+- omission and every documented explicit-zero meaning remain valid;
+- the rejection is consistent across startup, CLI, managed apply/stage, rollback,
+  importer output, and Console validation; and
+- the stricter behavior and any required correction are recorded in the
+  changelog.
+
+Jul.IA never clamps or auto-corrects an explicit invalid value. Operators should
+run `jul check` against the target binary before deployment.
 
 ## What it does not cover
 
@@ -79,4 +97,5 @@ cut at the first GA release.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-08-04 | 1.1 | Clarified that undocumented invalid values accepted through silent fallback are defects, not a stable v1 contract; PATCH releases may reject them while preserving omission and documented zero semantics. | Documented valid keys, value sets, defaults, lifecycle and deprecation guarantees remain unchanged. | #123; [configuration value contract](config-value-contract.json) |
 | 2026-06-21 | 1.0 | Created the compatibility & versioning policy (semver, the GA stable-contract surface, what is excluded, the deprecation policy, and the maturity/stability mapping) to satisfy GA criterion 4 fleet-wide for the GA push. | The maturity ladder and GA bar (ADR 0003) and all feature behaviour are unchanged; this only documents the contract. | [ADR 0003](adr/0003-maturity-and-ga.md), [ga-push.md](ga-push.md) |

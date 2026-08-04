@@ -122,6 +122,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
     `permission.test.tsx` / Security-panel RBAC-status tests.
 
 ### Fixed
+- **Fail-closed known configuration values (#123):** explicit invalid log level/format, worker grammar, negative durations/sizes/counts, invalid HTTP statuses, and overflowing size literals now fail consistently across startup, `jul check`, `jul lint`, `jul fmt`, hot apply, planned-restart staging, rollback, and importer validation instead of falling back or wrapping. Documented omission and zero/disabled semantics remain valid. A machine-readable value contract and AST drift test cover every public numeric and enum/grammar leaf.
 - **Prometheus compatibility and documentation contract (#126):** reconstructed the exact 28-family `v1.32.0` baseline at commit `6bb76a08846150663d7eeb9661edb718ef357a7c`, confirmed that current collectors preserve every released name/type/help/label tuple, documented the 14 additive release-pending families, corrected stale aliases and label descriptions, and added machine-readable current/released inventories with collector and documentation drift tests.
 - **ACME challenge selection:** HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface while preserving normal HTTP/TLS routing.
 - **Compression transformation contract:** request or response `Cache-Control: no-transform` now bypasses dynamic gzip/Brotli/Zstandard compression.

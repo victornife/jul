@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -75,6 +76,9 @@ func (s *Size) UnmarshalText(text []byte) error {
 	}
 	if n < 0 {
 		return fmt.Errorf("invalid size %q: must not be negative", string(text))
+	}
+	if n > math.MaxInt64/mult {
+		return fmt.Errorf("invalid size %q: value overflows int64 bytes", string(text))
 	}
 	*s = Size(n * mult)
 	return nil

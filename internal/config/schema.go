@@ -645,7 +645,8 @@ type CompressionConfig struct {
 	// one of "gzip", "br", or "zstd". Defaults to ["gzip"] when enabled.
 	Encoders []string `toml:"encoders"`
 	// Level is the encoder compression level; 0 selects each encoder's default.
-	// Out-of-range values are clamped to the encoder's valid range.
+	// Values outside the public 0..11 contract are rejected during validation;
+	// individual encoders may still defensively clamp internally.
 	Level int `toml:"level"`
 	// MinSize is the smallest response body that is compressed. Default 1k.
 	MinSize Size `toml:"min_size"`

@@ -20,10 +20,14 @@ There is no config file where `jul` looked (default `./server.toml`). Either:
 
 ### `invalid configuration in server.toml: ...`
 
-The file parsed but failed validation. Run `jul check -config server.toml` for
-the full list of errors, or `jul lint` for best-practice warnings. Use
-`jul lint -json` for machine-readable output (schema in
-[configuration.md](configuration.md#cli-json-output)).
+The file parsed but failed validation. Jul.IA rejects both unknown keys and
+known keys with invalid enum, duration, size, worker, status, or scalar values;
+it does not silently fall back or clamp. Run `jul check -config server.toml` for
+the full list of errors, or `jul lint` for the same errors plus best-practice
+warnings. Use `jul lint -json` for machine-readable output (schema in
+[configuration.md](configuration.md#cli-json-output)). The
+[configuration value contract](config-value-contract.json) records exact allowed
+values, bounds, and zero semantics.
 
 ### A path error like `open /srv/www/example: no such file or directory`
 

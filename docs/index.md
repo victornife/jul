@@ -18,7 +18,8 @@ binary.
 ### New to Jul.IA?
 - **[README](../README.md)** — What Jul.IA is, what it can do, and how to install it.
 - **[Getting started](getting-started.md)** — Your first server: zero-config mode, a static site, a reverse proxy, and TLS.
-- **[Configuration reference](configuration.md)** — Every config key, type, and default, with examples.
+- **[Configuration reference](configuration.md)** — Every config key, type, default, and validation rule, with examples.
+- **[Configuration value contract](config-value-contract.json)** — Machine-readable enum, grammar, bound, activation, and zero-semantics inventory used by drift tests.
 - **[Troubleshooting](troubleshooting.md)** — Common first-run and operational issues and their fixes.
 - **[Concepts appendix](vision/appendix.md)** — New to HTTP, proxies, TLS, caching, or observability? Start here.
 

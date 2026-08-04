@@ -10,9 +10,7 @@ references.
 ## Current defects and recertification work
 
 - **Response cache:** generation ownership, immutable entries, shared-cache semantics, invalidation, `304` metadata, Range bypass and protocol-transparent wrappers are being corrected under #107 and #131–#134.
-- **Known-value validation:** unknown TOML fields now fail, while invalid known enum/duration/worker/scalar values remain under #123.
 - **Access-log disablement:** `sinks = []` is not a supported off switch; explicit `enabled` semantics are owned by #124.
-- **Prometheus compatibility:** collector names/labels and the released reference are being reconciled by #126.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
 

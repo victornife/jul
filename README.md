@@ -304,11 +304,12 @@ under `-strict`. Parse errors point at the offending line and column.
 
 ### `jul fmt`
 
-Rewrites the configuration into canonical TOML. By default it prints to stdout;
-`-w` writes the result back to the file. `-diff` shows a unified diff of the
-changes without writing: exits 0 when nothing would change, 1 when changes are
-needed (useful for CI enforcement). Comments and original formatting are not
-preserved.
+Validates and rewrites the configuration into canonical TOML. Invalid known
+values are rejected before anything is printed or written. By default it prints
+to stdout; `-w` writes the result back to the file. `-diff` shows a unified diff
+of the changes without writing: exits 0 when nothing would change, 1 when
+changes are needed (useful for CI enforcement). Comments and original formatting
+are not preserved.
 
 ### `jul run` (zero-config)
 

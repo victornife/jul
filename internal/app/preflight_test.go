@@ -124,7 +124,7 @@ func TestPreflightApplyWithIdenticalPrevOK(t *testing.T) {
 func TestPreflightApplyReturnsCandidate(t *testing.T) {
 	t.Setenv("PREFLIGHT_SECRET", "preflight-secret-value")
 	cfg := &config.Config{
-		Global: config.GlobalConfig{WorkerThreads: "${env:PREFLIGHT_SECRET}"},
+		Admin: config.AdminConfig{Token: "${env:PREFLIGHT_SECRET}"},
 		Servers: []config.ServerConfig{{
 			Listen:    ":8080",
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
@@ -150,14 +150,14 @@ func TestPreflightApplyReturnsCandidate(t *testing.T) {
 	if cand.Effective == nil {
 		t.Fatal("candidate.Effective is nil")
 	}
-	if cand.Effective.Global.WorkerThreads != "preflight-secret-value" {
-		t.Fatalf("candidate effective worker_threads = %q, want resolved secret", cand.Effective.Global.WorkerThreads)
+	if cand.Effective.Admin.Token != "preflight-secret-value" {
+		t.Fatalf("candidate effective admin token = %q, want resolved secret", cand.Effective.Admin.Token)
 	}
 	if cand.Raw == nil {
 		t.Fatal("candidate.Raw is nil")
 	}
-	if cand.Raw.Global.WorkerThreads != "${env:PREFLIGHT_SECRET}" {
-		t.Fatalf("candidate raw worker_threads = %q, want original reference", cand.Raw.Global.WorkerThreads)
+	if cand.Raw.Admin.Token != "${env:PREFLIGHT_SECRET}" {
+		t.Fatalf("candidate raw admin token = %q, want original reference", cand.Raw.Admin.Token)
 	}
 }
 

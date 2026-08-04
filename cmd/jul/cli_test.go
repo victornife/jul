@@ -65,6 +65,18 @@ listen = ":8080"
   root = "/srv"
 `
 
+const invalidKnownValueConfig = `[global]
+log_level = "verbose"
+log_format = "yaml"
+worker_threads = "0"
+
+[[servers]]
+listen = ":8080"
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "/srv"
+`
+
 // runtimePreflightConfig is structurally valid but references a missing htpasswd
 // file so validateRuntimeConfig fails during the auth dry-run.
 const runtimePreflightConfig = `[[servers]]
@@ -123,6 +135,36 @@ func TestCmdLintInvalid(t *testing.T) {
 	}
 	if !strings.Contains(out, "error") {
 		t.Errorf("expected an error in output:\n%s", out)
+	}
+}
+
+func TestCLICommandsRejectInvalidKnownValuesConsistently(t *testing.T) {
+	path := writeTemp(t, invalidKnownValueConfig)
+	commands := []struct {
+		name string
+		run  func() int
+	}{
+		{"lint", func() int { return cmdLint([]string{"-config", path}) }},
+		{"check", func() int { return cmdCheck([]string{"-config", path}) }},
+		{"fmt", func() int { return cmdFmt([]string{"-config", path}) }},
+	}
+	for _, command := range commands {
+		t.Run(command.name, func(t *testing.T) {
+			code, out, errOut := capture(t, command.run)
+			if code != 1 {
+				t.Fatalf("exit code = %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
+			}
+			combined := out + errOut
+			for _, want := range []string{
+				`[global].log_level: invalid value "verbose"`,
+				`[global].log_format: invalid value "yaml"`,
+				`[global].worker_threads: invalid value "0"`,
+			} {
+				if !strings.Contains(combined, want) {
+					t.Errorf("output missing %q:\n%s", want, combined)
+				}
+			}
+		})
 	}
 }
 
