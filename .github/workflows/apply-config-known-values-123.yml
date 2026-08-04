@@ -19,64 +19,95 @@ jobs:
           ref: agent/config-known-values-123
           fetch-depth: 0
 
-      - name: Apply reviewed patch
+      - name: Rebase reviewed implementation onto current main
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin automation/apply-config-known-values-123
-          for part in 00 01 02 03 04; do
-            git show "origin/automation/apply-config-known-values-123:.github/patches/config-known-values-123.part-${part}"
-          done | base64 --decode | gzip --decompress > /tmp/config-known-values-123.patch
-          git apply --check /tmp/config-known-values-123.patch
-          git apply /tmp/config-known-values-123.patch
+          git fetch origin archive/config-known-values-123-reviewed
+          git cherry-pick -X ours --no-commit origin/archive/config-known-values-123-reviewed
+
           python3 - <<'PY'
           from pathlib import Path
 
           def replace_once(path: str, old: str, new: str) -> None:
               p = Path(path)
               text = p.read_text(encoding="utf-8")
-              if text.count(old) != 1:
-                  raise SystemExit(f"{path}: expected one match, found {text.count(old)}")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}")
               p.write_text(text.replace(old, new, 1), encoding="utf-8")
 
-          # The worker_threads lint block was promoted to authoritative
-          # validation, leaving its old strings import unused.
-          replace_once("internal/config/lint.go", '\t"strings"\n', "")
+          def remove_prefixed_lines(path: str, prefixes: tuple[str, ...]) -> None:
+              p = Path(path)
+              lines = p.read_text(encoding="utf-8").splitlines()
+              kept = [line for line in lines if not any(line.startswith(prefix) for prefix in prefixes)]
+              p.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
-          # Explicit negative cache values are invalid even while the cache is
-          # dormant; enablement only gates active cross-field requirements.
-          replace_once(
-              "internal/config/validate.go",
-              '\terrs = append(errs, validateAdminValues(c.Admin)...)\n\n\tif c.Admin.Enabled {',
-              '\terrs = append(errs, validateAdminValues(c.Admin)...)\n\terrs = append(errs, validateCacheValues(c.Cache)...)\n\n\tif c.Admin.Enabled {',
+          changelog = Path("CHANGELOG.md")
+          text = changelog.read_text(encoding="utf-8")
+          entry = '- **Fail-closed known configuration values (#123):** explicit invalid log level/format, worker grammar, negative durations/sizes/counts, invalid HTTP statuses, and overflowing size literals now fail consistently across startup, `jul check`, `jul lint`, `jul fmt`, hot apply, planned-restart staging, rollback, and importer validation instead of falling back or wrapping. Documented omission and zero/disabled semantics remain valid. A machine-readable value contract and AST drift test cover every public numeric and enum/grammar leaf.\n'
+          if entry not in text:
+              marker = "### Fixed\n"
+              if marker not in text:
+                  raise SystemExit("CHANGELOG.md: missing Fixed section")
+              text = text.replace(marker, marker + entry, 1)
+              changelog.write_text(text, encoding="utf-8")
+
+          remove_prefixed_lines(
+              "docs/known-limitations.md",
+              (
+                  "- **Known-value validation:**",
+                  "- **Prometheus compatibility:**",
+              ),
           )
 
-          # Preserve the established substring consumed by the pre-existing
-          # redirect_https regression test while keeping the supplied value.
           replace_once(
-              "internal/config/validate_values.go",
-              'errs = append(errs, fmt.Errorf("%s.redirect_https: %d must be 301 or 308 (0 disables redirect)", where, c.RedirectHTTPS))',
-              'errs = append(errs, fmt.Errorf("%s.redirect_https must be 301 or 308 (0 disables redirect), got %d", where, c.RedirectHTTPS))',
+              "docs/roadmap/README.md",
+              "| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | 🚧 audit merged; #165/#166 finalization |",
+              "| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | ✅ #165/#166 merged |",
           )
+          replace_once(
+              "docs/roadmap/README.md",
+              "| **1 — Immediate correctness** | Remaining known-value validation, access-log semantics, metrics, WAF privacy and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 partially complete |",
+              "| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 #123/#126/#127 complete; #124 and cache remain |",
+          )
+          replace_once(
+              "docs/roadmap/README.md",
+              "v1.32.1-rc.1 — unpublished draft release-candidate checkpoint\n    ↓\n#123 — reject invalid known configuration values\n    ↓\n#124 — explicit access-log enablement\n    ↓\n#127 — WAF request-target logging\n    ↓\n#131 → #133 / #132 → #134 — cache correctness and recertification",
+              "v1.32.1-rc.1 — unpublished draft release-candidate checkpoint\n    ↓\n#124 — explicit access-log enablement\n    ↓\n#131 → #133 / #132 → #134 — cache correctness and recertification",
+          )
+          replace_once(
+              "docs/roadmap/README.md",
+              "#127 may proceed independently while it does not overlap the active shared\nconfiguration or cache work. Shared edits to the configuration schema, lifecycle,\ncomposition root, reload transaction, or Console patch contracts remain serial.",
+              "#124 is the remaining shared configuration-schema correction before lifecycle\ngeneration and Phase 5. Shared edits to the configuration schema, lifecycle,\ncomposition root, reload transaction, or Console patch contracts remain serial.",
+          )
+          completed_marker = "- Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).\n"
+          completed_addition = (
+              "- Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).\n"
+              "- Path-only, bounded WAF matched-request logging with query and macro-expanded request data omitted (#127).\n"
+          )
+          roadmap = Path("docs/roadmap/README.md")
+          text = roadmap.read_text(encoding="utf-8")
+          if completed_addition not in text:
+              if completed_marker not in text:
+                  raise SystemExit("docs/roadmap/README.md: missing completed marker")
+              text = text.replace(completed_marker, completed_marker + completed_addition, 1)
+          text = text.replace("- Reject invalid known enum, duration, worker and scalar values (#123).\n", "")
+          text = text.replace("- Bound/redact WAF matched request-target logging (#127).\n", "")
+          roadmap.write_text(text, encoding="utf-8")
 
-          # The preflight immutability test needs a real secret-bearing string
-          # field. worker_threads now correctly rejects non-grammar values.
           replace_once(
-              "internal/app/preflight_test.go",
-              'cfg := &config.Config{\n\t\tGlobal: config.GlobalConfig{WorkerThreads: "${env:PREFLIGHT_SECRET}"},\n\t\tServers: []config.ServerConfig{{',
-              'cfg := &config.Config{\n\t\tAdmin: config.AdminConfig{Token: "${env:PREFLIGHT_SECRET}"},\n\t\tServers: []config.ServerConfig{{',
+              "docs/status.md",
+              "- **Configuration lifecycle:** strict unknown-field decoding is merged; invalid known values (#123), explicit access-log enablement (#124) and closed-world lifecycle generation (#89) remain open.",
+              "- **Configuration lifecycle:** strict unknown-field decoding and fail-closed known-value validation are merged, release pending; explicit access-log enablement (#124) and closed-world lifecycle generation (#89) remain open.",
           )
           replace_once(
-              "internal/app/preflight_test.go",
-              '\tif cand.Effective.Global.WorkerThreads != "preflight-secret-value" {\n\t\tt.Fatalf("candidate effective worker_threads = %q, want resolved secret", cand.Effective.Global.WorkerThreads)\n\t}',
-              '\tif cand.Effective.Admin.Token != "preflight-secret-value" {\n\t\tt.Fatalf("candidate effective admin token = %q, want resolved secret", cand.Effective.Admin.Token)\n\t}',
-          )
-          replace_once(
-              "internal/app/preflight_test.go",
-              '\tif cand.Raw.Global.WorkerThreads != "${env:PREFLIGHT_SECRET}" {\n\t\tt.Fatalf("candidate raw worker_threads = %q, want original reference", cand.Raw.Global.WorkerThreads)\n\t}',
-              '\tif cand.Raw.Admin.Token != "${env:PREFLIGHT_SECRET}" {\n\t\tt.Fatalf("candidate raw admin token = %q, want original reference", cand.Raw.Admin.Token)\n\t}',
+              "docs/status.md",
+              "- **Prometheus contract:** the exact `v1.32.0` name/type/help/label surface is preserved and CI-frozen; current additive egress/reload/managed-apply families are documented as release-pending. WAF request-target redaction review (#127) remains open.",
+              "- **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen, additive families are release-pending, and WAF matched-request warnings are now path-only and bounded with query/request-derived message data omitted.",
           )
           PY
+
           gofmt -w \
             cmd/jul/cli.go cmd/jul/cli_test.go \
             internal/app/config_apply_test.go internal/app/preflight_test.go internal/app/serve.go \
