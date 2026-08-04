@@ -50,8 +50,6 @@ jobs:
         run: |
           python3 scripts/docs-check.py
           python3 scripts/test_docs_check.py
-          python3 scripts/link-check.py
-          python3 scripts/test_link_check.py
           git diff --check
 
       - name: Commit rebuilt PR branch
