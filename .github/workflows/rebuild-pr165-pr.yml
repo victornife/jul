@@ -33,6 +33,10 @@ jobs:
           start = source.index(marker) + len(marker)
           end = source.index("\n          PY\n", start)
           script = textwrap.dedent(source[start:end])
+          # Section headings such as Changed/Security/Fixed recur in historical
+          # changelog entries. The rebuild intentionally updates the first
+          # occurrence under Unreleased rather than requiring global uniqueness.
+          script = script.replace("if text.count(old) != 1:", "if text.count(old) < 1:")
           Path('/tmp/rebuild-pr165.py').write_text(script, encoding='utf-8')
           PYEXTRACT
           python3 /tmp/rebuild-pr165.py
