@@ -2,7 +2,9 @@
 
 > Version 2.0 · Updated 2026-08-04
 >
-> This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence with a portfolio model. Delivered feature maturity remains authoritative in [docs/status.md](../status.md); #62 owns issue-level execution.
+> This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
+> with a portfolio model. Delivered feature maturity remains authoritative in the
+> [status matrix](../status.md); #62 owns issue-level execution.
 
 This roadmap translates the [vision](../vision/),
 [ADR 0013](../adr/0013-project-operating-model-and-completeness.md),
@@ -17,7 +19,7 @@ ready, draft, gated, selected, deferred, deliberately restart-bound, or complete
 
 | Lane | Objective | Entry rule | Current emphasis |
 | --- | --- | --- | --- |
-| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Configuration safety, HTTP/3 mTLS, ACME selection, cache correctness, metrics truth |
+| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Known-value validation, access-log semantics, cache correctness, metrics and WAF logging truth |
 | **Core Gateway Completeness** | Close material gaps inside the standalone gateway boundary | Architecture and product integrity | Trust boundaries, backend TLS/mTLS, resilience, routing policy, automation contracts |
 | **Operational enhancement** | Improve long-running operation without redefining the core | Value × leverage ÷ permanent complexity | Selected hot reload, diagnostics, recovery, migration assessment |
 | **Technical experiment** | Explore a new category through a bounded, removable tranche | Hypothesis, prerequisites, budget, evidence, exit decision | AI Gateway candidate after generic trust/resilience decisions |
@@ -45,23 +47,31 @@ portfolio has parallel lanes.
 ## Immediate critical path
 
 ```text
-Documentation truth and P0 corrections
+#165 — canonical current product truth
     ↓
-Strict configuration and explicit lifecycle-affecting schema
+#166 — operating model, roadmap v2.0 and completeness boundary
     ↓
-Cache correctness
+v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
     ↓
-Closed-world lifecycle authority (#89)
+#123 — reject invalid known configuration values
     ↓
-Phase 5 structured configuration (#77 → #82)
+#124 — explicit access-log enablement
     ↓
-Core architecture ADRs
+#126 metrics contract / #127 WAF request-target logging
     ↓
-Selected core implementations
+#131 → #133 / #132 → #134 — cache correctness and recertification
+    ↓
+#89 — closed-world lifecycle authority
+    ↓
+#77 → #82 — Phase 5 structured configuration
+    ↓
+#115 → #118 — core architecture decisions
+    ↓
+selected core implementations
 ```
 
-Independent P0/P1 fixes may proceed concurrently only when their files and
-runtime ownership are disjoint. Shared edits to configuration schema, lifecycle,
+#126 and #127 may proceed in parallel when they do not overlap the active shared
+configuration or cache work. Shared edits to the configuration schema, lifecycle,
 composition root, reload transaction, or Console patch contracts remain serial.
 
 ## Correctness and security backlog
@@ -240,8 +250,8 @@ reviews. This roadmap intentionally does not duplicate every closed issue.
 ## Historical roadmap
 
 The previous v1.37 five-year roadmap remains available through Git history and
-the Year 1–5 specifications. Delivered maturity stays authoritative in
-[docs/status.md](../status.md), [docs/feature-status.yaml](../feature-status.yaml),
+the Year 1–5 specifications. Delivered maturity stays authoritative in the
+[status matrix](../status.md), [machine-readable feature manifest](../feature-status.yaml),
 soak evidence and release history. This document now focuses on active portfolio
 and sequencing rather than duplicating every delivered feature row.
 
