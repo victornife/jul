@@ -1,0 +1,42 @@
+name: Export v1.32.0 source
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'automation/export-v1.32.0-source'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out released tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: v1.32.0
+          fetch-depth: 0
+
+      - name: Record released commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD | tee /tmp/v1.32.0-sha.txt
+          test -z "$(git status --short)"
+
+      - name: Package released source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git -czf /tmp/jul-v1.32.0-source.tar.gz .
+
+      - name: Upload source and SHA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: jul-v1.32.0-source
+          path: |
+            /tmp/jul-v1.32.0-source.tar.gz
+            /tmp/v1.32.0-sha.txt
+          if-no-files-found: error
+          retention-days: 1
