@@ -23,7 +23,14 @@ func startHTTP3(_ string, _ func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 	return nil, errors.New("http3 requires a build with -tags http3")
 }
 
-// newStagedHTTP3 is the no-HTTP/3 stub for staged QUIC creation.
+// newStagedHTTP3 is the no-HTTP/3 stub for certificate-only staged QUIC
+// creation used by focused tests.
 func newStagedHTTP3(_ string, _ func(*tls.ClientHelloInfo) (*tls.Certificate, error), _ http.Handler, _ func(int64), _ *slog.Logger) (h3Listener, error) {
+	return nil, errors.New("http3 requires a build with -tags http3")
+}
+
+// newStagedHTTP3WithTLS is the no-HTTP/3 stub for production staged QUIC
+// creation from a complete TLS policy.
+func newStagedHTTP3WithTLS(_ string, _ *tls.Config, _ http.Handler, _ func(int64), _ *slog.Logger) (h3Listener, error) {
 	return nil, errors.New("http3 requires a build with -tags http3")
 }

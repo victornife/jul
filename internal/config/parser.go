@@ -4,6 +4,8 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -56,15 +58,97 @@ func (s *TOMLSource) Load() (*Config, error) {
 	return cfg, nil
 }
 
-// Parse decodes TOML bytes into a Config and applies defaults. It does not
-// validate; callers should run Validate separately.
+// Parse decodes TOML bytes into a Config and applies defaults. Unknown fields
+// are rejected so typos cannot silently become no-op configuration. The only
+// compatibility rewrite performed before strict decoding is the historical
+// singular server_name field, which is normalized to server_names and is never
+// emitted by Marshal. Parse does not run semantic validation; callers should run
+// Validate separately.
 func Parse(data []byte) (*Config, error) {
+	normalized, err := normalizeDeprecatedTOML(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
 	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	decoder := toml.NewDecoder(bytes.NewReader(normalized)).DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		var missing *toml.StrictMissingError
+		if errors.As(err, &missing) {
+			return nil, fmt.Errorf("parse config: %s", strings.TrimSpace(missing.String()))
+		}
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	cfg.applyDefaults()
 	return &cfg, nil
+}
+
+// normalizeDeprecatedTOML preserves only explicitly supported compatibility
+// aliases without weakening strict decoding for the rest of the document.
+// server_name was historically accepted by examples and tests; its value is
+// converted into the canonical server_names list before the Config is decoded.
+func normalizeDeprecatedTOML(data []byte) ([]byte, error) {
+	if !bytes.Contains(data, []byte("server_name")) {
+		return data, nil
+	}
+
+	var doc map[string]any
+	if err := toml.Unmarshal(data, &doc); err != nil {
+		// Preserve the original bytes so the strict decoder below reports the
+		// original syntax or type error with its contextual line information.
+		return data, nil
+	}
+
+	changed := false
+	normalizeServer := func(index int, srv map[string]any) error {
+		legacy, ok := srv["server_name"]
+		if !ok {
+			return nil
+		}
+		if _, exists := srv["server_names"]; exists {
+			return fmt.Errorf("servers[%d]: cannot set both deprecated server_name and canonical server_names", index)
+		}
+		name, ok := legacy.(string)
+		if !ok {
+			return fmt.Errorf("servers[%d].server_name must be a string", index)
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("servers[%d].server_name must not be empty", index)
+		}
+		srv["server_names"] = []string{name}
+		delete(srv, "server_name")
+		changed = true
+		return nil
+	}
+
+	switch servers := doc["servers"].(type) {
+	case []map[string]any:
+		for i, srv := range servers {
+			if err := normalizeServer(i, srv); err != nil {
+				return nil, err
+			}
+		}
+	case []any:
+		for i, raw := range servers {
+			srv, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if err := normalizeServer(i, srv); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if !changed {
+		return data, nil
+	}
+	canonical, err := toml.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("normalize deprecated server_name: %w", err)
+	}
+	return canonical, nil
 }
 
 // Marshal encodes a Config back to TOML. Custom types (Duration, Size,

@@ -1,11 +1,11 @@
 # Response compression
 
 Jul.IA can **compress responses** on the fly using `gzip` (always available),
-`brotli`, or `zstd` (build-tagged).  The best codec is negotiated with the
+`brotli`, or `zstd` (build-tagged). The best codec is negotiated with the
 client via `Accept-Encoding`, and static files can be served from precompressed
 sidecar files (`.gz`, `.br`) to avoid recompression cost.
 
-This is **Y1-02**.  `gzip` is in **core**; `brotli` requires the `brotli` build
+This is **Y1-02**. `gzip` is in **core**; `brotli` requires the `brotli` build
 tag and `zstd` requires the `zstd` build tag.
 
 > **Maturity:** **GA** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
@@ -29,14 +29,14 @@ tag and `zstd` requires the `zstd` build tag.
 | `br` | `brotli` | `github.com/andybalholm/brotli` | 0–11 (default 6) | Best compression ratio; slower than gzip |
 | `zstd` | `zstd` | `github.com/klauspost/compress/zstd` | 1–4 mapped to Speed* levels | Fastest; good ratio near gzip-9 |
 
-Configure preference order in `[compression].encoders`.  The first encoder the
+Configure preference order in `[compression].encoders`. The first encoder the
 client accepts (by q-value) is chosen, with server preference as the tie-break.
 
 ## Negotiation
 
 The middleware parses `Accept-Encoding` q-values and selects the best match from
-the configured `encoders`.  If the client sends no `Accept-Encoding`, or q=0 for
-every configured encoder, the response passes through uncompressed.  The `Vary:
+the configured `encoders`. If the client sends no `Accept-Encoding`, or q=0 for
+every configured encoder, the response passes through uncompressed. The `Vary:
 Accept-Encoding` header is always added so caches do not serve a compressed
 response to a client that cannot decompress it.
 
@@ -49,6 +49,8 @@ response to a client that cannot decompress it.
 | Client sends `Accept-Encoding: br` but build lacks `brotli` tag | Pass-through (startup would have errored) | ✅ startup validation |
 | Response already has `Content-Encoding` | No double-compression | ✅ `TestCompressNoDoubleEncode` |
 | Request has `Range` header | No compression (pass-through) | ✅ `TestCompressSkipsRange` |
+| Request has `Cache-Control: no-transform` | No compression; original representation preserved | ✅ `TestCompressionRespectsCacheControlNoTransform` |
+| Response has `Cache-Control: no-transform` | No compression; original representation preserved | ✅ `TestCompressionRespectsCacheControlNoTransform` |
 | Response smaller than `min_size` | Pass-through | ✅ `TestCompressMinSize` |
 | Content-Type not in `types` | Pass-through | ✅ `TestCompressMIMEGate` |
 | SSE stream with `Flush()` | Decision forced, encoder flushed + underlying flushed | ✅ `TestCompressSSEFlush` |
@@ -64,9 +66,15 @@ All gates must pass:
 1. **Client accepts** — `Accept-Encoding` includes a configured coding with q > 0.
 2. **Body allowed** — not 1xx, 204, or 304.
 3. **Not already encoded** — `Content-Encoding` header is absent.
-4. **No Range** — request does not carry a `Range` header.
-5. **Above min_size** — buffered body ≥ `min_size` (default 1 KiB).
-6. **MIME type matches** — response `Content-Type` matches the `types` allow-list.
+4. **Transformation allowed** — neither the request nor response carries the case-insensitive `Cache-Control: no-transform` directive.
+5. **No Range** — request does not carry a `Range` header.
+6. **Above min_size** — buffered body ≥ `min_size` (default 1 KiB).
+7. **MIME type matches** — response `Content-Type` matches the `types` allow-list.
+
+`no-transform` is evaluated before Jul changes representation metadata. The
+original body, `Content-Length`, response cache policy and existing encoding are
+therefore preserved. The middleware still adds `Vary: Accept-Encoding` because
+the same resource may be transformable for a different request or response.
 
 The middleware buffers the first `min_size` bytes before deciding, so very small
 responses are not penalised by compression overhead.
@@ -89,6 +97,7 @@ Rules:
 - Sidecar files must sit next to the original (`app.js` + `app.js.gz` + `app.js.br`).
 - Only `gzip` and `br` sidecars are supported (zstd sidecars are not implemented).
 - The sidecar bytes are served verbatim; they must be valid compressed data.
+- `no-transform` governs dynamic intermediary compression. A precompressed sidecar is an operator-provided stored representation and remains subject to the static-file negotiation rules.
 
 ## Config reference
 
@@ -122,16 +131,17 @@ only; brotli/zstd tags not enabled):
 
 **Key take-away:** pass-through is ~7 μs; small-body gzip adds ~42 μs;
 large-body gzip is dominated by the compression algorithm (not the middleware
-overhead).  Encoder pooling keeps allocation count flat.
+overhead). Encoder pooling keeps allocation count flat.
 
 ## Security / threat note
 
 | Threat | Risk | Mitigation |
 | --- | --- | --- |
-| **BREACH attack** | Compression + reflection of a secret in the response body can leak the secret byte-by-byte via response-size side channel | Jul.IA has no built-in BREACH mitigation.  Defences: disable compression for pages that echo user input mixed with secrets; use CSRF tokens that rotate per request; deploy TLS with no compression at the record layer |
+| **BREACH attack** | Compression + reflection of a secret in the response body can leak the secret byte-by-byte via response-size side channel | Jul.IA has no built-in BREACH mitigation. Defences: disable compression for pages that echo user input mixed with secrets; use CSRF tokens that rotate per request; deploy TLS with no compression at the record layer |
 | **CRIME attack** | Historic TLS-level compression attack | TLS compression is disabled by default in Go's TLS stack; not applicable to HTTP response compression |
-| **Compression bomb (zip bomb)** | Attacker sends a tiny request that triggers a huge compression ratio, exhausting memory | Min-size gate prevents tiny triggers; the encoder operates on a streaming basis (bounded memory).  No defence against intentionally-decompressable huge payloads — that is an upstream / application concern |
+| **Compression bomb (zip bomb)** | Attacker sends a tiny request that triggers a huge compression ratio, exhausting memory | Min-size gate prevents tiny triggers; the encoder operates on a streaming basis (bounded memory). No defence against intentionally-decompressable huge payloads — that is an upstream/application concern |
 | **Cache poisoning via Vary** | Incorrect `Vary` handling causes a compressed response to be served to a non-compressible client | `Vary: Accept-Encoding` is set on **every** response, including pass-through and empty-body |
+| **Prohibited transformation** | A sender or requester uses `no-transform` because representation changes would break signatures, media semantics, or policy | Jul checks request and response `Cache-Control` case-insensitively and passes the original representation through unchanged |
 | **Sidecar data leak** | `app.js.gz` contains stale/dev data and is served in production | Sidecars are opt-in (`precompressed = true`); operators control what files exist on disk |
 | **CPU exhaustion** | Many unique URLs with large bodies cause continuous recompression | Precompressed sidecars eliminate CPU for static assets; dynamic responses are the application domain |
 
