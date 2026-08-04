@@ -59,7 +59,7 @@ func (c *h3Conn) Activate() error {
 
 // startHTTP3 creates and immediately activates an HTTP/3 listener. It exists
 // for direct tests that need a running h3 endpoint without going through the
-// server lifecycle. Prefer newStagedHTTP3 inside the reload flow.
+// server lifecycle. Prefer newStagedHTTP3WithTLS inside the listener build path.
 func startHTTP3(addr string, getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), handler http.Handler, onConn func(int64), log *slog.Logger) (h3Listener, error) {
 	h3, err := newStagedHTTP3(addr, getCert, handler, onConn, log)
 	if err != nil {
@@ -69,14 +69,28 @@ func startHTTP3(addr string, getCert func(*tls.ClientHelloInfo) (*tls.Certificat
 	return h3, nil
 }
 
-// newStagedHTTP3 opens a UDP listener on addr and prepares HTTP/3 (QUIC)
-// serving there using handler, but does not start accepting connections. The
-// accept loop is started by Activate. getCert is the same dynamic certificate
-// source the TCP/TLS listener uses, so static and ACME certificates —
-// including hot reloads — apply to HTTP/3 identically without a separate
-// refresh path. onConn, when non-nil, is called with +1 when a QUIC connection
-// opens and -1 when it closes, backing the jul_http3_connections gauge.
+// newStagedHTTP3 is the certificate-only compatibility seam used by focused
+// HTTP/3 tests. Production listener construction must use
+// newStagedHTTP3WithTLS so QUIC receives the complete server TLS policy,
+// including client-auth mode, CA pool and additional peer verification.
 func newStagedHTTP3(addr string, getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), handler http.Handler, onConn func(int64), log *slog.Logger) (h3Listener, error) {
+	return newStagedHTTP3WithTLS(addr, &tls.Config{GetCertificate: getCert}, handler, onConn, log)
+}
+
+// newStagedHTTP3WithTLS opens a UDP listener on addr and prepares HTTP/3 (QUIC)
+// serving there using handler, but does not start accepting connections. The
+// accept loop is started by Activate.
+//
+// tlsTemplate is the fully prepared TLS policy used by the sibling TCP listener.
+// It is cloned before QUIC-specific changes so the caller's config remains
+// immutable. HTTP/3 mandates TLS 1.3; every other relevant policy field is
+// preserved, including GetCertificate, ClientAuth, ClientCAs,
+// VerifyPeerCertificate and VerifyConnection.
+func newStagedHTTP3WithTLS(addr string, tlsTemplate *tls.Config, handler http.Handler, onConn func(int64), log *slog.Logger) (h3Listener, error) {
+	if tlsTemplate == nil {
+		return nil, errors.New("http3 requires a TLS configuration")
+	}
+
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("resolve udp address: %w", err)
@@ -86,12 +100,16 @@ func newStagedHTTP3(addr string, getCert func(*tls.ClientHelloInfo) (*tls.Certif
 		return nil, fmt.Errorf("listen udp: %w", err)
 	}
 
-	// QUIC mandates TLS 1.3; ConfigureTLSConfig adds the h3 ALPN. The certificate
-	// source is shared with the TCP/TLS listener so reloads apply to h3 too.
-	tlsConf := http3.ConfigureTLSConfig(&tls.Config{
-		GetCertificate: getCert,
-		MinVersion:     tls.VersionTLS13,
-	})
+	// Clone the complete TCP listener policy before applying QUIC's mandatory
+	// TLS 1.3 floor and h3 ALPN. This keeps server-level mTLS, CA, SAN and CRL
+	// verification equivalent across TCP TLS and QUIC handshakes.
+	h3TLS := tlsTemplate.Clone()
+	if h3TLS.MaxVersion != 0 && h3TLS.MaxVersion < tls.VersionTLS13 {
+		_ = udpConn.Close()
+		return nil, errors.New("http3 requires TLS 1.3 but the configured maximum TLS version is lower")
+	}
+	h3TLS.MinVersion = tls.VersionTLS13
+	tlsConf := http3.ConfigureTLSConfig(h3TLS)
 
 	ln, err := quic.ListenEarly(udpConn, tlsConf, nil)
 	if err != nil {

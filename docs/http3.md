@@ -4,8 +4,9 @@
 
 Jul.IA can serve HTTP/3 (QUIC) on any TLS-enabled server block. HTTP/3 runs on
 UDP alongside the existing TCP listener on the same address, shares the same TLS
-certificates (including ACME), and advertises itself to clients via an
-`Alt-Svc` response header so browsers can upgrade on a later request.
+certificate provider and server-level client-authentication policy, and
+advertises itself to clients via an `Alt-Svc` response header so browsers can
+upgrade on a later request.
 
 ## Usage
 
@@ -28,7 +29,7 @@ server_names = ["example.com"]
   min_version = "1.3"
 
   [servers.http3]
-  enabled        = true
+  enabled         = true
   alt_svc_max_age = 86400   # 24 hours (default)
 ```
 
@@ -41,7 +42,8 @@ server_names = ["example.com"]
 | First request (no prior Alt-Svc) | HTTP/1.1 or HTTP/2 via ALPN | Not used yet | Client needs an Alt-Svc hint to try h3 |
 | Subsequent request (Alt-Svc cached) | May be skipped by client | HTTP/3 | Browser decides based on cached Alt-Svc |
 | TLS ALPN | `h2`, `http/1.1` | `h3` | QUIC handshake includes h3 ALPN |
-| Certificate source | `GetCertificate` callback | Same callback | Static, ACME, and hot-reloaded certs apply to both |
+| Certificate source | `GetCertificate` callback | Same callback | ACME renewal applies to both; static-file replacement remains restart-bound until certificate rotation is implemented |
+| Server-level client authentication | Complete `tls.client_auth` policy | Same complete policy | `request`/`require`, CA verification, SAN allow-list, CRL checks and result hooks are equivalent |
 
 ### Alt-Svc advertisement
 
@@ -69,6 +71,24 @@ response; there is no multi-port or multi-protocol Alt-Svc list.
 | `enabled` | `false` | boolean |
 | `alt_svc_max_age` | `86400` (24h) | positive integer, seconds |
 
+## TLS and mutual-TLS parity
+
+HTTP/3 is created from a clone of the fully prepared TLS policy used by the
+sibling TCP listener. Jul then applies QUIC's mandatory TLS 1.3 floor and h3
+ALPN without discarding the rest of the policy. The QUIC handshake therefore
+preserves:
+
+- certificate selection through the shared dynamic provider;
+- `tls.client_auth.mode` (`none`, `request`, or `require`);
+- the configured client CA pool;
+- SAN allow-list and CRL verification;
+- the mutual-TLS result hook and verified peer certificate exposed to request
+  middleware.
+
+Existing HTTP/3 connections are governed by the policy used for their TLS
+handshake. Listener-level TLS and mTLS settings remain restart-bound today, so a
+policy change applies after the planned restart and to subsequent handshakes.
+
 ## Known limitations
 
 1. **No WebSocket upgrade over HTTP/3.** WebSocket requires HTTP/1.1 or HTTP/2.
@@ -84,10 +104,11 @@ response; there is no multi-port or multi-protocol Alt-Svc list.
    socket, HTTP/3 startup fails with a clear "address already in use" error.
    This is rare in practice because most services bind TCP only.
 
-4. **Bind-time gateway between quic-go and Jul.IA handler generations.** The
-   HTTP/3 server is wired to the active handler generation at listener bind
-   time; a reload installs a new generation for TCP but the QUIC path is
-   re-bound only on restart.
+4. **Static certificate-file replacement remains restart-bound.** HTTP/3 and
+   TCP share the same certificate callback, but changing a configured static
+   `cert`/`key` file is not published to that callback until the dedicated
+   certificate-rotation lifecycle is implemented. ACME renewal continues while
+   the process is running.
 
 ## Benchmarks
 
@@ -134,12 +155,12 @@ changes the attack surface:
    deploy behind a CDN or load balancer that terminates QUIC and proxies over
    TCP to Jul.IA for untrusted traffic.
 
-4. **Shared certificate compromise affects both paths.** Because HTTP/3 reuses
-   the same `GetCertificate` callback as TCP/TLS, a compromised or mis-issued
-   certificate affects both transports simultaneously. There is no separate
-   certificate pinning or validation path for QUIC. Counter-measures: rotate
-   certificates promptly; use short-lived ACME certificates; monitor both TCP
-   and QUIC handshakes for anomalies.
+4. **Shared TLS policy affects both paths.** HTTP/3 reuses the complete listener
+   TLS policy, including certificate selection and server-level mTLS. A
+   compromised server certificate or over-broad client CA/SAN policy therefore
+   affects both transports simultaneously. Counter-measures: rotate credentials
+   promptly, keep client trust roots and SAN allow-lists narrow, maintain CRLs,
+   and monitor TCP and QUIC handshake outcomes.
 
 5. **Alt-Svc as a tracking vector.** A malicious middlebox or CDN that injects
    a forged `Alt-Svc: h3=...` header can redirect clients to an attacker-
@@ -159,8 +180,9 @@ you can validate with a QUIC-capable client such as curl:
 go run -tags http3 ./cmd/jul -check -config testdata/http3.toml
 ```
 
-See `internal/server/http3_test.go` for the end-to-end test that exercises the
-full QUIC handshake + request/response path.
+See `internal/server/http3_test.go` and `internal/server/http3_mtls_test.go` for
+real QUIC tests covering request/response behavior and client-authentication
+parity.
 
 ## GA status
 
@@ -172,6 +194,6 @@ full QUIC handshake + request/response path.
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
 | 5 — Long-running soak test | ✅ | **8h isolated Linux soak** 2026-07-13 (55,302,486 req, 0% err, 100% success) — [evidence](soak-evidence.md#2026-07-13--http3-over-quic-8h-isolated-soak-linux-completed) |
 | 6 — Runnable example + docs | ✅ | `testdata/http3.toml` + this doc |
-| 7 — Security / threat note | ✅ | 5-row threat note (0-RTT replay, amplification, UDP exhaustion, cert sharing, Alt-Svc tracking) |
+| 7 — Security / threat note | ✅ | 5-row threat note (0-RTT replay, amplification, UDP exhaustion, shared TLS policy, Alt-Svc tracking) |
 | 8 — Fuzzing where parsing is involved | n/a | No custom parser (delegates to quic-go) |
 | 9 — Self-explanatory Console surface | ✅ | Status row shows HTTP/3 compiled state + active listener count |
