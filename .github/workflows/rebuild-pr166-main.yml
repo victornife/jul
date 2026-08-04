@@ -41,6 +41,28 @@ jobs:
           PYEXTRACT
           bash /tmp/rebuild-pr166.sh
 
+          python3 - <<'PYFIX'
+          from pathlib import Path
+
+          hardening = Path('docs/specs/hardening-platform.md')
+          text = hardening.read_text(encoding='utf-8')
+          text = text.replace('../roadmap/README.md#active-operating-roadmap', '../roadmap/README.md#current-execution-sequence')
+          hardening.write_text(text, encoding='utf-8')
+
+          for filename in ('docs/specs/year-3.md', 'docs/specs/year-4.md'):
+              path = Path(filename)
+              text = path.read_text(encoding='utf-8')
+              banner = '> **Concept horizon — not committed.**\n'
+              if 'Concept horizon — not committed' not in text:
+                  lines = text.splitlines(keepends=True)
+                  insert_at = 1
+                  while insert_at < len(lines) and not lines[insert_at].strip():
+                      insert_at += 1
+                  lines.insert(insert_at, '\n' + banner)
+                  text = ''.join(lines)
+              path.write_text(text, encoding='utf-8')
+          PYFIX
+
       - name: Validate strategy documentation
         run: |
           python3 scripts/docs-check.py
