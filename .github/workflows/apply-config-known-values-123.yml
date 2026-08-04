@@ -28,6 +28,14 @@ jobs:
           done | base64 --decode | gzip --decompress > /tmp/config-known-values-123.patch
           git apply --check /tmp/config-known-values-123.patch
           git apply /tmp/config-known-values-123.patch
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("internal/config/lint.go")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace('\t"strings"\n', '')
+          path.write_text(text, encoding="utf-8")
+          PY
           gofmt -w \
             cmd/jul/cli.go cmd/jul/cli_test.go \
             internal/app/config_apply_test.go internal/app/serve.go \
