@@ -4,6 +4,13 @@ Welcome to the Jul.IA documentation. Jul.IA is an NGINX-inspired HTTP edge
 server written in Go, configured through TOML, and shipped as a single static
 binary.
 
+## Current audit and programme
+
+- **[2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md)** — Current source of truth for repository health, confirmed defects, architecture decisions and implementation sequencing.
+- **[Audit register](audit-register.md)** — Current audit pointer plus historical findings, fixes, tests and closure evidence.
+- **[Master implementation tracker](https://github.com/victornife/jul/issues/62)** — Current staged execution programme and decision register.
+- **[2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md)** — Preserved historical audit and remediation evidence; no longer the active implementation plan.
+
 ## Choose your path
 
 ### New to Jul.IA?
@@ -14,13 +21,13 @@ binary.
 - **[Concepts appendix](vision/appendix.md)** — New to HTTP, proxies, TLS, caching, or observability? Start here.
 
 ### Evaluating or operating?
-- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means.
-- **[Known limitations](known-limitations.md)** — Every feature's documented gaps in one place: what Jul.IA does not do today.
+- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit while correction issues remain open.
+- **[Known limitations](known-limitations.md)** — Documented gaps and current correction notices.
 - **[Deployment guide](deployment.md)** — systemd, Windows service, Docker, and log rotation.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
 - **[Reload semantics](reload-semantics.md)** — What reloads safely, what needs a restart, and how zero-downtime reload works.
 - **[Security model](../SECURITY.md)** — Threat model, hardening defaults, and per-feature security notes.
-- **[Security posture](security-posture.md)** — Admin auth model, current limits, RBAC roadmap, and production hardening checklist.
+- **[Security posture](security-posture.md)** — Admin auth model, current limits, shipped local RBAC, and production hardening checklist.
 - **[Troubleshooting](troubleshooting.md)** — Common issues and how to resolve them.
 
 ### Feature deep-dives
@@ -43,11 +50,11 @@ binary.
 ### Extending and contributing
 - **[Project layout](architecture.md)** — How the repository is organized.
 - **[ADRs](adr/)** — Architecture Decision Records for durable design choices.
-- **[Reviews & decision log](reviews/)** — Dated architecture reviews, product direction changes, and audit findings that shaped the current design.
-- **[Engineering specs](specs/)** — Year-by-year execution plans and detailed feature specs.
-- **[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Where the project is headed. The [active operating roadmap](roadmap/README.md#active-operating-roadmap) shows the current Phase 2→7 sequence and the [evidence gates](roadmap/README.md#evidence-gates-and-product-signals) that govern horizon decisions.
+- **[Reviews & decision log](reviews/)** — Dated architecture reviews, product direction changes, and historical audit findings.
+- **[Engineering specs](specs/)** — Detailed feature and implementation specifications.
+- **[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Long-term direction. Current implementation sequencing is governed by the combined audit and #62 while the durable operating-model documents are updated.
 - **[Release process](release.md)** — How releases are cut, versioned, and signed.
-- **[Soak evidence log](soak-evidence.md)** — Dated soak runs and where the CI/release soak artifacts are published (ADR-0005 post-GA gate).
+- **[Soak evidence log](soak-evidence.md)** — Dated soak runs and where CI/release soak artifacts are published.
 - **[Changelog](../CHANGELOG.md)** — Release history.
 
 ## Build tags quick reference
@@ -78,14 +85,17 @@ go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins st
 
 ## Documentation conventions
 
-- **Code blocks** labelled `toml` are valid configuration examples.
+- **Code blocks** labelled `toml` are valid configuration examples unless a nearby correction notice states otherwise.
 - **Build-tag notes** appear under feature headings and in feature docs.
 - **Defaults** are shown as `default value` in reference tables.
-- **Cross-links** use relative paths so they work both on GitHub and when
-  rendered by the Console.
+- **Cross-links** use relative paths so they work both on GitHub and when rendered by the Console.
+- **Current defects** link to their remediation issues and are not described as shipped future behavior.
+- **Historical documents** keep their original evidence and carry an explicit historical relationship to the current audit.
 
 ## Status of this documentation
 
-This documentation is maintained alongside the code. If a doc and the code
-disagree, the code is the source of truth — please open an issue or PR. See
-`docs/ga-push.md` for the current effort to move every feature from Beta to GA.
+Code remains the runtime source of truth. The current documentation contract is governed by the
+[combined audit](audit/combined-audit-2026-08-03.md) while #119 corrects known capability,
+security, lifecycle, maturity and operational contradictions. Historical GA-push and year-horizon
+documents are context, not the active implementation sequence. Please open an issue or PR when a
+document and current behavior disagree.
