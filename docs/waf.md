@@ -15,10 +15,11 @@ engine or rule-set weight.
 > **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). It is off by
 > default; turn it on per scope. The recommended rollout is **detect → block**.
 
-> **Logging privacy notice:** matched-rule request-target logging is under
-> explicit URI/query redaction and bounding review in #127. Avoid credentials or
-> personal data in URLs, restrict log access/retention, and do not use raw request
-> targets as metric labels.
+> **Logging privacy contract:** matched-rule logs retain the rule ID, mode,
+> phase, severity, and a bounded/redacted request **path**. Raw query strings and
+> Coraza's macro-expanded rule message are deliberately omitted because the exact
+> Coraza v3.7.0 callback exposes the full unparsed URI and may expand request data
+> into the message. URI/path values never become metric labels.
 
 ## Contents
 
@@ -72,9 +73,10 @@ to run it. The check is performed once at startup by `waf.Check`.
    reaches the upstream. In **detect** mode the same match is recorded but the
    request proceeds.
 4. Every matched rule that logs is reported to metrics and structured-log
-   hooks. Rule/action labels must remain bounded. The warning currently includes
-   diagnostic request-target context; #127 owns the final path-only/redacted URI
-   contract so query secrets cannot enter logs.
+   hooks. The metric keeps only bounded action/rule labels. The structured warning
+   records `rule_id`, `mode`, `phase`, `severity`, a bounded/redacted `path`, and
+   `query_omitted`; it never records the raw query or Coraza's macro-expanded
+   matched-rule message.
 
 ## Configuration
 
@@ -303,7 +305,9 @@ the original, uncompressed request and response bodies.
 - **Detect first.** Roll a new ruleset (or a paranoia bump) out in `detect` mode,
   watch `jul_waf_events_total` and the `waf rule matched` logs for false
   positives, tune with `SecRuleRemoveById`/allow-list rules, then switch to
-  `block`.
+  `block`. The log intentionally omits query values and macro-expanded match
+  messages; reproduce a request in a controlled environment when deeper payload
+  inspection is required.
 - **Console.** The Console **Status** and **Security** panels report *Web
   application firewall (WAF)* with the active mode and how many locations it
   covers, so you can confirm enforcement at a glance.
@@ -337,7 +341,7 @@ switching modes or rule sources.
 | Uncompressed body inspection | ✅ | ✅ | WAF runs before compression middleware |
 | **Integration** ||||
 | Prometheus `jul_waf_events_total` | ✅ | ✅ | Labeled by `action` and `rule` |
-| Structured log `waf rule matched` | ✅ | ✅ | Both modes |
+| Structured log `waf rule matched` | ✅ | ✅ | Path-only, bounded/redacted; raw query and macro-expanded message omitted |
 | Flapping / health history | ☐ | ☐ | Not yet integrated (future) |
 | Access-log / audit sink integration | ☐ | ☐ | Future — events are metric+log only today |
 | **Build-time** ||||
@@ -349,6 +353,27 @@ switching modes or rule sources.
 
 The WAF is a **defense-in-depth** layer, not a single point of protection.
 Operators should understand the following risks and limitations:
+
+### Matched-rule log privacy
+
+Coraza v3.7.0 exposes `MatchedRule.URI()` as the full unparsed request URI and
+`MatchedRule.Message()` as a macro-expanded message. Both may therefore contain
+attacker-controlled request data. Jul.IA sanitizes at the integration boundary:
+
+- query and fragment text are discarded without URL-decoding;
+- identifier-, email-, and token-like path segments are normalized;
+- the remaining path is capped at 256 bytes and passed through the active secret
+  redaction state;
+- macro-expanded Coraza messages and matched values are not copied into the
+  ordinary structured warning;
+- the warning retains bounded rule metadata (`rule_id`, mode, phase, severity)
+  plus `query_omitted` for diagnostic context;
+- WAF metrics retain only bounded rule/action labels.
+
+This policy applies in both `detect` and `block` modes and to embedded CRS and
+custom rules. Avoid credentials in URLs regardless: upstream applications,
+intermediaries, or independently configured access logs may have their own
+retention policies.
 
 ### False positives
 

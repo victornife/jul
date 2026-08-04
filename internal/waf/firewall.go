@@ -22,6 +22,8 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/observability"
+	"jul/internal/redact"
 )
 
 // Compiled reports whether this binary includes WAF support. It is true in
@@ -182,11 +184,22 @@ func errorCallback(cfg config.WAFConfig, opts Options) func(types.MatchedRule) {
 			opts.Hooks.OnEvent(cfg.Mode, ruleID)
 		}
 		if opts.Logger != nil {
+			rawURI := mr.URI()
+			// Coraza exposes the full, unparsed request URI and its Message value
+			// may contain macro-expanded request data. Keep the structured event
+			// useful without copying attacker-controlled query values or matched
+			// data into long-lived logs. The shared path sanitizer strips query and
+			// fragment text without decoding, redacts token-like path segments, and
+			// applies a hard length bound. Global secret redaction remains a final
+			// defense for configured secrets that appear in an otherwise-safe path.
+			path := redact.Apply(observability.SanitizePath(rawURI))
 			opts.Logger.Warn("waf rule matched",
 				"rule_id", ruleID,
-				"uri", mr.URI(),
+				"path", path,
+				"query_omitted", strings.ContainsAny(rawURI, "?#"),
 				"mode", cfg.Mode,
-				"message", mr.Message())
+				"phase", int(mr.Rule().Phase()),
+				"severity", mr.Rule().Severity().String())
 		}
 	}
 }

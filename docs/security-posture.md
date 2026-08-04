@@ -91,7 +91,7 @@ access.
 - **Forwarded client identity:** the direct socket peer remains authoritative. Jul.IA does not yet provide a complete trusted-proxy CIDR/chain model for `Forwarded` and `X-Forwarded-For`; do not let arbitrary request headers redefine CIDR or rate-limit identity.
 - **Backend peer identity:** HTTPS/gRPC upstreams use the current default transport verification, but Jul.IA does not yet expose a unified private-CA, backend client-certificate, SNI override or explicit peer-identity policy across proxy, gRPC and health checks.
 - **Auxiliary egress is separate:** `[egress]` constrains configuration-driven auxiliary destinations; it is not backend certificate authentication and does not govern the data-plane reverse proxy.
-- **WAF request targets:** matched-rule URI/query logging remains under redaction/bounding review in #127. Avoid secrets in URLs and restrict log retention/access.
+- **WAF request targets:** matched-rule warnings are path-only, bounded and secret-redacted. Raw queries and Coraza macro-expanded messages are omitted; metric labels contain no request target or matched value. Avoid secrets in URLs regardless of downstream or intermediary logging.
 
 ---
 

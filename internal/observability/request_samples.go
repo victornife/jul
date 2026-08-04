@@ -57,7 +57,7 @@ func newRequestSampleBuffer(capacity int) *requestSampleBuffer {
 // record stores one sample, normalizing and redacting sensitive fields before
 // it ever enters the buffer.
 func (b *requestSampleBuffer) record(s RequestSample) {
-	s.Path = sanitizePath(s.Path)
+	s.Path = SanitizePath(s.Path)
 	s.Origin = normalizeOrigin(s.Origin)
 	if s.Origin == "(none)" {
 		s.Origin = ""
@@ -132,11 +132,12 @@ func redactSegment(seg string) string {
 	}
 }
 
-// sanitizePath strips any query string (defense in depth — r.URL.Path already
+// SanitizePath strips any query string (defense in depth — r.URL.Path already
 // excludes it), redacts identifier/email/token-like segments to placeholders so
-// the stored path carries no PII or secrets, and caps the stored length so the
-// buffer cannot be bloated.
-func sanitizePath(path string) string {
+// operator-visible diagnostics carry no obvious PII or secrets, and caps the
+// stored length so hostile request targets cannot inflate logs or buffers. It
+// deliberately does not URL-decode attacker-controlled input.
+func SanitizePath(path string) string {
 	if i := strings.IndexAny(path, "?#"); i >= 0 {
 		path = path[:i]
 	}
