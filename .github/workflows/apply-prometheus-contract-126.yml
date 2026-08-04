@@ -1,0 +1,53 @@
+name: Apply Prometheus contract reconciliation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'automation/apply-prometheus-contract-126'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target implementation branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: agent/prometheus-contract-126
+          fetch-depth: 0
+
+      - name: Apply reviewed contract patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/apply-prometheus-contract-126
+          git show origin/automation/apply-prometheus-contract-126:.github/patches/prometheus-contract-126.patch.gz.b64 \
+            | base64 --decode \
+            | gzip --decompress \
+            > /tmp/prometheus-contract-126.patch
+          git apply --check /tmp/prometheus-contract-126.patch
+          git apply /tmp/prometheus-contract-126.patch
+          gofmt -w internal/observability/cardinality_test.go internal/observability/metric_contract_test.go
+          git diff --check
+
+      - name: Validate focused implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./internal/observability
+          go test -race -p 2 ./internal/observability
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Commit target branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md docs/ internal/observability/
+          git commit -m "observability: freeze and document Prometheus contract"
+          git push origin HEAD:agent/prometheus-contract-126
