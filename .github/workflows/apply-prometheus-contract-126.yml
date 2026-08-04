@@ -29,6 +29,18 @@ jobs:
             > /tmp/prometheus-contract-126.patch
           git apply --check /tmp/prometheus-contract-126.patch
           git apply /tmp/prometheus-contract-126.patch
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("internal/observability/cardinality_test.go")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace('\t"reflect"\n', '\t"slices"\n')
+          text = text.replace(
+              "if !reflect.DeepEqual(names, wantNames) {",
+              "if !slices.Equal(names, wantNames) {",
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
           gofmt -w internal/observability/cardinality_test.go internal/observability/metric_contract_test.go
           git diff --check
 
