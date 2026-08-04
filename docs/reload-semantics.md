@@ -11,6 +11,14 @@
 > `restart_required` rejection, a degraded-subsystem apply — see
 > [troubleshooting.md](troubleshooting.md#reloads).
 
+> **Lifecycle authority notice:** the Go registry is the current runtime
+> classifier, but #89 is still required to make the schema closed-world and to
+> generate/check the YAML and human mirrors. An unlisted field must not be
+> assumed hot merely because a handler can be rebuilt.
+>
+> Mixed candidates remain whole-candidate operations: Jul.IA does not silently
+> publish a hot subset while another field is staged or restart-bound.
+
 Jul.IA reloads configuration **without dropping connections**. A reload can be
 triggered three ways:
 

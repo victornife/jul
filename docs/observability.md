@@ -14,6 +14,11 @@ registry. No build tag is required. The endpoint is served at:
 GET http://127.0.0.1:9090/metrics
 ```
 
+> **Metric compatibility notice:** #126 is reconciling the last released
+> Prometheus names/labels with current collectors and this reference. Keep
+> dashboards and alerts pinned to the released contract until that issue closes;
+> destination, path, identity and raw error values must not become labels.
+
 ### HTTP request metrics
 
 | Metric | Type | Labels | Description |
@@ -160,6 +165,11 @@ rotate_keep   = 7
 
 The `file` and `syslog` sinks always record at **info level** regardless of
 `[global].log_level`, so a quieter global level never suppresses the access log.
+
+> **Disablement notice:** an omitted sink list uses the default stdout sink,
+> and `sinks = []` is not a supported off switch. #124 introduces an explicit
+> `enabled` contract. The legacy global/per-server destination fields are
+> compatibility no-ops.
 
 ### Access-log fields
 

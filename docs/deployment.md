@@ -161,11 +161,10 @@ docker run --rm \
   sinks = ["file"]
   file  = "/var/log/jul/access.log"
   ```
-  Or suppress access logs entirely for a soak or benchmark run:
-  ```toml
-  [observability.access_log]
-  sinks = []
-  ```
+  Jul.IA does not yet expose an explicit access-log disable switch. Do not use
+  `sinks = []` as an off setting: the current defaulting path restores the
+  default stdout sink. #124 adds an explicit `enabled` field; until that lands,
+  use a dedicated sink and control retention at the deployment/log-driver layer.
 
 ## Windows service
 

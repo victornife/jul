@@ -1,6 +1,6 @@
 # Security Policy
 
-> Last reviewed: 2026-07-02
+> Last reviewed: 2026-08-04
 
 This is the umbrella security document for **Jul.IA** (`jul`). It defines the
 trust model the server is built around, the hardening defaults you should know
@@ -59,7 +59,7 @@ a set of **operator-chosen** upstreams. The boundaries are:
 | The TOML configuration | **trusted** | Operator-supplied. It can open files, dial hosts, and set headers; treat it as code and restrict who can edit it. |
 | The `jul` binary + host filesystem | **trusted** | Protect the working directory, the ACME `cache_dir`, and any htpasswd/CA/key files (service-user-only). |
 | Downstream client requests | **untrusted** | Headers, bodies, paths, tokens, and TLS client certs are all attacker-controlled and validated at the boundary. |
-| Upstreams you configure | **trusted by default** | `proxy_pass` / gRPC targets are static config; request input never selects them (no SSRF by design). gRPC `use_reflection` extends trust to the backend's self-description — pin a descriptor set for untrusted topologies. |
+| Upstreams you configure | **operator-chosen; authenticate deliberately** | Request input never selects the target. Default HTTPS uses the platform trust/hostname checks, but unified private-CA, backend mTLS, SNI override and explicit peer-identity policy are selected future core work. Reflection extends trust to the backend's self-description. |
 
 **Core invariant — request input never widens the attack surface.** The upstream
 target, the JWKS URL, the certificate set, and the FastCGI root are all
@@ -70,6 +70,14 @@ defense-in-depth against a mistaken or compromised config, the optional
 config-driven auxiliary fetch (JWKS, forward-auth, discovery, ACME/OCSP, and the
 WASM plugin `fetch` intersection) to an operator-approved host/CIDR set; it is
 disabled by default.
+
+### Current boundary notes
+
+- The direct transport peer is the current source identity for CIDR/rate-limit decisions. A complete trusted-proxy chain model is not yet shipped; never trust client-supplied forwarding headers as security identity by default.
+- The auxiliary `[egress]` allow-list and backend TLS identity solve different problems. Egress restricts selected configuration-driven fetch destinations; it does not authenticate reverse-proxy/gRPC backends.
+- HTTP/3 now applies the same complete prepared server-level TLS/mTLS policy as HTTP/1.1 and HTTP/2.
+- ACME HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface.
+- WAF request-target logging remains under query/URI redaction review; avoid credentials and personal data in URLs.
 
 ## Hardening defaults & recommendations
 

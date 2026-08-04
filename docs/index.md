@@ -94,8 +94,9 @@ go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins st
 
 ## Status of this documentation
 
-Code remains the runtime source of truth. The current documentation contract is governed by the
-[combined audit](audit/combined-audit-2026-08-03.md) while #119 corrects known capability,
-security, lifecycle, maturity and operational contradictions. Historical GA-push and year-horizon
-documents are context, not the active implementation sequence. Please open an issue or PR when a
-document and current behavior disagree.
+Current runtime behavior, executable tests, the combined audit, accepted ADRs,
+and canonical feature/operational guides form the documentation contract. Open
+correction notices live in their owning documents and linked issues rather than
+in a separate temporary ledger. Historical GA-push and year-horizon material is
+context, not the active execution sequence. Please open an issue or PR whenever
+a document and current behavior disagree.

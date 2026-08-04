@@ -10,10 +10,11 @@
 The at-a-glance view of **every shipped feature**, its **maturity**, and how
 it stands against the nine-criteria GA bar ([ADR 0003](adr/0003-maturity-and-ga.md)).
 
-> For a critical, evidence-based assessment of the repository — including scrutiny of
-> the maturity and soak claims on this page — see the historical
-> [Full Repository Audit (2026-07-09, v1.1 updated 2026-07-16)](reviews/previous_reviews/jul_full_repository_audit_2026-07-09.md)
-> and the live finding register in [`docs/audit-register.md`](audit-register.md).
+> For the current evidence-based assessment, release blockers and
+> implementation sequence, see the
+> [2026-08-03 combined repository audit](audit/combined-audit-2026-08-03.md),
+> [`docs/audit-register.md`](audit-register.md), and master programme #62. Older
+> audits remain historical evidence.
 
 **Keep this current.** When a feature's maturity or any GA criterion changes,
 update [`docs/feature-status.yaml`](feature-status.yaml) first — that is the
@@ -53,6 +54,13 @@ A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on 
   **not formally Closed** (exact-SHA CI + two sign-offs outstanding). Treat it as
   *remediated, closure pending*. Context: the
   [Full Repository Audit (2026-07-31)](audit/2026-07-31-full-repository-audit.md).
+
+### Active regression and recertification notices
+
+- **Response cache:** the historical GA row remains the released record, but #107 and #131–#134 reopen current conformance evidence. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.
+- **Configuration lifecycle:** strict unknown-field decoding is merged; invalid known values (#123), explicit access-log enablement (#124) and closed-world lifecycle generation (#89) remain open.
+- **Prometheus and WAF logging:** contract reconciliation (#126) and request-target redaction review (#127) remain open.
+- **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are merged to `main` and await the next tagged release.
 
 ## GA criteria legend
 

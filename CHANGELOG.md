@@ -15,6 +15,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 > **GA** only after its first tagged release passes the post-GA soak gate.
 
 ### Changed
+- **Current product-truth reconciliation (2026-08-04):** aligned README, security, status, configuration, observability, deployment, cache, reload, WAF and known-limitations documentation with the merged runtime and the remaining audited correction work.
 - **Post-audit remediation (2026-07-31):** activated the canonical Git hooks
   (`make hooks`) so the `gofmt` pre-commit gate runs locally — a stale
   hand-installed `.git/hooks/pre-commit` with `core.hooksPath` unset had been
@@ -25,9 +26,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   ships today.
 
 ### Security
+- **HTTP/3 mTLS parity:** QUIC listeners now clone the complete prepared sibling TCP TLS policy, preserving client-auth mode, CA verification, SAN/CRL checks, result hooks and verified client identity.
+- **Strict configuration decoding:** genuinely unknown TOML fields now fail immediately across the canonical parser; the documented singular `server_name` compatibility alias is canonicalized and conflicts with `server_names` are rejected.
+- **CodeQL reflected-output hardening:** FastCGI authorizer error strings are HTML-escaped and the deliberate upstream-response forwarding boundary is documented.
 - **Dependency advisory remediation (2026-07-31):** bumped `klauspost/compress`
   1.18.6 → 1.18.7 (GO-2026-5841) and forced patched transitive frontend deps via
-  pnpm overrides — `brace-expansion` → 5.0.8 (ReDoS) and `postcss` → ≥8.5.18
+  pnpm overrides — `brace-expansion` → 5.0.9 (ReDoS) and `postcss` → ≥8.5.18
   (GHSA-r28c-9q8g-f849, build-time only). Two advisories are **accepted with
   rationale**, not fixable today: `golang.org/x/crypto` GO-2026-5932 (no patched
   release published; `govulncheck` confirms it is **not called**) and
@@ -116,6 +120,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
     `permission.test.tsx` / Security-panel RBAC-status tests.
 
 ### Fixed
+- **ACME challenge selection:** HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface while preserving normal HTTP/TLS routing.
+- **Compression transformation contract:** request or response `Cache-Control: no-transform` now bypasses dynamic gzip/Brotli/Zstandard compression.
+- **HTTP/3 UDP preflight test:** the success path uses OS-assigned TCP/UDP ephemeral ports instead of reusing a released TCP port on Windows.
 - **Post-audit remediation (reload result contract, RBAC lifecycle, context propagation):**
   - `server.ReloadResult` now carries `admin` subsystem status so RBAC policy update
     failures are reported independently of stream-proxy status.

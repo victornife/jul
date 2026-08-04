@@ -67,6 +67,14 @@ plugin_upload_max_size = 32
 
 ---
 
+## Strict TOML decoding and compatibility aliases
+
+Jul.IA rejects unknown TOML fields in every path that uses the canonical parser. A misspelled security, routing, TLS or policy key is a fatal configuration error rather than a silent no-op. Errors include contextual field information where the TOML decoder exposes it.
+
+The historical singular `server_name` key remains the one documented compatibility alias: it is accepted, canonicalized immediately to `server_names`, and never emitted by `jul fmt`/marshal. Setting both forms is rejected. Known fields with invalid enum, duration, worker or scalar values are tracked separately by #123 and must not be assumed fully strict until that issue closes.
+
+---
+
 ## `[global]`
 
 The `[global]` block controls process-wide settings: logging, worker parallelism,
@@ -89,10 +97,12 @@ redact_min_secret_length = 4
 | `worker_threads` | string | `"auto"` (default) or a positive integer; `auto` uses Go's `GOMAXPROCS` defaults |
 | `log_level` | string | `debug`, `info` (default), `warn`, or `error` |
 | `log_format` | string | `text` (human-readable) or `json` |
-| `access_log` / `error_log` | string | Log destinations |
+| `access_log` / `error_log` | string | Deprecated compatibility fields; accepted but ignored by the current runtime. Configure access records under `[observability.access_log]`; application logs use the process logger. |
 | `shutdown_timeout` | duration | Grace period to drain in-flight requests on shutdown (also bounds the HTTP/3 drain) |
 | `reload_timeout` | duration | Maximum duration for a configuration reload before it is reported as `timed_out`. Zero or omitted defaults to 10s. The timeout is advisory: the swap still completes, but a warning is logged and the apply response includes `previous_reload.timed_out: true`. The Console surfaces this as a distinct "Applied — reload exceeded the configured timeout" warning so the operator knows to investigate slow reload paths (WAF rule compilation, WASM plugin loading, large config) or raise this value. See [reload-semantics.md](reload-semantics.md) |
 | `redact_min_secret_length` | int | Shortest resolved secret value masked from logs; `0` uses the default (4). Lower it (down to 1) for short secrets, accepting possible masking of incidental log text |
+
+The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They do not cause a restart or select a sink. Access-log enablement remains explicit follow-up #124; until then an empty sink list is not a supported disable contract.
 
 Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`, `512m`, etc.
 
