@@ -1,0 +1,212 @@
+name: Rebuild PR 166 strategy documentation
+
+on:
+  pull_request:
+    branches: [docs/current-product-truth]
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    if: github.head_ref == 'automation/rebuild-pr166'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out preserved PR branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: docs/core-gateway-completeness
+          fetch-depth: 0
+
+      - name: Restore reviewed strategy layer and apply final refinements
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/pr166-source docs/current-product-truth
+
+          files=(
+            docs/adr/0003-maturity-and-ga.md
+            docs/adr/0004-console-ui-invariants.md
+            docs/adr/0013-project-operating-model-and-completeness.md
+            docs/adr/0014-operability-surfaces.md
+            docs/operating-model.md
+            docs/roadmap/README.md
+            docs/specs/README.md
+            docs/specs/core-gateway-completeness.md
+            docs/specs/year-3.md
+            docs/specs/year-4.md
+            docs/vision/README.md
+          )
+          for path in "${files[@]}"; do
+            mkdir -p "$(dirname "$path")"
+            git show "origin/automation/pr166-source:$path" > "$path"
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def load(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def save(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(path, old, new):
+              text = load(path)
+              count = text.count(old)
+              if count < 1:
+                  raise SystemExit(f'{path}: expected match not found: {old[:80]!r}')
+              save(path, text.replace(old, new, 1))
+
+          def sub_once(path, pattern, repl, flags=0):
+              text = load(path)
+              updated, count = re.subn(pattern, repl, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one regex match, found {count}: {pattern}')
+              save(path, updated)
+
+          def insert_after(path, marker, block):
+              text = load(path)
+              if marker not in text:
+                  raise SystemExit(f'{path}: marker not found: {marker!r}')
+              save(path, text.replace(marker, marker + block, 1))
+
+          def insert_before(path, marker, block):
+              text = load(path)
+              if marker not in text:
+                  raise SystemExit(f'{path}: marker not found: {marker!r}')
+              save(path, text.replace(marker, block + marker, 1))
+
+          # Durable document relationships.
+          relationship = (
+              '\n> **Document roles:** ADR 0013 decides how work enters the portfolio; '
+              'ADR 0014 decides the required operator/developer surfaces; '
+              '`docs/operating-model.md` defines execution discipline; '
+              '`docs/specs/core-gateway-completeness.md` defines the bounded product; '
+              'the roadmap and #62 own current order and status.\n'
+          )
+          insert_after(
+              'docs/adr/0013-project-operating-model-and-completeness.md',
+              '- **Related:** [operating model](../operating-model.md), [Core Gateway Completeness](../specs/core-gateway-completeness.md), [combined audit](../audit/combined-audit-2026-08-03.md), #62\n',
+              relationship,
+          )
+          insert_after(
+              'docs/adr/0014-operability-surfaces.md',
+              '- **Related:** [operating model](../operating-model.md), [Core Gateway Completeness](../specs/core-gateway-completeness.md), #114, #118\n',
+              relationship,
+          )
+
+          # Operating model: distinguish factual current behavior from normative intent.
+          insert_after(
+              'docs/operating-model.md',
+              '**Programme authority:** #62 and the [combined repository audit](audit/combined-audit-2026-08-03.md)\n',
+              relationship,
+          )
+          sub_once(
+              'docs/operating-model.md',
+              r'## 5\. Source-of-truth hierarchy\n\nWhen artifacts disagree, use this order:\n\n1\. current runtime implementation and executable tests;\n2\. current authoritative audit and accepted ADRs;\n3\. generated/checkable machine contracts;\n4\. feature and operational documentation;\n5\. roadmap and issue plan;\n6\. historical audits, year specs and vision horizons\.\n\nA lower artifact must never silently override a higher artifact\.\n',
+              '''## 5. Source-of-truth model\n\nJul.IA distinguishes **descriptive truth** from **normative intent**.\n\n### Descriptive truth — what the current binary actually does\n\n1. observed runtime behavior and executable tests;\n2. generated/checkable machine contracts;\n3. current feature, reference and operational documentation;\n4. the current evidence-based audit.\n\n### Normative intent — what the product is required to do\n\n1. accepted ADRs;\n2. approved engineering specifications;\n3. compatibility and security contracts;\n4. the active roadmap;\n5. implementation-ready issues.\n\nWhen implementation contradicts an ADR, compatibility rule or security contract,\nthe code remains the factual current behavior but the contradiction is a defect —\nnot an implicit architectural override. Historical audits, year plans and vision\nhorizons remain context rather than current authority.\n''',
+          )
+          sub_once(
+              'docs/operating-model.md',
+              r'## 14\. Current sequence\n\n```text\n.*?```\n\nSee #62 and \[core-gateway-completeness\.md\]\(specs/core-gateway-completeness\.md\)\.',
+              '''## 14. Current sequencing\n\nThe operating model intentionally does not duplicate the live critical path.\nCurrent stage status, dependencies and selected work are maintained in the\n[roadmap](roadmap/README.md) and master programme #62.\n''',
+              flags=re.S,
+          )
+
+          # Roadmap v2.0: current status, completed fixes, remaining work and RC plan.
+          sub_once(
+              'docs/roadmap/README.md',
+              r'> Version 1\.37 · Updated 2026-07-31\n>\n> \*\*Current operating amendment:\*\* 2026-08-03\..*?issue\n> history\.\n',
+              '> Version 2.0 · Updated 2026-08-04\n>\n> This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence with a portfolio model. Delivered feature maturity remains authoritative in [docs/status.md](../status.md); #62 owns issue-level execution.\n',
+              flags=re.S,
+          )
+          text = load('docs/roadmap/README.md')
+          text = text.replace('| **0 — Programme and truth** | Current combined audit, issue graph, truthful product docs, operating model | One audit, one master tracker, no contradictory claims | 🚧 active |', '| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | 🚧 audit merged; #165/#166 finalization |')
+          text = text.replace('| **1 — Immediate correctness** | Strict TOML, invalid-value validation, access-log semantics, HTTP/3 mTLS, ACME selection, compression, metrics, WAF privacy | No known P0; P1 behavior documented and tested | 🚧 active |', '| **1 — Immediate correctness** | Remaining known-value validation, access-log semantics, metrics, WAF privacy and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 partially complete |')
+          save('docs/roadmap/README.md', text)
+          sub_once(
+              'docs/roadmap/README.md',
+              r'## Correctness and security backlog\n\n### Selected now\n\n.*?### Required quality foundation',
+              '''## Correctness and security backlog\n\n### Completed in the current correction tranche\n\n- Strict rejection of unknown TOML fields with the documented `server_name` compatibility alias.\n- Complete server-level mTLS parity on HTTP/3.\n- Exclusive ACME HTTP-01 versus TLS-ALPN-01 challenge selection.\n- `Cache-Control: no-transform` enforcement in dynamic compression.\n- Deterministic HTTP/3 UDP preflight testing on Windows.\n- Frontend dependency and CodeQL reflected-output hardening.\n\n### Remaining immediate correctness\n\n- Reject invalid known enum, duration, worker and scalar values (#123).\n- Add explicit access-log enablement and retire ignored destination fields (#124).\n- Reconcile the released Prometheus contract (#126).\n- Bound/redact WAF matched request-target logging (#127).\n- Restore cache concurrency, lifecycle, protocol and HTTP conformance (#107, #131–#134).\n- Establish closed-world generated lifecycle authority (#89).\n\n### Required quality foundation''',
+              flags=re.S,
+          )
+          insert_before(
+              'docs/roadmap/README.md',
+              '## Core Gateway Completeness backlog\n',
+              '''## Release-candidate checkpoint\n\nAfter #165 and #166 merge and exact-head CI is green, the next automatic patch\nrelease candidate is **`v1.32.1-rc.1`**. Pushing that tag runs the existing\nrelease gate, soak, lean/full cross-platform build, checksums, SBOM and\nattestation workflow, and creates an unpublished draft GitHub Release for human\nreview. Stable publication remains a later explicit decision while selected\ncorrectness work remains open.\n\n''',
+          )
+          insert_before(
+              'docs/roadmap/README.md',
+              '## Maintenance\n',
+              '''## Historical roadmap\n\nThe previous v1.37 five-year roadmap remains available through Git history and\nthe Year 1–5 specifications. Delivered maturity stays authoritative in\n[docs/status.md](../status.md), [docs/feature-status.yaml](../feature-status.yaml),\nsoak evidence and release history. This document now focuses on active portfolio\nand sequencing rather than duplicating every delivered feature row.\n\n''',
+          )
+
+          # Status and roadmap are intentionally versioned together by docs-check.
+          replace_once('docs/status.md', '> Version 1.37 · Updated 2026-07-31', '> Version 2.0 · Updated 2026-08-04')
+
+          # Core completeness: document roles, reduce issue coupling, align surfaces.
+          insert_after(
+              'docs/specs/core-gateway-completeness.md',
+              '**Related decisions:** #114-#118\n',
+              relationship,
+          )
+          text = load('docs/specs/core-gateway-completeness.md')
+          text = re.sub(r'\nImplementation: #[^\n]+\n', '\n', text)
+          text = re.sub(r'\nCurrent prerequisite programmes include #[^\n]+\n', '\nCurrent prerequisite programmes are tracked by the current audit, roadmap and parent epic.\n', text)
+          text = text.replace(
+              'A feature can be complete with API/CLI/docs only when a Console panel would add\nmore permanent complexity than operator value; that decision must be explicit.',
+              'A runtime/operator capability requires an understandable Console surface in the Full build. Machine-native capabilities such as schema generation, migration assessment, CI validation and controller integration may be API/CLI-first without a bespoke editor. Diagnostics may be CLI/API-first but should expose Console status or a trigger when that adds operational value. All surfaces reuse the same server-side semantics, per ADR 0014.'
+          )
+          save('docs/specs/core-gateway-completeness.md', text)
+
+          # Vision date and durable/current role statement.
+          replace_once('docs/vision/README.md', '> Version 1.5 · Updated 2026-08-03', '> Version 1.5 · Updated 2026-08-04')
+
+          # README: concise public direction, not internal planning detail.
+          insert_before(
+              'README.md',
+              '---\n\n## Feature maturity\n',
+              '''---\n\n## Current direction\n\nJul.IA is completing the bounded standalone gateway first: current correctness,\ntrusted client/backend identity, generic resilience, safe configuration\nautomation, and selected high-value runtime dynamics. Fleet, hosted cloud,\nGraphQL composition and AI remain optional horizons or bounded experiments; none\nis required for the single-node product to remain useful. See the\n[operating model](docs/operating-model.md),\n[Core Gateway Completeness](docs/specs/core-gateway-completeness.md), and\n[roadmap v2.0](docs/roadmap/README.md).\n\n''',
+          )
+
+          # Changelog: strategy/documentation change only.
+          replace_once(
+              'CHANGELOG.md',
+              '### Changed\n',
+              '### Changed\n- **Operating model and roadmap v2.0 (2026-08-04):** added ADR 0013/0014, a bounded Core Gateway Completeness contract, portfolio lanes, appropriate Console/API/CLI surfaces, value-ranked runtime dynamics, and bounded experiment governance. AI/fleet/cloud remain optional experiments or horizons; this documentation change adds no runtime capability.\n',
+          )
+
+          # Documentation navigation.
+          insert_after(
+              'docs/index.md',
+              '- **[Master implementation tracker](https://github.com/victornife/jul/issues/62)** — Current staged execution programme and decision register.\n',
+              '- **[Project operating model](operating-model.md)** — Durable portfolio, execution, evidence and experiment rules.\n- **[Core Gateway Completeness](specs/core-gateway-completeness.md)** — Bounded standalone-product completion contract.\n',
+          )
+          text = load('docs/index.md')
+          text = text.replace('**[Roadmap](roadmap/README.md)** & **[Vision](vision/README.md)** — Long-term direction. Current implementation sequencing is governed by the combined audit and #62 while the durable operating-model documents are updated.', '**[Roadmap v2.0](roadmap/README.md)** & **[Vision](vision/README.md)** — Current portfolio and durable direction; #62 owns issue-level sequencing.')
+          save('docs/index.md', text)
+
+          # Year 5 remains a concept horizon under the new activation model.
+          text = load('docs/specs/year-5.md')
+          text = text.replace(
+              'operating roadmap only when their evidence gates trip (see\n> [ADR 0003](../adr/0003-maturity-and-ga.md)). All implementation details must\n> be revalidated before work starts.',
+              'operating roadmap only through a separate horizon/experiment activation decision under\n> [ADR 0013](../adr/0013-project-operating-model-and-completeness.md). All implementation details must\n> be revalidated before work starts.'
+          )
+          save('docs/specs/year-5.md', text)
+          PY
+
+      - name: Validate strategy documentation
+        run: |
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Commit rebuilt PR branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md CHANGELOG.md docs/
+          git commit -m "docs: define operating model and core completeness"
+          git push origin HEAD:docs/core-gateway-completeness
