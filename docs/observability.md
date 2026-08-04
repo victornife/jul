@@ -183,6 +183,21 @@ Each access-log entry includes:
 - `trace_id` — when tracing is active
 - `error` — when the request failed with an error
 
+### WAF matched-rule logs
+
+A WAF match emits `waf rule matched` at warning level with bounded fields:
+`rule_id`, `mode`, `phase`, `severity`, a sanitized `path`, and
+`query_omitted`. The path uses the same privacy-preserving sanitizer as Console
+request diagnostics: it removes query/fragment text without decoding, normalizes
+identifier/email/token-like segments, applies a 256-byte cap, and passes through
+the active secret-redaction state.
+
+Jul.IA deliberately does **not** copy Coraza's raw `MatchedRule.URI()` or
+macro-expanded `MatchedRule.Message()` into this warning. In Coraza v3.7.0 those
+values may contain the full unparsed query and matched request data. WAF metric
+labels remain bounded to action/rule metadata and never include path, URI, query,
+message, or matched values.
+
 ### Egress block logs
 
 When the optional `[egress]` allow-list refuses an outbound auxiliary fetch

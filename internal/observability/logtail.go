@@ -18,7 +18,7 @@ const logTailCap = 512
 // LogEntry is one completed request rendered for the Console Operations Log
 // tail. It mirrors the access-log seam (middleware.AccessRecord) but is
 // privacy-preserving for browser display: the path has identifier/email/token
-// segments redacted to placeholders (sanitizePath), the query string is never
+// segments redacted to placeholders (SanitizePath), the query string is never
 // retained, and the User-Agent is reduced to a coarse family. The client IP is
 // kept because the log tail is the operator's access log — they need it to
 // diagnose — and the admin surface is loopback- and token-gated.
@@ -71,7 +71,7 @@ func (t *LogTail) Log(rec middleware.AccessRecord) {
 		Time:       rec.Time.UTC(),
 		Method:     rec.Method,
 		Host:       hostLabel(rec.Host),
-		Path:       sanitizePath(rec.Path),
+		Path:       SanitizePath(rec.Path),
 		Status:     rec.Status,
 		Bytes:      rec.Bytes,
 		DurationMs: float64(rec.Duration.Microseconds()) / 1000.0,

@@ -77,7 +77,7 @@ disabled by default.
 - The auxiliary `[egress]` allow-list and backend TLS identity solve different problems. Egress restricts selected configuration-driven fetch destinations; it does not authenticate reverse-proxy/gRPC backends.
 - HTTP/3 now applies the same complete prepared server-level TLS/mTLS policy as HTTP/1.1 and HTTP/2.
 - ACME HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface.
-- WAF request-target logging remains under query/URI redaction review; avoid credentials and personal data in URLs.
+- WAF matched-rule warnings retain only a bounded/redacted path plus bounded rule metadata; raw queries, macro-expanded match messages, and request-target metric labels are omitted. Avoid credentials and personal data in URLs regardless of other application/intermediary logs.
 
 ## Hardening defaults & recommendations
 
