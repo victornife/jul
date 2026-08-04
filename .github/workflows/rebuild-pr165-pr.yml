@@ -34,9 +34,14 @@ jobs:
           end = source.index("\n          PY\n", start)
           script = textwrap.dedent(source[start:end])
           # Section headings such as Changed/Security/Fixed recur in historical
-          # changelog entries. The rebuild intentionally updates the first
-          # occurrence under Unreleased rather than requiring global uniqueness.
+          # changelog entries. Update the first occurrence under Unreleased.
           script = script.replace("if text.count(old) != 1:", "if text.count(old) < 1:")
+          # PR 165 adds current status notices but does not yet re-version the
+          # roadmap/status pair. PR 166 performs their coordinated v2.0 update.
+          script = script.replace(
+              'replace_once("docs/status.md", "> Version 1.37 · Updated 2026-07-31", "> Version 1.38 · Updated 2026-08-04")\n',
+              ''
+          )
           Path('/tmp/rebuild-pr165.py').write_text(script, encoding='utf-8')
           PYEXTRACT
           python3 /tmp/rebuild-pr165.py
