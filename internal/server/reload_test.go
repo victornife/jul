@@ -143,7 +143,7 @@ func reachable(url string) bool {
 	return true
 }
 
-// waitForServe blocks until url serves want, failing on timeout.
+// waitForServe blocks until url serves want, failing the test on timeout.
 func waitForServe(t *testing.T, url, want string) {
 	t.Helper()
 	if !eventually(t, url, want) {
