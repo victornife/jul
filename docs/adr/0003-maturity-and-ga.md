@@ -1,6 +1,6 @@
 # ADR 0003 — Maturity model, GA bar, and evidence gates
 
-- **Status:** Accepted — *criterion 5 (soak test) amended by [ADR 0005](0005-soak-post-ga-gate.md)* (reclassified to a post-GA gate)
+- **Status:** Accepted — *criterion 5 amended by [ADR 0005](0005-soak-post-ga-gate.md); work-entry mechanisms amended by [ADR 0013](0013-project-operating-model-and-completeness.md)*
 - **Date:** 2026-06-21
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** every roadmap feature and its status labeling
@@ -22,6 +22,12 @@ plane, Kubernetes, distributed state, AI gateway, mesh, CDN, GSLB, Cloud) with n
 explicit evidence required before entering each. Without gates, a roadmap becomes
 a wish list. This is acute at the project's current capacity (solo, part-time),
 where scope discipline is existential.
+
+> **Amendment (ADR 0013):** demand evidence remains a valid activation route for
+> fleet, cloud, distributed, and other expensive category commitments. It is not
+> a prerequisite for fixing current defects, closing a material standalone
+> gateway gap, or beginning a bounded maintainer-sponsored technical experiment.
+> Those work-entry rules are defined by [ADR 0013](0013-project-operating-model-and-completeness.md).
 
 ## Decision
 
@@ -55,9 +61,10 @@ A feature is labeled **GA** only when **all** of the following are true:
 6. **Runnable example + docs.**
 7. **Security review / threat note** for the feature.
 8. **Fuzzing** where parsing is involved.
-9. **Self-explanatory Console surface** — the feature is operable and observable
-   from the Console without reading docs (the *Operable by design / Console-first*
-   invariant; see [ADR 0004](0004-console-ui-invariants.md)).
+9. **Appropriate operability surface** — runtime operator features are operable
+   and observable from the Console; automation and migration capabilities use
+   their appropriate API/CLI-first surfaces. See [ADR 0004](0004-console-ui-invariants.md)
+   and [ADR 0014](0014-operability-surfaces.md).
 
 Because this bar is deliberately high and capacity is limited, **most features
 will sit at Beta**, and **GA is a rare, earned milestone**. The first GA target is
@@ -67,37 +74,40 @@ is the core differentiator). Criteria 1, 6, and 9 also form the minimum
 
 ### 3. Evidence gates (before entering a category)
 
-Major expansions are **demand-gated**: do not commit roadmap capacity to a
-category until its evidence exists. The long-term vision stays broad; the
-*operating* roadmap stays narrow.
+Major expansions are **demand-gated** when they require a durable supported
+category commitment. The long-term vision stays broad; the operating roadmap
+stays narrow. ADR 0013 additionally permits core-completeness work and bounded
+technical experiments without customer-acquisition evidence.
 
-| Category | Evidence required before committing |
+| Category | Evidence required before committing as supported product |
 | --- | --- |
 | **GraphQL** | Users need BFF/composition over existing REST/gRPC |
 | **Fleet** | Multiple users operate N Jul.IA nodes |
 | **Kubernetes/Gateway API** | Real ingress-controller demand |
 | **Distributed cache/rate-limit** | Real fleet users hit local-limit problems |
-| **AI Gateway** | Jul.IA is used as an API/protocol gateway and users ask for AI routing/cost |
+| **AI Gateway** | Promotion beyond a bounded experiment requires technical fit, sustainable maintenance, and a separate support decision |
 | **Cloud** | Self-hosted control-plane demand exists |
-| **Service mesh** | Customers explicitly ask for east-west identity/policy |
-| **GSLB** | Customers run multi-region Jul.IA fleets |
+| **Service mesh** | Users explicitly ask for east-west identity/policy |
+| **GSLB** | Users run multi-region Jul.IA fleets |
 
-The operating roadmap now publishes quantitative thresholds and a lightweight
-product-signal table for each of these categories; see
-[docs/roadmap/README.md#evidence-gates-and-product-signals](../roadmap/README.md#evidence-gates-and-product-signals).
+The operating roadmap publishes the active portfolio and a lightweight product
+signal table; see [docs/roadmap/README.md](../roadmap/README.md).
 
-A **Time-boxed bet** is the sanctioned exception: a category may be entered ahead
-of its gate as a small, thin, time-boxed MVP with an explicit kill/continue
-decision (current example: the AI Gateway MVP behind the `ai` tag).
+A **bounded technical experiment** is the sanctioned non-demand route: a
+category may be explored through a small fixed tranche with explicit hypothesis,
+budget, exclusions, evidence, cleanup, and promote/freeze/extract/remove
+outcome. See ADR 0013.
 
 ## Consequences
 
 **Positive**
 
 - Honest status communication; "Beta" sets correct expectations and protects
-  trust. This directly resolves the review's top credibility concern.
+  trust.
 - A concrete, auditable definition of "done" and "GA".
 - Gates convert the roadmap from a wish list into evidence-driven commitments.
+- Core correctness is not blocked by an artificial market-demand requirement.
+- Technical experiments have an explicit containment and exit contract.
 
 **Negative / trade-offs**
 
@@ -105,21 +115,28 @@ decision (current example: the AI Gateway MVP behind the `ai` tag).
   exchange for execution credibility.
 - Maintaining conformance matrices, benchmarks, and soak tests is real ongoing
   cost; it is the price of the GA label.
+- Work-entry classification requires deliberate judgment rather than a single
+  universal gate.
 
 ## Alternatives considered
 
 - **Keep the binary Planned/Delivered model** — rejected: conflates "implemented"
   with "production-ready" and overstates maturity.
-- **Restructure the roadmap from Years into Phases 1–7** (review proposal) —
-  reframed, not adopted: we keep the year structure (history + 5-year narrative)
-  and instead add the Maturity column, gates, and reprioritization within years.
-- **Gate every category with no exceptions** — softened: a *Time-boxed bet* escape
-  hatch avoids chicken-and-egg paralysis for deliberate founder bets.
+- **Restructure the roadmap from Years into Phases 1–7** — historical proposal,
+  superseded for current execution by the portfolio/stage model in ADR 0013 and
+  #62 while the year documents remain useful horizons.
+- **Gate every category and every capability with external demand** — rejected:
+  inappropriate for current defects, core gateway completeness, and a solo
+  technical product.
+- **Allow unbounded founder bets** — rejected: every experiment needs a fixed
+  tranche, budget, evidence, and exit decision.
 
 ## Review triggers
 
-- A category's evidence gate trips → move it from "Vision horizon" into the
-  committed roadmap with a Maturity state.
-- A feature meets all GA criteria → promote Beta → GA and record it.
-- The GA bar proves impractical for edge features → consider a tiered bar
-  (flagship vs. peripheral) in a superseding ADR.
+- A category's evidence gate trips → consider moving it from vision horizon into
+  a supported-product decision.
+- A bounded experiment completes → promote, continue as experimental, freeze,
+  extract, remove, or defer explicitly.
+- A feature meets all GA criteria → promote and record exact evidence.
+- The GA bar proves impractical for edge features → consider a tiered bar in a
+  superseding ADR.

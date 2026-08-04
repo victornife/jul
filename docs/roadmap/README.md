@@ -1,283 +1,268 @@
 # Jul.IA — Roadmap
 
-> Version 1.37 · Updated 2026-07-31
+> Version 2.0 · Updated 2026-08-04
+>
+> This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence with a portfolio model. Delivered feature maturity remains authoritative in [docs/status.md](../status.md); #62 owns issue-level execution.
 
-This is the consolidated 5-year plan. It pairs with the [vision](../vision/) and
-the [Architecture Decision Records](../adr/). **Keep this file current:** whenever
-a feature ships, move its row to *Delivered* and tick the year checklist; whenever
-an ADR is added, link it where relevant. The permanent OSS/open-core boundary
-is defined in [ADR 0012](../adr/0012-oss-open-core-boundary.md).
+This roadmap translates the [vision](../vision/),
+[ADR 0013](../adr/0013-project-operating-model-and-completeness.md),
+[ADR 0014](../adr/0014-operability-surfaces.md), and
+[Core Gateway Completeness](../specs/core-gateway-completeness.md) into the current
+execution portfolio. #62 is the detailed issue-level programme tracker.
 
-Detailed per-feature engineering specs (design, config, tasks, DoD) live in
-[specs/](../specs/) — one file per year. The product direction behind these
-changes is recorded in the [reviews & decision log](../reviews/). New to the
-terminology in this plan? The [concepts appendix](../vision/appendix.md) explains
-HTTP, proxies, TLS, caching, and observability from first principles.
+The roadmap is not a promise to implement every open issue. An issue may be
+ready, draft, gated, selected, deferred, deliberately restart-bound, or complete.
 
-Effort uses T-shirt sizing: **M** ≈ weeks · **L** ≈ ~a quarter · **XL** ≈
-multi-quarter.
+## Portfolio lanes
 
-**Delivery legend:** ✅ delivered · 🚧 in progress (committed) · ⏳ time-boxed bet ·
-🔒 deferred (demand-gated) · ⬜ vision horizon.
-
-**Maturity** (per [ADR 0003](../adr/0003-maturity-and-ga.md)): Planned · Prototype ·
-Alpha · **Beta** · **GA** · Deprecated. *Implemented ≠ GA:* a shipped feature is
-**Beta** until it meets the full GA bar. The [GA push](../ga-push.md) is hardening
-shipped features to GA; the soak test is a post-GA gate per
-[ADR 0005](../adr/0005-soak-post-ga-gate.md). All Year 1 and Year 2 shipped
-features have now reached **GA**; the soak test post-GA gate is **fully closed**.
-**Delivery state ≠ maturity:** "delivered"/✅ below means *merged to `main`*, which
-is not necessarily *released* or *soaked* — see the delivery-state table in the
-[status matrix](../status.md).
-
-## Active operating roadmap
-
-The current execution sequence is fixed and sequential. Each phase is a
-releasable increment; later phases build on earlier ones.
-
-| Phase | Focus | Key deliverables | Status |
+| Lane | Objective | Entry rule | Current emphasis |
 | --- | --- | --- | --- |
-| Phase 2 | Reload results, bounded managed applies, and planned restart | Correlated reload results, exact restoration, planned-restart staging/discard/preflight | 🚧 in progress (remediation pass) |
-| Phase 3 | RBAC Phase 1 | Named principals, predefined + custom roles, scoped tokens, deny-by-default admin routes | 🚧 implemented; in security remediation |
-| Phase 4 | Egress coverage and hardening | JWKS, forward-auth, discovery, ACME/OCSP, WASM fetch under shared egress policy | ✅ delivered — merged to `main`; first tagged release pending (P4-01 wiring; P4-02 coverage; P4-03 observability, tests, docs) |
-| Phase 5 | Structured CRUD + near-term global-table patch ops | Batch patch preview, entity lifecycle, `global_set`, `compression_set`, `rate_limit_global_set` | 🔒 queued |
-| Phase 6 | AI Gateway MVP | Time-boxed multi-provider routing, failover, streaming, token/cost metrics | ⏳ time-boxed bet |
-| Phase 7 | Activate at most one evidence-backed horizon | Fleet, K8s/Gateway API, AI continuation, Cloud, or GraphQL — only if gate trips | 🔒 demand-gated |
+| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Configuration safety, HTTP/3 mTLS, ACME selection, cache correctness, metrics truth |
+| **Core Gateway Completeness** | Close material gaps inside the standalone gateway boundary | Architecture and product integrity | Trust boundaries, backend TLS/mTLS, resilience, routing policy, automation contracts |
+| **Operational enhancement** | Improve long-running operation without redefining the core | Value × leverage ÷ permanent complexity | Selected hot reload, diagnostics, recovery, migration assessment |
+| **Technical experiment** | Explore a new category through a bounded, removable tranche | Hypothesis, prerequisites, budget, evidence, exit decision | AI Gateway candidate after generic trust/resilience decisions |
+| **Vision horizon** | Preserve possible large future categories | Separate activation decision | Fleet, Kubernetes controller, distributed state, Cloud, mesh, GSLB, GraphQL composition |
 
-**Planned restart** is delivered as a shared Phase 2 foundation and is consumed
-by later restart-bound settings (for example the global-table operations in
-Phase 5).
+## Current execution sequence
 
-**Deferred table families:** `cache_set`, decomposed admin operations, and
-`access_log_set` are explicitly follow-ups, not hidden Phase 5 stretch goals.
-See the [evidence gates](#evidence-gates-and-product-signals) below and the
-[Hardening & platform spec](../specs/hardening-platform.md).
+Implementation remains serial around shared architecture even though the
+portfolio has parallel lanes.
 
----
-
-## Delivered
-
-### Year 1 — Credibility & effortlessness ✅
-
-Shipped and **all features GA**.
-
-| ID | Feature | Maturity |
-| --- | --- | --- |
-| Y1-01 | Automatic HTTPS (ACME: HTTP-01, TLS-ALPN-01, OCSP stapling) | **GA** |
-| Y1-02 | Response compression (gzip core; `brotli`/`zstd` tags) | **GA** |
-| Y1-03 | Rate limiting + connection limiting | **GA** |
-| Y1-04 | Authentication (Basic, bearer/JWT, forward-auth) | **GA** |
-| Y1-05 | Active health checks (HTTP/TCP probes) | **GA** |
-| Y1-06 | gRPC ↔ JSON transcoding (MVP, `grpc` tag) | **GA** |
-| Y1-07 | Console v1 → v2 (web dashboard, `console` tag) | **GA** |
-| Y1-08 | Zero-config + `jul lint` | **GA** |
-| Y1-09 | NGINX config importer (`importer` tag) | **GA** |
-| Y1-10 | OpenTelemetry tracing + access-log sinks (`otel` tag) | **GA** |
-| Y1-11 | HTTP/3 over QUIC (`http3` tag) | **GA** |
-
-### Year 2 — Protocol Gateway + Extensibility ✅
-
-Shipped and **all features GA**. The post-GA soak gate is fully closed per
-[ADR 0005](../adr/0005-soak-post-ga-gate.md).
-
-| ID | Feature | Tag | Maturity |
+| Stage | Focus | Exit criteria | Status |
 | --- | --- | --- | --- |
-| Y2-01 | gRPC ↔ JSON transcoding (server/client/bidi streaming, NDJSON/SSE) | `grpc` | **GA** |
-| Y2-02 | WASM plugin system (wazero) | `wasmplugins` | **GA** |
-| Y2-03 | L4 stream proxy (TCP/UDP, SNI routing, PROXY protocol) | `stream` | **GA** |
-| Y2-04 | Native gRPC passthrough + h2c inbound | `grpc` | **GA** |
-| Y2-05 | Service discovery / dynamic upstreams (DNS/SRV core; Consul/K8s tags) | `consul`, `kubernetes` | **GA** |
-| Y2-06 | WAF (Coraza + OWASP CRS; block/detect per-location) | `waf` | **GA** |
-| Y2-07 | mTLS client auth + `$ssl_client_*` identity vars | core | **GA** |
-| SEC-1 | Secrets references (`env`/`file`/`secret` refs + log redaction + lint) | core | **GA** |
+| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | 🚧 audit merged; #165/#166 finalization |
+| **1 — Immediate correctness** | Remaining known-value validation, access-log semantics, metrics, WAF privacy and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 partially complete |
+| **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ⬜ planned |
+| **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ⬜ planned |
+| **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ⬜ planned |
+| **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ⬜ planned |
+| **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ⬜ planned |
+| **7 — Selected runtime dynamics** | Value-ranked certificate, credential, logging, sink, cache-policy, and Alt-Svc transitions | Selected settings are safely dynamic; structural settings retain planned restart | ⬜ planned |
+| **8 — Migration and diagnostics** | NGINX assessment, provenance, compatibility corpus, support bundle, `jul doctor` | Operator-safe evidence and recovery workflows | ⬜ planned |
+| **9 — One bounded experiment** | AI Gateway or another explicitly approved category | Promote, continue experimental, freeze, extract, remove, or defer | 🔒 gated |
+| **10 — Integrated closure** | Exact-SHA audit, protocol matrix, failure injection, E2E, soak, compatibility and release evidence | No unsupported claims or unresolved selected work | ⬜ planned |
 
----
+## Immediate critical path
 
-## Delivered / closed committed work
+```text
+Documentation truth and P0 corrections
+    ↓
+Strict configuration and explicit lifecycle-affecting schema
+    ↓
+Cache correctness
+    ↓
+Closed-world lifecycle authority (#89)
+    ↓
+Phase 5 structured configuration (#77 → #82)
+    ↓
+Core architecture ADRs
+    ↓
+Selected core implementations
+```
 
-### Year 2 — delivered / closed ✅ (Protocol Gateway + Extensibility)
+Independent P0/P1 fixes may proceed concurrently only when their files and
+runtime ownership are disjoint. Shared edits to configuration schema, lifecycle,
+composition root, reload transaction, or Console patch contracts remain serial.
 
-The near-term, demand-backed work. Each ships at **Beta** with its own Console
-panel ([ADR 0004](../adr/0004-console-ui-invariants.md)) as part of Definition of
-Done.
+## Correctness and security backlog
 
-| ID | Feature | Description | Impact / what it unlocks | Effort |
-| --- | --- | --- | --- | --- |
-| Y2-09 | Console v2 (reframed) | Live log tail, WASM plugin manager, gRPC route designer — delivered as **continuous per-feature Console panels** ([ADR 0004](../adr/0004-console-ui-invariants.md)). The hand-written Console v1 is migrated **once** to a prebuilt **React/TS/Vite/Tailwind** SPA, embedded in the binary (**no Node runtime, no external web assets**) — a bounded substrate cutover, after which panels resume continuous evolution ([ADR 0006](../adr/0006-console-v2-stack.md); [spec](../specs/console-v2.md)). **Shipped:** Overview, Routes, Apps, TLS, Security, Traffic Controls, Search, Operations (diagnostics/events/timeline/log-tail), Audit, and the Config editor with diff/history/rollback plus the Setup wizard; guided creation for routes, apps, and TLS (static/ACME/mTLS), and structured editors for traffic controls, WAF (global + per-location), server limits, upstream backends, WASM plugins (declare, attach, detach, `.wasm` upload), and gRPC route designer (descriptor upload + method preview). **Remaining:** none — the Y2-09 panel backlog is closed; new panels follow the continuous evolution model. | Admin UI grows into an operations cockpit on a typed, testable substrate without an ongoing big-bang | L |
+### Completed in the current correction tranche
 
-### Near-term bet ⏳
+- Strict rejection of unknown TOML fields with the documented `server_name` compatibility alias.
+- Complete server-level mTLS parity on HTTP/3.
+- Exclusive ACME HTTP-01 versus TLS-ALPN-01 challenge selection.
+- `Cache-Control: no-transform` enforcement in dynamic compression.
+- Deterministic HTTP/3 UDP preflight testing on Windows.
+- Frontend dependency and CodeQL reflected-output hardening.
 
-| ID | Feature | Description | Impact / what it unlocks | Effort |
-| --- | --- | --- | --- | --- |
-| AI-MVP | AI Gateway MVP (`ai` tag) — **time-boxed bet** | Thin OpenAI-compatible front door: multi-provider routing, failover, streaming, token/cost metrics. **No** semantic cache or guardrails yet. **Kill/continue gate** after the MVP. Sequenced after Y2-07. | Tests the AI-gateway market window without committing the full Year-4 program (gated per [ADR 0003](../adr/0003-maturity-and-ga.md)) | L |
+### Remaining immediate correctness
 
-### Deferred — demand-gated 🔒
+- Reject invalid known enum, duration, worker and scalar values (#123).
+- Add explicit access-log enablement and retire ignored destination fields (#124).
+- Reconcile the released Prometheus contract (#126).
+- Bound/redact WAF matched request-target logging (#127).
+- Restore cache concurrency, lifecycle, protocol and HTTP conformance (#107, #131–#134).
+- Establish closed-world generated lifecycle authority (#89).
 
-| ID | Feature | Description | Gate | Effort |
-| --- | --- | --- | --- | --- |
-| Y2-08 | GraphQL composition prototype (`graphql` tag) | Schema-first, **explicit resolvers**, Query/Mutation over gRPC/REST unary, depth/complexity limits + resolver tracing from day one. **Not** "GraphQL without resolvers" ([ADR 0002](../adr/0002-protocol-adaptation.md)). | Users need BFF/composition over existing REST/gRPC | L |
+### Required quality foundation
 
-### Hardening & platform — pre-1.0 robustness 🚧
+- Preserve a fully green required CI baseline.
+- Add semantic drift guards for schema, defaults, lifecycle, metrics, and claims.
+- Add focused security-package coverage and negative-test gates.
+- Close the current audit with exact-SHA evidence.
 
-Cross-cutting robustness work parked out of the pre-1.0 hardening pass (the Console
-v2 robustness phases) so it is tracked, not lost. These are **not** demand-gated
-vision items; they are near-term durability/parity work. The design source-of-truth
-is the [Hardening & platform spec](../specs/hardening-platform.md) (HP-01..HP-07 +
-the HP-m\* micro-fixes register). Items are reconciled against the active phase
-sequence above.
+## Release-candidate checkpoint
 
-| ID | Item | Description | Impact / what it unlocks | Phase | Effort |
-| --- | --- | --- | --- | --- | --- |
-| HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | Add context-deadline to reload + structured per-subsystem result in apply response | Better operator visibility when reload stalls or partial-fails | **Partially delivered**; Phase 2 remediation completes it | M |
-| HP-02 | Console RBAC + multi-user | **Delivered (Phase 3):** local-token RBAC — predefined viewer/operator/admin/auditor roles, scoped revocable tokens, per-route authorization at the API boundary, `GET /api/admin/me` identity, proactive Console permission gating, and per-principal audit attribution. **Design:** [console-rbac.md](../specs/console-rbac.md) + [ADR 0010](../adr/0010-console-rbac.md). External identity (OIDC/SSO) remains [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core) horizon. | Multiple operators under least-privilege with attributable audit | ✅ **Delivered** (local-token RBAC) | L |
-| HP-03 | Metric-cardinality & relabel strategy | **Delivered:** full label-cardinality policy table + operator relabel cookbook ([core-http.md](../core-http.md#metrics)); the client-derived `method` label is folded to a fixed set (unknown → `other`) so every client-derived label is bounded by construction (`host` was already opt-in); enforced by `TestMetricLabelPolicy`. | Predictable Prometheus cardinality at scale | ✅ Delivered | M |
-| HP-04 | Pre-commit hooks / local gate parity | **Delivered:** repo-managed hooks running the CI gate's fast path locally (fmt/vet/changed-pkg test + console lint/typecheck), full test + drift/size on push. | Red builds caught before they reach `main` | ✅ Delivered | M |
-| HP-05 | Container & process-supervision hardening | **Delivered:** base images pinned by tag + `@sha256` digest (Dependabot-maintained); shell-less `HEALTHCHECK` running `jul healthcheck`; image bakes a self-consistent config (admin on loopback + placeholder `/var/www`) so it starts unmounted and the probe passes. (systemd resource/crash-loop limits landed earlier.) | Self-healing containers + reproducible images | ✅ Delivered | M |
-| HP-06A | Structured-config parity — backend entity CRUD | **Delivered:** create/delete ops for servers/routes/upstream pools (`server_add`/`server_remove`, `location_add`/`location_remove`, `upstream_add`/`upstream_remove`) close the entity CRUD gap. | Full structured lifecycle for servers, routes, and upstream pools | ✅ Delivered | L |
-| HP-06B | Structured-config parity — Console entity CRUD | Mirror the backend entity CRUD ops in the Console patch union, Zod schema, and structured create/delete forms. | Console users can create and delete entities without dropping to raw TOML | 🚧 Phase 5 active | L |
-| HP-06C | Structured-config parity — near-term global tables | Structured patch ops for `global_set`, `compression_set`, and `rate_limit_global_set`. `cache_set`, decomposed admin operations, and `access_log_set` are deferred follow-ups. | Close the global-table editing gap for the most common settings | 🚧 Phase 5 active (three ops); 🔒 deferred (cache/admin/access_log) | L |
-| HP-07 | SSRF allow-list hardening | **Delivered:** optional, default-off egress allow-list (host/suffix/IP/CIDR) with typed decisions, hostname normalization, and subsystem-scoped guards. Applied consistently to every config-driven auxiliary client — JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP, and the WASM plugin `fetch` intersection — with `Proxy=nil` guarded transports, bounded `jul_egress_decisions_total` metrics, rate-limited secret-safe block logs, and Console Security visibility. Defense-in-depth: config is trusted per [SECURITY.md](../../SECURITY.md), so this bounds operator-error blast radius, not a request-driven hole. | Limits outbound reach even with a mistaken/compromised config | ✅ Delivered (P4-01 wiring; P4-03 observability + full negative/integration test matrix) | M |
+After #165 and #166 merge and exact-head CI is green, the next automatic patch
+release candidate is **`v1.32.1-rc.1`**. Pushing that tag runs the existing
+release gate, soak, lean/full cross-platform build, checksums, SBOM and
+attestation workflow, and creates an unpublished draft GitHub Release for human
+review. Stable publication remains a later explicit decision while selected
+correctness work remains open.
 
----
+## Core Gateway Completeness backlog
 
-## Evidence gates and product signals
+### Inbound identity
 
-Major roadmap expansions are demand-gated. A category enters the operating
-roadmap only when its evidence gate trips. The long-term vision (Years 3–5)
-remains in the [vision horizon](#vision-horizon--demand-gated) below; the
-operating roadmap stays narrow.
+- Per-server trusted proxy CIDRs.
+- Standards-aware `Forwarded` and X-Forwarded-For processing.
+- Right-to-left trusted-hop evaluation.
+- One canonical effective client identity used by auth, rate limiting, WAF,
+  access logs, diagnostics, and upstream forwarding.
 
-### Evidence gates
+### Backend transport trust
 
-| Category | Hypothesis | Minimum evidence threshold | Technical prerequisites | Continue/extend/stop outcome | Decision note |
-| --- | --- | --- | --- | --- | --- |
-| Fleet | Jul.IA users need multi-node coordination | ≥3 external users operating multiple nodes; ≥2 operating ≥10 nodes; repeated rollout/drift/rollback pain; ≥2 willing to pilot a control plane | Planned-restart workflow proven; mTLS enrollment; config versioning | Continue to fleet design / stop if users stay single-node | — |
-| Kubernetes/Gateway API | Users want Jul.IA as a K8s ingress controller | ≥3 credible requests; ≥2 pilot commitments; agreed bounded Gateway API subset; evidence a controller will not weaken the standalone product | Kubernetes discovery tag stable; RBAC API contract stable | Continue to controller design / stop if demand is speculative | — |
-| AI continuation | The AI Gateway MVP should grow into the Year 4 program | ≥2 real users with meaningful traffic; 3 provider adapters demonstrated; reliable streaming and failover; useful token/cost accounting; acceptable `ai` build-tag size/runtime cost; clear reason to choose Jul.IA over a generic proxy | AI Gateway MVP (Phase 6) completed | Continue to full AI-native program / stop and keep MVP only / kill tag | — |
-| Cloud | Users want a hosted control plane | Fleet demand already proven; repeated request for hosted control plane; acceptance of BYO-node/control-traffic-only model; credible willingness to pay | Fleet control plane proven; multi-tenant isolation design | Continue to JUL Cloud stage 1 / stop if self-hosting remains dominant | — |
-| GraphQL | Users need BFF/composition over existing REST/gRPC | Multiple concrete composition cases not cleanly solved by current REST/gRPC support; willingness to define explicit schema/resolver mappings and operational limits | REST/gRPC support stable; explicit adapter pattern accepted | Continue to GraphQL composition prototype / stop if REST/gRPC suffice | — |
+- One normalized `BackendTLSConfig` supporting private roots, client
+  certificates, SNI, minimum version, and peer identity constraints.
+- Equivalent enforcement across HTTP proxy, native gRPC, transcoding, active
+  health checks, and discovery-backed targets.
+- Named reusable TLS profiles remain a follow-up only if representative
+  configurations demonstrate sufficient repetition.
 
-### Lightweight product signals
+### Generic resilience
 
-| Signal | Collection method | Current evidence | Last updated |
-| --- | --- | --- | --- |
-| Known production users | voluntary reports/issues | — | — |
-| Multi-node users | voluntary reports | — | — |
-| Kubernetes requests | issues/discussions | — | — |
-| AI Gateway pilots | direct pilots/issues | — | — |
-| Raw-editor friction | local audit/support reports | — | — |
+Implement in this order:
 
-Rules:
+1. active-request, pending-request, connection, and concurrency limits;
+2. retry budget, attempt deadline, backoff, jitter, and replayability rules;
+3. a simple closed/open/half-open circuit breaker;
+4. outlier ejection only after evidence justifies additional state.
 
-- No central telemetry.
-- No user payloads.
-- No mandatory monthly reporting.
-- Empty evidence is acceptable.
-- Update when making a horizon decision, not as ceremony.
+These primitives must be reused by future AI/provider routing rather than
+reimplemented in a category-specific subsystem.
 
----
+### Routing and response policy
 
-## Vision horizon — demand-gated ⬜
+Core selected scope:
 
-Years 3–5 below remain the **broad long-term vision**, kept for narrative and
-direction. **None is a committed plan:** each category enters the operating
-roadmap only when its [evidence gate](#evidence-gates-and-product-signals) trips.
-The tables are intentionally preserved (not deleted) to show where Jul.IA *can* go.
+- method matching;
+- header presence/exact/regex matching;
+- query presence/exact matching;
+- response-header add/set/remove;
+- bounded CORS policy and correct preflight behavior.
 
-### Year 3 — Scale, Fleet & Ecosystem ⬜ (horizon · open-core)
+Explicitly deferred:
 
-| ID | Feature | Description | Impact / what it unlocks | Effort |
-| --- | --- | --- | --- | --- |
-| Y3-01 | Multi-node control plane | Central config, staged/canary rollout, health-gated promotion, fleet rollback | The single-node → fleet pivot; core of monetization | XL |
-| Y3-02 | Console RBAC + SSO/SAML/OIDC | Multi-user auth, roles, scoped API tokens | Enterprise access control + audit-ready identity | L |
-| Y3-03 | Distributed cache + rate limit | Redis-shared cache + distributed token buckets; pub/sub purge | A fleet behaves as one cache/limiter | XL |
-| Y3-04 | K8s Ingress + Gateway API + Helm | Watch Ingress/Gateway API, hot-apply, status writeback, chart | Drop-in Kubernetes ingress controller | XL |
-| Y3-05 | Traffic management | Weighted split, canary, blue-green, request mirroring | Progressive delivery at the proxy | L |
-| Y3-06 | Hot binary upgrade | Zero-downtime binary swap via FD handoff (unix; Windows fallback) | 24/7 operation across version upgrades | M |
-| Y3-07 | Plugin marketplace (signed) | `jul add` to verify/install signed WASM plugins | Safe plugin distribution; ecosystem growth | L |
-| Y3-08 | Audit logging / compliance | Tamper-evident hash-chained audit trail; SIEM forward | SOC2/ISO evidence; regulated-industry sales | M |
-| Y3-09 | Console v3 | Fleet dashboard, RBAC admin, traffic UI, audit viewer | UI surface for everything in Year 3 | L |
+- arbitrary expression language;
+- embedded scripting;
+- general policy DSL;
+- mirroring/canary automation.
 
-### Year 4 — AI-native + Edge ⬜ (horizon)
+### Configuration authority and automation
 
-| ID | Feature | Description | Impact / what it unlocks | Effort |
-| --- | --- | --- | --- | --- |
-| Y4-01 | AI Gateway core | OpenAI-compatible + JUL-native LLM gateway: multi-provider routing, failover, streaming | The Year 4 flagship; AI-gateway category | XL |
-| Y4-02 | Semantic caching | Cache LLM responses by embedding similarity, namespaced by model/params | Cuts token spend + latency | L |
-| Y4-03 | Token rate-limit + cost observability | Per-key/model token budgets, USD caps, cost dashboards | Cost control + AI chargeback | M |
-| Y4-04 | Prompt/response guardrails | PII redaction, injection detection, moderation, custom WASM guardrails | Safety + compliance on AI traffic | L |
-| Y4-05 | AI-assisted Console | NL → validated config diff (human-approved), anomaly detection, incidents | Operate Jul.IA in plain English | L |
-| Y4-06 | Edge compute / WASM FaaS | Richer plugin ABI: persistent KV, fetch, cron, secrets | Plugins become mini edge-functions | L→XL |
-| Y4-07 | CDN-grade caching | Tiered/origin-shield, tag purge, image-opt (webp/avif), ESI | Run Jul.IA as a CDN node | L |
-| Y4-08 | 1-click app templates | Signed catalog (`jul template apply`) with auto-HTTPS | Popular apps behind Jul.IA in one command | M |
-| Y4-09 | Standards: Early Hints, WebTransport, PQ-TLS | HTTP 103, WebTransport over H3, hybrid post-quantum TLS | Protocol frontier; future-proof TLS | M |
+- `managed` and `file_owned` authority modes.
+- Explicit drift and authority-switch behavior.
+- Generated JSON Schema, lifecycle/capability metadata, and factual reference.
+- Versioned external OpenAPI.
+- Thin remote CLI for plan, diff, apply, stage, status, rollback, export, and diagnostics.
 
-### Year 5 — Global scale, Mesh & Cloud ⬜ (horizon · commercial completion)
+## Operational enhancement portfolio
 
-| ID | Feature | Description | Impact / what it unlocks | Effort |
-| --- | --- | --- | --- | --- |
-| Y5-01 | JUL Cloud platform | Multi-tenant hosted Console + BYO-node enrollment; control-only traffic | The commercial endgame (SaaS) | XL |
-| Y5-02 | GSLB geo-routing | Authoritative-DNS + HTTP geo-steering; multi-region failover | Global availability + latency routing | XL |
-| Y5-03 | Service mesh mode | Sidecar + ambient, east-west mTLS with SPIFFE/SVID, identity policy | Jul.IA as a mesh data plane | XL |
-| Y5-04 | Bot management + DDoS mitigation | JA3/H2 fingerprinting, JS/PoW challenges, adaptive rate limiting, L7 defense | App-layer abuse defense without a scrubber | L |
-| Y5-05 | RUM + synthetic + SLO | Web-vitals beacon, synthetic probes, SLO/error-budget tracking | Real-user observability + SLO dashboards | L |
-| Y5-06 | Secrets/identity integrations | Vault/cloud KMS/SPIFFE via rotating refs | Centralized secrets with hot rotation | M |
-| Y5-07 | Ecosystem maturity | Certification + signing, gallery, learning hub, `jul publish` | Durable ecosystem + community moat | L |
-| Y5-08 | Cloud usage metering + billing | Per-tenant metering + Stripe (demand-gated) | Monetization of JUL Cloud | L |
-| Y5-09 | Global perf + final hardening | Multi-region load tests, per-tag size budgets, pen-test, SOC2/ISO, SBOM | 5-year GA readiness | M |
+### Selected runtime-dynamics tranche
 
----
+- Closed-world lifecycle authority.
+- Static certificate/key rotation.
+- Admin authentication snapshot rotation.
+- Global log format and metrics Host-label mode.
+- Access-log enablement and sink generations.
+- Cache scalar policy/capacity after cache correctness.
+- Alt-Svc max-age and clear semantics.
 
-## Year completion checklist
+### Candidate after complexity review
 
-Counts are *shipped* features, regardless of maturity. Most ship at **Beta**;
-some have since reached **GA** (the canonical [status matrix](../status.md) is
-the source of truth).
+- Console mode and plugin-upload policy.
+- Admin request/SSE limits.
+- Durable audit sink.
 
-- [x] **Year 1** — Credibility & effortlessness (11/11 shipped; **all GA**)
-- [x] **Year 2** — Protocol Gateway + Extensibility (9/9 shipped; **all GA**). No remaining committed features; Y2-08 GraphQL stays **deferred** (demand-gated); AI-MVP stays a **time-boxed bet**.
-- [ ] **Years 3–5** — **Vision horizon (demand-gated)** — not committed; entered
-  per evidence gates ([ADR 0003](../adr/0003-maturity-and-ga.md)).
+### Gated or retained restart by default
+
+- Cache backend/path replacement.
+- Dynamic egress across every client and connection pool.
+- History backend relocation.
+- Admin listener enable/address changes.
+- Global tracing-provider replacement.
+- Dynamic TLS/mTLS connection epochs.
+- HTTP/3 listener activation/deactivation.
+- Dynamic ACME manager/account/issuer/cache transitions.
+- Retained-address plaintext↔TLS and h2c mode transitions.
+
+A complete planned-restart workflow is an acceptable final contract for these
+settings. The programme does not measure success by the percentage of fields
+made hot.
+
+## Migration and operational evidence
+
+- Evolve the NGINX importer into an assessor with source provenance and
+  supported/approximate/ignored/blocking classifications.
+- Add a representative compatibility corpus and real migration E2E.
+- Add an operator-triggered, secret-safe support bundle.
+- Add `jul doctor` for configuration, filesystem, listener, TLS, build-profile,
+  pending-restart, and upstream diagnostics.
+- Preserve the no-phone-home policy.
+
+## Technical experiments
+
+### AI Gateway candidate
+
+AI is not the automatic next phase. Its issue remains `[DRAFT]` until backend
+trust and generic resilience decisions are accepted, streaming ownership is
+reviewed, provider credentials use the normal secret model, metrics are bounded,
+and dependency/binary-size budgets are fixed.
+
+The first tranche is limited to an OpenAI-compatible front door, two or three
+providers, streaming, model routing, bounded fallback, and token/cost metrics
+using existing auth, egress, transport trust, and observability.
+
+Semantic cache, broad guardrails, autonomous configuration, complex tenant
+billing, and a large provider catalogue are excluded initially.
+
+### Other horizons
+
+Fleet, Kubernetes/Gateway API, GraphQL composition, Cloud, mesh, GSLB, and
+distributed state remain concept horizons. They require separate decisions and
+do not define current core completeness.
+
+## Delivered history
+
+Year 1 and Year 2 capabilities are shipped; exact maturity, GA evidence, build
+tags, and feature documentation are maintained in:
+
+- [Feature status and GA matrix](../status.md)
+- [Machine-readable feature manifest](../feature-status.yaml)
+- [Year 1 specification](../specs/year-1.md)
+- [Year 2 specification](../specs/year-2.md)
+- [Soak evidence](../soak-evidence.md)
+- [Changelog](../../CHANGELOG.md)
+
+Historical Phase 1–4 delivery remains recorded in #62 and checked-in handoff
+reviews. This roadmap intentionally does not duplicate every closed issue.
+
+## Historical roadmap
+
+The previous v1.37 five-year roadmap remains available through Git history and
+the Year 1–5 specifications. Delivered maturity stays authoritative in
+[docs/status.md](../status.md), [docs/feature-status.yaml](../feature-status.yaml),
+soak evidence and release history. This document now focuses on active portfolio
+and sequencing rather than duplicating every delivered feature row.
 
 ## Maintenance
 
-When a feature ships:
+When work changes state:
 
-1. Move its row from *Planned* to *Delivered*, note the build tag, and set its
-   **Maturity** (usually **Beta**; **GA** only after the full GA bar in
-   [ADR 0003](../adr/0003-maturity-and-ga.md), including a Console surface).
-2. Update the year completion checklist count **and the canonical
-   [status matrix](../status.md)** (the feature's maturity + GA-criteria row).
-3. Update the status snapshot line in [vision](../vision/) if the active year
-   changed.
-4. If the work involved a durable technical decision, add an ADR under
-   [docs/adr/](../adr/) and link it here.
-5. Bump this file's version and add a **Changelog** row (what changed / what
-   stayed / source).
+1. update #62 and the relevant epic;
+2. update this roadmap only when portfolio, sequence, or category changes;
+3. update ADRs when a durable decision changes;
+4. update the governing spec before downstream issues lose `[DRAFT]`;
+5. update feature status only when shipped maturity/evidence changes;
+6. update documentation and changelog in the same PR as behavior.
 
-When a category's evidence gate trips, move it from *Vision horizon* into the
-committed roadmap with a Maturity state.
+## Decision references
 
-## Changelog
-
-| Date | Ver | What changed | What stayed | Source |
-| --- | --- | --- | --- | --- |
-| 2026-07-31 | 1.37 | **Phase 4 egress → Delivered (P4-03 closes observability, tests, and docs).** Added rate-limited, secret-safe egress **block logs** (warn for auth/discovery/acme/ocsp, info for plugin; fields: subsystem, normalized host, optional resolved IP, reason) alongside the existing bounded metrics; a Console Security **documentation link**; and the full Phase 4 **negative/integration test matrix** — redirect-to-allowed, TLS SNI/Host preserved when dialing an IP, connection-reuse re-checks, timeout/cancellation, Consul/Kubernetes/ACME allow+block, egress lifecycle (restart-bound, secret-ref resolution, pending-restart classification), and resolver-seam/no-leak race tests ([#76](https://github.com/victornife/jul/issues/76)). | HP-07 stays ✅ Delivered; all other phase rows, IDs, and maturity states; default-off behavior. | Issue #76; [specs/hardening-platform.md](../specs/hardening-platform.md); [egress.md](../egress.md), [observability.md](../observability.md) |
-| 2026-07-31 | 1.36 | **Phase 4 egress coverage → in progress (P4-01 + P4-02 delivered).** Reconciled the active-operating-roadmap Phase 4 row from *queued* to *in progress*: the shared egress policy is now injected at the composition root through every config-driven auxiliary client — ACME/OCSP ([#74](https://github.com/victornife/jul/issues/74)) plus JWKS/forward-auth, Consul/Kubernetes discovery, and WASM `fetch` end-to-end wiring ([#75](https://github.com/victornife/jul/issues/75)). P4-03 (egress observability + negative/integration tests, [#76](https://github.com/victornife/jul/issues/76)) remains, so the phase is not yet fully delivered. | HP-07 stays ✅ Delivered; all other phase rows, IDs, and maturity states. | Issues #74, #75; [specs/hardening-platform.md](../specs/hardening-platform.md); [egress.md](../egress.md) |
-| 2026-07-31 | 1.35 | **HP-02 Console RBAC → Delivered (local-token RBAC).** Phase 3 ([#73](https://github.com/victornife/jul/issues/73)) shipped named-principal RBAC end to end: predefined viewer/operator/admin/auditor roles, scoped revocable tokens, per-route authorization at the API boundary, `GET /api/admin/me` identity, proactive Console permission gating (disable + reason), per-principal audit attribution, hot policy swap, and last-admin lockout protection — proven by a real-server role-matrix E2E and browser gating scenarios. | External identity (OIDC/SSO) stays [Y3-02](#year-3--scale-fleet--ecosystem--horizon--open-core) horizon; all other feature rows, IDs, and maturity states. | Issue #73; [console-rbac.md](../specs/console-rbac.md); [ADR 0010](../adr/0010-console-rbac.md) |
-| 2026-07-20 | 1.34 | **Phase 1 roadmap normalization.** Added the [active operating roadmap](#active-operating-roadmap) with the strict Phase 2→7 sequence; reconciled HP-01..HP-07 against the phase plan (delivered/partially-delivered/phase-active/deferred); added [evidence gates and lightweight product signals](#evidence-gates-and-product-signals) with quantitative thresholds for Fleet, K8s/Gateway API, AI continuation, Cloud, and GraphQL. | All Year 1–5 feature rows, IDs, and descriptions; the vision horizon remains demand-gated. | Issue #63; [specs/hardening-platform.md](../specs/hardening-platform.md) |
-| 2026-06-30 | 1.27 | Added the **Hardening & platform** pre-1.0 robustness backlog (HP-01..HP-07) under *Planned*, with a dedicated [engineering spec](../specs/hardening-platform.md): unified reload transaction + `[global].reload_timeout`, Console RBAC/multi-user, metric-cardinality strategy, pre-commit gate parity, container/supervision hardening (image digest pinning + a `jul healthcheck` target), structured-config parity patch-ops, and an optional SSRF allow-list. This records the strategic items and work deferred out of the pre-1.0 hardening pass so they are tracked, not lost. | All Delivered/Planned feature rows, IDs, and maturity states; the 5-year vision horizon is unchanged and nothing moved to Delivered. | [specs/hardening-platform.md](../specs/hardening-platform.md) |
-| 2026-07-04 | 1.30 | **Beta backlog cleared — all 20 shipped features are GA — soak pending.** The last 10 Beta features (Y1-02, Y1-03, Y1-08, Y1-09, Y1-10, Y1-11, cache, Y2-02, Y2-03, SEC-1) completed their evidence bundles (behaviour matrix, benchmarks, limitations, threat note, fuzz targets, docs, Console surface) and moved to **GA — soak pending**. Year-1 checklist is **11/11**, Year-2 checklist is **9/9** — zero committed Beta features remain. The only remaining GA gate is the **soak test** (post-GA per [ADR 0005](../adr/0005-soak-post-ga-gate.md)). Next work is the **Hardening & platform** backlog (HP-01..HP-07), the **AI-MVP bet** (time-boxed), or demand-gated horizon items. | All Year 3–5 vision rows remain horizon-demand-gated; no feature rows or IDs changed, only maturity labels and checklist counts. | [status.md](../status.md), [ga-push.md](../ga-push.md), http3.md, plugins.md, stream.md |
-| 2026-06-24 | 1.12 | Shipped **Y2-06 WAF** (Coraza + OWASP CRS, `waf` tag) and **SEC-1 secrets references** (core), both **Beta**. WAF adds block/detect engines per-location, embedded CRS (paranoia 0–4), inline SecLang rules, request/response body inspection, the `jul_waf_events_total` metric, and a Console **Status**/**Security** surface. SEC-1 adds `${env:}`/`${file:}`/`${secret:}` references resolved across all string config, automatic log redaction of resolved values, a `jul lint` rule for literal secrets, and a Console secret-reference count. Year-2 checklist **6/9 → 8/9**; committed remaining is now just Y2-09 Console. | All other feature rows, IDs, and maturity states; Y2-08 GraphQL stays deferred and AI-MVP stays a time-boxed bet. | [waf.md](../waf.md), [secrets.md](../secrets.md), [year-2.md](../specs/year-2.md), [status.md](../status.md) |
-| 2026-06-23 | 1.11 | Recorded the **Console v2 substrate migration** under Y2-09: a one-time cutover from the hand-written v1 to a prebuilt, embedded **React/TS/Vite/Tailwind** SPA (Node-free build, no external assets, ~250 KB gz budget), closing Console GA gaps ① + ⑦ and targeting **GA — soak pending**. | All other feature rows, IDs, and maturity states; the Y2-09 continuous-panels framing stands (the cutover is a bounded exception). | [ADR 0006](../adr/0006-console-v2-stack.md); [console-v2 spec](../specs/console-v2.md) |
-| 2026-06-22 | 1.10 | Linked the new beginner-friendly [concepts appendix](../vision/appendix.md) (HTTP, proxies, TLS, caching, observability from first principles) from the intro. | All feature rows, IDs, maturity states, and the 5-year plan. | [appendix.md](../vision/appendix.md) |
-| 2026-06-22 | 1.9 | Fixed **Y2-07 mTLS checklist drift**: the Year-2 completion line still listed mTLS as *committed remaining* and counted **5/9** even though it shipped and reached **GA — soak pending** — corrected to **6/9 shipped**, removed Y2-07 from the remaining list, and recorded which shipped features are GA. Added the canonical [status matrix](../status.md) as the single source of truth for maturity + GA criteria and wired it into the Maintenance steps. | All feature rows, IDs, descriptions, and maturity states; only the stale checklist counts/labels change, plus a new cross-reference. | [status.md](../status.md) |
-| 2026-06-21 | 1.8 | **Y1-04 authentication → GA** (GA push) and **relabeled every soak-pending GA feature `GA` → `GA — soak pending`** for honesty (Core HTTP, gRPC transcoding/passthrough, mTLS, TLS+ACME, auth). Published [docs/auth.md](../auth.md) (CIDR/Basic/JWT/forward-auth behaviour matrix, JWKS + algorithm-confusion threat note, limits, GA table); added `BenchmarkBasicVerify`/`BenchmarkJWTValidate` and `FuzzParseJWKS`/`FuzzValidateToken`. | All feature rows, IDs, and the soak post-GA gate ([ADR 0005](../adr/0005-soak-post-ga-gate.md)); only the label wording and the Y1-04 maturity change. | [auth.md](../auth.md), [ga-push.md](../ga-push.md) |
-| 2026-06-21 | 1.7 | **Core HTTP → GA** (GA push). The foundational request stack — static serving, reverse proxy, FastCGI/uWSGI, virtual hosts, and location routing — reaches **GA**: published [docs/core-http.md](../core-http.md) (host/location/static/proxy/FastCGI/balancing matrices, path-traversal + SSRF + CRLF threat note, limits), added router/balancer/static benchmarks and router + FastCGI fuzz targets, contract frozen under the [compatibility policy](../compatibility.md). Soak stays a post-GA gate. | All feature rows, IDs, and (Beta) maturity states; runtime behaviour is unchanged — only the new doc, tests, and the GA label. | [core-http.md](../core-http.md), [ga-push.md](../ga-push.md) |
-| 2026-06-21 | 1.6 | **Y1-01 TLS + automatic HTTPS → GA** (GA push). Published [docs/tls-acme.md](../tls-acme.md) with a behaviour matrix, SNI/ACME/OCSP semantics, a threat note, and benchmark numbers (`BenchmarkTLSHandshakeServerAuth`, `BenchmarkSNICertSelection` — 0-alloc selection); contract frozen under the [compatibility policy](../compatibility.md). Soak stays a post-GA gate ([ADR 0005](../adr/0005-soak-post-ga-gate.md)). | All other rows, IDs, and (Beta) maturity states; runtime behaviour is unchanged — only the maturity label and the new doc. | [tls-acme.md](../tls-acme.md), [ga-push.md](../ga-push.md), [compatibility.md](../compatibility.md) |
-| 2026-06-21 | 1.5 | Declared the **first GA features** in the [GA push](../ga-push.md): **Y2-01 gRPC transcoding**, **Y2-04 gRPC passthrough**, and **Y2-07 mTLS** move Beta → **GA** — closing the mTLS handshake benchmark and adding the semver-guarded [compatibility policy](../compatibility.md). The soak test is reclassified to a **post-GA gate** ([ADR 0005](../adr/0005-soak-post-ga-gate.md)), so it no longer blocks GA. | All other rows, IDs, descriptions, and (Beta) maturity states; feature behaviour is unchanged — only labels and the contract doc. | [ga-push.md](../ga-push.md), [compatibility.md](../compatibility.md), [mtls.md](../mtls.md#benchmarks); [ADR 0005](../adr/0005-soak-post-ga-gate.md) |
-| 2026-06-21 | 1.4 | Moved **Y2-07 mTLS** from committed-remaining to **Delivered (Beta)**: client-certificate verification against a CA bundle (request/require), per-location `require_client_cert`, `$ssl_client_*` identity proxy variables, signature-verified CRL + SAN allow-list, and the `jul_mtls_handshakes_total` metric — shipped in core (no build tag). | All other rows, IDs, and maturity states; the AI-MVP bet stays sequenced after mTLS (now satisfied). | [mtls.md](../mtls.md), [year-2.md](../specs/year-2.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |
-| 2026-06-21 | 1.3 | Advanced the **first GA target** (Y2-01 transcoding + Y2-04 passthrough): published conformance matrices, benchmark numbers, known-limitations lists, a threat note, path-template fuzzing, and confirmed the Console Status surface — leaving the **soak test** as the only remaining hard GA gate. | Both features stay **Beta**; all other rows, IDs, and maturity states unchanged. | [grpc-transcoding.md](../grpc-transcoding.md), [grpc-proxy.md](../grpc-proxy.md); [ADR 0003](../adr/0003-maturity-and-ga.md) |
-| 2026-06-21 | 1.2 | Recorded the first **continuous Console v2 panel** under Y2-09: a read-only **Status** overview (which capabilities are active in the running config) plus a back-link from the standalone config page to the Console, keeping all screens navigable. | All feature rows, IDs, maturity states, and the Y2-09 framing as continuous per-feature panels. | [ADR 0004](../adr/0004-console-ui-invariants.md); [console.md](../console.md) |
-| 2026-06-21 | 1.1 | Added a **Maturity** column and delivery legend; reclassified all shipped Year 1–2 features from "Delivered" to **Beta** (gRPC transcoding + passthrough named first GA target); demoted Y2-08 to a **deferred, demand-gated** GraphQL *composition* prototype with explicit resolvers; reframed Y2-09 Console v2 as continuous per-feature panels; pulled secrets references earlier (SEC-1); added a **time-boxed** AI Gateway MVP bet; relabeled Years 3–5 as the **Vision horizon (demand-gated)**; fixed `adr/` and `specs/` links after the folder move. | All Year 1–5 feature rows, IDs, descriptions, impact and effort sizing (Years 3–5 preserved verbatim under the horizon banner). | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |
-| 2026-06-21 | 1.0 | Initial consolidated 5-year roadmap. | — | — |
+- [ADR 0003 — Maturity and GA](../adr/0003-maturity-and-ga.md)
+- [ADR 0004 — Console invariants](../adr/0004-console-ui-invariants.md)
+- [ADR 0012 — OSS/open-core boundary](../adr/0012-oss-open-core-boundary.md)
+- [ADR 0013 — Operating model and completeness](../adr/0013-project-operating-model-and-completeness.md)
+- [ADR 0014 — Appropriate operability surfaces](../adr/0014-operability-surfaces.md)
+- [Operating model](../operating-model.md)
+- [Core Gateway Completeness](../specs/core-gateway-completeness.md)
+- [Combined audit](../audit/combined-audit-2026-08-03.md)

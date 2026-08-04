@@ -15,6 +15,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 > **GA** only after its first tagged release passes the post-GA soak gate.
 
 ### Changed
+- **Operating model and roadmap v2.0 (2026-08-04):** added ADR 0013/0014, a bounded Core Gateway Completeness contract, portfolio lanes, appropriate Console/API/CLI surfaces, value-ranked runtime dynamics, and bounded experiment governance. AI/fleet/cloud remain optional experiments or horizons; this documentation change adds no runtime capability.
 - **Current product-truth reconciliation (2026-08-04):** aligned README, security, status, configuration, observability, deployment, cache, reload, WAF and known-limitations documentation with the merged runtime and the remaining audited correction work.
 - **Post-audit remediation (2026-07-31):** activated the canonical Git hooks
   (`make hooks`) so the `gofmt` pre-commit gate runs locally — a stale

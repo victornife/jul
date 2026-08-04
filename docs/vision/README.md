@@ -1,179 +1,222 @@
 # Jul.IA — Vision
 
-> Version 1.4 · Updated 2026-07-20
+> Version 1.5 · Updated 2026-08-04
 >
-> Status snapshot: Year 1 shipped (11/11); Year 2 shipped (9/9). All 20 shipped
-> features are **GA** and the soak-test post-GA gate is fully closed. The
-> canonical [status matrix](../status.md) is the source of truth for maturity.
-> Maintained alongside the [roadmap](../roadmap/). Update both whenever a feature
-> ships or an ADR is added.
+> Shipped maturity is tracked in the canonical [status matrix](../status.md).
+> Current execution is tracked in the [roadmap](../roadmap/) and #62. The
+> permanent product boundary is defined by [ADR 0013](../adr/0013-project-operating-model-and-completeness.md)
+> and [Core Gateway Completeness](../specs/core-gateway-completeness.md).
 
 ## What Jul.IA is
 
-Jul.IA is an NGINX-inspired HTTP edge server written in Go and configured
-entirely through TOML. It bundles reverse-proxying, load balancing, static
-serving, application gateways, a two-tier cache, TLS, hot reload, and a built-in
-admin/observability surface — in a **single static, dependency-free binary**.
+Jul.IA is a self-contained edge and protocol gateway written in Go and
+configured through TOML. It combines reverse proxying, load balancing, static
+serving, HTTP and gRPC adaptation, L4 proxying, TLS, policy, observability,
+configuration lifecycle, an embedded Console, and sandboxed extension seams in
+a portable single-node product.
+
+The architectural thesis is:
+
+> Explore how much modern gateway capability can be delivered coherently in one
+> production-quality node without requiring a distributed control plane,
+> mandatory hosted service, or heavyweight operating model.
+
+## Project operating context
+
+Jul.IA is currently maintained as a solo, AI-assisted engineering product. Its
+near-term objective is to become unusually complete, coherent, powerful, and
+well-tested inside the standalone gateway boundary. It is not currently
+optimised primarily for customer acquisition, marketing growth, or revenue.
+
+This context does **not** lower the product bar. Jul.IA continues to require:
+
+- truthful feature and maturity claims;
+- fail-closed security and configuration behavior;
+- stable documented contracts for GA capabilities;
+- realistic protocol, concurrency, failure, platform, and build-profile tests;
+- documentation in the same change as behavior;
+- bounded permanent complexity suitable for one maintainer;
+- a useful standalone product even if every future horizon is never built.
+
+External users, issues, and production evidence remain valuable inputs. They are
+not mandatory before fixing a defect, closing a material gateway gap, or running
+a bounded technical experiment.
 
 ## Who Jul.IA is for
 
-### Primary user
+### Primary product users
 
-Small-to-medium platform or infrastructure teams that need modern proxy, TLS,
-policy, gRPC, observability, and extensibility without operating a heavyweight
-gateway platform.
+Small-to-medium platform, infrastructure, and application teams that need a
+modern proxy, TLS, policy, gRPC, observability, and extension surface without
+operating a distributed gateway platform.
 
 ### Primary jobs
 
-- Modernize or replace an NGINX estate.
-- Expose internal gRPC services safely.
-- Run a serious single-node edge/protocol gateway.
-- Manage routing, security, and observability from one binary.
-- Extend behavior through sandboxed WASM.
-- Establish a simple single-node base before any fleet platform.
+- Run a serious standalone HTTP, gRPC, and L4 gateway.
+- Modernize or assess an NGINX estate.
+- Expose internal services with explicit routing and trust boundaries.
+- Apply configuration safely with preview, lifecycle classification, rollback,
+  and planned restart.
+- Operate routing, security, and observability from one embedded cockpit.
+- Extend request behavior through sandboxed WASM.
 
-### Secondary users
+### Anti-personas and non-goals
 
-- Self-hosters and application teams.
-- Teams needing lightweight protocol adaptation.
-- Future AI platform teams if Phase 6 proves demand.
+Jul.IA is not currently trying to be:
 
-### Anti-personas
+- a hyperscale CDN;
+- a complete service mesh;
+- a managed global data plane;
+- a mandatory Kubernetes controller;
+- a fleet or cloud control plane required for standalone use;
+- a clone of every feature in NGINX, Envoy, Caddy, Traefik, or Kong;
+- an AI platform hidden inside the core gateway.
 
-- Hyperscale CDN operators.
-- Organizations seeking a complete service mesh now.
-- Teams requiring a managed global data plane today.
-- Teams already standardized on a larger gateway platform with no need for a
-  standalone node.
+## Product promise
 
-### Product promise
+> Jul.IA remains fully useful, operable, and supportable as a standalone
+> single-node gateway even if fleet, AI, GraphQL, Kubernetes, or hosted
+> capabilities are never promoted from experiments or horizons.
 
-> Jul.IA remains fully useful and operable as a standalone single-node product
-> even if fleet, AI, or hosted capabilities are added later.
+## The three product pillars
 
-## The three pillars
+Every decision must preserve all three properties together.
 
-Every decision is weighed against three properties that must hold *together*:
+### 1. Powerful without feature-count bloat
 
-1. **Powerful (without bloat)** — a serious protocol gateway and platform: gRPC,
-   L4 stream proxy, WASM plugins, service discovery, and — when demand is proven —
-   an AI gateway and beyond. The goal is not to be the *most powerful* gateway
-   overall (that invites losing comparisons with Envoy, Kong, Apollo, Cloudflare,
-   and Istio) but the **leanest serious edge/protocol gateway**: powerful enough
-   for modern infrastructure, simple enough to run as one binary.
-2. **Friendliest** — zero-config to HTTPS in under a minute and *Operable by
-   design*: every capability is reachable from a lean, self-explanatory web
-   Console (see [ADR 0004](../adr/0004-console-ui-invariants.md)), with
-   plain-English operations (AI assist) and 1-click app templates.
-3. **Lean** — one static binary, `CGO_ENABLED=0`, trivial cross-compilation, and
-   a *lean-by-default* build where every heavy feature is opt-in behind a build
-   tag. The default binary stays small. The concrete budgets (binary size,
-   per-tag delta, idle RSS, startup latency, hot-path allocations, Console
-   asset size) are recorded and updated in
-   [docs/benchmarks.md](../benchmarks.md#lean-product-budgets).
+Power comes from coherent, reusable primitives: protocol serving, routing,
+transport trust, resilience, policy, lifecycle, observability, and extension
+seams. Power is not measured by competitor parity or the number of configuration
+fields.
 
-When these tensions conflict, leanness wins by default and power is added behind
-a build tag. See [ADR 0001 — language strategy](../adr/0001-language-strategy.md).
+Generic gateway mechanisms should be implemented once and reused. An AI or
+future category must not create a second transport, retry, security, or
+observability architecture inside the product.
+
+### 2. Friendly without hiding reality
+
+Runtime operation should be understandable from the embedded Console. Migration,
+automation, diagnostics, and controller integration use the appropriate CLI or
+API-first surface. All surfaces reuse one server-side semantic implementation;
+raw TOML remains the complete expert escape hatch.
+
+See [ADR 0014](../adr/0014-operability-surfaces.md).
+
+### 3. Lean without becoming simplistic
+
+- One deployable node remains the baseline.
+- The lean profile excludes optional heavy capabilities.
+- The Full profile remains a tested supported distribution, not an excuse for
+  unbounded tag combinations.
+- No phone-home dependency is required.
+- Structural settings may remain restart-bound when a planned restart is safer
+  than permanent runtime-generation complexity.
+
+## What “complete” means
+
+Core completeness is bounded to the standalone gateway. The detailed contract is
+[docs/specs/core-gateway-completeness.md](../specs/core-gateway-completeness.md).
+At a high level, Jul.IA needs coherent answers for:
+
+- HTTP/1.1, HTTP/2, HTTP/3, TLS/mTLS, gRPC, and L4 ingress;
+- deterministic routing and response policy;
+- trusted client identity and backend peer identity;
+- health, overload, retries, backoff, and circuit behavior;
+- authentication, authorization, rate limiting, WAF, secrets, and egress;
+- validation, lifecycle, preview, atomic apply, rollback, and planned restart;
+- generated machine contracts and safe automation;
+- logs, metrics, traces, diagnostics, recovery, and deployment;
+- migration assessment and explicit semantic differences;
+- stable extension and release-profile boundaries.
+
+Fleet, cloud, distributed state, service mesh, GraphQL composition, AI Gateway,
+and universal hot reload are not required for this definition.
+
+## Portfolio model
+
+Work enters the active programme through five lanes:
+
+1. **Correctness and security** — current contract defects and release blockers.
+2. **Core Gateway Completeness** — material gaps inside the bounded product.
+3. **Operational enhancement** — value-ranked operability and lifecycle work.
+4. **Technical experiment** — bounded exploration with explicit exit decision.
+5. **Vision horizon** — retained future categories without implementation
+   commitment.
+
+The authoritative rules are in [ADR 0013](../adr/0013-project-operating-model-and-completeness.md)
+and [the operating model](../operating-model.md).
+
+## Technical experiments
+
+A major experiment requires:
+
+- a precise technical hypothesis;
+- fixed first-tranche scope and explicit exclusions;
+- architecture prerequisites;
+- time, dependency, binary-size, and maintenance budgets;
+- evidence to collect;
+- success and stop criteria;
+- one final outcome: promote, continue experimentally, freeze, extract, remove,
+  or defer.
+
+Only one major category experiment should be active at a time. Correctness and
+core integrity may interrupt it.
+
+### AI Gateway
+
+AI remains a valid future experiment, not the automatic next phase. Its initial
+question is whether Jul.IA can reuse its generic routing, trust, resilience,
+streaming, policy, and observability architecture for a small multi-provider
+front door without creating a parallel gateway inside the product.
+
+The experiment remains blocked until backend-trust and generic-resilience
+architecture decisions are complete. See [Year 4](../specs/year-4.md) and the
+experiment epic.
 
 ## Architectural commitments
 
-- **Single binary, no cgo.** Pure-Go dependencies only in the core (wazero for
-  WASM, `modernc.org/sqlite`, pure-Go codecs). Native code lives at the edges —
-  as sandboxed WASM or an opt-in sidecar — never via cgo in the main binary.
-- **Opt-in build tags.** Heavy features (`brotli`, `zstd`, `acme`, `otel`,
-  `grpc`, `http3`, `wasmplugins`, `stream`, `consul`, `kubernetes`, …) compile
-  out of the default build and fail loud if configured without their tag.
-- **Validate-then-atomic-reload.** Configuration changes are validated and then
-  applied atomically; a bad config never takes down a running server. This is
-  the seam that the fleet control plane (Year 3) and Cloud (Year 5) build on.
-- **Stable seams over churn.** Provider/adapter interfaces (discovery, cache
-  store, limiter, cert provider, secret provider) isolate the core from vendor
-  API drift and let features compose.
-- **Operable by design / Console-first.** Every user-facing capability ships with
-  a lean, self-explanatory Console surface; no feature is "done" until it can be
-  operated and observed from the Console without reading docs. Power is exposed
-  through clarity, not more knobs. See
-  [ADR 0004](../adr/0004-console-ui-invariants.md).
-- **Explicit adapters, not universal conversion.** Jul.IA adapts protocols
-  explicitly where the mapping is clear (REST/JSON → gRPC, native gRPC
-  passthrough); it does not promise magical conversion between incompatible
-  models. GraphQL, if built, is an explicit schema/resolver composition layer.
-  See [ADR 0002](../adr/0002-protocol-adaptation.md).
-- **Evidence before expansion.** Major new categories are demand-gated, and
-  maturity is labeled honestly (Beta until the GA bar is met). See
-  [ADR 0003](../adr/0003-maturity-and-ga.md) and the evidence gates below.
+1. **Single-node first.** Distributed control is additive, never required for
+   local usefulness.
+2. **Server-owned semantics.** Validation, lifecycle, preview, apply, and error
+   behavior live on the server, not independently in the Console.
+3. **Fail before Publish.** Fallible candidate construction and validation occur
+   before the point of no return.
+4. **Generation-safe retirement.** Old resources outlive the work that may still
+   use them and retire exactly once.
+5. **Explicit trust boundaries.** Client assertion trust, outbound destination
+   policy, and backend peer authentication remain distinct.
+6. **Build-tag honesty.** An absent capability is rejected clearly before
+   persistence; it never becomes a silent no-op.
+7. **One authoritative source per concept.** ADRs decide, specs design, status
+   reports shipped maturity, the roadmap sequences, and issues execute.
+8. **Documentation is product behavior.** Claims, examples, migration, and
+   operational guidance are part of Definition of Done.
 
-## The business ladder
+## Possible long-term evolution
 
-Jul.IA is designed so it *can* grow along an **OSS → open-core → Cloud** path
-without re-architecting. The near-term commitment is the OSS core; everything
-beyond it is a **Vision horizon — demand-gated**, not a committed plan.
+The permanent OSS/open-core boundary is defined in
+[ADR 0012](../adr/0012-oss-open-core-boundary.md). Fleet, external identity,
+hosted control, distributed state, and cloud may become separate supported
+categories if their operating and maintenance model is justified. That possible
+commercial evolution does not drive current feature selection by itself and
+must not weaken the standalone OSS node.
 
-Editions today are deliberately just two: **Core/OSS** (lean, default build) and
-**Full** (all OSS build tags, including the Console). Enterprise and Cloud naming
-is deferred until their evidence gates trip. The permanent boundary between
-what stays OSS and what may become commercial is recorded in
-[ADR 0012](../adr/0012-oss-open-core-boundary.md).
+## Success criteria
 
-- **OSS (now):** a fully-functional single-node edge server and protocol gateway.
-- **Open-core (horizon, demand-gated):** fleet control plane, RBAC/SSO,
-  distributed state, Kubernetes-at-scale, audit — gated on multi-node operators.
-- **AI-native + Edge (horizon, demand-gated):** AI gateway, semantic cache,
-  guardrails, AI-assisted Console — entered via a time-boxed bet (the `ai` MVP).
-- **Cloud (horizon, demand-gated):** multi-tenant hosted Console with
-  bring-your-own nodes; global load balancing and service mesh only if customers
-  pull them in.
+Jul.IA succeeds in its current phase when:
 
-## Evidence gates
-
-The long-term vision is broad; the *operating* roadmap stays narrow. A category
-is not committed until its evidence exists (see
-[ADR 0003](../adr/0003-maturity-and-ga.md)).
-
-| Category | Evidence required before committing |
-| --- | --- |
-| GraphQL | Users need BFF/composition over existing REST/gRPC |
-| Fleet | Multiple users operate N Jul.IA nodes |
-| Kubernetes/Gateway API | Real ingress-controller demand |
-| Distributed cache/rate-limit | Real fleet users hit local-limit problems |
-| AI Gateway | Jul.IA is used as an API/protocol gateway and users ask for AI routing/cost |
-| Cloud | Self-hosted control-plane demand exists |
-| Service mesh | Customers explicitly ask for east-west identity/policy |
-| GSLB | Customers run multi-region Jul.IA fleets |
-
-A **Time-boxed bet** is the sanctioned exception: a thin, time-boxed MVP with an
-explicit kill/continue decision may enter a category ahead of its gate (current
-example: the AI Gateway MVP behind the `ai` tag).
-
-## Non-goals (for now)
-
-- **Universal REST/gRPC/GraphQL conversion.** Jul.IA offers explicit adapters for
-  real migration paths, not a magic any-protocol converter
-  (see [ADR 0002](../adr/0002-protocol-adaptation.md)).
-- **GraphQL without resolvers.** GraphQL is a composition layer with explicit
-  schema/resolvers, never auto-generated from proto/OpenAPI.
-- Replacing dedicated secrets managers, SIEMs, or identity providers — Jul.IA
-  *integrates* with them rather than reimplementing them.
-- A broad rewrite of hot paths in another language inside the binary
-  (see [ADR 0001](../adr/0001-language-strategy.md)).
-- Running Jul.IA's own global anycast network before Cloud demand is proven.
-
-## Related documents
-
-- [Roadmap](../roadmap/) — what's shipped and what's planned (Years 1–5).
-- [Engineering specs](../specs/) — detailed per-feature plans.
-- [Architecture Decision Records](../adr/) — durable technical decisions.
-- [Reviews & decision log](../reviews/) — how the product direction evolves.
-- [Concepts appendix](appendix.md) — a beginner-friendly primer on HTTP,
-  proxies, TLS, caching, and observability for readers new to edge
-  infrastructure.
+- confirmed P0/P1 defects are closed with regression evidence;
+- the standalone completeness matrix has no unexplained critical gap;
+- supported profiles pass their protocol, race, platform, E2E, and security
+  gates;
+- lifecycle and public contracts are generated or exhaustively checked;
+- every GA claim is traceable to code, tests, and documentation;
+- experiments remain bounded and removable;
+- one maintainer can understand and safely evolve the architecture.
 
 ## Changelog
 
-| Date | Ver | What changed | What stayed | Source |
-| --- | --- | --- | --- | --- |
-| 2026-07-20 | 1.4 | Added **Who Jul.IA is for**: primary user, primary jobs, secondary users, anti-personas, and the standalone-single-node product promise. Linked the [operating roadmap](../roadmap/README.md#active-operating-roadmap) and [evidence gates](../roadmap/README.md#evidence-gates-and-product-signals) from the vision. | The three pillars, architectural commitments, business ladder, and demand-gated horizons. | Issue #63; [roadmap/README.md](../roadmap/README.md) |
-| 2026-06-22 | 1.3 | Linked the new beginner-friendly [concepts appendix](appendix.md) — how a request travels through modern edge infrastructure (HTTP, proxies, TLS, caching, observability) — from **Related documents**. | The vision body, pillars, commitments, status snapshot, and demand-gated horizons. | [appendix.md](appendix.md) |
-| 2026-06-22 | 1.2 | Refreshed the status snapshot: added the shipped **Y2-07 mTLS** (Year 2 is now 6/9 shipped, not "Y2-01…Y2-05") and recorded that Core HTTP, Y1-01, Y1-04, Y2-01, Y2-04, and Y2-07 are **GA** rather than all-Beta; pointed maturity at the canonical [status matrix](../status.md). | The vision body, pillars, commitments, and the demand-gated horizon. | [status.md](../status.md), [roadmap](../roadmap/) |
-| 2026-06-21 | 1.1 | Repositioned pillar 1 from "most powerful" to "leanest serious gateway"; added commitments *Operable by design / Console-first*, *Explicit adapters not universal conversion*, *Evidence before expansion*; added an evidence-gates table; softened the OSS→open-core→Cloud ladder to a demand-gated horizon with a two-edition (Core/OSS · Full) model; extended non-goals; fixed ADR links after the folder move. | The three-pillar model, the *leanness-wins* tie-breaker, and the single-binary / no-cgo / validate-then-atomic-reload / stable-seams commitments. | [review 2026-06-21](../reviews/); [ADR 0002](../adr/0002-protocol-adaptation.md), [ADR 0003](../adr/0003-maturity-and-ga.md), [ADR 0004](../adr/0004-console-ui-invariants.md) |
-| 2026-06-21 | 1.0 | Initial vision. | — | — |
+| Date | Version | Change |
+| --- | --- | --- |
+| 2026-08-03 | 1.5 | Added the solo/AI-assisted operating context, bounded definition of completeness, portfolio lanes, appropriate operability surfaces, experiment governance, and explicit separation between the standalone core and horizons. |
+| 2026-07-20 | 1.4 | Previous product/user/roadmap clarification. |

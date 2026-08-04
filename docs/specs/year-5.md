@@ -6,8 +6,8 @@
 > Version 1.0 · Updated 2026-06-21 · **Concept horizon — not committed.**
 > This document captures long-term technical possibilities, not a scheduled
 > delivery plan. Cloud, mesh, and GSLB are not committed; they enter the
-> operating roadmap only when their evidence gates trip (see
-> [ADR 0003](../adr/0003-maturity-and-ga.md)). All implementation details must
+> operating roadmap only through a separate horizon/experiment activation decision under
+> [ADR 0013](../adr/0013-project-operating-model-and-completeness.md). All implementation details must
 > be revalidated before work starts.
 
 Goal: complete the OSS -> open-core -> CLOUD ladder and the "global, powerful, still friendly" endgame. Headlines: (A) JUL CLOUD (managed SaaS, STAGED: hosted Console + bring-your-own-nodes BEFORE building anycast network), (B) GSLB (geo-routing + multi-region health-aware failover), (C) Service mesh mode (ambient/sidecar, mTLS east-west, SPIFFE/SVID). Plus bot/DDoS mitigation, RUM + synthetic + SLO tracking in Console, secrets/identity integrations (Vault/KMS/SPIFFE), ecosystem maturity (certification, gallery, learning hub).
