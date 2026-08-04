@@ -1,0 +1,293 @@
+name: Apply WAF matched-request log privacy fix
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'automation/apply-waf-log-privacy-127'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target implementation branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: agent/waf-log-privacy-127
+          fetch-depth: 0
+
+      - name: Apply bounded path-only WAF logging contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"{path}: expected text not found: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace(
+              "internal/observability/request_samples.go",
+              "s.Path = sanitizePath(s.Path)",
+              "s.Path = SanitizePath(s.Path)",
+          )
+          replace(
+              "internal/observability/request_samples.go",
+              "// sanitizePath strips any query string (defense in depth — r.URL.Path already\n// excludes it), redacts identifier/email/token-like segments to placeholders so\n// the stored path carries no PII or secrets, and caps the stored length so the\n// buffer cannot be bloated.\nfunc sanitizePath(path string) string {",
+              "// SanitizePath strips any query string (defense in depth — r.URL.Path already\n// excludes it), redacts identifier/email/token-like segments to placeholders so\n// operator-visible diagnostics carry no obvious PII or secrets, and caps the\n// stored length so hostile request targets cannot inflate logs or buffers. It\n// deliberately does not URL-decode attacker-controlled input.\nfunc SanitizePath(path string) string {",
+          )
+          for path in (
+              "internal/observability/logtail.go",
+              "internal/observability/route_failures.go",
+              "internal/observability/operational_test.go",
+          ):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              p.write_text(text.replace("sanitizePath(", "SanitizePath(").replace("(sanitizePath)", "(SanitizePath)"), encoding="utf-8")
+
+          replace(
+              "internal/waf/firewall.go",
+              '"jul/internal/middleware"\n',
+              '"jul/internal/middleware"\n\t"jul/internal/observability"\n\t"jul/internal/redact"\n',
+          )
+          replace(
+              "internal/waf/firewall.go",
+              '''\t\tif opts.Logger != nil {\n\t\t\topts.Logger.Warn("waf rule matched",\n\t\t\t\t"rule_id", ruleID,\n\t\t\t\t"uri", mr.URI(),\n\t\t\t\t"mode", cfg.Mode,\n\t\t\t\t"message", mr.Message())\n\t\t}\n''',
+              '''\t\tif opts.Logger != nil {\n\t\t\trawURI := mr.URI()\n\t\t\t// Coraza exposes the full, unparsed request URI and its Message value\n\t\t\t// may contain macro-expanded request data. Keep the structured event\n\t\t\t// useful without copying attacker-controlled query values or matched\n\t\t\t// data into long-lived logs. The shared path sanitizer strips query and\n\t\t\t// fragment text without decoding, redacts token-like path segments, and\n\t\t\t// applies a hard length bound. Global secret redaction remains a final\n\t\t\t// defense for configured secrets that appear in an otherwise-safe path.\n\t\t\tpath := redact.Apply(observability.SanitizePath(rawURI))\n\t\t\topts.Logger.Warn("waf rule matched",\n\t\t\t\t"rule_id", ruleID,\n\t\t\t\t"path", path,\n\t\t\t\t"query_omitted", strings.ContainsAny(rawURI, "?#"),\n\t\t\t\t"mode", cfg.Mode,\n\t\t\t\t"phase", int(mr.Rule().Phase()),\n\t\t\t\t"severity", mr.Rule().Severity().String())\n\t\t}\n''',
+          )
+
+          replace(
+              "docs/waf.md",
+              '''> **Logging privacy notice:** matched-rule request-target logging is under\n> explicit URI/query redaction and bounding review in #127. Avoid credentials or\n> personal data in URLs, restrict log access/retention, and do not use raw request\n> targets as metric labels.\n''',
+              '''> **Logging privacy contract:** matched-rule logs retain the rule ID, mode,\n> phase, severity, and a bounded/redacted request **path**. Raw query strings and\n> Coraza's macro-expanded rule message are deliberately omitted because the exact\n> Coraza v3.7.0 callback exposes the full unparsed URI and may expand request data\n> into the message. URI/path values never become metric labels.\n''',
+          )
+          replace(
+              "docs/waf.md",
+              '''4. Every matched rule that logs is reported to metrics and structured-log\n   hooks. Rule/action labels must remain bounded. The warning currently includes\n   diagnostic request-target context; #127 owns the final path-only/redacted URI\n   contract so query secrets cannot enter logs.\n''',
+              '''4. Every matched rule that logs is reported to metrics and structured-log\n   hooks. The metric keeps only bounded action/rule labels. The structured warning\n   records `rule_id`, `mode`, `phase`, `severity`, a bounded/redacted `path`, and\n   `query_omitted`; it never records the raw query or Coraza's macro-expanded\n   matched-rule message.\n''',
+          )
+          replace(
+              "docs/waf.md",
+              '''- **Detect first.** Roll a new ruleset (or a paranoia bump) out in `detect` mode,\n  watch `jul_waf_events_total` and the `waf rule matched` logs for false\n  positives, tune with `SecRuleRemoveById`/allow-list rules, then switch to\n  `block`.\n''',
+              '''- **Detect first.** Roll a new ruleset (or a paranoia bump) out in `detect` mode,\n  watch `jul_waf_events_total` and the `waf rule matched` logs for false\n  positives, tune with `SecRuleRemoveById`/allow-list rules, then switch to\n  `block`. The log intentionally omits query values and macro-expanded match\n  messages; reproduce a request in a controlled environment when deeper payload\n  inspection is required.\n''',
+          )
+          replace(
+              "docs/waf.md",
+              "| Structured log `waf rule matched` | ✅ | ✅ | Both modes |",
+              "| Structured log `waf rule matched` | ✅ | ✅ | Path-only, bounded/redacted; raw query and macro-expanded message omitted |",
+          )
+          replace(
+              "docs/waf.md",
+              "### False positives\n",
+              '''### Matched-rule log privacy\n\nCoraza v3.7.0 exposes `MatchedRule.URI()` as the full unparsed request URI and\n`MatchedRule.Message()` as a macro-expanded message. Both may therefore contain\nattacker-controlled request data. Jul.IA sanitizes at the integration boundary:\n\n- query and fragment text are discarded without URL-decoding;\n- identifier-, email-, and token-like path segments are normalized;\n- the remaining path is capped at 256 bytes and passed through the active secret\n  redaction state;\n- macro-expanded Coraza messages and matched values are not copied into the\n  ordinary structured warning;\n- the warning retains bounded rule metadata (`rule_id`, mode, phase, severity)\n  plus `query_omitted` for diagnostic context;\n- WAF metrics retain only bounded rule/action labels.\n\nThis policy applies in both `detect` and `block` modes and to embedded CRS and\ncustom rules. Avoid credentials in URLs regardless: upstream applications,\nintermediaries, or independently configured access logs may have their own\nretention policies.\n\n### False positives\n''',
+          )
+
+          replace(
+              "docs/observability.md",
+              "### Egress block logs\n",
+              '''### WAF matched-rule logs\n\nA WAF match emits `waf rule matched` at warning level with bounded fields:\n`rule_id`, `mode`, `phase`, `severity`, a sanitized `path`, and\n`query_omitted`. The path uses the same privacy-preserving sanitizer as Console\nrequest diagnostics: it removes query/fragment text without decoding, normalizes\nidentifier/email/token-like segments, applies a 256-byte cap, and passes through\nthe active secret-redaction state.\n\nJul.IA deliberately does **not** copy Coraza's raw `MatchedRule.URI()` or\nmacro-expanded `MatchedRule.Message()` into this warning. In Coraza v3.7.0 those\nvalues may contain the full unparsed query and matched request data. WAF metric\nlabels remain bounded to action/rule metadata and never include path, URI, query,\nmessage, or matched values.\n\n### Egress block logs\n''',
+          )
+          replace(
+              "docs/security-posture.md",
+              "- **WAF request targets:** matched-rule URI/query logging remains under redaction/bounding review in #127. Avoid secrets in URLs and restrict log retention/access.",
+              "- **WAF request targets:** matched-rule warnings are path-only, bounded and secret-redacted. Raw queries and Coraza macro-expanded messages are omitted; metric labels contain no request target or matched value. Avoid secrets in URLs regardless of downstream or intermediary logging.",
+          )
+          replace(
+              "docs/known-limitations.md",
+              "- **WAF request-target logging:** URI/query redaction and bounding remain under #127.\n",
+              "",
+          )
+          replace(
+              "SECURITY.md",
+              "- WAF request-target logging remains under query/URI redaction review; avoid credentials and personal data in URLs.",
+              "- WAF matched-rule warnings retain only a bounded/redacted path plus bounded rule metadata; raw queries, macro-expanded match messages, and request-target metric labels are omitted. Avoid credentials and personal data in URLs regardless of other application/intermediary logs.",
+          )
+          replace(
+              "CHANGELOG.md",
+              "### Security\n",
+              "### Security\n- **WAF matched-request log privacy (#127):** Coraza v3.7.0 exposes the full unparsed request URI and macro-expanded match message to callbacks. Jul.IA now logs only bounded rule metadata and a shared sanitized/redacted path, records whether query data was omitted, and never copies raw query values or macro-expanded matched data into ordinary WAF warnings or metric labels.\n",
+          )
+          PY
+
+          cat > internal/waf/logging_privacy_test.go <<'EOF'
+          // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+          // SPDX-License-Identifier: agpl
+
+          //go:build waf
+
+          package waf
+
+          import (
+          	"bytes"
+          	"context"
+          	"log/slog"
+          	"net/http"
+          	"net/http/httptest"
+          	"strings"
+          	"testing"
+
+          	"github.com/corazawaf/coraza/v3"
+          	corazahttp "github.com/corazawaf/coraza/v3/http"
+          	"github.com/corazawaf/coraza/v3/types"
+
+          	"jul/internal/config"
+          	"jul/internal/redact"
+          )
+
+          const privacyRule = `SecRule ARGS:token "@streq s3cr3t" "id:910001,phase:1,deny,status:403,log,msg:'token=%{ARGS.token}'"`
+
+          // TestCorazaMatchedRuleContainsFullRequestTargetAndExpandedMessage pins the
+          // behavior of the exact Coraza dependency linked by Jul.IA. It is the evidence
+          // for sanitizing at the integration boundary: URI contains the raw query and
+          // Message contains macro-expanded request data.
+          func TestCorazaMatchedRuleContainsFullRequestTargetAndExpandedMessage(t *testing.T) {
+          	var match types.MatchedRule
+          	w, err := coraza.NewWAF(coraza.NewWAFConfig().
+          		WithDirectives("SecRuleEngine On\n" + privacyRule + "\n").
+          		WithErrorCallback(func(mr types.MatchedRule) { match = mr }))
+          	if err != nil {
+          		t.Fatalf("coraza.NewWAF: %v", err)
+          	}
+
+          	h := corazahttp.WrapHandler(w, newOKHandler())
+          	rr := httptest.NewRecorder()
+          	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
+          		"/login?token=s3cr3t&api_key=also-secret", nil))
+
+          	if match == nil {
+          		t.Fatal("expected Coraza error callback to receive a matched rule")
+          	}
+          	if got := match.URI(); !strings.Contains(got, "?token=s3cr3t") {
+          		t.Fatalf("MatchedRule.URI() = %q; expected the full request target including query", got)
+          	}
+          	if got := match.Message(); !strings.Contains(got, "s3cr3t") {
+          		t.Fatalf("MatchedRule.Message() = %q; expected macro-expanded request data", got)
+          	}
+          }
+
+          func TestWAFStructuredLogIsPathOnlyBoundedAndSecretSafe(t *testing.T) {
+          	previous := redact.Global()
+          	redact.Install(redact.NewState([]string{"tenant-secret"}, 4))
+          	t.Cleanup(func() { redact.Install(previous) })
+
+          	for _, mode := range []string{"block", "detect"} {
+          		t.Run(mode, func(t *testing.T) {
+          			var out bytes.Buffer
+          			logger := slog.New(slog.NewJSONHandler(&out, nil))
+          			cfg := config.WAFConfig{
+          				Enabled:     true,
+          				Mode:        mode,
+          				InlineRules: privacyRule,
+          			}
+          			applyTestDefaults(&cfg)
+          			fw, err := New(context.Background(), cfg, Options{Logger: logger})
+          			if err != nil {
+          				t.Fatalf("New: %v", err)
+          			}
+
+          			h := fw.Middleware()(newOKHandler())
+          			rr := httptest.NewRecorder()
+          			h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
+          				"/accounts/tenant-secret?token=s3cr3t&api_key=also-secret&code=oauth-code", nil))
+
+          			if mode == "block" && rr.Code != http.StatusForbidden {
+          				t.Fatalf("block status = %d, want 403", rr.Code)
+          			}
+          			if mode == "detect" && rr.Code != http.StatusOK {
+          				t.Fatalf("detect status = %d, want 200", rr.Code)
+          			}
+
+          			logLine := out.String()
+          			for _, forbidden := range []string{
+          				"s3cr3t", "also-secret", "oauth-code", "tenant-secret",
+          				`"uri":`, `"message":`, "?token=", "api_key=", "code=",
+          			} {
+          				if strings.Contains(logLine, forbidden) {
+          					t.Errorf("structured WAF log contains forbidden value %q: %s", forbidden, logLine)
+          				}
+          			}
+          			for _, required := range []string{
+          				`"msg":"waf rule matched"`,
+          				`"rule_id":"910001"`,
+          				`"path":"/accounts/***"`,
+          				`"query_omitted":true`,
+          				`"phase":1`,
+          				`"mode":"` + mode + `"`,
+          			} {
+          				if !strings.Contains(logLine, required) {
+          					t.Errorf("structured WAF log missing %q: %s", required, logLine)
+          				}
+          			}
+          		})
+          	}
+          }
+
+          func TestWAFStructuredLogBoundsAttackerControlledPath(t *testing.T) {
+          	var out bytes.Buffer
+          	logger := slog.New(slog.NewJSONHandler(&out, nil))
+          	cfg := config.WAFConfig{
+          		Enabled:     true,
+          		Mode:        "detect",
+          		InlineRules: privacyRule,
+          	}
+          	applyTestDefaults(&cfg)
+          	fw, err := New(context.Background(), cfg, Options{Logger: logger})
+          	if err != nil {
+          		t.Fatalf("New: %v", err)
+          	}
+
+          	longSegment := strings.Repeat("a", 4096)
+          	h := fw.Middleware()(newOKHandler())
+          	rr := httptest.NewRecorder()
+          	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
+          		"/"+longSegment+"?token=s3cr3t", nil))
+          	if rr.Code != http.StatusOK {
+          		t.Fatalf("status = %d, want 200", rr.Code)
+          	}
+
+          	logLine := out.String()
+          	if strings.Contains(logLine, longSegment) {
+          		t.Fatalf("structured WAF log retained unbounded path: %d bytes", len(logLine))
+          	}
+          	if strings.Contains(logLine, "s3cr3t") {
+          		t.Fatalf("structured WAF log retained query secret: %s", logLine)
+          	}
+          	if len(logLine) > 1024 {
+          		t.Fatalf("structured WAF log = %d bytes, expected a bounded event", len(logLine))
+          	}
+          }
+          EOF
+
+          gofmt -w \
+            internal/observability/request_samples.go \
+            internal/observability/logtail.go \
+            internal/observability/route_failures.go \
+            internal/observability/operational_test.go \
+            internal/waf/firewall.go \
+            internal/waf/logging_privacy_test.go
+
+      - name: Validate focused implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -tags "waf" ./internal/waf ./internal/observability
+          go test -race -p 2 -tags "waf console" ./internal/waf ./internal/observability ./internal/admin
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Commit target branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md SECURITY.md docs/ internal/observability/ internal/waf/
+          git commit -m "security: bound and redact WAF matched-request logs"
+          git push origin HEAD:agent/waf-log-privacy-127
