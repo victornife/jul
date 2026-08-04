@@ -1,0 +1,43 @@
+name: Export exact #123 head for #124
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'automation/export-123-head-for-124'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact #123 implementation head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: agent/config-known-values-123
+          fetch-depth: 0
+
+      - name: Verify source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          expected="518920dde97574bc1923ddcfe457b249f2d06ed5"
+          echo "head=${actual}"
+          test "${actual}" = "${expected}"
+          test -z "$(git status --short)"
+
+      - name: Package repository source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git -czf /tmp/jul-123-head-source.tar.gz .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: jul-123-head-source
+          path: /tmp/jul-123-head-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
