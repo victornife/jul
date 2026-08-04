@@ -125,14 +125,32 @@ func TestAcmeDomainsForAddr(t *testing.T) {
 	}
 }
 
-func TestListenerNextProtosAdvertisesACMEALPN(t *testing.T) {
-	// With an ACME manager and an acme-enabled address, acme-tls/1 is offered
-	// first so the TLS-ALPN-01 challenge can be answered on the listener.
-	s := &Server{cfg: acmeServerCfg(), ACME: &fakeACME{}}
-	got := s.listenerNextProtos(":443")
-	want := []string{"acme-tls/1", "h2", "http/1.1"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("acme-enabled NextProtos = %v, want %v", got, want)
+func TestListenerNextProtosRespectsACMEChallenge(t *testing.T) {
+	cfg := acmeServerCfg()
+	s := &Server{cfg: cfg, ACME: &fakeACME{}}
+
+	// HTTP-01 must not expose the reserved TLS-ALPN challenge protocol.
+	if got, want := s.listenerNextProtos(":443"), []string{"h2", "http/1.1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("http-01 NextProtos = %v, want %v", got, want)
+	}
+
+	// TLS-ALPN-01 advertises the reserved protocol first so autocert can serve
+	// the challenge certificate while ordinary clients continue to negotiate
+	// h2 or HTTP/1.1.
+	cfg.Servers[0].TLS.ACME.Challenge = "tls-alpn-01"
+	if got, want := s.listenerNextProtos(":443"), []string{"acme-tls/1", "h2", "http/1.1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("tls-alpn-01 NextProtos = %v, want %v", got, want)
+	}
+}
+
+func TestAcmeChallengeForAddrDefaultsToHTTP01(t *testing.T) {
+	cfg := acmeServerCfg()
+	cfg.Servers[0].TLS.ACME.Challenge = ""
+	if got := acmeChallengeForAddr(cfg.Servers, ":443"); got != "http-01" {
+		t.Fatalf("challenge = %q, want http-01", got)
+	}
+	if got := acmeChallengeForAddr(cfg.Servers, ":8443"); got != "" {
+		t.Fatalf("non-ACME address challenge = %q, want empty", got)
 	}
 }
 
