@@ -1,0 +1,54 @@
+name: Trigger PR 166 strategy rebuild
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    if: github.head_ref == 'automation/rebuild-pr166'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out preserved PR branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: docs/core-gateway-completeness
+          fetch-depth: 0
+
+      - name: Load and run the reviewed strategy rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/rebuild-pr166
+          git show origin/automation/rebuild-pr166:.github/workflows/rebuild-pr166.yml > /tmp/rebuild-source.yml
+          python3 - <<'PYEXTRACT'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('/tmp/rebuild-source.yml').read_text(encoding='utf-8')
+          name = '      - name: Restore reviewed strategy layer and apply final refinements\n'
+          section = source.index(name)
+          marker = '        run: |\n'
+          start = source.index(marker, section) + len(marker)
+          end = source.index('\n      - name: Validate strategy documentation\n', start)
+          script = textwrap.dedent(source[start:end])
+          Path('/tmp/rebuild-pr166.sh').write_text(script, encoding='utf-8')
+          PYEXTRACT
+          bash /tmp/rebuild-pr166.sh
+
+      - name: Validate strategy documentation
+        run: |
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Commit rebuilt PR branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md CHANGELOG.md docs/
+          git commit -m "docs: define operating model and core completeness"
+          git push origin HEAD:docs/core-gateway-completeness
