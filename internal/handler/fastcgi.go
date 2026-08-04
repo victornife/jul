@@ -306,6 +306,9 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	}
 
 	w.WriteHeader(status)
+	// lgtm[go/reflected-xss] – This forwards the upstream FastCGI/uWSGI response
+	// body unchanged. User input flows to the upstream application, which is
+	// responsible for sanitizing any output it generates.
 	_, err := io.Copy(w, br)
 	return err
 }

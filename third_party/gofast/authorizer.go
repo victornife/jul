@@ -3,6 +3,7 @@ package gofast
 import (
 	"bytes"
 	"fmt"
+	"html"
 	"io"
 	"io/ioutil"
 	"log"
@@ -75,7 +76,7 @@ func (ar Authorizer) Wrap(inner http.Handler) http.Handler {
 		if err != nil {
 			w.Header().Add("Content-Type", "text/html; charset=utf8")
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "%s", err)
+			fmt.Fprint(w, html.EscapeString(err.Error()))
 			return
 		}
 
@@ -84,7 +85,7 @@ func (ar Authorizer) Wrap(inner http.Handler) http.Handler {
 		if err != nil {
 			w.Header().Add("Content-Type", "text/html; charset=utf8")
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "unable to connect to authorizer: %s", err)
+			fmt.Fprintf(w, "unable to connect to authorizer: %s", html.EscapeString(err.Error()))
 			return
 		}
 
@@ -93,7 +94,7 @@ func (ar Authorizer) Wrap(inner http.Handler) http.Handler {
 		if err != nil {
 			w.Header().Add("Content-Type", "text/html; charset=utf8")
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "error with authorizer request: %s", err)
+			fmt.Fprintf(w, "error with authorizer request: %s", html.EscapeString(err.Error()))
 			return
 		}
 
@@ -123,7 +124,7 @@ func (ar Authorizer) Wrap(inner http.Handler) http.Handler {
 			if ew.Len() > 0 {
 				w.Header().Add("Content-Type", "text/html; charset=utf8")
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "error reading authorizer response: %s", err)
+				fmt.Fprintf(w, "error reading authorizer response: %s", html.EscapeString(err.Error()))
 				log.Printf("gofast: error stream from application process %s",
 					ew.String())
 				return
