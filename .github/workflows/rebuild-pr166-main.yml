@@ -9,6 +9,8 @@ permissions:
 
 jobs:
   rebuild:
+    # This helper is isolated and is never merged; it preserves PR #166 while
+    # rebuilding its target branch from the clean #165 layer.
     if: github.head_ref == 'automation/rebuild-pr166'
     runs-on: ubuntu-latest
     steps:
