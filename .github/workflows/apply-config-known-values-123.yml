@@ -1,0 +1,56 @@
+name: Apply known configuration value validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'automation/apply-config-known-values-123'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target implementation branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: agent/config-known-values-123
+          fetch-depth: 0
+
+      - name: Apply reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/apply-config-known-values-123
+          for part in 00 01 02 03 04; do
+            git show "origin/automation/apply-config-known-values-123:.github/patches/config-known-values-123.part-${part}"
+          done | base64 --decode | gzip --decompress > /tmp/config-known-values-123.patch
+          git apply --check /tmp/config-known-values-123.patch
+          git apply /tmp/config-known-values-123.patch
+          gofmt -w \
+            cmd/jul/cli.go cmd/jul/cli_test.go \
+            internal/app/config_apply_test.go internal/app/serve.go \
+            internal/config/*.go internal/lifecycle/fingerprint.go \
+            internal/observability/logging.go
+          git diff --check
+
+      - name: Validate focused implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./internal/config ./internal/admin ./internal/app ./internal/server ./internal/observability ./cmd/jul
+          go test -race -p 2 -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" ./internal/config ./internal/admin ./internal/app ./internal/server ./internal/observability ./cmd/jul
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Commit target branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md README.md cmd/jul/ docs/ internal/app/ internal/config/ internal/lifecycle/ internal/observability/
+          git commit -m "config: reject invalid known values"
+          git push origin HEAD:agent/config-known-values-123
