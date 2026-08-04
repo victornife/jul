@@ -31,14 +31,54 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("internal/config/lint.go")
-          text = path.read_text(encoding="utf-8")
-          text = text.replace('\t"strings"\n', '')
-          path.write_text(text, encoding="utf-8")
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              if text.count(old) != 1:
+                  raise SystemExit(f"{path}: expected one match, found {text.count(old)}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          # The worker_threads lint block was promoted to authoritative
+          # validation, leaving its old strings import unused.
+          replace_once("internal/config/lint.go", '\t"strings"\n', "")
+
+          # Explicit negative cache values are invalid even while the cache is
+          # dormant; enablement only gates active cross-field requirements.
+          replace_once(
+              "internal/config/validate.go",
+              '\terrs = append(errs, validateAdminValues(c.Admin)...)\n\n\tif c.Admin.Enabled {',
+              '\terrs = append(errs, validateAdminValues(c.Admin)...)\n\terrs = append(errs, validateCacheValues(c.Cache)...)\n\n\tif c.Admin.Enabled {',
+          )
+
+          # Preserve the established substring consumed by the pre-existing
+          # redirect_https regression test while keeping the supplied value.
+          replace_once(
+              "internal/config/validate_values.go",
+              'errs = append(errs, fmt.Errorf("%s.redirect_https: %d must be 301 or 308 (0 disables redirect)", where, c.RedirectHTTPS))',
+              'errs = append(errs, fmt.Errorf("%s.redirect_https must be 301 or 308 (0 disables redirect), got %d", where, c.RedirectHTTPS))',
+          )
+
+          # The preflight immutability test needs a real secret-bearing string
+          # field. worker_threads now correctly rejects non-grammar values.
+          replace_once(
+              "internal/app/preflight_test.go",
+              'cfg := &config.Config{\n\t\tGlobal: config.GlobalConfig{WorkerThreads: "${env:PREFLIGHT_SECRET}"},\n\t\tServers: []config.ServerConfig{{',
+              'cfg := &config.Config{\n\t\tAdmin: config.AdminConfig{Token: "${env:PREFLIGHT_SECRET}"},\n\t\tServers: []config.ServerConfig{{',
+          )
+          replace_once(
+              "internal/app/preflight_test.go",
+              '\tif cand.Effective.Global.WorkerThreads != "preflight-secret-value" {\n\t\tt.Fatalf("candidate effective worker_threads = %q, want resolved secret", cand.Effective.Global.WorkerThreads)\n\t}',
+              '\tif cand.Effective.Admin.Token != "preflight-secret-value" {\n\t\tt.Fatalf("candidate effective admin token = %q, want resolved secret", cand.Effective.Admin.Token)\n\t}',
+          )
+          replace_once(
+              "internal/app/preflight_test.go",
+              '\tif cand.Raw.Global.WorkerThreads != "${env:PREFLIGHT_SECRET}" {\n\t\tt.Fatalf("candidate raw worker_threads = %q, want original reference", cand.Raw.Global.WorkerThreads)\n\t}',
+              '\tif cand.Raw.Admin.Token != "${env:PREFLIGHT_SECRET}" {\n\t\tt.Fatalf("candidate raw admin token = %q, want original reference", cand.Raw.Admin.Token)\n\t}',
+          )
           PY
           gofmt -w \
             cmd/jul/cli.go cmd/jul/cli_test.go \
-            internal/app/config_apply_test.go internal/app/serve.go \
+            internal/app/config_apply_test.go internal/app/preflight_test.go internal/app/serve.go \
             internal/config/*.go internal/lifecycle/fingerprint.go \
             internal/observability/logging.go
           git diff --check
