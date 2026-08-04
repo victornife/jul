@@ -29,13 +29,14 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path: str, old: str, new: str) -> None:
+          def replace_prefixed_line(path: str, prefix: str, replacement: str) -> None:
               p = Path(path)
-              text = p.read_text(encoding="utf-8")
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one match, found {count}")
-              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+              lines = p.read_text(encoding="utf-8").splitlines()
+              matches = [i for i, line in enumerate(lines) if line.startswith(prefix)]
+              if len(matches) != 1:
+                  raise SystemExit(f"{path}: expected one line starting {prefix!r}, found {len(matches)}")
+              lines[matches[0]] = replacement
+              p.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
           def remove_prefixed_lines(path: str, prefixes: tuple[str, ...]) -> None:
               p = Path(path)
@@ -50,8 +51,7 @@ jobs:
               marker = "### Fixed\n"
               if marker not in text:
                   raise SystemExit("CHANGELOG.md: missing Fixed section")
-              text = text.replace(marker, marker + entry, 1)
-              changelog.write_text(text, encoding="utf-8")
+              changelog.write_text(text.replace(marker, marker + entry, 1), encoding="utf-8")
 
           remove_prefixed_lines(
               "docs/known-limitations.md",
@@ -61,51 +61,84 @@ jobs:
               ),
           )
 
-          replace_once(
-              "docs/roadmap/README.md",
-              "| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | 🚧 audit merged; #165/#166 finalization |",
-              "| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | ✅ #165/#166 merged |",
-          )
-          replace_once(
-              "docs/roadmap/README.md",
-              "| **1 — Immediate correctness** | Remaining known-value validation, access-log semantics, metrics, WAF privacy and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 partially complete |",
-              "| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 #123/#126/#127 complete; #124 and cache remain |",
-          )
-          replace_once(
-              "docs/roadmap/README.md",
-              "v1.32.1-rc.1 — unpublished draft release-candidate checkpoint\n    ↓\n#123 — reject invalid known configuration values\n    ↓\n#124 — explicit access-log enablement\n    ↓\n#127 — WAF request-target logging\n    ↓\n#131 → #133 / #132 → #134 — cache correctness and recertification",
-              "v1.32.1-rc.1 — unpublished draft release-candidate checkpoint\n    ↓\n#124 — explicit access-log enablement\n    ↓\n#131 → #133 / #132 → #134 — cache correctness and recertification",
-          )
-          replace_once(
-              "docs/roadmap/README.md",
+          roadmap_path = Path("docs/roadmap/README.md")
+          roadmap = roadmap_path.read_text(encoding="utf-8")
+          lines = roadmap.splitlines()
+
+          for idx, line in enumerate(lines):
+              if line.startswith("| **0 — Programme and truth**"):
+                  lines[idx] = "| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | ✅ #165/#166 merged |"
+              elif line.startswith("| **1 — Immediate correctness**"):
+                  lines[idx] = "| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 #123/#126/#127 complete; #124 and cache remain |"
+
+          roadmap = "\n".join(lines) + "\n"
+          heading = "## Immediate critical path\n\n"
+          start = roadmap.index(heading) + len(heading)
+          fence_start = roadmap.index("```text\n", start)
+          fence_end = roadmap.index("```\n", fence_start) + len("```\n")
+          final_path = """```text
+#165 — canonical current product truth
+    ↓
+#166 — operating model, roadmap v2.0 and completeness boundary
+    ↓
+v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
+    ↓
+#124 — explicit access-log enablement
+    ↓
+#131 → #133 / #132 → #134 — cache correctness and recertification
+    ↓
+#89 — closed-world lifecycle authority
+    ↓
+#77 → #82 — Phase 5 structured configuration
+    ↓
+#115 → #118 — core architecture decisions
+    ↓
+selected core implementations
+```
+"""
+          roadmap = roadmap[:fence_start] + final_path + roadmap[fence_end:]
+
+          paragraph_variants = (
               "#127 may proceed independently while it does not overlap the active shared\nconfiguration or cache work. Shared edits to the configuration schema, lifecycle,\ncomposition root, reload transaction, or Console patch contracts remain serial.",
+              "#126 and #127 may proceed in parallel when they do not overlap the active shared\nconfiguration or cache work. Shared edits to the configuration schema, lifecycle,\ncomposition root, reload transaction, or Console patch contracts remain serial.",
               "#124 is the remaining shared configuration-schema correction before lifecycle\ngeneration and Phase 5. Shared edits to the configuration schema, lifecycle,\ncomposition root, reload transaction, or Console patch contracts remain serial.",
           )
-          completed_marker = "- Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).\n"
-          completed_addition = (
-              "- Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).\n"
-              "- Path-only, bounded WAF matched-request logging with query and macro-expanded request data omitted (#127).\n"
-          )
-          roadmap = Path("docs/roadmap/README.md")
-          text = roadmap.read_text(encoding="utf-8")
-          if completed_addition not in text:
-              if completed_marker not in text:
-                  raise SystemExit("docs/roadmap/README.md: missing completed marker")
-              text = text.replace(completed_marker, completed_marker + completed_addition, 1)
-          text = text.replace("- Reject invalid known enum, duration, worker and scalar values (#123).\n", "")
-          text = text.replace("- Bound/redact WAF matched request-target logging (#127).\n", "")
-          roadmap.write_text(text, encoding="utf-8")
+          final_paragraph = "#124 is the remaining shared configuration-schema correction before lifecycle\ngeneration and Phase 5. Shared edits to the configuration schema, lifecycle,\ncomposition root, reload transaction, or Console patch contracts remain serial."
+          found = [variant for variant in paragraph_variants if variant in roadmap]
+          if len(found) != 1:
+              raise SystemExit(f"docs/roadmap/README.md: expected one critical-path paragraph variant, found {len(found)}")
+          roadmap = roadmap.replace(found[0], final_paragraph, 1)
 
-          replace_once(
+          completed_marker = "- Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).\n"
+          additions = (
+              "- Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).\n",
+              "- Path-only, bounded WAF matched-request logging with query and macro-expanded request data omitted (#127).\n",
+          )
+          insertion = "".join(item for item in additions if item not in roadmap)
+          if insertion:
+              if completed_marker not in roadmap:
+                  raise SystemExit("docs/roadmap/README.md: missing completed metric marker")
+              roadmap = roadmap.replace(completed_marker, completed_marker + insertion, 1)
+          roadmap = roadmap.replace("- Reject invalid known enum, duration, worker and scalar values (#123).\n", "")
+          roadmap = roadmap.replace("- Bound/redact WAF matched request-target logging (#127).\n", "")
+          roadmap_path.write_text(roadmap, encoding="utf-8")
+
+          replace_prefixed_line(
               "docs/status.md",
-              "- **Configuration lifecycle:** strict unknown-field decoding is merged; invalid known values (#123), explicit access-log enablement (#124) and closed-world lifecycle generation (#89) remain open.",
+              "- **Configuration lifecycle:**",
               "- **Configuration lifecycle:** strict unknown-field decoding and fail-closed known-value validation are merged, release pending; explicit access-log enablement (#124) and closed-world lifecycle generation (#89) remain open.",
           )
-          replace_once(
-              "docs/status.md",
-              "- **Prometheus contract:** the exact `v1.32.0` name/type/help/label surface is preserved and CI-frozen; current additive egress/reload/managed-apply families are documented as release-pending. WAF request-target redaction review (#127) remains open.",
-              "- **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen, additive families are release-pending, and WAF matched-request warnings are now path-only and bounded with query/request-derived message data omitted.",
+          prometheus_prefixes = (
+              "- **Prometheus contract:**",
+              "- **Prometheus and WAF logging:**",
           )
+          status_path = Path("docs/status.md")
+          status_lines = status_path.read_text(encoding="utf-8").splitlines()
+          matches = [i for i, line in enumerate(status_lines) if line.startswith(prometheus_prefixes)]
+          if len(matches) != 1:
+              raise SystemExit(f"docs/status.md: expected one Prometheus/WAF line, found {len(matches)}")
+          status_lines[matches[0]] = "- **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen, additive families are release-pending, and WAF matched-request warnings are now path-only and bounded with query/request-derived message data omitted."
+          status_path.write_text("\n".join(status_lines) + "\n", encoding="utf-8")
           PY
 
           gofmt -w \
