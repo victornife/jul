@@ -1,0 +1,288 @@
+name: Rebuild PR 165 documentation branch
+
+on:
+  push:
+    branches: [automation/rebuild-pr165]
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out preserved PR branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: docs/current-product-truth
+          fetch-depth: 0
+
+      - name: Apply canonical current-product-truth edits
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def load(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def save(path, text):
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace_once(path, old, new):
+              text = load(path)
+              if text.count(old) != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {text.count(old)}")
+              save(path, text.replace(old, new, 1))
+
+          def sub_once(path, pattern, repl, flags=0):
+              text = load(path)
+              updated, count = re.subn(pattern, repl, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one regex match, found {count}: {pattern}")
+              save(path, updated)
+
+          def insert_before(path, marker, block):
+              text = load(path)
+              if text.count(marker) != 1:
+                  raise SystemExit(f"{path}: expected one marker, found {text.count(marker)}: {marker}")
+              save(path, text.replace(marker, block + marker, 1))
+
+          # README: current product description, programme pointer and factual feature rows.
+          sub_once(
+              "README.md",
+              r"\*\*Jul\.IA\*\* is an NGINX-inspired HTTP edge server written in Go and configured\nentirely through TOML\. It bundles reverse-proxying with load balancing, static\nfile serving, FastCGI/uWSGI application gateways, a two-tier response cache, TLS\ntermination, hot configuration reload, and a built-in admin/observability\ninterface — all in a single static, dependency-free binary\.",
+              "**Jul.IA** is a self-contained edge and protocol gateway written in Go and\nconfigured through TOML. It combines reverse proxying, load balancing, static\nserving, FastCGI/uWSGI, HTTP and gRPC gateway behavior, optional L4 proxying,\nTLS/mTLS, policy, observability, configuration lifecycle, and an embedded\noperations Console in a single static, dependency-free binary.",
+          )
+          sub_once(
+              "README.md",
+              r"> Where this is headed:.*?> travels through modern edge infrastructure, from first principles\.",
+              "> Current direction and sequencing are governed by the\n> [combined repository audit](docs/audit/combined-audit-2026-08-03.md) and the\n> [master programme](https://github.com/victornife/jul/issues/62). The durable\n> product direction remains in the [vision](docs/vision/), [roadmap](docs/roadmap/),\n> [engineering specs](docs/specs/), and [ADRs](docs/adr/). The permanent\n> OSS/open-core boundary is defined in\n> [ADR 0012](docs/adr/0012-oss-open-core-boundary.md).\n>\n> New to HTTP, proxies, TLS, caching, or observability? The\n> [concepts appendix](docs/vision/appendix.md) walks through how a request travels\n> through modern edge infrastructure from first principles.",
+              flags=re.S,
+          )
+          sub_once(
+              "README.md",
+              r"> \*\*Delivery state ≠ maturity\.\*\*.*?\[2026-07-31 repository audit\]\(docs/audit/2026-07-31-full-repository-audit\.md\)\)\.",
+              "> **Delivery state ≠ maturity.** \"GA\" describes the released maturity\n> contract; changes merged to `main` but not yet tagged remain under\n> [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]`. The current correction tranche\n> has merged strict unknown-field rejection, HTTP/3 mTLS parity, compression\n> `no-transform`, exclusive ACME challenge selection, dependency and CI fixes.\n> The response cache remains under a documented correctness recertification; see\n> [`docs/cache.md`](docs/cache.md), [`docs/status.md`](docs/status.md), and the\n> [combined audit](docs/audit/combined-audit-2026-08-03.md).",
+              flags=re.S,
+          )
+          replace_once(
+              "README.md",
+              "| **Response cache** | Two-tier (in-memory + optional disk overflow) cache with TTL, `stale-while-revalidate`, and admin purge |",
+              "| **Response cache** | Two-tier (in-memory + optional disk overflow) cache with TTL, `stale-while-revalidate`, and admin purge; currently under correctness recertification — see [docs/cache.md](docs/cache.md) |",
+          )
+          replace_once(
+              "README.md",
+              "| **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecar serving for static files |",
+              "| **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, `Cache-Control: no-transform`, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecars |",
+          )
+          replace_once(
+              "README.md",
+              "| **Automatic HTTPS** | ACME (Let's Encrypt) certificate issuance and auto-renewal via the HTTP-01 challenge, on-disk cache — opt-in `acme` build tag |",
+              "| **Automatic HTTPS** | ACME certificate issuance and auto-renewal using the configured exclusive HTTP-01 or TLS-ALPN-01 challenge, with on-disk account/certificate cache — opt-in `acme` build tag |",
+          )
+          replace_once(
+              "README.md",
+              "| **HTTP/3** | HTTP/3 over QUIC on the same address (UDP), sharing the server's TLS certificates (static or ACME, including reloads), advertised to clients via an `Alt-Svc` header — opt-in `http3` build tag |",
+              "| **HTTP/3** | HTTP/3 over QUIC on the same address (UDP), sharing the complete server TLS/mTLS policy and certificate provider, advertised through `Alt-Svc`; static certificate-file changes remain restart-bound — opt-in `http3` build tag |",
+          )
+          sub_once(
+              "README.md",
+              r"\| \*\*Admin GUI\*\* \| Loopback-bound web console.*?\|",
+              "| **Admin GUI** | Loopback-bound web console with live metrics, upstream/certificate status, config history and rollback, setup and structured editors. Legacy shared-token mode remains available; opt-in local multi-principal RBAC with predefined/custom roles, scoped revocable tokens and per-principal audit attribution is shipped (`console` build tag). External OIDC/SAML/SCIM identity is not shipped. |",
+          )
+
+          # Changelog: record the merged correction tranche and current dependency floor.
+          replace_once(
+              "CHANGELOG.md",
+              "### Changed\n",
+              "### Changed\n- **Current product-truth reconciliation (2026-08-04):** aligned README, security, status, configuration, observability, deployment, cache, reload, WAF and known-limitations documentation with the merged runtime and the remaining audited correction work.\n",
+          )
+          replace_once(
+              "CHANGELOG.md",
+              "### Security\n",
+              "### Security\n- **HTTP/3 mTLS parity:** QUIC listeners now clone the complete prepared sibling TCP TLS policy, preserving client-auth mode, CA verification, SAN/CRL checks, result hooks and verified client identity.\n- **Strict configuration decoding:** genuinely unknown TOML fields now fail immediately across the canonical parser; the documented singular `server_name` compatibility alias is canonicalized and conflicts with `server_names` are rejected.\n- **CodeQL reflected-output hardening:** FastCGI authorizer error strings are HTML-escaped and the deliberate upstream-response forwarding boundary is documented.\n",
+          )
+          replace_once(
+              "CHANGELOG.md",
+              "### Fixed\n",
+              "### Fixed\n- **ACME challenge selection:** HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface while preserving normal HTTP/TLS routing.\n- **Compression transformation contract:** request or response `Cache-Control: no-transform` now bypasses dynamic gzip/Brotli/Zstandard compression.\n- **HTTP/3 UDP preflight test:** the success path uses OS-assigned TCP/UDP ephemeral ports instead of reusing a released TCP port on Windows.\n",
+          )
+          text = load("CHANGELOG.md")
+          text = text.replace("`brace-expansion` → 5.0.8", "`brace-expansion` → 5.0.9")
+          save("CHANGELOG.md", text)
+
+          # Cache: preserve the detailed guide but make current evidence truthful.
+          replace_once(
+              "docs/cache.md",
+              "Cacheability follows standard HTTP semantics\n(`Cache-Control`, `Expires`, `Vary`), so an upstream stays in control of what may\nbe stored and for how long.\n",
+              "Cacheability is designed around standard HTTP semantics (`Cache-Control`,\n`Expires`, `Vary`), but the shared-cache contract is currently under active\nrecertification. The historical behavior matrix below is not complete release\nevidence until #107 and #131–#134 close.\n",
+          )
+          replace_once(
+              "docs/cache.md",
+              "## Behaviour matrix\n\nThe cache's behaviour for each major scenario:\n",
+              "## Historical behaviour matrix — under recertification\n\nThe table records the intended and previously documented behavior. Rows covering\nbackground revalidation ownership, shared-entry immutability, `no-cache`,\n`must-revalidate`/`proxy-revalidate`, authenticated reuse, unsafe-method\ninvalidation, `304` metadata, Range requests and upgrade transparency are being\nrevalidated and corrected by #107 and #131–#134. Do not treat an unchecked\ninteraction as a current conformance guarantee.\n",
+          )
+          insert_before(
+              "docs/cache.md",
+              "## Freshness and stale-while-revalidate\n",
+              "## Current correction contract\n\nThe active cache programme requires:\n\n- generation-owned, cancellable background revalidation;\n- immutable published entries and race-free metadata replacement;\n- synchronous validation for request/response `no-cache`;\n- correct `must-revalidate`, `proxy-revalidate`, authenticated reuse, unsafe-method invalidation and `304` metadata handling;\n- initial bypass for requests carrying `Range` or `If-Range` (cached byte-range serving remains a future enhancement);\n- transparent WebSocket/`101`, SSE and optional `http.ResponseWriter` interface behavior.\n\nUntil that programme closes, avoid cache on upgrade routes and treat authenticated or user-specific responses conservatively (`private`/`no-store`).\n\n",
+          )
+          replace_once(
+              "docs/cache.md",
+              "## GA status\n",
+              "## GA status — recertification open\n\nThe feature retains its historical release record, but the current correctness findings reopen its conformance evidence. #134 must publish the corrected executable matrix, race/protocol evidence, benchmarks, soak result and final maturity/status decision before the cache is described as recertified.\n\n",
+          )
+          text = load("docs/cache.md")
+          text = text.replace("| 1 — Conformance / behaviour matrix | ✅ | 14-row matrix above (key, Vary, TTL, status codes, conditional requests, eviction) |", "| 1 — Conformance / behaviour matrix | ⚠️ recertification open | #107 and #131–#134 own the corrected executable matrix |")
+          save("docs/cache.md", text)
+
+          # Configuration: document strict parsing and legacy no-op log fields.
+          insert_before(
+              "docs/configuration.md",
+              "---\n\n## `[global]`\n",
+              "---\n\n## Strict TOML decoding and compatibility aliases\n\nJul.IA rejects unknown TOML fields in every path that uses the canonical parser. A misspelled security, routing, TLS or policy key is a fatal configuration error rather than a silent no-op. Errors include contextual field information where the TOML decoder exposes it.\n\nThe historical singular `server_name` key remains the one documented compatibility alias: it is accepted, canonicalized immediately to `server_names`, and never emitted by `jul fmt`/marshal. Setting both forms is rejected. Known fields with invalid enum, duration, worker or scalar values are tracked separately by #123 and must not be assumed fully strict until that issue closes.\n\n",
+          )
+          replace_once(
+              "docs/configuration.md",
+              "| `access_log` / `error_log` | string | Log destinations |",
+              "| `access_log` / `error_log` | string | Deprecated compatibility fields; accepted but ignored by the current runtime. Configure access records under `[observability.access_log]`; application logs use the process logger. |",
+          )
+          replace_once(
+              "docs/configuration.md",
+              "Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`, `512m`, etc.\n",
+              "The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They do not cause a restart or select a sink. Access-log enablement remains explicit follow-up #124; until then an empty sink list is not a supported disable contract.\n\nDurations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`, `512m`, etc.\n",
+          )
+
+          # Deployment: remove the incorrect empty-sink disable instruction.
+          replace_once(
+              "docs/deployment.md",
+              "  Or suppress access logs entirely for a soak or benchmark run:\n  ```toml\n  [observability.access_log]\n  sinks = []\n  ```\n",
+              "  Jul.IA does not yet expose an explicit access-log disable switch. Do not use\n  `sinks = []` as an off setting: the current defaulting path restores the\n  default stdout sink. #124 adds an explicit `enabled` field; until that lands,\n  use a dedicated sink and control retention at the deployment/log-driver layer.\n",
+          )
+
+          # Known limitations: distinguish current defects from deliberate scope.
+          sub_once(
+              "docs/known-limitations.md",
+              r"This page aggregates.*?Nothing here is a correctness bug — these are explicit, bounded scope\ndecisions\. The maturity bar \(ADR 0003\) requires limitations to be documented\nbefore a feature is labelled GA; this page is the consolidated index\.\n",
+              "This page aggregates both deliberate product limitations and current known\ncorrectness/contract defects. A historical GA label does not make an open\nregression harmless or already fixed. The\n[combined audit](audit/combined-audit-2026-08-03.md) and linked issues own the\ncurrent remediation state; stable feature guides remain the detailed operational\nreferences.\n",
+              flags=re.S,
+          )
+          insert_before(
+              "docs/known-limitations.md",
+              "---\n\n## Configuration reload",
+              "## Current defects and recertification work\n\n- **Response cache:** generation ownership, immutable entries, shared-cache semantics, invalidation, `304` metadata, Range bypass and protocol-transparent wrappers are being corrected under #107 and #131–#134.\n- **Known-value validation:** unknown TOML fields now fail, while invalid known enum/duration/worker/scalar values remain under #123.\n- **Access-log disablement:** `sinks = []` is not a supported off switch; explicit `enabled` semantics are owned by #124.\n- **Prometheus compatibility:** collector names/labels and the released reference are being reconciled by #126.\n- **WAF request-target logging:** URI/query redaction and bounding remain under #127.\n- **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.\n- **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.\n\n---\n\n",
+          )
+          replace_once(
+              "docs/known-limitations.md",
+              "- **No RBAC or scope enforcement.** Claims are forwarded downstream; the\n  upstream service is responsible for authorization logic.\n",
+              "- **Application authorization remains upstream-owned.** Route authentication forwards validated identity/claims but does not implement arbitrary application scopes. The admin control plane separately ships opt-in local named-principal RBAC; external OIDC/SAML/SCIM identity is not available.\n",
+          )
+          replace_once(
+              "docs/known-limitations.md",
+              "- **IP spoofing.** IP-keyed limiting trusts `RemoteAddr`; operators behind a\n  trusted reverse proxy should key on a trusted header (e.g. `X-Real-IP`).\n",
+              "- **Trusted-proxy identity is not yet first-class.** IP-keyed limiting uses the direct transport peer. Do not switch security identity to an arbitrary forwarding header; canonical trusted-proxy chain handling is tracked by #115, #135 and #136.\n",
+          )
+
+          # Observability: make metrics and access-log gaps explicit.
+          insert_before(
+              "docs/observability.md",
+              "### HTTP request metrics\n",
+              "> **Metric compatibility notice:** #126 is reconciling the last released\n> Prometheus names/labels with current collectors and this reference. Keep\n> dashboards and alerts pinned to the released contract until that issue closes;\n> destination, path, identity and raw error values must not become labels.\n\n",
+          )
+          insert_before(
+              "docs/observability.md",
+              "### Access-log fields\n",
+              "> **Disablement notice:** an omitted sink list uses the default stdout sink,\n> and `sinks = []` is not a supported off switch. #124 introduces an explicit\n> `enabled` contract. The legacy global/per-server destination fields are\n> compatibility no-ops.\n\n",
+          )
+
+          # Security posture: correct admin state and add explicit trust-boundary gaps.
+          sub_once(
+              "docs/security-posture.md",
+              r"### Current state \(single shared token\).*?### Console RBAC \(HP-02 / ADR 0010\) — delivered \(opt-in\)",
+              "### Current state\n\nJul.IA supports two local admin authentication modes:\n\n| Mode | Authentication and authorization | Attribution |\n| --- | --- | --- |\n| Legacy shared token (default) | One bearer token with full control-plane access | Legacy operator identity; no per-person attribution |\n| Opt-in `[admin.rbac]` | Named principals, predefined/custom roles, scoped revocable token hashes and deny-by-default route permissions | Principal, role and public token ID in audit/status projections |\n\nThe shared token remains a bootstrap/compatibility mode, not the only shipped\nmodel. External OIDC/SAML/SCIM identity and browser login flows are not shipped.\nAdmin token rotation is tracked by the selected runtime-dynamics issue #95; use\nthe lifecycle result returned by the running server rather than assuming every\nadmin setting is already live-applicable.\n\n### Console RBAC (HP-02 / ADR 0010) — delivered (opt-in)",
+              flags=re.S,
+          )
+          insert_before(
+              "docs/security-posture.md",
+              "## SSRF posture\n",
+              "## Current trust-boundary limitations\n\n- **Forwarded client identity:** the direct socket peer remains authoritative. Jul.IA does not yet provide a complete trusted-proxy CIDR/chain model for `Forwarded` and `X-Forwarded-For`; do not let arbitrary request headers redefine CIDR or rate-limit identity.\n- **Backend peer identity:** HTTPS/gRPC upstreams use the current default transport verification, but Jul.IA does not yet expose a unified private-CA, backend client-certificate, SNI override or explicit peer-identity policy across proxy, gRPC and health checks.\n- **Auxiliary egress is separate:** `[egress]` constrains configuration-driven auxiliary destinations; it is not backend certificate authentication and does not govern the data-plane reverse proxy.\n- **WAF request targets:** matched-rule URI/query logging remains under redaction/bounding review in #127. Avoid secrets in URLs and restrict log retention/access.\n\n---\n\n",
+          )
+          text = load("docs/security-posture.md")
+          text = text.replace("| Token rotation | Edit `admin.token`, restart or reload. Audit log entries do not attribute to a user today, so rotation is the only revocation mechanism. |", "| Token rotation | Rotate through the validated configuration lifecycle; legacy shared-token cutover remains tracked by #95. RBAC token IDs can be revoked independently. |")
+          save("docs/security-posture.md", text)
+
+          # Umbrella security document: current review date and explicit boundaries.
+          replace_once("SECURITY.md", "> Last reviewed: 2026-07-02", "> Last reviewed: 2026-08-04")
+          replace_once(
+              "SECURITY.md",
+              "| Upstreams you configure | **trusted by default** | `proxy_pass` / gRPC targets are static config; request input never selects them (no SSRF by design). gRPC `use_reflection` extends trust to the backend's self-description — pin a descriptor set for untrusted topologies. |",
+              "| Upstreams you configure | **operator-chosen; authenticate deliberately** | Request input never selects the target. Default HTTPS uses the platform trust/hostname checks, but unified private-CA, backend mTLS, SNI override and explicit peer-identity policy are selected future core work. Reflection extends trust to the backend's self-description. |",
+          )
+          insert_before(
+              "SECURITY.md",
+              "## Hardening defaults & recommendations\n",
+              "### Current boundary notes\n\n- The direct transport peer is the current source identity for CIDR/rate-limit decisions. A complete trusted-proxy chain model is not yet shipped; never trust client-supplied forwarding headers as security identity by default.\n- The auxiliary `[egress]` allow-list and backend TLS identity solve different problems. Egress restricts selected configuration-driven fetch destinations; it does not authenticate reverse-proxy/gRPC backends.\n- HTTP/3 now applies the same complete prepared server-level TLS/mTLS policy as HTTP/1.1 and HTTP/2.\n- ACME HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface.\n- WAF request-target logging remains under query/URI redaction review; avoid credentials and personal data in URLs.\n\n",
+          )
+
+          # Reload semantics: current authority is not yet closed-world.
+          insert_before(
+              "docs/reload-semantics.md",
+              "Jul.IA reloads configuration **without dropping connections**.",
+              "> **Lifecycle authority notice:** the Go registry is the current runtime\n> classifier, but #89 is still required to make the schema closed-world and to\n> generate/check the YAML and human mirrors. An unlisted field must not be\n> assumed hot merely because a handler can be rebuilt.\n>\n> Mixed candidates remain whole-candidate operations: Jul.IA does not silently\n> publish a hot subset while another field is staged or restart-bound.\n\n",
+          )
+
+          # Human status: keep machine maturity unchanged but expose active regressions.
+          replace_once("docs/status.md", "> Version 1.37 · Updated 2026-07-31", "> Version 1.38 · Updated 2026-08-04")
+          sub_once(
+              "docs/status.md",
+              r"> For a critical, evidence-based assessment.*?\[`docs/audit-register\.md`\]\(audit-register\.md\)\.",
+              "> For the current evidence-based assessment, release blockers and\n> implementation sequence, see the\n> [2026-08-03 combined repository audit](audit/combined-audit-2026-08-03.md),\n> [`docs/audit-register.md`](audit-register.md), and master programme #62. Older\n> audits remain historical evidence.",
+              flags=re.S,
+          )
+          insert_before(
+              "docs/status.md",
+              "## GA criteria legend\n",
+              "### Active regression and recertification notices\n\n- **Response cache:** the historical GA row remains the released record, but #107 and #131–#134 reopen current conformance evidence. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.\n- **Configuration lifecycle:** strict unknown-field decoding is merged; invalid known values (#123), explicit access-log enablement (#124) and closed-world lifecycle generation (#89) remain open.\n- **Prometheus and WAF logging:** contract reconciliation (#126) and request-target redaction review (#127) remain open.\n- **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are merged to `main` and await the next tagged release.\n\n",
+          )
+
+          # WAF: current logging caveat.
+          insert_before(
+              "docs/waf.md",
+              "## Contents\n",
+              "> **Logging privacy notice:** matched-rule request-target logging is under\n> explicit URI/query redaction and bounding review in #127. Avoid credentials or\n> personal data in URLs, restrict log access/retention, and do not use raw request\n> targets as metric labels.\n\n",
+          )
+          replace_once(
+              "docs/waf.md",
+              "4. Every matched rule that logs is reported to the metrics and structured-log\n   hooks: it increments `jul_waf_events_total{action,rule}` and emits a\n   `waf rule matched` warning with the rule ID, URI, and message.\n",
+              "4. Every matched rule that logs is reported to metrics and structured-log\n   hooks. Rule/action labels must remain bounded. The warning currently includes\n   diagnostic request-target context; #127 owns the final path-only/redacted URI\n   contract so query secrets cannot enter logs.\n",
+          )
+
+          # Documentation index: canonical docs now carry the notices directly.
+          sub_once(
+              "docs/index.md",
+              r"## Status of this documentation\n\nCode remains.*$",
+              "## Status of this documentation\n\nCurrent runtime behavior, executable tests, the combined audit, accepted ADRs,\nand canonical feature/operational guides form the documentation contract. Open\ncorrection notices live in their owning documents and linked issues rather than\nin a separate temporary ledger. Historical GA-push and year-horizon material is\ncontext, not the active execution sequence. Please open an issue or PR whenever\na document and current behavior disagree.\n",
+              flags=re.S,
+          )
+
+          # The temporary ledger is deliberately absent after rebuilding from main.
+          Path("docs/current-product-truth.md").unlink(missing_ok=True)
+          PY
+
+      - name: Validate documentation
+        run: |
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          python3 scripts/link-check.py
+          python3 scripts/test_link_check.py
+          git diff --check
+
+      - name: Commit rebuilt PR branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md CHANGELOG.md SECURITY.md docs/
+          git commit -m "docs: reconcile current product truth"
+          git push origin HEAD:docs/current-product-truth
