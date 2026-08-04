@@ -59,7 +59,7 @@ A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on 
 
 - **Response cache:** the historical GA row remains the released record, but #107 and #131–#134 reopen current conformance evidence. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.
 - **Configuration lifecycle:** strict unknown-field decoding is merged; invalid known values (#123), explicit access-log enablement (#124) and closed-world lifecycle generation (#89) remain open.
-- **Prometheus and WAF logging:** contract reconciliation (#126) and request-target redaction review (#127) remain open.
+- **Prometheus contract:** the exact `v1.32.0` name/type/help/label surface is preserved and CI-frozen; current additive egress/reload/managed-apply families are documented as release-pending. WAF request-target redaction review (#127) remains open.
 - **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are merged to `main` and await the next tagged release.
 
 ## GA criteria legend

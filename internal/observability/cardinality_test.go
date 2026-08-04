@@ -6,7 +6,7 @@ package observability
 import (
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -78,67 +78,19 @@ func TestMetricLabelPolicy(t *testing.T) {
 
 	got := labelPolicy(t, m)
 
-	want := map[string][]string{
-		"jul_http_requests_total":                {"code", "host", "method"},
-		"jul_http_request_duration_seconds":      {"host", "method"},
-		"jul_http_requests_in_flight":            nil,
-		"jul_cache_events_total":                 {"state"},
-		"jul_http_response_compressed_total":     {"encoding"},
-		"jul_http_ratelimited_total":             {"key"},
-		"jul_auth_decisions_total":               {"method", "result"},
-		"jul_waf_events_total":                   {"action", "rule"},
-		"jul_upstream_healthy":                   {"backend", "pool"},
-		"jul_upstream_backends":                  {"pool"},
-		"jul_discovery_errors_total":             {"pool"},
-		"jul_upstream_probes_total":              {"pool", "result"},
-		"jul_upstream_probe_duration_seconds":    {"pool"},
-		"jul_grpc_transcode_requests_total":      {"code", "method"},
-		"jul_grpc_transcode_stream_msgs_total":   {"direction", "method"},
-		"jul_grpc_proxy_streams_total":           nil,
-		"jul_plugin_invocations_total":           {"plugin", "result"},
-		"jul_plugin_duration_seconds":            {"plugin"},
-		"jul_plugin_panics_total":                {"plugin"},
-		"jul_listener_conns":                     nil,
-		"jul_http3_connections":                  nil,
-		"jul_stream_active_conns":                {"proto"},
-		"jul_stream_bytes_total":                 {"direction", "proto"},
-		"jul_stream_udp_sessions_evicted_total":  {"reason"},
-		"jul_stream_udp_sessions_rejected_total": nil,
-		"jul_tls_cert_expiry_seconds":            {"domain"},
-		"jul_acme_renewals_total":                nil,
-		"jul_mtls_handshakes_total":              {"result"},
-		// Reload and staged-restart metrics (P2-05): source/outcome labels are
-		// bounded to 3 source values × 4 outcome values = 12 series maximum.
-		"jul_reload_total":                  {"outcome", "source"},
-		"jul_reload_duration_seconds":       {"outcome", "source"},
-		"jul_reload_in_progress":            nil,
-		"jul_config_stage_restart_total":    {"result"},
-		"jul_config_pending_restart":        nil,
-		"jul_managed_apply_finalized_total": {"mode", "operation", "outcome", "restored"},
-		// WS02 §3.6 / WS06 §7.5: finalization/restoration-error counter labeled by
-		// the bounded component that failed (restoration/pending/registry/
-		// callback_panic). component is a fixed, low-cardinality enum — never an
-		// apply ID, actor, or configuration version.
-		"jul_managed_apply_finalization_errors_total": {"component"},
-		// WS02 §3.7: the terminal finalizer's history-snapshot counter is bounded
-		// to the managed operation and the snapshot disposition
-		// (recorded/skipped/failed) — never an apply ID, actor, path or version.
-		"jul_managed_apply_history_total": {"operation", "result"},
-		// WS06 §7.5: unlabeled gauge of retained terminal ledger records.
-		"jul_managed_apply_terminal_registry_entries": nil,
-		// WS06 §7.5: exact-ID lookup counter bounded to the lookup disposition
-		// (pending/finalizing/terminal/missing/invalid) — never an apply ID, actor,
-		// or IP.
-		"jul_managed_apply_terminal_lookup_total": {"result"},
+	contract := loadMetricContract(t)
+	want := make(map[string][]string, len(contract.Metrics))
+	for _, metric := range contract.Metrics {
+		want[metric.Name] = metric.Labels
 	}
 
 	for name, names := range got {
 		wantNames, ok := want[name]
 		if !ok {
-			t.Errorf("metric %q is not in the label policy; add it to docs/core-http.md and this test, and confirm its labels are bounded", name)
+			t.Errorf("metric %q is not in docs/metrics-contract.json; add it to the contract and docs/core-http.md, and confirm its labels are bounded", name)
 			continue
 		}
-		if !reflect.DeepEqual(names, wantNames) {
+		if !slices.Equal(names, wantNames) {
 			t.Errorf("metric %q labels = %v, want %v (label policy)", name, names, wantNames)
 		}
 	}
@@ -222,6 +174,7 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveRateLimited("ip")
 	m.ObserveAuthDecision("jwt", "allow")
 	m.ObserveWAFEvent("block", "942100")
+	m.ObserveEgressDecision("jwks", "allow", "", 1)
 	m.ObserveBackendHealth("pool-a", "10.0.0.1:80", true)
 	m.ObserveUpstreamBackends("pool-a", 3)
 	m.ObserveDiscoveryError("pool-a")
@@ -242,6 +195,7 @@ func exerciseAllMetrics(m *Metrics) {
 	// Reload and staged-restart metrics (P2-05).
 	m.ReloadStarted()
 	m.ObserveReload("admin", "applied_live", 42)
+	m.ObserveReloadResult("applied_live", map[string]int64{"resolve": 1}, true, "resolve")
 	m.ObserveStageRestart("created")
 	m.SetPendingRestart(true)
 	m.SetPendingRestart(false)

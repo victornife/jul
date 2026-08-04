@@ -1,0 +1,229 @@
+{
+  "tag": "v1.32.0",
+  "commit": "6bb76a08846150663d7eeb9661edb718ef357a7c",
+  "metrics": [
+    {
+      "name": "jul_acme_renewals_total",
+      "type": "counter",
+      "help": "ACME certificate renewals observed (expiry advanced for a domain).",
+      "labels": []
+    },
+    {
+      "name": "jul_auth_decisions_total",
+      "type": "counter",
+      "help": "Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny).",
+      "labels": [
+        "method",
+        "result"
+      ]
+    },
+    {
+      "name": "jul_cache_events_total",
+      "type": "counter",
+      "help": "Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS).",
+      "labels": [
+        "state"
+      ]
+    },
+    {
+      "name": "jul_discovery_errors_total",
+      "type": "counter",
+      "help": "Failed or empty service-discovery resolves, labeled by pool (last-good backends are kept).",
+      "labels": [
+        "pool"
+      ]
+    },
+    {
+      "name": "jul_grpc_proxy_streams_total",
+      "type": "counter",
+      "help": "Native gRPC calls forwarded by the HTTP/2 passthrough proxy (one per call, including each streaming call).",
+      "labels": []
+    },
+    {
+      "name": "jul_grpc_transcode_requests_total",
+      "type": "counter",
+      "help": "gRPC-JSON transcoding requests, labeled by gRPC method full name and HTTP status code.",
+      "labels": [
+        "code",
+        "method"
+      ]
+    },
+    {
+      "name": "jul_grpc_transcode_stream_msgs_total",
+      "type": "counter",
+      "help": "gRPC-JSON transcoding streamed messages, labeled by gRPC method full name and direction (sent to backend / received from backend).",
+      "labels": [
+        "direction",
+        "method"
+      ]
+    },
+    {
+      "name": "jul_http3_connections",
+      "type": "gauge",
+      "help": "Current open HTTP/3 (QUIC) connections across all listeners.",
+      "labels": []
+    },
+    {
+      "name": "jul_http_ratelimited_total",
+      "type": "counter",
+      "help": "Requests rejected by rate limiting, labeled by key kind (ip/header/jwt).",
+      "labels": [
+        "key"
+      ]
+    },
+    {
+      "name": "jul_http_request_duration_seconds",
+      "type": "histogram",
+      "help": "HTTP request latency in seconds.",
+      "labels": [
+        "host",
+        "method"
+      ]
+    },
+    {
+      "name": "jul_http_requests_in_flight",
+      "type": "gauge",
+      "help": "Number of HTTP requests currently being served.",
+      "labels": []
+    },
+    {
+      "name": "jul_http_requests_total",
+      "type": "counter",
+      "help": "Total HTTP requests handled, labeled by method, host, and status code.",
+      "labels": [
+        "code",
+        "host",
+        "method"
+      ]
+    },
+    {
+      "name": "jul_http_response_compressed_total",
+      "type": "counter",
+      "help": "Responses compressed by the edge, labeled by content coding.",
+      "labels": [
+        "encoding"
+      ]
+    },
+    {
+      "name": "jul_listener_conns",
+      "type": "gauge",
+      "help": "Current concurrent connections across all listeners.",
+      "labels": []
+    },
+    {
+      "name": "jul_mtls_handshakes_total",
+      "type": "counter",
+      "help": "Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total.",
+      "labels": [
+        "result"
+      ]
+    },
+    {
+      "name": "jul_plugin_duration_seconds",
+      "type": "histogram",
+      "help": "WASM plugin invocation latency in seconds, labeled by plugin name.",
+      "labels": [
+        "plugin"
+      ]
+    },
+    {
+      "name": "jul_plugin_invocations_total",
+      "type": "counter",
+      "help": "WASM plugin invocations, labeled by plugin name and result (continue/stop/error).",
+      "labels": [
+        "plugin",
+        "result"
+      ]
+    },
+    {
+      "name": "jul_plugin_panics_total",
+      "type": "counter",
+      "help": "WASM plugin traps/panics contained by the host, labeled by plugin name.",
+      "labels": [
+        "plugin"
+      ]
+    },
+    {
+      "name": "jul_stream_active_conns",
+      "type": "gauge",
+      "help": "Current active L4 stream connections/sessions, labeled by protocol (tcp/udp).",
+      "labels": [
+        "proto"
+      ]
+    },
+    {
+      "name": "jul_stream_bytes_total",
+      "type": "counter",
+      "help": "Bytes relayed by the L4 stream proxy, labeled by protocol (tcp/udp) and direction (up to backend / down to client).",
+      "labels": [
+        "direction",
+        "proto"
+      ]
+    },
+    {
+      "name": "jul_stream_udp_sessions_evicted_total",
+      "type": "counter",
+      "help": "UDP sessions removed by the L4 stream proxy to enforce limits, labeled by reason: 'idle' (reaped after idle_timeout) or 'lru' (reclaimed to admit a new client at the session cap).",
+      "labels": [
+        "reason"
+      ]
+    },
+    {
+      "name": "jul_stream_udp_sessions_rejected_total",
+      "type": "counter",
+      "help": "New UDP clients dropped because a listener's max_udp_sessions cap was reached and no session was reclaimable.",
+      "labels": []
+    },
+    {
+      "name": "jul_tls_cert_expiry_seconds",
+      "type": "gauge",
+      "help": "Leaf certificate expiry as a Unix timestamp, labeled by domain.",
+      "labels": [
+        "domain"
+      ]
+    },
+    {
+      "name": "jul_upstream_backends",
+      "type": "gauge",
+      "help": "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",
+      "labels": [
+        "pool"
+      ]
+    },
+    {
+      "name": "jul_upstream_healthy",
+      "type": "gauge",
+      "help": "Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend.",
+      "labels": [
+        "backend",
+        "pool"
+      ]
+    },
+    {
+      "name": "jul_upstream_probe_duration_seconds",
+      "type": "histogram",
+      "help": "Active health-check probe latency in seconds, labeled by pool.",
+      "labels": [
+        "pool"
+      ]
+    },
+    {
+      "name": "jul_upstream_probes_total",
+      "type": "counter",
+      "help": "Active health-check probes, labeled by pool and result (success/failure).",
+      "labels": [
+        "pool",
+        "result"
+      ]
+    },
+    {
+      "name": "jul_waf_events_total",
+      "type": "counter",
+      "help": "Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID.",
+      "labels": [
+        "action",
+        "rule"
+      ]
+    }
+  ]
+}

@@ -8,84 +8,86 @@ with pluggable access-log sinks). All three are served from the admin listener
 ## Prometheus metrics
 
 The `/metrics` endpoint on the admin listener exports a private Prometheus
-registry. No build tag is required. The endpoint is served at:
+registry. No build tag is required:
 
-```
+```text
 GET http://127.0.0.1:9090/metrics
 ```
 
-> **Metric compatibility notice:** #126 is reconciling the last released
-> Prometheus names/labels with current collectors and this reference. Keep
-> dashboards and alerts pinned to the released contract until that issue closes;
-> destination, path, identity and raw error values must not become labels.
+### Compatibility contract
 
-### HTTP request metrics
+The released baseline was reconstructed from tag `v1.32.0` at commit
+`6bb76a08846150663d7eeb9661edb718ef357a7c`: all 28 released `jul_*` families
+retain the same names, types, help strings, and label names on current `main`.
+Current `main` adds 14 families for egress, reload, staged restart, and managed
+apply observability; those additions remain **merged / release pending** until a
+tag ships them.
 
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `jul_http_requests_total` | Counter | `method`, `host`, `code` | Total requests served |
-| `jul_http_request_duration_seconds` | Histogram | `method`, `host`, `code` | Request latency distribution |
-| `jul_http_requests_in_flight` | Gauge | — | Concurrent requests currently being handled |
-| `jul_http_response_compressed_total` | Counter | `encoder` | Responses compressed by encoder (gzip/br/zstd) |
+The complete machine-readable contract is
+[`docs/metrics-contract.json`](metrics-contract.json). CI compares it with the
+actual private registry, separately freezes the `v1.32.0` snapshot in
+`internal/observability/testdata/v1.32.0-metrics.json`, and verifies that this
+reference and the cardinality table in [core-http.md](core-http.md#label-cardinality-policy)
+contain no stale or missing metric names. A released family cannot be removed,
+renamed, relabeled, or have its type/help changed accidentally; an intentional
+breaking change requires the compatibility/deprecation process rather than a
+silent collector edit.
 
-The `host` label is **off by default** because the `Host` header is
-client-controlled and unbounded host values can explode metric cardinality. Set
-`[observability.metrics].host_label = true` only when the host set is bounded.
-Changing this setting requires a restart.
+The request `host` label is present in the contract but emitted with an empty
+value by default because `Host` is client-controlled. Set
+`[observability.metrics].host_label = true` only when the host set is bounded;
+changing it requires a restart.
 
-### Cache metrics
+### Exported Jul.IA metric families
 
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `jul_cache_events_total` | Counter | `result` (HIT / MISS / STALE / BYPASS) | Cache outcome per request |
+| Metric | Type | Labels | Contract | Description |
+| --- | --- | --- | --- | --- |
+| `jul_acme_renewals_total` | Counter | — | Released `v1.32.0` | ACME certificate renewals observed (expiry advanced for a domain). |
+| `jul_auth_decisions_total` | Counter | `method`, `result` | Released `v1.32.0` | Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny). |
+| `jul_cache_events_total` | Counter | `state` | Released `v1.32.0` | Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS). |
+| `jul_config_pending_restart` | Gauge | — | Merged / release pending | 1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise. |
+| `jul_config_stage_restart_total` | Counter | `result` | Merged / release pending | Staged-restart apply operations, labeled by result (created/updated/discarded/failed). |
+| `jul_discovery_errors_total` | Counter | `pool` | Released `v1.32.0` | Failed or empty service-discovery resolves, labeled by pool (last-good backends are kept). |
+| `jul_egress_decisions_total` | Counter | `reason`, `result`, `subsystem` | Merged / release pending | Outbound egress allow-list decisions, labeled by subsystem, result (allow/block), and reason (empty on allow). |
+| `jul_egress_dns_answers_total` | Counter | `result`, `subsystem` | Merged / release pending | Egress CIDR-only hostname resolutions evaluated, labeled by subsystem and result (allow/block). |
+| `jul_grpc_proxy_streams_total` | Counter | — | Released `v1.32.0` | Native gRPC calls forwarded by the HTTP/2 passthrough proxy (one per call, including each streaming call). |
+| `jul_grpc_transcode_requests_total` | Counter | `code`, `method` | Released `v1.32.0` | gRPC-JSON transcoding requests, labeled by gRPC method full name and HTTP status code. |
+| `jul_grpc_transcode_stream_msgs_total` | Counter | `direction`, `method` | Released `v1.32.0` | gRPC-JSON transcoding streamed messages, labeled by gRPC method full name and direction (sent to backend / received from backend). |
+| `jul_http3_connections` | Gauge | — | Released `v1.32.0` | Current open HTTP/3 (QUIC) connections across all listeners. |
+| `jul_http_ratelimited_total` | Counter | `key` | Released `v1.32.0` | Requests rejected by rate limiting, labeled by key kind (ip/header/jwt). |
+| `jul_http_request_duration_seconds` | Histogram | `host`, `method` | Released `v1.32.0` | HTTP request latency in seconds. |
+| `jul_http_requests_in_flight` | Gauge | — | Released `v1.32.0` | Number of HTTP requests currently being served. |
+| `jul_http_requests_total` | Counter | `code`, `host`, `method` | Released `v1.32.0` | Total HTTP requests handled, labeled by method, host, and status code. |
+| `jul_http_response_compressed_total` | Counter | `encoding` | Released `v1.32.0` | Responses compressed by the edge, labeled by content coding. |
+| `jul_listener_conns` | Gauge | — | Released `v1.32.0` | Current concurrent connections across all listeners. |
+| `jul_managed_apply_finalization_errors_total` | Counter | `component` | Merged / release pending | Managed-apply finalization/restoration failures, labeled by the bounded component that failed (restoration/pending/registry/callback_panic). An increment means the failure was made explicit and surfaced through logs/health/ledger rather than silently discarded. |
+| `jul_managed_apply_finalized_total` | Counter | `mode`, `operation`, `outcome`, `restored` | Merged / release pending | Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a). |
+| `jul_managed_apply_history_total` | Counter | `operation`, `result` | Merged / release pending | Configuration-history snapshot attempts made by the terminal managed-apply finalizer (WS02 §3.7), labeled by operation and result (recorded/skipped/failed). |
+| `jul_managed_apply_terminal_lookup_total` | Counter | `result` | Merged / release pending | Exact-ID managed-apply lookups, labeled by bounded result (pending/finalizing/terminal/missing/invalid). |
+| `jul_managed_apply_terminal_registry_entries` | Gauge | — | Merged / release pending | Number of terminal managed-apply records currently retained in the bounded ledger. |
+| `jul_mtls_handshakes_total` | Counter | `result` | Released `v1.32.0` | Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total. |
+| `jul_plugin_duration_seconds` | Histogram | `plugin` | Released `v1.32.0` | WASM plugin invocation latency in seconds, labeled by plugin name. |
+| `jul_plugin_invocations_total` | Counter | `plugin`, `result` | Released `v1.32.0` | WASM plugin invocations, labeled by plugin name and result (continue/stop/error). |
+| `jul_plugin_panics_total` | Counter | `plugin` | Released `v1.32.0` | WASM plugin traps/panics contained by the host, labeled by plugin name. |
+| `jul_reload_duration_seconds` | Histogram | `outcome`, `source` | Merged / release pending | Configuration reload latency in seconds, labeled by source and outcome. |
+| `jul_reload_in_progress` | Gauge | — | Merged / release pending | 1 while a configuration reload transaction is in flight; 0 otherwise. |
+| `jul_reload_phase_duration_seconds` | Histogram | `outcome`, `phase` | Merged / release pending | Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome. |
+| `jul_reload_timeout_total` | Counter | `phase` | Merged / release pending | Configuration reloads that exceeded their deadline, labeled by the phase that timed out. |
+| `jul_reload_total` | Counter | `outcome`, `source` | Merged / release pending | Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/not_applied/saved_not_live). |
+| `jul_stream_active_conns` | Gauge | `proto` | Released `v1.32.0` | Current active L4 stream connections/sessions, labeled by protocol (tcp/udp). |
+| `jul_stream_bytes_total` | Counter | `direction`, `proto` | Released `v1.32.0` | Bytes relayed by the L4 stream proxy, labeled by protocol (tcp/udp) and direction (up to backend / down to client). |
+| `jul_stream_udp_sessions_evicted_total` | Counter | `reason` | Released `v1.32.0` | UDP sessions removed by the L4 stream proxy to enforce limits, labeled by reason: 'idle' (reaped after idle_timeout) or 'lru' (reclaimed to admit a new client at the session cap). |
+| `jul_stream_udp_sessions_rejected_total` | Counter | — | Released `v1.32.0` | New UDP clients dropped because a listener's max_udp_sessions cap was reached and no session was reclaimable. |
+| `jul_tls_cert_expiry_seconds` | Gauge | `domain` | Released `v1.32.0` | Leaf certificate expiry as a Unix timestamp, labeled by domain. |
+| `jul_upstream_backends` | Gauge | `pool` | Released `v1.32.0` | Current number of backends in a pool, labeled by pool (tracks dynamic service discovery). |
+| `jul_upstream_healthy` | Gauge | `backend`, `pool` | Released `v1.32.0` | Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend. |
+| `jul_upstream_probe_duration_seconds` | Histogram | `pool` | Released `v1.32.0` | Active health-check probe latency in seconds, labeled by pool. |
+| `jul_upstream_probes_total` | Counter | `pool`, `result` | Released `v1.32.0` | Active health-check probes, labeled by pool and result (success/failure). |
+| `jul_waf_events_total` | Counter | `action`, `rule` | Released `v1.32.0` | Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID. |
 
-### Upstream metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `jul_upstream_healthy` | Gauge | `pool`, `backend` | 1 = healthy, 0 = unhealthy |
-| `jul_upstream_backends` | Gauge | `pool` | Current number of backends in pool |
-| `jul_upstream_probes_total` | Counter | `pool`, `result` (success / failure) | Active health-check probes |
-| `jul_upstream_probe_duration_seconds` | Histogram | `pool` | Probe latency |
-| `jul_discovery_errors_total` | Counter | `pool` | Failed or empty backend resolves |
-
-### Auth, rate limit, and WAF metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `jul_auth_decisions_total` | Counter | `method`, `result` (allow / deny) | Authentication decisions |
-| `jul_http_ratelimited_total` | Counter | `key` (ip / header / jwt) | Requests rejected by rate limiter |
-| `jul_waf_events_total` | Counter | `mode`, `severity` | WAF rule matches (block or detect) |
-| `jul_egress_decisions_total` | Counter | `subsystem`, `result` (allow / block), `reason` | Outbound egress allow-list decisions (never labelled by destination) |
-| `jul_egress_dns_answers_total` | Counter | `subsystem`, `result` | Egress CIDR-only hostname resolutions evaluated |
-
-### gRPC metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `jul_grpc_transcode_requests_total` | Counter | `method`, `code` | Transcoded REST → gRPC calls |
-| `jul_grpc_transcode_stream_msgs_total` | Counter | `method`, `direction` | Streaming messages |
-| `jul_grpc_proxy_streams_total` | Counter | `upstream` | Native gRPC passthrough calls |
-
-### Plugin metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `jul_plugin_invocations_total` | Counter | `plugin`, `result` | WASM plugin calls |
-| `jul_plugin_duration_seconds` | Histogram | `plugin` | Plugin call latency |
-| `jul_plugin_panics_total` | Counter | `plugin` | Guest panics contained by the host |
-
-### Listener and certificate metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `jul_listener_conns` | Gauge | `addr`, `proto` | Active connections per listener |
-| `jul_http3_connections` | Gauge | — | Active HTTP/3 / QUIC connections |
-| `jul_stream_conns` | Gauge | `proto` | Active L4 stream connections |
-| `jul_stream_bytes_total` | Counter | `proto`, `direction` | L4 relayed bytes |
-| `jul_cert_expiry` | Gauge | `domain` | Certificate expiry timestamp (Unix epoch seconds) |
-| `jul_cert_renewals` | Counter | `domain` | ACME renewal events |
-| `jul_mtls_handshakes` | Counter | `result` | mTLS handshakes (success / failed) |
+Metric labels must remain bounded and must never contain request paths, queries,
+client identity, destination URLs, raw errors, or secrets. See the
+[cardinality policy and operator playbook](core-http.md#label-cardinality-policy).
 
 ## OpenTelemetry tracing
 
@@ -234,7 +236,7 @@ to disable a specific limit.
       `keep` relabel rule if `host_label` is enabled.
 - [ ] Use the `file` access-log sink for dedicated, rotatable logs.
 - [ ] Enable tracing (`otel` tag) in staging first to validate overhead.
-- [ ] Monitor `jul_cert_expiry` for upcoming certificate renewals.
+- [ ] Monitor `jul_tls_cert_expiry_seconds` for upcoming certificate renewals.
 - [ ] Use `/readyz` for orchestrator readiness probes.
 
 ## Benchmarks & tuning

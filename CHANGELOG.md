@@ -121,6 +121,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
     `permission.test.tsx` / Security-panel RBAC-status tests.
 
 ### Fixed
+- **Prometheus compatibility and documentation contract (#126):** reconstructed the exact 28-family `v1.32.0` baseline at commit `6bb76a08846150663d7eeb9661edb718ef357a7c`, confirmed that current collectors preserve every released name/type/help/label tuple, documented the 14 additive release-pending families, corrected stale aliases and label descriptions, and added machine-readable current/released inventories with collector and documentation drift tests.
 - **ACME challenge selection:** HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface while preserving normal HTTP/TLS routing.
 - **Compression transformation contract:** request or response `Cache-Control: no-transform` now bypasses dynamic gzip/Brotli/Zstandard compression.
 - **HTTP/3 UDP preflight test:** the success path uses OS-assigned TCP/UDP ephemeral ports instead of reusing a released TCP port on Windows.
