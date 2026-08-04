@@ -1,0 +1,54 @@
+name: Trigger PR 165 documentation rebuild
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    if: github.head_ref == 'automation/rebuild-pr165'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out preserved PR branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: docs/current-product-truth
+          fetch-depth: 0
+
+      - name: Load and run the reviewed rebuild script
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/rebuild-pr165
+          git show origin/automation/rebuild-pr165:.github/workflows/rebuild-pr165.yml > /tmp/rebuild-source.yml
+          python3 - <<'PYEXTRACT'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('/tmp/rebuild-source.yml').read_text(encoding='utf-8')
+          marker = "          python3 - <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n          PY\n", start)
+          script = textwrap.dedent(source[start:end])
+          Path('/tmp/rebuild-pr165.py').write_text(script, encoding='utf-8')
+          PYEXTRACT
+          python3 /tmp/rebuild-pr165.py
+
+      - name: Validate documentation
+        run: |
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          python3 scripts/link-check.py
+          python3 scripts/test_link_check.py
+          git diff --check
+
+      - name: Commit rebuilt PR branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md CHANGELOG.md SECURITY.md docs/
+          git commit -m "docs: reconcile current product truth"
+          git push origin HEAD:docs/current-product-truth
