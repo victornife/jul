@@ -76,26 +76,27 @@ jobs:
           start = roadmap.index(heading) + len(heading)
           fence_start = roadmap.index("```text\n", start)
           fence_end = roadmap.index("```\n", fence_start) + len("```\n")
-          final_path = """```text
-#165 — canonical current product truth
-    ↓
-#166 — operating model, roadmap v2.0 and completeness boundary
-    ↓
-v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
-    ↓
-#124 — explicit access-log enablement
-    ↓
-#131 → #133 / #132 → #134 — cache correctness and recertification
-    ↓
-#89 — closed-world lifecycle authority
-    ↓
-#77 → #82 — Phase 5 structured configuration
-    ↓
-#115 → #118 — core architecture decisions
-    ↓
-selected core implementations
-```
-"""
+          final_path = (
+              "```text\n"
+              "#165 — canonical current product truth\n"
+              "    ↓\n"
+              "#166 — operating model, roadmap v2.0 and completeness boundary\n"
+              "    ↓\n"
+              "v1.32.1-rc.1 — unpublished draft release-candidate checkpoint\n"
+              "    ↓\n"
+              "#124 — explicit access-log enablement\n"
+              "    ↓\n"
+              "#131 → #133 / #132 → #134 — cache correctness and recertification\n"
+              "    ↓\n"
+              "#89 — closed-world lifecycle authority\n"
+              "    ↓\n"
+              "#77 → #82 — Phase 5 structured configuration\n"
+              "    ↓\n"
+              "#115 → #118 — core architecture decisions\n"
+              "    ↓\n"
+              "selected core implementations\n"
+              "```\n"
+          )
           roadmap = roadmap[:fence_start] + final_path + roadmap[fence_end:]
 
           paragraph_variants = (
