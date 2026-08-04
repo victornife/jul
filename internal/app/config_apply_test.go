@@ -4,6 +4,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -542,6 +543,55 @@ func TestCoordinatorApplyRawValidationFailureNoWrite(t *testing.T) {
 	}
 }
 
+func TestCoordinatorRejectsInvalidKnownValueBeforeHotOrStagedPersistence(t *testing.T) {
+	for _, mode := range []ApplyMode{ApplyHot, ApplyStageRestart} {
+		t.Run(string(mode), func(t *testing.T) {
+			tmp := t.TempDir()
+			path := filepath.Join(tmp, "server.toml")
+			seed := validConfigRaw(t, ":8080")
+			if err := os.WriteFile(path, seed, 0o600); err != nil {
+				t.Fatalf("write seed: %v", err)
+			}
+
+			candidateCfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+			candidateCfg.Global.LogLevel = "verbose"
+			candidate, marshalErr := config.Marshal(candidateCfg)
+			if marshalErr != nil {
+				t.Fatalf("marshal candidate: %v", marshalErr)
+			}
+			c := &ConfigApplyCoordinator{
+				BaseCtx:        context.Background(),
+				Path:           path,
+				Preflight:      testPreflight(),
+				LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+				PlannedRestart: &PlannedRestartStore{},
+			}
+
+			res, err := c.ApplyRaw(admin.ApplyRequestContext{}, candidate, mode)
+			if err != nil {
+				t.Fatalf("ApplyRaw: %v", err)
+			}
+			if res.OK {
+				t.Fatal("OK = true, want false")
+			}
+			joined := strings.Join(res.ValidationErrors, "\n")
+			if !strings.Contains(joined, `[global].log_level: invalid value "verbose"`) {
+				t.Fatalf("validation errors = %q, want canonical log-level error", joined)
+			}
+			if res.RestartRequired || res.CanStage {
+				t.Fatalf("invalid candidate reported as lifecycle transition: %+v", res)
+			}
+			onDisk, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatalf("read file: %v", readErr)
+			}
+			if !bytes.Equal(onDisk, seed) {
+				t.Fatal("invalid known value changed the persisted configuration")
+			}
+		})
+	}
+}
+
 func TestCoordinatorApplyRawRestartRequiredCanStage(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")
@@ -568,7 +618,7 @@ func TestCoordinatorApplyRawRestartRequiredCanStage(t *testing.T) {
 
 	// Change a restart-required field.
 	next := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	next.Global.LogFormat = "combined"
+	next.Global.LogFormat = "text"
 	nextRaw, err := config.Marshal(next)
 	if err != nil {
 		t.Fatalf("marshal next: %v", err)

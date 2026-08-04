@@ -182,9 +182,11 @@ To rewrite a config into canonical TOML:
 ./jul fmt -config server.toml -diff # show what would change (exit 1 if changes needed)
 ```
 
-The `-diff` mode is useful in CI to enforce canonical formatting without
-modifying files — it exits 0 when nothing would change, 1 when changes are
-needed. Comments and original formatting are not preserved.
+All three forms run the canonical semantic validator before formatting, so an
+unknown key or invalid known value is rejected and `-w` never persists it. The
+`-diff` mode is useful in CI to enforce canonical formatting without modifying
+files — it exits 0 when nothing would change, 1 when changes are needed. Comments
+and original formatting are not preserved.
 
 ## Version and shell completion
 

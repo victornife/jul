@@ -197,6 +197,9 @@ func effectiveWorkerThreads(raw string) any {
 	return initialGOMAXPROCS
 }
 
+// parseWorkerThreads mirrors the runtime conversion after configuration
+// validation. Invalid direct-call input falls back defensively but cannot enter
+// through startup, check, apply, stage, or rollback paths.
 func parseWorkerThreads(raw string) int {
 	if raw == "" || strings.EqualFold(raw, "auto") {
 		return 0

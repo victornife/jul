@@ -71,7 +71,25 @@ plugin_upload_max_size = 32
 
 Jul.IA rejects unknown TOML fields in every path that uses the canonical parser. A misspelled security, routing, TLS or policy key is a fatal configuration error rather than a silent no-op. Errors include contextual field information where the TOML decoder exposes it.
 
-The historical singular `server_name` key remains the one documented compatibility alias: it is accepted, canonicalized immediately to `server_names`, and never emitted by `jul fmt`/marshal. Setting both forms is rejected. Known fields with invalid enum, duration, worker or scalar values are tracked separately by #123 and must not be assumed fully strict until that issue closes.
+The historical singular `server_name` key remains the one documented compatibility alias: it is accepted, canonicalized immediately to `server_names`, and never emitted by `jul fmt`/marshal. Setting both forms is rejected.
+
+Known fields are also fail-closed. Jul.IA distinguishes three cases:
+
+- **omitted** — apply the documented default;
+- **explicit zero/disabled value** — apply that field's documented zero semantics;
+- **explicit invalid value** — reject the whole candidate without writing or staging it.
+
+Enums are case-sensitive and use the exact lowercase spellings shown in this
+reference. `worker_threads` accepts only `auto` or a canonical positive base-10
+integer. Negative durations/sizes, invalid HTTP statuses, out-of-range values,
+and sizes that overflow `int64` are rejected before runtime construction. The
+same validator governs startup, `jul check`, `jul lint`, `jul fmt`, raw and
+structured apply/preview, planned-restart staging, rollback, and importer output.
+
+The machine-readable [configuration value contract](config-value-contract.json)
+records every public numeric leaf plus every enum/grammar leaf, including its
+bounds, allowed values, zero semantics, and activation condition. A schema drift
+test fails when a new public scalar is added without an audited disposition.
 
 ---
 
@@ -94,9 +112,9 @@ redact_min_secret_length = 4
 
 | Key | Type | Description |
 | --- | ---- | ----------- |
-| `worker_threads` | string | `"auto"` (default) or a positive integer; `auto` uses Go's `GOMAXPROCS` defaults |
-| `log_level` | string | `debug`, `info` (default), `warn`, or `error` |
-| `log_format` | string | `text` (human-readable) or `json` |
+| `worker_threads` | string | Exact lowercase `"auto"` (default) or a canonical positive base-10 integer (`1`, `2`, …); whitespace, signs, zero, fractions, overflow, and other spellings are invalid |
+| `log_level` | string | Exact lowercase `debug`, `info` (default), `warn`, or `error`; any other explicit value is invalid |
+| `log_format` | string | Exact lowercase `text` (human-readable, default) or `json`; invalid values are rejected rather than falling back to text |
 | `access_log` / `error_log` | string | Deprecated compatibility fields; accepted but ignored by the current runtime. Configure access records under `[observability.access_log]`; application logs use the process logger. |
 | `shutdown_timeout` | duration | Grace period to drain in-flight requests on shutdown (also bounds the HTTP/3 drain) |
 | `reload_timeout` | duration | Maximum duration for a configuration reload before it is reported as `timed_out`. Zero or omitted defaults to 10s. The timeout is advisory: the swap still completes, but a warning is logged and the apply response includes `previous_reload.timed_out: true`. The Console surfaces this as a distinct "Applied — reload exceeded the configured timeout" warning so the operator knows to investigate slow reload paths (WAF rule compilation, WASM plugin loading, large config) or raise this value. See [reload-semantics.md](reload-semantics.md) |
@@ -104,7 +122,16 @@ redact_min_secret_length = 4
 
 The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They do not cause a restart or select a sink. Access-log enablement remains explicit follow-up #124; until then an empty sink list is not a supported disable contract.
 
-Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`, `512m`, etc.
+Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`,
+`512m`, etc. Values must fit the signed 64-bit representation used by the
+runtime; parsing rejects overflow before unit multiplication. Zero is accepted
+only with the meaning documented for the specific field.
+
+Run `jul check -config server.toml` before deployment for structural validation
+plus runtime preflight. `jul lint` adds advisory best-practice findings; it never
+downgrades a runtime-invalid value to a warning. `jul fmt` validates before
+printing or writing canonical TOML, so formatting cannot persist an invalid
+candidate.
 
 ## Configuration apply modes
 

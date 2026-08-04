@@ -172,7 +172,7 @@ func cmdLint(args []string) int {
 // cmdFmt rewrites a config into canonical TOML. By default it prints to stdout;
 // with -w it writes back to the file in place. Comments and original formatting
 // are not preserved (see config.Marshal). Exit codes: 0 = ok, 1 = read/parse
-// error.
+// or semantic-validation error.
 func cmdFmt(args []string) int {
 	fs := flag.NewFlagSet("fmt", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -191,6 +191,13 @@ func cmdFmt(args []string) int {
 	cfg, err := config.Parse(orig)
 	if err != nil {
 		fmt.Fprintln(stderr, config.FormatError(err))
+		return 1
+	}
+	if errs := flattenErrors(config.Validate(cfg)); len(errs) > 0 {
+		for _, err := range errs {
+			fmt.Fprintln(stderr, err)
+		}
+		fmt.Fprintf(stderr, "%s: %d error(s)\n", config.NewTOMLSource(*configPath).Name(), len(errs))
 		return 1
 	}
 	out, err := config.Marshal(cfg)

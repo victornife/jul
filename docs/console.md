@@ -293,8 +293,13 @@ carrying:
 - a human **summary** (and optional **detail**) with actionable guidance.
 
 The Configuration panel shows the path as a chip in front of each message. The
-mapping is presentation-only — `config/validate.go` remains the source of truth
-for what is valid.
+mapping is presentation-only — the canonical configuration validator remains
+the source of truth for what is valid. Unknown keys and invalid known values use
+the same errors across validate, preview, hot apply, planned-restart staging,
+rollback, startup, and CLI checks. An invalid value is never reclassified as
+`restart_required`, never staged, and never written. The editor keeps the draft
+visible so the operator can correct it; the currently serving and persisted
+configuration remain unchanged.
 
 ### Concurrent edits (optimistic concurrency)
 

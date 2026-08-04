@@ -1,0 +1,768 @@
+{
+  "version": 1,
+  "purpose": "Audited public enum, grammar, integer, duration, size, ratio, and HTTP-status dispositions. Runtime validation remains explicit in Go; this inventory is metadata for drift detection and the later generated-schema programme.",
+  "fields": [
+    {
+      "go_field": "ACMEConfig.CA",
+      "path": "servers[].tls.acme.ca",
+      "kind": "enum_or_url",
+      "constraint": "letsencrypt, letsencrypt-staging, or an https directory URL",
+      "zero_semantics": "omitted defaults to letsencrypt-staging",
+      "active_when": "ACME enabled",
+      "allowed": [
+        "letsencrypt",
+        "letsencrypt-staging"
+      ]
+    },
+    {
+      "go_field": "ACMEConfig.Challenge",
+      "path": "servers[].tls.acme.challenge",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "ACME enabled",
+      "allowed": [
+        "http-01",
+        "tls-alpn-01"
+      ]
+    },
+    {
+      "go_field": "AccessLogConfig.Format",
+      "path": "observability.access_log.format",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "access logging active",
+      "allowed": [
+        "text",
+        "json"
+      ]
+    },
+    {
+      "go_field": "AccessLogConfig.RotateKeep",
+      "path": "observability.access_log.rotate_keep",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 7",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AccessLogConfig.RotateMaxMB",
+      "path": "observability.access_log.rotate_max_mb",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 100",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AccessLogConfig.Sinks",
+      "path": "observability.access_log.sinks",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "access logging active",
+      "allowed": [
+        "stdout",
+        "file",
+        "syslog"
+      ]
+    },
+    {
+      "go_field": "AdminConfig.AuditLogRotateKeep",
+      "path": "admin.audit_log_rotate_keep",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 14 when audit_log_file is set",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AdminConfig.AuditLogRotateMaxMB",
+      "path": "admin.audit_log_rotate_max_mb",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 100 when audit_log_file is set",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AdminConfig.HistoryKeep",
+      "path": "admin.history_keep",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 50 when admin is enabled",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AdminConfig.MaxEventConns",
+      "path": "admin.max_event_conns",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 4",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AdminConfig.PluginUploadMaxSize",
+      "path": "admin.plugin_upload_max_size",
+      "kind": "integer",
+      "constraint": "positive when upload is enabled; otherwise non-negative",
+      "zero_semantics": "omitted/zero defaults to 32 MiB when upload is enabled",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AdminConfig.RateLimitApplyPerMin",
+      "path": "admin.rate_limit_apply_per_min",
+      "kind": "integer",
+      "constraint": "any integer; negative disables the limiter",
+      "zero_semantics": "omitted/zero defaults to 30",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AdminConfig.RateLimitReadPerMin",
+      "path": "admin.rate_limit_read_per_min",
+      "kind": "integer",
+      "constraint": "any integer; negative disables the limiter",
+      "zero_semantics": "omitted/zero defaults to 240",
+      "active_when": "always"
+    },
+    {
+      "go_field": "AdminConfig.RateLimitWritePerMin",
+      "path": "admin.rate_limit_write_per_min",
+      "kind": "integer",
+      "constraint": "any integer; negative disables the limiter",
+      "zero_semantics": "omitted/zero defaults to 60",
+      "active_when": "always"
+    },
+    {
+      "go_field": "CacheConfig.DefaultTTL",
+      "path": "cache.default_ttl",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "0 disables that optional window/default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "CacheConfig.DiskMaxSize",
+      "path": "cache.disk_max_size",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 512 MiB when disk_path is set",
+      "active_when": "always"
+    },
+    {
+      "go_field": "CacheConfig.MemoryMaxSize",
+      "path": "cache.memory_max_size",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 64 MiB when enabled",
+      "active_when": "always"
+    },
+    {
+      "go_field": "CacheConfig.StaleIfError",
+      "path": "cache.stale_if_error",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "0 disables that optional window/default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "CacheConfig.StaleWhileRevalidate",
+      "path": "cache.stale_while_revalidate",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "0 disables that optional window/default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ClientAuthConfig.Mode",
+      "path": "servers[].tls.client_auth.mode",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "client_auth configured",
+      "allowed": [
+        "none",
+        "request",
+        "require"
+      ]
+    },
+    {
+      "go_field": "CompressionConfig.Encoders",
+      "path": "compression.encoders",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "compression enabled",
+      "allowed": [
+        "gzip",
+        "br",
+        "zstd"
+      ]
+    },
+    {
+      "go_field": "CompressionConfig.Level",
+      "path": "compression.level",
+      "kind": "integer",
+      "constraint": "0..11",
+      "zero_semantics": "0 selects the encoder default",
+      "active_when": "compression enabled"
+    },
+    {
+      "go_field": "CompressionConfig.MinSize",
+      "path": "compression.min_size",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 1 KiB when enabled",
+      "active_when": "always"
+    },
+    {
+      "go_field": "DiscoveryConfig.Refresh",
+      "path": "upstreams[].discovery.refresh",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 30s for dynamic providers",
+      "active_when": "dynamic discovery"
+    },
+    {
+      "go_field": "DiscoveryConfig.Type",
+      "path": "upstreams[].discovery.type",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "discovery block configured",
+      "allowed": [
+        "static",
+        "dns",
+        "dns_srv",
+        "consul",
+        "kubernetes"
+      ]
+    },
+    {
+      "go_field": "GRPCTranscodeConfig.MaxMessageSize",
+      "path": "servers[].locations[].grpc_transcode.max_message_size",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "0 applies the 4 MiB default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "GRPCTranscodeConfig.StreamMode",
+      "path": "servers[].locations[].grpc_transcode.stream_mode",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "transcoder configured",
+      "allowed": [
+        "ndjson",
+        "sse"
+      ]
+    },
+    {
+      "go_field": "GlobalConfig.LogFormat",
+      "path": "global.log_format",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to text",
+      "active_when": "always",
+      "allowed": [
+        "text",
+        "json"
+      ]
+    },
+    {
+      "go_field": "GlobalConfig.LogLevel",
+      "path": "global.log_level",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to info",
+      "active_when": "always",
+      "allowed": [
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ]
+    },
+    {
+      "go_field": "GlobalConfig.RedactMinSecretLength",
+      "path": "global.redact_min_secret_length",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero uses the default floor",
+      "active_when": "always"
+    },
+    {
+      "go_field": "GlobalConfig.ReloadTimeout",
+      "path": "global.reload_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 10s",
+      "active_when": "always"
+    },
+    {
+      "go_field": "GlobalConfig.ShutdownTimeout",
+      "path": "global.shutdown_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 30s",
+      "active_when": "always"
+    },
+    {
+      "go_field": "GlobalConfig.WorkerThreads",
+      "path": "global.worker_threads",
+      "kind": "grammar",
+      "constraint": "auto or a canonical positive base-10 integer",
+      "zero_semantics": "omitted/empty and auto use the Go runtime default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "HTTP3Config.AltSvcMaxAge",
+      "path": "servers[].http3.alt_svc_max_age",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 86400",
+      "active_when": "HTTP/3 enabled"
+    },
+    {
+      "go_field": "HealthCheckConfig.HealthyThreshold",
+      "path": "upstreams[].health_check.healthy_threshold",
+      "kind": "integer",
+      "constraint": "at least 1 effective",
+      "zero_semantics": "omitted/zero defaults to 2",
+      "active_when": "health check enabled"
+    },
+    {
+      "go_field": "HealthCheckConfig.Interval",
+      "path": "upstreams[].health_check.interval",
+      "kind": "duration",
+      "constraint": "positive effective value",
+      "zero_semantics": "omitted/zero defaults to 5s",
+      "active_when": "health check enabled"
+    },
+    {
+      "go_field": "HealthCheckConfig.Timeout",
+      "path": "upstreams[].health_check.timeout",
+      "kind": "duration",
+      "constraint": "positive and less than interval",
+      "zero_semantics": "omitted/zero defaults to 2s",
+      "active_when": "health check enabled"
+    },
+    {
+      "go_field": "HealthCheckConfig.Type",
+      "path": "upstreams[].health_check.type",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "health check enabled",
+      "allowed": [
+        "http",
+        "tcp"
+      ]
+    },
+    {
+      "go_field": "HealthCheckConfig.UnhealthyThreshold",
+      "path": "upstreams[].health_check.unhealthy_threshold",
+      "kind": "integer",
+      "constraint": "at least 1 effective",
+      "zero_semantics": "omitted/zero defaults to 3",
+      "active_when": "health check enabled"
+    },
+    {
+      "go_field": "LocationConfig.ClientMaxBodySize",
+      "path": "servers[].locations[].client_max_body_size",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "0 inherits the server value",
+      "active_when": "always"
+    },
+    {
+      "go_field": "LocationConfig.ProxyConnectTimeout",
+      "path": "servers[].locations[].proxy_connect_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "zero uses the runtime/default transport behavior",
+      "active_when": "always"
+    },
+    {
+      "go_field": "LocationConfig.ProxyReadTimeout",
+      "path": "servers[].locations[].proxy_read_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "zero uses the runtime/default transport behavior",
+      "active_when": "always"
+    },
+    {
+      "go_field": "LocationConfig.ProxyRetries",
+      "path": "servers[].locations[].proxy_retries",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "0 disables retry",
+      "active_when": "always"
+    },
+    {
+      "go_field": "LocationConfig.ProxySendTimeout",
+      "path": "servers[].locations[].proxy_send_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "zero uses the runtime/default transport behavior",
+      "active_when": "always"
+    },
+    {
+      "go_field": "LocationConfig.Return",
+      "path": "servers[].locations[].return",
+      "kind": "http_status",
+      "constraint": "100..599 when set",
+      "zero_semantics": "0 means no return action",
+      "active_when": "always"
+    },
+    {
+      "go_field": "MatchConfig.Type",
+      "path": "servers[].locations[].match.type",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "location configured",
+      "allowed": [
+        "exact",
+        "prefix",
+        "regex"
+      ]
+    },
+    {
+      "go_field": "PluginConfig.FetchTimeout",
+      "path": "plugins.<name>.fetch_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero applies the documented plugin default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "PluginConfig.KVMaxBytes",
+      "path": "plugins.<name>.kv_max_bytes",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero applies the documented plugin default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "PluginConfig.KVMaxEntries",
+      "path": "plugins.<name>.kv_max_entries",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 1024",
+      "active_when": "always"
+    },
+    {
+      "go_field": "PluginConfig.MaxFetchResponse",
+      "path": "plugins.<name>.max_fetch_response",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero applies the documented plugin default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "PluginConfig.MaxRequestBody",
+      "path": "plugins.<name>.max_request_body",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero applies the documented plugin default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "PluginConfig.MaxResponseBody",
+      "path": "plugins.<name>.max_response_body",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero applies the documented plugin default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "PluginConfig.MemoryLimit",
+      "path": "plugins.<name>.memory_limit",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero applies the documented plugin default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "PluginConfig.Timeout",
+      "path": "plugins.<name>.timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero applies the documented plugin default",
+      "active_when": "always"
+    },
+    {
+      "go_field": "PluginConfig.Type",
+      "path": "plugins.<name>.type",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "plugin configured",
+      "allowed": [
+        "middleware",
+        "handler"
+      ]
+    },
+    {
+      "go_field": "RateLimitConfig.Burst",
+      "path": "rate_limit.burst / servers[].locations[].rate_limit.burst",
+      "kind": "integer",
+      "constraint": "at least rate",
+      "zero_semantics": "omitted/zero defaults to rate",
+      "active_when": "rate limit enabled"
+    },
+    {
+      "go_field": "RateLimitConfig.Key",
+      "path": "rate_limit.key / servers[].locations[].rate_limit.key",
+      "kind": "grammar",
+      "constraint": "ip, header:<Name>, or jwt:<claim>",
+      "zero_semantics": "omitted defaults to ip",
+      "active_when": "rate limit enabled"
+    },
+    {
+      "go_field": "RateLimitConfig.MaxConns",
+      "path": "rate_limit.max_conns",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "0 means unlimited",
+      "active_when": "global rate limit enabled"
+    },
+    {
+      "go_field": "RateLimitConfig.Rate",
+      "path": "rate_limit.rate / servers[].locations[].rate_limit.rate",
+      "kind": "integer",
+      "constraint": "positive",
+      "zero_semantics": "no valid zero while enabled",
+      "active_when": "rate limit enabled"
+    },
+    {
+      "go_field": "RewriteConfig.Flag",
+      "path": "servers[].locations[].rewrites[].flag",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "non-empty",
+      "allowed": [
+        "last",
+        "break",
+        "redirect",
+        "permanent"
+      ]
+    },
+    {
+      "go_field": "ServerConfig.ClientMaxBodySize",
+      "path": "servers[].client_max_body_size",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 1 MiB",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ServerConfig.IdleTimeout",
+      "path": "servers[].idle_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 60s",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ServerConfig.MaxHeaderBytes",
+      "path": "servers[].max_header_bytes",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 1 MiB",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ServerConfig.ReadHeaderTimeout",
+      "path": "servers[].read_header_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 10s",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ServerConfig.ReadTimeout",
+      "path": "servers[].read_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "zero disables the timeout",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ServerConfig.RedirectHTTPS",
+      "path": "servers[].redirect_https",
+      "kind": "integer_enum",
+      "constraint": "0, 301, or 308",
+      "zero_semantics": "0 disables redirect",
+      "active_when": "always",
+      "allowed": [
+        0,
+        301,
+        308
+      ]
+    },
+    {
+      "go_field": "ServerConfig.WriteTimeout",
+      "path": "servers[].write_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "zero disables the timeout",
+      "active_when": "always"
+    },
+    {
+      "go_field": "StreamServer.ConnectTimeout",
+      "path": "stream[].connect_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 10s",
+      "active_when": "always"
+    },
+    {
+      "go_field": "StreamServer.IdleTimeout",
+      "path": "stream[].idle_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 5m",
+      "active_when": "always"
+    },
+    {
+      "go_field": "StreamServer.MaxUDPSessions",
+      "path": "stream[].max_udp_sessions",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 10000",
+      "active_when": "always"
+    },
+    {
+      "go_field": "StreamServer.Protocol",
+      "path": "stream[].protocol",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "stream configured",
+      "allowed": [
+        "tcp",
+        "udp"
+      ]
+    },
+    {
+      "go_field": "StreamServer.ProxyProtocol",
+      "path": "stream[].proxy_protocol",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "non-empty",
+      "allowed": [
+        "in",
+        "out",
+        "both"
+      ]
+    },
+    {
+      "go_field": "TLSConfig.MinVersion",
+      "path": "servers[].tls.min_version",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "TLS enabled",
+      "allowed": [
+        "1.2",
+        "1.3"
+      ]
+    },
+    {
+      "go_field": "TracingConfig.Exporter",
+      "path": "observability.tracing.exporter",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "tracing enabled",
+      "allowed": [
+        "otlp-grpc",
+        "otlp-http"
+      ]
+    },
+    {
+      "go_field": "TracingConfig.SampleRatio",
+      "path": "observability.tracing.sample_ratio",
+      "kind": "ratio",
+      "constraint": "0..1",
+      "zero_semantics": "omitted/zero defaults to 1.0 when tracing is enabled",
+      "active_when": "tracing enabled"
+    },
+    {
+      "go_field": "UpstreamConfig.FailTimeout",
+      "path": "upstreams[].fail_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 10s",
+      "active_when": "always"
+    },
+    {
+      "go_field": "UpstreamConfig.MaxFails",
+      "path": "upstreams[].max_fails",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 3",
+      "active_when": "always"
+    },
+    {
+      "go_field": "UpstreamConfig.Strategy",
+      "path": "upstreams[].strategy",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "upstream configured",
+      "allowed": [
+        "round_robin",
+        "weighted_round_robin",
+        "least_conn"
+      ]
+    },
+    {
+      "go_field": "UpstreamServer.Weight",
+      "path": "upstreams[].servers[].weight",
+      "kind": "integer",
+      "constraint": "positive when explicitly materialized; zero is treated as omitted for direct struct callers",
+      "zero_semantics": "omitted/zero defaults to 1",
+      "active_when": "always"
+    },
+    {
+      "go_field": "WAFConfig.BlockStatus",
+      "path": "waf.block_status / servers[].locations[].waf.block_status",
+      "kind": "http_status",
+      "constraint": "100..599 effective",
+      "zero_semantics": "omitted/zero defaults to 403",
+      "active_when": "WAF enabled"
+    },
+    {
+      "go_field": "WAFConfig.Mode",
+      "path": "waf.mode / servers[].locations[].waf.mode",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "WAF enabled",
+      "allowed": [
+        "block",
+        "detect"
+      ]
+    },
+    {
+      "go_field": "WAFConfig.Paranoia",
+      "path": "waf.paranoia / servers[].locations[].waf.paranoia",
+      "kind": "integer",
+      "constraint": "0 or 1..4; non-zero requires CRS",
+      "zero_semantics": "0 selects the CRS default",
+      "active_when": "WAF enabled"
+    },
+    {
+      "go_field": "WAFConfig.RequestBodyLimit",
+      "path": "waf.request_body_limit / servers[].locations[].waf.request_body_limit",
+      "kind": "size",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 128 KiB",
+      "active_when": "WAF enabled"
+    }
+  ]
+}

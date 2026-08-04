@@ -988,7 +988,8 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan [32]
 }
 
 // parseWorkerThreads converts a [global].worker_threads value to a GOMAXPROCS
-// argument. "auto", "", or any non-numeric value returns 0 (do not set).
+// argument. Supported configuration paths validate the public grammar first;
+// the zero result for malformed direct-call input is defense in depth only.
 func parseWorkerThreads(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" || strings.EqualFold(s, "auto") {

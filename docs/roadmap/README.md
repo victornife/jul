@@ -32,8 +32,8 @@ portfolio has parallel lanes.
 
 | Stage | Focus | Exit criteria | Status |
 | --- | --- | --- | --- |
-| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | 🚧 audit merged; #165/#166 finalization |
-| **1 — Immediate correctness** | Remaining known-value validation, access-log semantics, metrics, WAF privacy and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 partially complete |
+| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | ✅ #165/#166 merged |
+| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 #123/#126/#127 complete; #124 and cache remain |
 | **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ⬜ planned |
 | **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ⬜ planned |
 | **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ⬜ planned |
@@ -53,11 +53,7 @@ portfolio has parallel lanes.
     ↓
 v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
     ↓
-#123 — reject invalid known configuration values
-    ↓
 #124 — explicit access-log enablement
-    ↓
-#127 — WAF request-target logging
     ↓
 #131 → #133 / #132 → #134 — cache correctness and recertification
     ↓
@@ -70,8 +66,8 @@ v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
 selected core implementations
 ```
 
-#127 may proceed independently while it does not overlap the active shared
-configuration or cache work. Shared edits to the configuration schema, lifecycle,
+#124 is the remaining shared configuration-schema correction before lifecycle
+generation and Phase 5. Shared edits to the configuration schema, lifecycle,
 composition root, reload transaction, or Console patch contracts remain serial.
 
 ## Correctness and security backlog
@@ -85,12 +81,12 @@ composition root, reload transaction, or Console patch contracts remain serial.
 - Deterministic HTTP/3 UDP preflight testing on Windows.
 - Frontend dependency and CodeQL reflected-output hardening.
 - Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).
+- Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).
+- Path-only, bounded WAF matched-request logging with query and macro-expanded request data omitted (#127).
 
 ### Remaining immediate correctness
 
-- Reject invalid known enum, duration, worker and scalar values (#123).
 - Add explicit access-log enablement and retire ignored destination fields (#124).
-- Bound/redact WAF matched request-target logging (#127).
 - Restore cache concurrency, lifecycle, protocol and HTTP conformance (#107, #131–#134).
 - Establish closed-world generated lifecycle authority (#89).
 

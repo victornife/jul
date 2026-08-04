@@ -28,12 +28,7 @@ func Validate(c *Config) error {
 		errs = append(errs, errors.New("at least one [[servers]] block is required"))
 	}
 
-	if c.Global.RedactMinSecretLength < 0 {
-		errs = append(errs, fmt.Errorf("global: redact_min_secret_length must be >= 0, got %d", c.Global.RedactMinSecretLength))
-	}
-	if c.Global.ReloadTimeout < 0 {
-		errs = append(errs, errors.New("global: reload_timeout must be >= 0"))
-	}
+	errs = append(errs, validateGlobalValues(c.Global)...)
 
 	errs = append(errs, validateEgress(c.Egress)...)
 
@@ -62,6 +57,7 @@ func Validate(c *Config) error {
 				errs = append(errs, fmt.Errorf("%s.servers[%d]: address is required", where, j))
 			}
 		}
+		errs = append(errs, validateUpstreamValues(up, where)...)
 		errs = append(errs, validateHealthCheck(up.HealthCheck, where+".health_check")...)
 		errs = append(errs, validateDiscovery(up.Discovery, where+".discovery")...)
 	}
@@ -77,6 +73,7 @@ func Validate(c *Config) error {
 
 	for i, srv := range c.Servers {
 		where := fmt.Sprintf("servers[%d]", i)
+		errs = append(errs, validateServerValues(srv, where)...)
 		if strings.TrimSpace(srv.Listen) == "" {
 			errs = append(errs, fmt.Errorf("%s: 'listen' is required", where))
 		} else {
@@ -136,9 +133,6 @@ func Validate(c *Config) error {
 		if srv.TLS != nil && srv.TLS.ClientAuth.Active() && !srv.TLS.Enabled {
 			errs = append(errs, fmt.Errorf("%s: tls.client_auth requires tls.enabled = true", where))
 		}
-		if srv.RedirectHTTPS != 0 && srv.RedirectHTTPS != 301 && srv.RedirectHTTPS != 308 {
-			errs = append(errs, fmt.Errorf("%s: redirect_https must be 301 or 308, got %d", where, srv.RedirectHTTPS))
-		}
 		errs = append(errs, validateHTTP3(srv.HTTP3, srv.TLS, where)...)
 	}
 
@@ -153,26 +147,17 @@ func Validate(c *Config) error {
 
 	errs = append(errs, validateACMEConsistency(c.Servers)...)
 
+	errs = append(errs, validateAdminValues(c.Admin)...)
+	errs = append(errs, validateCacheValues(c.Cache)...)
+
 	if c.Admin.Enabled {
 		if strings.TrimSpace(c.Admin.Listen) == "" {
 			errs = append(errs, errors.New("[admin] enabled but 'listen' is empty"))
-		}
-		if c.Admin.HistoryKeep < 0 {
-			errs = append(errs, errors.New("[admin] 'history_keep' must not be negative"))
-		}
-		if c.Admin.AuditLogRotateMaxMB < 0 {
-			errs = append(errs, errors.New("[admin] 'audit_log_rotate_max_mb' must not be negative"))
-		}
-		if c.Admin.AuditLogRotateKeep < 0 {
-			errs = append(errs, errors.New("[admin] 'audit_log_rotate_keep' must not be negative"))
 		}
 		if c.Admin.PluginUploadEnabled != nil && !*c.Admin.PluginUploadEnabled {
 			// upload explicitly disabled; skip max-size validation entirely.
 		} else if c.Admin.PluginUploadMaxSize <= 0 {
 			errs = append(errs, errors.New("[admin] 'plugin_upload_max_size' must be positive when upload is enabled"))
-		}
-		if c.Admin.PluginUploadMaxSize < 0 {
-			errs = append(errs, errors.New("[admin] 'plugin_upload_max_size' must not be negative"))
 		}
 		errs = append(errs, validateRBAC(c.Admin.RBAC, c.Admin.Token)...)
 	}
@@ -194,10 +179,13 @@ func Validate(c *Config) error {
 // "zstd" are actually compiled in is reported at middleware construction with a
 // "not compiled in this build" error, since that depends on build tags.
 func validateCompression(c CompressionConfig) []error {
-	if !c.IsEnabled() {
-		return nil
-	}
 	var errs []error
+	if err := validateNonNegativeSize("[compression].min_size", c.MinSize); err != nil {
+		errs = append(errs, err)
+	}
+	if !c.IsEnabled() {
+		return errs
+	}
 	if len(c.Encoders) == 0 {
 		errs = append(errs, errors.New("[compression] enabled but no encoders are configured"))
 	}

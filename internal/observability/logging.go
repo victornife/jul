@@ -40,6 +40,10 @@ func NewDynamicLogger(w io.Writer, level, format string) (*slog.Logger, func(str
 	return slog.New(h), func(l string) { lv.Set(parseLevel(l)) }
 }
 
+// parseLevel retains an internal fallback to info as defense in depth for
+// direct library callers. Supported configuration paths validate
+// [global].log_level before constructing or updating the logger, so public
+// configuration never relies on this fallback.
 func parseLevel(level string) slog.Level {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "debug":
