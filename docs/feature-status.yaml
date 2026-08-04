@@ -20,14 +20,17 @@
 # Delivery state is a SEPARATE axis from maturity. A change moves implemented ->
 # merged (on main, under CHANGELOG [Unreleased]) -> released (tagged) -> soaked ->
 # audit-closed; a feature is GA only when released AND soaked. See the
-# "Delivery state vs. maturity" table in docs/status.md. As of 2026-07-31 the
-# Phase 4 egress hardening is merged but not yet released, and the configuration
-# write/apply/reload subsystem is remediated but its reopened audit is not
-# formally closed.
+# "Delivery state vs. maturity" table in docs/status.md. As of 2026-08-04 the
+# strict TOML, HTTP/3 mTLS, compression no-transform, exclusive ACME challenge,
+# dependency/CI and CodeQL correction tranche is merged but not yet tagged. The
+# response-cache entry preserves the historical release maturity while its
+# current conformance evidence is explicitly under recertification in the note
+# below and in docs/status.md/docs/cache.md; no new machine maturity value is
+# invented for a temporary regression programme.
 #
-# NOTE: Keep in sync with docs/status.md. When a feature's maturity or any
-# criterion changes, update both files. docs-check.py validates this file
-# automatically on every CI run.
+# NOTE: Keep in sync with docs/status.md. When a feature's maturity, criterion,
+# or material current-status note changes, update both files. docs-check.py
+# validates this file automatically on every CI run.
 
 version: 1
 
@@ -165,6 +168,11 @@ features:
     maturity: GA
     doc: cache.md
     criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+    notes: >
+      Historical released GA record. Current shared-cache, lifecycle,
+      concurrency and protocol-transparency evidence is under explicit
+      recertification in #107 and #131-#134; see docs/cache.md and docs/status.md.
+      The final maturity/status decision belongs to #134.
 
   - id: core-http
     name: "Core HTTP (static / proxy / FastCGI / vhosts / routing)"
