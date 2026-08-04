@@ -633,7 +633,7 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		// enabled. Its accept loop is not started here, so QUIC connections do
 		// not reach the previous handler generation before Publish either.
 		if cv.http3EnabledForAddr(addr) {
-			h3, err := newStagedHTTP3(addr, dyn.GetCertificate, s.dynamicHandler(addr), s.HTTP3ConnHook, s.log)
+			h3, err := newStagedHTTP3WithTLS(addr, tlsConf, s.dynamicHandler(addr), s.HTTP3ConnHook, s.log)
 			if err != nil {
 				_ = ln.Close()
 				return nil, fmt.Errorf("http3 %s: %w", addr, err)
