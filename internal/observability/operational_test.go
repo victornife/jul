@@ -25,14 +25,14 @@ func TestSanitizePathRedactsSensitiveSegments(t *testing.T) {
 		"/api/v1/health":                              "/api/v1/health",
 	}
 	for in, want := range cases {
-		if got := sanitizePath(in); got != want {
-			t.Errorf("sanitizePath(%q) = %q, want %q", in, got, want)
+		if got := SanitizePath(in); got != want {
+			t.Errorf("SanitizePath(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
 
 func TestSanitizePathStripsQueryThenRedacts(t *testing.T) {
-	if got := sanitizePath("/users/99999?token=secret#frag"); got != "/users/:id" {
+	if got := SanitizePath("/users/99999?token=secret#frag"); got != "/users/:id" {
 		t.Errorf("got %q, want /users/:id", got)
 	}
 }
@@ -95,8 +95,8 @@ func TestSanitizePath(t *testing.T) {
 		strings.Repeat("/x", 200): strings.Repeat("/x", 200)[:samplePathMaxLen],
 	}
 	for in, want := range cases {
-		if got := sanitizePath(in); got != want {
-			t.Errorf("sanitizePath(%q) = %q, want %q", in, got, want)
+		if got := SanitizePath(in); got != want {
+			t.Errorf("SanitizePath(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

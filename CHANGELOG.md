@@ -27,6 +27,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   ships today.
 
 ### Security
+- **WAF matched-request log privacy (#127):** Coraza v3.7.0 exposes the full unparsed request URI and macro-expanded match message to callbacks. Jul.IA now logs only bounded rule metadata and a shared sanitized/redacted path, records whether query data was omitted, and never copies raw query values or macro-expanded matched data into ordinary WAF warnings or metric labels.
 - **HTTP/3 mTLS parity:** QUIC listeners now clone the complete prepared sibling TCP TLS policy, preserving client-auth mode, CA verification, SAN/CRL checks, result hooks and verified client identity.
 - **Strict configuration decoding:** genuinely unknown TOML fields now fail immediately across the canonical parser; the documented singular `server_name` compatibility alias is canonicalized and conflicts with `server_names` are rejected.
 - **CodeQL reflected-output hardening:** FastCGI authorizer error strings are HTML-escaped and the deliberate upstream-response forwarding boundary is documented.
