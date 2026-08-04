@@ -74,7 +74,10 @@ flowchart LR
    **draft** GitHub Release. A maintainer reviews the assets and publishes it.
 
 Because the release is created as a draft, publishing is a deliberate human
-step, not an automatic side effect of pushing a tag.
+step, not an automatic side effect of pushing a tag. GitHub-generated release
+notes are a starting point: before publication they must be reconciled with
+`CHANGELOG.md`, the current security/status/known-limitations documents, and the
+actual artifacts produced for the tagged SHA.
 
 ## Release candidates
 
