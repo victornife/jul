@@ -1,4 +1,5 @@
 name: Apply known configuration value validation
+# Revalidated against main 9f2ce9dfe564e92bb93ea4db5c12f18e09cde980 after #199 and #201.
 
 on:
   pull_request:
