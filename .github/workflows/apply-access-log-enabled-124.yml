@@ -1,132 +1,56 @@
-name: Apply explicit access-log enablement
+name: Export recoverable #124 source
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
-    if: github.head_ref == 'automation/apply-access-log-enabled-124'
+  export:
+    if: github.head_ref == 'automation/export-access-log-124-source'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
-      - name: Check out target implementation branch
+      - name: Check out exact integrated main baseline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
         with:
-          ref: agent/access-log-enabled-124
+          ref: e585ed8c9fd6e1db1d71442ad113190869e4c878
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
-        with:
-          version: 11.8.0
-
-      - name: Set up Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version-file: internal/admin/ui/package.json
-          cache: pnpm
-          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
-
-      - name: Apply reviewed #124 patch
+      - name: Verify and package baseline
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin automation/apply-access-log-enabled-124
+          test "$(git rev-parse HEAD)" = "e585ed8c9fd6e1db1d71442ad113190869e4c878"
+          test -z "$(git status --short)"
+          tar --exclude=.git -czf /tmp/jul-124-base-source.tar.gz .
+
+      - name: Reconstruct and apply last known-good #124 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/export-access-log-124-source
           : > /tmp/access-log-enabled-124.patch.gz.b64
           for part in $(seq -w 0 10); do
-            git show "origin/automation/apply-access-log-enabled-124:.github/patches/access-log-enabled-124.part-${part}" >> /tmp/access-log-enabled-124.patch.gz.b64
+            git show "origin/automation/export-access-log-124-source:.github/patches/access-log-enabled-124.part-${part}" >> /tmp/access-log-enabled-124.patch.gz.b64
           done
           echo 'a0703da0b39ca3864a12d766ac3d54cf7b592a0c986022bf83b2e5549b0dc491  /tmp/access-log-enabled-124.patch.gz.b64' | sha256sum -c -
           base64 --decode /tmp/access-log-enabled-124.patch.gz.b64 | gzip --decompress > /tmp/access-log-enabled-124.patch
           echo '6a40dd970a2f5f9f135e8682e3a532d74b1f3ed6aea174da16d0e926b16712c1  /tmp/access-log-enabled-124.patch' | sha256sum -c -
           git apply --check /tmp/access-log-enabled-124.patch
           git apply /tmp/access-log-enabled-124.patch
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("internal/admin/ui/src/test/access-log-editor.test.tsx")
-          text = path.read_text(encoding="utf-8")
-          old_vitest = 'import { afterEach, beforeEach, describe, expect, fireEvent, it, vi } from "vitest";'
-          new_vitest = 'import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";'
-          old_testing = 'import { render, screen, waitFor } from "@testing-library/react";'
-          new_testing = 'import { fireEvent, render, screen, waitFor } from "@testing-library/react";'
-          if old_vitest not in text or old_testing not in text:
-              raise SystemExit("unexpected access-log editor test imports")
-          path.write_text(text.replace(old_vitest, new_vitest, 1).replace(old_testing, new_testing, 1), encoding="utf-8")
-          PY
-          gofmt -w \
-            internal/admin/api_status.go \
-            internal/admin/consolev1_test.go \
-            internal/admin/consolev2_test.go \
-            internal/admin/projection_types.go \
-            internal/admin/projections.go \
-            internal/app/factory.go internal/app/serve.go \
-            internal/config/config_test.go internal/config/lint.go internal/config/lint_test.go \
-            internal/config/parser.go internal/config/schema.go internal/config/validate.go \
-            internal/lifecycle/fingerprint.go internal/lifecycle/lifecycle.go internal/lifecycle/lifecycle_test.go \
-            internal/observability/preflight.go internal/observability/preflight_accesslog_test.go \
-            internal/observability/sinks.go internal/observability/sinks_test.go \
-            internal/server/accesslog_reload.go internal/server/accesslog_reload_test.go
           git diff --check
+          tar --exclude=.git -czf /tmp/jul-124-patched-source.tar.gz .
 
-      - name: Install and format Console sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm --dir internal/admin/ui install --frozen-lockfile
-          pnpm --dir internal/admin/ui exec prettier --write \
-            src/api/client.ts \
-            src/features/traffic-controls/AccessLogEditor.tsx \
-            src/features/traffic-controls/TrafficControlsPanel.tsx \
-            src/lib/accessLogToml.ts \
-            src/test/access-log-editor.test.tsx \
-            src/test/access-log-toml.test.ts \
-            e2e/smoke.spec.ts
-          pnpm --dir internal/admin/ui run build
-          git diff --check
-
-      - name: Validate backend and lifecycle
-        shell: bash
-        env:
-          FULL_TAGS: brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf
-        run: |
-          set -euo pipefail
-          go test ./internal/config ./internal/observability ./internal/app ./internal/admin ./internal/server ./internal/lifecycle
-          go test -race -p 2 -tags "${FULL_TAGS}" ./internal/config ./internal/observability ./internal/app ./internal/admin ./internal/server ./internal/lifecycle
-          python3 scripts/docs-check.py
-          python3 scripts/test_docs_check.py
-
-      - name: Validate Console and real server
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm --dir internal/admin/ui run typecheck
-          pnpm --dir internal/admin/ui run lint
-          pnpm --dir internal/admin/ui run test:coverage
-          go build -tags "console grpc" -o jul ./cmd/jul
-          pnpm --dir internal/admin/ui exec playwright install chromium --with-deps
-          pnpm --dir internal/admin/ui exec playwright test --project=chromium --project=real-server
-
-      - name: Commit target branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            CHANGELOG.md README.md SECURITY.md server.toml testdata/accesslog.toml \
-            docs/ scripts/docs-check.py \
-            internal/admin/ internal/app/ internal/config/ internal/lifecycle/ \
-            internal/observability/ internal/server/
-          git commit -m "observability: add explicit access-log enablement"
-          git push origin HEAD:agent/access-log-enabled-124
+      - name: Upload recovery bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: jul-124-recovery-source
+          path: |
+            /tmp/jul-124-base-source.tar.gz
+            /tmp/jul-124-patched-source.tar.gz
+            /tmp/access-log-enabled-124.patch
+          if-no-files-found: error
+          retention-days: 1
