@@ -144,12 +144,15 @@ func (ctx *clockDeadlineCtx) cancel(err error) {
 // only when Advance moves the clock past their deadline. It is safe to call
 // Advance while goroutines are blocked on timers created by this clock.
 type fakeClock struct {
-	mu     sync.Mutex
-	now    time.Time
-	timers []*fakeTimer
+	mu           sync.Mutex
+	now          time.Time
+	timers       []*fakeTimer
+	timerChanged chan struct{}
 }
 
-func newFakeClock(now time.Time) *fakeClock { return &fakeClock{now: now} }
+func newFakeClock(now time.Time) *fakeClock {
+	return &fakeClock{now: now, timerChanged: make(chan struct{})}
+}
 
 func (f *fakeClock) Now() time.Time {
 	f.mu.Lock()
@@ -168,6 +171,12 @@ func (f *fakeClock) NewTimer(d time.Duration) Timer {
 	f.mu.Lock()
 	ft := &fakeTimer{clock: f, deadline: f.now.Add(d), c: make(chan time.Time, 1)}
 	f.timers = append(f.timers, ft)
+	// Wake tests waiting for a specific timer-registration boundary. Closing
+	// and replacing the channel under the clock lock avoids polling and ensures
+	// an Advance cannot race ahead of the timer it is intended to trigger.
+	changed := f.timerChanged
+	f.timerChanged = make(chan struct{})
+	close(changed)
 	// A zero or negative duration fires immediately so callers that compute a
 	// non-positive remaining time observe the timer without requiring another
 	// Advance call.
@@ -181,6 +190,29 @@ func (f *fakeClock) NewTimer(d time.Duration) Timer {
 		ft.c <- now
 	}
 	return ft
+}
+
+// WaitForTimerCount blocks until at least count timers have been registered or
+// ctx is canceled. It is a deterministic test synchronization point: tests can
+// wait for the coordinator's reload-wait timer before advancing fake time,
+// rather than assuming that observing an earlier callback means the timer is
+// already installed.
+func (f *fakeClock) WaitForTimerCount(ctx context.Context, count int) bool {
+	for {
+		f.mu.Lock()
+		if len(f.timers) >= count {
+			f.mu.Unlock()
+			return true
+		}
+		changed := f.timerChanged
+		f.mu.Unlock()
+
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return false
+		}
+	}
 }
 
 // Advance moves fake time forward by d and fires any timers whose deadlines

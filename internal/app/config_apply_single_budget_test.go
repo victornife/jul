@@ -16,6 +16,15 @@ import (
 	"jul/internal/server"
 )
 
+func waitForFakeTimerCount(t *testing.T, clock *fakeClock, count int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !clock.WaitForTimerCount(ctx, count) {
+		t.Fatalf("fake clock did not register %d timers before the test deadline", count)
+	}
+}
+
 // TestManagedApplyEnforcesSingleReloadTimeoutBudget is the deterministic proof
 // for AC-08/R15-01: preflight and the reload wait share ONE absolute deadline
 // bound at admission. A fake clock drives the transaction so the test does not
@@ -103,6 +112,11 @@ func TestManagedApplyEnforcesSingleReloadTimeoutBudget(t *testing.T) {
 	if !req.Deadline.Equal(admissionDeadline) {
 		t.Fatalf("reload deadline = %v, want admission deadline %v (deadline was reset after preflight)", req.Deadline, admissionDeadline)
 	}
+
+	// SubmitReload happens before the synchronous reload-wait timer is
+	// installed. Wait for that second timer explicitly so Advance cannot race
+	// ahead of timer registration on a slower scheduler.
+	waitForFakeTimerCount(t, clock, 2)
 
 	remaining := admissionDeadline.Sub(clock.Now())
 	if remaining <= 0 {
@@ -201,6 +215,11 @@ func TestReloadDeadlineBoundsPostPublishFinalizeWait(t *testing.T) {
 	if !req.Deadline.Equal(admissionDeadline) {
 		t.Fatalf("reload deadline = %v, want admission deadline %v", req.Deadline, admissionDeadline)
 	}
+
+	// SubmitReload happens before the synchronous reload-wait timer is
+	// installed. Wait for that second timer explicitly so Advance cannot race
+	// ahead of timer registration on a slower scheduler.
+	waitForFakeTimerCount(t, clock, 2)
 
 	// Move past the admission deadline so the synchronous wait returns the
 	// provisional saved_not_live result.
