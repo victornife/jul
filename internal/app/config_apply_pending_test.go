@@ -113,10 +113,11 @@ func TestApplyRegistersPendingRecordBeforeSavedNotLive(t *testing.T) {
 	}
 	registry, startedCh, completedCh := wireProductionLedger(c)
 
-	deadline := time.Now().Add(time.Minute).UTC()
+	startedAt := time.Now().UTC()
+	deadline := startedAt.Add(30 * time.Millisecond * raceTimeScale)
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
-		StartedAt: time.Now().UTC(),
+		StartedAt: startedAt,
 		Deadline:  deadline,
 		TokenID:   "tok-owner-123",
 	}

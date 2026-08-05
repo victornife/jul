@@ -182,10 +182,11 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 
 	// 1. Submit a managed apply; the reload is withheld so ApplyRaw returns the
 	//    provisional saved_not_live 202 after its bounded wait expires.
+	startedAt := time.Now().UTC()
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
-		StartedAt: time.Now().UTC(),
-		Deadline:  time.Now().Add(time.Minute).UTC(),
+		StartedAt: startedAt,
+		Deadline:  startedAt.Add(30 * time.Millisecond),
 		TokenID:   "tok-owner-finalizer",
 		Actor:     "alice",
 	}

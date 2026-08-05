@@ -89,10 +89,11 @@ func TestManagedApplyLifecycle_202PendingThen200Terminal(t *testing.T) {
 
 	// 1. Submit a managed apply. The reload is withheld, so ApplyRaw returns the
 	//    provisional saved_not_live 202 after its bounded wait expires.
-	deadline := time.Now().Add(time.Minute).UTC()
+	startedAt := time.Now().UTC()
+	deadline := startedAt.Add(30 * time.Millisecond)
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
-		StartedAt: time.Now().UTC(),
+		StartedAt: startedAt,
 		Deadline:  deadline,
 		TokenID:   "tok-owner-vertical",
 	}
