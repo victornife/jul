@@ -3,9 +3,12 @@ name: Release
 # Release gate: building a version tag publishes artifacts only after the full
 # build/test gate AND the ADR-0005 soak gate are green. A red soak blocks the
 # release job, so a regression cannot ship under a tag ("block tag on red").
+# workflow_dispatch is a recovery path for an already-created immutable tag; the
+# preflight below rejects branch refs.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,8 +18,25 @@ env:
   FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
 
 jobs:
+  preflight:
+    name: release ref preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require immutable version tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF}" in
+            refs/tags/v*) ;;
+            *)
+              echo "::error::Release workflow must run at an existing refs/tags/v* ref; got ${GITHUB_REF}"
+              exit 1
+              ;;
+          esac
+
   gate:
     name: release gate (build + test)
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
@@ -33,6 +53,7 @@ jobs:
 
   soak:
     name: soak gate (ADR 0005)
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
@@ -191,7 +212,9 @@ jobs:
       - name: Create draft release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
+          tag_name: ${{ github.ref_name }}
           draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
@@ -199,4 +222,3 @@ jobs:
             artifacts/jul_*.zip
             artifacts/*.sha256
             artifacts/SHA256SUMS
-
