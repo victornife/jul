@@ -36,7 +36,7 @@ tested yet not in a tagged release. Keep the two distinct:
 | --- | --- |
 | **implemented** | Code exists and its tests pass on a working branch. |
 | **merged** | Landed on `main` and listed under `[Unreleased]` in [CHANGELOG.md](../CHANGELOG.md); it is not stable publication. |
-| **candidate** | Frozen in an immutable `vX.Y.Z-rc.N` tag with draft release artifacts for review; it is not a published stable release. |
+| **candidate** | Frozen in an immutable `vX.Y.Z-rc.N` tag; it may be reviewed as a draft or published as a prerelease, but it is not a stable release. |
 | **released** | Published in a stable tagged `vX.Y.Z` build with cross-compiled artifacts. |
 | **soaked** | The post-GA soak gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) has passed for the released build. |
 | **audit-closed** | Any reopened audit finding covering it is formally Closed (exact-SHA CI + two human sign-offs). |
@@ -45,14 +45,14 @@ A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on 
 [roadmap](roadmap/README.md) means *merged*, which is not the same as *released*.
 The current independently verified candidate is
 [`v1.32.1-rc.1`](release-candidates/v1.32.1-rc.1.md), frozen at
-`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`; its draft prerelease remains
-unpublished and does not change stable-release or long-running-soak status.
+`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`; it is published as a
+prerelease and does not change stable-release or long-running-soak status.
 
 **Current exceptions:**
 
 - **Egress allow-list (Phase 4)** — frozen in the independently verified,
-  unpublished `v1.32.1-rc.1` candidate. Treat it as *verified candidate, stable
-  release pending*; the five-minute RC soak is release-path smoke evidence, not
+  published `v1.32.1-rc.1` prerelease candidate. Treat it as *verified candidate,
+  stable release pending*; the five-minute RC soak is release-path smoke evidence, not
   long-running GA-soak evidence.
 - **Configuration write/apply/reload subsystem** — *remediated* across workstreams
   WS01–WS07 with tests, but the reopened

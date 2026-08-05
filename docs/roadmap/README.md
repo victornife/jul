@@ -19,7 +19,7 @@ ready, draft, gated, selected, deferred, deliberately restart-bound, or complete
 
 | Lane | Objective | Entry rule | Current emphasis |
 | --- | --- | --- | --- |
-| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Cache correctness/recertification, lifecycle authority, deterministic timing-test infrastructure |
+| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Cache correctness/recertification and lifecycle authority |
 | **Core Gateway Completeness** | Close material gaps inside the standalone gateway boundary | Architecture and product integrity | Trust boundaries, backend TLS/mTLS, resilience, routing policy, automation contracts |
 | **Operational enhancement** | Improve long-running operation without redefining the core | Value × leverage ÷ permanent complexity | Selected hot reload, diagnostics, recovery, migration assessment |
 | **Technical experiment** | Explore a new category through a bounded, removable tranche | Hypothesis, prerequisites, budget, evidence, exit decision | AI Gateway candidate after generic trust/resilience decisions |
@@ -51,7 +51,7 @@ portfolio has parallel lanes.
     ↓
 #123/#124/#126/#127 — selected correction tranche (complete)
     ↓
-v1.32.1-rc.1 — independently verified draft candidate (complete; unpublished)
+v1.32.1-rc.1 — independently verified published prerelease (complete; not stable)
     ↓
 #131 → #133 / #132 → #134 — cache correctness and recertification
     ↓
@@ -64,8 +64,8 @@ v1.32.1-rc.1 — independently verified draft candidate (complete; unpublished)
 selected core implementations
 ```
 
-The selected correction tranche and its unpublished `v1.32.1-rc.1`
-candidate checkpoint are complete and independently verified. Cache correctness
+The selected correction tranche and its published `v1.32.1-rc.1`
+prerelease checkpoint are complete and independently verified. Cache correctness
 and recertification are now the immediate correctness gate, followed by
 closed-world lifecycle authority. Shared edits to the configuration schema,
 lifecycle, composition root, reload transaction, or Console patch contracts
@@ -80,6 +80,7 @@ remain serial.
 - Exclusive ACME HTTP-01 versus TLS-ALPN-01 challenge selection.
 - `Cache-Control: no-transform` enforcement in dynamic compression.
 - Deterministic HTTP/3 UDP preflight testing on Windows.
+- Deterministic reload/apply deadline tests through an injected clock/timer seam, with race-scaled integration margins (#185, #219, #220).
 - Frontend dependency and CodeQL reflected-output hardening.
 - Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).
 - Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).
@@ -104,7 +105,7 @@ The immutable **`v1.32.1-rc.1`** checkpoint is complete at
 `9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Its exact-main CI, release-ref
 preflight, full-tag gate, five-minute soak-smoke, 12-cell lean/full matrix,
 checksums, embedded SPDX SBOMs, and all provenance/SBOM attestations passed. The
-GitHub Release remains an unpublished draft prerelease; see the
+GitHub Release is published as a prerelease; see the
 [candidate evidence](../release-candidates/v1.32.1-rc.1.md). Stable publication
 remains a later explicit decision while cache recertification and broader
 lifecycle-authority work remain open.

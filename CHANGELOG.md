@@ -9,15 +9,15 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
-> **Release state:** these changes are frozen in the independently verified,
-> unpublished `v1.32.1-rc.1` candidate at
-> `9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Release run `30999192141`
-> completed the tag-ref preflight, full-tag gate, release soak-smoke, twelve
-> platform/profile builds, checksums, embedded SBOMs, and provenance/SBOM
-> attestations. Verification run `31000789454` independently matched all 25
-> asset digests and verified all 24 attestations. The GitHub Release remains
-> draft and prerelease; this section stays `[Unreleased]` until a separate
-> stable-release decision. See the
+> **Release state:** the selected correction tranche through
+> `9a936d0cc1bc3f7086f38ca87741d9d09f950e25` is published as prerelease
+> `v1.32.1-rc.1`. Release run `30999192141` completed the tag-ref preflight,
+> full-tag gate, release soak-smoke, twelve platform/profile builds, checksums,
+> embedded SBOMs, and provenance/SBOM attestations. Verification run
+> `31000789454` independently matched all 25 asset digests and verified all 24
+> attestations. Current `main` is ahead of the tag; later changes, including the
+> deterministic reload-deadline work in #185/#219/#220, remain unreleased. This
+> section stays `[Unreleased]` until a separate stable-release decision. See the
 > [candidate evidence](docs/release-candidates/v1.32.1-rc.1.md).
 
 ### Changed
@@ -129,6 +129,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
     `permission.test.tsx` / Security-panel RBAC-status tests.
 
 ### Fixed
+- **Deterministic reload/apply deadline tests (#185):** added an internal clock/timer seam for managed apply and finalization tests, replaced narrow scheduler-dependent elapsed-time assertions with explicit deadline/state assertions, retained production real-clock integration, and race-scaled the remaining saved-not-live test deadlines (#219, #220).
 - **Fail-closed known configuration values (#123):** explicit invalid log level/format, worker grammar, negative durations/sizes/counts, invalid HTTP statuses, and overflowing size literals now fail consistently across startup, `jul check`, `jul lint`, `jul fmt`, hot apply, planned-restart staging, rollback, and importer validation instead of falling back or wrapping. Documented omission and zero/disabled semantics remain valid. A machine-readable value contract and AST drift test cover every public numeric and enum/grammar leaf.
 - **Prometheus compatibility and documentation contract (#126):** reconstructed the exact 28-family `v1.32.0` baseline at commit `6bb76a08846150663d7eeb9661edb718ef357a7c`, confirmed that current collectors preserve every released name/type/help/label tuple, documented the 14 additive release-pending families, corrected stale aliases and label descriptions, and added machine-readable current/released inventories with collector and documentation drift tests.
 - **ACME challenge selection:** HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface while preserving normal HTTP/TLS routing.

@@ -91,7 +91,7 @@ glance:
 
 > **Delivery state ≠ maturity.** "GA" describes the stable released maturity
 > contract. The immutable `v1.32.1-rc.1` tag is an independently verified
-> **candidate**, not stable publication: its draft prerelease contains all 12
+> **published prerelease candidate**, not a stable release: it contains all 12
 > platform/architecture/profile archives, verified checksums and embedded SPDX
 > SBOMs, plus SLSA provenance and SPDX SBOM attestations for every binary. It
 > covers strict unknown- and known-value validation, HTTP/3 mTLS parity,
