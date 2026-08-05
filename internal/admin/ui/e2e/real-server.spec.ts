@@ -59,6 +59,45 @@ function assertShape<T>(schema: z.ZodType<T>, data: unknown, endpoint: string): 
   return result.data;
 }
 
+/**
+ * Returns a copy of the raw TOML with a restart-required [cache] change.
+ * If the config already contains a [cache] block, the memory_max_size field
+ * is replaced; otherwise a new [cache] block is appended. This keeps the
+ * stage_restart tests valid regardless of whether the server returns a minimal
+ * or canonical raw view.
+ */
+function withCacheMemoryMaxSize(raw: string, value: string): string {
+  if (raw.includes("[cache]")) {
+    return raw.replace(
+      /memory_max_size\s*=\s*['"][^'"]*['"]/,
+      `memory_max_size = "${value}"`,
+    );
+  }
+  return `${raw}\n[cache]\nenabled = true\nmemory_max_size = "${value}"\n`;
+}
+
+/**
+ * Toggles [global].log_level between "debug" and "warn", preserving the
+ * existing quote style so the substitution works for both minimal and
+ * canonical raw TOML.
+ */
+function toggleLogLevel(raw: string): {
+  modified: string;
+  currentLevel: string;
+  nextLevel: string;
+  quote: string;
+} {
+  const levelMatch = raw.match(/log_level\s*=\s*(['"])(\w+)\1/);
+  const quote = levelMatch?.[1] ?? '"';
+  const currentLevel = levelMatch?.[2] ?? "warn";
+  const nextLevel = currentLevel === "debug" ? "warn" : "debug";
+  const modified = raw.replace(
+    /log_level\s*=\s*['"]\w+['"]/,
+    `log_level = ${quote}${nextLevel}${quote}`,
+  );
+  return { modified, currentLevel, nextLevel, quote };
+}
+
 // ── Overview ─────────────────────────────────────────────────────────────────
 
 test("GET /api/runtime/overview matches OverviewSchema", async ({ request }) => {
@@ -207,16 +246,16 @@ test("POST /api/config/apply with stale base_version returns 409 conflict", asyn
 test(
   "POST /api/config/apply adding [cache] block returns 409 restart_required",
   async ({ request }) => {
-    // Read the current config — e2e config has no [cache] section.
+    // Read the current config — the raw view may be minimal or canonical.
     const cfgResp = await request.get("/api/config");
     expect(cfgResp.status()).toBe(200);
     const cfgData: unknown = await cfgResp.json();
     const cfg = RawConfigSchema.parse(cfgData);
     const baseVersion = cfg.base_version ?? "";
 
-    // Append a cache block — this crosses CacheRestartRequired and should be
+    // Changing cache.memory_max_size crosses CacheRestartRequired and should be
     // rejected without writing anything.
-    const candidate = `${cfg.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MB"\n`;
+    const candidate = withCacheMemoryMaxSize(cfg.raw ?? "", "64m");
 
     const applyResp = await request.post(
       `${baseVersion ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}` : "/api/config/apply"}`,
@@ -276,13 +315,9 @@ test(
     // 2. Toggle log_level — a real semantic change that is hot-reloadable
     //    (not restart-required). The starting level depends on leftover state
     //    from earlier tests, so read it and switch to the other level.
-    const originalRaw = original.raw ?? "";
-    const levelMatch = originalRaw.match(/log_level\s*=\s*"(\w+)"/);
-    const currentLevel = levelMatch?.[1] ?? "warn";
-    const nextLevel = currentLevel === "debug" ? "warn" : "debug";
-    const modified = originalRaw.replace(/log_level\s*=\s*"\w+"/, `log_level = "${nextLevel}"`);
+    const { modified, currentLevel, nextLevel, quote } = toggleLogLevel(original.raw ?? "");
     // Sanity: the substitution changed something.
-    expect(modified).not.toBe(originalRaw);
+    expect(modified).not.toBe(original.raw ?? "");
 
     const applyUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
@@ -303,7 +338,7 @@ test(
     expect(afterApplyCfgResp.status()).toBe(200);
     const afterApplyCfgData: unknown = await afterApplyCfgResp.json();
     const afterApplyCfg = RawConfigSchema.parse(afterApplyCfgData);
-    expect(afterApplyCfg.raw ?? "").toContain(`log_level = "${nextLevel}"`);
+    expect(afterApplyCfg.raw ?? "").toContain(`log_level = ${quote}${nextLevel}${quote}`);
 
     // 4. A history entry must exist (the apply snapshots the previous config).
     const histResp = await request.get("/api/config/history");
@@ -325,8 +360,8 @@ test(
     expect(afterResp.status()).toBe(200);
     const afterData: unknown = await afterResp.json();
     const after = RawConfigSchema.parse(afterData);
-    expect(after.raw ?? "").not.toContain(`log_level = "${nextLevel}"`);
-    expect(after.raw ?? "").toContain(`log_level = "${currentLevel}"`);
+    expect(after.raw ?? "").not.toContain(`log_level = ${quote}${nextLevel}${quote}`);
+    expect(after.raw ?? "").toContain(`log_level = ${quote}${currentLevel}${quote}`);
   },
 );
 
@@ -353,11 +388,12 @@ test(
     const cfgData: unknown = await cfgResp.json();
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
-    expect(original.raw ?? "").toContain('root = "testdata/www"');
+    const rootRegex = /root\s*=\s*['"]testdata\/www['"]/;
+    expect(original.raw ?? "").toMatch(rootRegex);
 
     const modified = (original.raw ?? "").replace(
-      'root = "testdata/www"',
-      'root = "testdata/www-reload"',
+      rootRegex,
+      "root = 'testdata/www-reload'",
     );
     expect(modified).not.toBe(original.raw ?? "");
 
@@ -397,13 +433,13 @@ test(
     // 1. Baseline traffic content.
     await expectStaticOK(request, "Jul static OK");
 
-    // 2. Read current config and append a restart-required [cache] block.
+    // 2. Read current config and submit a restart-required [cache] change.
     const cfgResp = await request.get("/api/config");
     expect(cfgResp.status()).toBe(200);
     const cfgData: unknown = await cfgResp.json();
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
-    const candidate = `${original.raw ?? ""}\n[cache]\nenabled = true\nmemory_max_size = "64MB"\n`;
+    const candidate = withCacheMemoryMaxSize(original.raw ?? "", "64m");
 
     const applyUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
@@ -423,7 +459,7 @@ test(
     const afterResp = await request.get("/api/config");
     expect(afterResp.status()).toBe(200);
     const after = RawConfigSchema.parse(await afterResp.json());
-    expect(after.raw ?? "").not.toContain("[cache]");
+    expect(after.raw ?? "").not.toContain('memory_max_size = "64m"');
   },
 );
 
@@ -590,11 +626,8 @@ test(
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
 
-    // 3. Build a candidate with a restart-required change (log_format).
-    const candidate = (original.raw ?? "").replace(
-      /log_format\s*=\s*['"][^'"]*['"]/,
-      'log_format = "json"',
-    );
+    // 3. Build a candidate with a restart-required change (cache.memory_max_size).
+    const candidate = withCacheMemoryMaxSize(original.raw ?? "", "64m");
     const applyUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}&mode=stage_restart`
       : "/api/config/apply?mode=stage_restart";
@@ -696,10 +729,7 @@ test(
     const cfgData: unknown = await cfgResp.json();
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
-    const candidate = (original.raw ?? "").replace(
-      /log_format\s*=\s*['"][^'"]*['"]/,
-      'log_format = "json"',
-    );
+    const candidate = withCacheMemoryMaxSize(original.raw ?? "", "64m");
 
     const stageUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}&mode=stage_restart`
@@ -713,10 +743,7 @@ test(
     expect(stage1.ok).toBe(true);
 
     // 3. Update the staged config with a slightly different candidate.
-    const candidateV2 = (original.raw ?? "").replace(
-      /log_format\s*=\s*['"][^'"]*['"]/,
-      'log_format = "combined"',
-    );
+    const candidateV2 = withCacheMemoryMaxSize(original.raw ?? "", "128m");
     const cfgResp2 = await request.get("/api/config");
     const latestCfg = RawConfigSchema.parse(await cfgResp2.json());
     const updateUrl = latestCfg.base_version
