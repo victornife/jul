@@ -51,6 +51,19 @@ jobs:
           echo '6a40dd970a2f5f9f135e8682e3a532d74b1f3ed6aea174da16d0e926b16712c1  /tmp/access-log-enabled-124.patch' | sha256sum -c -
           git apply --check /tmp/access-log-enabled-124.patch
           git apply /tmp/access-log-enabled-124.patch
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("internal/admin/ui/src/test/access-log-editor.test.tsx")
+          text = path.read_text(encoding="utf-8")
+          old_testing = 'import { act, cleanup, render, screen, waitFor } from "@testing-library/react";'
+          new_testing = 'import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";'
+          old_vitest = 'import { afterEach, beforeEach, describe, expect, fireEvent, it, vi } from "vitest";'
+          new_vitest = 'import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";'
+          if old_testing not in text or old_vitest not in text:
+              raise SystemExit("unexpected access-log editor test imports")
+          path.write_text(text.replace(old_testing, new_testing, 1).replace(old_vitest, new_vitest, 1), encoding="utf-8")
+          PY
           gofmt -w \
             internal/admin/api_status.go \
             internal/admin/consolev1_test.go \
