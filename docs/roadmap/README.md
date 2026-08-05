@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.0 · Updated 2026-08-04
+> Version 2.0 · Updated 2026-08-05
 >
 > This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
 > with a portfolio model. Delivered feature maturity remains authoritative in the
@@ -47,13 +47,11 @@ portfolio has parallel lanes.
 ## Immediate critical path
 
 ```text
-#165 — canonical current product truth
+#165/#166 — product truth, operating model and completeness boundary (complete)
     ↓
-#166 — operating model, roadmap v2.0 and completeness boundary
+#123/#124/#126/#127 — selected correction tranche (complete)
     ↓
 v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
-    ↓
-#124 — explicit access-log enablement (complete)
     ↓
 #131 → #133 / #132 → #134 — cache correctness and recertification
     ↓
@@ -66,8 +64,9 @@ v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
 selected core implementations
 ```
 
-#124 is the remaining shared configuration-schema correction before lifecycle
-generation and Phase 5. Shared edits to the configuration schema, lifecycle,
+The selected correction tranche is complete. Cache correctness and
+recertification are the next immediate correctness gate, followed by closed-world
+lifecycle authority. Shared edits to the configuration schema, lifecycle,
 composition root, reload transaction, or Console patch contracts remain serial.
 
 ## Correctness and security backlog
@@ -99,12 +98,13 @@ composition root, reload transaction, or Console patch contracts remain serial.
 
 ## Release-candidate checkpoint
 
-After #165 and #166 merge and exact-head CI is green, the next automatic patch
-release candidate is **`v1.32.1-rc.1`**. Pushing that tag runs the existing
-release gate, soak, lean/full cross-platform build, checksums, SBOM and
+After #165/#166 and the selected #123/#124/#126/#127 correction tranche
+merge, documentation is reconciled, and exact-`main` CI is green, the next patch
+release candidate is **`v1.32.1-rc.1`**. The immutable tag runs the release
+preflight, gate, soak, lean/full cross-platform build, checksums, SBOM and
 attestation workflow, and creates an unpublished draft GitHub Release for human
-review. Stable publication remains a later explicit decision while selected
-correctness work remains open.
+review. Stable publication remains a later explicit decision while cache
+recertification and broader lifecycle-authority work remain open.
 
 ## Core Gateway Completeness backlog
 

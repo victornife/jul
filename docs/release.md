@@ -2,8 +2,9 @@
 
 > How Jul.IA (`jul`) is built, published, verified, and installed. Releases are
 > cut by [`.github/workflows/release.yml`](../.github/workflows/release.yml) when
-> a `v*` tag is pushed, and only after the build/test gate **and** the ADR-0005
-> soak gate are green — a regression cannot ship under a tag.
+> a `v*` tag is pushed or the workflow is explicitly dispatched at an existing
+> immutable `v*` tag. The build/test gate **and** ADR-0005 soak gate must both be
+> green — a regression cannot ship under a tag.
 
 ## Contents
 
@@ -58,26 +59,32 @@ what each tag enables.
 
 ```mermaid
 flowchart LR
-  tag([push tag v*]) --> gate[gate: vet + build + test]
-  tag --> soak[soak gate ADR-0005]
+  tag([tag push or tag-ref dispatch]) --> preflight[require refs/tags/v*]
+  preflight --> gate[gate: vet + build + test]
+  preflight --> soak[soak gate ADR-0005]
   gate --> build[build matrix: os × arch × profile]
   soak --> build
   build --> publish[publish: draft GitHub Release]
 ```
 
-1. **`gate`** — `go vet`/`go build`/`go test` with the full tag set.
-2. **`soak`** — the ADR-0005 long-running soak; a red run blocks the release.
-3. **`build`** (matrix) — cross-compiles a static (`CGO_ENABLED=0`),
+1. **`preflight`** — fails closed unless the run is bound to an existing
+   immutable `refs/tags/v*` ref.
+2. **`gate`** — `go vet`/`go build`/`go test` with the full tag set.
+3. **`soak`** — the ADR-0005 long-running soak; a red run blocks the release.
+4. **`build`** (matrix) — cross-compiles a static (`CGO_ENABLED=0`),
    `-trimpath` binary per cell, stamps `main.version` from the tag, generates
    the SBOM, archives, checksums, and attests provenance + SBOM.
-4. **`publish`** — collects every archive, writes `SHA256SUMS`, and opens a
+5. **`publish`** — collects every archive, writes `SHA256SUMS`, and opens a
    **draft** GitHub Release. A maintainer reviews the assets and publishes it.
 
 Because the release is created as a draft, publishing is a deliberate human
-step, not an automatic side effect of pushing a tag. GitHub-generated release
-notes are a starting point: before publication they must be reconciled with
-`CHANGELOG.md`, the current security/status/known-limitations documents, and the
-actual artifacts produced for the tagged SHA.
+step, not an automatic side effect of creating a tag. A controlled
+`workflow_dispatch` at the **existing tag ref** is supported for recovery when a
+tag push did not start the workflow; dispatch from a branch fails preflight and
+the workflow never creates or moves tags. GitHub-generated release notes are a
+starting point: before publication they must be reconciled with `CHANGELOG.md`,
+the current security/status/known-limitations documents, and the actual
+artifacts produced for the tagged SHA.
 
 ## Release candidates
 
@@ -96,9 +103,11 @@ maturity work is complete.
 
 The [current roadmap checkpoint](roadmap/README.md#release-candidate-checkpoint)
 is `v1.32.1-rc.1`, to be tagged from the exact integrated `main` SHA only after
-PRs #165 and #166 merge and the complete CI pipeline is green. A later stable
-`v1.32.1` tag requires a separate publication decision and a fresh release run;
-the RC tag is never renamed or reused.
+#165/#166 and the selected #123/#124/#126/#127 correction tranche are merged,
+the documentation is reconciled, and the complete CI pipeline is green for that
+exact SHA. Issue #194 is the evidence ledger. A later stable `v1.32.1` tag
+requires a separate publication decision and a fresh release run; the RC tag is
+never renamed or reused.
 
 Before creating any tag:
 

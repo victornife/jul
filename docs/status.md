@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.0 · Updated 2026-08-04
+> Version 2.0 · Updated 2026-08-05
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -35,8 +35,9 @@ tested yet not in a tagged release. Keep the two distinct:
 | Delivery state | Meaning |
 | --- | --- |
 | **implemented** | Code exists and its tests pass on a working branch. |
-| **merged** | Landed on `main`; listed under `[Unreleased]` in [CHANGELOG.md](../CHANGELOG.md), not yet tagged. |
-| **released** | Shipped in a tagged `vX.Y` build with cross-compiled artifacts. |
+| **merged** | Landed on `main` and listed under `[Unreleased]` in [CHANGELOG.md](../CHANGELOG.md); it is not stable publication. |
+| **candidate** | Frozen in an immutable `vX.Y.Z-rc.N` tag with draft release artifacts for review; it is not a published stable release. |
+| **released** | Published in a stable tagged `vX.Y.Z` build with cross-compiled artifacts. |
 | **soaked** | The post-GA soak gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) has passed for the released build. |
 | **audit-closed** | Any reopened audit finding covering it is formally Closed (exact-SHA CI + two human sign-offs). |
 
@@ -45,9 +46,10 @@ A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on 
 
 **Current exceptions:**
 
-- **Egress allow-list (Phase 4)** — *merged* to `main` (see [CHANGELOG.md](../CHANGELOG.md)
-  `[Unreleased]`); its first tagged **release** is pending. The implementation is
-  complete and tested: treat it as *merged, release pending*.
+- **Egress allow-list (Phase 4)** — *merged* to `main` and selected for the
+  unpublished `v1.32.1-rc.1` candidate checkpoint. Until stable publication,
+  treat it as *candidate, stable release pending*; RC soak is release-path
+  evidence rather than GA publication.
 - **Configuration write/apply/reload subsystem** — *remediated* across workstreams
   WS01–WS07 with tests, but the reopened
   [configuration-audit closure](audit/old/2026-07-25-configuration-audit-closure.md) is
@@ -58,9 +60,9 @@ A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on 
 ### Active regression and recertification notices
 
 - **Response cache:** the historical GA row remains the released record, but #107 and #131–#134 reopen current conformance evidence. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.
-- **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are implemented in the current tree and release pending; closed-world lifecycle generation (#89) remains open. Access-log changes are restart-required until #98.
-- **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen, additive families are release-pending, and WAF matched-request warnings are now path-only and bounded with query/request-derived message data omitted.
-- **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are merged to `main` and await the next tagged release.
+- **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are selected for the `v1.32.1-rc.1` candidate; stable publication remains pending. Closed-world lifecycle generation (#89) remains open, and access-log changes are restart-required until #98.
+- **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen; additive families and the bounded, path-only WAF warning contract are selected for the `v1.32.1-rc.1` candidate and remain stable-release pending.
+- **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are merged to `main` and selected for the `v1.32.1-rc.1` candidate; stable publication remains a later decision.
 
 ## GA criteria legend
 

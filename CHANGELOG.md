@@ -9,10 +9,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
-> **Release state:** these changes are **merged to `main`** but **not yet tagged
-> or released**. Per the delivery-state vocabulary in [docs/status.md](docs/status.md),
-> "merged" is not "released" or "soaked"; the Phase 4 egress hardening becomes
-> **GA** only after its first tagged release passes the post-GA soak gate.
+> **Release state:** these changes are **merged to `main`** and selected for the
+> unpublished `v1.32.1-rc.1` release-candidate checkpoint. An immutable RC tag
+> and draft GitHub Release provide verification evidence; they are not a stable
+> publication. Per the delivery-state vocabulary in [docs/status.md](docs/status.md),
+> "merged", "candidate", "released", and "soaked" remain distinct. This section
+> stays `[Unreleased]` until a stable-release decision is made; Phase 4 egress
+> remains stable-release pending even when included in the RC.
 
 ### Changed
 - **Explicit access-log enablement (#124):** `[observability.access_log].enabled` now distinguishes the default-on state from an explicit disabled state. `enabled = false` opens no access-log file/syslog resources and emits no request records to stdout or the Console access tail while process, security, audit, health, metrics, and tracing remain independent. Enabled blocks reject an explicit empty sink list; dormant sink settings remain validated. Legacy global/per-server log-destination fields are now linted and classified as `ignored_deprecated`, never as pending restart. The Traffic Controls Console includes a guided restart-aware editor.
