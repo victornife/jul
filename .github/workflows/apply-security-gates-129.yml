@@ -18,7 +18,7 @@ jobs:
           ref: agent/security-package-quality-gates-129
           fetch-depth: 0
 
-      - name: Apply reviewed implementation patch
+      - name: Apply reviewed implementation
         shell: bash
         run: |
           set -euo pipefail
@@ -28,10 +28,93 @@ jobs:
             > /tmp/issue-129.patch
           echo 'c946632d0d14dcafe05e9fc5368c931afdb1e483ae2668b5bae2f8789ee9e206  /tmp/issue-129.patch' \
             | sha256sum --check --strict
-          git apply --check /tmp/issue-129.patch
-          git apply /tmp/issue-129.patch
+
+          include_args=(
+            --include=.github/workflows/security-gates.yml
+            --include=scripts/security-package-coverage.json
+            --include=scripts/check-package-coverage.py
+            --include=scripts/test_check_package_coverage.py
+            --include=scripts/security-gates.sh
+            --include=internal/plugins/stub_test.go
+            --include=internal/waf/stub_test.go
+            --include=internal/rbac/security_negative_test.go
+            --include=docs/security-testing.md
+          )
+          git apply --check "${include_args[@]}" /tmp/issue-129.patch
+          git apply "${include_args[@]}" /tmp/issue-129.patch
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'Makefile',
+              '        hooks waf-churn\n',
+              '        hooks waf-churn security-gates\n',
+          )
+          replace_once(
+              'Makefile',
+              'vulncheck-full:\n\tgovulncheck -tags "$(FULL_TAGS)" ./...\n\nci-fast:',
+              'vulncheck-full:\n\tgovulncheck -tags "$(FULL_TAGS)" ./...\n\nsecurity-gates:\n\tscripts/security-gates.sh\n\nci-fast:',
+          )
+          replace_once(
+              'Makefile',
+              '# Extended local gate: ci-full + go vet + docs structural check.\n# Covers the most common CI-only failures without requiring CGO, pnpm, or\n# external services. See CONTRIBUTING.md for the full exclusion list.\nci-pr: ci-full\n',
+              '# Extended local gate: ci-full + dedicated security-package gates + go vet +\n# docs structural check.\n# Covers the most common CI-only failures without requiring CGO, pnpm, or\n# external services. See CONTRIBUTING.md for the full exclusion list.\nci-pr: ci-full security-gates\n',
+          )
+
+          replace_once(
+              'CONTRIBUTING.md',
+              '   ```bash\n   make ci-pr            # ci-full + go vet + docs-check\n   ```\n\n   **What `ci-pr` does not cover** (still requires a CI push):\n   - race detector (needs a CGO C toolchain)\n   - coverage floor enforcement\n',
+              '   ```bash\n   make ci-pr            # ci-full + go vet + docs-check\n   ```\n   Changes to RBAC, WAF, WASM plugins, or their build-tag boundaries can run the\n   focused gate directly:\n   ```bash\n   make security-gates   # lean/full negative tests + package coverage floors\n   ```\n   `make ci-pr` also runs this focused security gate.\n\n   **What `ci-pr` does not cover** (still requires a CI push):\n   - race detector (needs a CGO C toolchain)\n   - repository-wide coverage floor enforcement\n',
+          )
+          replace_once(
+              'CONTRIBUTING.md',
+              '`make vulncheck-full` before a release-sensitive change. A green pre-push is a\ngood signal, not a guarantee the full CI will pass.\n\n### Dependency vulnerability scanning\n',
+              '`make vulncheck-full` before a release-sensitive change. A green pre-push is a\ngood signal, not a guarantee the full CI will pass.\n\n### Security-package gates\n\n`make security-gates` enforces the dedicated fail-closed matrices and statement\ncoverage floors for `internal/rbac`, `internal/waf`, and `internal/plugins`.\nThe thresholds and exact baseline live in\n`scripts/security-package-coverage.json`; the checker fails distinctly when a\nrequired package is absent from the profile, so build-tag drift cannot turn a\nmissing package into a false pass.\n\nDo not lower a security-package floor just to make a pull request green. Add a\nlinked rationale covering the changed trust boundary and replacement evidence.\nSee [docs/security-testing.md](docs/security-testing.md) for the negative matrix,\nlocal commands, exit-code contract, and floor-change policy.\n\n### Dependency vulnerability scanning\n',
+          )
+
+          replace_once('SECURITY.md', '> Last reviewed: 2026-08-04\n', '> Last reviewed: 2026-08-05\n')
+          replace_once(
+              'SECURITY.md',
+              '- A statement-coverage floor is enforced in CI (the `coverage gate` job) so test\n  erosion fails the build rather than going unnoticed.\n',
+              '- A repository-wide statement-coverage floor and critical-package floors are\n  enforced by the main `coverage gate`. Dedicated RBAC, WAF, and WASM-plugin\n  floors plus lean/full fail-closed negative matrices run independently in the\n  `Security package gates` workflow. Their exact thresholds, baseline evidence,\n  local commands, and change policy are documented in\n  [Security testing gates](docs/security-testing.md).\n',
+          )
+
+          replace_once(
+              'docs/index.md',
+              '- **[Security posture](security-posture.md)** — Admin auth model, current limits, shipped local RBAC, and production hardening checklist.\n- **[Troubleshooting](troubleshooting.md)**',
+              '- **[Security posture](security-posture.md)** — Admin auth model, current limits, shipped local RBAC, and production hardening checklist.\n- **[Security testing gates](security-testing.md)** — Dedicated RBAC/WAF/WASM negative matrices, package floors, exact baselines, and local commands.\n- **[Troubleshooting](troubleshooting.md)**',
+          )
+
+          replace_once(
+              'CHANGELOG.md',
+              '### Changed\n',
+              '### Changed\n- **Dedicated security-package gates (#129):** added independently enforced full-tag statement floors for RBAC, WAF, and WASM plugins; lean/full fail-closed negative matrices for missing build tags and invalid security policy; a deterministic checker that fails on malformed or missing package coverage; exact baseline/floor documentation; and a reproducible `make security-gates` local command. These focused gates supplement rather than replace the repository-wide coverage, race, fuzz, vulnerability, CodeQL, E2E, and soak evidence.\n',
+          )
+
+          replace_once(
+              'docs/audit/combined-audit-2026-08-03.md',
+              '**Execution status (2026-08-05):** programme/audit truth and the non-cache correction tranche are closed; #131 is the next issue and has not started\n',
+              '**Execution status (2026-08-05):** programme/audit truth, the non-cache correction tranche, and #129 security-test foundations are closed; #131 is the next issue and has not started\n',
+          )
+          replace_once(
+              'docs/audit/combined-audit-2026-08-03.md',
+              'No command should be recorded as passing unless it was run against the exact commit being certified.\n\n---\n',
+              'No command should be recorded as passing unless it was run against the exact commit being certified.\n\nIssue #129 adds a separate `Security package gates` workflow and a reproducible\nlocal command for `internal/rbac`, `internal/waf`, and `internal/plugins`. The\nmachine-readable manifest records exact full-tag baselines and independently\nenforced floors; missing packages and malformed profiles fail closed.\n\n---\n',
+          )
+          PY
+
           rm -f .github/workflows/apply-security-gates-129.yml
-          rm -rf .github/patches
+          rm -f .github/patches/security-gates-129.part-00
+          rmdir .github/patches 2>/dev/null || true
           git diff --check
 
       - name: Validate focused gates
