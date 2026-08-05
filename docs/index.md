@@ -8,6 +8,7 @@ binary.
 
 - **[2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md)** — Current source of truth for repository health, confirmed defects, architecture decisions and implementation sequencing.
 - **[Audit register](audit-register.md)** — Current audit pointer plus historical findings, fixes, tests and closure evidence.
+- **[Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md)** — Exact-SHA maintainer certification, historical-audit disposition, residual transfers and the gate before #131.
 - **[Master implementation tracker](https://github.com/victornife/jul/issues/62)** — Current staged execution programme and decision register.
 - **[Project operating model](operating-model.md)** — Durable portfolio, execution, evidence and experiment rules.
 - **[Core Gateway Completeness](specs/core-gateway-completeness.md)** — Bounded standalone-product completion contract.
@@ -24,7 +25,7 @@ binary.
 - **[Concepts appendix](vision/appendix.md)** — New to HTTP, proxies, TLS, caching, or observability? Start here.
 
 ### Evaluating or operating?
-- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit while correction issues remain open.
+- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit; cache recertification is the active correctness programme.
 - **[Known limitations](known-limitations.md)** — Documented gaps and current correction notices.
 - **[Deployment guide](deployment.md)** — systemd, Windows service, Docker, and log rotation.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
