@@ -1,0 +1,78 @@
+name: Security package gates
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+
+jobs:
+  negative-tests:
+    name: security negative tests (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: lean
+            tags: ""
+          - profile: full
+            tags: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: run fail-closed security matrices
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(-count=1)
+          if [ -n "${{ matrix.tags }}" ]; then
+            args+=(-tags "${{ matrix.tags }}")
+          fi
+          go test "${args[@]}" ./internal/rbac ./internal/waf ./internal/plugins
+
+  package-coverage:
+    name: security package coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: test coverage gate parser
+        run: python3 scripts/test_check_package_coverage.py
+      - name: collect full-tag security package coverage
+        run: >-
+          go test -count=1 -covermode=atomic -coverprofile=security-cover.out
+          -tags "${{ env.FULL_TAGS }}"
+          ./internal/rbac ./internal/waf ./internal/plugins
+      - name: enforce dedicated package floors
+        run: >-
+          python3 scripts/check-package-coverage.py
+          --profile scripts/security-package-coverage.json
+          --coverprofile security-cover.out
+      - name: upload security coverage profile
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: security-package-coverage
+          path: security-cover.out
+          if-no-files-found: error

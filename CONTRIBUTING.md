@@ -27,10 +27,16 @@ technical merit aligned with the project's vision.
    ```bash
    make ci-pr            # ci-full + go vet + docs-check
    ```
+   Changes to RBAC, WAF, WASM plugins, or their build-tag boundaries can run the
+   focused gate directly:
+   ```bash
+   make security-gates   # lean/full negative tests + package coverage floors
+   ```
+   `make ci-pr` also runs this focused security gate.
 
    **What `ci-pr` does not cover** (still requires a CI push):
    - race detector (needs a CGO C toolchain)
-   - coverage floor enforcement
+   - repository-wide coverage floor enforcement
    - Windows / macOS platform lanes
    - frontend typecheck/lint/unit tests (run `make console-check` separately)
    - Playwright E2E
@@ -65,6 +71,20 @@ toolchain), the coverage floors, `govulncheck`, or the bench/fuzz/soak smoke
 jobs — those still run in CI, and you should run `make ci-full` /
 `make vulncheck-full` before a release-sensitive change. A green pre-push is a
 good signal, not a guarantee the full CI will pass.
+
+### Security-package gates
+
+`make security-gates` enforces the dedicated fail-closed matrices and statement
+coverage floors for `internal/rbac`, `internal/waf`, and `internal/plugins`.
+The thresholds and exact baseline live in
+`scripts/security-package-coverage.json`; the checker fails distinctly when a
+required package is absent from the profile, so build-tag drift cannot turn a
+missing package into a false pass.
+
+Do not lower a security-package floor just to make a pull request green. Add a
+linked rationale covering the changed trust boundary and replacement evidence.
+See [docs/security-testing.md](docs/security-testing.md) for the negative matrix,
+local commands, exit-code contract, and floor-change policy.
 
 ### Dependency vulnerability scanning
 

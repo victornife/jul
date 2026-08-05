@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "profile": "full-tags",
+  "baseline": {
+    "sha": "0de8541e0479bebd175e6ca7d3c47e2cd091ec74",
+    "workflow_run": 31044350343,
+    "measured_on": "2026-08-05"
+  },
+  "packages": {
+    "jul/internal/plugins": {
+      "label": "internal/plugins",
+      "baseline": 70.1,
+      "floor": 69.0
+    },
+    "jul/internal/rbac": {
+      "label": "internal/rbac",
+      "baseline": 75.8,
+      "floor": 75.0
+    },
+    "jul/internal/waf": {
+      "label": "internal/waf",
+      "baseline": 73.0,
+      "floor": 72.0
+    }
+  }
+}
