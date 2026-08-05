@@ -64,10 +64,10 @@ func TestManagedApplyLifecycle_202PendingThen200Terminal(t *testing.T) {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
 			// A short reload_timeout bounds the synchronous wait so the 202 is
 			// returned promptly without any test sleep.
-			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond)
+			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond * raceTimeScale)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
-		waitMargin:     10 * time.Millisecond,
+		waitMargin:     10 * time.Millisecond * raceTimeScale,
 		PlannedRestart: &PlannedRestartStore{},
 	}
 
@@ -90,7 +90,7 @@ func TestManagedApplyLifecycle_202PendingThen200Terminal(t *testing.T) {
 	// 1. Submit a managed apply. The reload is withheld, so ApplyRaw returns the
 	//    provisional saved_not_live 202 after its bounded wait expires.
 	startedAt := time.Now().UTC()
-	deadline := startedAt.Add(30 * time.Millisecond)
+	deadline := startedAt.Add(30 * time.Millisecond * raceTimeScale)
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
 		StartedAt: startedAt,
