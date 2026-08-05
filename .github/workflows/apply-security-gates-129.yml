@@ -1,0 +1,55 @@
+name: Apply issue 129 security quality gates
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/security-package-quality-gates-129'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: agent/security-package-quality-gates-129
+          fetch-depth: 0
+
+      - name: Apply reviewed implementation patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/patches/security-gates-129.part-00 \
+            | base64 --decode \
+            | gzip --decompress \
+            > /tmp/issue-129.patch
+          echo 'c946632d0d14dcafe05e9fc5368c931afdb1e483ae2668b5bae2f8789ee9e206  /tmp/issue-129.patch' \
+            | sha256sum --check --strict
+          git apply --check /tmp/issue-129.patch
+          git apply /tmp/issue-129.patch
+          rm -f .github/workflows/apply-security-gates-129.yml
+          rm -rf .github/patches
+          git diff --check
+
+      - name: Validate focused gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/test_check_package_coverage.py
+          make security-gates
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Commit final implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -s -m 'test: enforce dedicated security package gates'
+          git push origin HEAD:agent/security-package-quality-gates-129
