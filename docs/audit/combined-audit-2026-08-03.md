@@ -5,7 +5,7 @@
 **Audited branch:** `main`  
 **Source baseline:** `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a`  
 **Status:** current authoritative audit and implementation-planning baseline  
-**Execution status (2026-08-05):** programme/audit truth and the non-cache correction tranche are closed; #131 is the next issue and has not started
+**Execution status (2026-08-05):** programme/audit truth, the non-cache correction tranche, and #129 security-test foundations are closed; #131 is the next issue and has not started
 **Supersedes for current planning:** `2026-07-31-full-repository-audit.md` while preserving that document as historical evidence
 
 > This audit is the source of truth for the current programme. It separates shipped behavior, confirmed defects, probable defects, operational enhancements, architecture decisions and bounded experiments. A linked issue is not implementation approval when its title contains `[DRAFT]` or `[GATED]`.
@@ -222,6 +222,11 @@ The repository already has broad unit and integration coverage, but the followin
 - long-running soak with goroutine, FD, socket, heap and resource-retirement trends.
 
 No command should be recorded as passing unless it was run against the exact commit being certified.
+
+Issue #129 adds a separate `Security package gates` workflow and a reproducible
+local command for `internal/rbac`, `internal/waf`, and `internal/plugins`. The
+machine-readable manifest records exact full-tag baselines and independently
+enforced floors; missing packages and malformed profiles fail closed.
 
 ---
 

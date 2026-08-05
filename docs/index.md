@@ -33,6 +33,7 @@ binary.
 - **[Reload semantics](reload-semantics.md)** — What reloads safely, what needs a restart, and how zero-downtime reload works.
 - **[Security model](../SECURITY.md)** — Threat model, hardening defaults, and per-feature security notes.
 - **[Security posture](security-posture.md)** — Admin auth model, current limits, shipped local RBAC, and production hardening checklist.
+- **[Security testing gates](security-testing.md)** — Dedicated RBAC/WAF/WASM negative matrices, package floors, exact baselines, and local commands.
 - **[Troubleshooting](troubleshooting.md)** — Common issues and how to resolve them.
 
 ### Feature deep-dives

@@ -1,6 +1,6 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
         console-dev console-build console-check build-console build-full license-check \
-        hooks waf-churn
+        hooks waf-churn security-gates
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
@@ -58,6 +58,9 @@ vulncheck:
 vulncheck-full:
 	govulncheck -tags "$(FULL_TAGS)" ./...
 
+security-gates:
+	scripts/security-gates.sh
+
 ci-fast: format-check lint test build license-check
 
 # Full-tag Go gates (build, lint, test, vulncheck, license).
@@ -65,10 +68,11 @@ ci-fast: format-check lint test build license-check
 # floors, platform lanes, frontend, or E2E (those run only in CI).
 ci-full: format-check lint-full test-full vulncheck-full build-full license-check
 
-# Extended local gate: ci-full + go vet + docs structural check.
+# Extended local gate: ci-full + dedicated security-package gates + go vet +
+# docs structural check.
 # Covers the most common CI-only failures without requiring CGO, pnpm, or
 # external services. See CONTRIBUTING.md for the full exclusion list.
-ci-pr: ci-full
+ci-pr: ci-full security-gates
 	go vet -tags "$(FULL_TAGS)" ./...
 	python3 scripts/docs-check.py
 

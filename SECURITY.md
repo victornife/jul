@@ -1,6 +1,6 @@
 # Security Policy
 
-> Last reviewed: 2026-08-04
+> Last reviewed: 2026-08-05
 
 This is the umbrella security document for **Jul.IA** (`jul`). It defines the
 trust model the server is built around, the hardening defaults you should know
@@ -172,8 +172,12 @@ permanent regression seed.
 - [`govulncheck`](.github/workflows/ci.yml) runs in CI against the full opt-in tag
   set, alongside `go vet`, `golangci-lint`, the race detector, and the benchmark
   and fuzz smoke jobs.
-- A statement-coverage floor is enforced in CI (the `coverage gate` job) so test
-  erosion fails the build rather than going unnoticed.
+- A repository-wide statement-coverage floor and critical-package floors are
+  enforced by the main `coverage gate`. Dedicated RBAC, WAF, and WASM-plugin
+  floors plus lean/full fail-closed negative matrices run independently in the
+  `Security package gates` workflow. Their exact thresholds, baseline evidence,
+  local commands, and change policy are documented in
+  [Security testing gates](docs/security-testing.md).
 - The [container image](Dockerfile) pins both base images (the Go build stage and
   the distroless runtime) by tag **and** `@sha256` digest, so a rebuild is
   reproducible and tamper-evident. [Dependabot](.github/dependabot.yml) tracks
