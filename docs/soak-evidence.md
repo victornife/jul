@@ -59,6 +59,22 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-08-05 — `v1.32.1-rc.1` release-gate smoke (Linux, 5m/scenario)
+
+- **Tag/SHA:** `v1.32.1-rc.1` / `9a936d0cc1bc3f7086f38ca87741d9d09f950e25`
+- **Workflow:** release run `30999192141`; independent verification run
+  `31000789454` (artifact `8928187128`).
+- **Environment:** Linux/amd64, Go 1.26.5, 32 workers, full release tag set.
+- **Result:** proxy scenario passed with 4,114,941 requests and 0 errors;
+  goroutines 10 → 100 and heap 676,880 → 1,565,400 bytes. UDP churn passed
+  with 813,725 sends, peak sessions 257 against cap 256, 437,683 rejected
+  admissions, goroutines 4 → 4, and heap 370,344 → 596,944 bytes.
+- **Artifact:** `soak-results` from release run `30999192141`.
+- **Classification:** ✅ release-path smoke gate; ❌ does **not** count toward
+  ADR 0005's one-hour single-feature or four-hour consolidated long-running
+  soak minimum. Full RC evidence is in
+  [the candidate record](release-candidates/v1.32.1-rc.1.md).
+
 ### 2026-07-16 — WASM plugin 8h isolated soak (Linux) — authoritative run
 
 Environment: Linux/amd64, Go 1.26+, build tag `wasmplugins`, wazero runtime,

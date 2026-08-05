@@ -90,14 +90,16 @@ glance:
 > regression, not a reason to retract the label.
 
 > **Delivery state ≠ maturity.** "GA" describes the stable released maturity
-> contract. Changes merged to `main` remain under
-> [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]`; an immutable `vX.Y.Z-rc.N` tag
-> with draft artifacts is a **candidate**, not stable publication. The selected
-> `v1.32.1-rc.1` checkpoint covers strict unknown- and known-value validation,
-> HTTP/3 mTLS parity, compression `no-transform`, exclusive ACME challenge
-> selection, the frozen Prometheus contract, bounded/redacted WAF request
-> logging, explicit access-log enablement, and dependency/CI fixes. The response
-> cache remains under a documented correctness recertification; see
+> contract. The immutable `v1.32.1-rc.1` tag is an independently verified
+> **candidate**, not stable publication: its draft prerelease contains all 12
+> platform/architecture/profile archives, verified checksums and embedded SPDX
+> SBOMs, plus SLSA provenance and SPDX SBOM attestations for every binary. It
+> covers strict unknown- and known-value validation, HTTP/3 mTLS parity,
+> compression `no-transform`, exclusive ACME challenge selection, the frozen
+> Prometheus contract, bounded/redacted WAF request logging, explicit access-log
+> enablement, and dependency/CI fixes. See the
+> [candidate evidence](docs/release-candidates/v1.32.1-rc.1.md). The response
+> cache remains under correctness recertification; see
 > [`docs/cache.md`](docs/cache.md), [`docs/status.md`](docs/status.md), and the
 > [combined audit](docs/audit/combined-audit-2026-08-03.md).
 

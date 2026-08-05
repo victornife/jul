@@ -43,13 +43,17 @@ tested yet not in a tagged release. Keep the two distinct:
 
 A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on the
 [roadmap](roadmap/README.md) means *merged*, which is not the same as *released*.
+The current independently verified candidate is
+[`v1.32.1-rc.1`](release-candidates/v1.32.1-rc.1.md), frozen at
+`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`; its draft prerelease remains
+unpublished and does not change stable-release or long-running-soak status.
 
 **Current exceptions:**
 
-- **Egress allow-list (Phase 4)** — *merged* to `main` and selected for the
-  unpublished `v1.32.1-rc.1` candidate checkpoint. Until stable publication,
-  treat it as *candidate, stable release pending*; RC soak is release-path
-  evidence rather than GA publication.
+- **Egress allow-list (Phase 4)** — frozen in the independently verified,
+  unpublished `v1.32.1-rc.1` candidate. Treat it as *verified candidate, stable
+  release pending*; the five-minute RC soak is release-path smoke evidence, not
+  long-running GA-soak evidence.
 - **Configuration write/apply/reload subsystem** — *remediated* across workstreams
   WS01–WS07 with tests, but the reopened
   [configuration-audit closure](audit/old/2026-07-25-configuration-audit-closure.md) is
@@ -60,9 +64,9 @@ A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on 
 ### Active regression and recertification notices
 
 - **Response cache:** the historical GA row remains the released record, but #107 and #131–#134 reopen current conformance evidence. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.
-- **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are selected for the `v1.32.1-rc.1` candidate; stable publication remains pending. Closed-world lifecycle generation (#89) remains open, and access-log changes are restart-required until #98.
-- **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen; additive families and the bounded, path-only WAF warning contract are selected for the `v1.32.1-rc.1` candidate and remain stable-release pending.
-- **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are merged to `main` and selected for the `v1.32.1-rc.1` candidate; stable publication remains a later decision.
+- **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are verified in `v1.32.1-rc.1`; stable publication remains pending. Closed-world lifecycle generation (#89) remains open, and access-log changes are restart-required until #98.
+- **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen; additive families and the bounded, path-only WAF warning contract are verified in `v1.32.1-rc.1` and remain stable-release pending.
+- **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are verified in `v1.32.1-rc.1`; stable publication remains a later decision.
 
 ## GA criteria legend
 
