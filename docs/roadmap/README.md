@@ -80,7 +80,7 @@ remain serial.
 - Exclusive ACME HTTP-01 versus TLS-ALPN-01 challenge selection.
 - `Cache-Control: no-transform` enforcement in dynamic compression.
 - Deterministic HTTP/3 UDP preflight testing on Windows.
-- Deterministic reload/apply deadline tests through an injected clock/timer seam, with race-scaled integration margins (#185, #219, #220).
+- Deterministic reload/apply deadline tests through an injected clock/timer seam, with race-scaled integration margins and explicit timer-registration synchronization (#185, #219, #220, #222).
 - Frontend dependency and CodeQL reflected-output hardening.
 - Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).
 - Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).
