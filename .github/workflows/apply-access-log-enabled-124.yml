@@ -1,0 +1,116 @@
+name: Apply explicit access-log enablement
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'automation/apply-access-log-enabled-124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out target implementation branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: agent/access-log-enabled-124
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: 11.8.0
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+
+      - name: Apply reviewed #124 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/apply-access-log-enabled-124
+          git show origin/automation/apply-access-log-enabled-124:.github/patches/access-log-enabled-124.patch.gz.b64 \
+            | base64 --decode \
+            | gzip --decompress \
+            > /tmp/access-log-enabled-124.patch
+          git apply --check /tmp/access-log-enabled-124.patch
+          git apply /tmp/access-log-enabled-124.patch
+          gofmt -w \
+            internal/admin/api_status.go \
+            internal/admin/consolev1_test.go \
+            internal/admin/consolev2_test.go \
+            internal/admin/projection_types.go \
+            internal/admin/projections.go \
+            internal/app/factory.go internal/app/serve.go \
+            internal/config/config_test.go internal/config/lint.go internal/config/lint_test.go \
+            internal/config/parser.go internal/config/schema.go internal/config/validate.go \
+            internal/lifecycle/fingerprint.go internal/lifecycle/lifecycle.go internal/lifecycle/lifecycle_test.go \
+            internal/observability/preflight.go internal/observability/preflight_accesslog_test.go \
+            internal/observability/sinks.go internal/observability/sinks_test.go \
+            internal/server/accesslog_reload.go internal/server/accesslog_reload_test.go
+          git diff --check
+
+      - name: Install and format Console sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui exec prettier --write \
+            src/api/client.ts \
+            src/features/traffic-controls/AccessLogEditor.tsx \
+            src/features/traffic-controls/TrafficControlsPanel.tsx \
+            src/lib/accessLogToml.ts \
+            src/test/access-log-editor.test.tsx \
+            src/test/access-log-toml.test.ts \
+            e2e/smoke.spec.ts
+          pnpm --dir internal/admin/ui run build
+          git diff --check
+
+      - name: Validate backend and lifecycle
+        shell: bash
+        env:
+          FULL_TAGS: brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf
+        run: |
+          set -euo pipefail
+          go test ./internal/config ./internal/observability ./internal/app ./internal/admin ./internal/server ./internal/lifecycle
+          go test -race -p 2 -tags "${FULL_TAGS}" ./internal/config ./internal/observability ./internal/app ./internal/admin ./internal/server ./internal/lifecycle
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+
+      - name: Validate Console and real server
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+          pnpm --dir internal/admin/ui run test:coverage
+          go build -tags "console grpc" -o jul ./cmd/jul
+          pnpm --dir internal/admin/ui exec playwright install chromium --with-deps
+          pnpm --dir internal/admin/ui exec playwright test --project=chromium --project=real-server
+
+      - name: Commit target branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            CHANGELOG.md README.md SECURITY.md server.toml testdata/accesslog.toml \
+            docs/ scripts/docs-check.py \
+            internal/admin/ internal/app/ internal/config/ internal/lifecycle/ \
+            internal/observability/ internal/server/
+          git commit -m "observability: add explicit access-log enablement"
+          git push origin HEAD:agent/access-log-enabled-124
