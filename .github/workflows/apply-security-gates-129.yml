@@ -96,8 +96,8 @@ jobs:
 
           replace_once(
               'CHANGELOG.md',
-              '### Changed\n',
-              '### Changed\n- **Dedicated security-package gates (#129):** added independently enforced full-tag statement floors for RBAC, WAF, and WASM plugins; lean/full fail-closed negative matrices for missing build tags and invalid security policy; a deterministic checker that fails on malformed or missing package coverage; exact baseline/floor documentation; and a reproducible `make security-gates` local command. These focused gates supplement rather than replace the repository-wide coverage, race, fuzz, vulnerability, CodeQL, E2E, and soak evidence.\n',
+              '[candidate evidence](docs/release-candidates/v1.32.1-rc.1.md).\n\n### Changed\n',
+              '[candidate evidence](docs/release-candidates/v1.32.1-rc.1.md).\n\n### Changed\n- **Dedicated security-package gates (#129):** added independently enforced full-tag statement floors for RBAC, WAF, and WASM plugins; lean/full fail-closed negative matrices for missing build tags and invalid security policy; a deterministic checker that fails on malformed or missing package coverage; exact baseline/floor documentation; and a reproducible `make security-gates` local command. These focused gates supplement rather than replace the repository-wide coverage, race, fuzz, vulnerability, CodeQL, E2E, and soak evidence.\n',
           )
 
           replace_once(
