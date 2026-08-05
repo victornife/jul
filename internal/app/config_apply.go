@@ -196,6 +196,11 @@ type ConfigApplyCoordinator struct {
 	beforeRestore func()
 	waitMargin    time.Duration
 
+	// clock is an internal deterministic test seam for time. nil selects the
+	// real wall clock; tests may inject a fakeClock to advance deadlines and
+	// timers explicitly. It is not part of the public coordinator contract.
+	clock Clock
+
 	mu      sync.Mutex
 	applyMu sync.Mutex
 
@@ -421,10 +426,10 @@ func (c *ConfigApplyCoordinator) preflightContext(reqCtx admin.ApplyRequestConte
 		base = context.Background()
 	}
 	if !reqCtx.Deadline.IsZero() {
-		return context.WithDeadline(base, reqCtx.Deadline)
+		return c.withDeadline(base, reqCtx.Deadline)
 	}
 	if timeout := c.servingReloadTimeout(candidate); timeout > 0 {
-		return context.WithTimeout(base, timeout)
+		return c.withTimeout(base, timeout)
 	}
 	return context.WithCancel(base)
 }
@@ -926,10 +931,10 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	// AC-08/R15-01: reuse the ONE absolute deadline bound at HTTP admission.
 	// transactionStarted is the admission time so provisional results and the
 	// reload deadline share a single origin; only when no admission time was
-	// bound (older callers/tests) do we fall back to now.
+	// bound (older callers/tests) do we fall back to the coordinator clock.
 	transactionStarted := reqCtx.StartedAt
 	if transactionStarted.IsZero() {
-		transactionStarted = time.Now().UTC()
+		transactionStarted = c.coordinatorClock().Now().UTC()
 	}
 
 	// AC-03: id is allocated once in ApplyRaw before the hot/stage branch so
@@ -1149,13 +1154,13 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	// accidental one-second wait.
 	var wait <-chan time.Time
 	if !deadline.IsZero() {
-		remaining := time.Until(deadline) + waitMargin
+		remaining := c.coordinatorClock().Until(deadline) + waitMargin
 		if remaining < 0 {
 			remaining = 0
 		}
-		timer := time.NewTimer(remaining)
+		timer := c.coordinatorClock().NewTimer(remaining)
 		defer timer.Stop()
-		wait = timer.C
+		wait = timer.C()
 	}
 
 	select {

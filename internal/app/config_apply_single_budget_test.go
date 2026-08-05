@@ -16,28 +16,18 @@ import (
 	"jul/internal/server"
 )
 
-// TestManagedApplyEnforcesSingleReloadTimeoutBudget is the end-to-end proof for
-// AC-08/R15-01: preflight and the reload wait share ONE absolute deadline bound
-// at admission. If the reload wait were granted a fresh full timeout after
-// preflight (the reset defect), the transaction would run for
-// preflight_consumed + reload_timeout; with a single budget it must terminate at
-// the original deadline regardless of how much of the budget preflight already
-// spent.
-//
-// Scaling: the runbook example uses a 150ms serving timeout with ~100ms spent in
-// preflight. The wall-clock window is widened here (200ms budget, ~150ms
-// preflight) so the one-budget return (~budget+margin) and the reset return
-// (~preflight+budget+margin) sit far enough apart to assert without flakiness.
-// The return is anchored to the ABSOLUTE deadline computed at admission, so the
-// low side is stable; only scheduling jitter can push it up, hence the generous
-// upper bound.
+// TestManagedApplyEnforcesSingleReloadTimeoutBudget is the deterministic proof
+// for AC-08/R15-01: preflight and the reload wait share ONE absolute deadline
+// bound at admission. A fake clock drives the transaction so the test does not
+// depend on host scheduler latency. If the reload wait were granted a fresh full
+// timeout after preflight (the reset defect), the reload request would carry a
+// deadline of admission + preflight + reload_timeout instead of the original
+// admission deadline.
 func TestManagedApplyEnforcesSingleReloadTimeoutBudget(t *testing.T) {
 	const (
-		servingTimeout  = 200 * time.Millisecond * raceTimeScale
-		preflightSpend  = 150 * time.Millisecond * raceTimeScale
-		waitMargin      = 15 * time.Millisecond * raceTimeScale
-		singleBudgetMax = 300 * time.Millisecond * raceTimeScale // < reset (~365ms), well above one-budget (~215ms)
-		singleBudgetMin = 150 * time.Millisecond * raceTimeScale // proves the wait ran ~the budget, not just preflight
+		servingTimeout = 200 * time.Millisecond
+		preflightSpend = 150 * time.Millisecond
+		waitMargin     = 15 * time.Millisecond
 	)
 
 	tmp := t.TempDir()
@@ -47,10 +37,12 @@ func TestManagedApplyEnforcesSingleReloadTimeoutBudget(t *testing.T) {
 		t.Fatalf("write seed: %v", err)
 	}
 
-	// The reload never delivers a terminal result within the transaction budget
-	// (it "tries to consume" more time than remains). stopReload lets the
-	// finalizer goroutine complete cleanly once the timing has been measured.
-	stopReload := make(chan struct{})
+	enteredPreflight := make(chan struct{})
+	preflightProceed := make(chan struct{})
+	submittedReload := make(chan server.ReloadRequest, 1)
+	done := make(chan ApplyResult, 1)
+
+	clock := newFakeClock(time.Unix(0, 0).UTC())
 	c := &ConfigApplyCoordinator{
 		BaseCtx: context.Background(),
 		Path:    path,
@@ -59,8 +51,9 @@ func TestManagedApplyEnforcesSingleReloadTimeoutBudget(t *testing.T) {
 			// shared budget and then succeeds, so the reload wait must live on
 			// whatever budget remains — not a fresh full timeout.
 			BuildHandlers: func(ctx context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+				close(enteredPreflight)
 				select {
-				case <-time.After(preflightSpend):
+				case <-preflightProceed:
 					return map[string]http.Handler{}, nil, nil
 				case <-ctx.Done():
 					return nil, nil, ctx.Err()
@@ -69,52 +62,187 @@ func TestManagedApplyEnforcesSingleReloadTimeoutBudget(t *testing.T) {
 			Stream: &mockStreamPreflighter{},
 		},
 		SubmitReload: func(req server.ReloadRequest) error {
-			go func() {
-				<-stopReload
-				req.Result <- server.ReloadResult{
-					ID:      req.ID,
-					Source:  server.ReloadSourceAdmin,
-					Outcome: server.ReloadAppliedLive,
-				}
-			}()
+			submittedReload <- req
 			return nil
 		},
 		LiveSnapshot:   servingSnapshot(t, servingTimeout),
 		PlannedRestart: &PlannedRestartStore{},
 		waitMargin:     waitMargin,
+		clock:          clock,
 	}
 
-	// Mirror HTTP admission: bind StartedAt and the ONE absolute deadline from
-	// the serving reload_timeout.
-	started := time.Now().UTC()
+	startedAt := clock.Now().UTC()
+	admissionDeadline := startedAt.Add(servingTimeout)
 	reqCtx := admin.ApplyRequestContext{
-		StartedAt:      started,
-		Deadline:       started.Add(servingTimeout),
+		StartedAt:      startedAt,
+		Deadline:       admissionDeadline,
 		RequestContext: context.Background(),
 	}
 
-	begin := time.Now()
-	res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
-	elapsed := time.Since(begin)
-	close(stopReload) // release the finalizer goroutine
+	go func() {
+		res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
+		if err != nil {
+			t.Errorf("apply error: %v", err)
+		}
+		done <- res
+	}()
 
-	if err != nil {
-		t.Fatalf("apply error: %v", err)
+	<-enteredPreflight
+	clock.Advance(preflightSpend)
+	close(preflightProceed)
+
+	var req server.ReloadRequest
+	select {
+	case req = <-submittedReload:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reload was not submitted")
 	}
-	if elapsed > singleBudgetMax {
-		t.Fatalf("transaction took %v; a single absolute budget must terminate near %v, not preflight+budget (~%v). The reload wait was granted a second timeout.", elapsed, servingTimeout, preflightSpend+servingTimeout)
+
+	// The reload request must inherit the admission deadline verbatim. A reset
+	// would move the deadline forward by at least preflightSpend.
+	if !req.Deadline.Equal(admissionDeadline) {
+		t.Fatalf("reload deadline = %v, want admission deadline %v (deadline was reset after preflight)", req.Deadline, admissionDeadline)
 	}
-	if elapsed < singleBudgetMin {
-		t.Fatalf("transaction took %v; expected the reload wait to consume roughly the remaining budget (~%v total)", elapsed, servingTimeout)
+
+	remaining := admissionDeadline.Sub(clock.Now())
+	if remaining <= 0 {
+		t.Fatalf("preflight consumed the entire budget; remaining = %v", remaining)
 	}
-	// The transaction budget elapsed while the reload was still in flight: the
-	// candidate is persisted and the synchronous result is a post-persistence
-	// timeout, not a fresh success.
+	// Advance past the remaining budget plus the wait margin to trigger the
+	// synchronous saved_not_live timeout deterministically.
+	clock.Advance(remaining + waitMargin + 1*time.Millisecond)
+
+	var res ApplyResult
+	select {
+	case res = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ApplyRaw did not return after the deadline expired")
+	}
+
 	if !res.Persisted {
 		t.Error("Persisted = false; the candidate was written before the reload wait timed out")
 	}
 	if res.Reload == nil || !res.Reload.TimedOut {
 		t.Fatalf("reload = %+v; want a timed-out provisional result once the single budget elapsed", res.Reload)
+	}
+	if res.Reload.Outcome != server.ReloadSavedNotLive {
+		t.Fatalf("reload outcome = %v, want %v", res.Reload.Outcome, server.ReloadSavedNotLive)
+	}
+
+	// Release the finalizer goroutine so the test does not leak it.
+	req.Result <- server.ReloadResult{
+		ID:        req.ID,
+		Source:    server.ReloadSourceAdmin,
+		Outcome:   server.ReloadAppliedLive,
+		Published: true,
+	}
+}
+
+// TestReloadDeadlineBoundsPostPublishFinalizeWait verifies that a post-Publish
+// result arriving after the synchronous wait has already timed out still
+// terminalizes cleanly and retains the candidate file. The test advances a fake
+// clock explicitly so the bounded wait and finalization are deterministic.
+func TestReloadDeadlineBoundsPostPublishFinalizeWait(t *testing.T) {
+	const (
+		servingTimeout = 200 * time.Millisecond
+		waitMargin     = 15 * time.Millisecond
+	)
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "server.toml")
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	submittedReload := make(chan server.ReloadRequest, 1)
+	finalized := make(chan struct{})
+	done := make(chan ApplyResult, 1)
+
+	clock := newFakeClock(time.Unix(0, 0).UTC())
+	c := &ConfigApplyCoordinator{
+		BaseCtx:   context.Background(),
+		Path:      path,
+		Preflight: testPreflight(),
+		SubmitReload: func(req server.ReloadRequest) error {
+			submittedReload <- req
+			return nil
+		},
+		LiveSnapshot:   servingSnapshot(t, servingTimeout),
+		PlannedRestart: &PlannedRestartStore{},
+		waitMargin:     waitMargin,
+		clock:          clock,
+		OnManagedApplyComplete: func(admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+			close(finalized)
+			return admin.ManagedApplyFinalization{}
+		},
+	}
+
+	startedAt := clock.Now().UTC()
+	admissionDeadline := startedAt.Add(servingTimeout)
+	go func() {
+		res, err := c.ApplyRaw(admin.ApplyRequestContext{
+			StartedAt:      startedAt,
+			Deadline:       admissionDeadline,
+			RequestContext: context.Background(),
+		}, validConfigRaw(t, ":8081"), ApplyHot)
+		if err != nil {
+			t.Errorf("apply error: %v", err)
+		}
+		done <- res
+	}()
+
+	var req server.ReloadRequest
+	select {
+	case req = <-submittedReload:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reload was not submitted")
+	}
+	if !req.Deadline.Equal(admissionDeadline) {
+		t.Fatalf("reload deadline = %v, want admission deadline %v", req.Deadline, admissionDeadline)
+	}
+
+	// Move past the admission deadline so the synchronous wait returns the
+	// provisional saved_not_live result.
+	clock.Advance(servingTimeout + waitMargin + 1*time.Millisecond)
+
+	var res ApplyResult
+	select {
+	case res = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ApplyRaw did not return after the deadline expired")
+	}
+	if !res.Persisted {
+		t.Error("Persisted = false; the candidate was written before the reload wait timed out")
+	}
+	if res.Reload == nil || !res.Reload.TimedOut || res.Reload.Outcome != server.ReloadSavedNotLive {
+		t.Fatalf("provisional result = %+v; want saved_not_live timed-out result", res.Reload)
+	}
+
+	// The post-Publish result arrives late. It must still terminalize and must
+	// not attempt restoration, so the candidate file stays on disk.
+	req.Result <- server.ReloadResult{
+		ID:             req.ID,
+		Source:         server.ReloadSourceAdmin,
+		Outcome:        server.ReloadAppliedDegraded,
+		Published:      true,
+		TimedOut:       true,
+		ServingVersion: "v-degraded",
+		Error:          "post-publish timeout",
+	}
+
+	select {
+	case <-finalized:
+	case <-time.After(2 * time.Second):
+		t.Fatal("post-publish finalizer did not complete")
+	}
+
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	if string(onDisk) != string(validConfigRaw(t, ":8081")) {
+		t.Error("post-Publish timeout must retain the candidate file")
 	}
 }
 

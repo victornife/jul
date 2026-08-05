@@ -64,10 +64,11 @@ func TestReportManagedApplyErrorPendingRegistration(t *testing.T) {
 		},
 	}
 
+	startedAt := time.Now().UTC()
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
-		StartedAt: time.Now().UTC(),
-		Deadline:  time.Now().Add(time.Minute).UTC(),
+		StartedAt: startedAt,
+		Deadline:  startedAt.Add(30 * time.Millisecond),
 	}
 	res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
 	if err != nil {
@@ -150,10 +151,11 @@ func TestReportManagedApplyErrorRestoration(t *testing.T) {
 		},
 	}
 
+	startedAt := time.Now().UTC()
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
-		StartedAt: time.Now().UTC(),
-		Deadline:  time.Now().Add(time.Minute).UTC(),
+		StartedAt: startedAt,
+		Deadline:  startedAt.Add(30 * time.Millisecond),
 	}
 	res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
 	if err != nil {

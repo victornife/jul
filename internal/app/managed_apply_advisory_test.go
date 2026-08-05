@@ -131,10 +131,11 @@ func TestManagedApplyFinalizationAdvisoryTracksHistoryDegradationAndClears(t *te
 	// synchronous apply result plus the terminal finalization provenance.
 	runApply := func(t *testing.T, listen string) (admin.ConfigApplyResult, admin.ManagedApplyFinalization) {
 		t.Helper()
+		startedAt := time.Now().UTC()
 		reqCtx := admin.ApplyRequestContext{
 			Operation: admin.ApplyOperationConfigApply,
-			StartedAt: time.Now().UTC(),
-			Deadline:  time.Now().Add(time.Minute).UTC(),
+			StartedAt: startedAt,
+			Deadline:  startedAt.Add(30 * time.Millisecond),
 			TokenID:   "tok-owner-advisory",
 			Actor:     "alice",
 		}
