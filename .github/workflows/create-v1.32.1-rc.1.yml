@@ -1,0 +1,84 @@
+name: Create and dispatch v1.32.1-rc.1
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  create:
+    if: github.head_ref == 'automation/create-v1.32.1-rc.1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA: 9a936d0cc1bc3f7086f38ca87741d9d09f950e25
+      EXPECTED_CI_RUN: '30998490538'
+      TAG: v1.32.1-rc.1
+    steps:
+      - name: Verify exact immutable release target
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          actual_main="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "${actual_main}" = "${EXPECTED_SHA}"
+
+          read -r run_sha run_event run_status run_conclusion < <(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${EXPECTED_CI_RUN}" \
+              --jq '[.head_sha, .event, .status, .conclusion] | @tsv'
+          )
+          test "${run_sha}" = "${EXPECTED_SHA}"
+          test "${run_event}" = "push"
+          test "${run_status}" = "completed"
+          test "${run_conclusion}" = "success"
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/tmp/existing-tag.json 2>/tmp/existing-tag.err; then
+            echo "::error::Tag ${TAG} already exists; refusing to create or move it"
+            cat /tmp/existing-tag.json
+            exit 1
+          fi
+          grep -q 'HTTP 404' /tmp/existing-tag.err || {
+            cat /tmp/existing-tag.err
+            exit 1
+          }
+
+      - name: Create immutable lightweight tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${TAG}" \
+            -f sha="${EXPECTED_SHA}" >/tmp/created-tag.json
+
+          actual_tag="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')"
+          test "${actual_tag}" = "${EXPECTED_SHA}"
+          echo "tag=${TAG}"
+          echo "sha=${actual_tag}"
+
+      - name: Dispatch release workflow at the tag ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/dispatches" \
+            -f ref="${TAG}"
+
+      - name: Confirm dispatched run is bound to the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/runs?event=workflow_dispatch&branch=${TAG}&per_page=5")"
+            run_id="$(jq -r --arg sha "${EXPECTED_SHA}" '.workflow_runs[] | select(.head_sha == $sha and .head_branch == env.TAG) | .id' <<<"${run_json}" | head -n 1)"
+            if [ -n "${run_id}" ] && [ "${run_id}" != "null" ]; then
+              echo "release_run_id=${run_id}"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Release workflow dispatch was not observed for ${TAG}@${EXPECTED_SHA}"
+          exit 1
