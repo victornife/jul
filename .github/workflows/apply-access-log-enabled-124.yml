@@ -56,13 +56,13 @@ jobs:
 
           path = Path("internal/admin/ui/src/test/access-log-editor.test.tsx")
           text = path.read_text(encoding="utf-8")
-          old_testing = 'import { act, cleanup, render, screen, waitFor } from "@testing-library/react";'
-          new_testing = 'import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";'
           old_vitest = 'import { afterEach, beforeEach, describe, expect, fireEvent, it, vi } from "vitest";'
           new_vitest = 'import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";'
-          if old_testing not in text or old_vitest not in text:
+          old_testing = 'import { render, screen, waitFor } from "@testing-library/react";'
+          new_testing = 'import { fireEvent, render, screen, waitFor } from "@testing-library/react";'
+          if old_vitest not in text or old_testing not in text:
               raise SystemExit("unexpected access-log editor test imports")
-          path.write_text(text.replace(old_testing, new_testing, 1).replace(old_vitest, new_vitest, 1), encoding="utf-8")
+          path.write_text(text.replace(old_vitest, new_vitest, 1).replace(old_testing, new_testing, 1), encoding="utf-8")
           PY
           gofmt -w \
             internal/admin/api_status.go \
