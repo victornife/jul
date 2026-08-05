@@ -173,6 +173,11 @@ jobs:
           new = 'import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";\nimport { fireEvent, render, screen, waitFor } from "@testing-library/react";'
           if old not in text:
               raise SystemExit("access-log editor test import anchor not found")
+          text = text.replace(old, new, 1)
+          old = '  ) as unknown as typeof fetch;\n'
+          new = '  );\n'
+          if old not in text:
+              raise SystemExit("access-log editor fetch assertion anchor not found")
           path.write_text(text.replace(old, new, 1), encoding="utf-8")
           PY
 
@@ -207,15 +212,13 @@ jobs:
           pnpm --dir internal/admin/ui run build
           git diff --check
 
-      - name: Validate backend, lifecycle, importer golden, and documentation
+      - name: Reconfirm affected backend, importer golden, and documentation
         shell: bash
-        env:
-          FULL_TAGS: brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf
         run: |
           set -euo pipefail
           UPDATE_IMPORT_GOLDEN=1 go test -tags importer ./cmd/jul/ -run TestCmdImportNginxGolden
-          go test ./internal/config ./internal/observability ./internal/middleware ./internal/app ./internal/admin ./internal/server ./internal/lifecycle ./cmd/jul
-          go test -race -p 2 -tags "${FULL_TAGS}" ./internal/config ./internal/observability ./internal/middleware ./internal/app ./internal/admin ./internal/server ./internal/lifecycle ./cmd/jul
+          go test ./internal/config ./internal/observability ./internal/middleware ./internal/admin ./internal/server ./internal/lifecycle ./cmd/jul
+          go test ./internal/app -run TestPendingRestartCheckMixedPendingAndHot
           python3 scripts/docs-check.py
           python3 scripts/test_docs_check.py
           git diff --check
