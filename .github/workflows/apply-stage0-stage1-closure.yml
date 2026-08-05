@@ -22,7 +22,18 @@ jobs:
           fetch-depth: 0
 
       - name: Apply closure edits
-        run: python3 .github/scripts/apply_stage0_stage1_closure.py
+        run: |
+          python3 .github/scripts/apply_stage0_stage1_closure.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("docs/audit/combined-audit-2026-08-03.md")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "**Execution status (2026-08-05):** programme/audit truth and the non-cache correction tranche are closed; #131 is the next issue and has not started  \n",
+              "**Execution status (2026-08-05):** programme/audit truth and the non-cache correction tranche are closed; #131 is the next issue and has not started\n",
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
 
       - name: Validate documentation
         run: |
