@@ -228,7 +228,9 @@ listen = "127.0.0.1:9090"
 # The default sink "stdout" emits the structured access line in the server log,
 # honoring [global].log_format. Add "file" for a dedicated rotating file and/or
 # "syslog" for the system log (syslog is not supported on Windows). Settings are
-# fixed at startup; changing this block needs a restart.
+# fixed at startup; changing this block needs a restart. Omitted `enabled`
+# preserves the default-on behavior; false stops request records only.
+# enabled = true
 # sinks = ["stdout", "file"]        # any of "stdout", "file", "syslog"
 # file = "/var/log/jul/access.log" # required when "file" is listed
 # format = "text"                  # "text" (logfmt, default) or "json" (file/syslog)

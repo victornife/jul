@@ -519,8 +519,10 @@ using schema-derived extractors, so a field cannot be added to the registry
 without being diffed. The runtime rejects the following categories with `restart_required` at apply
 time (admin path) or at swap time (SIGHUP/file-watch):
 
-- **Log format and access-log sinks** — the log handler and sink handles are
-  built once at startup. Log *level* is hot-reloadable.
+- **Log format and access-log settings** — the log handler, request access-log
+  middleware, Console access-record tail attachment, and sink handles are built
+  once at startup. `enabled`, sink selection, file/format, and rotation changes
+  therefore require restart. Log *level* is hot-reloadable.
 - **ACME issued-domain set / issuer** — frozen when the autocert manager is
   built at startup.
 

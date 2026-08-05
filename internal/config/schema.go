@@ -961,6 +961,11 @@ type TracingConfig struct {
 // to a rotating file and/or the system log. Access-log settings are fixed at
 // startup; changing them takes effect after a restart.
 type AccessLogConfig struct {
+	// Enabled controls whether Jul emits request access records. It is a pointer
+	// so an omitted key preserves the v1 default (enabled), while an explicit
+	// false disables stdout/file/syslog and the Console access-record tail.
+	// Process, security, audit, health, metric, and trace output are independent.
+	Enabled *bool `toml:"enabled"`
 	// Sinks selects the active access-log destinations: any of "stdout" (the
 	// server's structured logger), "file", and "syslog". Defaults to ["stdout"],
 	// preserving the standard access line in the server log.
@@ -978,3 +983,8 @@ type AccessLogConfig struct {
 	// Only affects the file sink.
 	RotateKeep int `toml:"rotate_keep"`
 }
+
+// IsEnabled reports the effective access-record state. Access logging remains
+// enabled when the key is omitted for backward compatibility; an explicit
+// false is the only supported disable mechanism.
+func (a AccessLogConfig) IsEnabled() bool { return a.Enabled == nil || *a.Enabled }

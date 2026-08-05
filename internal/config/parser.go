@@ -155,7 +155,19 @@ func normalizeDeprecatedTOML(data []byte) ([]byte, error) {
 // UpstreamServer) round-trip via their TextMarshaler implementations. Note that
 // comments and original formatting are not preserved.
 func Marshal(c *Config) ([]byte, error) {
-	data, err := toml.Marshal(c)
+	// Direct struct callers can leave access_log.sinks nil to express the same
+	// omitted/default state as TOML without a sinks key. go-toml encodes a nil
+	// slice as `sinks = []`, which would turn that omission into an explicit
+	// empty list and fail validation when the canonical output is parsed again.
+	// Canonicalize only the shallow copy so Marshal and Clone preserve the
+	// documented default stdout sink without mutating the caller's config.
+	canonical := *c
+	canonical.Observability = c.Observability
+	if canonical.Observability.AccessLog.Sinks == nil {
+		canonical.Observability.AccessLog.Sinks = []string{"stdout"}
+	}
+
+	data, err := toml.Marshal(&canonical)
 	if err != nil {
 		return nil, fmt.Errorf("encode config: %w", err)
 	}
@@ -348,11 +360,13 @@ func (c *Config) applyDefaults() {
 		}
 	}
 
-	// Access-log defaults always apply: there is always at least the stdout sink
-	// so the standard access line keeps appearing. The rotate defaults are only
-	// consulted by the file sink but are harmless when no file sink is active.
+	// Access-log defaults preserve the v1 default-on contract. A nil slice means
+	// the key was omitted and defaults to stdout; a non-nil empty slice is kept
+	// intact so validation can reject `enabled = true` with `sinks = []` rather
+	// than silently turning it back into stdout. Disabled blocks retain dormant
+	// settings so a later re-enable is deterministic.
 	al := &c.Observability.AccessLog
-	if len(al.Sinks) == 0 {
+	if al.Sinks == nil {
 		al.Sinks = []string{"stdout"}
 	}
 	if al.Format == "" {

@@ -753,11 +753,21 @@ export const TracingProjectionSchema = z.object({
   insecure: z.boolean().optional(),
 });
 
+export const AccessLogProjectionSchema = z.object({
+  enabled: z.boolean(),
+  sinks: z.array(z.string()).optional(),
+  file: z.string().optional(),
+  format: z.string().optional(),
+  rotate_max_mb: z.number().optional(),
+  rotate_keep: z.number().optional(),
+});
+
 export const TrafficControlsSchema = z.object({
   compression: CompressionProjectionSchema.optional(),
   rate_limit: RateLimitProjectionSchema.optional(),
   cache: CacheProjectionSchema.optional(),
   tracing: TracingProjectionSchema.optional(),
+  access_log: AccessLogProjectionSchema.optional(),
 });
 export type TrafficControls = z.infer<typeof TrafficControlsSchema>;
 

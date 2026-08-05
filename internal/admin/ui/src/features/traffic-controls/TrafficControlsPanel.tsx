@@ -11,6 +11,7 @@ import {
   type TrafficEditorKind,
 } from "@/features/traffic-controls/TrafficControlEditor.tsx";
 import { TracingEditor } from "@/features/traffic-controls/TracingEditor.tsx";
+import { AccessLogEditor } from "@/features/traffic-controls/AccessLogEditor.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading } from "@/components/ui.tsx";
 
@@ -31,9 +32,7 @@ function SectionCard({
         <span className="font-medium text-jul-text">{title}</span>
         <span
           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-            active
-              ? "bg-jul-success/15 text-jul-success"
-              : "bg-jul-border text-jul-muted"
+            active ? "bg-jul-success/15 text-jul-success" : "bg-jul-border text-jul-muted"
           }`}
         >
           {active ? "enabled" : "disabled"}
@@ -69,6 +68,7 @@ export function TrafficControlsPanel() {
 
   const [editing, setEditing] = useState<TrafficEditorKind | null>(null);
   const [tracingEditing, setTracingEditing] = useState(false);
+  const [accessLogEditing, setAccessLogEditing] = useState(false);
 
   if (isLoading) return <Loading label="Loading traffic controls…" />;
   if (isError || !data)
@@ -80,10 +80,10 @@ export function TrafficControlsPanel() {
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">Traffic Controls</h1>
         <p className="max-w-3xl text-sm text-jul-muted">
-          Traffic controls shape how Jul handles requests and responses: compression,
-          caching, rate limits, and distributed tracing. Changes here are generated as
-          configuration and applied safely through validate → diff → apply, so nothing
-          takes effect until you confirm.
+          Traffic controls shape how Jul handles requests and responses: compression, caching, rate
+          limits, access logging, and distributed tracing. Changes here are generated as
+          configuration and applied safely through validate → diff → apply, so nothing takes effect
+          until you confirm.
         </p>
       </div>
 
@@ -109,8 +109,8 @@ export function TrafficControlsPanel() {
             </div>
           ) : (
             <p className="text-xs text-jul-muted">
-              Compression is off. Enable it to shrink text, JSON, and SVG responses before
-              they are sent to clients.
+              Compression is off. Enable it to shrink text, JSON, and SVG responses before they are
+              sent to clients.
             </p>
           )}
         </SectionCard>
@@ -126,13 +126,20 @@ export function TrafficControlsPanel() {
           {data.rate_limit?.enabled ? (
             <div className="space-y-1">
               <KV k="key" v={data.rate_limit.key || "ip"} />
-              <KV k="rate" v={data.rate_limit.rate !== undefined ? `${String(data.rate_limit.rate)}/s` : undefined} />
+              <KV
+                k="rate"
+                v={
+                  data.rate_limit.rate !== undefined
+                    ? `${String(data.rate_limit.rate)}/s`
+                    : undefined
+                }
+              />
               <KV k="burst" v={data.rate_limit.burst} />
             </div>
           ) : (
             <p className="text-xs text-jul-muted">
-              No rate limit configured. Add one to protect upstreams from spikes and abuse,
-              keyed by client IP, a header, or a JWT claim.
+              No rate limit configured. Add one to protect upstreams from spikes and abuse, keyed by
+              client IP, a header, or a JWT claim.
             </p>
           )}
         </SectionCard>
@@ -153,8 +160,8 @@ export function TrafficControlsPanel() {
             </div>
           ) : (
             <p className="text-xs text-jul-muted">
-              No cache configured. Enable it to serve repeat responses from memory or disk
-              and reduce upstream load — avoid caching authenticated or per-user responses.
+              No cache configured. Enable it to serve repeat responses from memory or disk and
+              reduce upstream load — avoid caching authenticated or per-user responses.
             </p>
           )}
         </SectionCard>
@@ -168,11 +175,33 @@ export function TrafficControlsPanel() {
           }}
         >
           <p className="text-xs text-jul-muted">
-            Per-server request body limit and read/write/idle timeouts. Configure these to
-            protect the server from oversized or slow requests; the generated keys are placed
-            under the server block you choose in the editor. The read/write/idle timeouts are
-            listener-level and require a restart to change on an existing listener.
+            Per-server request body limit and read/write/idle timeouts. Configure these to protect
+            the server from oversized or slow requests; the generated keys are placed under the
+            server block you choose in the editor. The read/write/idle timeouts are listener-level
+            and require a restart to change on an existing listener.
           </p>
+        </SectionCard>
+
+        {/* Request access logging */}
+        <SectionCard
+          title="Access Logging"
+          active={data.access_log?.enabled ?? true}
+          onEdit={() => {
+            setAccessLogEditing(true);
+          }}
+        >
+          {(data.access_log?.enabled ?? true) ? (
+            <div className="space-y-1">
+              <KV k="sinks" v={(data.access_log?.sinks ?? ["stdout"]).join(", ")} />
+              <KV k="format" v={data.access_log?.format || "text"} />
+              {data.access_log?.file && <KV k="file" v={data.access_log.file} />}
+            </div>
+          ) : (
+            <p className="text-xs text-jul-muted">
+              Request access records are disabled. Process, security, audit, health, metrics, and
+              tracing remain active.
+            </p>
+          )}
         </SectionCard>
 
         {/* Distributed tracing (Phase 4d) */}
@@ -189,7 +218,11 @@ export function TrafficControlsPanel() {
               <KV k="endpoint" v={data.tracing.endpoint} />
               <KV
                 k="sample ratio"
-                v={data.tracing.sample_ratio !== undefined ? String(data.tracing.sample_ratio) : undefined}
+                v={
+                  data.tracing.sample_ratio !== undefined
+                    ? String(data.tracing.sample_ratio)
+                    : undefined
+                }
               />
               <KV k="service" v={data.tracing.service_name} />
               {data.tracing.insecure && <KV k="transport" v="insecure (plaintext)" />}
@@ -218,6 +251,15 @@ export function TrafficControlsPanel() {
           current={data}
           onClose={() => {
             setTracingEditing(false);
+          }}
+        />
+      )}
+
+      {accessLogEditing && (
+        <AccessLogEditor
+          current={data}
+          onClose={() => {
+            setAccessLogEditing(false);
           }}
         />
       )}

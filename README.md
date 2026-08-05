@@ -512,7 +512,7 @@ Key sections covered there:
 - [`[compression]`](docs/configuration.md#compression) — gzip, Brotli, Zstd
 - [`[rate_limit]`](docs/configuration.md#rate_limit) — token-bucket limiting
 - [`[admin]`](docs/configuration.md#admin) — admin listener and console
-- [`[observability.*]`](docs/configuration.md#observabilitytracing) — tracing, metrics, access logs
+- [`[observability.*]`](docs/configuration.md#observabilitytracing) — tracing, metrics, and explicitly enableable/disableable access logs
 - [TLS](docs/configuration.md#tls) — static certificates, mTLS
 - [ACME](docs/configuration.md#automatic-https-acme) — Let's Encrypt automation
 - [HTTP/3](docs/configuration.md#http3-quic) — QUIC listener

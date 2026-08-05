@@ -73,7 +73,7 @@ Some settings are **bound at startup** and a hot reload keeps the running value
 (it logs a warning rather than silently misapplying): the ACME issued-domain set
 and issuer, listener bind-time settings (max-connections, listener timeouts, max
 header bytes, HTTP/3 or h2c toggles), TLS handshake parameters (`min_version`,
-mutual-TLS `client_auth`), tracing, and access-log sinks. These require a
+mutual-TLS `client_auth`), tracing, and access-log enablement/sinks. These require a
 **restart** to take effect. See [reload-semantics.md](reload-semantics.md) for
 the exact *applied vs. serving* model and the full restart-required list.
 

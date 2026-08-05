@@ -343,6 +343,19 @@ type TrafficControlsProjection struct {
 	RateLimit   *RateLimitProjection   `json:"rate_limit,omitempty"`
 	Cache       *CacheProjection       `json:"cache,omitempty"`
 	Tracing     *TracingProjection     `json:"tracing,omitempty"`
+	AccessLog   *AccessLogProjection   `json:"access_log,omitempty"`
+}
+
+// AccessLogProjection exposes the complete non-secret access-log block for the
+// guided Console editor. Enabled is always effective (omitted means true), and
+// the remaining fields retain dormant values while disabled.
+type AccessLogProjection struct {
+	Enabled     bool     `json:"enabled"`
+	Sinks       []string `json:"sinks,omitempty"`
+	File        string   `json:"file,omitempty"`
+	Format      string   `json:"format,omitempty"`
+	RotateMaxMB int      `json:"rotate_max_mb,omitempty"`
+	RotateKeep  int      `json:"rotate_keep,omitempty"`
 }
 
 // CompressionProjection is compression configuration.

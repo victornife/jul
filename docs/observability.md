@@ -158,20 +158,26 @@ The access log can be written to multiple destinations simultaneously via
 
 ```toml
 [observability.access_log]
-sinks       = ["stdout", "file"]
-file        = "/var/log/jul/access.log"
-format      = "json"          # applies to file and syslog only
+enabled       = true
+sinks         = ["stdout", "file"]
+file          = "/var/log/jul/access.log"
+format        = "json"          # applies to file and syslog only
 rotate_max_mb = 100
 rotate_keep   = 7
 ```
 
-The `file` and `syslog` sinks always record at **info level** regardless of
-`[global].log_level`, so a quieter global level never suppresses the access log.
+Omitting `enabled` preserves the default-on v1 behavior. Set `enabled = false`
+to stop request access records in stdout, file, syslog, and the Console access
+record tail. Jul then opens no access-log file or syslog resource. Application,
+reload, security/WAF, audit, health, metric, and trace output remain active.
+Dormant sink settings are retained and validated for deterministic re-enable.
 
-> **Disablement notice:** an omitted sink list uses the default stdout sink,
-> and `sinks = []` is not a supported off switch. #124 introduces an explicit
-> `enabled` contract. The legacy global/per-server destination fields are
-> compatibility no-ops.
+When enabled, an omitted sink list selects `stdout`; an explicit `sinks = []`
+is invalid and the error directs the operator to disable the block instead. The
+`file` and `syslog` sinks always record at **info level** regardless of
+`[global].log_level`, so a quieter global level never suppresses the access log.
+The legacy global/per-server destination fields are deprecated compatibility
+no-ops and produce lint warnings.
 
 ### Access-log fields
 

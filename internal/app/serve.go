@@ -183,11 +183,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 	}()
 
-	// The Console Operations Log tail is an extra access-log sink: a bounded,
-	// privacy-preserving in-memory ring buffer that fans new entries to live
-	// SSE followers.
+	// The Console Operations Log tail always exists so the API remains stable,
+	// but it receives request records only when access logging is effectively
+	// enabled. Disabling access logging must not suppress process/security/audit
+	// events, which use independent channels.
 	logTail := observability.NewLogTail(0)
-	accessSinks = append(accessSinks, logTail)
+	if cfg.Observability.AccessLog.IsEnabled() {
+		accessSinks = append(accessSinks, logTail)
+	}
 
 	// The rate-limiter store persists across reloads (its janitor is bound to
 	// baseCtx) so token buckets survive config edits.

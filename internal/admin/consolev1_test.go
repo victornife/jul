@@ -185,6 +185,39 @@ func TestStatusAPI(t *testing.T) {
 	}
 }
 
+func TestStatusAPIAccessLogDisabled(t *testing.T) {
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{Listen: ":80"}},
+		Observability: config.ObservabilityConfig{AccessLog: config.AccessLogConfig{
+			Enabled: config.Bool(false),
+			Sinks:   []string{"file"},
+			File:    "/var/log/jul/access.log",
+		}},
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{LoadConfig: func() (*config.Config, error) { return cfg, nil }})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var got []FeatureStatus
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, feature := range got {
+		if feature.Name == "Access log" {
+			if feature.Active {
+				t.Fatal("disabled access log reported active")
+			}
+			if !strings.Contains(feature.Detail, "dormant sinks: file") {
+				t.Fatalf("detail = %q, want dormant sink detail", feature.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("Access log feature missing")
+}
+
 func TestStatusAPINilHookReturnsEmptyArray(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
 	rr := httptest.NewRecorder()

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1289,6 +1290,58 @@ func TestAccessLogDefaults(t *testing.T) {
 	}
 }
 
+func TestAccessLogProgrammaticMarshalUsesDefaultSink(t *testing.T) {
+	cfg := &Config{Servers: []ServerConfig{{Listen: "127.0.0.1:80"}}}
+	raw, err := Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if bytes.Contains(raw, []byte("sinks = []")) {
+		t.Fatalf("marshal encoded omitted sinks as an explicit empty list:\n%s", raw)
+	}
+	round, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("round-trip parse: %v", err)
+	}
+	if err := Validate(round); err != nil {
+		t.Fatalf("round-trip config rejected: %v\n%s", err, raw)
+	}
+	if got := round.Observability.AccessLog.Sinks; len(got) != 1 || got[0] != "stdout" {
+		t.Fatalf("round-trip default sinks = %v, want [stdout]", got)
+	}
+}
+
+func TestAccessLogExplicitDisableRoundTrip(t *testing.T) {
+	cfg, err := Parse([]byte("[observability.access_log]\nenabled = false\n\n[[servers]]\nlisten = \"127.0.0.1:80\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	al := cfg.Observability.AccessLog
+	if al.Enabled == nil || *al.Enabled {
+		t.Fatalf("enabled = %v, want explicit false", al.Enabled)
+	}
+	if al.IsEnabled() {
+		t.Fatal("explicit enabled=false must disable access records")
+	}
+	if len(al.Sinks) != 1 || al.Sinks[0] != "stdout" {
+		t.Fatalf("dormant default sinks = %v, want [stdout]", al.Sinks)
+	}
+	raw, err := Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(raw, []byte("enabled = false")) {
+		t.Fatalf("marshal lost explicit false:\n%s", raw)
+	}
+	round, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("round-trip parse: %v", err)
+	}
+	if round.Observability.AccessLog.IsEnabled() {
+		t.Fatal("round trip re-enabled access logging")
+	}
+}
+
 func TestAccessLogExplicitValues(t *testing.T) {
 	cfg, err := Parse([]byte("[observability.access_log]\nsinks = [\"stdout\", \"file\"]\nfile = \"/var/log/jul/access.log\"\nformat = \"json\"\nrotate_max_mb = 50\nrotate_keep = 3\n"))
 	if err != nil {
@@ -1327,6 +1380,18 @@ func TestValidateAccessLog(t *testing.T) {
 	}
 	if err := Validate(base(AccessLogConfig{Sinks: []string{"stdout"}, RotateKeep: -1})); err == nil {
 		t.Error("expected error for negative rotate_keep")
+	}
+	if err := Validate(base(AccessLogConfig{Enabled: Bool(true), Sinks: []string{}})); err == nil || !strings.Contains(err.Error(), "enabled=true requires at least one sink") {
+		t.Fatalf("expected explicit-empty sink error, got %v", err)
+	}
+	if err := Validate(base(AccessLogConfig{Enabled: Bool(false), Sinks: []string{"file"}})); err == nil {
+		t.Error("disabled access log must still reject an invalid dormant file sink")
+	}
+	if err := Validate(base(AccessLogConfig{Enabled: Bool(false), Sinks: []string{"stdout"}, Format: "json"})); err != nil {
+		t.Fatalf("valid dormant access-log settings rejected: %v", err)
+	}
+	if err := Validate(base(AccessLogConfig{Sinks: []string{"stdout", "stdout"}})); err == nil || !strings.Contains(err.Error(), "duplicate sink") {
+		t.Fatalf("expected duplicate sink error, got %v", err)
 	}
 }
 

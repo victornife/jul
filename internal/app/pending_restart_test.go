@@ -88,7 +88,13 @@ func TestPendingRestartCheckDetectsSecretRotation(t *testing.T) {
 func TestPendingRestartCheckMixedPendingAndHot(t *testing.T) {
 	addr := freePort(t)
 	startupRaw := &config.Config{
-		Global: config.GlobalConfig{AccessLog: "/tmp/startup-access.log"},
+		Observability: config.ObservabilityConfig{AccessLog: config.AccessLogConfig{
+			Enabled:     config.Bool(true),
+			Sinks:       []string{"stdout"},
+			Format:      "text",
+			RotateMaxMB: 100,
+			RotateKeep:  7,
+		}},
 		Servers: []config.ServerConfig{{
 			Listen:    addr,
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
@@ -100,12 +106,13 @@ func TestPendingRestartCheckMixedPendingAndHot(t *testing.T) {
 	}
 	startupFP := lifecycle.ComputeFingerprint(startup.Effective)
 
-	// Change a restart-required global field and a hot-reloadable location field.
+	// Change an active restart-required access-log field and a hot-reloadable
+	// location field. Deprecated global.access_log is deliberately ignored.
 	nextRaw, err := startupRaw.Clone()
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	nextRaw.Global.AccessLog = "/tmp/changed-access.log"
+	nextRaw.Observability.AccessLog.Format = "json"
 	nextRaw.Servers[0].Locations[0].Return = 201
 
 	loadFn := func() (*config.Config, error) { return nextRaw, nil }

@@ -949,6 +949,14 @@ func TestTrafficControlsProjection(t *testing.T) {
 		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100, Key: "ip"},
 		Observability: config.ObservabilityConfig{
+			AccessLog: config.AccessLogConfig{
+				Enabled:     config.Bool(false),
+				Sinks:       []string{"stdout", "file"},
+				File:        "/var/log/jul/access.log",
+				Format:      "json",
+				RotateMaxMB: 50,
+				RotateKeep:  3,
+			},
 			Tracing: config.TracingConfig{
 				Enabled:     true,
 				Exporter:    "otlp-http",
@@ -983,6 +991,11 @@ func TestTrafficControlsProjection(t *testing.T) {
 	if out.Tracing.Exporter != "otlp-http" || out.Tracing.Endpoint != "http://collector:4318" ||
 		out.Tracing.SampleRatio != 0.25 || out.Tracing.ServiceName != "edge" || !out.Tracing.Insecure {
 		t.Errorf("tracing projection = %+v", out.Tracing)
+	}
+	if out.AccessLog == nil || out.AccessLog.Enabled || len(out.AccessLog.Sinks) != 2 ||
+		out.AccessLog.File != "/var/log/jul/access.log" || out.AccessLog.Format != "json" ||
+		out.AccessLog.RotateMaxMB != 50 || out.AccessLog.RotateKeep != 3 {
+		t.Errorf("access-log projection = %+v", out.AccessLog)
 	}
 }
 

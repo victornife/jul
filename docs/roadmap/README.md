@@ -33,7 +33,7 @@ portfolio has parallel lanes.
 | Stage | Focus | Exit criteria | Status |
 | --- | --- | --- | --- |
 | **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | ✅ #165/#166 merged |
-| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 #123/#126/#127 complete; #124 and cache remain |
+| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 #123/#124/#126/#127 complete; cache remains |
 | **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ⬜ planned |
 | **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ⬜ planned |
 | **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ⬜ planned |
@@ -53,7 +53,7 @@ portfolio has parallel lanes.
     ↓
 v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
     ↓
-#124 — explicit access-log enablement
+#124 — explicit access-log enablement (complete)
     ↓
 #131 → #133 / #132 → #134 — cache correctness and recertification
     ↓
@@ -83,10 +83,10 @@ composition root, reload transaction, or Console patch contracts remain serial.
 - Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).
 - Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).
 - Path-only, bounded WAF matched-request logging with query and macro-expanded request data omitted (#127).
+- Explicit access-log enablement with restart-truthful sinks and deprecated legacy-field handling (#124).
 
 ### Remaining immediate correctness
 
-- Add explicit access-log enablement and retire ignored destination fields (#124).
 - Restore cache concurrency, lifecycle, protocol and HTTP conformance (#107, #131–#134).
 - Establish closed-world generated lifecycle authority (#89).
 

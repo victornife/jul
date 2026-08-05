@@ -150,7 +150,7 @@ insecure = false
 host_label = false
 
 [observability.access_log]
-sinks = []
+sinks = ['stdout']
 file = ''
 format = ''
 rotate_max_mb = 0

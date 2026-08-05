@@ -58,6 +58,32 @@ func TestBuildAccessSinksDefaultsToStdout(t *testing.T) {
 	}
 }
 
+func TestBuildAccessSinksDisabledOpensNothing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "access.log")
+	sinks, closers, err := BuildAccessSinks(config.AccessLogConfig{
+		Enabled: config.Bool(false),
+		Sinks:   []string{"file"},
+		File:    path,
+	}, newBase())
+	if err != nil {
+		t.Fatalf("build disabled sinks: %v", err)
+	}
+	if len(sinks) != 0 || len(closers) != 0 {
+		t.Fatalf("disabled build returned %d sinks / %d closers, want 0/0", len(sinks), len(closers))
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("disabled access log created %q: %v", path, err)
+	}
+}
+
+func TestBuildAccessSinksRejectsExplicitEmptyEnabledSet(t *testing.T) {
+	_, _, err := BuildAccessSinks(config.AccessLogConfig{Enabled: config.Bool(true), Sinks: []string{}}, newBase())
+	if err == nil {
+		t.Fatal("enabled access log with explicit empty sinks must fail")
+	}
+}
+
 func TestBuildAccessSinksDedupes(t *testing.T) {
 	sinks, _, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"stdout", "stdout"}}, newBase())
 	if err != nil {

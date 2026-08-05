@@ -434,9 +434,11 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			middleware.RequestID(),
 			f.RT.Tracer.Middleware,
 			f.Metrics.Middleware,
-			middleware.AccessLog(f.AccessSinks...),
-			middleware.Recover(f.Log),
 		}
+		if len(f.AccessSinks) > 0 {
+			mws = append(mws, middleware.AccessLog(f.AccessSinks...))
+		}
+		mws = append(mws, middleware.Recover(f.Log))
 		if compress != nil {
 			mws = append(mws, compress)
 		}

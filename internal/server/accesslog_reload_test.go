@@ -17,6 +17,7 @@ func TestAccessLogRestartRequired(t *testing.T) {
 	withAccessLog := func(mutate func(al *config.AccessLogConfig)) *config.Config {
 		c := &config.Config{}
 		c.Observability.AccessLog = config.AccessLogConfig{
+			Enabled:     config.Bool(true),
 			Sinks:       []string{"stdout", "file"},
 			File:        "/var/log/jul/access.log",
 			Format:      "json",
@@ -32,6 +33,13 @@ func TestAccessLogRestartRequired(t *testing.T) {
 	t.Run("unchanged access log hot-applies", func(t *testing.T) {
 		if _, need := AccessLogRestartRequired(withAccessLog(nil), withAccessLog(nil)); need {
 			t.Fatal("an unchanged access-log block must not require a restart")
+		}
+	})
+
+	t.Run("changing enabled state requires restart", func(t *testing.T) {
+		next := withAccessLog(func(al *config.AccessLogConfig) { al.Enabled = config.Bool(false) })
+		if _, need := AccessLogRestartRequired(withAccessLog(nil), next); !need {
+			t.Fatal("changing access-log enabled state must require a restart")
 		}
 	})
 

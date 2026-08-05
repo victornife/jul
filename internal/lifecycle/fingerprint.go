@@ -155,6 +155,8 @@ func extractValue(cfg *config.Config, path string) any {
 		return cfg.Observability.Tracing.ServiceName
 	case "observability.tracing.insecure":
 		return cfg.Observability.Tracing.Insecure
+	case "observability.access_log.enabled":
+		return cfg.Observability.AccessLog.IsEnabled()
 	case "observability.access_log.sinks":
 		return cfg.Observability.AccessLog.Sinks
 	case "observability.access_log.file":

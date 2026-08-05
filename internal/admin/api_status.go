@@ -223,9 +223,16 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		trDetail = "exporter: " + exp
 	}
 
+	accessLogEnabled := c.Observability.AccessLog.IsEnabled()
 	sinks := c.Observability.AccessLog.Sinks
-	if len(sinks) == 0 {
+	if sinks == nil {
 		sinks = []string{"stdout"}
+	}
+	accessLogDetail := "disabled"
+	if accessLogEnabled {
+		accessLogDetail = "sinks: " + strings.Join(sinks, ", ")
+	} else if len(sinks) > 0 {
+		accessLogDetail += "; dormant sinks: " + strings.Join(sinks, ", ")
 	}
 
 	mtlsDetail := ""
@@ -317,7 +324,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 
 		{Group: "Observability", Name: "Prometheus metrics", Active: s.deps.Metrics != nil, Detail: metricsDetail(s.deps.Metrics != nil)},
 		{Group: "Observability", Name: "Distributed tracing", Active: c.Observability.Tracing.Enabled, Detail: trDetail},
-		{Group: "Observability", Name: "Access log", Active: true, Detail: "sinks: " + strings.Join(sinks, ", ")},
+		{Group: "Observability", Name: "Access log", Active: accessLogEnabled, Detail: accessLogDetail},
 
 		{Group: "Extensibility", Name: "WASM plugins", Active: len(c.Plugins) > 0, Detail: pluginDetail(len(c.Plugins), pluginLocs)},
 	}
