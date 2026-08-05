@@ -3,8 +3,10 @@
 > How Jul.IA (`jul`) is built, published, verified, and installed. Releases are
 > cut by [`.github/workflows/release.yml`](../.github/workflows/release.yml) when
 > a `v*` tag is pushed or the workflow is explicitly dispatched at an existing
-> immutable `v*` tag. The build/test gate **and** ADR-0005 soak gate must both be
-> green — a regression cannot ship under a tag.
+> immutable `v*` tag. The build/test gate **and** five-minute release
+> soak-smoke must both be green — a regression cannot ship under a tag. The
+> smoke gate is release-blocking evidence, but it does not replace ADR 0005's
+> long-running GA-soak minimums.
 
 ## Contents
 
@@ -61,7 +63,7 @@ what each tag enables.
 flowchart LR
   tag([tag push or tag-ref dispatch]) --> preflight[require refs/tags/v*]
   preflight --> gate[gate: vet + build + test]
-  preflight --> soak[soak gate ADR-0005]
+  preflight --> soak[release soak-smoke: 5m/scenario]
   gate --> build[build matrix: os × arch × profile]
   soak --> build
   build --> publish[publish: draft GitHub Release]
@@ -70,7 +72,9 @@ flowchart LR
 1. **`preflight`** — fails closed unless the run is bound to an existing
    immutable `refs/tags/v*` ref.
 2. **`gate`** — `go vet`/`go build`/`go test` with the full tag set.
-3. **`soak`** — the ADR-0005 long-running soak; a red run blocks the release.
+3. **`soak`** — a five-minute-per-scenario release smoke gate; a red run
+   blocks the release, but the run does not satisfy ADR 0005's long-running GA
+   soak minimums.
 4. **`build`** (matrix) — cross-compiles a static (`CGO_ENABLED=0`),
    `-trimpath` binary per cell, stamps `main.version` from the tag, generates
    the SBOM, archives, checksums, and attests provenance + SBOM.
@@ -94,20 +98,23 @@ A release-candidate tag uses the normal semantic-version pre-release form:
 vX.Y.Z-rc.N
 ```
 
-It runs the **same** release gate, soak, cross-platform lean/full matrix,
-checksums, SBOM generation, and provenance/SBOM attestation as a stable tag. The
+It runs the **same** release gate, five-minute release soak-smoke,
+cross-platform lean/full matrix, checksums, SBOM generation, and
+provenance/SBOM attestation as a stable tag. The
 workflow still creates a **draft** GitHub Release. An RC draft remains
 unpublished unless a maintainer explicitly decides otherwise; it is an artifact
 and release-path validation point, not a claim that all selected correctness or
 maturity work is complete.
 
 The [current roadmap checkpoint](roadmap/README.md#release-candidate-checkpoint)
-is `v1.32.1-rc.1`, to be tagged from the exact integrated `main` SHA only after
-#165/#166 and the selected #123/#124/#126/#127 correction tranche are merged,
-the documentation is reconciled, and the complete CI pipeline is green for that
-exact SHA. Issue #194 is the evidence ledger. A later stable `v1.32.1` tag
-requires a separate publication decision and a fresh release run; the RC tag is
-never renamed or reused.
+is the independently verified, unpublished `v1.32.1-rc.1` candidate at
+`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. The complete inventory, checksum,
+archive-content, version, provenance, SBOM-attestation, and soak-smoke evidence
+is recorded in
+[`docs/release-candidates/v1.32.1-rc.1.md`](release-candidates/v1.32.1-rc.1.md).
+Issue #194 is the operational ledger. A later stable `v1.32.1` tag requires a
+separate publication decision and fresh release run; the RC tag is never renamed
+or reused.
 
 Before creating any tag:
 
@@ -135,12 +142,18 @@ sha256sum -c <file>.sha256          # or verify against SHA256SUMS
 **Build provenance + SBOM** (needs the [GitHub CLI](https://cli.github.com/)):
 
 ```bash
-# Extract the binary first, then:
+# Extract the binary first, then verify SLSA provenance:
 gh attestation verify ./jul --repo victornife/jul
+
+# Verify the separately signed SPDX SBOM attestation:
+gh attestation verify ./jul --repo victornife/jul \
+  --predicate-type https://spdx.dev/Document/v2.3
 ```
 
-This confirms the binary was built by this repository's release workflow from a
-specific commit, with no local signing keys involved.
+For a reviewed candidate or stable release, also constrain the signer workflow,
+source ref, and source digest as shown in its evidence document. This confirms
+the binary was built by this repository's release workflow from the expected
+source, with no local signing keys involved.
 
 ## Installing
 

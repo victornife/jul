@@ -19,7 +19,7 @@ ready, draft, gated, selected, deferred, deliberately restart-bound, or complete
 
 | Lane | Objective | Entry rule | Current emphasis |
 | --- | --- | --- | --- |
-| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Known-value validation, access-log semantics, cache correctness, metrics and WAF logging truth |
+| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Cache correctness/recertification, lifecycle authority, deterministic timing-test infrastructure |
 | **Core Gateway Completeness** | Close material gaps inside the standalone gateway boundary | Architecture and product integrity | Trust boundaries, backend TLS/mTLS, resilience, routing policy, automation contracts |
 | **Operational enhancement** | Improve long-running operation without redefining the core | Value × leverage ÷ permanent complexity | Selected hot reload, diagnostics, recovery, migration assessment |
 | **Technical experiment** | Explore a new category through a bounded, removable tranche | Hypothesis, prerequisites, budget, evidence, exit decision | AI Gateway candidate after generic trust/resilience decisions |
@@ -33,7 +33,7 @@ portfolio has parallel lanes.
 | Stage | Focus | Exit criteria | Status |
 | --- | --- | --- | --- |
 | **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | ✅ #165/#166 merged |
-| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 #123/#124/#126/#127 complete; cache remains |
+| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 selected tranche verified in `v1.32.1-rc.1`; cache remains |
 | **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ⬜ planned |
 | **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ⬜ planned |
 | **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ⬜ planned |
@@ -51,7 +51,7 @@ portfolio has parallel lanes.
     ↓
 #123/#124/#126/#127 — selected correction tranche (complete)
     ↓
-v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
+v1.32.1-rc.1 — independently verified draft candidate (complete; unpublished)
     ↓
 #131 → #133 / #132 → #134 — cache correctness and recertification
     ↓
@@ -64,10 +64,12 @@ v1.32.1-rc.1 — unpublished draft release-candidate checkpoint
 selected core implementations
 ```
 
-The selected correction tranche is complete. Cache correctness and
-recertification are the next immediate correctness gate, followed by closed-world
-lifecycle authority. Shared edits to the configuration schema, lifecycle,
-composition root, reload transaction, or Console patch contracts remain serial.
+The selected correction tranche and its unpublished `v1.32.1-rc.1`
+candidate checkpoint are complete and independently verified. Cache correctness
+and recertification are now the immediate correctness gate, followed by
+closed-world lifecycle authority. Shared edits to the configuration schema,
+lifecycle, composition root, reload transaction, or Console patch contracts
+remain serial.
 
 ## Correctness and security backlog
 
@@ -98,13 +100,14 @@ composition root, reload transaction, or Console patch contracts remain serial.
 
 ## Release-candidate checkpoint
 
-After #165/#166 and the selected #123/#124/#126/#127 correction tranche
-merge, documentation is reconciled, and exact-`main` CI is green, the next patch
-release candidate is **`v1.32.1-rc.1`**. The immutable tag runs the release
-preflight, gate, soak, lean/full cross-platform build, checksums, SBOM and
-attestation workflow, and creates an unpublished draft GitHub Release for human
-review. Stable publication remains a later explicit decision while cache
-recertification and broader lifecycle-authority work remain open.
+The immutable **`v1.32.1-rc.1`** checkpoint is complete at
+`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Its exact-main CI, release-ref
+preflight, full-tag gate, five-minute soak-smoke, 12-cell lean/full matrix,
+checksums, embedded SPDX SBOMs, and all provenance/SBOM attestations passed. The
+GitHub Release remains an unpublished draft prerelease; see the
+[candidate evidence](../release-candidates/v1.32.1-rc.1.md). Stable publication
+remains a later explicit decision while cache recertification and broader
+lifecycle-authority work remain open.
 
 ## Core Gateway Completeness backlog
 

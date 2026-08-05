@@ -9,13 +9,16 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
-> **Release state:** these changes are **merged to `main`** and selected for the
-> unpublished `v1.32.1-rc.1` release-candidate checkpoint. An immutable RC tag
-> and draft GitHub Release provide verification evidence; they are not a stable
-> publication. Per the delivery-state vocabulary in [docs/status.md](docs/status.md),
-> "merged", "candidate", "released", and "soaked" remain distinct. This section
-> stays `[Unreleased]` until a stable-release decision is made; Phase 4 egress
-> remains stable-release pending even when included in the RC.
+> **Release state:** these changes are frozen in the independently verified,
+> unpublished `v1.32.1-rc.1` candidate at
+> `9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Release run `30999192141`
+> completed the tag-ref preflight, full-tag gate, release soak-smoke, twelve
+> platform/profile builds, checksums, embedded SBOMs, and provenance/SBOM
+> attestations. Verification run `31000789454` independently matched all 25
+> asset digests and verified all 24 attestations. The GitHub Release remains
+> draft and prerelease; this section stays `[Unreleased]` until a separate
+> stable-release decision. See the
+> [candidate evidence](docs/release-candidates/v1.32.1-rc.1.md).
 
 ### Changed
 - **Explicit access-log enablement (#124):** `[observability.access_log].enabled` now distinguishes the default-on state from an explicit disabled state. `enabled = false` opens no access-log file/syslog resources and emits no request records to stdout or the Console access tail while process, security, audit, health, metrics, and tracing remain independent. Enabled blocks reject an explicit empty sink list; dormant sink settings remain validated. Legacy global/per-server log-destination fields are now linted and classified as `ignored_deprecated`, never as pending restart. The Traffic Controls Console includes a guided restart-aware editor.
