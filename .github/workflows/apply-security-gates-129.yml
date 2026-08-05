@@ -30,7 +30,6 @@ jobs:
             | sha256sum --check --strict
 
           include_args=(
-            --include=.github/workflows/security-gates.yml
             --include=scripts/security-package-coverage.json
             --include=scripts/check-package-coverage.py
             --include=scripts/test_check_package_coverage.py
@@ -175,9 +174,9 @@ jobs:
           )
           PY
 
-          rm -f .github/workflows/apply-security-gates-129.yml
           rm -f .github/patches/security-gates-129.part-00
           rmdir .github/patches 2>/dev/null || true
+          rm -rf scripts/__pycache__
           git diff --check
 
       - name: Validate focused gates
@@ -188,6 +187,7 @@ jobs:
           make security-gates
           python3 scripts/docs-check.py
           python3 scripts/test_docs_check.py
+          rm -rf scripts/__pycache__
           git diff --check
 
       - name: Commit final implementation
