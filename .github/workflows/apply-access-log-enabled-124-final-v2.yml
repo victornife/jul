@@ -1,0 +1,134 @@
+name: Apply and validate final explicit access-log enablement v2
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'automation/apply-access-log-enabled-124-final-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out clean target branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: agent/access-log-enabled-124-final
+          fetch-depth: 0
+
+      - name: Verify exact integrated baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "e585ed8c9fd6e1db1d71442ad113190869e4c878"
+          test -z "$(git status --short)"
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: 11.8.0
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+
+      - name: Apply checksum-pinned implementation and bounded corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin automation/export-access-log-124-source automation/apply-access-log-enabled-124-final-v2
+
+          : > /tmp/access-log-enabled-124.patch.gz.b64
+          for part in $(seq -w 0 10); do
+            git show "origin/automation/export-access-log-124-source:.github/patches/access-log-enabled-124.part-${part}" >> /tmp/access-log-enabled-124.patch.gz.b64
+          done
+          echo 'a0703da0b39ca3864a12d766ac3d54cf7b592a0c986022bf83b2e5549b0dc491  /tmp/access-log-enabled-124.patch.gz.b64' | sha256sum -c -
+          base64 --decode /tmp/access-log-enabled-124.patch.gz.b64 | gzip --decompress > /tmp/access-log-enabled-124.patch
+          echo '6a40dd970a2f5f9f135e8682e3a532d74b1f3ed6aea174da16d0e926b16712c1  /tmp/access-log-enabled-124.patch' | sha256sum -c -
+          git apply --check /tmp/access-log-enabled-124.patch
+          git apply /tmp/access-log-enabled-124.patch
+
+          git show "origin/automation/apply-access-log-enabled-124-final-v2:.github/scripts/apply-access-log-124-final.py" > /tmp/apply-access-log-124-final.py
+          python3 /tmp/apply-access-log-124-final.py
+
+          gofmt -w \
+            internal/admin/api_status.go \
+            internal/admin/consolev1_test.go \
+            internal/admin/consolev2_test.go \
+            internal/admin/projection_types.go \
+            internal/admin/projections.go \
+            internal/app/factory.go internal/app/pending_restart_test.go internal/app/serve.go \
+            internal/config/config_test.go internal/config/lint.go internal/config/lint_test.go \
+            internal/config/parser.go internal/config/schema.go internal/config/validate.go \
+            internal/lifecycle/fingerprint.go internal/lifecycle/lifecycle.go internal/lifecycle/lifecycle_test.go \
+            internal/observability/preflight.go internal/observability/preflight_accesslog_test.go \
+            internal/observability/sinks.go internal/observability/sinks_test.go \
+            internal/server/accesslog_reload.go internal/server/accesslog_reload_test.go
+          git diff --check
+
+      - name: Install, format, and build Console
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui exec prettier --write \
+            src/api/client.ts \
+            src/features/traffic-controls/AccessLogEditor.tsx \
+            src/features/traffic-controls/TrafficControlsPanel.tsx \
+            src/lib/accessLogToml.ts \
+            src/test/access-log-editor.test.tsx \
+            src/test/access-log-toml.test.ts \
+            e2e/smoke.spec.ts
+          pnpm --dir internal/admin/ui run build
+          git diff --check
+
+      - name: Reconfirm affected backend, importer, lifecycle, and docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPDATE_IMPORT_GOLDEN=1 go test -tags importer ./cmd/jul/ -run TestCmdImportNginxGolden
+          go test ./internal/config ./internal/observability ./internal/middleware ./internal/admin ./internal/server ./internal/lifecycle ./cmd/jul
+          go test ./internal/app -run 'TestPendingRestartCheckMixedPendingAndHot|TestPreflightStageRestartAcceptsRestartRequiredChange|TestPreflightApplyReturnsCandidate'
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Validate Console unit, coverage, browser, and real server
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+          pnpm --dir internal/admin/ui run test:coverage
+          go build -tags "console grpc" -o jul ./cmd/jul
+          pnpm --dir internal/admin/ui exec playwright install chromium --with-deps
+          pnpm --dir internal/admin/ui exec playwright test --project=chromium --project=real-server
+          git diff --check
+
+      - name: Commit validated implementation branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            CHANGELOG.md README.md server.toml testdata/accesslog.toml \
+            cmd/jul/testdata/import-nginx-golden.toml \
+            docs/ scripts/docs-check.py \
+            internal/admin/ internal/app/ internal/config/ internal/lifecycle/ \
+            internal/observability/ internal/server/
+          test -n "$(git status --short)"
+          git commit -m "observability: add explicit access-log enablement"
+          git push origin HEAD:agent/access-log-enabled-124-final
