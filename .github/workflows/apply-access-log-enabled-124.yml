@@ -42,10 +42,13 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin automation/apply-access-log-enabled-124
-          git show origin/automation/apply-access-log-enabled-124:.github/patches/access-log-enabled-124.patch.gz.b64 \
-            | base64 --decode \
-            | gzip --decompress \
-            > /tmp/access-log-enabled-124.patch
+          : > /tmp/access-log-enabled-124.patch.gz.b64
+          for part in $(seq -w 0 10); do
+            git show "origin/automation/apply-access-log-enabled-124:.github/patches/access-log-enabled-124.part-${part}" >> /tmp/access-log-enabled-124.patch.gz.b64
+          done
+          echo 'a0703da0b39ca3864a12d766ac3d54cf7b592a0c986022bf83b2e5549b0dc491  /tmp/access-log-enabled-124.patch.gz.b64' | sha256sum -c -
+          base64 --decode /tmp/access-log-enabled-124.patch.gz.b64 | gzip --decompress > /tmp/access-log-enabled-124.patch
+          echo '6a40dd970a2f5f9f135e8682e3a532d74b1f3ed6aea174da16d0e926b16712c1  /tmp/access-log-enabled-124.patch' | sha256sum -c -
           git apply --check /tmp/access-log-enabled-124.patch
           git apply /tmp/access-log-enabled-124.patch
           gofmt -w \
