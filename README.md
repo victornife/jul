@@ -89,12 +89,15 @@ glance:
 > soak-evidence links. A soak failure on a GA feature is a release-blocking
 > regression, not a reason to retract the label.
 
-> **Delivery state ≠ maturity.** "GA" describes the released maturity
-> contract; changes merged to `main` but not yet tagged remain under
-> [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]`. The current correction tranche
-> has merged strict unknown-field rejection, HTTP/3 mTLS parity, compression
-> `no-transform`, exclusive ACME challenge selection, dependency and CI fixes.
-> The response cache remains under a documented correctness recertification; see
+> **Delivery state ≠ maturity.** "GA" describes the stable released maturity
+> contract. Changes merged to `main` remain under
+> [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]`; an immutable `vX.Y.Z-rc.N` tag
+> with draft artifacts is a **candidate**, not stable publication. The selected
+> `v1.32.1-rc.1` checkpoint covers strict unknown- and known-value validation,
+> HTTP/3 mTLS parity, compression `no-transform`, exclusive ACME challenge
+> selection, the frozen Prometheus contract, bounded/redacted WAF request
+> logging, explicit access-log enablement, and dependency/CI fixes. The response
+> cache remains under a documented correctness recertification; see
 > [`docs/cache.md`](docs/cache.md), [`docs/status.md`](docs/status.md), and the
 > [combined audit](docs/audit/combined-audit-2026-08-03.md).
 
