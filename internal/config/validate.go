@@ -233,8 +233,17 @@ func validateTracing(c TracingConfig) []error {
 // are constructed at startup, since that depends on the platform.
 func validateAccessLog(c AccessLogConfig) []error {
 	var errs []error
+	if c.IsEnabled() && c.Sinks != nil && len(c.Sinks) == 0 {
+		errs = append(errs, errors.New("[observability.access_log] enabled=true requires at least one sink; omit sinks for the stdout default or set enabled=false"))
+	}
 	hasFile := false
+	seen := make(map[string]struct{}, len(c.Sinks))
 	for _, s := range c.Sinks {
+		if _, ok := seen[s]; ok {
+			errs = append(errs, fmt.Errorf("[observability.access_log] duplicate sink %q", s))
+			continue
+		}
+		seen[s] = struct{}{}
 		switch s {
 		case "stdout", "syslog":
 		case "file":
@@ -243,6 +252,9 @@ func validateAccessLog(c AccessLogConfig) []error {
 			errs = append(errs, fmt.Errorf("[observability.access_log] unknown sink %q (want stdout|file|syslog)", s))
 		}
 	}
+	// Dormant settings are still validated so re-enabling cannot activate a
+	// configuration that was never safe. Resource opening itself is skipped by
+	// preflight/runtime while disabled.
 	if hasFile && strings.TrimSpace(c.File) == "" {
 		errs = append(errs, errors.New("[observability.access_log] sink \"file\" requires 'file' (path)"))
 	}

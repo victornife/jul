@@ -566,6 +566,7 @@ def check_lifecycle_manifest():
         "restart_required": "restart_required",
         "new_listener_only": "new_listener_only",
         "hot_reload": "hot_reload",
+        "ignored_deprecated": "ignored_deprecated",
     }
     registry_paths = {e["path"] for e in registry}
     covered_registry_paths: set[str] = set()
@@ -611,9 +612,9 @@ def check_lifecycle_manifest():
     for entry in registry:
         path = entry["path"]
         if path not in covered_registry_paths:
-            # The hot_reload "note" may cover unlisted fields; only enforce for
-            # restart_required and new_listener_only entries.
-            if entry["class"] in ("restart_required", "new_listener_only"):
+            # The hot_reload note may cover unlisted fields. All startup-bound,
+            # new-listener-only, and ignored/deprecated paths are explicit.
+            if entry["class"] in ("restart_required", "new_listener_only", "ignored_deprecated"):
                 error(
                     manifest, 0,
                     f"Go registry path '{path}' ({entry['class']}) is missing from config-lifecycle.yaml",
@@ -698,13 +699,6 @@ SCHEMA_EXEMPTIONS = {
     "servers.*.locations.*.match": "covered by match.type and match.path",
     "servers.*.locations.*.match.type": "routing key; hot-reloadable via handler rebuild",
     "servers.*.locations.*.match.path": "routing key; hot-reloadable via handler rebuild",
-    # Per-server access/error_log overrides are currently ignored; the global
-    # observability.access_log sink is used instead.
-    "servers.*.access_log": "per-server access_log is not consumed at runtime",
-    "servers.*.error_log": "per-server error_log is not consumed at runtime",
-    # Legacy/ignored global sinks.
-    "global.access_log": "deprecated global access_log; not consumed at runtime",
-    "global.error_log": "deprecated global error_log; not consumed at runtime",
 }
 
 

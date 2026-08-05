@@ -23,6 +23,12 @@ func TestFieldClassExact(t *testing.T) {
 	if got := FieldClass("servers.*.listen"); got != NewListenerOnlyClass {
 		t.Fatalf("listen class = %v, want new_listener_only", got)
 	}
+	if got := FieldClass("global.access_log"); got != IgnoredDeprecatedClass {
+		t.Fatalf("global.access_log class = %v, want ignored_deprecated", got)
+	}
+	if got := FieldClass("servers.*.error_log"); got != IgnoredDeprecatedClass {
+		t.Fatalf("servers.*.error_log class = %v, want ignored_deprecated", got)
+	}
 }
 
 func TestRestartRequiredEntriesAreStartupConsumed(t *testing.T) {
@@ -619,5 +625,31 @@ func TestRestartRequiredDetectsTLSCertContentChange(t *testing.T) {
 
 	if _, need := RestartRequired(before, after); !need {
 		t.Fatal("expected restart required after TLS certificate content change")
+	}
+}
+
+func TestDiffConfigClassifiesDeprecatedLogFieldsWithoutRestart(t *testing.T) {
+	before := &config.Config{Servers: []config.ServerConfig{{Listen: ":80"}}}
+	after := &config.Config{
+		Global:  config.GlobalConfig{AccessLog: "/tmp/access.log"},
+		Servers: []config.ServerConfig{{Listen: ":80", ErrorLog: "/tmp/error.log"}},
+	}
+	diffs := DiffConfig(before, after)
+	seen := map[string]bool{}
+	for _, diff := range diffs {
+		if diff.Path == "global.access_log" || diff.Path == "servers.*.error_log" {
+			seen[diff.Path] = true
+			if diff.Class != IgnoredDeprecatedClass {
+				t.Errorf("%s class = %v, want ignored_deprecated", diff.Path, diff.Class)
+			}
+		}
+	}
+	for _, path := range []string{"global.access_log", "servers.*.error_log"} {
+		if !seen[path] {
+			t.Errorf("missing diff for %s", path)
+		}
+	}
+	if reason, need := RestartRequired(ComputeFingerprint(before), ComputeFingerprint(after)); need {
+		t.Fatalf("ignored deprecated fields must not require restart: %s", reason)
 	}
 }

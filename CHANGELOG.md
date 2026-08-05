@@ -15,6 +15,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 > **GA** only after its first tagged release passes the post-GA soak gate.
 
 ### Changed
+- **Explicit access-log enablement (#124):** `[observability.access_log].enabled` now distinguishes the default-on state from an explicit disabled state. `enabled = false` opens no access-log file/syslog resources and emits no request records to stdout or the Console access tail while process, security, audit, health, metrics, and tracing remain independent. Enabled blocks reject an explicit empty sink list; dormant sink settings remain validated. Legacy global/per-server log-destination fields are now linted and classified as `ignored_deprecated`, never as pending restart. The Traffic Controls Console includes a guided restart-aware editor.
 - **Operating model and roadmap v2.0 (2026-08-04):** added ADR 0013/0014, a bounded Core Gateway Completeness contract, portfolio lanes, appropriate Console/API/CLI surfaces, value-ranked runtime dynamics, and bounded experiment governance. AI/fleet/cloud remain optional experiments or horizons; this documentation change adds no runtime capability.
 - **Current product-truth reconciliation (2026-08-04):** aligned README, security, status, configuration, observability, deployment, cache, reload, WAF and known-limitations documentation with the merged runtime and the remaining audited correction work.
 - **Post-audit remediation (2026-07-31):** activated the canonical Git hooks

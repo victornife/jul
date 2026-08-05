@@ -183,3 +183,22 @@ func TestSeverityString(t *testing.T) {
 		t.Errorf("error = %q", SeverityError.String())
 	}
 }
+
+func TestLintDeprecatedLogDestinationFields(t *testing.T) {
+	c := &Config{
+		Global: GlobalConfig{AccessLog: "/tmp/global-access.log", ErrorLog: "/tmp/global-error.log"},
+		Servers: []ServerConfig{{
+			Listen:    ":80",
+			AccessLog: "/tmp/server-access.log",
+			ErrorLog:  "/tmp/server-error.log",
+			Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}},
+		}},
+		Compression: CompressionConfig{Enabled: Bool(true)},
+	}
+	got := lintMessages(Lint(c))
+	for _, path := range []string{"[global].access_log", "[global].error_log", "servers[0].access_log", "servers[0].error_log"} {
+		if !strings.Contains(got, path) {
+			t.Errorf("expected warning for %s, got:\n%s", path, got)
+		}
+	}
+}

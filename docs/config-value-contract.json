@@ -27,6 +27,14 @@
       ]
     },
     {
+      "go_field": "AccessLogConfig.Enabled",
+      "path": "observability.access_log.enabled",
+      "kind": "boolean",
+      "constraint": "true or false",
+      "zero_semantics": "omitted preserves the v1 default-on behavior; explicit false disables request access records",
+      "active_when": "always"
+    },
+    {
       "go_field": "AccessLogConfig.Format",
       "path": "observability.access_log.format",
       "kind": "enum",

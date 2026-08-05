@@ -27,6 +27,9 @@ import (
 // system-log connection — so changing access-log settings requires a restart. On
 // any error every resource opened so far is closed before returning.
 func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []middleware.AccessSink, closers []io.Closer, err error) {
+	if !cfg.IsEnabled() {
+		return nil, nil, nil
+	}
 	defer func() {
 		if err != nil {
 			for _, c := range closers {
@@ -37,11 +40,12 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 	}()
 
 	names := cfg.Sinks
-	if len(names) == 0 {
+	if names == nil {
 		// Defaults are normally applied by config.Parse; guard direct callers so
-		// an empty set still produces the standard access line rather than
-		// silently disabling the access log.
+		// an omitted set still produces the standard access line.
 		names = []string{"stdout"}
+	} else if len(names) == 0 {
+		return nil, nil, fmt.Errorf("access_log: enabled configuration requires at least one sink")
 	}
 
 	seen := make(map[string]bool, len(names))

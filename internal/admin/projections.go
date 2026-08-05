@@ -677,6 +677,15 @@ func projectTrafficControls(c *config.Config) TrafficControlsProjection {
 		tcp.Cache.MemoryMax = string(mustMarshal(c.Cache.MemoryMaxSize.MarshalText()))
 		tcp.Cache.DiskPath = c.Cache.DiskPath
 	}
+	al := c.Observability.AccessLog
+	tcp.AccessLog = &AccessLogProjection{
+		Enabled:     al.IsEnabled(),
+		Sinks:       append([]string(nil), al.Sinks...),
+		File:        al.File,
+		Format:      al.Format,
+		RotateMaxMB: al.RotateMaxMB,
+		RotateKeep:  al.RotateKeep,
+	}
 	if c.Observability.Tracing.Enabled {
 		t := c.Observability.Tracing
 		tcp.Tracing = &TracingProjection{

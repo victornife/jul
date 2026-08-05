@@ -57,6 +57,13 @@ failed open to a default, provided that:
 Jul.IA never clamps or auto-corrects an explicit invalid value. Operators should
 run `jul check` against the target binary before deployment.
 
+### Access-log enablement compatibility
+
+`[observability.access_log].enabled` is an additive optional Boolean. Omission
+preserves the v1 default-on behavior; explicit `false` is the only supported
+disable contract. The legacy global/per-server log-destination strings remain
+parseable but deprecated and ignored for the rest of the v1 line.
+
 ## What it does not cover
 
 - **Beta / Prototype / Alpha features** — still evolving; their config and APIs

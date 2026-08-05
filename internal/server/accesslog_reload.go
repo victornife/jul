@@ -34,7 +34,8 @@ func AccessLogRestartRequired(old, next *config.Config) (string, bool) {
 
 // accessLogEqual reports whether two access-log configurations are identical.
 func accessLogEqual(a, b config.AccessLogConfig) bool {
-	return slices.Equal(a.Sinks, b.Sinks) &&
+	return a.IsEnabled() == b.IsEnabled() &&
+		slices.Equal(a.Sinks, b.Sinks) &&
 		a.File == b.File &&
 		a.Format == b.Format &&
 		a.RotateMaxMB == b.RotateMaxMB &&

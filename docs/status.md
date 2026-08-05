@@ -58,7 +58,7 @@ A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on 
 ### Active regression and recertification notices
 
 - **Response cache:** the historical GA row remains the released record, but #107 and #131–#134 reopen current conformance evidence. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.
-- **Configuration lifecycle:** strict unknown-field decoding and fail-closed known-value validation are merged, release pending; explicit access-log enablement (#124) and closed-world lifecycle generation (#89) remain open.
+- **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are implemented in the current tree and release pending; closed-world lifecycle generation (#89) remains open. Access-log changes are restart-required until #98.
 - **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen, additive families are release-pending, and WAF matched-request warnings are now path-only and bounded with query/request-derived message data omitted.
 - **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are merged to `main` and await the next tagged release.
 

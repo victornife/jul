@@ -103,8 +103,6 @@ instance and are read once at startup.
 [global]
 log_level = "info"
 log_format = "json"
-access_log = "stdout"
-error_log  = "stderr"
 shutdown_timeout = "30s"
 reload_timeout = "10s"
 redact_min_secret_length = 4
@@ -120,7 +118,7 @@ redact_min_secret_length = 4
 | `reload_timeout` | duration | Maximum duration for a configuration reload before it is reported as `timed_out`. Zero or omitted defaults to 10s. The timeout is advisory: the swap still completes, but a warning is logged and the apply response includes `previous_reload.timed_out: true`. The Console surfaces this as a distinct "Applied — reload exceeded the configured timeout" warning so the operator knows to investigate slow reload paths (WAF rule compilation, WASM plugin loading, large config) or raise this value. See [reload-semantics.md](reload-semantics.md) |
 | `redact_min_secret_length` | int | Shortest resolved secret value masked from logs; `0` uses the default (4). Lower it (down to 1) for short secrets, accepting possible masking of incidental log text |
 
-The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They do not cause a restart or select a sink. Access-log enablement remains explicit follow-up #124; until then an empty sink list is not a supported disable contract.
+The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They emit lint warnings, do not cause a restart, and do not select a sink. Use `[observability.access_log].enabled` and `sinks` for request records; route process stderr through the service supervisor.
 
 Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`,
 `512m`, etc. Values must fit the signed 64-bit representation used by the
@@ -188,7 +186,7 @@ write_timeout = "60s"
 | `read_header_timeout` | duration | Time allowed to read request headers |
 | `read_timeout` / `write_timeout` | duration | Hard request/response caps (off by default so SSE/WebSocket/large transfers are not severed) |
 | `idle_timeout` | duration | Keep-alive idle timeout |
-| `access_log` / `error_log` | string | Per-server log destinations |
+| `access_log` / `error_log` | string | Deprecated compatibility fields; accepted and linted but ignored. Use the global `[observability.access_log]` block and the process logger instead. |
 | `error_pages` | table | Map of status code → file path or redirect URL |
 | `redirect_https` | int | On an HTTP server, redirect to HTTPS with this status (`301` or `308`) |
 | `h2c` | bool | On a plaintext listener, also accept cleartext HTTP/2 (h2c) for native gRPC clients without TLS; ignored on a TLS listener (HTTP/2 is negotiated via ALPN) |
@@ -785,6 +783,7 @@ No build tag required.
 
 ```toml
 [observability.access_log]
+enabled = true
 sinks = ["stdout", "file"]
 file = "/var/log/jul/access.log"
 format = "json"
@@ -794,14 +793,16 @@ rotate_keep = 14
 
 | Key | Type | Description |
 | --- | ---- | ----------- |
-| `sinks` | []string | Active destinations: any of `stdout`, `file`, `syslog` (default `["stdout"]`) |
-| `file` | string | Access-log file path. Required when `file` is listed |
-| `format` | string | Encoding of the `file` and `syslog` sinks: `text` (logfmt, default) or `json`. The `stdout` sink always follows `[global].log_format` |
-| `rotate_max_mb` | int | File size in MB at which the file rotates (default `100`) |
-| `rotate_keep` | int | Maximum number of rotated files to retain (default `7`) |
+| `enabled` | bool | Emit request access records. Omitted defaults to `true`; explicit `false` disables stdout/file/syslog and the Console access-record tail only. |
+| `sinks` | []string | Destinations: any of `stdout`, `file`, `syslog`. Omitted defaults to `["stdout"]`; an explicit empty list is invalid while enabled. |
+| `file` | string | Access-log file path. Required whenever `file` is listed, including dormant disabled configuration. |
+| `format` | string | Encoding of the `file` and `syslog` sinks: `text` (logfmt, default) or `json`. The `stdout` sink always follows `[global].log_format`. |
+| `rotate_max_mb` | int | File size in MB at which the file rotates (default `100`). |
+| `rotate_keep` | int | Maximum number of rotated files to retain (default `7`). |
 
-The `syslog` sink uses the local system log and is **not supported on Windows**.
-Access-log settings are fixed at startup; changing them needs a restart.
+When `enabled = false`, Jul opens no access-log file or syslog resource and emits no request access records to the Console tail. Process/application, reload, security/WAF, audit, health, metrics, and tracing output remain independent. Sink details remain stored and validated while dormant so re-enabling is deterministic.
+
+The `syslog` sink uses the local system log and is **not supported on Windows**. The whole block is fixed at startup and currently requires a staged restart to change; #98 owns future generation-safe sink reload.
 
 ---
 

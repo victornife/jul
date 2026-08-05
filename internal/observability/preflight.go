@@ -16,6 +16,9 @@ import (
 // proves the target directory is writable by creating and immediately removing
 // a temporary sentinel file. It does not retain any file handle.
 func PreflightAccessSinks(cfg config.AccessLogConfig) error {
+	if !cfg.IsEnabled() {
+		return nil
+	}
 	for _, name := range cfg.Sinks {
 		if name != "file" {
 			continue

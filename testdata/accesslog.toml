@@ -12,6 +12,7 @@ log_level = "info"
 log_format = "text"
 
 [observability.access_log]
+enabled = true
 sinks = ["stdout", "file"]
 file = "jul-data/access.log"
 format = "json"

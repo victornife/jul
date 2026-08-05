@@ -10,7 +10,7 @@ references.
 ## Current defects and recertification work
 
 - **Response cache:** generation ownership, immutable entries, shared-cache semantics, invalidation, `304` metadata, Range bypass and protocol-transparent wrappers are being corrected under #107 and #131–#134.
-- **Access-log disablement:** `sinks = []` is not a supported off switch; explicit `enabled` semantics are owned by #124.
+- **Access-log lifecycle:** request records can be disabled explicitly, but enablement and sink changes remain restart-required until #98 introduces generation-safe sink replacement.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
 

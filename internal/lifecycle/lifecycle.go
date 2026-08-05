@@ -26,6 +26,10 @@ const (
 	// created (e.g. a bind address change); existing listeners keep the old value
 	// until they are recreated.
 	NewListenerOnlyClass
+	// IgnoredDeprecatedClass means the field remains parseable for v1
+	// compatibility but is not consumed by runtime behavior. Changing it never
+	// creates a pending restart; lint and diff surfaces point to the replacement.
+	IgnoredDeprecatedClass
 )
 
 func (c Class) String() string {
@@ -36,6 +40,8 @@ func (c Class) String() string {
 		return "restart_required"
 	case NewListenerOnlyClass:
 		return "new_listener_only"
+	case IgnoredDeprecatedClass:
+		return "ignored_deprecated"
 	default:
 		return fmt.Sprintf("lifecycle.Class(%d)", c)
 	}
@@ -64,8 +70,8 @@ type Entry struct {
 var Registry = []Entry{
 	// Global process settings.
 	{Path: "global.worker_threads", Class: HotReloadClass, Subsystem: "worker_threads", Reason: "log level and GOMAXPROCS are applied dynamically via OnReloaded"},
-	{Path: "global.access_log", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "access-log sinks are built once at startup", StartupConsumed: true},
-	{Path: "global.error_log", Class: RestartRequiredClass, Subsystem: "error_log", Reason: "error-log sink is built once at startup", StartupConsumed: true},
+	{Path: "global.access_log", Class: IgnoredDeprecatedClass, Subsystem: "access_log", Reason: "deprecated compatibility field; use observability.access_log"},
+	{Path: "global.error_log", Class: IgnoredDeprecatedClass, Subsystem: "error_log", Reason: "deprecated compatibility field; structured process logs use stderr"},
 	{Path: "global.log_level", Class: HotReloadClass, Subsystem: "log_level", Reason: "log level is applied dynamically via OnReloaded"},
 	{Path: "global.log_format", Class: RestartRequiredClass, Subsystem: "log_format", Reason: "log handler format is chosen once at startup", StartupConsumed: true},
 	{Path: "global.shutdown_timeout", Class: HotReloadClass, Subsystem: "shutdown_timeout", Reason: "shutdown timeout is read from effective config on each graceful stop"},
@@ -133,6 +139,7 @@ var Registry = []Entry{
 	{Path: "observability.tracing.sample_ratio", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "sampler is configured at startup", StartupConsumed: true},
 	{Path: "observability.tracing.service_name", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "tracer resource attributes are configured at startup", StartupConsumed: true},
 	{Path: "observability.tracing.insecure", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "tracer transport security is configured at startup", StartupConsumed: true},
+	{Path: "observability.access_log.enabled", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "access-log middleware and sinks are wired at startup", StartupConsumed: true},
 	{Path: "observability.access_log.sinks", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "access-log sinks are built once at startup", StartupConsumed: true},
 	{Path: "observability.access_log.file", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "file sink handle is opened at startup", StartupConsumed: true},
 	{Path: "observability.access_log.format", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "sink formatter is chosen at startup", StartupConsumed: true},
@@ -158,6 +165,8 @@ var Registry = []Entry{
 	{Path: "servers.*.redirect_https", Class: HotReloadClass, Subsystem: "server_redirect", Reason: "handler tree is rebuilt on reload"},
 	{Path: "servers.*.error_pages", Class: HotReloadClass, Subsystem: "error_pages", Reason: "handler tree is rebuilt on reload"},
 	{Path: "servers.*.plugins", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin chain is rebuilt on reload"},
+	{Path: "servers.*.access_log", Class: IgnoredDeprecatedClass, Subsystem: "access_log", Reason: "deprecated compatibility field; use observability.access_log"},
+	{Path: "servers.*.error_log", Class: IgnoredDeprecatedClass, Subsystem: "error_log", Reason: "deprecated compatibility field; structured process logs use stderr"},
 
 	// Rate limiting.
 	{Path: "rate_limit.enabled", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},

@@ -60,6 +60,22 @@ func Lint(c *Config) []Diagnostic {
 	// A server with no locations answers every request with 404. An HTTPS
 	// redirector (redirect_https set) legitimately has no locations.
 	for i, srv := range c.Servers {
+		if srv.AccessLog != "" {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    fmt.Sprintf("servers[%d].access_log", i),
+				Message:  "this field is deprecated and ignored; use [observability.access_log] instead",
+				Hint:     "move sink selection and file paths to [observability.access_log]",
+			})
+		}
+		if srv.ErrorLog != "" {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    fmt.Sprintf("servers[%d].error_log", i),
+				Message:  "this field is deprecated and ignored; structured process logs write to stderr",
+				Hint:     "remove error_log and route stderr with the process supervisor",
+			})
+		}
 		if len(srv.Locations) == 0 && srv.RedirectHTTPS == 0 {
 			diags = append(diags, Diagnostic{
 				Severity: SeverityWarning,

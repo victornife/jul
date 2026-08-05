@@ -14,6 +14,9 @@
 #                     bound once and reused, so timeouts / TLS / h2c / HTTP3 on
 #                     a *kept* address require restart. A *new* address is bound
 #                     fresh on reload (no restart needed).
+#   ignored-deprecated Parseable v1 compatibility field with no runtime effect;
+#                     lint/diff surfaces direct operators to the replacement and
+#                     changing it never creates a pending restart.
 #
 # gated_by: the Go function in the codebase that enforces the restart check.
 # fields:   TOML key paths; "*" means the entire sub-table.
@@ -33,15 +36,6 @@ restart_required:
       hot_reload section).
     fields:
       - "[global].log_format"
-
-  - subsystem: global_process
-    gated_by: "internal/lifecycle.RestartRequired"
-    reason: >
-      Legacy [global] sinks are ignored at runtime; they remain in the schema
-      only for compatibility. Changing them has no effect.
-    fields:
-      - "[global].access_log"
-      - "[global].error_log"
 
   - subsystem: cache
     gated_by: "internal/lifecycle.RestartRequired"
@@ -119,6 +113,7 @@ restart_required:
       The file and syslog sinks are opened once at startup; the file sink owns a
       rotating handle and the syslog sink a system-log connection.
     fields:
+      - "[observability.access_log].enabled"
       - "[observability.access_log].sinks"
       - "[observability.access_log].file"
       - "[observability.access_log].format"
@@ -338,12 +333,16 @@ hot_reload:
         - "[admin].rbac.roles.*"
         - "[admin].rbac.principals.*"
 
-  deprecated:
-    - field: "[global].access_log"
-      note: >
-        Not consumed at runtime. Use [observability.access_log] instead.
-        Lint emits a warning when this field is set.
-    - field: "[global].error_log"
-      note: >
-        Not consumed at runtime. The structured logger writes to stderr.
-        Lint emits a warning when this field is set.
+ignored_deprecated:
+  - subsystem: legacy_log_destinations
+    gated_by: "internal/lifecycle.DiffConfig"
+    reason: >
+      These v1 compatibility fields are accepted and surfaced in lint/diff, but
+      no runtime component consumes them. Changes therefore never create a
+      pending restart. Use [observability.access_log] for request records and
+      the process supervisor for structured stderr.
+    fields:
+      - "[global].access_log"
+      - "[global].error_log"
+      - "[[servers]].access_log"
+      - "[[servers]].error_log"

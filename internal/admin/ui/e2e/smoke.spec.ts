@@ -68,6 +68,16 @@ const RAW_CONFIG = {
   base_version: "v1",
 };
 
+const TRAFFIC_CONTROLS = {
+  access_log: {
+    enabled: true,
+    sinks: ["stdout"],
+    format: "text",
+    rotate_max_mb: 100,
+    rotate_keep: 7,
+  },
+};
+
 /** PatchResult returned for POST /api/config/patch. */
 const PATCH_RESULT = {
   ok: true,
@@ -144,6 +154,23 @@ async function setupApiMocks(page: Page): Promise<void> {
   await page.route("/api/runtime/overview", (route) => json(route, OVERVIEW));
   await page.route("/api/routes", (route) => json(route, ROUTES));
   await page.route("/api/config", (route) => json(route, RAW_CONFIG));
+  await page.route("/api/config/validate", (route) =>
+    json(route, { ok: true, message: "Configuration is valid." }),
+  );
+  await page.route("/api/config/diff", (route) =>
+    json(route, {
+      summary: "1 modification",
+      modifications: [
+        {
+          kind: "access_log",
+          name: "observability.access_log",
+          before: "enabled = true",
+          after: "enabled = false",
+        },
+      ],
+    }),
+  );
+  await page.route("/api/traffic-controls", (route) => json(route, TRAFFIC_CONTROLS));
   await page.route("/api/config/history", (route) => json(route, [HISTORY_ENTRY]));
   await page.route("/api/config/history/snap-001", (route) => json(route, HISTORY_SNAPSHOT));
 
@@ -270,6 +297,28 @@ test.describe("Console SPA smoke (UI-1)", () => {
     // The dialog is dismissed after the rollback POST returns.
     await expect(page.getByText("Roll back to this snapshot?")).not.toBeVisible();
   });
+});
+
+test("traffic controls exposes the restart-aware access-log editor", async ({ page }) => {
+  await setupApiMocks(page);
+  await page.goto("/traffic");
+
+  await expect(page.getByRole("heading", { name: "Traffic Controls" })).toBeVisible();
+  const accessCard = page
+    .getByText("Access Logging", { exact: true })
+    .locator("..", { hasText: "enabled" });
+  await expect(accessCard).toBeVisible();
+  await accessCard.getByRole("button", { name: "Edit" }).click();
+
+  await expect(page.getByText("Edit access logging")).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Enable request access logging" })).toBeChecked();
+  await expect(page.getByText(/require a restart to take effect/)).toBeVisible();
+
+  await page.getByRole("checkbox", { name: "Enable request access logging" }).uncheck();
+  await page.getByRole("button", { name: "Review in editor →" }).click();
+
+  await expect(page).toHaveURL(/\/config$/);
+  await expect(page.getByText("Pending changes", { exact: true })).toBeVisible();
 });
 
 // ── Role-based gating (P3-04) ─────────────────────────────────────────────────
