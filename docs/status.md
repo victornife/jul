@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.0 · Updated 2026-08-05
+> Version 2.1 · Updated 2026-08-05
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -39,7 +39,8 @@ tested yet not in a tagged release. Keep the two distinct:
 | **candidate** | Frozen in an immutable `vX.Y.Z-rc.N` tag; it may be reviewed as a draft or published as a prerelease, but it is not a stable release. |
 | **released** | Published in a stable tagged `vX.Y.Z` build with cross-compiled artifacts. |
 | **soaked** | The post-GA soak gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) has passed for the released build. |
-| **audit-closed** | Any reopened audit finding covering it is formally Closed (exact-SHA CI + two human sign-offs). |
+| **audit-closed** | Any reopened audit finding covering it is formally Closed under its recorded rule, including exact-SHA CI and any required independent sign-offs. |
+| **maintainer-certified** | Exact-SHA evidence is recorded by the maintainer and the historical audit is explicitly superseded; this does not claim independent two-human certification. |
 
 A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on the
 [roadmap](roadmap/README.md) means *merged*, which is not the same as *released*.
@@ -54,12 +55,14 @@ prerelease and does not change stable-release or long-running-soak status.
   published `v1.32.1-rc.1` prerelease candidate. Treat it as *verified candidate,
   stable release pending*; the five-minute RC soak is release-path smoke evidence, not
   long-running GA-soak evidence.
-- **Configuration write/apply/reload subsystem** — *remediated* across workstreams
-  WS01–WS07 with tests, but the reopened
-  [configuration-audit closure](audit/old/2026-07-25-configuration-audit-closure.md) is
-  **not formally Closed** (exact-SHA CI + two sign-offs outstanding). Treat it as
-  *remediated, closure pending*. Context: the
-  [Full Repository Audit (2026-07-31)](audit/2026-07-31-full-repository-audit.md).
+- **Configuration write/apply/reload subsystem** — implementation remains
+  remediated across workstreams WS01–WS07. Under #130 the historical closure is
+  exact-SHA **maintainer-certified** and historically superseded by the current
+  combined audit. It is intentionally not described as independently
+  `audit-closed`, because the historical two-human sign-off rule was not met. See
+  the [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md)
+  and the preserved
+  [configuration-audit closure](audit/old/2026-07-25-configuration-audit-closure.md).
 
 ### Active regression and recertification notices
 

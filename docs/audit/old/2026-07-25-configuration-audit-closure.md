@@ -146,3 +146,36 @@ is complete only when every row carries the exact run's green result and the
 
 _This report must not be treated as final until both rows are signed against the
 exact SHA that ran all CI workflows green._
+
+---
+
+## 2026-08-05 maintainer certification and historical supersession
+
+Issue #130 closes the remaining programme obligation using a deliberately
+narrower disposition than the historical `Closed` rule above:
+
+- the current repository state is certified against an exact `main` SHA and
+  complete GitHub Actions CI;
+- the maintainer records the evidence and residual disposition;
+- the 2026-08-03 combined audit is the current authority;
+- this document remains historical evidence and is not rewritten to claim the
+  two independent human sign-offs that were never obtained.
+
+The resulting status is **maintainer-certified and historically superseded**,
+not independently `audit-closed`. The exact final SHA and CI run are recorded
+in the #130 completion comment; that issue record is authoritative because a
+commit cannot embed its own final SHA without creating a new SHA.
+
+Final residual disposition:
+
+- R9-14.4 is transferred to the final lifecycle/soak closure in #106 and is
+  non-blocking before cache correctness;
+- R9-14.5 is transferred to #100 static certificate rotation and is
+  non-blocking before cache correctness;
+- #129 remains a non-blocking security-quality workstream before final
+  integrated release closure;
+- cache correctness #107/#131-#134 is the next active programme gate.
+
+See the
+[Stage 0/1 programme closure](../2026-08-05-stage-0-1-programme-closure.md)
+and [audit register](../../audit-register.md) for the current relationship.

@@ -6,18 +6,18 @@ This page identifies the current authoritative audit and preserves the evidence 
 
 | Audit | Source baseline | Role | Current status | Programme |
 |---|---|---|---|---|
-| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a` | Current implementation and planning source of truth | Active; implementation underway through staged PRs | #62, #107-#162 |
-| [2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediation commits | Historical audit and remediation evidence | Historical; formal closure evidence tracked by #130 | #130 |
+| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a` | Current implementation and planning source of truth | Active; programme truth closed, cache programme next | #62, #107-#162 |
+| [2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediation commits | Historical audit and remediation evidence | Historical; exact-SHA maintainer-certified and superseded under #130, not independently two-human certified | #130 |
 
-The current combined audit does not rewrite the historical record. It supersedes the July audit only for current prioritisation, sequencing, capability truth and implementation planning.
+The current combined audit does not rewrite the historical record. It supersedes the July audit for current prioritisation, sequencing, capability truth and implementation planning. The [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md) records the exact disposition, residual transfers and branch-cleanup gate.
 
 ## Current programme gates
 
-- Documentation truth: #119 and #130.
-- Immediate correctness/security: #120-#127 and #129.
-- Cache correctness: #107 and #131-#134.
-- Lifecycle authority: #89 and #128.
-- Core Gateway Completeness decisions: #114-#118.
+- Completed programme truth and correction tranche: #114, #119, #120-#127 and #130.
+- Non-blocking quality foundation: #129.
+- Active cache correctness: #107 and #131-#134.
+- Next lifecycle authority: #89 and #128.
+- Core Gateway Completeness decisions: #115-#118.
 - Core implementation: #135-#151.
 - Selected runtime dynamics: #88-#106 and #157-#161.
 - Migration/diagnostics: #112 and #152-#156.
@@ -47,8 +47,8 @@ A release closure entry must record the exact SHA, commands actually run, CI run
 | R9-14.1 | Composition-root startup redaction test | `internal/app/startup_redaction_test.go` | `TestCompositionRootStartupRedactionIsolation` | Integration test output | ✅ Implemented | 2026-07-17 |
 | R9-14.2 | Admin write + watcher echo test | `internal/app/admin_watcher_test.go` | `TestAdminWriteAndWatcherEcho` | Integration test output | ✅ Implemented | 2026-07-17 |
 | R9-14.3 | Event-race test for typed reload requests | `internal/admin/operational_test.go` | `TestConcurrentAdminAppliesSerialize` | Race test output | ✅ Implemented | 2026-07-17 |
-| R9-14.4 | Never-draining shutdown test | — | *(deferred)* | — | ⏸ Deferred | — |
-| R9-14.5 | Hot-added TLS rotation test | — | *(deferred)* | — | ⏸ Deferred | — |
+| R9-14.4 | Never-draining shutdown test | final lifecycle/soak closure | Existing bounded-shutdown coverage; final integrated evidence remains in #106 | transferred, not silently closed | ↪ Superseded/non-blocking | 2026-08-05 |
+| R9-14.5 | Hot-added TLS rotation test | #100 static certificate generation | Real TCP/QUIC rotation evidence required by #100 | transferred to selected runtime-dynamics work | ↪ Superseded/non-blocking | 2026-08-05 |
 | R9-14.6 | Reflection A→B migration acceptance test | — | Covered by R9-06 / R9-10 | — | ✅ N/A (duplicate) | Phase 2 |
 
 ### Round 10
@@ -89,8 +89,8 @@ A release closure entry must record the exact SHA, commands actually run, CI run
 
 ## Deferred work rationale
 
-- **R9-14.4 (never-draining shutdown test)** — timing-sensitive and better handled through the current lifecycle/soak closure programme. The underlying shutdown behavior has focused unit coverage, but exact final evidence remains tracked by #130 and later closure work.
-- **R9-14.5 (hot-added TLS rotation)** — now related to the selected static-certificate generation work in #100 and the current HTTP/3 correctness work in #121. Do not close it based only on the old audit wording.
+- **R9-14.4 (never-draining shutdown test)** — transferred to the final lifecycle/soak closure in #106. Existing bounded-shutdown tests remain evidence; no new pre-cache blocker was inferred.
+- **R9-14.5 (hot-added TLS rotation)** — transferred to selected issue #100. HTTP/3 mTLS parity is already corrected by #121; certificate rotation remains later runtime-dynamics work and is not a prerequisite for #131.
 
 ## Running the historical evidence tests
 

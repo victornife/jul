@@ -1,0 +1,46 @@
+name: One-time programme branch cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/cleanup-programme-branches.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.repository == 'victornife/jul'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete every branch except main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t branches < <(
+            gh api --paginate "repos/${REPO}/branches?per_page=100" --jq '.[].name'
+          )
+
+          for branch in "${branches[@]}"; do
+            if [[ "${branch}" == "main" ]]; then
+              continue
+            fi
+            echo "Deleting ${branch}"
+            gh api --method DELETE "repos/${REPO}/git/refs/heads/${branch}"
+          done
+
+          gh api --paginate "repos/${REPO}/branches?per_page=100" --jq '.[].name' > /tmp/branches-after.txt
+          unexpected="$(grep -vxF main /tmp/branches-after.txt || true)"
+          if [[ -n "${unexpected}" ]]; then
+            echo "Non-main branches remain:" >&2
+            printf '%s\n' "${unexpected}" >&2
+            exit 1
+          fi
+
+          echo "Branch cleanup complete: main is the only branch."

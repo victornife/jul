@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.0 · Updated 2026-08-05
+> Version 2.1 · Updated 2026-08-05
 >
 > This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
 > with a portfolio model. Delivered feature maturity remains authoritative in the
@@ -32,9 +32,9 @@ portfolio has parallel lanes.
 
 | Stage | Focus | Exit criteria | Status |
 | --- | --- | --- | --- |
-| **0 — Programme and truth** | Combined audit, current product truth, operating model | One audit, one tracker, canonical docs synchronized | ✅ #165/#166 merged |
-| **1 — Immediate correctness** | Access-log semantics and cache correctness | No known P0; selected P1 behavior documented and tested | 🚧 selected tranche verified in `v1.32.1-rc.1`; cache remains |
-| **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ⬜ planned |
+| **0 — Programme and truth** | Combined audit, current product truth, operating model and historical-audit disposition | One audit, one tracker, canonical docs synchronized | ✅ reconciled; #114/#119/#130 closed |
+| **1 — Immediate non-cache correctness** | Strict configuration, HTTP/3 mTLS, ACME, compression, access logs, metrics and WAF contracts | No known non-cache P0; selected P1 corrections documented and tested | ✅ verified in `v1.32.1-rc.1`; #129 remains a non-blocking quality track |
+| **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ▶ next: #131; implementation not started |
 | **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ⬜ planned |
 | **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ⬜ planned |
 | **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ⬜ planned |
@@ -43,6 +43,18 @@ portfolio has parallel lanes.
 | **8 — Migration and diagnostics** | NGINX assessment, provenance, compatibility corpus, support bundle, `jul doctor` | Operator-safe evidence and recovery workflows | ⬜ planned |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | Promote, continue experimental, freeze, extract, remove, or defer | 🔒 gated |
 | **10 — Integrated closure** | Exact-SHA audit, protocol matrix, failure injection, E2E, soak, compatibility and release evidence | No unsupported claims or unresolved selected work | ⬜ planned |
+
+
+### Tracker-numbering crosswalk
+
+The roadmap deliberately consolidates the more granular numbering in #62:
+
+- roadmap Stage 0 = #62 Stage 0 programme reconciliation plus Stage 1 audit/documentation truth;
+- roadmap Stage 1 = the completed #62 Stage 2 non-cache correctness tranche;
+- roadmap Stage 2 = #62 Stage 3 cache correctness and recertification.
+
+This avoids two competing execution models. #62 owns issue-level status;
+this roadmap owns the durable portfolio sequence.
 
 ## Immediate critical path
 
@@ -97,7 +109,7 @@ remain serial.
 - Preserve a fully green required CI baseline.
 - Add semantic drift guards for schema, defaults, lifecycle, metrics, and claims.
 - Add focused security-package coverage and negative-test gates.
-- Close the current audit with exact-SHA evidence.
+- Preserve #130's exact-SHA maintainer certification and historical-supersession record; no independent two-human certification is claimed.
 
 ## Release-candidate checkpoint
 
