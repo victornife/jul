@@ -15,6 +15,7 @@ import (
 
 	"jul/internal/background"
 	"jul/internal/config"
+	"jul/internal/respwriter"
 	"jul/internal/tracing"
 )
 
@@ -210,6 +211,19 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 		// its own (proxy) span. No-op unless the otel build wired a tracer.
 		_, span := tracing.Active().Start(r.Context(), "cache.lookup")
 
+		// A protocol upgrade leaves HTTP behind: the handler takes the connection
+		// and speaks another protocol on it. There is no representation to look up
+		// or store, and the handler must receive the untouched writer so it can
+		// hijack. Only the cache is bypassed — authentication, rate limiting and
+		// the WAF wrap outside this handler and still run.
+		if isUpgradeRequest(r) {
+			span.SetString("cache.status", "BYPASS")
+			span.End()
+			w.Header().Set("X-Cache", "BYPASS")
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if requestNoStore(r) {
 			span.SetString("cache.status", "BYPASS")
 			span.End()
@@ -244,13 +258,15 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 }
 
 // fetchAndStore runs the upstream handler, streams the response to the client,
-// and stores it if cacheable.
+// and stores it if cacheable. The handler receives a capability-transparent
+// wrapper, so enabling the cache neither removes nor invents an optional
+// ResponseWriter interface.
 func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time) {
 	cw := &cacheWriter{ResponseWriter: w, limit: c.maxEntry}
 	w.Header().Set("X-Cache", "MISS")
-	next.ServeHTTP(cw, r)
+	next.ServeHTTP(respwriter.Wrap(cw, w), r)
 
-	if cw.tooBig {
+	if !cw.storable() {
 		return
 	}
 	if e := c.buildEntry(r, cw.status, w.Header(), cw.buf.Bytes(), now); e != nil {
