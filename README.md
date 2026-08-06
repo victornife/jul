@@ -15,7 +15,7 @@
 configured through TOML. It combines reverse proxying, load balancing, static
 serving, FastCGI/uWSGI, HTTP and gRPC gateway behavior, optional L4 proxying,
 TLS/mTLS, policy, observability, configuration lifecycle, and an embedded
-operations Console in a single static, dependency-free binary for simplicity.
+operations Console in a single static, dependency-free binary.
 
 - **Binary / module / service name:** `jul`
 - **Product name:** `Jul.IA`
