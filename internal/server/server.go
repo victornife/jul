@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/net/netutil"
 
+	"jul/internal/background"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/redact"
@@ -329,6 +330,11 @@ func (s *Server) candidateStillValid(req ReloadRequest) bool {
 // in-flight requests finish (or a grace period elapses), so handler-owned
 // resources (gRPC backend connections, WASM plugin runtimes, static-file
 // directory handles) are never closed while an old request is still executing.
+//
+// A generation also owns the background work its requests started and that
+// legitimately outlives them (today: cache stale revalidation). Such work holds
+// a background lease, which is counted in the SAME in-flight counter, so a
+// generation cannot retire while leased work is still using its handler tree.
 type handlerGen struct {
 	handlers  map[string]http.Handler
 	snapshots upstream.SnapshotMap
@@ -340,11 +346,54 @@ type handlerGen struct {
 	drainOnce  sync.Once
 	retire     func()
 	retireOnce sync.Once
+
+	// bg leases this generation's background operations. Its contexts descend
+	// from the process context, so shutdown cancels them; each operation is
+	// additionally bounded by the retirement grace so it can never outlive the
+	// forced teardown of the resources it uses.
+	bg *background.Group
 }
 
-func newHandlerGen(handlers map[string]http.Handler, snapshots upstream.SnapshotMap, genID uint64) *handlerGen {
-	return &handlerGen{handlers: handlers, snapshots: snapshots, genID: genID, drained: make(chan struct{})}
+func newHandlerGen(parent context.Context, grace time.Duration, handlers map[string]http.Handler, snapshots upstream.SnapshotMap, genID uint64) *handlerGen {
+	g := &handlerGen{handlers: handlers, snapshots: snapshots, genID: genID, drained: make(chan struct{})}
+	g.bg = background.NewGroup(parent, background.GroupOptions{
+		Generation:   genID,
+		MaxOperation: grace,
+		Admit:        g.admitBackground,
+		Done:         g.release,
+	})
+	return g
 }
+
+// admitBackground registers a background operation against this generation's
+// in-flight count. It mirrors acquireGen's ordering — increment, then read the
+// retiring flag — but it does not retry on another generation: background work
+// belongs to the generation whose handler tree it captured, so a retiring
+// generation must refuse it rather than hand it to a newer one.
+func (g *handlerGen) admitBackground() bool {
+	g.inflight.Add(1)
+	if g.retiring.Load() {
+		g.release()
+		return false
+	}
+	return true
+}
+
+// newGeneration builds a handler generation whose background lease is rooted in
+// the process context and bounded by the same grace the retirement path uses,
+// so a leased operation can never outlive the forced teardown of the resources
+// it holds open.
+func (s *Server) newGeneration(handlers map[string]http.Handler, snapshots upstream.SnapshotMap, genID uint64) *handlerGen {
+	return newHandlerGen(s.baseCtx, s.shutdownTimeout(), handlers, snapshots, genID)
+}
+
+// Acquire implements background.Lease.
+func (g *handlerGen) Acquire(src context.Context, op background.Operation) (context.Context, func(), bool) {
+	return g.bg.Acquire(src, op)
+}
+
+// Generation implements background.Lease.
+func (g *handlerGen) Generation() uint64 { return g.genID }
 
 // release marks an in-flight request against this generation done. The request
 // generation has drained so its resources can be closed.
@@ -354,9 +403,14 @@ func (g *handlerGen) release() {
 	}
 }
 
-// doRetire closes the generation's resources exactly once.
+// doRetire closes the generation's resources exactly once. It first cancels the
+// generation's background lease group so no leased operation can still be
+// touching a resource that is about to close.
 func (g *handlerGen) doRetire() {
 	g.retireOnce.Do(func() {
+		if g.bg != nil {
+			g.bg.Cancel()
+		}
 		if g.retire != nil {
 			g.retire()
 		}
@@ -503,7 +557,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 	}
 	snapshots, _ := commit() // promote the initial generation; retirePrev is nil at startup
 	s.registerRedactionGen(genID, initialRedaction)
-	s.handlers.Store(newHandlerGen(handlers, snapshots, genID))
+	s.handlers.Store(s.newGeneration(handlers, snapshots, genID))
 
 	addrs := uniqueListenAddrs(s.cfg.Servers)
 	if len(addrs) == 0 {
@@ -780,6 +834,9 @@ func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction, reti
 	}
 	g.retire = retireResources
 	g.retiring.Store(true)
+	// From here the generation accepts no new background work: admitBackground
+	// observes the retiring flag and refuses. Operations already leased keep the
+	// generation open exactly like an in-flight request.
 	if g.inflight.Load() == 0 {
 		g.doRetire()
 		if retireRedaction != nil {
@@ -802,7 +859,8 @@ func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction, reti
 		select {
 		case <-g.drained:
 		case <-t.C:
-			s.log.Warn("reload: previous handler generation did not drain within grace; closing its resources", "grace", grace)
+			s.log.Warn("reload: previous handler generation did not drain within grace; closing its resources",
+				"grace", grace, "generation", g.genID, "background_operations", g.bg.Active())
 		}
 		g.doRetire()
 	}()
@@ -883,10 +941,15 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 			http.Error(w, "503 Service Unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		ctx := r.Context()
 		if len(g.snapshots) > 0 {
-			r = r.WithContext(upstream.WithSnapshot(r.Context(), g.snapshots))
+			ctx = upstream.WithSnapshot(ctx, g.snapshots)
 		}
-		h.ServeHTTP(w, r)
+		// Install the generation's background lease so a handler that must keep
+		// working after ServeHTTP returns (cache stale revalidation) can hold
+		// this generation open instead of escaping its accounting.
+		ctx = background.WithLease(ctx, g)
+		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -1289,9 +1352,29 @@ func (s *Server) drain() error {
 	ctx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout())
 	defer cancel()
 	s.shutdownAll(ctx)
+	s.drainLiveBackground()
 	s.wg.Wait()
 	s.log.Info("shutdown complete")
 	return nil
+}
+
+// drainLiveBackground cancels and bounds the background work leased by the
+// generation that is still live at shutdown. Listener shutdown drains requests,
+// but leased work (cache stale revalidation) is by design not tied to a client
+// connection, so shutdown owns it explicitly: it is canceled first and then
+// awaited for at most the shutdown grace, after which the process proceeds
+// regardless so shutdown can never wedge.
+func (s *Server) drainLiveBackground() {
+	g := s.handlers.Load()
+	if g == nil || g.bg == nil {
+		return
+	}
+	g.bg.Cancel()
+	grace := s.shutdownTimeout()
+	if !g.bg.Wait(grace) {
+		s.log.Warn("shutdown: background operations did not finish within grace",
+			"grace", grace, "generation", g.genID, "background_operations", g.bg.Active())
+	}
 }
 
 func (s *Server) shutdownAll(ctx context.Context) {

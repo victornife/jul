@@ -255,7 +255,7 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	p.s.registerRedactionGen(p.GenID, p.Candidate.Redaction)
 
 	prevGen := p.s.handlers.Load()
-	newGen := newHandlerGen(p.Handlers, snapshots, p.GenID)
+	newGen := p.s.newGeneration(p.Handlers, snapshots, p.GenID)
 	p.s.handlers.Store(newGen)
 
 	// Update the authoritative config pointers so code that still reads s.cfg
