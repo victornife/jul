@@ -6,7 +6,6 @@ package middleware
 import (
 	"bufio"
 	"compress/gzip"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"jul/internal/respwriter"
 )
 
 // CompressionOptions configures the Compression middleware. It is populated
@@ -143,7 +144,7 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 			}
 			cw := &compressWriter{ResponseWriter: w, c: c, r: r, chosen: ep, minSize: c.minSize}
 			defer cw.close()
-			next.ServeHTTP(cw, r)
+			next.ServeHTTP(respwriter.Wrap(cw, w), r)
 		})
 	}, nil
 }
@@ -227,6 +228,9 @@ func (cw *compressWriter) Write(b []byte) (int, error) {
 // Flush forces a decision so buffered bytes reach the client (SSE), then
 // flushes the encoder and the underlying writer.
 func (cw *compressWriter) Flush() {
+	if cw.hijacked {
+		return
+	}
 	if !cw.sawHeader {
 		cw.WriteHeader(http.StatusOK)
 	}
@@ -245,12 +249,18 @@ func (cw *compressWriter) Flush() {
 // Hijack forwards to the underlying writer for WebSocket upgrades. The upgrade
 // handshake writes no body, so nothing has been buffered or compressed. The
 // writer is marked hijacked so close() does not touch the raw connection.
+// respwriter.Wrap exposes this method only when the underlying writer can
+// actually hijack, so a handler's type assertion stays truthful.
 func (cw *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if h, ok := cw.ResponseWriter.(http.Hijacker); ok {
-		cw.hijacked = true
-		return h.Hijack()
+	h, ok := cw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
 	}
-	return nil, nil, errors.New("compress: underlying ResponseWriter does not support hijacking")
+	conn, buf, err := h.Hijack()
+	if err == nil {
+		cw.hijacked = true
+	}
+	return conn, buf, err
 }
 
 // decide chooses compression vs pass-through once enough bytes are buffered or a

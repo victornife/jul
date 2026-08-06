@@ -9,7 +9,7 @@ references.
 
 ## Current defects and recertification work
 
-- **Response cache:** generation ownership and immutable published entries are corrected and evidenced by #131. Shared-cache semantics, invalidation, `304` metadata, Range bypass and protocol-transparent wrappers remain open under #107 and #132–#134.
+- **Response cache:** generation ownership and immutable published entries are corrected and evidenced by #131; protocol-upgrade bypass, streaming policy and `ResponseWriter` transparency by #133. Shared-cache semantics, invalidation, `304` metadata and Range bypass remain open under #107 and #132–#134.
 - **Access-log lifecycle:** request records can be disabled explicitly, but enablement and sink changes remain restart-required until #98 introduces generation-safe sink replacement.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
@@ -89,6 +89,16 @@ references.
   stale responses normally but starts no background refresh — unowned work would
   have no resource holder and no shutdown owner. The decision is counted as
   `no_lease` on `jul_cache_revalidations_total`.
+- **Server-Sent Events are never cached.** A `text/event-stream` response is
+  streamed to the client but never stored, because an event stream has no end
+  and capturing it would only grow a buffer that is discarded. Ordinary chunked
+  responses, which the reverse proxy also flushes on every write, are still
+  cached normally.
+- **A cached route cannot hijack on HTTP/2 or HTTP/3.** That is a protocol fact,
+  not a cache limitation: there is no connection to take over. The response
+  writer reports it honestly by not implementing `http.Hijacker`, and
+  `http.ResponseController.Hijack` returns `http.ErrNotSupported`. WebSocket
+  upgrades therefore use HTTP/1.1, as they do without the cache.
 
 ---
 

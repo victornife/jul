@@ -124,7 +124,7 @@ transport that picks a backend from the named (or anonymous) upstream pool.
 | Failover | one retry per backend, **idempotent methods only** (GET/HEAD/OPTIONS/TRACE/PUT/DELETE) and only when the body is re-readable |
 | Timeouts | `proxy_connect_timeout` (default 10s); `proxy_read_timeout` / `proxy_send_timeout` are per-read / per-write **inactivity** bounds (NGINX semantics) — they cap the gap between successive reads of the response (headers and slow-trickle body) or writes of the request, not the total transfer, so a steady stream is never cut off; both default to unbounded. 90s idle keep-alive |
 | Connection reuse | `MaxIdleConns` 100, `MaxIdleConnsPerHost` 32, HTTP/2 attempted |
-| WebSocket / SSE | `Connection: Upgrade` (HTTP `101`) spliced bidirectionally; `text/event-stream` and chunked responses streamed (flushed per write, never buffered) |
+| WebSocket / SSE | `Connection: Upgrade` (HTTP `101`) spliced bidirectionally; `text/event-stream` and chunked responses streamed (flushed per write, never buffered). Both work with `cache = true`: an upgrade bypasses the cache and an event stream is never stored |
 | Error mapping | 503 no backend, 504 timeout, 502 connection error |
 
 ### WebSocket & streaming passthrough
@@ -145,6 +145,30 @@ Both are pinned by passthrough conformance tests
 binary frames; `TestProxyServerSentEventsStreaming` proves events are streamed,
 not buffered). WebSocket upgrades are not available on HTTP/3 listeners (clients
 transparently fall back to HTTP/2 — see [HTTP/3 (QUIC)](../docs/configuration.md#http3-quic)).
+
+Both also work with `cache = true` on the same location. An upgrade request
+bypasses the cache before lookup and reaches the handler with the untouched
+response writer, and an event stream is streamed but never stored; see
+[Upgrades, streaming and ResponseWriter transparency](cache.md#upgrades-streaming-and-responsewriter-transparency).
+`TestWebSocketThroughCachedProxy` and `TestWebSocketThroughFullMiddlewareChain`
+drive a real handshake through a cached route, the second through the complete
+production middleware chain.
+
+### Optional `ResponseWriter` interfaces
+
+Every response-writer wrapper in the chain — metrics, access log, tracing,
+compression and the response cache — is built with `internal/respwriter`, which
+exposes **exactly** the optional interfaces the underlying writer implements:
+`http.Flusher`, `http.Hijacker`, `http.Pusher`, `io.ReaderFrom`, plus
+`Unwrap() http.ResponseWriter` for `http.ResponseController`.
+
+Neither half of that is optional. Hiding an interface stalls SSE and breaks
+upgrades; advertising one the connection does not have is worse, because a
+handler branches on the type assertion rather than on the error it gets back. On
+**HTTP/2 and HTTP/3 there is no connection to hijack**, and `w.(http.Hijacker)`
+correctly fails; `http.NewResponseController(w).Hijack()` returns
+`http.ErrNotSupported`. The behaviour is pinned by the 16-combination interface
+matrix in `internal/respwriter`.
 
 ## FastCGI / uWSGI
 

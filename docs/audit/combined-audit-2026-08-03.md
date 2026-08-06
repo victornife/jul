@@ -5,7 +5,7 @@
 **Audited branch:** `main`  
 **Source baseline:** `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a`  
 **Status:** current authoritative audit and implementation-planning baseline  
-**Execution status (2026-08-06):** programme/audit truth, the non-cache correction tranche, #129 security-test foundations, and the #226 managed-apply terminal-order correction are included in the current baseline; CACHE-01 and CACHE-02 are corrected by #131, and #133 is next
+**Execution status (2026-08-06):** programme/audit truth, the non-cache correction tranche, #129 security-test foundations, and the #226 managed-apply terminal-order correction are included in the current baseline; CACHE-01 and CACHE-02 are corrected by #131, CACHE-04 by #133, and #132 is next
 **Supersedes for current planning:** `2026-07-31-full-repository-audit.md` while preserving that document as historical evidence
 
 > This audit is the source of truth for the current programme. It separates shipped behavior, confirmed defects, probable defects, operational enhancements, architecture decisions and bounded experiments. A linked issue is not implementation approval when its title contains `[DRAFT]` or `[GATED]`.
@@ -143,7 +143,7 @@ The 2026-07-31 audit remains valuable historical evidence, but several of its co
 | CACHE-01 | Background stale revalidation can outlive the handler generation/resources it uses | Confirmed lifecycle defect | Critical | L | #131 (corrected) |
 | CACHE-02 | Published cache entries can be mutated in place during stale/error handling | Confirmed concurrency defect | Critical | M-L | #131 (corrected) |
 | CACHE-03 | Shared-cache directive, authenticated reuse, invalidation and `304` behavior are incomplete | Confirmed standards defect | High | L-XL | #132 |
-| CACHE-04 | Cache wrappers do not prove transparent WebSocket/upgrade/stream behavior | Confirmed/probable protocol defect | High | L | #133 |
+| CACHE-04 | Cache wrappers do not prove transparent WebSocket/upgrade/stream behavior | Confirmed/probable protocol defect | High | L | #133 (corrected) |
 | COMP-01 | Compression does not consistently respect `Cache-Control: no-transform` | Confirmed HTTP defect | Medium-High | S-M | #125 |
 | OBS-01 | Current metrics/docs may drift from the last released Prometheus contract | Contract/compatibility defect | High | M-L | #126 |
 | OBS-02 | Access-log disablement relies on ambiguous sink semantics and ignored legacy fields | Confirmed product-contract defect | Medium-High | M | #124 |

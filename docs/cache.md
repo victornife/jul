@@ -19,6 +19,7 @@ evidence until #107 and #131–#134 close.
 - [Freshness and stale-while-revalidate](#freshness-and-stale-while-revalidate)
 - [Background revalidation lifecycle](#background-revalidation-lifecycle)
 - [Entry immutability](#entry-immutability)
+- [Upgrades, streaming and ResponseWriter transparency](#upgrades-streaming-and-responsewriter-transparency)
 - [On-disk format](#on-disk-format)
 - [Disk-tier safety](#disk-tier-safety)
 - [Eviction and overflow](#eviction-and-overflow)
@@ -88,14 +89,16 @@ Responses report their disposition in the `X-Cache` header:
 
 The table records the intended and previously documented behavior. Rows covering
 `no-cache`, `must-revalidate`/`proxy-revalidate`, authenticated reuse,
-unsafe-method invalidation, `304` metadata, Range requests and upgrade
-transparency are being revalidated and corrected by #107 and #132–#134. Do not
-treat an unchecked interaction as a current conformance guarantee.
+unsafe-method invalidation, `304` metadata and Range requests are being
+revalidated and corrected by #107 and #132–#134. Do not treat an unchecked
+interaction as a current conformance guarantee.
 
-Background-revalidation ownership and shared-entry immutability are no longer
-under revalidation: they are corrected and evidenced by #131, and described in
-[Background revalidation lifecycle](#background-revalidation-lifecycle) and
-[Entry immutability](#entry-immutability).
+Background-revalidation ownership and shared-entry immutability (#131), and
+upgrade/streaming/`ResponseWriter` transparency (#133), are no longer under
+revalidation: they are corrected and evidenced, and described in
+[Background revalidation lifecycle](#background-revalidation-lifecycle),
+[Entry immutability](#entry-immutability) and
+[Upgrades, streaming and ResponseWriter transparency](#upgrades-streaming-and-responsewriter-transparency).
 
 | Scenario | Rule | Detail |
 | --- | --- | --- |
@@ -113,6 +116,10 @@ under revalidation: they are corrected and evidenced by #131, and described in
 | `stale_if_error` extension | Extend stale window on 5xx/timeout | Measured from point of revalidation failure |
 | Conditional requests (`If-None-Match` / `If-Modified-Since`) | 304 if cached ETag/Last-Modified matches | Saves bandwidth on unchanged resources |
 | POST / PUT / DELETE / PATCH | Bypass | Only GET and HEAD are cached |
+| Protocol upgrade request (`Connection: Upgrade` + `Upgrade`) | Bypass | Handler receives the untouched writer; `X-Cache: BYPASS`; never stored |
+| `101 Switching Protocols` and other `1xx` | Not stored | Not a representation; capture is dropped |
+| `Content-Type: text/event-stream` | Not stored | Capture stops at the first byte so an open stream accumulates nothing |
+| Flushed (chunked) response | Stored normally | A flush alone does not make a response a stream |
 | Oversized responses (> `memory_max_size`) | Not stored in that tier | Silently dropped; client still served |
 | Memory eviction → disk | Overflow to disk tier (when configured) | Eviction runs outside the memory lock |
 
@@ -122,12 +129,12 @@ The active cache programme requires:
 
 - ~~generation-owned, cancellable background revalidation~~ — **delivered by #131**;
 - ~~immutable published entries and race-free metadata replacement~~ — **delivered by #131**;
+- ~~transparent WebSocket/`101`, SSE and optional `http.ResponseWriter` interface behavior~~ — **delivered by #133**;
 - synchronous validation for request/response `no-cache`;
 - correct `must-revalidate`, `proxy-revalidate`, authenticated reuse, unsafe-method invalidation and `304` metadata handling;
-- initial bypass for requests carrying `Range` or `If-Range` (cached byte-range serving remains a future enhancement);
-- transparent WebSocket/`101`, SSE and optional `http.ResponseWriter` interface behavior.
+- initial bypass for requests carrying `Range` or `If-Range` (cached byte-range serving remains a future enhancement).
 
-Until the remaining items close, avoid cache on upgrade routes and treat authenticated or user-specific responses conservatively (`private`/`no-store`).
+Until the remaining items close, treat authenticated or user-specific responses conservatively (`private`/`no-store`).
 
 ## Freshness and stale-while-revalidate
 
@@ -271,6 +278,72 @@ pays a body copy**.
 This is what makes it safe for a lookup to hand out the stored `*Entry` pointer:
 concurrent readers, the disk tier's encoder and a replacing writer can never
 observe a half-updated entry.
+
+## Upgrades, streaming and ResponseWriter transparency
+
+Enabling `cache = true` on a route must not change what the route can *do*. Three
+rules make that true.
+
+### Protocol upgrades bypass the cache
+
+A request is treated as a protocol upgrade when it carries a non-empty `Upgrade`
+header **and** lists the `upgrade` token in `Connection` (RFC 9110 §7.8). Both
+halves are required, so a stray client-supplied `Upgrade` header cannot switch
+caching off for ordinary traffic.
+
+An upgrade request:
+
+- is **not** looked up in the cache, even if a fresh entry exists for its key;
+- reaches the handler with the **untouched** response writer, so the reverse
+  proxy can hijack the connection and complete the `101 Switching Protocols`
+  handshake;
+- is reported as `X-Cache: BYPASS`;
+- is **never** stored.
+
+Only the cache is bypassed. Authentication, rate limiting, the WAF, plugins and
+mutual-TLS identity all wrap outside the cache and still run.
+
+`CONNECT` and every other method outside `GET`/`HEAD` never reach the cache path
+at all.
+
+### Responses that are never stored
+
+| Response | Stored? | Why |
+| --- | :---: | --- |
+| `101 Switching Protocols` and any other `1xx` | no | An interim or protocol-switch response is not a representation. |
+| Anything written after a successful hijack | no | The connection has left HTTP; the wrapper also refuses further writes with `http.ErrHijacked`. |
+| `Content-Type: text/event-stream` | no | An event stream never ends. Capture stops at the first byte, so an open SSE connection accumulates nothing. |
+| A body larger than `memory_max_size` | no | Existing size bound; capture is discarded when the limit is passed. |
+
+### Flushing does not make a response uncacheable
+
+An ordinary flushed response **is** still cached. This is deliberate: the
+standard reverse proxy flushes on every write of any response whose
+`Content-Length` is unknown — that is, every chunked response — so treating a
+flush as "this is a stream" would silently stop caching most dynamic backends.
+Unbounded growth is prevented by the event-stream rule and the size bound above
+rather than by the flush itself.
+
+### Optional `ResponseWriter` interfaces
+
+The writer a cached route hands to its handler implements **exactly** the
+optional interfaces the real connection implements — `http.Flusher`,
+`http.Hijacker`, `http.Pusher`, `io.ReaderFrom` — and no others. It also
+implements `Unwrap() http.ResponseWriter`, so `http.ResponseController` reaches
+the real writer for capabilities that have no classic interface (read/write
+deadlines, full duplex).
+
+The "no others" half matters as much as the first. A wrapper that always
+implements `Hijack` and returns an error still makes `w.(http.Hijacker)` succeed,
+and handlers branch on the assertion rather than the error. On **HTTP/2 and
+HTTP/3 there is no connection to hijack**, and the writer correctly reports that
+by not implementing `http.Hijacker` at all; `http.NewResponseController(w).Hijack()`
+returns `http.ErrNotSupported`. WebSocket over HTTP/2 (RFC 8441 extended
+`CONNECT`) is not supported by the reverse proxy and is unrelated to caching.
+
+The same guarantee holds through the whole middleware chain — metrics, access
+log, tracing and compression all use the same wrapper — so composition does not
+erode it.
 
 ## On-disk format
 
@@ -432,7 +505,7 @@ The feature retains its historical release record, but the current correctness f
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| 1 — Conformance / behaviour matrix | ⚠️ recertification open | #107 and #132–#134 own the corrected executable matrix; the revalidation-lifecycle and entry-immutability rows are settled by #131 |
+| 1 — Conformance / behaviour matrix | ⚠️ recertification open | #107 and #132–#134 own the corrected executable matrix; the revalidation-lifecycle and entry-immutability rows are settled by #131, and the upgrade/streaming/`ResponseWriter` rows by #133 |
 | 2 — Published benchmark numbers | ✅ | `BenchmarkCacheHit` / `Miss` / `VaryHit` / `MemOverflow` in `internal/cache/bench_test.go` |
 | 3 — Known-limitations list | ✅ | 6-item limitation list above |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
