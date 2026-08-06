@@ -188,7 +188,7 @@ Each access-log entry includes:
 - `method`, `path`, `host`, `remote_addr`
 - `status`, `bytes_sent`, `duration_ms`
 - `upstream_addr`, `upstream_status`, `upstream_duration_ms` (when proxied)
-- `cache` — `HIT`, `MISS`, `STALE`, or `BYPASS`
+- `cache` — `HIT`, `MISS`, `STALE`, `REVALIDATED`, or `BYPASS`
 - `trace_id` — when tracing is active
 - `error` — when the request failed with an error
 

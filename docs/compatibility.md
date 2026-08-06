@@ -64,6 +64,34 @@ preserves the v1 default-on behavior; explicit `false` is the only supported
 disable contract. The legacy global/per-server log-destination strings remain
 parseable but deprecated and ignored for the rest of the v1 line.
 
+### Response-cache behavior changes (#132)
+
+No configuration key changed. The following **observable HTTP behavior** changed
+because the previous behavior contradicted the shared-cache contract Jul.IA
+claims. Each is a correctness fix, not a feature toggle, and none is
+configurable:
+
+- `Cache-Control: no-cache` on a request or a response now forces successful
+  validation before reuse. It previously did nothing.
+- `must-revalidate` and `proxy-revalidate` now prevent stale reuse. They were
+  previously ignored, so `[cache] stale_while_revalidate` silently overrode them.
+- A request carrying `Authorization` can no longer be answered from a stored
+  response unless that response explicitly permits shared reuse.
+- A successful `POST`/`PUT`/`PATCH`/`DELETE` now invalidates the cached
+  representations of its target. Nothing was invalidated before.
+- A request carrying `Range` or `If-Range` now bypasses the cache. It could
+  previously be answered with a cached complete representation.
+- Freshness is measured from the origin's `Date`/`Age`, so a response that
+  already aged upstream is served for less time than before.
+- A new `X-Cache: REVALIDATED` value can appear where `HIT` previously did.
+  Clients or dashboards that enumerate `X-Cache` values, or that compute a hit
+  ratio, must account for it.
+
+The on-disk entry format gained fields. It remains readable in both directions:
+gob decodes an absent field as its zero value, every added field's zero value is
+the conservative answer, and an older binary ignores fields it does not know. No
+migration is required, and no cache needs to be cleared on upgrade or rollback.
+
 ## What it does not cover
 
 - **Beta / Prototype / Alpha features** — still evolving; their config and APIs

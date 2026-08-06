@@ -6,16 +6,19 @@ on-disk overflow tier that survives process restarts. Both tiers are part of the
 core binary — there is no build tag to enable.
 
 The cache is opt-in per location (`cache = true`) and gated by the global
-`[cache].enabled` switch. Cacheability is designed around standard HTTP semantics (`Cache-Control`,
-`Expires`, `Vary`), but the shared-cache contract is currently under active
-recertification. The historical behavior matrix below is not complete release
-evidence until #107 and #131–#134 close.
+`[cache].enabled` switch. Cacheability follows the shared-cache rules of RFC 9111
+and RFC 5861; the exact contract, including every deliberate conservative
+choice, is written out in [Shared-cache contract](#shared-cache-contract). The
+overall GA/maturity decision remains open until #134 publishes the recertified
+evidence package.
 
 ## Contents
 
 - [Two-tier model](#two-tier-model)
 - [Configuration](#configuration)
 - [Cache key and Vary](#cache-key-and-vary)
+- [Cache result values](#cache-result-values)
+- [Shared-cache contract](#shared-cache-contract)
 - [Freshness and stale-while-revalidate](#freshness-and-stale-while-revalidate)
 - [Background revalidation lifecycle](#background-revalidation-lifecycle)
 - [Entry immutability](#entry-immutability)
@@ -69,53 +72,275 @@ cache = true
 ## Cache key and Vary
 
 The cache key is derived from the request method, the lowercased host, and the
-request URI. When an upstream response carries a `Vary` header, each combination
-of the varied request-header values is stored as a **distinct variant** under its
-own key, so (for example) `Vary: Accept` keeps the JSON and XML representations of
-one URL cached at the same time instead of overwriting each other. A tiny pointer
-entry under the base key records which header fields the URL varies on so a
-lookup can compute the right variant key. A request whose varied values match no
-stored variant is a miss; `Vary: *` responses are never reused.
+request URI — and from nothing else. No credential, cookie or other request
+header is ever part of a key; reuse restrictions are enforced by the stored
+entry's recorded policy instead, because a credential-derived key would silently
+turn a leak into an unbounded cache.
 
-Responses report their disposition in the `X-Cache` header:
+When an upstream response carries a `Vary` header, each combination of the varied
+request-header values is stored as a **distinct variant** under its own key, so
+(for example) `Vary: Accept` keeps the JSON and XML representations of one URL
+cached at the same time instead of overwriting each other. A pointer entry under
+the base key records both the varied field names and the **membership list** of
+every variant key the resource owns.
+
+Membership is authoritative on lookup: a variant key the base entry does not
+claim is a miss, even if the store still holds something under it. That is what
+lets unsafe-method invalidation remove *every* variant, and what stops a deleted
+variant from becoming reachable again through a rebuilt pointer entry. A pointer
+entry written by a Jul older than the membership record claims nothing, so it
+fails closed — one extra miss per `Vary` URL after an upgrade, never a stale or
+unaccounted hit.
+
+A request whose varied values match no stored variant is a miss; `Vary: *`
+responses are never reused. Membership is capped at 64 variants per base
+resource; past the cap the oldest variant is deleted with its membership entry,
+so a pathological `Vary` cannot grow one record without bound.
+
+## Cache result values
+
+Every response reports its disposition in the `X-Cache` header. The set is closed:
+the same values are the `state` label of `jul_cache_events_total`, so nothing
+request-derived may ever appear here.
 
 | `X-Cache` | Meaning |
 | --- | --- |
-| `MISS` | Not in cache (or `Vary` mismatch); fetched from upstream and stored |
-| `HIT` | Served fresh from cache |
-| `STALE` | Served stale under `stale-while-revalidate` while refreshing |
+| `MISS` | The body came from the origin. Stored if the shared-cache rules allow it |
+| `HIT` | Served from a fresh stored entry without contacting the origin |
+| `STALE` | Served from a stored entry past its freshness lifetime, under `stale-while-revalidate` or `stale-if-error` |
+| `REVALIDATED` | The origin confirmed the stored entry with a `304` during this request, and the confirmed copy was served |
+| `BYPASS` | The cache was not consulted at all (protocol upgrade, `Range`/`If-Range`, or request `no-store`) |
 
-## Historical behaviour matrix — under recertification
+> The `jul_cache_events_total` **help string** still reads
+> `(HIT/MISS/STALE/BYPASS)`. That text is frozen by the v1.32.0 released metric
+> contract and cannot change without a compatibility decision; `REVALIDATED` is a
+> new *label value*, which the contract does not freeze. Re-wording is owned by
+> #126/#134.
 
-The table records the intended and previously documented behavior. Rows covering
-`no-cache`, `must-revalidate`/`proxy-revalidate`, authenticated reuse,
-unsafe-method invalidation, `304` metadata and Range requests are being
-revalidated and corrected by #107 and #132–#134. Do not treat an unchecked
-interaction as a current conformance guarantee.
+## Shared-cache contract
 
-Background-revalidation ownership and shared-entry immutability (#131), and
-upgrade/streaming/`ResponseWriter` transparency (#133), are no longer under
-revalidation: they are corrected and evidenced, and described in
-[Background revalidation lifecycle](#background-revalidation-lifecycle),
-[Entry immutability](#entry-immutability) and
-[Upgrades, streaming and ResponseWriter transparency](#upgrades-streaming-and-responsewriter-transparency).
+This section describes tested behavior. Every rule below is pinned by a named
+test in `internal/cache` (unit and policy matrices) or `internal/handler`
+(real origin, real proxy hop, real client).
+
+### Request directives
+
+| Request `Cache-Control` | Behavior |
+| --- | --- |
+| `no-store` | Bypasses lookup **and** storage. `X-Cache: BYPASS`. It is not a purge: an entry another client stored is left exactly as it was |
+| `no-cache` | The stored entry may be reused only after a **successful synchronous validation**, however fresh it is. `stale-while-revalidate` is never a substitute |
+| `max-age=0` | Handled identically to `no-cache`: no stored response can be zero seconds old |
+| `Pragma: no-cache` | Honored as `no-cache`, but **only** when the request carries no `Cache-Control` at all (RFC 9111 §5.4) |
+| `min-fresh`, `max-stale`, `only-if-cached` | **Not supported.** Parsed and then ignored entirely. Honoring part of a directive is worse than not honoring it, because the client cannot tell the difference |
+| Any other extension | Ignored |
+
+### Response directives
+
+| Response `Cache-Control` | Stored? | Reuse |
+| --- | :---: | --- |
+| `no-store` | no | — |
+| `private` | no | Jul is a shared cache; a private response belongs to one user agent |
+| `public` | yes | Normal, and explicitly shareable with authenticated requests |
+| `s-maxage=N` | yes | Freshness lifetime `N`; outranks `max-age` and `Expires` |
+| `max-age=N` | yes | Freshness lifetime `N`; outranks `Expires` |
+| `no-cache` | **yes** | Stored, but **every** reuse requires successful synchronous validation. Storing it is the point: a `304` still saves the body |
+| `no-cache="Header"` | yes | Treated as unqualified `no-cache`. Selective header replacement is a separate design; validating the whole representation is its conservative superset |
+| `must-revalidate` | yes | Never served stale. Outranks `[cache] stale_while_revalidate` and `[cache] stale_if_error` |
+| `proxy-revalidate` | yes | Identical to `must-revalidate` for Jul, which is a shared cache |
+| `stale-while-revalidate=N` | yes | Replaces the global stale window for this entry |
+| `stale-if-error=N` | yes | Replaces the global `stale_if_error` for this entry, in both directions: an explicit `0` disables it |
+| `Expires` | yes | Fallback when no `s-maxage`/`max-age`. Measured against the response's own `Date` when present, so clock skew is not folded into the lifetime. An unparseable value means "already expired" |
+| `Set-Cookie` present | no | Conservative shared-cache rule: replaying per-client state to another client is a session-fixation vector |
+
+### Malformed and duplicate directives
+
+- A recognized delta-seconds directive with a **malformed, empty or negative**
+  argument resolves to **zero**, not to "directive absent". The origin wrote it,
+  so it must not be ignored — but its lifetime cannot be trusted, and zero is the
+  shortest one. In practice `max-age=oops` makes the response uncacheable.
+- An **out-of-range** argument is clamped upward to ~100 years, as RFC 9111
+  §1.2.2 requires, which also keeps the arithmetic inside `time.Duration`.
+- A **duplicate** directive resolves to the **smallest** value. RFC 9111 leaves
+  this undefined; the shortest lifetime is the safe reading.
+- Multiple `Cache-Control` field lines are merged into one directive set, as
+  RFC 9110 §5.3 requires.
+- Directive tokens are case-insensitive, values may be quoted, and a quoted value
+  may contain commas (`no-cache="Set-Cookie, X-Token"` is one directive).
+
+### Age and freshness
+
+Freshness is measured from when the **origin** generated the representation, not
+from when Jul received it: `Date` and `Age` are folded into RFC 9111 §4.2.3
+corrected initial age. A response that already spent two minutes in an upstream
+cache is therefore served for its remaining lifetime, not for a fresh full one.
+A `Date` in the future or a negative `Age` never makes an entry look younger than
+the moment it arrived.
+
+### Mandatory synchronous validation
+
+When the request said `no-cache`/`max-age=0`, the stored response said
+`no-cache`, `must-revalidate` forbids serving the entry stale, or the entry has
+aged out of its stale window, Jul validates **before** writing anything to the
+client.
+
+- The conditional request prefers the **entity tag** (`If-None-Match`) whenever
+  the origin supplied one, and falls back to `Last-Modified`
+  (`If-Modified-Since`) — RFC 9110 §13.1.2 validator precedence. Never both.
+- The client's own conditional headers are **replaced**, not merged: the cache is
+  asking whether *its* stored copy is current.
+- With **no validator at all**, Jul fetches a complete new response rather than
+  serving the stored one.
+- Concurrent validators for the same (effective key, handler generation) join
+  **one** origin request through the same call state background
+  `stale-while-revalidate` uses. There is no second deduplication mechanism.
+- The leader runs on the generation's background lease, so it is bounded by
+  `[global] shutdown_timeout` and is **not** cancelled by its own client. A
+  waiter that gives up cancels only its own wait; the leader keeps serving the
+  waiters that remain.
+- Every leader and waiter terminates on every outcome — `304`, a new
+  representation, an uncacheable response, an origin error, a timeout, a
+  cancellation, and a panic in the downstream handler. No call state is left
+  behind, and a panic value never reaches a waiter, a log or a metric.
+
+| Validation outcome | Result |
+| --- | --- |
+| Origin answers `304` | Metadata merged, entry replaced, stored body served as `REVALIDATED` |
+| Origin answers a new cacheable response | Stored and served as `MISS` |
+| Origin answers something unstorable | The superseded entry is **deleted**; the origin's response is served as `MISS` |
+| Origin answers `5xx` | Stale reuse only if the policy below permits it, otherwise the origin's error is forwarded |
+| Origin's answer cannot be buffered (over `memory_max_size`, or a stream) | Re-fetched and streamed; one extra origin request on this path only, so a response is never truncated |
+| No generation lease available | A complete origin fetch. Never an unvalidated stored body |
+
+### Stale reuse after a failed validation
+
+Precedence is the origin's, then Jul's:
+
+1. `must-revalidate` / `proxy-revalidate` forbid stale reuse outright. Neither
+   `[cache] stale_if_error` nor an explicit `stale-if-error` overrides it.
+2. An explicit response `stale-if-error=N` replaces the global setting for that
+   entry — longer, shorter, or an explicit `0` that disables it.
+3. `[cache] stale_if_error` is a default for responses that said nothing. It is
+   **not** permission to serve a `no-cache` response unvalidated, so a `no-cache`
+   entry gets a grace window only when the origin explicitly asked for one.
+
+There is no offline or disconnected-mode exception.
+
+### `304 Not Modified` merge
+
+A `304` produces a **new immutable entry** that atomically replaces the stored
+one; the published entry is never written through.
+
+- The stored **body and status are preserved** — that is the point of a `304`.
+- Every end-to-end field the `304` supplies **replaces** its stored counterpart;
+  a field the `304` does not mention is kept.
+- `Warning` is removed (RFC 9111 §5.5 obsoleted it, and a stale warn-code must
+  not survive a refresh).
+- Hop-by-hop fields, everything named in the `304`'s `Connection`, and
+  `Content-Length` are never merged.
+- Freshness, validators, and the whole policy set (`no-cache`,
+  `must-revalidate`, authenticated-reuse permission, `stale-if-error`) are
+  **recomputed** from the merged headers, so an origin can tighten its policy
+  through a `304` and have it apply immediately.
+- The `304`'s `Date`/`Age` restart the age clock. A `304` carrying neither is
+  treated as generated now.
+
+The refreshed representation is **discarded** rather than published when the
+`304` makes it unstorable (`private`, `no-store`, a new `Set-Cookie`, an expired
+`Expires`) or **changes `Vary`**. A changed `Vary` changes which key the
+representation belongs under, and publishing it at the old key would leave an
+entry reachable through a keying rule that no longer describes it. The request
+falls back to a complete fetch, which stores it under the correct key.
+
+### Requests carrying `Authorization`
+
+Jul is a shared cache, so it applies RFC 9111 §3.5 with a deliberately stricter
+storage rule:
+
+| Stored response says | May satisfy an authenticated request? | May a response **generated for** an authenticated request be stored? |
+| --- | :---: | :---: |
+| nothing | no | no |
+| `public` | yes | yes |
+| `s-maxage=N` | yes | yes |
+| `must-revalidate` | yes | **no** |
+| `private` / `no-store` | no | no |
+| `no-cache` | only after successful validation | no |
+
+`must-revalidate` is listed by §3.5 as a *reuse* permission, and Jul honors it as
+one. It is **not** a publication permission: "do not serve me stale" says nothing
+about whether the body is user-specific, so it does not authorize putting an
+authenticated response into a cache an anonymous client also reads. When an
+origin's directives are incomplete, Jul does not share.
+
+Consequences that are tested rather than assumed:
+
+- an unauthenticated stored response is **not** automatically reusable by an
+  authenticated request;
+- two requests carrying the **same** credential string do not thereby share a
+  response — the permission comes from the stored response, never from the
+  credential;
+- `Vary: Authorization` is not a substitute for the permission;
+- credentials never enter a cache key, a stored header, a log, a metric label, a
+  tracing attribute or disk metadata.
+
+### Unsafe-method invalidation
+
+After a **successful** unsafe request, Jul invalidates the representations it
+made obsolete (RFC 9111 §4.4).
+
+- **Unsafe methods**: everything except `GET`, `HEAD`, `OPTIONS`, `TRACE` and
+  `CONNECT`. An unknown extension method counts as unsafe — the cost of an
+  unnecessary invalidation is a miss.
+- **Success** means a non-error status, that is **2xx or 3xx**. A `4xx`, a `5xx`,
+  or an exchange that produced no status at all (canceled, timed out, hijacked)
+  proves nothing changed and invalidates nothing.
+- **Targets**: the effective request URI, plus same-origin `Location` and
+  `Content-Location`. For each target, both the `GET` and the `HEAD` key are
+  removed, together with **every `Vary` variant** they own.
+- **Cross-origin targets are never invalidated.** A `Location` naming another
+  host is skipped, as is a value that does not parse, is opaque (`mailto:`), uses
+  a non-HTTP scheme, or spells the authority differently.
+
+A user-controlled header cannot reach the filesystem through this path: an
+invalidation target is only ever used to build a cache key, and a disk file is
+named by the SHA-256 of that key, so it can neither traverse a directory nor name
+a file the cache did not write. Foreign files in `disk_path` are never touched.
+
+### `Range` and `If-Range` (decision D05)
+
+A request carrying `Range` **or** `If-Range` bypasses the cache entirely, before
+lookup and before any storage decision:
+
+- no cached complete representation is substituted for the origin's answer;
+- the request is forwarded unchanged, and the origin's `206`, `200` or `416`,
+  its `Content-Range`, its validators and its exact bytes reach the client
+  untouched;
+- the result is `X-Cache: BYPASS`;
+- **nothing** is stored — not a `206`, not a partial body under a full-object
+  key, and not a `200` the origin happened to return;
+- an existing complete representation is neither replaced nor evicted.
+
+Only the cache is bypassed. Authentication, authorization, client-certificate
+handling, rate limiting, plugins, the WAF, tracing, metrics and the access log
+all wrap outside this handler and still run.
+
+Serving RFC-compliant byte ranges from complete cached representations is a
+documented future enhancement, not a gap that will be filled implicitly. See
+[Known limitations](#known-limitations).
+
+## Historical behaviour matrix
 
 | Scenario | Rule | Detail |
 | --- | --- | --- |
-| Cache key composition | `METHOD\nhost.lower\nREQUEST_URI` | Host is lowercased; query string is part of the key |
-| `Vary` handling | Distinct variant per header-value combo | Base key holds a stub listing varied fields; each variant gets its own storage key |
+| Cache key composition | `METHOD\nhost.lower\nREQUEST_URI` | Host is lowercased; query string is part of the key; no request header is ever included |
+| `Vary` handling | Distinct variant per header-value combo | Base key holds a pointer entry listing varied fields and owned variant keys |
 | `Vary: *` | Never cached | Treated as non-reusable; not stored |
 | Cacheable status codes | 200, 203, 301, 404, 410 | Configurable via `cacheableStatus` map in code |
 | Non-cacheable status codes | 500, 502, 503, 504, all others | Silently not stored |
 | TTL precedence | `s-maxage` → `max-age` → `Expires` → `default_ttl` | First explicit directive wins; `default_ttl` is the fallback |
-| `Cache-Control: no-store` | Bypass | Request and response both opt out |
-| `Cache-Control: private` | Not stored | Unless combined with `public` on an authorized request |
-| `Set-Cookie` present | Not stored | Prevents session leakage |
-| Authorized requests (`Authorization` header) | Not stored unless `public` | Protects authenticated responses |
-| `stale_while_revalidate` grace | Serve stale immediately, refresh in background | Singleflight per variant prevents thundering herd |
-| `stale_if_error` extension | Extend stale window on 5xx/timeout | Measured from point of revalidation failure |
 | Conditional requests (`If-None-Match` / `If-Modified-Since`) | 304 if cached ETag/Last-Modified matches | Saves bandwidth on unchanged resources |
-| POST / PUT / DELETE / PATCH | Bypass | Only GET and HEAD are cached |
+| Unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`/extension) | Forwarded; invalidate on 2xx/3xx | See [Unsafe-method invalidation](#unsafe-method-invalidation) |
+| `OPTIONS` / `TRACE` / `CONNECT` | Forwarded, never invalidate | Safe or tunnelling; no target representation |
+| `Range` / `If-Range` request | Bypass | See [`Range` and `If-Range`](#range-and-if-range-decision-d05) |
 | Protocol upgrade request (`Connection: Upgrade` + `Upgrade`) | Bypass | Handler receives the untouched writer; `X-Cache: BYPASS`; never stored |
 | `101 Switching Protocols` and other `1xx` | Not stored | Not a representation; capture is dropped |
 | `Content-Type: text/event-stream` | Not stored | Capture stops at the first byte so an open stream accumulates nothing |
@@ -130,11 +355,13 @@ The active cache programme requires:
 - ~~generation-owned, cancellable background revalidation~~ — **delivered by #131**;
 - ~~immutable published entries and race-free metadata replacement~~ — **delivered by #131**;
 - ~~transparent WebSocket/`101`, SSE and optional `http.ResponseWriter` interface behavior~~ — **delivered by #133**;
-- synchronous validation for request/response `no-cache`;
-- correct `must-revalidate`, `proxy-revalidate`, authenticated reuse, unsafe-method invalidation and `304` metadata handling;
-- initial bypass for requests carrying `Range` or `If-Range` (cached byte-range serving remains a future enhancement).
+- ~~synchronous validation for request/response `no-cache`~~ — **delivered by #132**;
+- ~~`must-revalidate`, `proxy-revalidate`, authenticated reuse, unsafe-method invalidation and `304` metadata handling~~ — **delivered by #132**;
+- ~~bypass for requests carrying `Range` or `If-Range`~~ — **delivered by #132**.
 
-Until the remaining items close, treat authenticated or user-specific responses conservatively (`private`/`no-store`).
+The remaining programme item is #134: the integrated source re-audit, executable
+matrix, race/leak/soak evidence, benchmark refresh and maturity decision. **This
+document describes tested behavior; it does not assert recertification.**
 
 ## Freshness and stale-while-revalidate
 
@@ -359,6 +586,14 @@ There is no index file or sidecar; on startup the directory is scanned and each
 cache file is re-hydrated into the index, ordered by modification time and bounded
 by `disk_max_size`.
 
+The encoding is gob, which decodes a field absent from an older file as its zero
+value. Every field #132 added was chosen so that **its zero value is the
+conservative answer**: an entry written by an older Jul permits no authenticated
+reuse, and a `Vary` pointer entry with no membership record claims no variants.
+An older Jul reading a newer file ignores the fields it does not know, which
+returns it to its own (looser) behaviour but never corrupts the file. No
+migration is required in either direction.
+
 ## Disk-tier safety
 
 The disk tier is written defensively so that an operator can point `disk_path` at
@@ -399,39 +634,80 @@ An entry larger than a tier's cap is simply not stored in that tier.
 
 ## Known limitations
 
+Product limitations — deliberate scope, not defects:
+
 1. **No tag or pattern purge.** The admin API can purge a single exact key or
    the entire cache. There is no way to purge by URL prefix, host, or tag (e.g.
    invalidate all `/api/v1/users/*`). Operators needing selective invalidation
    must do so at the application layer or use short TTLs.
 
-2. **Orphaned variants are not auto-cleaned.** If an upstream changes its `Vary`
-   header (e.g. from `Vary: Accept` to `Vary: Accept-Encoding`), the old variant
-   entries remain in cache until they expire or are evicted by LRU.
+2. **No cached byte-range serving.** Every request carrying `Range` or
+   `If-Range` bypasses the cache and reaches the origin (decision D05). Range
+   workloads therefore get no cache benefit. Serving RFC-compliant single byte
+   ranges from complete cached representations — with `If-Range`,
+   `Content-Range` and `416`, and without multipart ranges or partial-object
+   storage — is a recorded future enhancement candidate, promoted only when
+   representative media/download workloads show material origin or latency cost.
 
-3. **Silent oversized-entry drop.** A response body larger than `memory_max_size`
-   (or `disk_max_size`) is streamed to the client but not cached. There is no
-   log or metric emitted for this; operators must size tiers generously.
-
-4. **No cross-location cache sharing.** Each Jul.IA process has its own isolated
+3. **No cross-location cache sharing.** Each Jul.IA process has its own isolated
    cache instance. There is no shared cache (e.g. Redis) for multi-instance
    deployments; each node warms independently.
 
-5. **A reload does not invalidate cached entries.** The cache is process-scoped
-   and survives configuration reloads by design, so a routing or backend change
-   does not retroactively drop entries stored under the previous configuration.
-   A refresh that was already in flight when the reload ran also completes
-   against the *old* generation's route and publishes its result. Use the admin
-   purge endpoint or a restart when a configuration change must invalidate
-   cached content. Characterized by
-   `TestReloadWaitsForCacheRevalidationHoldingGeneration`
-   (`internal/server`) and the generation-isolation tests in `internal/cache`.
+4. **Silent oversized-entry drop.** A response body larger than `memory_max_size`
+   (or `disk_max_size`) is streamed to the client but not cached. There is no
+   log or metric emitted for this; operators must size tiers generously.
 
-6. **A background refresh delays retirement of its generation.** While a refresh
-   is running, the handler generation that started it keeps its gRPC
-   connections, plugin runtimes and static roots open. This is bounded: the
-   refresh is cancelled and the resources closed after `[global]
-   shutdown_timeout`. A very slow origin can therefore hold one superseded
-   generation's resources for up to that long after a reload.
+Intentionally conservative behavior — correct, but stricter than the letter of
+the standard:
+
+5. **`Set-Cookie` responses are never stored**, whatever their directives say.
+   An origin cannot currently opt a cookie-bearing response into shared caching.
+
+6. **A response generated for a request carrying `Authorization` is stored only
+   with `public` or `s-maxage`.** RFC 9111 §3.5 also lists `must-revalidate` as
+   a *reuse* permission, and Jul honors it as one — but not as permission to
+   publish an authenticated response into a cache anonymous clients read.
+
+7. **A `304` that changes `Vary` discards the representation** rather than
+   rekeying it, and the request re-fetches. Rekeying is possible in principle;
+   discarding is the outcome that cannot leave a wrongly-keyed entry reachable.
+
+8. **A `Vary` pointer entry written before the membership record fails closed.**
+   After upgrading, the first request for each previously cached `Vary` URL is a
+   miss. No data is lost and nothing stale is served.
+
+9. **Variant membership is capped at 64 per base resource.** Past the cap the
+   oldest variant is deleted. A resource with more than 64 live variants will
+   churn.
+
+10. **Mandatory validation buffers the origin's answer** rather than streaming
+    it, because the cache must see the status before deciding whether to serve
+    the stored body. An answer that exceeds `memory_max_size` or turns out to be
+    a stream costs one extra origin request, and is then streamed normally.
+
+Lifecycle behavior:
+
+11. **A reload does not invalidate cached entries.** The cache is process-scoped
+    and survives configuration reloads by design, so a routing or backend change
+    does not retroactively drop entries stored under the previous configuration.
+    A refresh that was already in flight when the reload ran also completes
+    against the *old* generation's route and publishes its result. Use the admin
+    purge endpoint or a restart when a configuration change must invalidate
+    cached content. Characterized by
+    `TestReloadWaitsForCacheRevalidationHoldingGeneration` and
+    `TestReloadDuringMandatorySynchronousValidation` (`internal/server`) and the
+    generation-isolation tests in `internal/cache`.
+
+12. **A background refresh or a synchronous validation delays retirement of its
+    generation.** While either is running, the handler generation that started it
+    keeps its gRPC connections, plugin runtimes and static roots open. This is
+    bounded: the work is cancelled and the resources closed after
+    `[global] shutdown_timeout`. A very slow origin can therefore hold one
+    superseded generation's resources for up to that long after a reload.
+
+13. **Without the server's generation-lease seam there is no background
+    refresh**, and mandatory validation degrades to a complete origin fetch. It
+    never degrades to serving an unvalidated entry.
 
 ## Benchmarks
 
@@ -466,10 +742,13 @@ integrity, and availability:
 2. **Cross-user leakage through `Vary` misconfiguration.** An upstream that sets
    `Vary: Cookie` without `Cache-Control: private` may cause one user's
    authenticated page to be served to another user with the same `Cookie` header.
-   The cache does not treat cookies as a cache-bypass signal (only `private` or
-   `no-store` do). Counter-measures: upstreams must set `private` for
-   user-specific responses; operators should audit `Vary` headers before enabling
-   cache on authenticated routes.
+   The cache does not treat cookies as a cache-bypass signal (only `private`,
+   `no-store` or a `Set-Cookie` in the response do). Requests carrying
+   `Authorization` are separately protected by the shared-reuse rule above, but
+   **cookie-based sessions are not**, because a `Cookie` header is not a
+   shared-cache authentication signal in RFC 9111. Counter-measures: upstreams
+   must set `private` for user-specific responses; operators should audit `Vary`
+   headers before enabling cache on cookie-authenticated routes.
 
 3. **Vary-header evasion (Web Cache Deception).** An attacker requests
    `/profile.jpg` with a `Accept: image/webp` header when the real page is
@@ -481,6 +760,8 @@ integrity, and availability:
 4. **Stale-if-error window extension as a DoS vector.** If `stale_if_error` is
    configured very long (e.g. 24 hours) and an attacker keeps the backend down,
    clients may receive stale responses well beyond the intended freshness window.
+   An origin can defend itself with `must-revalidate`, `proxy-revalidate` or an
+   explicit `stale-if-error=0`, all of which outrank the global setting.
    Counter-measures: keep `stale_if_error` short (minutes, not hours); monitor
    upstream health and alert on prolonged 5xx rates.
 
@@ -500,17 +781,17 @@ integrity, and availability:
 
 ## GA status — recertification open
 
-The feature retains its historical release record, but the current correctness findings reopen its conformance evidence. #134 must publish the corrected executable matrix, race/protocol evidence, benchmarks, soak result and final maturity/status decision before the cache is described as recertified.
+The feature retains its historical release record. The shared-cache conformance findings that reopened its evidence are now corrected and tested (#131, #132, #133), but #134 must still publish the integrated executable matrix, race/protocol evidence, benchmarks, soak result and final maturity/status decision before the cache is described as recertified.
 
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| 1 — Conformance / behaviour matrix | ⚠️ recertification open | #107 and #132–#134 own the corrected executable matrix; the revalidation-lifecycle and entry-immutability rows are settled by #131, and the upgrade/streaming/`ResponseWriter` rows by #133 |
-| 2 — Published benchmark numbers | ✅ | `BenchmarkCacheHit` / `Miss` / `VaryHit` / `MemOverflow` in `internal/cache/bench_test.go` |
-| 3 — Known-limitations list | ✅ | 6-item limitation list above |
+| 1 — Conformance / behaviour matrix | ⚠️ recertification open | The [shared-cache contract](#shared-cache-contract) above describes tested behaviour; #134 owns the integrated executable matrix and the maturity decision |
+| 2 — Published benchmark numbers | ⚠️ refresh pending | `BenchmarkCacheHit` / `Miss` / `VaryHit` / `MemOverflow` in `internal/cache/bench_test.go`; the recorded numbers predate #132 and are rerun by #134 |
+| 3 — Known-limitations list | ✅ | 13-item limitation list above, separated into product, conservative and lifecycle |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
-| 5 — Long-running soak test | ✅ | soaked 1h windows 2026-07-04 (1.5M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers) |
+| 5 — Long-running soak test | ⚠️ refresh pending | soaked 1h windows 2026-07-04 (1.5M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers); predates #132 and is rerun by #134 |
 | 6 — Runnable example + docs | ✅ | `testdata/cache.toml` + this doc |
-| 7 — Security / threat note | ✅ | 6-row threat note above |
-| 8 — Fuzzing where parsing is involved | n/a | No custom parser (uses stdlib `http` + `gob`) |
+| 7 — Security / threat note | ✅ | 6-row threat note above, plus the identity-isolation tests in `internal/cache/authorization_test.go` and `internal/handler/cache_conformance_test.go` |
+| 8 — Fuzzing where parsing is involved | ✅ | `TestParseCacheControlIsTotal` exercises the directive parser against adversarial input alongside the explicit behavioural matrix |
 | 9 — Self-explanatory Console surface | ✅ | Status row in runtime overview (tier config + opt-in location count) |

@@ -95,9 +95,9 @@ func TestRequestNoStore(t *testing.T) {
 		if tc.header != "" {
 			req.Header.Set("Cache-Control", tc.header)
 		}
-		got := requestNoStore(req)
+		got := parseRequestPolicy(req).NoStore
 		if got != tc.want {
-			t.Errorf("requestNoStore(%q) = %v, want %v", tc.header, got, tc.want)
+			t.Errorf("NoStore(%q) = %v, want %v", tc.header, got, tc.want)
 		}
 	}
 }
@@ -134,15 +134,6 @@ func TestNotModified(t *testing.T) {
 	}
 }
 
-func TestCCHasDirective(t *testing.T) {
-	if ccHasDirective("public, max-age=60", "max-age") != true {
-		t.Error("expected max-age directive found")
-	}
-	if ccHasDirective("public", "no-store") != false {
-		t.Error("expected no-store not found")
-	}
-}
-
 func TestParseList(t *testing.T) {
 	got := parseList("a, b, c")
 	want := []string{"a", "b", "c"}
@@ -150,18 +141,6 @@ func TestParseList(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("parseList[%d] = %q, want %q", i, got[i], want[i])
 		}
-	}
-}
-
-func TestSecs(t *testing.T) {
-	if secs("60") != 60*time.Second {
-		t.Errorf("secs(60) = %v", secs("60"))
-	}
-	if secs("-1") != 0 {
-		t.Errorf("secs(-1) = %v", secs("-1"))
-	}
-	if secs("nope") != 0 {
-		t.Errorf("secs(nope) = %v", secs("nope"))
 	}
 }
 

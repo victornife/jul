@@ -66,7 +66,7 @@ prerelease and does not change stable-release or long-running-soak status.
 
 ### Active regression and recertification notices
 
-- **Response cache:** the historical GA row remains the released record, but #107 and #132–#134 reopen current conformance evidence. Generation-owned, cancellable background revalidation and immutable published entries are corrected and evidenced by #131; protocol-upgrade bypass, streaming policy and `ResponseWriter` transparency by #133. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.
+- **Response cache:** the historical GA row remains the released record, but #107 and #134 still hold current conformance evidence open. Generation-owned, cancellable background revalidation and immutable published entries are corrected and evidenced by #131; protocol-upgrade bypass, streaming policy and `ResponseWriter` transparency by #133; shared-cache directives, mandatory synchronous validation, authenticated reuse, unsafe-method invalidation, `304` metadata merging and Range/If-Range bypass by #132. Do not treat the row as recertification until #134 publishes the integrated matrix, benchmark/soak refresh and exact-SHA evidence.
 - **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are verified in `v1.32.1-rc.1`; stable publication remains pending. Closed-world lifecycle generation (#89) remains open, and access-log changes are restart-required until #98.
 - **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen; additive families and the bounded, path-only WAF warning contract are verified in `v1.32.1-rc.1` and remain stable-release pending.
 - **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are verified in `v1.32.1-rc.1`; stable publication remains a later decision.
@@ -110,7 +110,7 @@ release-blocking regression, not a reason to retract the label.
 | Web application firewall (WAF) | Y2-06 | `waf` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
 | Rate + connection limiting | Y1-03 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [ratelimit.md](ratelimit.md) |
 | OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
-| Response cache (memory + disk) | core-cache | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [cache.md](cache.md) |
+| Response cache (memory + disk) | core-cache | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [cache.md](cache.md) |
 | Core HTTP (static/proxy/FastCGI/vhosts/routing) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
 | Configuration reload transaction | reload-tx | core | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
 | Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |

@@ -8,9 +8,7 @@ import (
 	"bytes"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 )
 
 // cacheWriter streams the response to the client while buffering up to limit
@@ -140,14 +138,19 @@ func isUpgradeRequest(r *http.Request) bool {
 	return false
 }
 
-// recorder is an in-memory http.ResponseWriter used for background
-// revalidation.
+// recorder is an in-memory http.ResponseWriter used for background and
+// synchronous revalidation. It applies the same never-store rules as the
+// streaming capture writer, so a revalidation cannot store — or buffer — a
+// response the foreground path would have refused.
 type recorder struct {
 	header http.Header
 	status int
 	body   bytes.Buffer
 	limit  int64
 	tooBig bool
+	// noStore marks a response that can never be stored whatever its headers
+	// say: an interim/protocol-switch status, or a live event stream.
+	noStore bool
 }
 
 func (r *recorder) Header() http.Header {
@@ -158,18 +161,27 @@ func (r *recorder) Header() http.Header {
 }
 
 func (r *recorder) WriteHeader(code int) {
-	if r.status == 0 {
-		r.status = code
+	if r.status != 0 {
+		return
+	}
+	r.status = code
+	// A 1xx is an interim or protocol-switch response, not a representation, and
+	// an event stream never ends — buffering one would grow to the size limit
+	// before being discarded.
+	if code < http.StatusOK || isEventStream(r.Header()) {
+		r.noStore = true
+		r.body.Reset()
 	}
 }
 
 func (r *recorder) Write(p []byte) (int, error) {
 	if r.status == 0 {
-		r.status = http.StatusOK
+		r.WriteHeader(http.StatusOK)
 	}
-	if !r.tooBig {
+	if !r.tooBig && !r.noStore {
 		if int64(r.body.Len()+len(p)) > r.limit {
 			r.tooBig = true
+			r.body.Reset()
 		} else {
 			r.body.Write(p)
 		}
@@ -177,11 +189,47 @@ func (r *recorder) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// requestNoStore reports whether the request opts out of caching.
-func requestNoStore(r *http.Request) bool {
-	cc := parseCacheControl(r.Header.Get("Cache-Control"))
-	_, ok := cc["no-store"]
-	return ok
+// storable reports whether the captured response may be considered for storage,
+// and equivalently whether r.body holds the complete response bytes.
+func (r *recorder) storable() bool { return !r.noStore && !r.tooBig }
+
+// statusWriter observes the status of a response the cache forwards but never
+// stores, so an unsafe method can decide whether it invalidates.
+//
+// It is composed through respwriter.Wrap like every other wrapper in the chain,
+// so it neither removes nor invents an optional interface. It deliberately does
+// not implement http.Hijacker: a hijacked exchange leaves HTTP, its status stays
+// zero, and nothing is invalidated.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	if w.status == 0 {
+		w.status = code
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	// lgtm[go/reflected-xss] – This observes the status of a response the cache
+	// only forwards. The bytes are the upstream application's, passed through
+	// unchanged; that application is responsible for sanitizing its own output.
+	return w.ResponseWriter.Write(p)
+}
+
+// isRangeRequest reports whether the request asks for part of a representation.
+//
+// If-Range counts even without Range: it only has meaning together with one, and
+// a request carrying it is unambiguously about ranges. Both are checked before
+// lookup so decision D05 (bypass, never substitute a stored full response, never
+// store a 206) is taken before any cache state is consulted.
+func isRangeRequest(r *http.Request) bool {
+	return r.Header.Get("Range") != "" || r.Header.Get("If-Range") != ""
 }
 
 // notModified reports whether a conditional request can be answered with 304
@@ -205,29 +253,6 @@ func notModified(r *http.Request, e *Entry) bool {
 	return false
 }
 
-// parseCacheControl parses a Cache-Control header into a directive map.
-func parseCacheControl(v string) map[string]string {
-	out := map[string]string{}
-	for _, part := range strings.Split(v, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if i := strings.IndexByte(part, '='); i >= 0 {
-			out[strings.ToLower(part[:i])] = strings.Trim(part[i+1:], `"`)
-		} else {
-			out[strings.ToLower(part)] = ""
-		}
-	}
-	return out
-}
-
-// ccHasDirective reports whether a Cache-Control header includes a directive.
-func ccHasDirective(v, name string) bool {
-	_, ok := parseCacheControl(v)[name]
-	return ok
-}
-
 // parseList splits a comma-separated header value, trimming whitespace.
 func parseList(v string) []string {
 	var out []string
@@ -237,15 +262,6 @@ func parseList(v string) []string {
 		}
 	}
 	return out
-}
-
-// secs converts an integer-seconds directive value to a Duration.
-func secs(v string) time.Duration {
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
-		return 0
-	}
-	return time.Duration(n) * time.Second
 }
 
 func cloneHeader(h http.Header) http.Header {

@@ -167,15 +167,18 @@ features:
     tags: ["core"]
     maturity: GA
     doc: cache.md
-    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}
     notes: >
       Historical released GA record. Generation-owned cancellable revalidation
       and immutable published entries are corrected and evidenced by #131;
-      upgrade bypass, streaming policy and ResponseWriter transparency by #133.
-      Current shared-cache, invalidation and 304 evidence remains under explicit
-      recertification in #107 and #132-#134; see docs/cache.md and
-      docs/status.md.
-      The final maturity/status decision belongs to #134.
+      upgrade bypass, streaming policy and ResponseWriter transparency by #133;
+      shared-cache directives, mandatory synchronous validation, authenticated
+      reuse, unsafe-method invalidation, Vary variant membership, 304 metadata
+      merging and Range/If-Range bypass by #132. Criterion 8 is now satisfied by
+      the Cache-Control directive parser's adversarial-input coverage.
+      The integrated recertification — executable matrix, race/leak/soak
+      evidence, benchmark refresh — and the final maturity/status decision
+      remain open in #107 and #134; see docs/cache.md and docs/status.md.
 
   - id: core-http
     name: "Core HTTP (static / proxy / FastCGI / vhosts / routing)"

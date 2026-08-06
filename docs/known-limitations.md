@@ -9,7 +9,7 @@ references.
 
 ## Current defects and recertification work
 
-- **Response cache:** generation ownership and immutable published entries are corrected and evidenced by #131; protocol-upgrade bypass, streaming policy and `ResponseWriter` transparency by #133. Shared-cache semantics, invalidation, `304` metadata and Range bypass remain open under #107 and #132–#134.
+- **Response cache:** generation ownership and immutable published entries are corrected and evidenced by #131; protocol-upgrade bypass, streaming policy and `ResponseWriter` transparency by #133; shared-cache directives, authenticated reuse, unsafe-method invalidation, `304` metadata merging and Range bypass by #132. The integrated recertification and maturity decision remain open under #107 and #134.
 - **Access-log lifecycle:** request records can be disabled explicitly, but enablement and sink changes remain restart-required until #98 introduces generation-safe sink replacement.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
@@ -66,9 +66,35 @@ references.
   entire cache. There is no prefix, host, or tag-based purge (e.g. all
   `/api/v1/*`). Use short TTLs or application-layer cache busting for
   selective invalidation.
-- **Orphaned `Vary` variants are not auto-cleaned.** If an upstream changes its
-  `Vary` header, stale variant entries accumulate until TTL expiry or a full
-  purge.
+- **No cached byte-range serving.** Every request carrying `Range` or `If-Range`
+  bypasses the cache and reaches the origin (`X-Cache: BYPASS`), and no `206` is
+  ever stored. Range workloads get no cache benefit. Serving single byte ranges
+  from complete cached representations is a recorded future enhancement, not an
+  accidental gap.
+- **`Set-Cookie` responses are never stored**, whatever their `Cache-Control`
+  says. An origin cannot currently opt a cookie-bearing response into shared
+  caching.
+- **A response generated for a request carrying `Authorization` is stored only
+  with `public` or `s-maxage`.** RFC 9111 §3.5 also lists `must-revalidate` as a
+  *reuse* permission, which Jul honors — but not as permission to publish an
+  authenticated response into a cache anonymous clients read.
+- **Cookie-based sessions are not protected by the authenticated-reuse rule.**
+  RFC 9111 §3.5 is defined in terms of `Authorization`; a `Cookie` header is not
+  a shared-cache authentication signal. An origin serving user-specific content
+  behind a cookie must set `private` or `no-store`.
+- **A `304` that changes `Vary` discards the representation** and the request
+  re-fetches, rather than rekeying it in place. Discarding is the outcome that
+  cannot leave a wrongly-keyed entry reachable.
+- **A `Vary` pointer entry written before the variant-membership record fails
+  closed.** After upgrading, the first request for each previously cached `Vary`
+  URL is a miss. Nothing is lost and nothing stale is served.
+- **Variant membership is capped at 64 per base resource.** Past the cap the
+  oldest variant is deleted, so a resource with more than 64 live variants will
+  churn.
+- **Mandatory validation buffers the origin's answer** instead of streaming it,
+  because the status must be known before deciding whether to serve the stored
+  body. An answer larger than `memory_max_size`, or one that turns out to be a
+  stream, costs one extra origin request and is then streamed normally.
 - **Disk tier is best-effort.** A disk-write failure does not error the request;
   the entry serves from memory or the upstream.
 - **No distributed / shared cache.** Cache state is local to the single Jul.IA
@@ -79,16 +105,18 @@ references.
   background refresh that was already in flight when the reload ran also
   completes against the *old* generation's route and publishes its result. Purge
   or restart when a configuration change must invalidate content.
-- **A background refresh delays retirement of its generation.** While a
-  `stale_while_revalidate` refresh runs, the handler generation that started it
-  keeps its gRPC connections, plugin runtimes and static roots open. The delay is
-  bounded: the refresh is cancelled and the resources closed after `[global]
+- **A background refresh or a synchronous validation delays retirement of its
+  generation.** While either runs, the handler generation that started it keeps
+  its gRPC connections, plugin runtimes and static roots open. The delay is
+  bounded: the work is cancelled and the resources closed after `[global]
   shutdown_timeout`.
 - **Background refresh requires the server's generation-lease seam.** The
   production wiring always installs it. A cache embedded without that seam serves
   stale responses normally but starts no background refresh — unowned work would
   have no resource holder and no shutdown owner. The decision is counted as
-  `no_lease` on `jul_cache_revalidations_total`.
+  `no_lease` on `jul_cache_revalidations_total`. Mandatory validation without the
+  seam degrades to a complete origin fetch; it never degrades to serving an
+  unvalidated entry.
 - **Server-Sent Events are never cached.** A `text/event-stream` response is
   streamed to the client but never stored, because an event stream has no end
   and capturing it would only grow a buffer that is discarded. Ordinary chunked

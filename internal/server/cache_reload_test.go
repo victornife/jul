@@ -217,3 +217,143 @@ func getCacheState(t *testing.T, client *http.Client, url string) string {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.Header.Get("X-Cache")
 }
+
+// TestReloadDuringMandatorySynchronousValidation is the #132 counterpart of the
+// test above. Mandatory validation — here forced by a response
+// Cache-Control: no-cache — also runs on the generation's background lease, so
+// the same lifecycle guarantee must hold for it: a reload publishes the new
+// generation immediately, but the old generation's resources stay open until the
+// validation its handler tree is executing has finished, and the waiting client
+// still receives a correctly validated response.
+func TestReloadDuringMandatorySynchronousValidation(t *testing.T) {
+	addr := freePort(t)
+
+	responseCache, err := cache.New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(1 << 20),
+		DefaultTTL:    config.Duration(time.Hour),
+	}, quietLogger())
+	if err != nil {
+		t.Fatalf("cache.New: %v", err)
+	}
+
+	var (
+		builds        atomic.Int32
+		enterOnce     sync.Once
+		entered       = make(chan struct{})
+		release       = make(chan struct{})
+		gen1Closer    = newGenerationCloser()
+		gen1CloserSet = make(chan struct{})
+		closerOnce    sync.Once
+	)
+
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		n := builds.Add(1)
+		first := n == 1
+
+		origin := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("ETag", `"v1"`)
+			// no-cache makes every reuse take the synchronous validation path.
+			w.Header().Set("Cache-Control", "no-cache")
+			if r.Header.Get("If-None-Match") != `"v1"` {
+				_, _ = io.WriteString(w, "payload")
+				return
+			}
+			if first {
+				enterOnce.Do(func() { close(entered) })
+				<-release
+			}
+			w.WriteHeader(http.StatusNotModified)
+		})
+
+		cached := responseCache.Handler(origin)
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/ready" {
+				_, _ = io.WriteString(w, "ready")
+				return
+			}
+			cached.ServeHTTP(w, r)
+		})
+
+		m := map[string]http.Handler{}
+		for _, srv := range c.Servers {
+			m[srv.Listen] = h
+		}
+
+		var retire func()
+		if n == 2 {
+			retire = gen1Closer.Close
+			closerOnce.Do(func() { close(gen1CloserSet) })
+		}
+		commitFn := func() (upstream.SnapshotMap, func()) { return nil, retire }
+		return m, uint64(n), commitFn, func() {}, nil
+	}
+
+	src := &stubSource{}
+	src.set(cfgWith(addr), nil)
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src,
+		func(context.Context, *config.Config) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+
+	releaseOrigin := sync.OnceFunc(func() { close(release) })
+	stopServer := sync.OnceFunc(func() {
+		cancel()
+		<-done
+	})
+	t.Cleanup(func() {
+		releaseOrigin()
+		stopServer()
+	})
+
+	waitForServe(t, "http://"+addr+"/ready", "ready")
+
+	client := &http.Client{Transport: testTransport, Timeout: 30 * time.Second}
+	url := "http://" + addr + "/cached"
+
+	if state := getCacheState(t, client, url); state != "MISS" {
+		t.Fatalf("first request X-Cache = %q, want MISS", state)
+	}
+
+	// A second request must validate, and blocks in the origin while doing so.
+	validated := make(chan string, 1)
+	go func() { validated <- getCacheState(t, client, url) }()
+
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("mandatory validation did not reach the origin")
+	}
+
+	src.set(cfgWith(addr), nil)
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
+
+	select {
+	case <-gen1CloserSet:
+	case <-time.After(10 * time.Second):
+		t.Fatal("reload did not build a second generation")
+	}
+
+	// The validation is executing on the old generation's handler tree, so that
+	// generation must not be retired underneath it.
+	select {
+	case <-gen1Closer.done:
+		t.Fatal("previous generation was retired while its synchronous cache validation was still running")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	releaseOrigin()
+	if state := <-validated; state != "REVALIDATED" {
+		t.Fatalf("validating request X-Cache = %q, want REVALIDATED", state)
+	}
+	select {
+	case <-gen1Closer.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("previous generation's resources were not closed after its validation finished")
+	}
+
+	stopServer()
+}
