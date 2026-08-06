@@ -69,7 +69,7 @@ func TestDynamicHandlerInstallsGenerationSnapshots(t *testing.T) {
 
 	snap := pool.Snapshot()
 	s := &Server{redactGens: make(map[uint64]redact.State)}
-	s.handlers.Store(newHandlerGen(map[string]http.Handler{
+	s.handlers.Store(newHandlerGen(context.Background(), time.Second, map[string]http.Handler{
 		":80": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			count := len(pool.BackendsCtx(r.Context()))
 			_, _ = io.WriteString(w, itoa(count))
@@ -177,7 +177,7 @@ func TestRedactionRetiredWhenGenerationDrains(t *testing.T) {
 	s.registerRedactionGen(1, oldGen)
 	s.registerRedactionGen(2, newGen)
 
-	g := newHandlerGen(map[string]http.Handler{}, upstream.SnapshotMap{}, 1)
+	g := newHandlerGen(context.Background(), time.Second, map[string]http.Handler{}, upstream.SnapshotMap{}, 1)
 	g.inflight.Add(1) // simulate a request still executing on generation 1
 
 	resourcesRetired := make(chan struct{})
@@ -235,7 +235,7 @@ func TestRedactionMovedToTombstoneOnGraceTimeout(t *testing.T) {
 	s.registerRedactionGen(1, oldGen)
 	s.registerRedactionGen(2, newGen)
 
-	g := newHandlerGen(map[string]http.Handler{}, upstream.SnapshotMap{}, 1)
+	g := newHandlerGen(context.Background(), time.Second, map[string]http.Handler{}, upstream.SnapshotMap{}, 1)
 	g.inflight.Add(1) // simulate a request still executing on generation 1
 
 	resourcesRetired := make(chan struct{})

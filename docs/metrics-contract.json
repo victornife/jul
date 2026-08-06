@@ -32,6 +32,15 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_cache_revalidations_total",
+      "type": "counter",
+      "help": "Background cache revalidation decisions, labeled by bounded outcome (stored/not_modified/uncacheable/origin_error/canceled/panic/no_lease/deduplicated).",
+      "labels": [
+        "outcome"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_config_pending_restart",
       "type": "gauge",
       "help": "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",

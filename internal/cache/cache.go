@@ -13,12 +13,18 @@ import (
 	"sync"
 	"time"
 
+	"jul/internal/background"
 	"jul/internal/config"
 	"jul/internal/tracing"
 )
 
 // Cache is a two-tier HTTP response cache. The memory tier overflows evicted
 // entries to the disk tier (when configured).
+//
+// Entries published to either tier are immutable; see Entry. Cache instances
+// outlive handler generations: the composition root creates one Cache per
+// process and every reload wraps the new handler tree with it, so cached data
+// survives an ordinary configuration reload.
 type Cache struct {
 	mem  *memStore
 	disk *diskStore
@@ -30,8 +36,15 @@ type Cache struct {
 	sif      time.Duration
 	maxEntry int64
 
-	reMu     sync.Mutex
-	inflight map[string]struct{} // keys with an in-flight background revalidation
+	log *slog.Logger
+
+	reMu  sync.Mutex
+	calls map[revalidateKey]*revalidateCall // in-flight revalidations
+
+	// observe, when set, receives one bounded outcome per revalidation
+	// decision. It is installed by the composition root so the cache does not
+	// depend on the observability package.
+	observe func(outcome string)
 }
 
 // cacheableStatus lists response codes safe to cache by default.
@@ -51,12 +64,16 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	c := &Cache{
 		defaultTTL: cfg.DefaultTTL.Std(),
 		swr:        cfg.StaleWhileRevalidate.Std(),
 		sif:        cfg.StaleIfError.Std(),
 		maxEntry:   cfg.MemoryMaxSize.Bytes(),
-		inflight:   make(map[string]struct{}),
+		log:        logger,
+		calls:      make(map[revalidateKey]*revalidateCall),
 	}
 	if cfg.DiskPath != "" {
 		d, err := newDiskStore(cfg.DiskPath, cfg.DiskMaxSize.Bytes(), logger)
@@ -71,6 +88,23 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		}
 	})
 	return c, nil
+}
+
+// SetRevalidationObserver installs a bounded counter for background
+// revalidation outcomes. The values passed to fn are the package's own outcome
+// constants — never a cache key, URL, host, or error string — so they are safe
+// as a metric label. Call it once at startup, before the cache serves traffic.
+func (c *Cache) SetRevalidationObserver(fn func(outcome string)) {
+	if c == nil {
+		return
+	}
+	c.observe = fn
+}
+
+func (c *Cache) observeRevalidation(outcome revalidateOutcome) {
+	if c.observe != nil {
+		c.observe(string(outcome))
+	}
 }
 
 func (c *Cache) get(key string) (*Entry, bool) {
@@ -197,14 +231,9 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 				span.SetString("cache.status", "STALE")
 				span.End()
 				c.serve(w, r, e, "STALE", now)
-				// Background refresh, deduplicated per variant so a burst of
-				// stale hits triggers exactly one upstream revalidation.
-				if c.beginRevalidate(effKey) {
-					go func() {
-						defer c.endRevalidate(effKey)
-						c.revalidate(effKey, r, next, e)
-					}()
-				}
+				// Start the background refresh before returning, so the lease
+				// is taken while this request still holds its generation.
+				c.startRevalidate(effKey, r, next, e)
 				return
 			}
 		}
@@ -229,68 +258,142 @@ func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.
 	}
 }
 
-// beginRevalidate marks key as having an in-flight background revalidation,
-// returning false if one is already running so callers skip launching a
-// duplicate. This bounds a burst of concurrent stale hits to one upstream fetch.
-func (c *Cache) beginRevalidate(key string) bool {
-	c.reMu.Lock()
-	defer c.reMu.Unlock()
-	if _, ok := c.inflight[key]; ok {
-		return false
+// startRevalidate launches the background refresh of a stale entry. It must be
+// called from the originating request's ServeHTTP, before it returns:
+//
+//  1. it acquires the handler generation's background lease first, so the
+//     generation cannot retire — and close the gRPC connections, plugin
+//     runtimes and static roots the captured next handler uses — while the
+//     refresh runs. Acquisition fails cleanly on a retiring generation or when
+//     no lease is installed, in which case no refresh starts and the stale
+//     entry simply expires normally;
+//  2. it deduplicates per (effective key, generation), so a burst of concurrent
+//     stale hits produces exactly one origin request;
+//  3. it clones the request onto the leased context here, not in the goroutine,
+//     because the originating *http.Request must not be touched after
+//     ServeHTTP returns.
+func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handler, stale *Entry) {
+	ctx, release, ok := background.Acquire(r.Context(), background.OpCacheRevalidate)
+	if !ok {
+		c.observeRevalidation(outcomeNoLease)
+		c.log.Debug("cache: background revalidation not started",
+			"operation", background.OpCacheRevalidate.String(), "reason", "no generation lease available")
+		return
 	}
-	c.inflight[key] = struct{}{}
-	return true
-}
+	gen, _ := background.Generation(r.Context())
+	k := revalidateKey{key: effKey, gen: gen}
 
-// endRevalidate clears the in-flight marker for key.
-func (c *Cache) endRevalidate(key string) {
-	c.reMu.Lock()
-	delete(c.inflight, key)
-	c.reMu.Unlock()
-}
+	call, leader := c.beginRevalidate(k)
+	if !leader {
+		release()
+		c.observeRevalidation(outcomeDeduplicated)
+		return
+	}
 
-// revalidate refreshes a stale entry in the background using a conditional
-// request when possible.
-func (c *Cache) revalidate(effKey string, orig *http.Request, next http.Handler, stale *Entry) {
-	r := orig.Clone(context.Background())
-	r.Body = http.NoBody
+	req := r.Clone(ctx)
+	req.Body = http.NoBody
 	if stale.ETag != "" {
-		r.Header.Set("If-None-Match", stale.ETag)
+		req.Header.Set("If-None-Match", stale.ETag)
 	}
 	if stale.LastModified != "" {
-		r.Header.Set("If-Modified-Since", stale.LastModified)
+		req.Header.Set("If-Modified-Since", stale.LastModified)
 	}
+
+	go func() {
+		defer release()
+		c.revalidate(ctx, k, req, next, stale, call)
+	}()
+}
+
+// revalidate refreshes a stale entry using a conditional request. It runs on the
+// leased background context: independent of the client that triggered it, but
+// canceled by process shutdown, generation retirement, and the lease's bounded
+// operation deadline.
+//
+// It never mutates the published stale entry. Every update publishes a clone and
+// replaces the stored pointer under the tier's own lock. The deferred cleanup
+// removes the call state and releases every waiter on all paths, including a
+// panic in the downstream handler.
+func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req *http.Request, next http.Handler, stale *Entry, call *revalidateCall) {
+	defer func() {
+		// Ordering matters: drop the call state first so a later stale hit can
+		// start a fresh refresh the instant a waiter is released.
+		c.endRevalidate(k, call)
+		if v := recover(); v != nil {
+			call.finish(nil, outcomePanic, errRevalidatePanic)
+			c.observeRevalidation(outcomePanic)
+			// The panic value is unbounded, request-influenced data; log only
+			// that it happened, consistent with the request-path recoverer.
+			c.log.Error("cache: background revalidation panicked",
+				"operation", background.OpCacheRevalidate.String(), "generation", k.gen)
+			return
+		}
+		// A leader that returned without publishing an outcome (an impossible
+		// path today) must still release its waiters rather than strand them.
+		call.finish(nil, outcomeCanceled, context.Canceled)
+	}()
 
 	rec := &recorder{header: http.Header{}, limit: c.maxEntry}
-	next.ServeHTTP(rec, r)
+	next.ServeHTTP(rec, req)
 	now := time.Now()
 
-	if rec.status == http.StatusNotModified {
-		// Upstream confirms freshness: extend the stored entry's lifetime under
-		// the same (variant) key it already lives at.
-		if ttl, swr, ok := c.freshness(stale.Status, stale.Header, now); ok {
-			refreshed := *stale
-			refreshed.CreatedAt = now
-			refreshed.ExpiresAt = now.Add(ttl)
-			refreshed.StaleUntil = now.Add(ttl + swr)
-			c.set(effKey, &refreshed)
-		}
+	// The handler may have returned early because the operation was canceled.
+	// A canceled refresh must not be mistaken for an origin outage, so it never
+	// extends the stale-if-error window.
+	if err := ctx.Err(); err != nil {
+		call.finish(nil, outcomeCanceled, err)
+		c.observeRevalidation(outcomeCanceled)
+		c.log.Debug("cache: background revalidation canceled",
+			"operation", background.OpCacheRevalidate.String(), "generation", k.gen, "reason", err.Error())
 		return
 	}
-	if rec.status >= 500 {
-		// Upstream error during revalidation: extend stale-if-error window
-		// so the stale entry remains servable while the backend recovers.
+
+	switch {
+	case rec.status == http.StatusNotModified:
+		// Upstream confirms freshness: republish a clone with extended timing
+		// under the same (variant) key it already lives at.
+		ttl, swr, ok := c.freshness(stale.Status, stale.Header, now)
+		if !ok {
+			call.finish(nil, outcomeUncacheable, nil)
+			c.observeRevalidation(outcomeUncacheable)
+			return
+		}
+		refreshed := stale.Clone()
+		refreshed.CreatedAt = now
+		refreshed.ExpiresAt = now.Add(ttl)
+		refreshed.StaleUntil = now.Add(ttl + swr)
+		c.set(k.key, refreshed)
+		call.finish(refreshed, outcomeNotModified, nil)
+		c.observeRevalidation(outcomeNotModified)
+
+	case rec.status >= 500:
+		// Upstream error during revalidation: extend the stale-if-error window
+		// so the entry stays servable while the backend recovers. The published
+		// entry is replaced by a clone, never edited in place.
 		if c.sif > 0 {
-			stale.StaleUntil = now.Add(c.sif)
-			c.set(effKey, stale)
+			refreshed := stale.Clone()
+			refreshed.StaleUntil = now.Add(c.sif)
+			c.set(k.key, refreshed)
+			call.finish(refreshed, outcomeOriginError, nil)
+		} else {
+			call.finish(nil, outcomeOriginError, nil)
 		}
-		return
-	}
-	if rec.tooBig {
-		return
-	}
-	if e := c.buildEntry(orig, rec.status, rec.header, rec.body.Bytes(), now); e != nil {
-		c.store(key(orig), orig, e)
+		c.observeRevalidation(outcomeOriginError)
+
+	case rec.tooBig:
+		call.finish(nil, outcomeUncacheable, nil)
+		c.observeRevalidation(outcomeUncacheable)
+
+	default:
+		e := c.buildEntry(req, rec.status, rec.header, rec.body.Bytes(), now)
+		if e == nil {
+			call.finish(nil, outcomeUncacheable, nil)
+			c.observeRevalidation(outcomeUncacheable)
+			return
+		}
+		c.store(key(req), req, e)
+		call.finish(e, outcomeStored, nil)
+		c.observeRevalidation(outcomeStored)
 	}
 }
 

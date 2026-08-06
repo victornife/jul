@@ -188,6 +188,14 @@ func WithSnapshot(ctx context.Context, snaps SnapshotMap) context.Context {
 	return context.WithValue(ctx, poolSnapshotKey{}, snaps)
 }
 
+// SnapshotsFrom returns the generation-scoped snapshot map stored in ctx, or
+// nil. It lets the background-lease seam carry a request's generation view onto
+// the context of work that continues after the request returns.
+func SnapshotsFrom(ctx context.Context) SnapshotMap {
+	m, _ := ctx.Value(poolSnapshotKey{}).(SnapshotMap)
+	return m
+}
+
 // snapshotFrom returns the snapshot for (name, scheme) stored in ctx, or nil.
 func snapshotFrom(ctx context.Context, name, scheme string) *PoolSnapshot {
 	if m, ok := ctx.Value(poolSnapshotKey{}).(SnapshotMap); ok {

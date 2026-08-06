@@ -171,6 +171,7 @@ func exerciseAllMetrics(m *Metrics) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
 
 	m.ObserveCompression("gzip")
+	m.ObserveCacheRevalidation("stored")
 	m.ObserveRateLimited("ip")
 	m.ObserveAuthDecision("jwt", "allow")
 	m.ObserveWAFEvent("block", "942100")

@@ -9,7 +9,7 @@ references.
 
 ## Current defects and recertification work
 
-- **Response cache:** generation ownership, immutable entries, shared-cache semantics, invalidation, `304` metadata, Range bypass and protocol-transparent wrappers are being corrected under #107 and #131–#134.
+- **Response cache:** generation ownership and immutable published entries are corrected and evidenced by #131. Shared-cache semantics, invalidation, `304` metadata, Range bypass and protocol-transparent wrappers remain open under #107 and #132–#134.
 - **Access-log lifecycle:** request records can be disabled explicitly, but enablement and sink changes remain restart-required until #98 introduces generation-safe sink replacement.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
@@ -73,6 +73,22 @@ references.
   the entry serves from memory or the upstream.
 - **No distributed / shared cache.** Cache state is local to the single Jul.IA
   process. Multi-node setups each maintain independent cache pools.
+- **A reload does not invalidate cached entries.** The cache is process-scoped
+  and deliberately survives configuration reloads, so a routing or backend change
+  does not retroactively drop entries stored under the previous configuration. A
+  background refresh that was already in flight when the reload ran also
+  completes against the *old* generation's route and publishes its result. Purge
+  or restart when a configuration change must invalidate content.
+- **A background refresh delays retirement of its generation.** While a
+  `stale_while_revalidate` refresh runs, the handler generation that started it
+  keeps its gRPC connections, plugin runtimes and static roots open. The delay is
+  bounded: the refresh is cancelled and the resources closed after `[global]
+  shutdown_timeout`.
+- **Background refresh requires the server's generation-lease seam.** The
+  production wiring always installs it. A cache embedded without that seam serves
+  stale responses normally but starts no background refresh — unowned work would
+  have no resource holder and no shutdown owner. The decision is counted as
+  `no_lease` on `jul_cache_revalidations_total`.
 
 ---
 
