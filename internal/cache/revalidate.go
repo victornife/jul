@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 // revalidateOutcome is the bounded set of results a background revalidation can
@@ -59,6 +60,11 @@ type revalidateKey struct {
 type revalidateCall struct {
 	done chan struct{}
 
+	// joined counts the callers that have waited on this call. It is what makes
+	// "the leader is still required by other waiters" an observable fact rather
+	// than an assumption, and lets tests synchronize on join without sleeping.
+	joined atomic.Int32
+
 	// Written by the leader before done is closed; read by waiters after.
 	entry   *Entry
 	outcome revalidateOutcome
@@ -87,6 +93,7 @@ func (rc *revalidateCall) finish(entry *Entry, outcome revalidateOutcome, err er
 // error. When ctx ends first it reports outcomeCanceled and ctx.Err(), leaving
 // the call itself untouched for its leader to complete.
 func (rc *revalidateCall) wait(ctx context.Context) (*Entry, revalidateOutcome, error) {
+	rc.joined.Add(1)
 	select {
 	case <-rc.done:
 		return rc.entry, rc.outcome, rc.err
