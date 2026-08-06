@@ -39,6 +39,13 @@ func RequestID() Middleware {
 	}
 }
 
+// WithRequestID returns a copy of ctx carrying the request id. It is used by
+// the background-lease seam to carry the id onto work that continues after the
+// request returns, so its logs stay correlated with the request that started it.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDKey, id)
+}
+
 // RequestIDFrom returns the request id stored in ctx, or "" if absent.
 func RequestIDFrom(ctx context.Context) string {
 	if v, ok := ctx.Value(requestIDKey).(string); ok {
