@@ -43,7 +43,7 @@ type StatsSnapshot struct {
 	LatencyP95Ms float64 `json:"latencyP95Ms"`
 	LatencyP99Ms float64 `json:"latencyP99Ms"`
 
-	// CacheHitRatio is HIT / (HIT+MISS+STALE+BYPASS), or 0 when no cache events
+	// CacheHitRatio is HIT / (HIT+MISS+STALE+REVALIDATED+BYPASS), or 0 when no cache events
 	// have been recorded. CacheEvents holds the cumulative per-state counts.
 	CacheHitRatio float64            `json:"cacheHitRatio"`
 	CacheEvents   map[string]float64 `json:"cacheEvents"`
@@ -149,7 +149,7 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 
 	hits := snap.CacheEvents["HIT"]
 	cacheTotal := hits
-	for _, state := range []string{"MISS", "STALE", "BYPASS"} {
+	for _, state := range []string{"MISS", "STALE", "REVALIDATED", "BYPASS"} {
 		cacheTotal += snap.CacheEvents[state]
 	}
 	if cacheTotal > 0 {
