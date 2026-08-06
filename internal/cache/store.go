@@ -7,12 +7,21 @@
 package cache
 
 import (
+	"maps"
 	"net/http"
 	"time"
 )
 
 // Entry is a cached HTTP response together with the freshness metadata needed
 // to serve, revalidate, and key it.
+//
+// A published entry is IMMUTABLE. Once store or set hands an *Entry to a tier,
+// no field of it — including the Header map, the Body slice, Vary and
+// VaryValues — may be written again, because concurrent readers hold the same
+// pointer and the disk tier may be encoding it. Code that needs to change
+// timing or metadata clones the entry, mutates the clone, and replaces the
+// stored pointer under the tier's own lock. Clone is the only supported way to
+// produce a mutable copy.
 type Entry struct {
 	Status int
 	Header http.Header
@@ -36,6 +45,30 @@ type Entry struct {
 	// values for those fields) where the real response is stored. A stub is
 	// never served — it only redirects the lookup to the correct variant.
 	IsVaryStub bool
+}
+
+// Clone returns a deep-enough copy of e for mutation: every reference field a
+// reader could observe (headers and their value slices, body, Vary, VaryValues)
+// is copied, so writing to the clone cannot be seen through the published
+// pointer. It is called only at publication and update boundaries — never per
+// cache hit — so the body copy is paid once per revalidation, not once per
+// request.
+func (e *Entry) Clone() *Entry {
+	if e == nil {
+		return nil
+	}
+	cp := *e
+	cp.Header = cloneHeader(e.Header)
+	if e.Body != nil {
+		cp.Body = append([]byte(nil), e.Body...)
+	}
+	if e.Vary != nil {
+		cp.Vary = append([]string(nil), e.Vary...)
+	}
+	if e.VaryValues != nil {
+		cp.VaryValues = maps.Clone(e.VaryValues)
+	}
+	return &cp
 }
 
 // Size estimates the entry's memory footprint in bytes.

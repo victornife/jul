@@ -179,6 +179,7 @@ func TestHandlerConditionalHit(t *testing.T) {
 
 func TestHandlerStaleWhileRevalidate(t *testing.T) {
 	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	g := testLease(t, 1)
 
 	var mu sync.Mutex
 	calls := 0
@@ -196,7 +197,7 @@ func TestHandlerStaleWhileRevalidate(t *testing.T) {
 	}))
 
 	// Seed a stale-but-servable entry directly.
-	r := httptest.NewRequest(http.MethodGet, "http://x/", nil)
+	r := leased(httptest.NewRequest(http.MethodGet, "http://x/", nil), g)
 	now := time.Now()
 	c.set(key(r), &Entry{
 		Status:     200,
@@ -226,6 +227,7 @@ func TestHandlerStaleIfError(t *testing.T) {
 		MemoryMaxSize: config.Size(1 << 20),
 		StaleIfError:  config.Duration(5 * time.Minute),
 	})
+	g := testLease(t, 1)
 
 	var upstreamCalls atomic.Int32
 	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +242,7 @@ func TestHandlerStaleIfError(t *testing.T) {
 		_, _ = w.Write([]byte("fresh"))
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
+	req := leased(httptest.NewRequest(http.MethodGet, "http://x/", nil), g)
 	now := time.Now()
 	// Seed an expired entry with a short stale-while-revalidate window.
 	c.set(key(req), &Entry{
@@ -474,6 +476,7 @@ func TestHandlerVaryVariantsCoexist(t *testing.T) {
 // triggers exactly one background revalidation, not one per request.
 func TestHandlerStaleRevalidateSingleflight(t *testing.T) {
 	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	g := testLease(t, 1)
 
 	var mu sync.Mutex
 	calls := 0
@@ -511,7 +514,7 @@ func TestHandlerStaleRevalidateSingleflight(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://x/swr", nil))
+			h.ServeHTTP(rec, leased(httptest.NewRequest(http.MethodGet, "http://x/swr", nil), g))
 			if got := rec.Body.String(); got != "stale" {
 				t.Errorf("stale serve body = %q, want stale", got)
 			}
