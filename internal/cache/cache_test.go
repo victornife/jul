@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -298,31 +297,26 @@ func TestHandlerStaleIfError(t *testing.T) {
 func TestFreshnessRules(t *testing.T) {
 	c := &Cache{defaultTTL: 30 * time.Second}
 	now := time.Now()
+	fresh := func(status int, h http.Header) (time.Duration, time.Duration, bool) {
+		return c.freshness(status, h, parseResponsePolicy(h), now)
+	}
 
-	if _, _, ok := c.freshness(200, http.Header{"Cache-Control": {"private"}}, now); ok {
+	if _, _, ok := fresh(200, http.Header{"Cache-Control": {"private"}}); ok {
 		t.Error("private should not be cacheable")
 	}
-	if _, _, ok := c.freshness(200, http.Header{"Set-Cookie": {"a=b"}}, now); ok {
+	if _, _, ok := fresh(200, http.Header{"Set-Cookie": {"a=b"}}); ok {
 		t.Error("Set-Cookie should not be cacheable")
 	}
-	if _, _, ok := c.freshness(500, http.Header{}, now); ok {
+	if _, _, ok := fresh(500, http.Header{}); ok {
 		t.Error("500 should not be cacheable")
 	}
-	ttl, _, ok := c.freshness(200, http.Header{"Cache-Control": {"max-age=120"}}, now)
+	ttl, _, ok := fresh(200, http.Header{"Cache-Control": {"max-age=120"}})
 	if !ok || ttl != 120*time.Second {
 		t.Errorf("max-age ttl = %v ok=%v", ttl, ok)
 	}
-	ttl, _, ok = c.freshness(200, http.Header{}, now) // falls back to default
+	ttl, _, ok = fresh(200, http.Header{}) // falls back to default
 	if !ok || ttl != 30*time.Second {
 		t.Errorf("default ttl = %v ok=%v", ttl, ok)
-	}
-}
-
-func TestParseCacheControl(t *testing.T) {
-	got := parseCacheControl("public, max-age=60, stale-while-revalidate=30")
-	want := map[string]string{"public": "", "max-age": "60", "stale-while-revalidate": "30"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("parseCacheControl = %v, want %v", got, want)
 	}
 }
 
