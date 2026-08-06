@@ -56,7 +56,7 @@ Both exporters support `insecure = true` for local development (plaintext).
 | `GET /path` | Server | Every HTTP request | `http.request.method`, `url.path`, `url.scheme`, `server.address`, `user_agent.original`, `network.protocol.version`, `http.response.status_code` |
 | `proxy.roundtrip` | Internal | Every proxied request | `upstream.name` |
 | `upstream.request` | Internal | Each backend attempt (including retries) | `http.response.status_code`, error on failure |
-| `cache.lookup` | Internal | When `cache = true` | `cache.status` (HIT/MISS/STALE/BYPASS) |
+| `cache.lookup` | Internal | When `cache = true` | `cache.status` (HIT/MISS/STALE/VALIDATE/BYPASS) |
 
 ### Propagation
 

@@ -240,7 +240,7 @@ Labels fall into three classes by what bounds them:
 | `jul_http_requests_total` | `method`, `host`, `code` | method folded to a fixed set · host opt-in · code = status |
 | `jul_http_request_duration_seconds` | `method`, `host` | as above (buckets fixed) |
 | `jul_http_requests_in_flight` | — | single series |
-| `jul_cache_events_total` | `state` | fixed (`HIT`/`MISS`/`STALE`/`BYPASS`) |
+| `jul_cache_events_total` | `state` | fixed (`HIT`/`MISS`/`STALE`/`REVALIDATED`/`BYPASS`) |
 | `jul_cache_revalidations_total` | `outcome` | fixed (`stored`/`not_modified`/`uncacheable`/`origin_error`/`canceled`/`panic`/`no_lease`/`deduplicated`) |
 | `jul_http_response_compressed_total` | `encoding` | fixed content codings |
 | `jul_http_ratelimited_total` | `key` | fixed (`ip`/`header`/`jwt`) |
