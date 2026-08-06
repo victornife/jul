@@ -203,6 +203,10 @@ type ConfigApplyCoordinator struct {
 
 	mu      sync.Mutex
 	applyMu sync.Mutex
+	// finalizeMu serializes managed terminal history/audit/metrics/ledger work
+	// after the config mutation gate is released. This permits the next apply to
+	// start without allowing two managed finalizers to write history at once.
+	finalizeMu sync.Mutex
 
 	// applyIDOnce guards the one-time generation of applyInstanceID, the
 	// boot-scoped correlation prefix used by nextID. seq is the monotonically
@@ -211,8 +215,8 @@ type ConfigApplyCoordinator struct {
 	applyInstanceID string
 	seq             atomic.Uint64
 
-	// inFlightState tracks whether a managed apply transaction is still
-	// outstanding. It is protected by applyMu for state transitions.
+	// inFlightState tracks whether a managed apply transaction still owns the
+	// config-path mutation/restoration gate. It is protected by mu.
 	inFlightState ApplyInFlightState
 }
 
@@ -1115,17 +1119,21 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			}
 		}
 		terminal := c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest)
-		// AC-03: terminal finalization ordering. Unlock the coordinator file
-		// mutex, then run terminal finalization (history/audit/metrics/ledger)
-		// BEFORE clearing the in-flight guard, closing Finalized, or delivering
-		// the result to the synchronous waiter. This guarantees that:
-		//   - no subsequent managed transaction can begin while terminal
-		//     history/audit is still outstanding (inFlightState stays set), and
-		//   - the HTTP caller never observes completion until the terminal
-		//     record is durably finalized in the ledger/audit/metrics.
-		// notifyManagedApplyComplete contains its own panic recovery so a
-		// callback panic cannot wedge the coordinator here.
+		// #226 / AC-03: every config-path mutation is complete at this point,
+		// including any required restoration and the final disk-state read. Clear
+		// the admission gate while still holding mu, then release the server's
+		// reload-serialization gate before any completion callback can publish a
+		// terminal ledger record. Therefore a client that observes terminal state
+		// can immediately submit the next valid apply; it can never see terminal
+		// truth while the coordinator still reports the prior apply as in flight.
+		//
+		// The non-config terminal side effects remain exactly-once and ordered:
+		// completeManagedApply serializes history/audit/metrics/ledger work with
+		// finalizeMu. A later apply may start while that work finishes, but its own
+		// terminal publication queues behind this finalizer.
+		c.inFlightState = ApplyInFlightNone
 		c.mu.Unlock()
+		close(finalizedCh)
 		// Carry any post-persistence pending-registration failure into the
 		// terminal finalization provenance so it is surfaced through the
 		// ledger/overview rather than silently dropped.
@@ -1137,10 +1145,6 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// and returns the finalization provenance threaded back onto the terminal
 		// result. The trusted history write runs outside c.mu.
 		terminal = c.completeManagedApply(reqCtx, terminal, baseline.Raw)
-		c.mu.Lock()
-		c.inFlightState = ApplyInFlightNone
-		c.mu.Unlock()
-		close(finalizedCh)
 		terminalCh <- terminal
 	}()
 
@@ -1268,6 +1272,12 @@ func (c *ConfigApplyCoordinator) notifyManagedApplyComplete(comp admin.ManagedAp
 // callback yields a zero finalization so context-free and unit-test callers are
 // unaffected.
 func (c *ConfigApplyCoordinator) completeManagedApply(reqCtx admin.ApplyRequestContext, result ApplyResult, previousRaw []byte) ApplyResult {
+	// Managed finalization writes history and publishes audit/metric/ledger
+	// truth. Keep those side effects ordered even though #226 deliberately
+	// releases the config mutation gate before terminal publication.
+	c.finalizeMu.Lock()
+	defer c.finalizeMu.Unlock()
+
 	fin := c.notifyManagedApplyComplete(admin.ManagedApplyCompletion{
 		Context:     reqCtx,
 		Result:      toAdminConfigApplyResult(result),
