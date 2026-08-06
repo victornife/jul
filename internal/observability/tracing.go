@@ -144,12 +144,13 @@ func (t *Tracer) Middleware(next http.Handler) http.Handler {
 			ctx = middleware.WithTraceID(ctx, sc.TraceID().String())
 		}
 
-		// Reuse the shared status-capturing writer so the span observes the
-		// final status without degrading Flusher/Hijacker for inner layers.
-		rw := middleware.WrapResponseWriter(w)
-		next.ServeHTTP(rw, r.WithContext(ctx))
+		// Reuse the shared status-capturing recorder so the span observes the
+		// final status while inner layers still see exactly the optional
+		// interfaces the real connection offers.
+		rec := middleware.NewRecorder(w)
+		next.ServeHTTP(rec.Writer(), r.WithContext(ctx))
 
-		status := rw.Status()
+		status := rec.Status()
 		span.SetAttributes(semconv.HTTPResponseStatusCode(status))
 		if status >= 500 {
 			span.SetStatus(codes.Error, http.StatusText(status))

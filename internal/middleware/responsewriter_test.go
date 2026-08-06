@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestWrapResponseWriterCapturesStatus(t *testing.T) {
+func TestRecorderCapturesStatus(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	})
@@ -19,17 +19,17 @@ func TestWrapResponseWriterCapturesStatus(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	wrapped := WrapResponseWriter(rec)
-	handler.ServeHTTP(wrapped, req)
+	rw := NewRecorder(rec)
+	handler.ServeHTTP(rw.Writer(), req)
 
-	if wrapped.Status() != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", wrapped.Status())
+	if rw.Status() != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rw.Status())
 	}
 }
 
 func TestRecorderDefaultsTo200(t *testing.T) {
 	rec := httptest.NewRecorder()
-	rw := newRecorder(rec)
+	rw := NewRecorder(rec)
 
 	if rw.Status() != http.StatusOK {
 		t.Fatalf("default status = %d, want 200", rw.Status())
@@ -38,7 +38,7 @@ func TestRecorderDefaultsTo200(t *testing.T) {
 
 func TestRecorderWriteTriggers200(t *testing.T) {
 	rec := httptest.NewRecorder()
-	rw := newRecorder(rec)
+	rw := NewRecorder(rec)
 
 	_, _ = rw.Write([]byte("hello"))
 	if rw.Status() != http.StatusOK {
@@ -51,17 +51,17 @@ func TestRecorderWriteTriggers200(t *testing.T) {
 
 func TestRecorderCapturesBytes(t *testing.T) {
 	rec := httptest.NewRecorder()
-	rw := newRecorder(rec)
+	rw := NewRecorder(rec)
 
 	n, _ := rw.Write([]byte("hello world"))
-	if rw.bytes != int64(n) {
-		t.Fatalf("bytes = %d, want %d", rw.bytes, n)
+	if rw.Bytes() != int64(n) {
+		t.Fatalf("bytes = %d, want %d", rw.Bytes(), n)
 	}
 }
 
 func TestRecorderDoubleWriteHeaderIgnored(t *testing.T) {
 	rec := httptest.NewRecorder()
-	rw := newRecorder(rec)
+	rw := NewRecorder(rec)
 
 	rw.WriteHeader(http.StatusNotFound)
 	rw.WriteHeader(http.StatusOK) // should be ignored
@@ -71,19 +71,31 @@ func TestRecorderDoubleWriteHeaderIgnored(t *testing.T) {
 	}
 }
 
-func TestWrapDoesNotDoubleWrap(t *testing.T) {
+// TestNestedRecordersAgree replaces the former "do not double wrap" identity
+// check. Recorders now nest (each observer keeps its own), so the property that
+// matters is that every layer reports the same status and byte count.
+func TestNestedRecordersAgree(t *testing.T) {
 	rec := httptest.NewRecorder()
-	wrapped1 := WrapResponseWriter(rec)
-	wrapped2 := WrapResponseWriter(wrapped1)
+	outer := NewRecorder(rec)
+	inner := NewRecorder(outer.Writer())
 
-	if wrapped1 != wrapped2 {
-		t.Fatal("double-wrapped: expected same wrapper returned")
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("hello"))
+	})
+	handler.ServeHTTP(inner.Writer(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if inner.Status() != http.StatusAccepted || outer.Status() != http.StatusAccepted {
+		t.Fatalf("status inner=%d outer=%d, want 202", inner.Status(), outer.Status())
+	}
+	if inner.Bytes() != 5 || outer.Bytes() != 5 {
+		t.Fatalf("bytes inner=%d outer=%d, want 5", inner.Bytes(), outer.Bytes())
 	}
 }
 
 func TestRecorderFlushDelegates(t *testing.T) {
 	rec := httptest.NewRecorder()
-	rw := newRecorder(rec)
+	rw := NewRecorder(rec)
 
 	// httptest.ResponseRecorder implements Flusher
 	rw.Flush()
@@ -92,7 +104,7 @@ func TestRecorderFlushDelegates(t *testing.T) {
 
 func TestRecorderHijackNotSupported(t *testing.T) {
 	rec := httptest.NewRecorder()
-	rw := newRecorder(rec)
+	rw := NewRecorder(rec)
 
 	_, _, err := rw.Hijack()
 	if err == nil {
@@ -102,7 +114,7 @@ func TestRecorderHijackNotSupported(t *testing.T) {
 
 func TestRecorderHijackDelegates(t *testing.T) {
 	hijackable := &hijackableRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rw := newRecorder(hijackable)
+	rw := NewRecorder(hijackable)
 
 	conn, brw, err := rw.Hijack()
 	if err != nil {

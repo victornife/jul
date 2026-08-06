@@ -415,8 +415,8 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		defer m.inflight.Dec()
 
 		start := time.Now()
-		rw := middleware.WrapResponseWriter(w)
-		next.ServeHTTP(rw, r)
+		rec := middleware.NewRecorder(w)
+		next.ServeHTTP(rec.Writer(), r)
 
 		host := hostLabel(r.Host)
 		if !m.hostLabelEnabled {
@@ -430,9 +430,9 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		// methods cannot explode cardinality (see the metric label policy in
 		// docs/core-http.md).
 		method := methodLabel(r.Method)
-		m.requests.WithLabelValues(method, host, strconv.Itoa(rw.Status())).Inc()
+		m.requests.WithLabelValues(method, host, strconv.Itoa(rec.Status())).Inc()
 		m.duration.WithLabelValues(method, host).Observe(time.Since(start).Seconds())
-		if state := rw.Header().Get("X-Cache"); state != "" {
+		if state := rec.Header().Get("X-Cache"); state != "" {
 			m.cacheEvents.WithLabelValues(state).Inc()
 		}
 		// Fold the request into the bounded traffic-source rollups. Only the Host
@@ -443,7 +443,7 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		// Capture a privacy-preserving sample of the request and fold its outcome
 		// into the per-path failure rollup (Console v2 Milestones 5.1 and 5.2).
 		durationMs := time.Since(start).Seconds() * 1000
-		status := rw.Status()
+		status := rec.Status()
 		m.samples.record(RequestSample{
 			Time:        start.UTC(),
 			Method:      r.Method,
@@ -451,8 +451,8 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 			Host:        host,
 			Status:      status,
 			DurationMs:  durationMs,
-			CacheState:  rw.Header().Get("X-Cache"),
-			Compressed:  rw.Header().Get("Content-Encoding") != "",
+			CacheState:  rec.Header().Get("X-Cache"),
+			Compressed:  rec.Header().Get("Content-Encoding") != "",
 			RateLimited: status == http.StatusTooManyRequests,
 			Origin:      r.Header.Get("Origin"),
 			UserAgent:   r.Header.Get("User-Agent"),

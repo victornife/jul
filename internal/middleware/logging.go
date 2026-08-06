@@ -81,9 +81,9 @@ func AccessLog(sinks ...AccessSink) Middleware {
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			rec := newRecorder(w)
+			rec := NewRecorder(w)
 
-			next.ServeHTTP(rec, r)
+			next.ServeHTTP(rec.Writer(), r)
 
 			record := AccessRecord{
 				Time:      start,
@@ -91,8 +91,8 @@ func AccessLog(sinks ...AccessSink) Middleware {
 				Host:      r.Host,
 				Path:      r.URL.Path,
 				Query:     r.URL.RawQuery,
-				Status:    rec.status,
-				Bytes:     rec.bytes,
+				Status:    rec.Status(),
+				Bytes:     rec.Bytes(),
 				Duration:  time.Since(start),
 				Remote:    clientIP(r),
 				RequestID: RequestIDFrom(r.Context()),
