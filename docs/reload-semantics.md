@@ -293,6 +293,22 @@ and bind under preflight conditions:
 
 Only after all gates pass is the file written and the reload triggered.
 
+### Managed-apply terminal handoff
+
+A managed apply retains its single-writer gate through every possible
+restoration and the final disk-state read. Once config-path mutation is complete,
+the coordinator releases both its in-flight admission state and the server's
+`ReloadRequest.Finalized` gate **before** the per-ID ledger can become terminal.
+Consequently, terminal status is a reliable readiness signal: a caller that
+observes a terminal record may immediately submit the next valid apply and will
+not receive a stale “previous apply is still in flight” rejection.
+
+History snapshots, audit events, metrics, latest-result projection and terminal
+ledger publication remain exactly-once and serial. They use a separate managed
+finalization lock, so a later apply may begin after restoration without allowing
+two managed finalizers to write history concurrently. The synchronous apply
+response is still delivered only after its terminal finalization returns.
+
 ## The ReloadPlan transaction
 
 The live reload is implemented as a `ReloadPlan` value that owns exactly one

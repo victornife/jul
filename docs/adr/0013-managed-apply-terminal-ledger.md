@@ -1,6 +1,6 @@
 # ADR 0013 — Managed-apply terminal ledger, exactly-once finalization, and audit-closure product defaults
 
-- **Status:** Accepted — audit-closure implementation baseline (2026-07-24)
+- **Status:** Accepted — audit-closure implementation baseline (2026-07-24); terminal/admission ordering amended by #226 (2026-08-06)
 - **Date:** 2026-07-24
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** configuration mutation lifecycle, managed apply coordinator, terminal result retention, history snapshots, planned-restart promotion, admin Console correlation
@@ -8,14 +8,21 @@
 
 ## Context
 
-The configuration mutation path produces one terminal result after restoration,
-but the completion side effects (history snapshot, audit event, metrics, latest
-pointer, health/degradation state) are recorded separately and can run after the
-coordinator has already cleared its in-flight state and closed the finalization
-gate. The composition-root callback also applies the high-water sequence guard
-*before* metrics and audit, so a legitimate but older terminal result can be
-discarded entirely rather than merely being prevented from replacing the latest
-pointer.
+The configuration mutation path produces one terminal result after restoration.
+Audit closure originally kept the coordinator's in-flight gate set until every
+history, audit, metric and ledger side effect completed. Exact-SHA certification
+later exposed the inverse ordering defect tracked in #226: the per-ID ledger
+could become externally terminal inside the completion callback while the
+coordinator still rejected the next apply as in flight. Terminal visibility and
+mutation admission therefore contradicted one another for a scheduler-dependent
+window.
+
+The correction separates two responsibilities. The config-path gate remains held
+through every possible restoration and final disk-state read, then is released
+before any callback can publish terminal state. A dedicated finalization mutex
+continues to serialize managed history/audit/metrics/ledger side effects, so
+releasing mutation admission does not introduce concurrent managed history
+writes or duplicate terminalization.
 
 Four product choices required to close the audit were not explicitly defined in
 the repository. Rather than leave them implicit in code, they are recorded here
@@ -75,20 +82,27 @@ The finalizer path uses this order:
 ```
 receive reload result
 restore previous file if required
-build final ApplyResult
-unlock coordinator file mutex
-finalize history/audit/metrics/ledger
-mark transaction no longer in flight
+build final ApplyResult and final disk truth
+mark the config mutation transaction no longer in flight
+unlock the coordinator file mutex
 close ReloadRequest.Finalized
-deliver terminal result to synchronous waiter
+serialize and finalize history/audit/metrics/ledger
+deliver the terminal result to the synchronous waiter
 ```
 
-No external callback runs while holding the coordinator mutex. `inFlightState`
-is not cleared and `Finalized` is not closed before finalization completes. No
-second managed transaction begins while terminal history/audit is outstanding. A
-callback panic is caught, converted into a finalization error, surfaced through
-admin health, and must not wedge the coordinator. Finalization failure is an
-observability/compliance degradation, not a runtime rollback.
+No external callback runs while holding the coordinator mutex. The mutation gate
+is retained for as long as restoration or another config-path write can still
+occur, but both that gate and the server reload-serialization channel are
+released before a terminal ledger record can be published. A client that
+observes terminal state may therefore immediately submit the next valid apply.
+
+Managed terminal side effects remain serialized by the coordinator's dedicated
+finalization mutex. A later transaction may begin while the prior transaction's
+non-config history/audit work finishes, but its own terminal finalization queues
+behind the prior one. A callback panic is caught, converted into a finalization
+error, surfaced through advisory health, and cannot wedge admission or the reload
+loop. Finalization failure remains an observability/compliance degradation, not
+a runtime rollback.
 
 ### 5. Planned-restart linearization
 
@@ -139,7 +153,9 @@ never loses its operation or result.
   the exact terminal result is retrievable by ID; planned-restart promotion is
   linearizable.
 - **Negative / trade-off:** the coordinator holds its mutex across more of the
-  promotion path; a bounded in-memory ledger adds retention state.
+  promotion path; a bounded in-memory ledger adds retention state; a later apply
+  may begin while the prior transaction's non-config finalization finishes, so
+  managed finalizers require their own strict serialization.
 - **Invariant:** a singular latest pointer never substitutes for per-ID
   retention; no success response precedes coherent marker+disk verification; no
   high-water check suppresses a legitimate audit event.
@@ -152,9 +168,11 @@ The following pieces of this decision have landed and are covered by tests:
   in `internal/admin/server.go`, assigned by each write handler.
 - **Terminal ledger + exact-ID API (AC-02):** `internal/admin/managed_apply_registry.go`
   and `GET /api/config/applies/{id}`.
-- **Coordinator finalizer ordering (AC-03):** `internal/app/config_apply.go` runs
-  terminal finalization before clearing the in-flight guard, closing `Finalized`,
-  or delivering the synchronous result.
+- **Coordinator finalizer ordering (AC-03, amended by #226):**
+  `internal/app/config_apply.go` retains the mutation gate through restoration,
+  then clears it and closes `Finalized` before any terminal ledger publication;
+  a dedicated finalization mutex serializes history/audit/metrics/ledger work
+  before the synchronous terminal result is delivered.
 - **Durable-recording-before-high-water + operation-specific audit and bounded
   metric labels (AC-04):** `internal/app/serve.go` callback ordering,
   `finalizedAuditOperation` in `internal/admin/server.go`, and the

@@ -5,7 +5,7 @@
 **Audited branch:** `main`  
 **Source baseline:** `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a`  
 **Status:** current authoritative audit and implementation-planning baseline  
-**Execution status (2026-08-05):** programme/audit truth, the non-cache correction tranche, and #129 security-test foundations are closed; #131 is the next issue and has not started
+**Execution status (2026-08-06):** programme/audit truth, the non-cache correction tranche, #129 security-test foundations, and the #226 managed-apply terminal-order correction are included in the current baseline; #131 is next and has not started
 **Supersedes for current planning:** `2026-07-31-full-repository-audit.md` while preserving that document as historical evidence
 
 > This audit is the source of truth for the current programme. It separates shipped behavior, confirmed defects, probable defects, operational enhancements, architecture decisions and bounded experiments. A linked issue is not implementation approval when its title contains `[DRAFT]` or `[GATED]`.
@@ -227,6 +227,13 @@ Issue #129 adds a separate `Security package gates` workflow and a reproducible
 local command for `internal/rbac`, `internal/waf`, and `internal/plugins`. The
 machine-readable manifest records exact full-tag baselines and independently
 enforced floors; missing packages and malformed profiles fail closed.
+
+Issue #226 closes the scheduler-dependent gap between terminal managed-apply
+visibility and mutation admission. Restoration and final disk truth complete
+before the in-flight and server-finalization gates are released; only then may
+the serialized history/audit/metrics/ledger finalizer publish terminal state.
+A terminal record is therefore a reliable signal that the next valid apply can
+be admitted, while managed finalization side effects remain strictly ordered.
 
 ---
 
