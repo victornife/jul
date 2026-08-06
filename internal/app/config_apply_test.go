@@ -1051,6 +1051,7 @@ func TestSlowRestorationReturnsSavedNotLiveThenOneTerminalResult(t *testing.T) {
 	restoreStarted := make(chan struct{})
 	restoreContinue := make(chan struct{})
 	terminalCh := make(chan admin.ConfigApplyResult, 1)
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -1063,7 +1064,7 @@ func TestSlowRestorationReturnsSavedNotLiveThenOneTerminalResult(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(20 * time.Millisecond * raceTimeScale)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
 		PlannedRestart: &PlannedRestartStore{},
@@ -1071,7 +1072,8 @@ func TestSlowRestorationReturnsSavedNotLiveThenOneTerminalResult(t *testing.T) {
 			close(restoreStarted)
 			<-restoreContinue
 		},
-		waitMargin: 10 * time.Millisecond * raceTimeScale,
+		waitMargin: 10 * time.Millisecond,
+		clock:      clock,
 		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
 			terminalCh <- comp.Result
 			return admin.ManagedApplyFinalization{FinalizationError: comp.Result.FinalizationError}
@@ -1079,11 +1081,17 @@ func TestSlowRestorationReturnsSavedNotLiveThenOneTerminalResult(t *testing.T) {
 	}
 
 	resultCh := make(chan ApplyResult, 1)
+	before := clock.timerCount()
 	go func() {
 		result, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 		resultCh <- result
 	}()
 	<-restoreStarted
+	// The restoration is wedged inside the finalizer, so only the bounded
+	// synchronous wait can return. Advance fake time past the derived
+	// transaction deadline once that wait timer is installed (#228).
+	waitForFakeTimerCount(t, clock, before+2)
+	clock.Advance(savedNotLiveBudget + c.waitMargin + time.Millisecond)
 	provisional := <-resultCh
 	if provisional.Reload == nil || provisional.Reload.Outcome != server.ReloadSavedNotLive {
 		t.Fatalf("provisional result = %+v, want saved_not_live", provisional)

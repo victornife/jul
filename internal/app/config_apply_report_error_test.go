@@ -38,6 +38,7 @@ func TestReportManagedApplyErrorPendingRegistration(t *testing.T) {
 	reports := make(chan report, 4)
 
 	reqCh := make(chan server.ReloadRequest, 1)
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -50,11 +51,12 @@ func TestReportManagedApplyErrorPendingRegistration(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond * raceTimeScale)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
-		waitMargin:     10 * time.Millisecond * raceTimeScale,
+		waitMargin:     10 * time.Millisecond,
 		PlannedRestart: &PlannedRestartStore{},
+		clock:          clock,
 		// The pending-registration write fails after persistence.
 		OnManagedApplyStarted: func(admin.ManagedApplyStart) error {
 			return errors.New("ledger unavailable")
@@ -64,16 +66,13 @@ func TestReportManagedApplyErrorPendingRegistration(t *testing.T) {
 		},
 	}
 
-	startedAt := time.Now().UTC()
+	startedAt := clock.Now().UTC()
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
 		StartedAt: startedAt,
-		Deadline:  startedAt.Add(30 * time.Millisecond * raceTimeScale),
+		Deadline:  startedAt.Add(savedNotLiveBudget),
 	}
-	res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
-	if err != nil {
-		t.Fatalf("apply error: %v", err)
-	}
+	res := applyRawAwaitingSavedNotLive(t, c, clock, reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
 	if res.ApplyID == "" {
 		t.Fatal("apply result carried no apply id")
 	}
@@ -125,6 +124,7 @@ func TestReportManagedApplyErrorRestoration(t *testing.T) {
 	reports := make(chan report, 4)
 
 	reqCh := make(chan server.ReloadRequest, 1)
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -135,11 +135,12 @@ func TestReportManagedApplyErrorRestoration(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond * raceTimeScale)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
-		waitMargin:     10 * time.Millisecond * raceTimeScale,
+		waitMargin:     10 * time.Millisecond,
 		PlannedRestart: &PlannedRestartStore{},
+		clock:          clock,
 		// Corrupt the on-disk candidate just before restoration so the digest
 		// check fails deterministically and restorePreviousLocked returns an
 		// error routed to logRestorationFailure.
@@ -151,16 +152,13 @@ func TestReportManagedApplyErrorRestoration(t *testing.T) {
 		},
 	}
 
-	startedAt := time.Now().UTC()
+	startedAt := clock.Now().UTC()
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
 		StartedAt: startedAt,
-		Deadline:  startedAt.Add(30 * time.Millisecond * raceTimeScale),
+		Deadline:  startedAt.Add(savedNotLiveBudget),
 	}
-	res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
-	if err != nil {
-		t.Fatalf("apply error: %v", err)
-	}
+	res := applyRawAwaitingSavedNotLive(t, c, clock, reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
 	if res.ApplyID == "" {
 		t.Fatal("apply result carried no apply id")
 	}

@@ -34,6 +34,7 @@ func TestTerminalManagedApplyVisibilityReleasesAdmission(t *testing.T) {
 	}
 
 	firstRequests := make(chan server.ReloadRequest, 1)
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -44,11 +45,12 @@ func TestTerminalManagedApplyVisibilityReleasesAdmission(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond * raceTimeScale)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
-		waitMargin:     10 * time.Millisecond * raceTimeScale,
+		waitMargin:     10 * time.Millisecond,
 		PlannedRestart: &PlannedRestartStore{},
+		clock:          clock,
 	}
 
 	registry := admin.NewManagedApplyRegistry(0, 0)
@@ -110,16 +112,13 @@ func TestTerminalManagedApplyVisibilityReleasesAdmission(t *testing.T) {
 		return fin
 	}
 
-	startedAt := time.Now().UTC()
-	firstResult, err := c.ApplyRaw(admin.ApplyRequestContext{
+	startedAt := clock.Now().UTC()
+	firstResult := applyRawAwaitingSavedNotLive(t, c, clock, admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
 		StartedAt: startedAt,
-		Deadline:  startedAt.Add(30 * time.Millisecond * raceTimeScale),
+		Deadline:  startedAt.Add(savedNotLiveBudget),
 		TokenID:   "tok-owner-123",
 	}, validConfigRaw(t, ":8081"), ApplyHot)
-	if err != nil {
-		t.Fatalf("first apply: %v", err)
-	}
 	if firstResult.Reload == nil || firstResult.Reload.Outcome != server.ReloadSavedNotLive {
 		t.Fatalf("first result = %+v, want provisional saved_not_live", firstResult.Reload)
 	}
@@ -175,7 +174,7 @@ func TestTerminalManagedApplyVisibilityReleasesAdmission(t *testing.T) {
 	}
 	secondDone := make(chan applyOutcome, 1)
 	go func() {
-		secondStarted := time.Now().UTC()
+		secondStarted := clock.Now().UTC()
 		res, applyErr := c.ApplyRaw(admin.ApplyRequestContext{
 			Operation: admin.ApplyOperationConfigApply,
 			StartedAt: secondStarted,

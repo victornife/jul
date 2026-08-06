@@ -25,6 +25,70 @@ func waitForFakeTimerCount(t *testing.T, clock *fakeClock, count int) {
 	}
 }
 
+// savedNotLiveBudget is the transaction budget used by the managed-apply tests
+// that must reach the provisional saved_not_live path. It is spent by advancing
+// an injected fakeClock, never by real elapsed time, so preflight, persistence
+// and reload submission may take as long as the host needs (#228).
+const savedNotLiveBudget = 30 * time.Millisecond
+
+// newSavedNotLiveClock returns the fake clock those tests inject. Fake time
+// starts at the Unix epoch so a test that forgets to derive its StartedAt and
+// Deadline from the clock fails loudly instead of flaking.
+func newSavedNotLiveClock() *fakeClock { return newFakeClock(time.Unix(0, 0).UTC()) }
+
+// timerCount reports how many timers the clock has registered so far. The
+// registry is append-only, so a test that drives several transactions waits on
+// a count relative to this reading rather than an absolute one.
+func (f *fakeClock) timerCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.timers)
+}
+
+// applyRawAwaitingSavedNotLive runs ApplyRaw on its own goroutine and advances
+// clock past the transaction deadline once the coordinator has installed its
+// synchronous reload-wait timer, so the provisional saved_not_live result is
+// produced deterministically instead of racing real preflight work against a
+// wall-clock budget (#228).
+//
+// Exactly two coordinator timers precede the return: the preflight transaction
+// deadline, and the reload wait installed after the candidate is persisted and
+// the reload is enqueued. Waiting for the second one means the advance can never
+// run ahead of the timer it is meant to fire.
+func applyRawAwaitingSavedNotLive(t *testing.T, c *ConfigApplyCoordinator, clock *fakeClock, reqCtx admin.ApplyRequestContext, raw []byte, mode ApplyMode) ApplyResult {
+	t.Helper()
+	type outcome struct {
+		res ApplyResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	before := clock.timerCount()
+	go func() {
+		res, err := c.ApplyRaw(reqCtx, raw, mode)
+		done <- outcome{res: res, err: err}
+	}()
+
+	waitForFakeTimerCount(t, clock, before+2)
+	deadline := reqCtx.Deadline
+	if deadline.IsZero() {
+		// No admission deadline: the coordinator derived one from the serving
+		// reload_timeout starting at the transaction's clock reading.
+		deadline = clock.Now().Add(savedNotLiveBudget)
+	}
+	clock.Advance(deadline.Sub(clock.Now()) + c.waitMargin + time.Millisecond)
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("apply error: %v", got.err)
+		}
+		return got.res
+	case <-time.After(10 * time.Second):
+		t.Fatal("ApplyRaw did not return after the fake transaction deadline elapsed")
+		return ApplyResult{}
+	}
+}
+
 // TestManagedApplyEnforcesSingleReloadTimeoutBudget is the deterministic proof
 // for AC-08/R15-01: preflight and the reload wait share ONE absolute deadline
 // bound at admission. A fake clock drives the transaction so the test does not

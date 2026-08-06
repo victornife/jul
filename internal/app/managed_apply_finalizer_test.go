@@ -137,6 +137,7 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 	completedCh := make(chan admin.ManagedApplyFinalization, 1)
 
 	reqCh := make(chan server.ReloadRequest, 1)
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -147,11 +148,12 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond * raceTimeScale)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
-		waitMargin:     10 * time.Millisecond * raceTimeScale,
+		waitMargin:     10 * time.Millisecond,
 		PlannedRestart: &PlannedRestartStore{},
+		clock:          clock,
 		OnManagedApplyStarted: func(start admin.ManagedApplyStart) error {
 			applyID := start.Result.ApplyID
 			if applyID == "" && start.Result.Reload != nil {
@@ -182,18 +184,15 @@ func TestManagedApplyFinalizerExactlyOnce(t *testing.T) {
 
 	// 1. Submit a managed apply; the reload is withheld so ApplyRaw returns the
 	//    provisional saved_not_live 202 after its bounded wait expires.
-	startedAt := time.Now().UTC()
+	startedAt := clock.Now().UTC()
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
 		StartedAt: startedAt,
-		Deadline:  startedAt.Add(30 * time.Millisecond * raceTimeScale),
+		Deadline:  startedAt.Add(savedNotLiveBudget),
 		TokenID:   "tok-owner-finalizer",
 		Actor:     "alice",
 	}
-	res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
-	if err != nil {
-		t.Fatalf("apply error: %v", err)
-	}
+	res := applyRawAwaitingSavedNotLive(t, c, clock, reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
 	applyID := res.ApplyID
 	if applyID == "" {
 		t.Fatal("apply result carried no apply id")

@@ -93,6 +93,7 @@ func TestApplyRegistersPendingRecordBeforeSavedNotLive(t *testing.T) {
 	}
 
 	reqCh := make(chan server.ReloadRequest, 1)
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -105,26 +106,24 @@ func TestApplyRegistersPendingRecordBeforeSavedNotLive(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond * raceTimeScale)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
-		waitMargin:     10 * time.Millisecond * raceTimeScale,
+		waitMargin:     10 * time.Millisecond,
 		PlannedRestart: &PlannedRestartStore{},
+		clock:          clock,
 	}
 	registry, startedCh, completedCh := wireProductionLedger(c)
 
-	startedAt := time.Now().UTC()
-	deadline := startedAt.Add(30 * time.Millisecond * raceTimeScale)
+	startedAt := clock.Now().UTC()
+	deadline := startedAt.Add(savedNotLiveBudget)
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
 		StartedAt: startedAt,
 		Deadline:  deadline,
 		TokenID:   "tok-owner-123",
 	}
-	res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
-	if err != nil {
-		t.Fatalf("apply error: %v", err)
-	}
+	res := applyRawAwaitingSavedNotLive(t, c, clock, reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
 	if res.Reload == nil || res.Reload.Outcome != server.ReloadSavedNotLive {
 		t.Fatalf("result = %+v, want provisional saved_not_live", res.Reload)
 	}

@@ -52,6 +52,7 @@ func TestManagedApplyLifecycle_202PendingThen200Terminal(t *testing.T) {
 	// ApplyRaw wait to expire and return the provisional saved_not_live 202,
 	// while the exact-ID pending ledger record is already registered.
 	reqCh := make(chan server.ReloadRequest, 1)
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -64,11 +65,12 @@ func TestManagedApplyLifecycle_202PendingThen200Terminal(t *testing.T) {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
 			// A short reload_timeout bounds the synchronous wait so the 202 is
 			// returned promptly without any test sleep.
-			cfg.Global.ReloadTimeout = config.Duration(30 * time.Millisecond * raceTimeScale)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
-		waitMargin:     10 * time.Millisecond * raceTimeScale,
+		waitMargin:     10 * time.Millisecond,
 		PlannedRestart: &PlannedRestartStore{},
+		clock:          clock,
 	}
 
 	// Wire the coordinator to a real admin ManagedApplyRegistry using the EXACT
@@ -89,18 +91,15 @@ func TestManagedApplyLifecycle_202PendingThen200Terminal(t *testing.T) {
 
 	// 1. Submit a managed apply. The reload is withheld, so ApplyRaw returns the
 	//    provisional saved_not_live 202 after its bounded wait expires.
-	startedAt := time.Now().UTC()
-	deadline := startedAt.Add(30 * time.Millisecond * raceTimeScale)
+	startedAt := clock.Now().UTC()
+	deadline := startedAt.Add(savedNotLiveBudget)
 	reqCtx := admin.ApplyRequestContext{
 		Operation: admin.ApplyOperationConfigApply,
 		StartedAt: startedAt,
 		Deadline:  deadline,
 		TokenID:   "tok-owner-vertical",
 	}
-	res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
-	if err != nil {
-		t.Fatalf("apply error: %v", err)
-	}
+	res := applyRawAwaitingSavedNotLive(t, c, clock, reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
 	if res.Reload == nil || res.Reload.Outcome != server.ReloadSavedNotLive {
 		t.Fatalf("result = %+v, want provisional saved_not_live", res.Reload)
 	}
