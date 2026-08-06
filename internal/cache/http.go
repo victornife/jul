@@ -216,6 +216,9 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
+	// lgtm[go/reflected-xss] – This observes the status of a response the cache
+	// only forwards. The bytes are the upstream application's, passed through
+	// unchanged; that application is responsible for sanitizing its own output.
 	return w.ResponseWriter.Write(p)
 }
 

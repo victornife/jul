@@ -181,6 +181,11 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, state 
 	}
 	w.WriteHeader(status)
 	if r.Method != http.MethodHead {
+		// lgtm[go/reflected-xss] – This forwards the upstream response body
+		// unchanged, together with its own Content-Type. User input flows to the
+		// upstream application, which is responsible for sanitizing any output it
+		// generates. Buffering it to decide whether a 304 could be served instead
+		// does not make the cache the origin of the bytes.
 		_, _ = w.Write(rec.body.Bytes())
 	}
 }
