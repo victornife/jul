@@ -32,36 +32,39 @@ type Metrics struct {
 	// metric shape is stable for dashboards.
 	hostLabelEnabled bool
 
-	requests         *prometheus.CounterVec
-	duration         *prometheus.HistogramVec
-	inflight         prometheus.Gauge
-	cacheEvents      *prometheus.CounterVec
-	compressed       *prometheus.CounterVec
-	ratelimited      *prometheus.CounterVec
-	authDecisions    *prometheus.CounterVec
-	upstreamUp       *prometheus.GaugeVec
-	upstreamBackends *prometheus.GaugeVec
-	discoveryErrors  *prometheus.CounterVec
-	probes           *prometheus.CounterVec
-	probeDuration    *prometheus.HistogramVec
-	grpcTranscode    *prometheus.CounterVec
-	grpcStreamMsgs   *prometheus.CounterVec
-	grpcProxyCalls   prometheus.Counter
-	pluginInvokes    *prometheus.CounterVec
-	pluginDuration   *prometheus.HistogramVec
-	pluginPanics     *prometheus.CounterVec
-	listenerConns    prometheus.Gauge
-	http3Conns       prometheus.Gauge
-	streamConns      *prometheus.GaugeVec
-	streamBytes      *prometheus.CounterVec
-	streamUDPEvicted *prometheus.CounterVec
-	streamUDPReject  prometheus.Counter
-	certExpiry       *prometheus.GaugeVec
-	certRenewals     prometheus.Counter
-	mtlsHandshakes   *prometheus.CounterVec
-	wafEvents        *prometheus.CounterVec
-	egressDecisions  *prometheus.CounterVec
-	egressDNSAnswers *prometheus.CounterVec
+	requests    *prometheus.CounterVec
+	duration    *prometheus.HistogramVec
+	inflight    prometheus.Gauge
+	cacheEvents *prometheus.CounterVec
+	// cacheRevalidations counts background cache revalidation outcomes. The
+	// label values come from a closed set of cache-package constants.
+	cacheRevalidations *prometheus.CounterVec
+	compressed         *prometheus.CounterVec
+	ratelimited        *prometheus.CounterVec
+	authDecisions      *prometheus.CounterVec
+	upstreamUp         *prometheus.GaugeVec
+	upstreamBackends   *prometheus.GaugeVec
+	discoveryErrors    *prometheus.CounterVec
+	probes             *prometheus.CounterVec
+	probeDuration      *prometheus.HistogramVec
+	grpcTranscode      *prometheus.CounterVec
+	grpcStreamMsgs     *prometheus.CounterVec
+	grpcProxyCalls     prometheus.Counter
+	pluginInvokes      *prometheus.CounterVec
+	pluginDuration     *prometheus.HistogramVec
+	pluginPanics       *prometheus.CounterVec
+	listenerConns      prometheus.Gauge
+	http3Conns         prometheus.Gauge
+	streamConns        *prometheus.GaugeVec
+	streamBytes        *prometheus.CounterVec
+	streamUDPEvicted   *prometheus.CounterVec
+	streamUDPReject    prometheus.Counter
+	certExpiry         *prometheus.GaugeVec
+	certRenewals       prometheus.Counter
+	mtlsHandshakes     *prometheus.CounterVec
+	wafEvents          *prometheus.CounterVec
+	egressDecisions    *prometheus.CounterVec
+	egressDNSAnswers   *prometheus.CounterVec
 
 	// Reload and staged-restart metrics (P2-05).
 	reloadTotal      *prometheus.CounterVec
@@ -175,6 +178,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_cache_events_total",
 			Help: "Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS).",
 		}, []string{"state"}),
+		cacheRevalidations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_cache_revalidations_total",
+			Help: "Background cache revalidation decisions, labeled by bounded outcome (stored/not_modified/uncacheable/origin_error/canceled/panic/no_lease/deduplicated).",
+		}, []string{"outcome"}),
 		compressed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_http_response_compressed_total",
 			Help: "Responses compressed by the edge, labeled by content coding.",
@@ -347,6 +354,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.duration,
 		m.inflight,
 		m.cacheEvents,
+		m.cacheRevalidations,
 		m.compressed,
 		m.ratelimited,
 		m.authDecisions,
@@ -489,6 +497,15 @@ func (m *Metrics) TrafficSnapshot() TrafficSources {
 // hook (the middleware package cannot import observability directly).
 func (m *Metrics) ObserveCompression(encoding string) {
 	m.compressed.WithLabelValues(encoding).Inc()
+}
+
+// ObserveCacheRevalidation records the outcome of one background cache
+// revalidation decision. outcome is one of the cache package's own bounded
+// constants — never a cache key, URL, host, or error string — so the label set
+// stays fixed. It is wired into the cache as its revalidation observer (the
+// cache package cannot import observability directly).
+func (m *Metrics) ObserveCacheRevalidation(outcome string) {
+	m.cacheRevalidations.WithLabelValues(outcome).Inc()
 }
 
 // ObserveRateLimited records that a request was rejected by rate limiting. kind

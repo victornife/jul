@@ -120,6 +120,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Metrics persist across reloads so counters are not reset on config edits.
 	metrics := observability.NewMetrics(observability.WithHostLabel(cfg.Observability.Metrics.HostLabel))
 
+	// Background cache revalidation reports its bounded outcome through the
+	// metrics registry. The cache cannot import observability, so the seam is a
+	// plain callback installed here, before any traffic is served.
+	responseCache.SetRevalidationObserver(metrics.ObserveCacheRevalidation)
+
 	// The optional egress allow-list guards the server's config-driven auxiliary
 	// fetches (JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP PKI
 	// calls, and WASM plugin fetches). It is built before the process-lifetime
