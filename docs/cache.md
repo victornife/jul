@@ -17,6 +17,8 @@ evidence until #107 and #131–#134 close.
 - [Configuration](#configuration)
 - [Cache key and Vary](#cache-key-and-vary)
 - [Freshness and stale-while-revalidate](#freshness-and-stale-while-revalidate)
+- [Background revalidation lifecycle](#background-revalidation-lifecycle)
+- [Entry immutability](#entry-immutability)
 - [On-disk format](#on-disk-format)
 - [Disk-tier safety](#disk-tier-safety)
 - [Eviction and overflow](#eviction-and-overflow)
@@ -85,11 +87,15 @@ Responses report their disposition in the `X-Cache` header:
 ## Historical behaviour matrix — under recertification
 
 The table records the intended and previously documented behavior. Rows covering
-background revalidation ownership, shared-entry immutability, `no-cache`,
-`must-revalidate`/`proxy-revalidate`, authenticated reuse, unsafe-method
-invalidation, `304` metadata, Range requests and upgrade transparency are being
-revalidated and corrected by #107 and #131–#134. Do not treat an unchecked
-interaction as a current conformance guarantee.
+`no-cache`, `must-revalidate`/`proxy-revalidate`, authenticated reuse,
+unsafe-method invalidation, `304` metadata, Range requests and upgrade
+transparency are being revalidated and corrected by #107 and #132–#134. Do not
+treat an unchecked interaction as a current conformance guarantee.
+
+Background-revalidation ownership and shared-entry immutability are no longer
+under revalidation: they are corrected and evidenced by #131, and described in
+[Background revalidation lifecycle](#background-revalidation-lifecycle) and
+[Entry immutability](#entry-immutability).
 
 | Scenario | Rule | Detail |
 | --- | --- | --- |
@@ -114,14 +120,14 @@ interaction as a current conformance guarantee.
 
 The active cache programme requires:
 
-- generation-owned, cancellable background revalidation;
-- immutable published entries and race-free metadata replacement;
+- ~~generation-owned, cancellable background revalidation~~ — **delivered by #131**;
+- ~~immutable published entries and race-free metadata replacement~~ — **delivered by #131**;
 - synchronous validation for request/response `no-cache`;
 - correct `must-revalidate`, `proxy-revalidate`, authenticated reuse, unsafe-method invalidation and `304` metadata handling;
 - initial bypass for requests carrying `Range` or `If-Range` (cached byte-range serving remains a future enhancement);
 - transparent WebSocket/`101`, SSE and optional `http.ResponseWriter` interface behavior.
 
-Until that programme closes, avoid cache on upgrade routes and treat authenticated or user-specific responses conservatively (`private`/`no-store`).
+Until the remaining items close, avoid cache on upgrade routes and treat authenticated or user-specific responses conservatively (`private`/`no-store`).
 
 ## Freshness and stale-while-revalidate
 
@@ -133,6 +139,10 @@ for lower tail latency. A burst of concurrent stale hits triggers exactly one
 background revalidation per variant, so the cache shields the origin from a
 thundering herd.
 
+The background refresh is owned by the handler generation that started it; see
+[Background revalidation lifecycle](#background-revalidation-lifecycle) for what
+cancels it and what does not.
+
 ## Stale-if-error
 
 `stale_if_error` extends the stale-serving window when a background
@@ -141,6 +151,14 @@ revalidation fails, the cached entry remains servable for the configured
 `stale_if_error` duration from the point of failure, protecting clients from
 backend outages. Once the error window expires or a subsequent revalidation
 succeeds, normal freshness rules apply.
+
+The extension **replaces** the stored entry with an updated copy; it never edits
+the published entry in place (see [Entry immutability](#entry-immutability)).
+
+A revalidation that is **cancelled** — by process shutdown, by forced generation
+retirement, or by the bounded operation deadline — is deliberately *not* treated
+as an upstream error and does **not** extend the stale window. Only a real origin
+failure does.
 
 Example — tolerate a 5-minute backend outage:
 
@@ -152,6 +170,107 @@ stale_if_error         = "300s"
 
 > `stale_if_error` only applies when a stale entry exists and a background
 > revalidation is attempted. It does not create cache entries on its own.
+
+## Background revalidation lifecycle
+
+A background refresh is **owned by the handler generation that started it**. This
+is what the ownership model guarantees, and what it deliberately does not.
+
+### Ownership
+
+When a stale hit decides to refresh, it acquires a **background lease** on the
+current handler generation *before* the originating request returns. The lease is
+counted in the same in-flight accounting that keeps a generation's resources
+open, so while a refresh is running the reload machinery treats that generation
+exactly as if a request were still executing on it:
+
+- the generation's gRPC backend connections, WASM plugin runtimes and
+  static-file directory handles stay open;
+- a configuration reload still publishes the new generation immediately, and new
+  requests use it at once;
+- the **old** generation is retired only once its leased work finishes.
+
+A generation that has begun retiring refuses new background work. In that case
+the stale entry is served normally and simply expires; no refresh starts.
+
+### Lifetime
+
+| Event | Effect on an in-flight background revalidation |
+| --- | --- |
+| The originating client disconnects | **No effect.** The refresh continues; that is the point of `stale_while_revalidate`. |
+| A configuration reload runs | **No effect** on the refresh. It keeps using the generation it started on. |
+| The old generation exceeds `[global] shutdown_timeout` while retiring | **Cancelled.** The server cancels the leased work, then closes the generation's resources. |
+| The operation exceeds `[global] shutdown_timeout` in total | **Cancelled.** Every background operation carries that bound as an absolute deadline. |
+| Process shutdown | **Cancelled**, then awaited for at most `[global] shutdown_timeout`. Shutdown is never wedged by a refresh. |
+
+A background revalidation therefore **may survive client disconnect**, and
+**cannot outlive process shutdown or its bounded lifetime**.
+
+### Context carried into a refresh
+
+The refresh does not inherit the client request's context. It runs on a context
+rooted in the process lifetime that carries an explicit allow-list of values:
+
+| Value | Carried | Why |
+| --- | --- | --- |
+| Generation upstream pool snapshot | yes | The refresh must select from the same backend set as the request that started it. |
+| Mutual-TLS client identity | yes | The reverse proxy expands `$ssl_client_*` from it; dropping it would send the origin a different request. |
+| Request id | yes | Log correlation; bounded, already-logged value. |
+| Trace id | yes | Log correlation; bounded, already-logged value. |
+| Authentication claims | **no** | Consumed by the rate limiter, which wraps *outside* the cache and is not re-entered by a refresh. Not retained. |
+| Plugin invocation state | **no** | Plugin middleware also wraps outside the cache. |
+| Client tracing span | **no** | A refresh is not part of the client request's trace and must not extend its lifetime. |
+| Client cancellation / request deadline | **no** | Replaced by process cancellation plus the bounded operation deadline. |
+
+### Deduplication
+
+At most one refresh runs per (effective cache key, handler generation). A burst
+of concurrent stale hits therefore produces exactly one origin request.
+
+Generation is part of the key on purpose: a refresh still running on a retiring
+generation must never suppress the new generation's refresh of the same key. The
+call state is removed, and every waiter released, on **every** outcome —
+success, `304`, uncacheable, origin error, cancellation and panic in the
+downstream handler.
+
+### Cache data across reloads
+
+The cache instance is created once per process and is captured by every handler
+generation, so **cached data persists across ordinary configuration reloads**.
+This is the pre-existing, deliberately preserved policy: reloading configuration
+does not warm-start or flush the cache.
+
+One consequence follows directly from it: a refresh that started on the old
+generation publishes into the process-shared cache even if it completes after a
+reload changed routes or backends. The result is the representation the **old**
+generation's route would have produced. Changing routing or backends therefore
+does not retroactively invalidate entries; use `[cache] enabled = false`, a
+restart, or the admin purge endpoint when that matters.
+
+### Observability
+
+`jul_cache_revalidations_total{outcome}` counts refresh decisions with a fixed
+label set: `stored`, `not_modified`, `uncacheable`, `origin_error`, `canceled`,
+`panic`, `no_lease`, `deduplicated`. No cache key, URL, host, generation id or
+error string is ever used as a label. Structured logs carry only the bounded
+operation name, the generation id and a bounded reason.
+
+## Entry immutability
+
+A cache entry is **immutable once published**. After an entry is handed to the
+memory or disk tier, no field of it is written again — not the body bytes, not
+the header map or its value slices, not the `Vary` metadata, and not the
+freshness timestamps.
+
+Code that must change timing or metadata (a `304` refreshing freshness, a
+`stale_if_error` window extension) builds a deep-enough clone, mutates the clone,
+and atomically replaces the stored pointer under the tier's own lock. Cloning
+happens only at those publication and update boundaries, so a cache **hit never
+pays a body copy**.
+
+This is what makes it safe for a lookup to hand out the stored `*Entry` pointer:
+concurrent readers, the disk tier's encoder and a replacing writer can never
+observe a half-updated entry.
 
 ## On-disk format
 
@@ -223,6 +342,23 @@ An entry larger than a tier's cap is simply not stored in that tier.
 4. **No cross-location cache sharing.** Each Jul.IA process has its own isolated
    cache instance. There is no shared cache (e.g. Redis) for multi-instance
    deployments; each node warms independently.
+
+5. **A reload does not invalidate cached entries.** The cache is process-scoped
+   and survives configuration reloads by design, so a routing or backend change
+   does not retroactively drop entries stored under the previous configuration.
+   A refresh that was already in flight when the reload ran also completes
+   against the *old* generation's route and publishes its result. Use the admin
+   purge endpoint or a restart when a configuration change must invalidate
+   cached content. Characterized by
+   `TestReloadWaitsForCacheRevalidationHoldingGeneration`
+   (`internal/server`) and the generation-isolation tests in `internal/cache`.
+
+6. **A background refresh delays retirement of its generation.** While a refresh
+   is running, the handler generation that started it keeps its gRPC
+   connections, plugin runtimes and static roots open. This is bounded: the
+   refresh is cancelled and the resources closed after `[global]
+   shutdown_timeout`. A very slow origin can therefore hold one superseded
+   generation's resources for up to that long after a reload.
 
 ## Benchmarks
 
@@ -296,9 +432,9 @@ The feature retains its historical release record, but the current correctness f
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| 1 — Conformance / behaviour matrix | ⚠️ recertification open | #107 and #131–#134 own the corrected executable matrix |
+| 1 — Conformance / behaviour matrix | ⚠️ recertification open | #107 and #132–#134 own the corrected executable matrix; the revalidation-lifecycle and entry-immutability rows are settled by #131 |
 | 2 — Published benchmark numbers | ✅ | `BenchmarkCacheHit` / `Miss` / `VaryHit` / `MemOverflow` in `internal/cache/bench_test.go` |
-| 3 — Known-limitations list | ✅ | 4-item limitation list above |
+| 3 — Known-limitations list | ✅ | 6-item limitation list above |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
 | 5 — Long-running soak test | ✅ | soaked 1h windows 2026-07-04 (1.5M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers) |
 | 6 — Runnable example + docs | ✅ | `testdata/cache.toml` + this doc |

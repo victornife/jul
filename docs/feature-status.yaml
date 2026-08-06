@@ -169,9 +169,11 @@ features:
     doc: cache.md
     criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
     notes: >
-      Historical released GA record. Current shared-cache, lifecycle,
-      concurrency and protocol-transparency evidence is under explicit
-      recertification in #107 and #131-#134; see docs/cache.md and docs/status.md.
+      Historical released GA record. Generation-owned cancellable revalidation
+      and immutable published entries are corrected and evidenced by #131.
+      Current shared-cache, invalidation and protocol-transparency evidence
+      remains under explicit recertification in #107 and #132-#134; see
+      docs/cache.md and docs/status.md.
       The final maturity/status decision belongs to #134.
 
   - id: core-http

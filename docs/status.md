@@ -66,7 +66,7 @@ prerelease and does not change stable-release or long-running-soak status.
 
 ### Active regression and recertification notices
 
-- **Response cache:** the historical GA row remains the released record, but #107 and #131–#134 reopen current conformance evidence. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.
+- **Response cache:** the historical GA row remains the released record, but #107 and #132–#134 reopen current conformance evidence. Generation-owned, cancellable background revalidation and immutable published entries are corrected and evidenced by #131. Do not treat the row as recertification until #134 publishes the corrected matrix and exact-SHA evidence.
 - **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are verified in `v1.32.1-rc.1`; stable publication remains pending. Closed-world lifecycle generation (#89) remains open, and access-log changes are restart-required until #98.
 - **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen; additive families and the bounded, path-only WAF warning contract are verified in `v1.32.1-rc.1` and remain stable-release pending.
 - **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are verified in `v1.32.1-rc.1`; stable publication remains a later decision.

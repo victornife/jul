@@ -16,6 +16,7 @@ internal/
   admin/               # Admin HTTP API, web console backend, operational endpoints
   atomicfile/          # Atomic file writes used by config save and plugin upload
   auth/                # Authentication handlers (basic, JWT, forward-auth, CIDR)
+  background/          # Generation-owned background-operation lease (context seam)
   cache/               # HTTP response cache (memory + disk backends)
   config/              # TOML config schema, parser, validation, and defaults
   handler/             # HTTP request handlers (static files, proxy, gRPC, plugins)
@@ -66,6 +67,9 @@ unit-tested independently of a full process boot.
    and rebuilds the per-listen-address HTTP handler tree on every reload.
    Generational teardown (`GenerationResources`) keeps old gRPC connections,
    plugin runtimes, and static handles alive until in-flight requests drain.
+   Background work that legitimately outlives its request holds a **generation
+   lease** so it is counted in the same drain accounting; see
+   [Generation-owned background work](#generation-owned-background-work-internalbackground).
 3. **Preflight** — `Preflight.Apply` is the admin-write validation gate:
    validate → TLS → handler dry-run → stream dry-run → bind probes →
    restart-required checks (ACME, listeners, tracing, access-log, cache,
@@ -90,6 +94,32 @@ Each helper is independently testable and owns a well-defined lifecycle
 responsibility. `serve.go` is the only file that assembles the full runtime;
 the helpers keep it readable by extracting each phase into a focused,
 testable unit.
+
+## Generation-owned background work (`internal/background/`)
+
+Some handler work legitimately outlives the request that started it — today the
+response cache's `stale_while_revalidate` refresh. Left unmanaged, such work
+escapes generational teardown and can use a gRPC connection, plugin runtime or
+static root that a reload has already closed.
+
+`internal/background` is the smallest durable seam that prevents this. It is a
+dependency-free context seam, in the spirit of `internal/tracing`: the server
+supplies the implementation, the cache consumes only the interface, and neither
+package imports the other.
+
+| Piece | Responsibility |
+|------|---------------|
+| `Operation` | Closed set of constants naming the work (`cache_revalidate`). Never caller-supplied, so it is safe as a metric label. |
+| `Lease` | `Acquire(src, op) (ctx, release, ok)` plus `Generation()`. Installed in every request context by the server's dynamic handler. |
+| `Group` | The concrete lease. Roots operations in a parent context, bounds each with a deadline, and calls `Admit`/`Done` hooks so the owner counts leased work in its own accounting. |
+| `Detach` | The explicit request-context allow-list. Copies the generation upstream snapshot, mutual-TLS identity and request/trace ids; deliberately drops claims, plugin state, the client span, and client cancellation. |
+
+`internal/server`'s `handlerGen` implements `Lease` by delegating to a `Group`
+whose hooks drive the same `inflight` counter that requests use. The result is
+that leased background work delays generation retirement exactly like an
+in-flight request, while remaining cancellable by process shutdown and bounded by
+`[global] shutdown_timeout`. See
+[reload semantics](reload-semantics.md#generation-owned-background-work).
 
 ## Large-file decomposition (`internal/admin/`)
 

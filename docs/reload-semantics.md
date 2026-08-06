@@ -472,6 +472,42 @@ connection. A **rejected** reload never reaches step 1's swap: its freshly
 built (staged) resources are closed immediately and the live generation is
 untouched.
 
+### Generation-owned background work
+
+Some work legitimately outlives the request that started it. Today that is the
+response cache's `stale_while_revalidate` refresh: the client is served the stale
+representation immediately and the origin is contacted afterwards.
+
+Such work is **not** allowed to escape generation accounting. Before the
+originating request returns, it takes a **background lease** on its generation
+(`internal/background`). The lease increments the *same* in-flight counter used
+by requests, so step 3 above applies to it unchanged: a superseded generation
+keeps its gRPC connections, plugin runtimes and static roots open until its
+leased work finishes.
+
+The lease also fixes the work's lifetime:
+
+- the operation context is rooted in the **process** context, not the client
+  connection, so a client disconnect does not abort it;
+- it carries an absolute deadline equal to `[global] shutdown_timeout`, so no
+  single operation can delay retirement indefinitely;
+- forced retirement (step 4) **cancels the lease before closing the
+  generation's resources**, so leased work can never be using a resource that is
+  being torn down;
+- process shutdown cancels the live generation's leased work and then waits for
+  it for at most `[global] shutdown_timeout`, so shutdown stays bounded.
+
+A generation that has begun retiring **refuses** new background work rather than
+migrating it to the live generation: the work belongs to the handler tree it
+captured. A refused acquisition leaves the in-flight accounting balanced, so a
+rejected attempt can never pin a generation open.
+
+The operation name is a closed set of constants, never caller-supplied, so it is
+safe in metrics and logs. See [Background revalidation
+lifecycle](cache.md#background-revalidation-lifecycle) for the cache-side
+contract, including the explicit list of request-context values a refresh
+inherits.
+
 ### Stateless per-reload components
 
 Not every reloaded component owns teardown-sensitive resources. Per-location
