@@ -170,10 +170,11 @@ features:
     criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: null, 9: true}
     notes: >
       Historical released GA record. Generation-owned cancellable revalidation
-      and immutable published entries are corrected and evidenced by #131.
-      Current shared-cache, invalidation and protocol-transparency evidence
-      remains under explicit recertification in #107 and #132-#134; see
-      docs/cache.md and docs/status.md.
+      and immutable published entries are corrected and evidenced by #131;
+      upgrade bypass, streaming policy and ResponseWriter transparency by #133.
+      Current shared-cache, invalidation and 304 evidence remains under explicit
+      recertification in #107 and #132-#134; see docs/cache.md and
+      docs/status.md.
       The final maturity/status decision belongs to #134.
 
   - id: core-http

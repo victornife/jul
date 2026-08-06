@@ -24,6 +24,7 @@ internal/
   migrate/             # NGINX config importer
   observability/       # Metrics, tracing, access logging
   plugins/             # WASM plugin loader and runtime
+  respwriter/          # Capability-preserving http.ResponseWriter wrappers
   router/              # HTTP request routing (prefix, exact, regex matching)
   server/              # HTTP/1, HTTP/2, HTTP/3 server construction and lifecycle
   signals/             # Graceful shutdown and config reload signal handling
@@ -120,6 +121,28 @@ that leased background work delays generation retirement exactly like an
 in-flight request, while remaining cancellable by process shutdown and bounded by
 `[global] shutdown_timeout`. See
 [reload semantics](reload-semantics.md#generation-owned-background-work).
+
+## Capability-preserving response writers (`internal/respwriter/`)
+
+Every layer that observes or transforms a response wraps the
+`http.ResponseWriter`: metrics, the access log, tracing, compression and the
+response cache. A wrapper that implements nothing optional removes `Flush` (SSE
+stalls) and `Hijack` (a WebSocket upgrade cannot take the connection); a wrapper
+that implements everything and returns "unsupported" is worse, because handlers
+branch on the type assertion rather than on the error, so an HTTP/2 stream is
+told it can be hijacked.
+
+`respwriter.Wrap(inner, under)` inspects `under` once and returns one of sixteen
+shells implementing **exactly** the subset of `http.Flusher`, `http.Hijacker`,
+`http.Pusher` and `io.ReaderFrom` that `under` implements, plus
+`Unwrap() http.ResponseWriter` so `http.ResponseController` reaches the real
+writer. An optional call goes to `inner` when `inner` implements the same
+interface — that is how the cache intercepts a hijack to stop capturing — and
+otherwise straight to `under`.
+
+The guarantee composes: because every wrapper in the chain uses it, the innermost
+handler sees the real connection's capability set no matter how many layers are
+enabled.
 
 ## Large-file decomposition (`internal/admin/`)
 
