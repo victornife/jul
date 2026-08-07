@@ -1,0 +1,260 @@
+name: Apply issue 236 deterministic activation patch
+
+on:
+  push:
+    branches:
+      - fix/236-deterministic-registry-activation
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: fix/236-deterministic-registry-activation
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Apply deterministic activation seam and test
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          registry = Path('internal/upstream/registry.go')
+          text = registry.read_text()
+
+          old_struct = '''type Registry struct {
+          \topts RegistryOptions
+
+          \tmu     sync.Mutex
+          \tlive   map[poolKey]*poolEntry // committed pools currently serving, keyed by (name, scheme)
+          \tstaged map[poolKey]*poolEntry // pools assembled by the in-progress build
+          }
+          '''
+          new_struct = '''type Registry struct {
+          \topts RegistryOptions
+
+          \t// startHealthChecks is the per-registry activation seam. Production
+          \t// uses Pool.StartHealthChecks; tests replace it to observe activation
+          \t// directly instead of inferring worker creation from probe timing.
+          \tstartHealthChecks func(*Pool, config.HealthCheckConfig, HealthHook, ProbeHook)
+
+          \tmu     sync.Mutex
+          \tlive   map[poolKey]*poolEntry // committed pools currently serving, keyed by (name, scheme)
+          \tstaged map[poolKey]*poolEntry // pools assembled by the in-progress build
+          }
+          '''
+          if text.count(old_struct) != 1:
+              raise SystemExit(f'expected one Registry struct, found {text.count(old_struct)}')
+          text = text.replace(old_struct, new_struct)
+
+          old_new = '''func NewRegistry(opts RegistryOptions) *Registry {
+          \treturn &Registry{
+          \t\topts:   opts,
+          \t\tlive:   make(map[poolKey]*poolEntry),
+          \t\tstaged: make(map[poolKey]*poolEntry),
+          \t}
+          }
+          '''
+          new_new = '''func NewRegistry(opts RegistryOptions) *Registry {
+          \treturn &Registry{
+          \t\topts:              opts,
+          \t\tstartHealthChecks: (*Pool).StartHealthChecks,
+          \t\tlive:              make(map[poolKey]*poolEntry),
+          \t\tstaged:            make(map[poolKey]*poolEntry),
+          \t}
+          }
+          '''
+          if text.count(old_new) != 1:
+              raise SystemExit(f'expected one NewRegistry body, found {text.count(old_new)}')
+          text = text.replace(old_new, new_new)
+
+          old_activate = '''func (r *Registry) Activate() {
+          \tr.mu.Lock()
+          \tdefer r.mu.Unlock()
+          \tfor _, e := range r.live {
+          \t\tif e.reused {
+          \t\t\tcontinue
+          \t\t}
+          \t\tif e.needsHealth {
+          \t\t\te.pool.StartHealthChecks(e.healthCfg, r.opts.OnHealth, r.opts.OnProbe)
+          \t\t}
+          \t\tif e.discovery {
+          \t\t\te.pool.StartDiscovery(e.discoverer, e.discoCfg.Refresh.Std(), DiscoveryHooks{
+          \t\t\t\tOnBackends: r.opts.OnBackends,
+          \t\t\t\tOnError:    r.opts.OnDiscoveryError,
+          \t\t\t}, r.opts.Logger)
+          \t\t}
+          \t\t// Clear activation state now that it has been consumed.
+          \t\te.needsHealth = false
+          \t\te.discoverer = nil
+          \t}
+          }
+          '''
+          new_activate = '''func (r *Registry) Activate() {
+          \tr.mu.Lock()
+          \tdefer r.mu.Unlock()
+          \tstartHealthChecks := r.startHealthChecks
+          \tif startHealthChecks == nil {
+          \t\tstartHealthChecks = (*Pool).StartHealthChecks
+          \t}
+          \tfor _, e := range r.live {
+          \t\tif e.reused {
+          \t\t\tcontinue
+          \t\t}
+          \t\tif e.needsHealth {
+          \t\t\tstartHealthChecks(e.pool, e.healthCfg, r.opts.OnHealth, r.opts.OnProbe)
+          \t\t}
+          \t\tif e.discovery {
+          \t\t\te.pool.StartDiscovery(e.discoverer, e.discoCfg.Refresh.Std(), DiscoveryHooks{
+          \t\t\t\tOnBackends: r.opts.OnBackends,
+          \t\t\t\tOnError:    r.opts.OnDiscoveryError,
+          \t\t\t}, r.opts.Logger)
+          \t\t}
+          \t\t// Clear activation state now that it has been consumed.
+          \t\te.needsHealth = false
+          \t\te.discoverer = nil
+          \t}
+          }
+          '''
+          if text.count(old_activate) != 1:
+              raise SystemExit(f'expected one Activate body, found {text.count(old_activate)}')
+          registry.write_text(text.replace(old_activate, new_activate))
+
+          tests = Path('internal/upstream/registry_test.go')
+          text = tests.read_text()
+          old_test = '''func TestRegistryActivateSkipsReusedPools(t *testing.T) {
+          \tsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+          \t\tw.WriteHeader(http.StatusOK)
+          \t}))
+          \tdefer srv.Close()
+          \taddr := strings.TrimPrefix(srv.URL, "http://")
+
+          \tvar probes atomic.Int64
+          \tr := NewRegistry(RegistryOptions{
+          \t\tOnProbe: func(string, bool, time.Duration) { probes.Add(1) },
+          \t})
+
+          \tup := upstreamCfg("api", "round_robin", addr)
+          \tup.HealthCheck = &config.HealthCheckConfig{
+          \t\tEnabled: true, Type: "http", Path: "/",
+          \t\tInterval: config.Duration(5 * time.Millisecond), Timeout: config.Duration(2 * time.Millisecond),
+          \t\tHealthyThreshold: 1, UnhealthyThreshold: 1, ExpectStatus: []int{200},
+          \t}
+
+          \tr.Begin()
+          \tif _, err := r.For(context.Background(), up, "http"); err != nil {
+          \t\tt.Fatalf("For: %v", err)
+          \t}
+          \tr.Commit()
+          \tr.Activate()
+          \tdefer r.CloseAll()
+
+          \ttime.Sleep(20 * time.Millisecond)
+          \tfirst := probes.Load()
+          \tif first == 0 {
+          \t\tt.Fatal("health checker did not start on first build")
+          \t}
+
+          \t// Reuse the pool on a subsequent build; Activate must not start a second
+          \t// health checker (probe rate should stay the same).
+          \tr.Begin()
+          \tif _, err := r.For(context.Background(), up, "http"); err != nil {
+          \t\tt.Fatalf("For: %v", err)
+          \t}
+          \tr.Commit()
+          \tr.Activate()
+
+          \ttime.Sleep(20 * time.Millisecond)
+          \tsecond := probes.Load()
+          \tif second <= first {
+          \t\tt.Fatalf("probe count did not advance after reuse: %d -> %d", first, second)
+          \t}
+          \tif second > first+10 {
+          \t\tt.Fatalf("probe count jumped too much after reuse, suggesting duplicate checker: %d -> %d", first, second)
+          \t}
+          }
+          '''
+          new_test = '''func TestRegistryActivateSkipsReusedPools(t *testing.T) {
+          \tvar starts atomic.Int64
+          \tr := NewRegistry(RegistryOptions{})
+          \tr.startHealthChecks = func(*Pool, config.HealthCheckConfig, HealthHook, ProbeHook) {
+          \t\tstarts.Add(1)
+          \t}
+
+          \tup := upstreamCfg("api", "round_robin", "127.0.0.1:80")
+          \tup.HealthCheck = &config.HealthCheckConfig{
+          \t\tEnabled: true, Type: "http", Path: "/",
+          \t\tInterval: config.Duration(5 * time.Millisecond), Timeout: config.Duration(2 * time.Millisecond),
+          \t\tHealthyThreshold: 1, UnhealthyThreshold: 1, ExpectStatus: []int{200},
+          \t}
+
+          \tr.Begin()
+          \tp1, err := r.For(context.Background(), up, "http")
+          \tif err != nil {
+          \t\tt.Fatalf("For first build: %v", err)
+          \t}
+          \tr.Commit()
+          \tr.Activate()
+          \tdefer r.CloseAll()
+
+          \tif got := starts.Load(); got != 1 {
+          \t\tt.Fatalf("health-check starts after first Activate = %d, want 1", got)
+          \t}
+
+          \t// Reuse the pool on a subsequent build; Activate must not start a second
+          \t// health checker for the already-running pool.
+          \tr.Begin()
+          \tp2, err := r.For(context.Background(), up, "http")
+          \tif err != nil {
+          \t\tt.Fatalf("For reused build: %v", err)
+          \t}
+          \tif p2 != p1 {
+          \t\tt.Fatal("unchanged upstream did not reuse its live pool")
+          \t}
+          \tr.Commit()
+          \tr.Activate()
+
+          \tif got := starts.Load(); got != 1 {
+          \t\tt.Fatalf("health-check starts after reused Activate = %d, want 1", got)
+          \t}
+          }
+          '''
+          if text.count(old_test) != 1:
+              raise SystemExit(f'expected one activation test, found {text.count(old_test)}')
+          tests.write_text(text.replace(old_test, new_test))
+
+          changelog = Path('CHANGELOG.md')
+          text = changelog.read_text()
+          anchor = '### Fixed\n'
+          addition = '''### Fixed
+          - **Deterministic reused-pool activation test (#236):** `TestRegistryActivateSkipsReusedPools` now observes health-check worker activation through a private per-registry seam and asserts the exact one-start lifecycle before and after pool reuse. It no longer estimates worker creation from two 20 ms probe windows; production activation behavior is unchanged.
+          - **Deterministic managed-apply deadline and callback tests (#233, #237):** the preflight phase-attribution test now synchronizes on actual handler-build entry and advances the coordinator fake clock, while the terminal callback test drives `saved_not_live` through the existing deterministic helper. Both preserve their semantic assertions without depending on 40–50 ms of host wall-clock scheduling; test-only changes.
+          '''
+          if text.count(anchor) != 1:
+              raise SystemExit(f'expected one Fixed heading, found {text.count(anchor)}')
+          changelog.write_text(text.replace(anchor, addition, 1))
+          PY
+          gofmt -w internal/upstream/registry.go internal/upstream/registry_test.go
+          git diff --check
+      - name: Focused deterministic regression validation
+        shell: bash
+        run: |
+          go test ./internal/upstream -run '^TestRegistryActivateSkipsReusedPools$' -count=100
+          go test -race ./internal/upstream -run '^TestRegistryActivateSkipsReusedPools$' -count=50
+          go test ./internal/upstream
+      - name: Commit validated patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md internal/upstream/registry.go internal/upstream/registry_test.go
+          git commit -m 'test(upstream): make reused-pool activation deterministic (#236)'
+          git push origin HEAD:fix/236-deterministic-registry-activation
