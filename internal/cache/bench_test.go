@@ -110,3 +110,58 @@ func BenchmarkCacheMemOverflow(b *testing.B) {
 		h.ServeHTTP(rec, req)
 	}
 }
+
+// BenchmarkCacheMandatoryValidation304 measures the synchronous no-cache path:
+// every request reaches the origin, receives a 304, merges metadata into a new
+// immutable entry, and serves the stored body as REVALIDATED.
+func BenchmarkCacheMandatoryValidation304(b *testing.B) {
+	c := benchCache()
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", `"bench-v1"`)
+		if r.Header.Get("If-None-Match") == `"bench-v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write([]byte("validated body"))
+	})
+	h := c.Handler(next)
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/validated", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Header().Get("X-Cache") != stateRevalidated {
+			b.Fatal("expected REVALIDATED")
+		}
+	}
+}
+
+// BenchmarkCacheVariantInvalidation measures removal of a populated Vary
+// membership set. Setup is excluded so the result reflects the invalidation
+// path rather than response publication.
+func BenchmarkCacheVariantInvalidation(b *testing.B) {
+	c := benchCache()
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=300")
+		w.Header().Set("Vary", "Accept-Language")
+		_, _ = w.Write([]byte(r.Header.Get("Accept-Language")))
+	})
+	h := c.Handler(next)
+	base := httptest.NewRequest(http.MethodGet, "http://example.com/vary", nil)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		for variant := 0; variant < 32; variant++ {
+			req := httptest.NewRequest(http.MethodGet, "http://example.com/vary", nil)
+			req.Header.Set("Accept-Language", "lang-"+strconv.Itoa(variant))
+			h.ServeHTTP(httptest.NewRecorder(), req)
+		}
+		b.StartTimer()
+		c.Delete(key(base))
+	}
+}
