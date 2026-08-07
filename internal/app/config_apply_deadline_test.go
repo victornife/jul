@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -95,48 +96,75 @@ func TestCoordinatorBoundDeadlineGovernsPreflightOverServingTimeout(t *testing.T
 	}
 
 	var submitted atomic.Bool
+	enteredHandlers := make(chan struct{})
+	var enteredOnce sync.Once
+	clock := newFakeClock(time.Unix(0, 0).UTC())
 	c := &ConfigApplyCoordinator{
-		BaseCtx:      context.Background(),
-		Path:         path,
-		Preflight:    blockingPreflight(),
+		BaseCtx: context.Background(),
+		Path:    path,
+		Preflight: &Preflight{
+			BuildHandlers: func(ctx context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+				enteredOnce.Do(func() { close(enteredHandlers) })
+				<-ctx.Done()
+				return nil, nil, ctx.Err()
+			},
+			Stream: &mockStreamPreflighter{},
+		},
 		SubmitReload: func(server.ReloadRequest) error { submitted.Store(true); return nil },
-		// Large serving timeout: if preflight derived from it the test would
-		// block for ~10s instead of the bound 40ms deadline.
+		// Large serving timeout: if preflight derived from it, advancing the
+		// shorter admission deadline below would not unblock the handler build.
 		LiveSnapshot:   servingSnapshot(t, 10*time.Second),
 		PlannedRestart: &PlannedRestartStore{},
+		clock:          clock,
 	}
 
+	startedAt := clock.Now().UTC()
+	admissionDeadline := startedAt.Add(40 * time.Millisecond)
 	reqCtx := admin.ApplyRequestContext{
-		StartedAt:      time.Now().UTC(),
-		Deadline:       time.Now().Add(40 * time.Millisecond),
+		StartedAt:      startedAt,
+		Deadline:       admissionDeadline,
 		RequestContext: context.Background(),
 	}
 
-	done := make(chan ApplyResult, 1)
+	type outcome struct {
+		res ApplyResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	beforeTimers := clock.timerCount()
 	go func() {
 		res, err := c.ApplyRaw(reqCtx, validConfigRaw(t, ":8081"), ApplyHot)
-		if err != nil {
-			t.Errorf("apply error: %v", err)
-		}
-		done <- res
+		done <- outcome{res: res, err: err}
 	}()
 
 	select {
-	case res := <-done:
-		if res.OK {
-			t.Fatalf("ok = true, want false (bound deadline breach must fail)")
-		}
-		if res.TimedOutPhase != PreflightPhaseHandlers {
-			t.Errorf("timed_out_phase = %q, want %q", res.TimedOutPhase, PreflightPhaseHandlers)
-		}
-		if res.Persisted {
-			t.Error("Persisted = true; a pre-persistence timeout must leave disk untouched")
-		}
-		if submitted.Load() {
-			t.Error("SubmitReload was called; a timed-out apply must not enqueue a reload")
-		}
+	case <-enteredHandlers:
 	case <-time.After(2 * time.Second):
-		t.Fatal("apply did not honour the 40ms admission deadline; preflight is using the serving reload_timeout")
+		t.Fatal("apply did not enter the blocking preflight handler gate")
+	}
+	waitForFakeTimerCount(t, clock, beforeTimers+1)
+	clock.Advance(admissionDeadline.Sub(clock.Now()) + time.Nanosecond)
+
+	var got outcome
+	select {
+	case got = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("apply did not honor the fake admission deadline")
+	}
+	if got.err != nil {
+		t.Fatalf("apply error: %v", got.err)
+	}
+	if got.res.OK {
+		t.Fatalf("ok = true, want false (bound deadline breach must fail)")
+	}
+	if got.res.TimedOutPhase != PreflightPhaseHandlers {
+		t.Errorf("timed_out_phase = %q, want %q", got.res.TimedOutPhase, PreflightPhaseHandlers)
+	}
+	if got.res.Persisted {
+		t.Error("Persisted = true; a pre-persistence timeout must leave disk untouched")
+	}
+	if submitted.Load() {
+		t.Error("SubmitReload was called; a timed-out apply must not enqueue a reload")
 	}
 }
 
