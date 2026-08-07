@@ -34,6 +34,11 @@ import (
 type Registry struct {
 	opts RegistryOptions
 
+	// startHealthChecks is the per-registry activation seam. Production
+	// uses Pool.StartHealthChecks; tests replace it to observe activation
+	// directly instead of inferring worker creation from probe timing.
+	startHealthChecks func(*Pool, config.HealthCheckConfig, HealthHook, ProbeHook)
+
 	mu     sync.Mutex
 	live   map[poolKey]*poolEntry // committed pools currently serving, keyed by (name, scheme)
 	staged map[poolKey]*poolEntry // pools assembled by the in-progress build
@@ -134,9 +139,10 @@ type poolKey struct {
 // NewRegistry creates an empty pool registry.
 func NewRegistry(opts RegistryOptions) *Registry {
 	return &Registry{
-		opts:   opts,
-		live:   make(map[poolKey]*poolEntry),
-		staged: make(map[poolKey]*poolEntry),
+		opts:              opts,
+		startHealthChecks: (*Pool).StartHealthChecks,
+		live:              make(map[poolKey]*poolEntry),
+		staged:            make(map[poolKey]*poolEntry),
 	}
 }
 
@@ -298,12 +304,16 @@ func (r *Registry) Commit() {
 func (r *Registry) Activate() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	startHealthChecks := r.startHealthChecks
+	if startHealthChecks == nil {
+		startHealthChecks = (*Pool).StartHealthChecks
+	}
 	for _, e := range r.live {
 		if e.reused {
 			continue
 		}
 		if e.needsHealth {
-			e.pool.StartHealthChecks(e.healthCfg, r.opts.OnHealth, r.opts.OnProbe)
+			startHealthChecks(e.pool, e.healthCfg, r.opts.OnHealth, r.opts.OnProbe)
 		}
 		if e.discovery {
 			e.pool.StartDiscovery(e.discoverer, e.discoCfg.Refresh.Std(), DiscoveryHooks{
