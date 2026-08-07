@@ -33,6 +33,7 @@ func TestCacheRecertificationSoak(t *testing.T) {
 
 	var (
 		originRequests atomic.Int64
+		originFailures atomic.Int64
 		failErrorPath  atomic.Bool
 	)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +66,7 @@ func TestCacheRecertificationSoak(t *testing.T) {
 			w.Header().Set("Cache-Control", "no-cache, stale-if-error=60")
 			w.Header().Set("ETag", `"error-v1"`)
 			if failErrorPath.Load() {
+				originFailures.Add(1)
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
@@ -123,14 +125,18 @@ func TestCacheRecertificationSoak(t *testing.T) {
 	baseG, baseHeap, baseFD := cacheSoakSample()
 
 	var (
-		requests atomic.Int64
-		errors   atomic.Int64
-		hits     atomic.Int64
-		misses   atomic.Int64
-		stales   atomic.Int64
-		valids   atomic.Int64
-		bypasses atomic.Int64
-		wg       sync.WaitGroup
+		requests           atomic.Int64
+		errors             atomic.Int64
+		hits               atomic.Int64
+		misses             atomic.Int64
+		stales             atomic.Int64
+		valids             atomic.Int64
+		bypasses           atomic.Int64
+		staleIfErrorServed atomic.Int64
+		clientErrors       atomic.Int64
+		serverErrors       atomic.Int64
+		scenarioErrors     [10]atomic.Int64
+		wg                 sync.WaitGroup
 	)
 	countResult := func(state string) {
 		switch state {
@@ -154,7 +160,8 @@ func TestCacheRecertificationSoak(t *testing.T) {
 			for seq := 0; time.Now().Before(deadline); seq++ {
 				var method, target string
 				headers := map[string]string{}
-				switch (worker + seq) % 10 {
+				scenario := (worker + seq) % 10
+				switch scenario {
 				case 0:
 					method, target = http.MethodGet, front.URL+"/fresh"
 				case 1:
@@ -167,7 +174,10 @@ func TestCacheRecertificationSoak(t *testing.T) {
 					method, target = http.MethodGet, front.URL+"/vary"
 					headers["Accept-Language"] = "lang-" + strconv.Itoa((worker+seq)%8)
 				case 5:
-					method, target = http.MethodGet, front.URL+"/large?id="+strconv.Itoa(worker)+"-"+strconv.Itoa(seq)
+					// Keep a bounded working set: this still forces memory-to-disk
+					// overflow, but does not make eviction of the stale-if-error
+					// control entry an expected outcome of the correctness soak.
+					method, target = http.MethodGet, front.URL+"/large?id="+strconv.Itoa((worker+seq)%256)
 				case 6:
 					method, target = http.MethodGet, front.URL+"/range"
 					headers["Range"] = "bytes=0-3"
@@ -179,6 +189,12 @@ func TestCacheRecertificationSoak(t *testing.T) {
 				default:
 					if _, status, err := cacheSoakDo(client, http.MethodPost, front.URL+"/fresh", nil); err != nil || status != http.StatusNoContent {
 						errors.Add(1)
+						scenarioErrors[scenario].Add(1)
+						if err != nil {
+							clientErrors.Add(1)
+						} else {
+							serverErrors.Add(1)
+						}
 					}
 					requests.Add(1)
 					method, target = http.MethodGet, front.URL+"/fresh"
@@ -187,7 +203,16 @@ func TestCacheRecertificationSoak(t *testing.T) {
 				requests.Add(1)
 				if err != nil || status >= 500 || status == 0 {
 					errors.Add(1)
+					scenarioErrors[scenario].Add(1)
+					if err != nil {
+						clientErrors.Add(1)
+					} else {
+						serverErrors.Add(1)
+					}
 					continue
+				}
+				if scenario == 3 && state == stateStale {
+					staleIfErrorServed.Add(1)
 				}
 				countResult(state)
 			}
@@ -204,8 +229,12 @@ func TestCacheRecertificationSoak(t *testing.T) {
 	endG, endHeap, endFD := cacheSoakSample()
 	memBytes, memMax, diskBytes, diskMax := cacheSoakUsage(c)
 
-	t.Logf("cache soak: duration=%s workers=%d requests=%d errors=%d origin_requests=%d", duration, workers, requests.Load(), errors.Load(), originRequests.Load())
-	t.Logf("cache soak results: HIT=%d MISS=%d STALE=%d REVALIDATED=%d BYPASS=%d", hits.Load(), misses.Load(), stales.Load(), valids.Load(), bypasses.Load())
+	t.Logf("cache soak: duration=%s workers=%d requests=%d errors=%d origin_requests=%d origin_5xx=%d", duration, workers, requests.Load(), errors.Load(), originRequests.Load(), originFailures.Load())
+	t.Logf("cache soak results: HIT=%d MISS=%d STALE=%d REVALIDATED=%d BYPASS=%d stale_if_error=%d", hits.Load(), misses.Load(), stales.Load(), valids.Load(), bypasses.Load(), staleIfErrorServed.Load())
+	t.Logf("cache soak error distribution: fresh=%d validate=%d stale=%d error=%d vary=%d large=%d range=%d no_store=%d sse=%d invalidation=%d client=%d server=%d",
+		scenarioErrors[0].Load(), scenarioErrors[1].Load(), scenarioErrors[2].Load(), scenarioErrors[3].Load(), scenarioErrors[4].Load(),
+		scenarioErrors[5].Load(), scenarioErrors[6].Load(), scenarioErrors[7].Load(), scenarioErrors[8].Load(), scenarioErrors[9].Load(),
+		clientErrors.Load(), serverErrors.Load())
 	t.Logf("cache soak resources: goroutines %d -> %d, heap %d -> %d, fds %d -> %d, memory %d/%d, disk %d/%d", baseG, endG, baseHeap, endHeap, baseFD, endFD, memBytes, memMax, diskBytes, diskMax)
 
 	if requests.Load() == 0 || originRequests.Load() == 0 {
@@ -213,6 +242,9 @@ func TestCacheRecertificationSoak(t *testing.T) {
 	}
 	if got := errors.Load(); got != 0 {
 		t.Fatalf("cache soak saw %d unexpected request errors", got)
+	}
+	if staleIfErrorServed.Load() == 0 {
+		t.Error("cache soak never served stale-if-error on the failing origin path")
 	}
 	for state, count := range map[string]int64{
 		stateHit: hits.Load(), stateMiss: misses.Load(), stateStale: stales.Load(),
@@ -227,6 +259,9 @@ func TestCacheRecertificationSoak(t *testing.T) {
 	}
 	if memBytes > memMax || diskBytes > diskMax {
 		t.Errorf("cache capacity exceeded: memory %d/%d disk %d/%d", memBytes, memMax, diskBytes, diskMax)
+	}
+	if diskBytes == 0 {
+		t.Error("cache soak never exercised memory-to-disk overflow")
 	}
 	if growth := endG - baseG; growth > 4*workers+32 {
 		t.Errorf("goroutine growth %d exceeds bound", growth)
