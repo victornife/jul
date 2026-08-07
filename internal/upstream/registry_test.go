@@ -369,18 +369,13 @@ func TestRegistryCandidateSnapshotUsesPendingServers(t *testing.T) {
 }
 
 func TestRegistryActivateSkipsReusedPools(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-	addr := strings.TrimPrefix(srv.URL, "http://")
+	var starts atomic.Int64
+	r := NewRegistry(RegistryOptions{})
+	r.startHealthChecks = func(*Pool, config.HealthCheckConfig, HealthHook, ProbeHook) {
+		starts.Add(1)
+	}
 
-	var probes atomic.Int64
-	r := NewRegistry(RegistryOptions{
-		OnProbe: func(string, bool, time.Duration) { probes.Add(1) },
-	})
-
-	up := upstreamCfg("api", "round_robin", addr)
+	up := upstreamCfg("api", "round_robin", "127.0.0.1:80")
 	up.HealthCheck = &config.HealthCheckConfig{
 		Enabled: true, Type: "http", Path: "/",
 		Interval: config.Duration(5 * time.Millisecond), Timeout: config.Duration(2 * time.Millisecond),
@@ -388,34 +383,32 @@ func TestRegistryActivateSkipsReusedPools(t *testing.T) {
 	}
 
 	r.Begin()
-	if _, err := r.For(context.Background(), up, "http"); err != nil {
-		t.Fatalf("For: %v", err)
+	p1, err := r.For(context.Background(), up, "http")
+	if err != nil {
+		t.Fatalf("For first build: %v", err)
 	}
 	r.Commit()
 	r.Activate()
 	defer r.CloseAll()
 
-	time.Sleep(20 * time.Millisecond)
-	first := probes.Load()
-	if first == 0 {
-		t.Fatal("health checker did not start on first build")
+	if got := starts.Load(); got != 1 {
+		t.Fatalf("health-check starts after first Activate = %d, want 1", got)
 	}
 
 	// Reuse the pool on a subsequent build; Activate must not start a second
-	// health checker (probe rate should stay the same).
+	// health checker for the already-running pool.
 	r.Begin()
-	if _, err := r.For(context.Background(), up, "http"); err != nil {
-		t.Fatalf("For: %v", err)
+	p2, err := r.For(context.Background(), up, "http")
+	if err != nil {
+		t.Fatalf("For reused build: %v", err)
+	}
+	if p2 != p1 {
+		t.Fatal("unchanged upstream did not reuse its live pool")
 	}
 	r.Commit()
 	r.Activate()
 
-	time.Sleep(20 * time.Millisecond)
-	second := probes.Load()
-	if second <= first {
-		t.Fatalf("probe count did not advance after reuse: %d -> %d", first, second)
-	}
-	if second > first+10 {
-		t.Fatalf("probe count jumped too much after reuse, suggesting duplicate checker: %d -> %d", first, second)
+	if got := starts.Load(); got != 1 {
+		t.Fatalf("health-check starts after reused Activate = %d, want 1", got)
 	}
 }
