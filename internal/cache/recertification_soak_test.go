@@ -100,7 +100,7 @@ func TestCacheRecertificationSoak(t *testing.T) {
 
 	c, err := New(config.CacheConfig{
 		Enabled:              true,
-		MemoryMaxSize:        config.Size(32 << 10),
+		MemoryMaxSize:        config.Size(256 << 10),
 		DiskPath:             t.TempDir(),
 		DiskMaxSize:          config.Size(2 << 20),
 		DefaultTTL:           config.Duration(time.Minute),
@@ -112,6 +112,20 @@ func TestCacheRecertificationSoak(t *testing.T) {
 	}
 	front := httptest.NewServer(c.Handler(next))
 	defer front.Close()
+
+	overflow, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(8 << 10),
+		DiskPath:      t.TempDir(),
+		DiskMaxSize:   config.Size(2 << 20),
+		DefaultTTL:    config.Duration(time.Minute),
+	}, nil)
+	if err != nil {
+		t.Fatalf("New overflow cache: %v", err)
+	}
+	overflowFront := httptest.NewServer(overflow.Handler(next))
+	defer overflowFront.Close()
+
 	client := &http.Client{Timeout: 3 * time.Second}
 	defer client.CloseIdleConnections()
 
@@ -174,10 +188,11 @@ func TestCacheRecertificationSoak(t *testing.T) {
 					method, target = http.MethodGet, front.URL+"/vary"
 					headers["Accept-Language"] = "lang-" + strconv.Itoa((worker+seq)%8)
 				case 5:
-					// Keep a bounded working set: this still forces memory-to-disk
-					// overflow, but does not make eviction of the stale-if-error
-					// control entry an expected outcome of the correctness soak.
-					method, target = http.MethodGet, front.URL+"/large?id="+strconv.Itoa((worker+seq)%256)
+					// Exercise memory-to-disk overflow on a separate cache instance.
+					// Capacity pressure is therefore concurrent with the correctness
+					// workload without making eviction of its stale-if-error control
+					// entry an expected result.
+					method, target = http.MethodGet, overflowFront.URL+"/large?id="+strconv.Itoa((worker+seq)%256)
 				case 6:
 					method, target = http.MethodGet, front.URL+"/range"
 					headers["Range"] = "bytes=0-3"
@@ -221,13 +236,14 @@ func TestCacheRecertificationSoak(t *testing.T) {
 	wg.Wait()
 
 	settleDeadline := time.Now().Add(5 * time.Second)
-	for c.inflightRevalidations() != 0 && time.Now().Before(settleDeadline) {
+	for (c.inflightRevalidations() != 0 || overflow.inflightRevalidations() != 0) && time.Now().Before(settleDeadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	client.CloseIdleConnections()
 	time.Sleep(250 * time.Millisecond)
 	endG, endHeap, endFD := cacheSoakSample()
 	memBytes, memMax, diskBytes, diskMax := cacheSoakUsage(c)
+	overflowMemBytes, overflowMemMax, overflowDiskBytes, overflowDiskMax := cacheSoakUsage(overflow)
 
 	t.Logf("cache soak: duration=%s workers=%d requests=%d errors=%d origin_requests=%d origin_5xx=%d", duration, workers, requests.Load(), errors.Load(), originRequests.Load(), originFailures.Load())
 	t.Logf("cache soak results: HIT=%d MISS=%d STALE=%d REVALIDATED=%d BYPASS=%d stale_if_error=%d", hits.Load(), misses.Load(), stales.Load(), valids.Load(), bypasses.Load(), staleIfErrorServed.Load())
@@ -235,7 +251,7 @@ func TestCacheRecertificationSoak(t *testing.T) {
 		scenarioErrors[0].Load(), scenarioErrors[1].Load(), scenarioErrors[2].Load(), scenarioErrors[3].Load(), scenarioErrors[4].Load(),
 		scenarioErrors[5].Load(), scenarioErrors[6].Load(), scenarioErrors[7].Load(), scenarioErrors[8].Load(), scenarioErrors[9].Load(),
 		clientErrors.Load(), serverErrors.Load())
-	t.Logf("cache soak resources: goroutines %d -> %d, heap %d -> %d, fds %d -> %d, memory %d/%d, disk %d/%d", baseG, endG, baseHeap, endHeap, baseFD, endFD, memBytes, memMax, diskBytes, diskMax)
+	t.Logf("cache soak resources: goroutines %d -> %d, heap %d -> %d, fds %d -> %d, primary memory %d/%d disk %d/%d, overflow memory %d/%d disk %d/%d", baseG, endG, baseHeap, endHeap, baseFD, endFD, memBytes, memMax, diskBytes, diskMax, overflowMemBytes, overflowMemMax, overflowDiskBytes, overflowDiskMax)
 
 	if requests.Load() == 0 || originRequests.Load() == 0 {
 		t.Fatal("soak did not exercise requests and origin traffic")
@@ -254,13 +270,13 @@ func TestCacheRecertificationSoak(t *testing.T) {
 			t.Errorf("cache soak never observed %s", state)
 		}
 	}
-	if c.inflightRevalidations() != 0 {
-		t.Errorf("stranded revalidation calls: %d", c.inflightRevalidations())
+	if c.inflightRevalidations() != 0 || overflow.inflightRevalidations() != 0 {
+		t.Errorf("stranded revalidation calls: primary=%d overflow=%d", c.inflightRevalidations(), overflow.inflightRevalidations())
 	}
-	if memBytes > memMax || diskBytes > diskMax {
-		t.Errorf("cache capacity exceeded: memory %d/%d disk %d/%d", memBytes, memMax, diskBytes, diskMax)
+	if memBytes > memMax || diskBytes > diskMax || overflowMemBytes > overflowMemMax || overflowDiskBytes > overflowDiskMax {
+		t.Errorf("cache capacity exceeded: primary memory %d/%d disk %d/%d; overflow memory %d/%d disk %d/%d", memBytes, memMax, diskBytes, diskMax, overflowMemBytes, overflowMemMax, overflowDiskBytes, overflowDiskMax)
 	}
-	if diskBytes == 0 {
+	if overflowDiskBytes == 0 {
 		t.Error("cache soak never exercised memory-to-disk overflow")
 	}
 	if growth := endG - baseG; growth > 4*workers+32 {
