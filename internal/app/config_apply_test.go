@@ -1539,6 +1539,7 @@ func TestManagedApplyOutcomeCallbackFired(t *testing.T) {
 
 	finalizerContinue := make(chan struct{})
 	gotCallback := make(chan admin.ConfigApplyResult, 1)
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -1558,10 +1559,12 @@ func TestManagedApplyOutcomeCallbackFired(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(50 * time.Millisecond)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
 		PlannedRestart: &PlannedRestartStore{},
+		waitMargin:     10 * time.Millisecond,
+		clock:          clock,
 		OnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
 			if comp.Context.Actor != "alice" {
 				t.Errorf("callback actor = %q, want alice", comp.Context.Actor)
@@ -1571,15 +1574,14 @@ func TestManagedApplyOutcomeCallbackFired(t *testing.T) {
 		},
 	}
 
-	ctx := admin.ApplyRequestContext{Actor: "alice", SourceIP: "127.0.0.1"}
-	resCh := make(chan ApplyResult, 1)
-	go func() {
-		res, _ := c.ApplyRaw(ctx, validConfigRaw(t, ":8081"), ApplyHot)
-		resCh <- res
-	}()
-
-	// Wait for the synchronous path to time out.
-	res := <-resCh
+	startedAt := clock.Now().UTC()
+	ctx := admin.ApplyRequestContext{
+		Actor:     "alice",
+		SourceIP:  "127.0.0.1",
+		StartedAt: startedAt,
+		Deadline:  startedAt.Add(savedNotLiveBudget),
+	}
+	res := applyRawAwaitingSavedNotLive(t, c, clock, ctx, validConfigRaw(t, ":8081"), ApplyHot)
 	if !res.OK || res.Reload == nil || res.Reload.Outcome != server.ReloadSavedNotLive {
 		t.Fatalf("expected saved_not_live timeout result, got %+v", res.Reload)
 	}
