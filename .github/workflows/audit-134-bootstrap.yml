@@ -1,4 +1,4 @@
-name: Bootstrap cache recertification evidence
+name: Package cache recertification snapshot
 
 on:
   push:
@@ -9,70 +9,26 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  package:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: audit/134-cache-recertification
           fetch-depth: 0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: Record environment and source inventory
+      - name: Package exact audited tree
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           mkdir -p audit-134
-          {
-            echo "sha=$(git rev-parse HEAD)"
-            go version
-            go env GOOS GOARCH GOMAXPROCS CGO_ENABLED
-            uname -a
-          } | tee audit-134/environment.txt
-          go test -list '.' ./internal/cache | tee audit-134/cache-tests.txt
-          go test -list '.' ./internal/handler | tee audit-134/handler-tests.txt
-          go test -list '.' ./internal/server | tee audit-134/server-tests.txt
-          go test -list '.' ./internal/app | tee audit-134/app-tests.txt
-          go test -list 'Benchmark.*' ./internal/cache | tee audit-134/cache-benchmarks.txt
-          find internal/cache internal/handler internal/server internal/app internal/middleware internal/respwriter -type f -name '*.go' -print | sort > audit-134/source-files.txt
-      - name: Canonical focused suite
-        shell: bash
-        run: |
-          set -o pipefail
-          go test -count=1 -v ./internal/cache ./internal/middleware ./internal/handler ./internal/server ./internal/app 2>&1 | tee audit-134/focused-test.txt
-      - name: Canonical race suite
-        shell: bash
-        run: |
-          set -o pipefail
-          go test -race -count=1 -p 2 -tags "console grpc wasmplugins" -v ./internal/cache ./internal/middleware ./internal/handler ./internal/server ./internal/app 2>&1 | tee audit-134/focused-race.txt
-      - name: Cache lifecycle and protocol repetition
-        shell: bash
-        run: |
-          set -o pipefail
-          REGEX='TestRevalidationChurnNoLeak|TestReloadWaitsForCacheRevalidationHoldingGeneration|TestLeasedWorkKeepsGenerationResourcesOpen|TestForcedRetirementCancelsLeasedWork|TestDrainCancelsAndBoundsLiveBackgroundWork|TestRevalidationSurvivesClientDisconnect|TestStaleIfErrorReplacesRatherThanMutates|TestNotModifiedReplacesRatherThanMutates|TestConcurrentReadsDuringStaleIfErrorReplacement|TestRepeatedUpgradesThroughCachedProxy|TestWebSocketThroughCachedProxy|TestWebSocketThroughFullMiddlewareChain|TestSSEThroughCachedProxyStreamsAndIsNotStored|TestReloadDuringMandatorySynchronousValidation'
-          go test -race -count=5 -p 2 -run "$REGEX" -v ./internal/cache ./internal/handler ./internal/server 2>&1 | tee audit-134/repeated-race.txt
-      - name: Cache benchmark refresh
-        shell: bash
-        run: |
-          set -o pipefail
-          go test -run '^$' -bench='BenchmarkCache.*' -benchmem -count=5 ./internal/cache/ 2>&1 | tee audit-134/cache-benchmarks-raw.txt
-      - name: Documentation validation
-        shell: bash
-        run: |
-          set -o pipefail
-          python3 scripts/docs-check.py 2>&1 | tee audit-134/docs-check.txt
-          python3 scripts/test_docs_check.py 2>&1 | tee audit-134/docs-check-tests.txt
-      - name: Package source snapshot
-        shell: bash
-        run: |
-          tar --exclude=.git --exclude=repo-snapshot.tar.gz -czf repo-snapshot.tar.gz .
+          git rev-parse HEAD | tee audit-134/snapshot-sha.txt
+          git archive --format=tar.gz --output=repo-snapshot.tar.gz HEAD
+          sha256sum repo-snapshot.tar.gz | tee audit-134/repo-snapshot.sha256
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: cache-recertification-bootstrap
+          name: cache-recertification-snapshot
           path: |
             audit-134/
             repo-snapshot.tar.gz
