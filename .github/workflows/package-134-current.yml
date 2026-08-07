@@ -1,0 +1,36 @@
+name: Package current cache recertification tree
+
+on:
+  push:
+    branches:
+      - audit/134-cache-recertification
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: audit/134-cache-recertification
+          fetch-depth: 0
+      - name: Package exact branch tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD | tee snapshot-sha.txt
+          git archive --format=tar.gz --output=repo-snapshot.tar.gz HEAD
+          sha256sum repo-snapshot.tar.gz | tee repo-snapshot.sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cache-recertification-current-tree
+          path: |
+            snapshot-sha.txt
+            repo-snapshot.sha256
+            repo-snapshot.tar.gz
+          if-no-files-found: error
+          retention-days: 7
