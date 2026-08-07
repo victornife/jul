@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -run '^$' -bench='BenchmarkCache.*' -benchmem -count=5 ./internal/cache | tee cache-benchmarks.txt
+          go test -run '^$' -bench='BenchmarkCache.*' -benchmem -benchtime=100x -count=5 ./internal/cache | tee cache-benchmarks.txt
       - name: Focused cache soak
         shell: bash
         run: |
