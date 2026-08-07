@@ -1,0 +1,200 @@
+name: Apply issue 237 test patch
+
+on:
+  push:
+    branches:
+      - fix/237-deterministic-managed-apply-callback
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: fix/237-deterministic-managed-apply-callback
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Replace the scheduler-dependent callback test
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('internal/app/config_apply_test.go')
+          text = path.read_text()
+          old = '''func TestManagedApplyOutcomeCallbackFired(t *testing.T) {
+          \ttmp := t.TempDir()
+          \tpath := filepath.Join(tmp, "server.toml")
+          \tseed := validConfigRaw(t, ":8080")
+          \tif err := os.WriteFile(path, seed, 0o600); err != nil {
+          \t\tt.Fatalf("write seed: %v", err)
+          \t}
+
+          \tfinalizerContinue := make(chan struct{})
+          \tgotCallback := make(chan admin.ConfigApplyResult, 1)
+          \tc := &ConfigApplyCoordinator{
+          \t\tBaseCtx:   context.Background(),
+          \t\tPath:      path,
+          \t\tPreflight: testPreflight(),
+          \t\tSubmitReload: func(req server.ReloadRequest) error {
+          \t\t\tgo func() {
+          \t\t\t\t<-finalizerContinue
+          \t\t\t\treq.Result <- server.ReloadResult{
+          \t\t\t\t\tID:        req.ID,
+          \t\t\t\t\tSource:    server.ReloadSourceAdmin,
+          \t\t\t\t\tOutcome:   server.ReloadNotApplied,
+          \t\t\t\t\tPublished: false,
+          \t\t\t\t\tError:     "intentional failure",
+          \t\t\t\t}
+          \t\t\t}()
+          \t\t\treturn nil
+          \t\t},
+          \t\tLiveSnapshot: func() server.LiveSnapshot {
+          \t\t\tcfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+          \t\t\tcfg.Global.ReloadTimeout = config.Duration(50 * time.Millisecond)
+          \t\t\treturn server.LiveSnapshot{EffectiveConfig: cfg}
+          \t\t},
+          \t\tPlannedRestart: &PlannedRestartStore{},
+          \t\tOnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+          \t\t\tif comp.Context.Actor != "alice" {
+          \t\t\t\tt.Errorf("callback actor = %q, want alice", comp.Context.Actor)
+          \t\t\t}
+          \t\t\tgotCallback <- comp.Result
+          \t\t\treturn admin.ManagedApplyFinalization{FinalizationError: comp.Result.FinalizationError}
+          \t\t},
+          \t}
+
+          \tctx := admin.ApplyRequestContext{Actor: "alice", SourceIP: "127.0.0.1"}
+          \tresCh := make(chan ApplyResult, 1)
+          \tgo func() {
+          \t\tres, _ := c.ApplyRaw(ctx, validConfigRaw(t, ":8081"), ApplyHot)
+          \t\tresCh <- res
+          \t}()
+
+          \t// Wait for the synchronous path to time out.
+          \tres := <-resCh
+          \tif !res.OK || res.Reload == nil || res.Reload.Outcome != server.ReloadSavedNotLive {
+          \t\tt.Fatalf("expected saved_not_live timeout result, got %+v", res.Reload)
+          \t}
+
+          \t// Allow the finalizer to finish and invoke the callback.
+          \tclose(finalizerContinue)
+          \tselect {
+          \tcase terminal := <-gotCallback:
+          \t\tif terminal.OK {
+          \t\t\tt.Errorf("terminal outcome ok = true, want false")
+          \t\t}
+          \t\tif terminal.RestoreError != "" {
+          \t\t\tt.Errorf("unexpected restore error: %s", terminal.RestoreError)
+          \t\t}
+          \t\tif !terminal.Restored {
+          \t\t\tt.Errorf("terminal restored = false, want true")
+          \t\t}
+          \t\tif terminal.Reload == nil || terminal.Reload.Outcome != server.ReloadNotApplied {
+          \t\t\tt.Errorf("terminal outcome = %v, want not_applied", terminal.Reload)
+          \t\t}
+          \tcase <-time.After(2 * time.Second):
+          \t\tt.Fatal("OnManagedApplyComplete was not called")
+          \t}
+          }
+          '''
+          new = '''func TestManagedApplyOutcomeCallbackFired(t *testing.T) {
+          \ttmp := t.TempDir()
+          \tpath := filepath.Join(tmp, "server.toml")
+          \tseed := validConfigRaw(t, ":8080")
+          \tif err := os.WriteFile(path, seed, 0o600); err != nil {
+          \t\tt.Fatalf("write seed: %v", err)
+          \t}
+
+          \tfinalizerContinue := make(chan struct{})
+          \tgotCallback := make(chan admin.ConfigApplyResult, 1)
+          \tclock := newSavedNotLiveClock()
+          \tc := &ConfigApplyCoordinator{
+          \t\tBaseCtx:   context.Background(),
+          \t\tPath:      path,
+          \t\tPreflight: testPreflight(),
+          \t\tSubmitReload: func(req server.ReloadRequest) error {
+          \t\t\tgo func() {
+          \t\t\t\t<-finalizerContinue
+          \t\t\t\treq.Result <- server.ReloadResult{
+          \t\t\t\t\tID:        req.ID,
+          \t\t\t\t\tSource:    server.ReloadSourceAdmin,
+          \t\t\t\t\tOutcome:   server.ReloadNotApplied,
+          \t\t\t\t\tPublished: false,
+          \t\t\t\t\tError:     "intentional failure",
+          \t\t\t\t}
+          \t\t\t}()
+          \t\t\treturn nil
+          \t\t},
+          \t\tLiveSnapshot: func() server.LiveSnapshot {
+          \t\t\tcfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+          \t\t\tcfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
+          \t\t\treturn server.LiveSnapshot{EffectiveConfig: cfg}
+          \t\t},
+          \t\tPlannedRestart: &PlannedRestartStore{},
+          \t\twaitMargin:     10 * time.Millisecond,
+          \t\tclock:          clock,
+          \t\tOnManagedApplyComplete: func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+          \t\t\tif comp.Context.Actor != "alice" {
+          \t\t\t\tt.Errorf("callback actor = %q, want alice", comp.Context.Actor)
+          \t\t\t}
+          \t\t\tgotCallback <- comp.Result
+          \t\t\treturn admin.ManagedApplyFinalization{FinalizationError: comp.Result.FinalizationError}
+          \t\t},
+          \t}
+
+          \tstartedAt := clock.Now().UTC()
+          \tctx := admin.ApplyRequestContext{
+          \t\tActor:     "alice",
+          \t\tSourceIP:  "127.0.0.1",
+          \t\tStartedAt: startedAt,
+          \t\tDeadline:  startedAt.Add(savedNotLiveBudget),
+          \t}
+          \tres := applyRawAwaitingSavedNotLive(t, c, clock, ctx, validConfigRaw(t, ":8081"), ApplyHot)
+          \tif !res.OK || res.Reload == nil || res.Reload.Outcome != server.ReloadSavedNotLive {
+          \t\tt.Fatalf("expected saved_not_live timeout result, got %+v", res.Reload)
+          \t}
+
+          \t// Allow the finalizer to finish and invoke the callback.
+          \tclose(finalizerContinue)
+          \tselect {
+          \tcase terminal := <-gotCallback:
+          \t\tif terminal.OK {
+          \t\t\tt.Errorf("terminal outcome ok = true, want false")
+          \t\t}
+          \t\tif terminal.RestoreError != "" {
+          \t\t\tt.Errorf("unexpected restore error: %s", terminal.RestoreError)
+          \t\t}
+          \t\tif !terminal.Restored {
+          \t\t\tt.Errorf("terminal restored = false, want true")
+          \t\t}
+          \t\tif terminal.Reload == nil || terminal.Reload.Outcome != server.ReloadNotApplied {
+          \t\t\tt.Errorf("terminal outcome = %v, want not_applied", terminal.Reload)
+          \t\t}
+          \tcase <-time.After(2 * time.Second):
+          \t\tt.Fatal("OnManagedApplyComplete was not called")
+          \t}
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one callback test body, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+          gofmt -w internal/app/config_apply_test.go
+          git diff --check
+          git diff --exit-code -- . ':!.github/workflows/patch-237.yml' || true
+      - name: Commit patched test
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add internal/app/config_apply_test.go
+          git commit -m 'test(app): make managed-apply callback test deterministic (#237)'
+          git push origin HEAD:fix/237-deterministic-managed-apply-callback
