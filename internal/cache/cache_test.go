@@ -38,6 +38,35 @@ func newTestCache(t *testing.T, cfg config.CacheConfig) *Cache {
 	return c
 }
 
+func TestKeyConstruction(t *testing.T) {
+	if got, want := keyFor(http.MethodHead, "EXAMPLE.COM:8443", "/Path?q=One"), "HEAD\nexample.com:8443\n/Path?q=One"; got != want {
+		t.Fatalf("keyFor() = %q, want %q", got, want)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/a%2Fb?q=1", nil)
+	req.Host = "MiXeD.Example:8080"
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Cookie", "session=secret")
+	if got, want := key(req), "GET\nmixed.example:8080\n/a%2Fb?q=1"; got != want {
+		t.Fatalf("key() = %q, want %q", got, want)
+	}
+}
+
+func TestCacheableStatusSet(t *testing.T) {
+	want := map[int]bool{
+		http.StatusOK:                   true,
+		http.StatusNonAuthoritativeInfo: true,
+		http.StatusMovedPermanently:     true,
+		http.StatusNotFound:             true,
+		http.StatusGone:                 true,
+	}
+	for status := 100; status <= 599; status++ {
+		if got := cacheableStatus[status]; got != want[status] {
+			t.Errorf("cacheableStatus[%d] = %v, want %v", status, got, want[status])
+		}
+	}
+}
+
 func TestMemStoreEvictionOverflow(t *testing.T) {
 	var evicted []string
 	m := newMemStore(600, func(key string, e *Entry) { evicted = append(evicted, key) })

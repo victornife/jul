@@ -587,8 +587,10 @@ applied dynamically on the next successful reload.
 - **TLS handshake parameters on an existing listener** — minimum TLS version,
   certificates, and mutual-TLS policy are baked into the listener's TLS config.
 - **Tracing** — the OpenTelemetry pipeline is wired once at startup.
-- **Response cache** — the cache backend (LRU/disk tiers, counters) is built
-  once at startup.
+- **Response cache** — the recertified cache backend (LRU/disk tiers and
+  counters) is built once at startup and remains process-scoped across ordinary
+  handler reloads. Scalar policy/capacity hot reload is separately planned in
+  #92; enable/disable and disk-path replacement remain gated in #93.
 - **Egress allow-list** — the outbound dial policy is built once at startup.
 - **Admin server** — listener, token, rate limits, history, plugin-upload, and
   audit-log settings are baked in at startup. Token rotation in particular does

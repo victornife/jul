@@ -6,7 +6,8 @@ This page identifies the current authoritative audit and preserves the evidence 
 
 | Audit | Source baseline | Role | Current status | Programme |
 |---|---|---|---|---|
-| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a` | Current implementation and planning source of truth | Active; programme truth closed, cache programme next | #62, #107-#162 |
+| [2026-08-07 response-cache recertification](audit/2026-08-07-cache-recertification.md) | post-#131/#132/#133 merged cache tree | Current response-cache conformance and GA evidence | Complete; GA retained, closure evidence recorded in #107/#134 | #107, #134 |
+| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a` | Current implementation and planning source of truth | Active; cache programme complete, lifecycle authority next | #62, #107-#162 |
 | [2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediation commits | Historical audit and remediation evidence | Historical; exact-SHA maintainer-certified and superseded under #130, not independently two-human certified | #130 |
 
 The current combined audit does not rewrite the historical record. It supersedes the July audit for current prioritisation, sequencing, capability truth and implementation planning. The [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md) records the exact disposition, residual transfers and branch-cleanup gate.
@@ -15,7 +16,7 @@ The current combined audit does not rewrite the historical record. It supersedes
 
 - Completed programme truth and correction tranche: #114, #119, #120-#127 and #130.
 - Non-blocking quality foundation: #129.
-- Active cache correctness: #107 and #131-#134.
+- Cache correctness programme: #107 and #131-#134 complete; #92 is separately gated by #89/#90 and #93 remains draft/gated.
 - Next lifecycle authority: #89 and #128.
 - Core Gateway Completeness decisions: #115-#118.
 - Core implementation: #135-#151.
