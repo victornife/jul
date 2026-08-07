@@ -162,6 +162,8 @@ When adding a new feature, include **all** of these in your PR:
 - [ ] Code implementation with tests (`*_test.go`).
 - [ ] Config schema update (`internal/config/schema.go`).
 - [ ] Config validation (`internal/config/validate.go`).
+- [ ] Lifecycle disposition for every new configuration leaf
+      (`internal/lifecycle/registry.go`), then `make lifecycle-generate`.
 - [ ] Admin diff support (`internal/admin/diff_helpers.go`) when applicable.
 - [ ] Documentation in `docs/<feature>.md` or update to `docs/configuration.md`.
 - [ ] README mention (brief, with a link to the deep-dive doc).
@@ -170,6 +172,30 @@ When adding a new feature, include **all** of these in your PR:
       security-relevant.
 - [ ] `CHANGELOG.md` entry under `[Unreleased]`.
 - [ ] Metrics update in `internal/observability/metrics.go` when applicable.
+
+### Adding a configuration field
+
+The configuration lifecycle is closed-world: every public TOML leaf must have
+exactly one disposition, and CI fails when one is missing. Follow this order:
+
+1. Add the field to `internal/config/schema.go` with its `toml` tag.
+2. Add validation to `internal/config/validate.go`.
+3. Add its lifecycle entry to `internal/lifecycle/registry.go`. Classify what
+   the code **already does** — never mark a field `hot_reload` in anticipation
+   of work that has not landed. If the effective value needs different
+   comparison semantics (a file-content digest, an order-insensitive list, a
+   secret digest, a per-listener grouping), add a case to `specialExtractor`.
+4. Run `make lifecycle-generate` and review the diff in
+   `docs/config-lifecycle.yaml` and `docs/generated/config-lifecycle.{md,json}`.
+   Never hand-edit those files: they are outputs, and the runtime does not read
+   them.
+5. Update conceptual prose in `docs/reload-semantics.md` only when the
+   transition semantics changed — the per-field table is generated.
+6. Verify with `make generated-check` (which `make ci-pr` runs) and
+   `go test ./internal/lifecycle ./internal/config`.
+
+A stale artifact fails with the exact regeneration command, so a missing
+regeneration is never a guess.
 
 ### Changelog entries
 

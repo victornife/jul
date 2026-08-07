@@ -127,15 +127,19 @@ func diffLifecycleCompleteness(before, after *config.Config, d *ConfigDiff) {
 		if ch.Reason != "" {
 			detail += " — " + ch.Reason
 		}
-		classStr := ch.Class.String()
-		if ch.Class == lifecycle.RestartRequiredClass {
+		switch {
+		case ch.Reserved:
+			d.warn("%s is reserved and rejected by configuration validation; the change cannot be saved.", ch.Path)
+		case ch.Ignored:
+			d.warn("%s is no longer read by any runtime component; the change is saved but has no runtime effect.", ch.Path)
+		case ch.Class == lifecycle.RestartRequiredClass:
 			d.warn("%s is restart-required; the change is saved but will not take effect until the process restarts.", ch.Path)
 		}
 		d.mod(DiffEntry{
-			Kind:           ch.Subsystem,
+			Kind:           string(ch.Subsystem),
 			Name:           ch.Path,
 			Detail:         detail,
-			LifecycleClass: classStr,
+			LifecycleClass: ch.Class.String(),
 		}, affected)
 	}
 }

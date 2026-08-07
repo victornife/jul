@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.1 · Updated 2026-08-05
+> Version 2.2 · Updated 2026-08-07
 >
 > This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
 > with a portfolio model. Delivered feature maturity remains authoritative in the
@@ -19,7 +19,7 @@ ready, draft, gated, selected, deferred, deliberately restart-bound, or complete
 
 | Lane | Objective | Entry rule | Current emphasis |
 | --- | --- | --- | --- |
-| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Cache correctness/recertification and lifecycle authority |
+| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Closed-world lifecycle authority (cache correctness/recertification complete) |
 | **Core Gateway Completeness** | Close material gaps inside the standalone gateway boundary | Architecture and product integrity | Trust boundaries, backend TLS/mTLS, resilience, routing policy, automation contracts |
 | **Operational enhancement** | Improve long-running operation without redefining the core | Value × leverage ÷ permanent complexity | Selected hot reload, diagnostics, recovery, migration assessment |
 | **Technical experiment** | Explore a new category through a bounded, removable tranche | Hypothesis, prerequisites, budget, evidence, exit decision | AI Gateway candidate after generic trust/resilience decisions |
@@ -34,8 +34,8 @@ portfolio has parallel lanes.
 | --- | --- | --- | --- |
 | **0 — Programme and truth** | Combined audit, current product truth, operating model and historical-audit disposition | One audit, one tracker, canonical docs synchronized | ✅ reconciled; #114/#119/#130 closed |
 | **1 — Immediate non-cache correctness** | Strict configuration, HTTP/3 mTLS, ACME, compression, access logs, metrics and WAF contracts | No known non-cache P0; selected P1 corrections documented and tested | ✅ verified in `v1.32.1-rc.1`; #129 remains a non-blocking quality track |
-| **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ▶ in progress: #131 and #133 merged; #132 next |
-| **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ⬜ planned |
+| **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ✅ complete: #131, #133 and #132 merged; #134 recertification closed #107; the cache retains GA |
+| **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ▶ in progress: #89 |
 | **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ⬜ planned |
 | **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ⬜ planned |
 | **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ⬜ planned |
@@ -51,7 +51,8 @@ The roadmap deliberately consolidates the more granular numbering in #62:
 
 - roadmap Stage 0 = #62 Stage 0 programme reconciliation plus Stage 1 audit/documentation truth;
 - roadmap Stage 1 = the completed #62 Stage 2 non-cache correctness tranche;
-- roadmap Stage 2 = #62 Stage 3 cache correctness and recertification.
+- roadmap Stage 2 = #62 Stage 3 cache correctness and recertification (complete);
+- roadmap Stage 3 = #62 lifecycle authority (#89), the current stage.
 
 This avoids two competing execution models. #62 owns issue-level status;
 this roadmap owns the durable portfolio sequence.
@@ -65,9 +66,9 @@ this roadmap owns the durable portfolio sequence.
     ↓
 v1.32.1-rc.1 — independently verified published prerelease (complete; not stable)
     ↓
-#131 → #133 / #132 → #134 — cache correctness and recertification
+#131 → #133 → #132 → #134 — cache correctness and recertification (complete; #107 closed)
     ↓
-#89 — closed-world lifecycle authority
+#89 — closed-world lifecycle authority (current)
     ↓
 #77 → #82 — Phase 5 structured configuration
     ↓
@@ -77,11 +78,12 @@ selected core implementations
 ```
 
 The selected correction tranche and its published `v1.32.1-rc.1`
-prerelease checkpoint are complete and independently verified. Cache correctness
-and recertification are now the immediate correctness gate, followed by
-closed-world lifecycle authority. Shared edits to the configuration schema,
-lifecycle, composition root, reload transaction, or Console patch contracts
-remain serial.
+prerelease checkpoint are complete and independently verified. The cache
+correctness programme is complete and #107 is closed: the response cache retains
+GA on the strength of the 2026-08-07 recertification. Closed-world lifecycle
+authority (#89) is now the immediate correctness gate and the hard predecessor of
+Phase 5 preview (#77). Shared edits to the configuration schema, lifecycle,
+composition root, reload transaction, or Console patch contracts remain serial.
 
 ## Correctness and security backlog
 
@@ -98,10 +100,10 @@ remain serial.
 - Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).
 - Path-only, bounded WAF matched-request logging with query and macro-expanded request data omitted (#127).
 - Explicit access-log enablement with restart-truthful sinks and deprecated legacy-field handling (#124).
+- Cache concurrency, lifecycle, protocol and HTTP conformance restored, with an integrated source audit, executable behavior matrix, race/protocol evidence, benchmarks and soak (#131, #133, #132, #134; epic #107 closed).
 
 ### Remaining immediate correctness
 
-- Restore cache concurrency, lifecycle, protocol and HTTP conformance (#107, #131–#134).
 - Establish closed-world generated lifecycle authority (#89).
 
 ### Required quality foundation
@@ -119,8 +121,9 @@ preflight, full-tag gate, five-minute soak-smoke, 12-cell lean/full matrix,
 checksums, embedded SPDX SBOMs, and all provenance/SBOM attestations passed. The
 GitHub Release is published as a prerelease; see the
 [candidate evidence](../release-candidates/v1.32.1-rc.1.md). Stable publication
-remains a later explicit decision while cache recertification and broader
-lifecycle-authority work remain open.
+remains a later explicit decision. The response-cache correctness programme has
+since completed on `main`; closed-world lifecycle authority is the remaining open
+correctness foundation.
 
 ## Core Gateway Completeness backlog
 

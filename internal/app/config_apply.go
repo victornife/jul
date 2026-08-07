@@ -885,12 +885,13 @@ func subsystemNames(cs lifecycle.ChangeSet) []string {
 	seen := make(map[string]struct{}, len(cs))
 	var out []string
 	for _, e := range cs {
-		if e.Subsystem == "" {
+		name := string(e.Subsystem)
+		if name == "" {
 			continue
 		}
-		if _, ok := seen[e.Subsystem]; !ok {
-			seen[e.Subsystem] = struct{}{}
-			out = append(out, e.Subsystem)
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			out = append(out, name)
 		}
 	}
 	return out

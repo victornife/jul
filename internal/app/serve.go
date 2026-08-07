@@ -1075,8 +1075,8 @@ func pendingRestartCheck(startupCand *config.Candidate, startupFP lifecycle.Fing
 
 	pendingSet := make(map[string]struct{})
 	for _, path := range lifecycle.DiffAddressAware(startupFP, lifecycle.ComputeFingerprint(candidate.Effective)) {
-		if e := lifecycle.ByPath(path); e != nil {
-			pendingSet[e.Subsystem] = struct{}{}
+		if e, ok := lifecycle.Lookup(path); ok {
+			pendingSet[string(e.Subsystem)] = struct{}{}
 		}
 	}
 	if _, need := server.PreflightRebindRequired(live, candidate.Effective); need {

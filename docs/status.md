@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.1 · Updated 2026-08-05
+> Version 2.2 · Updated 2026-08-07
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -67,7 +67,7 @@ prerelease and does not change stable-release or long-running-soak status.
 ### Current audit and release notices
 
 - **Response cache:** recertified by #134 after the #131/#132/#133 correction programme. The feature retains GA: the integrated source audit found no unresolved P0/P1 cache defect, the behaviour matrix now maps to executable tests, six benchmarks were refreshed, and the focused correctness soak completed with 422,042 requests and zero unexplained errors. See [cache.md](cache.md) and the [2026-08-07 audit record](audit/2026-08-07-cache-recertification.md).
-- **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are verified in `v1.32.1-rc.1`; stable publication remains pending. Closed-world lifecycle generation (#89) remains open, and access-log changes are restart-required until #98.
+- **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are verified in `v1.32.1-rc.1`; stable publication remains pending. Closed-world lifecycle authority (#89) is implemented on `main`: the Go registry in `internal/lifecycle/registry.go` classifies every public TOML leaf exactly once, an unregistered path fails closed instead of defaulting to hot reload, and `docs/config-lifecycle.yaml` plus `docs/generated/config-lifecycle.{md,json}` are deterministic mirrors verified by `make generated-check`. Access-log changes remain restart-required until #98, static certificate material until #100, and cache settings until #92/#93.
 - **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen; additive families and the bounded, path-only WAF warning contract are verified in `v1.32.1-rc.1` and remain stable-release pending.
 - **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are verified in `v1.32.1-rc.1`; stable publication remains a later decision.
 
