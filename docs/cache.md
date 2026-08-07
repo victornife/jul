@@ -9,8 +9,10 @@ The cache is opt-in per location (`cache = true`) and gated by the global
 `[cache].enabled` switch. Cacheability follows the shared-cache rules of RFC 9111
 and RFC 5861; the exact contract, including every deliberate conservative
 choice, is written out in [Shared-cache contract](#shared-cache-contract). The
-overall GA/maturity decision remains open until #134 publishes the recertified
-evidence package.
+cache was recertified by #134 after the #131/#132/#133 correction programme.
+The final decision is to retain GA: no unresolved cache P0/P1 correctness defect
+was found, and the executable matrix, race/protocol suites, focused soak and
+benchmarks below were refreshed against the corrected implementation.
 
 ## Contents
 
@@ -113,9 +115,10 @@ request-derived may ever appear here.
 
 > The `jul_cache_events_total` **help string** still reads
 > `(HIT/MISS/STALE/BYPASS)`. That text is frozen by the v1.32.0 released metric
-> contract and cannot change without a compatibility decision; `REVALIDATED` is a
-> new *label value*, which the contract does not freeze. Re-wording is owned by
-> #126/#134.
+> contract and is intentionally preserved; `REVALIDATED` is an additive label
+> value, which the released contract does not freeze. The separate release-pending
+> `jul_cache_revalidations_total` description covers both synchronous validation
+> and background revalidation.
 
 ## Shared-cache contract
 
@@ -327,41 +330,44 @@ Serving RFC-compliant byte ranges from complete cached representations is a
 documented future enhancement, not a gap that will be filled implicitly. See
 [Known limitations](#known-limitations).
 
-## Historical behaviour matrix
+## Executable behaviour matrix
 
-| Scenario | Rule | Detail |
+This is the authoritative post-#134 matrix. Every row names executable evidence;
+the complete audit record is [the 2026-08-07 cache recertification](audit/2026-08-07-cache-recertification.md).
+
+| Behaviour | Contract | Executable evidence |
 | --- | --- | --- |
-| Cache key composition | `METHOD\nhost.lower\nREQUEST_URI` | Host is lowercased; query string is part of the key; no request header is ever included |
-| `Vary` handling | Distinct variant per header-value combo | Base key holds a pointer entry listing varied fields and owned variant keys |
-| `Vary: *` | Never cached | Treated as non-reusable; not stored |
-| Cacheable status codes | 200, 203, 301, 404, 410 | Configurable via `cacheableStatus` map in code |
-| Non-cacheable status codes | 500, 502, 503, 504, all others | Silently not stored |
-| TTL precedence | `s-maxage` → `max-age` → `Expires` → `default_ttl` | First explicit directive wins; `default_ttl` is the fallback |
-| Conditional requests (`If-None-Match` / `If-Modified-Since`) | 304 if cached ETag/Last-Modified matches | Saves bandwidth on unchanged resources |
-| Unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`/extension) | Forwarded; invalidate on 2xx/3xx | See [Unsafe-method invalidation](#unsafe-method-invalidation) |
-| `OPTIONS` / `TRACE` / `CONNECT` | Forwarded, never invalidate | Safe or tunnelling; no target representation |
-| `Range` / `If-Range` request | Bypass | See [`Range` and `If-Range`](#range-and-if-range-decision-d05) |
-| Protocol upgrade request (`Connection: Upgrade` + `Upgrade`) | Bypass | Handler receives the untouched writer; `X-Cache: BYPASS`; never stored |
-| `101 Switching Protocols` and other `1xx` | Not stored | Not a representation; capture is dropped |
-| `Content-Type: text/event-stream` | Not stored | Capture stops at the first byte so an open stream accumulates nothing |
-| Flushed (chunked) response | Stored normally | A flush alone does not make a response a stream |
-| Oversized responses (> `memory_max_size`) | Not stored in that tier | Silently dropped; client still served |
-| Memory eviction → disk | Overflow to disk tier (when configured) | Eviction runs outside the memory lock |
+| Key construction | `METHOD\nhost.lower\nREQUEST_URI`; credentials and cookies never enter the key | `TestKeyConstruction`, `TestCredentialsNeverEnterTheCacheKey` (`internal/cache`) |
+| GET/HEAD, unsafe and other methods | GET/HEAD may cache; successful unsafe methods invalidate GET+HEAD; OPTIONS/TRACE/CONNECT do not invalidate | `TestSuccessfulUnsafeMethodsInvalidateTheTarget`, `TestSafeMethodsNeverInvalidate`, `TestInvalidationStatusRules`, `TestHeadRangeRequestBypasses` |
+| Cacheable statuses | Only the documented status allow-list is stored; 1xx/101 and origin errors are not | `TestCacheableStatusSet`, `TestProtocolSwitchResponseNeverStored`, `TestResponseDirectiveStorage` |
+| Request `no-store` | Bypass lookup and storage without purging an existing entry | `TestRequestNoStoreBypassesLookupAndStorage`, `TestRequestNoStoreResponseIsNotStored` |
+| Request `no-cache`, `max-age=0`, `Pragma` | Mandatory synchronous validation, including fresh entries | `TestRequestNoCacheValidatesEvenAFreshEntry`, `TestPragmaNoCacheValidates`, `TestRequestPolicyMatrix` |
+| Response storage/freshness directives | `no-store`, `private`, `public`, `s-maxage`, `max-age`, `Expires` and malformed/duplicate values follow the contract above | `TestResponseDirectiveStorage`, `TestFreshnessPrecedence`, `TestResponsePolicyMatrix`, `TestParseCacheControlDirectiveMatrix`, `TestParseCacheControlIsTotal` |
+| Response `no-cache` | Stored, but every reuse validates before serving | `TestResponseNoCacheRequiresValidationBeforeEveryReuse`, `TestConcurrentMandatoryValidatorsIssueOneOriginRequest` |
+| `must-revalidate` / `proxy-revalidate` | Forbid stale reuse and outrank stale-if-error | `TestMustRevalidateForbidsStaleReuse`, `TestStaleIfErrorRespectsMustRevalidate`, `TestFreshnessStaleWindowIsZeroWhenRevalidationIsMandatory` |
+| SWR/SIE | Bounded stale reuse; explicit response values replace global defaults; canceled work never extends SIE | `TestExplicitStaleIfErrorReplacesTheGlobalSetting`, `TestStaleOnErrorWindowContract`, `TestRevalidationCanceledByLeaseCancel`, `TestCacheRecertificationSoak` |
+| `Authorization` | Shared reuse only when explicitly permitted; identities and credentials never leak through keys or variants | `TestSharedReusePermissionMatrix`, `TestNoCrossIdentityLeakage`, `TestUnauthenticatedEntryIsNotReusableByAnAuthenticatedRequest`, `TestVaryAuthorizationStillEnforcesTheSharedReuseRule`, `TestRealAuthenticatedIdentityIsolation` |
+| `Set-Cookie` | Never stored | `TestResponseDirectiveStorage`, `TestSharedReusePermissionMatrix` |
+| `Vary` and membership | Distinct variants coexist; 64-entry membership cap; invalidation removes every owned memory/disk variant | `TestHandlerVaryVariantsCoexist`, `TestUnsafeMethodRemovesEveryVaryVariant`, `TestDeletedVariantCannotBeResurrectedByANewStub`, `TestChangedVaryReplacesTheVariantSet` |
+| ETag / Last-Modified / 304 | ETag precedence; immutable metadata merge; changed/unsafe metadata discards | `TestValidatorPrecedence`, `TestMerge304UpdatesMetadata`, `TestMerge304Discards`, `TestMerge304NeverMutatesThePublishedEntry`, `TestMerge304AcrossBothTiers` |
+| Range / If-Range | Bypass before lookup/store; 206 is never stored | `TestRangeRequestBypassesLookup`, `TestIfRangeBypassesLookup`, `TestRangeResponsesAreNeverStored`, `TestRealRangePassThrough` |
+| WebSocket / 101 | Upgrade requests bypass with the original writer; 101 is never stored | `TestWebSocketThroughCachedProxy`, `TestWebSocketThroughFullMiddlewareChain`, `TestUpgradeRequestBypassesCache`, `TestProtocolSwitchResponseNeverStored`, `TestRepeatedUpgradesThroughCachedProxy` |
+| SSE / flushed / oversized | SSE is not buffered or stored; ordinary flushed chunked responses remain cacheable; oversized capture is not stored | `TestSSEThroughCachedProxyStreamsAndIsNotStored`, `TestEventStreamIsNeverStoredOrBuffered`, `TestFlushedChunkedResponseIsStillCached`, `TestOversizedStreamIsNotStored` |
+| Memory/disk tiers | Byte-bounded LRU, disk overflow/promotion, restart rehydration, owner-only files and foreign-file isolation | `TestDiskStorePersistence`, `TestDiskStoreConcurrentOverflowEviction`, `TestDiskStoreFileMode`, `TestDiskStoreAtomicNoTempLeftovers`, `TestDiskStoreIgnoresForeignFiles` |
+| Entry immutability | Published entries are cloned and replaced, never mutated under readers | `TestStaleIfErrorReplacesRatherThanMutates`, `TestNotModifiedReplacesRatherThanMutates`, `TestConcurrentReadsDuringStaleIfErrorReplacement`, `TestPublishedEntryDoesNotAliasHandlerState` |
+| Reload and generation lifetime | Refresh/validation is generation-owned, survives client disconnect, blocks premature retirement and is bounded on forced retirement/shutdown | `TestReloadWaitsForCacheRevalidationHoldingGeneration`, `TestReloadDuringMandatorySynchronousValidation`, `TestRevalidationSurvivesClientDisconnect`, `TestForcedRetirementCancelsLeasedWork`, `TestDrainCancelsAndBoundsLiveBackgroundWork` |
+| Real HTTP/admin paths | H1/H2 validation, concurrent singleflight, invalidation, auth isolation and purge/delete use production handlers | `TestRealProxyOriginValidation`, `TestRealHTTP2CacheBehavior`, `TestRealConcurrentValidatorsShareOneOriginRequest`, `TestRealUnsafeMethodInvalidation`, `TestPurgeMethodAndKey` |
 
-## Current correction contract
+## Recertification disposition
 
-The active cache programme requires:
-
-- ~~generation-owned, cancellable background revalidation~~ — **delivered by #131**;
-- ~~immutable published entries and race-free metadata replacement~~ — **delivered by #131**;
-- ~~transparent WebSocket/`101`, SSE and optional `http.ResponseWriter` interface behavior~~ — **delivered by #133**;
-- ~~synchronous validation for request/response `no-cache`~~ — **delivered by #132**;
-- ~~`must-revalidate`, `proxy-revalidate`, authenticated reuse, unsafe-method invalidation and `304` metadata handling~~ — **delivered by #132**;
-- ~~bypass for requests carrying `Range` or `If-Range`~~ — **delivered by #132**.
-
-The remaining programme item is #134: the integrated source re-audit, executable
-matrix, race/leak/soak evidence, benchmark refresh and maturity decision. **This
-document describes tested behavior; it does not assert recertification.**
+#131, #132 and #133 corrected generation ownership/immutability, shared-cache
+semantics and protocol-writer transparency. #134 then re-read the integrated
+source, replaced the prose-only matrix above with executable evidence, added the
+mandatory-validation and variant-invalidation benchmarks, and added the focused
+cache correctness soak. No unresolved cache P0/P1 defect was found. The cache
+therefore retains **GA**; the limitations below remain explicit product,
+performance, conservative or lifecycle constraints rather than hidden
+correctness exceptions.
 
 ## Freshness and stale-while-revalidate
 
@@ -649,9 +655,10 @@ Product limitations — deliberate scope, not defects:
    storage — is a recorded future enhancement candidate, promoted only when
    representative media/download workloads show material origin or latency cost.
 
-3. **No cross-location cache sharing.** Each Jul.IA process has its own isolated
-   cache instance. There is no shared cache (e.g. Redis) for multi-instance
-   deployments; each node warms independently.
+3. **No cross-process / distributed cache.** Each Jul.IA process has one
+   process-scoped cache instance shared by its cache-enabled locations. There is
+   no shared cache (e.g. Redis) across multiple instances; each node warms
+   independently.
 
 4. **Silent oversized-entry drop.** A response body larger than `memory_max_size`
    (or `disk_max_size`) is streamed to the client but not cached. There is no
@@ -711,20 +718,30 @@ Lifecycle behavior:
 
 ## Benchmarks
 
-Run with `go test -bench='BenchmarkCache.*' -benchmem ./internal/cache/`.
+Recertification command (five fixed-iteration samples):
 
-| Benchmark | Scenario | ns/op | allocs/op | bytes/op |
-| --- | --- | --- | --- | --- |
-| `BenchmarkCacheHit` | Memory hit, small body | ~2 400 | 15 | 1 192 |
-| `BenchmarkCacheMiss` | Memory miss (first store) | ~10 600 | 44 | 7 807 |
-| `BenchmarkCacheVaryHit` | Vary variant hit | ~2 900 | 18 | 1 280 |
-| `BenchmarkCacheMemOverflow` | 512-byte memory cap → disk overflow per write | ~4 360 000 | 106 | 14 620 |
+```bash
+go test -run '^$' -bench='BenchmarkCache.*' -benchmem -benchtime=100x -count=5 ./internal/cache
+```
 
-A memory hit is ~4× faster than a miss (the miss must buffer the response and
-allocate an entry). Vary adds ~20% overhead to a hit because the variant key
-must be computed. Overflow to disk is orders of magnitude slower due to the
-syscall cost of file I/O; the memory lock is released before writing so readers
-are never blocked.
+Environment: GitHub-hosted Ubuntu 24.04, Go 1.26.5, linux/amd64, AMD EPYC 7763,
+`GOMAXPROCS=4`. Values below are the median of the five samples from workflow
+run `31163489042` on `3a4c982ed42cabaf608de771492402897f2dffac`.
+
+| Benchmark | Scenario | Median ns/op | allocs/op | bytes/op |
+| --- | --- | ---: | ---: | ---: |
+| `BenchmarkCacheHit` | Fresh memory hit, small body | 2,071 | 15 | 1,224 |
+| `BenchmarkCacheMiss` | Unique miss and first store | 10,321 | 49 | 8,266 |
+| `BenchmarkCacheVaryHit` | Warm `Vary` variant hit | 2,777 | 19 | 1,328 |
+| `BenchmarkCacheMemOverflow` | 512-byte memory cap and disk overflow | 751,820 | 113 | 14,154 |
+| `BenchmarkCacheMandatoryValidation304` | Synchronous `no-cache` validation, 304 merge and stored-body serve | 7,703 | 47 | 4,354 |
+| `BenchmarkCacheVariantInvalidation` | Delete a populated 32-variant membership set | 5,728 | 1 | 84 |
+
+These are correctness-path baselines, not cross-machine service-level targets.
+The fixed `100x` benchtime deliberately excludes automatic calibration that
+would repeatedly rebuild the 32-variant setup. Disk overflow remains orders of
+magnitude slower than a memory hit because it performs crash-safe file I/O; the
+memory lock is released before that I/O.
 
 ## Threat note
 
@@ -779,19 +796,23 @@ integrity, and availability:
    hop-by-hop headers but does not inspect application-level headers beyond
    `Cache-Control` semantics.
 
-## GA status — recertification open
+## GA status — recertified
 
-The feature retains its historical release record. The shared-cache conformance findings that reopened its evidence are now corrected and tested (#131, #132, #133), but #134 must still publish the integrated executable matrix, race/protocol evidence, benchmarks, soak result and final maturity/status decision before the cache is described as recertified.
-
+**Decision: retain/restore GA.** The historical released status is now backed by
+the corrected implementation and the post-#134 integrated evidence package. The
+focused correctness soak is not presented as production-scale throughput; the
+historical one-hour soak remains the long-duration evidence and the new run
+specifically recertifies corrected validation, stale, invalidation and overflow
+paths.
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| 1 — Conformance / behaviour matrix | ⚠️ recertification open | The [shared-cache contract](#shared-cache-contract) above describes tested behaviour; #134 owns the integrated executable matrix and the maturity decision |
-| 2 — Published benchmark numbers | ⚠️ refresh pending | `BenchmarkCacheHit` / `Miss` / `VaryHit` / `MemOverflow` in `internal/cache/bench_test.go`; the recorded numbers predate #132 and are rerun by #134 |
-| 3 — Known-limitations list | ✅ | 13-item limitation list above, separated into product, conservative and lifecycle |
-| 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
-| 5 — Long-running soak test | ⚠️ refresh pending | soaked 1h windows 2026-07-04 (1.5M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--cache-soak-local-windows-1-hour-50-workers); predates #132 and is rerun by #134 |
-| 6 — Runnable example + docs | ✅ | `testdata/cache.toml` + this doc |
-| 7 — Security / threat note | ✅ | 6-row threat note above, plus the identity-isolation tests in `internal/cache/authorization_test.go` and `internal/handler/cache_conformance_test.go` |
-| 8 — Fuzzing where parsing is involved | ✅ | `TestParseCacheControlIsTotal` exercises the directive parser against adversarial input alongside the explicit behavioural matrix |
-| 9 — Self-explanatory Console surface | ✅ | Status row in runtime overview (tier config + opt-in location count) |
+| 1 — Conformance / behaviour matrix | ✅ | [Executable behaviour matrix](#executable-behaviour-matrix) and [audit record](audit/2026-08-07-cache-recertification.md) |
+| 2 — Published benchmark numbers | ✅ | Six refreshed benchmarks above, including mandatory validation and populated-variant invalidation |
+| 3 — Known-limitations list | ✅ | 13-item list above and [known-limitations.md](known-limitations.md), separated by product/conservative/performance/lifecycle meaning |
+| 4 — Semver-guarded config/API contract | ✅ | v1 config freeze and #126 metric compatibility guard; the released `jul_cache_events_total` help remains unchanged |
+| 5 — Soak evidence | ✅ | Historical 1h cache soak plus post-correction focused run: 422,042 requests, 0 errors, all five cache result classes, stable goroutine/FD/heap trends — [evidence](soak-evidence.md#2026-08-07--cache-recertification-correctness-soak-linux-30-seconds-16-workers) |
+| 6 — Runnable example + docs | ✅ | `testdata/cache.toml`, this guide, benchmark and soak records |
+| 7 — Security / threat note | ✅ | Threat note above plus real authenticated identity-isolation and foreign-file tests |
+| 8 — Fuzzing/parser robustness | ✅ | `TestParseCacheControlIsTotal` and directive matrices |
+| 9 — Self-explanatory Console surface | ✅ | Runtime overview and cache purge/delete surfaces; lifecycle limitations remain explicit |

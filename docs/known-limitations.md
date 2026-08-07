@@ -9,12 +9,10 @@ references.
 
 ## Current defects and recertification work
 
-- **Response cache:** generation ownership and immutable published entries are corrected and evidenced by #131; protocol-upgrade bypass, streaming policy and `ResponseWriter` transparency by #133; shared-cache directives, authenticated reuse, unsafe-method invalidation, `304` metadata merging and Range bypass by #132. The integrated recertification and maturity decision remain open under #107 and #134.
+- **Response cache:** #131/#132/#133 corrected the confirmed implementation defects and #134 completed the integrated source, protocol, race, benchmark and soak recertification. The cache remains GA. The limitations in the dedicated section below are explicit product, performance, conservative or lifecycle constraints; no residual cache correctness exception is being hidden as a limitation.
 - **Access-log lifecycle:** request records can be disabled explicitly, but enablement and sink changes remain restart-required until #98 introduces generation-safe sink replacement.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
-
----
 
 ---
 

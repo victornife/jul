@@ -23,10 +23,9 @@
 # "Delivery state vs. maturity" table in docs/status.md. As of 2026-08-04 the
 # strict TOML, HTTP/3 mTLS, compression no-transform, exclusive ACME challenge,
 # dependency/CI and CodeQL correction tranche is merged but not yet tagged. The
-# response-cache entry preserves the historical release maturity while its
-# current conformance evidence is explicitly under recertification in the note
-# below and in docs/status.md/docs/cache.md; no new machine maturity value is
-# invented for a temporary regression programme.
+# response-cache entry retains GA after the #134 integrated recertification;
+# the executable matrix, benchmark/soak refresh and remaining limitations are
+# recorded in docs/cache.md and docs/audit/2026-08-07-cache-recertification.md.
 #
 # NOTE: Keep in sync with docs/status.md. When a feature's maturity, criterion,
 # or material current-status note changes, update both files. docs-check.py
@@ -169,16 +168,15 @@ features:
     doc: cache.md
     criteria: {1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true}
     notes: >
-      Historical released GA record. Generation-owned cancellable revalidation
-      and immutable published entries are corrected and evidenced by #131;
-      upgrade bypass, streaming policy and ResponseWriter transparency by #133;
-      shared-cache directives, mandatory synchronous validation, authenticated
-      reuse, unsafe-method invalidation, Vary variant membership, 304 metadata
-      merging and Range/If-Range bypass by #132. Criterion 8 is now satisfied by
-      the Cache-Control directive parser's adversarial-input coverage.
-      The integrated recertification — executable matrix, race/leak/soak
-      evidence, benchmark refresh — and the final maturity/status decision
-      remain open in #107 and #134; see docs/cache.md and docs/status.md.
+      Historical released GA record retained after #134 integrated
+      recertification. #131 corrected generation-owned cancellable revalidation
+      and immutable entries; #133 corrected upgrade/streaming/ResponseWriter
+      transparency; #132 corrected shared-cache directives, mandatory validation,
+      authenticated reuse, invalidation, Vary membership, 304 merge and Range
+      bypass. #134 published the executable matrix, refreshed six benchmarks,
+      added a zero-error focused correctness soak and found no unresolved P0/P1
+      cache defect. Criterion 8 is satisfied by adversarial Cache-Control parser
+      coverage. See docs/cache.md and the 2026-08-07 audit record.
 
   - id: core-http
     name: "Core HTTP (static / proxy / FastCGI / vhosts / routing)"

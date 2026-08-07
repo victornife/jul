@@ -34,7 +34,7 @@
     {
       "name": "jul_cache_revalidations_total",
       "type": "counter",
-      "help": "Background cache revalidation decisions, labeled by bounded outcome (stored/not_modified/uncacheable/origin_error/canceled/panic/no_lease/deduplicated).",
+      "help": "Cache validation and revalidation decisions, labeled by bounded outcome (stored/not_modified/uncacheable/origin_error/canceled/panic/no_lease/deduplicated).",
       "labels": [
         "outcome"
       ],

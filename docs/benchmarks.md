@@ -87,6 +87,16 @@ Jul.IA uses Go's default goroutine-per-request model. There is no fixed worker p
 1. **`GOMAXPROCS`** — set to the number of physical CPU cores (or vCPUs) available. The Go scheduler handles the rest.
 2. **File descriptor limits** — on Linux, ensure `ulimit -n` covers `(listeners + upstream_backends) × expected_parallelism`. For 10k concurrent connections, `ulimit -n 65536` is typical.
 
+### Response cache recertification baseline
+
+The post-#134 cache baseline was measured on GitHub-hosted Ubuntu 24.04,
+Go 1.26.5, linux/amd64, AMD EPYC 7763, using five fixed 100-iteration samples.
+Median results: fresh hit 2,071 ns/op; miss/store 10,321 ns/op; Vary hit
+2,777 ns/op; crash-safe memory-to-disk overflow 751,820 ns/op; mandatory
+304 validation 7,703 ns/op; and 32-variant invalidation 5,728 ns/op. These are
+machine-specific correctness-path baselines, not deployment SLOs. Full
+allocation data and command are in [cache.md](cache.md#benchmarks).
+
 ### Response cache sizing
 
 ```toml

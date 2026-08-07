@@ -180,7 +180,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}, []string{"state"}),
 		cacheRevalidations: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_cache_revalidations_total",
-			Help: "Background cache revalidation decisions, labeled by bounded outcome (stored/not_modified/uncacheable/origin_error/canceled/panic/no_lease/deduplicated).",
+			Help: "Cache validation and revalidation decisions, labeled by bounded outcome (stored/not_modified/uncacheable/origin_error/canceled/panic/no_lease/deduplicated).",
 		}, []string{"outcome"}),
 		compressed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_http_response_compressed_total",

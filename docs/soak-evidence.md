@@ -27,15 +27,20 @@ does not immediately crash, but they do **not** satisfy the post-GA soak criteri
 
 | Context | Trigger | Duration | Artifact | Counts toward gate? |
 | --- | --- | --- | --- | --- |
-| CI smoke (`soak (smoke)` job) | every push / PR | 20s × 2 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run | ❌ No (smoke only) |
-| Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 2 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release | ❌ No (smoke only) |
+| CI smoke (`soak (smoke)` job) | every push / PR | 20s × 3 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run | ❌ No (smoke only) |
+| Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 3 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release | ❌ No (smoke only) |
 | Local | `scripts/soak.sh` | configurable | stdout (see runs below) | ✅ Yes, if duration meets the minimum for the scope exercised |
 
-Both scenarios are driven by the in-tree soak tests behind the `soak` build tag:
+All three scenarios are driven by the in-tree soak tests behind the `soak` build tag:
 
 - **proxy** — `TestSoak` ([internal/handler/soak_test.go](../internal/handler/soak_test.go)):
   sustained concurrent HTTP requests through a real reverse-proxy handler; asserts
   **zero request errors** plus steady goroutine count and bounded heap growth.
+- **cache** — `TestCacheRecertificationSoak` ([internal/cache/recertification_soak_test.go](../internal/cache/recertification_soak_test.go)):
+  concurrent real HTTP/1.1 traffic across fresh hits, mandatory 304 validation,
+  stale-while-revalidate, stale-if-error, Vary variants, unsafe invalidation,
+  Range/no-store/SSE bypass and a separate memory-to-disk overflow tier; asserts
+  zero unexplained errors, every bounded cache result class and resource/capacity bounds.
 - **udp-churn** — `TestSoakUDPChurn` ([internal/stream/soak_test.go](../internal/stream/soak_test.go)):
   sustained UDP source-address churn through a real stream listener; asserts the
   live-session count stays capped and every reaped/evicted session tears down
@@ -58,6 +63,16 @@ artifacts; each entry states the scope (single-feature vs. consolidated) and
 whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
+
+### 2026-08-07 — Cache recertification correctness soak (Linux, 30 seconds, 16 workers)
+
+- **SHA/workflow:** `3a4c982ed42cabaf608de771492402897f2dffac`, workflow `31163489042`, artifact `cache-recertification-measurements` (`8988058136`).
+- **Environment:** GitHub-hosted Ubuntu 24.04, Go 1.26.5, linux/amd64, AMD EPYC 7763, full opt-in tag set plus `soak`.
+- **Command:** `SOAK_SCENARIO=cache SOAK_DURATION=30s SOAK_WORKERS=16 scripts/soak.sh`.
+- **Traffic:** 422,042 client requests; 294,330 origin requests; 37,884 deliberate origin 5xx responses absorbed by stale-if-error; **0 client errors**.
+- **Cache distribution:** HIT 126,328; MISS 103,877; STALE 38,368; REVALIDATED 38,365; BYPASS 76,736. Every scenario-specific client/server error counter remained zero.
+- **Resources:** goroutines 7 → 4; heap 326,528 → 592,656 bytes; file descriptors 13 → 11. Primary cache 3,866/262,144 memory bytes; overflow cache 4,375/8,192 memory and 583,168/2,097,152 disk bytes. No stranded revalidation call state.
+- **Classification:** ✅ focused post-correction correctness/lifecycle evidence for #134; ❌ not a production-throughput claim and not a replacement for the historical one-hour ADR-0005 duration record.
 
 ### 2026-08-05 — `v1.32.1-rc.1` release-gate smoke (Linux, 5m/scenario)
 
