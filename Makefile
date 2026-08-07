@@ -1,6 +1,6 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
         console-dev console-build console-check build-console build-full license-check \
-        hooks waf-churn security-gates
+        hooks waf-churn security-gates lifecycle-generate generated-check
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
@@ -63,6 +63,19 @@ security-gates:
 
 ci-fast: format-check lint test build license-check
 
+# ── Generated artifacts ──────────────────────────────────────────────
+# The Go lifecycle registry (internal/lifecycle/registry.go) is the machine
+# authority for configuration lifecycle behavior. docs/config-lifecycle.yaml and
+# docs/generated/config-lifecycle.{md,json} are deterministic renderings of it.
+# Never hand-edit them; change the registry and regenerate.
+lifecycle-generate:
+	go generate ./internal/lifecycle
+
+# Non-mutating drift gate. Fails when a generated artifact does not match what
+# the registry renders, printing the exact regeneration command.
+generated-check:
+	go run ./internal/lifecycle/lifecyclegen -out docs -check
+
 # Full-tag Go gates (build, lint, test, vulncheck, license).
 # Closest local equivalent to the merge gate; does not cover race, coverage
 # floors, platform lanes, frontend, or E2E (those run only in CI).
@@ -74,6 +87,7 @@ ci-full: format-check lint-full test-full vulncheck-full build-full license-chec
 # external services. See CONTRIBUTING.md for the full exclusion list.
 ci-pr: ci-full security-gates
 	go vet -tags "$(FULL_TAGS)" ./...
+	$(MAKE) generated-check
 	python3 scripts/docs-check.py
 
 # Install the repo-managed Git hooks (local CI gate parity, SEQ-08). One command;

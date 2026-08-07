@@ -4,17 +4,21 @@
 > "applied" actually guarantees. The implementation is a single `ReloadPlan`
 > transaction object in [`internal/server/reload_plan.go`](../internal/server/reload_plan.go);
 > lifecycle classification is single-sourced from
-> [`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go) and
-> mirrored in [`config-lifecycle.yaml`](config-lifecycle.yaml).
+> [`internal/lifecycle/registry.go`](../internal/lifecycle/registry.go) and
+> mirrored in the generated
+> [configuration lifecycle reference](generated/config-lifecycle.md),
+> [`config-lifecycle.yaml`](config-lifecycle.yaml) and
+> [`config-lifecycle.json`](generated/config-lifecycle.json).
 >
 > For operator symptoms and fixes — a change that did not apply, a
 > `restart_required` rejection, a degraded-subsystem apply — see
 > [troubleshooting.md](troubleshooting.md#reloads).
 
-> **Lifecycle authority notice:** the Go registry is the current runtime
-> classifier, but #89 is still required to make the schema closed-world and to
-> generate/check the YAML and human mirrors. An unlisted field must not be
-> assumed hot merely because a handler can be rebuilt.
+> **Lifecycle authority.** The Go registry is the sole machine authority and the
+> schema is closed-world: every public TOML leaf has exactly one disposition and
+> an unregistered path fails closed rather than being assumed hot. Regenerate
+> the mirrors with `make lifecycle-generate`; `make generated-check` fails a PR
+> that leaves them stale.
 >
 > Mixed candidates remain whole-candidate operations: Jul.IA does not silently
 > publish a hot subset while another field is staged or restart-bound.
@@ -366,11 +370,93 @@ on a kept address is handled by the new generation as soon as the atomic swap
 completes — never by the old generation after a listener has started serving
 new connections.
 
+## Lifecycle classification: single source of truth
+
+The authoritative classification is the Go registry in
+[`internal/lifecycle/registry.go`](../internal/lifecycle/registry.go). It is the
+**machine authority**: the runtime never reads lifecycle behavior from YAML,
+Markdown or JSON. [`docs/config-lifecycle.yaml`](config-lifecycle.yaml),
+[`docs/generated/config-lifecycle.md`](generated/config-lifecycle.md) and
+[`docs/generated/config-lifecycle.json`](generated/config-lifecycle.json) are
+deterministic renderings of it, produced by `make lifecycle-generate` and
+verified by `make generated-check`. Hand-editing them changes nothing at
+runtime and fails CI.
+
+The world is closed. Every public TOML leaf reachable from `config.Config` —
+inventoried once by [`config.SchemaPaths`](../internal/config/inventory.go) —
+has exactly one disposition, and an unregistered path fails closed:
+`lifecycle.Lookup` reports absence and `lifecycle.ClassOf` returns an error
+naming the regeneration command. Nothing defaults to hot reload.
+
+The classes are:
+
+- **hot_reload** — takes effect on the next successful reload.
+- **restart_required** — takes effect only after a process restart. The admin
+  apply path returns HTTP 409 with `restart_required: true`; SIGHUP/file-watch
+  set `LastReload.OK=false`.
+- **new_listener_only** — honored for a brand-new listen address on reload;
+  changing the property on an already-bound listener is restart-required.
+- **ignored_deprecated** — parsed for v1 compatibility but read by no runtime
+  consumer. Changing `global.access_log`, `global.error_log`,
+  `servers.*.access_log` or `servers.*.error_log` never creates a pending
+  restart and is never reported as applied. Use
+  `[observability.access_log]` instead.
+- **validation_rejected_reserved** — a reserved seam that configuration
+  validation rejects today, so no running process can have consumed it. This
+  covers `servers.*.tls.acme.dns_provider` (DNS-01 is not implemented; `http-01`
+  and `tls-alpn-01` are both supported and are ordinary settings) and
+  `servers.*.locations.*.rate_limit.max_conns` (connection caps are
+  listener-global).
+
+Lifecycle checks compare **effective values** (secret references resolved,
+file-backed secrets digested, `worker_threads` auto resolved to the effective
+GOMAXPROCS cap). This prevents a saved secret-reference change from hiding a
+real structural change and detects file-content rotation. Hot-reloadable
+fields such as `worker_threads` are diffed against the live effective value so
+that a change is applied on the next successful reload.
+
+Values that carry secrets never leave the process: `admin.token`,
+`admin.rbac.principals.*.token`, the discovery tokens, and the TLS
+certificate/key/CA/CRL material are compared as digests. Certificate, key,
+client-CA and CRL material is digested by **file content**, so rotating a file
+in place without editing the configuration is still detected as a change.
+
+### Conditional classification
+
+Some paths do not have one fixed answer: a bind-time value edited on a listen
+address that survives the reload strands the running socket, while the same
+edit confined to an address the reload adds or removes is adopted when the new
+socket binds. `lifecycle.Classify(before, candidate, live)` resolves those
+entries against the live listener set. It is pure — no filesystem, no network —
+so the configuration preview API and the apply path reach identical verdicts
+from the same inputs.
+
+### TLS, PKI, ACME and HTTP/3
+
+These subsystems are classified per exact leaf rather than as one group, so a
+restart reason names the field that actually changed:
+
+- `servers.*.tls.enabled`, `.min_version`, `.cert`, `.key`;
+- `servers.*.tls.client_auth.mode`, `.ca_file`, `.verify_san`, `.crl_file` —
+  the **mtls** bundle installed in the listener's `tls.Config` at bind time;
+- `servers.*.tls.acme.enabled`, `.email`, `.ca`, `.domains`, `.challenge`,
+  `.cache_dir`, `.ocsp_stapling`, plus the reserved `.dns_provider`;
+- `servers.*.http3.enabled` and `servers.*.http3.alt_svc_max_age` — the
+  **http3** QUIC listener and its Alt-Svc advertisement;
+- `servers.*.h2c`.
+
+All of them are compared per listen address, so adding or removing an unrelated
+listener never produces a restart-required verdict for an address nobody edited.
+
 ### Listener property changes
 
 Listener bind-time properties (timeouts, header limits, h2c, HTTP/3, TLS
 settings, mutual TLS, and the connection cap) are captured in a
-`boundFingerprint` when the listener is created. On reload,
+`boundFingerprint` when the listener is created. That fingerprint is a checked
+mirror of the registry, not a second lifecycle list:
+`TestListenerBindFingerprintMirrorsRegistry` asserts every property it freezes
+maps to a registry path classified as listener-bound, and that a new
+listener-bound entry is added to the mapping. On reload,
 `listenerBoundRebindRequired` compares the bound fingerprint against the
 candidate fingerprint for each kept listener. This detects:
 
@@ -564,8 +650,10 @@ very large configs or environments with slow DNS.
 
 ## Changes that require a restart
 
-The authoritative list is [`docs/config-lifecycle.yaml`](config-lifecycle.yaml),
-whose entries are checked against the Go registry by `scripts/docs-check.py`.
+The authoritative list is the Go registry; the complete per-path table is the
+generated [configuration lifecycle reference](generated/config-lifecycle.md),
+with the same data in [`config-lifecycle.yaml`](config-lifecycle.yaml) and
+[`config-lifecycle.json`](generated/config-lifecycle.json).
 `lifecycle.DiffConfig` compares the effective value of every registered path
 using schema-derived extractors, so a field cannot be added to the registry
 without being diffed. The runtime rejects the following categories with `restart_required` at apply
@@ -585,7 +673,10 @@ applied dynamically on the next successful reload.
   timeouts, max header bytes, h2c, HTTP/3, or the global connection cap cannot
   rebind the listener live.
 - **TLS handshake parameters on an existing listener** — minimum TLS version,
-  certificates, and mutual-TLS policy are baked into the listener's TLS config.
+  certificates, and the **mtls** client-authentication bundle (mode, CA bundle,
+  SAN allow-list, CRL) are baked into the listener's TLS config. **http3**
+  (`enabled` and `alt_svc_max_age`) and `h2c` are likewise decided when the
+  address binds.
 - **Tracing** — the OpenTelemetry pipeline is wired once at startup.
 - **Response cache** — the recertified cache backend (LRU/disk tiers and
   counters) is built once at startup and remains process-scoped across ordinary
@@ -605,10 +696,23 @@ it fresh. Only changes to an address the server is already serving are gated.
 ### L4 stream listeners {:#l4-stream-listeners-are-not-affected}
 
 `[[stream]]` routes (`proxy_pass`, `sni_routes`, `proxy_protocol`,
-`connect_timeout`, `idle_timeout`) are swapped atomically per listener and take
-effect on the next connection. The only bind-time properties are `protocol`
-(TCP/UDP) and `listen`; changing either keys a different listener, which is
-bound fresh and drained. See [stream-proxy.md](stream-proxy.md#hot-reload).
+`connect_timeout`, `idle_timeout`, `max_udp_sessions`, `tls_passthrough`) are
+swapped atomically per listener and take effect on the next connection.
+
+`protocol` is also hot-reloadable. An L4 listener is keyed by protocol **and**
+address, and TCP and UDP occupy independent port spaces, so switching the
+protocol on one numeric address is a transactional remove/add: the candidate
+protocol's socket is bound before any live state is mutated, and only then is
+the previous listener retired. Established TCP connections and tracked UDP
+sessions follow the retired listener's drain boundary — they keep running until
+they close or hit `idle_timeout`, and the reload waits for them — while new
+traffic arrives on the candidate protocol. If the candidate cannot build its
+routes or bind its socket, nothing is mutated and the previous protocol keeps
+serving. This is proven by the real-socket matrix in
+`internal/stream/protocol_switch_test.go`.
+
+`listen` keys a different listener, which is bound fresh and drained. See
+[stream-proxy.md](stream-proxy.md#hot-reload).
 
 ## Optimistic concurrency
 

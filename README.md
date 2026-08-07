@@ -98,10 +98,15 @@ glance:
 > compression `no-transform`, exclusive ACME challenge selection, the frozen
 > Prometheus contract, bounded/redacted WAF request logging, explicit access-log
 > enablement, and dependency/CI fixes. See the
-> [candidate evidence](docs/release-candidates/v1.32.1-rc.1.md). The response
-> cache remains under correctness recertification; see
-> [`docs/cache.md`](docs/cache.md), [`docs/status.md`](docs/status.md), and the
-> [combined audit](docs/audit/combined-audit-2026-08-03.md).
+> [candidate evidence](docs/release-candidates/v1.32.1-rc.1.md). Current `main`
+> has since completed the response-cache correctness programme: the cache
+> retains GA on the strength of the
+> [2026-08-07 recertification](docs/audit/2026-08-07-cache-recertification.md)
+> — source audit, executable behavior matrix, race and protocol evidence,
+> benchmarks and soak. See [`docs/cache.md`](docs/cache.md) and
+> [`docs/status.md`](docs/status.md); the
+> [combined audit](docs/audit/combined-audit-2026-08-03.md) is retained as the
+> dated record that programme closed out.
 
 Many features require an opt-in **build tag** (e.g. `grpc`, `acme`,
 `wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default

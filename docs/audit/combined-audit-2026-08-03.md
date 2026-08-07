@@ -5,8 +5,20 @@
 **Audited branch:** `main`  
 **Source baseline:** `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a`  
 **Status:** current authoritative audit and implementation-planning baseline  
-**Execution status (2026-08-06):** programme/audit truth, the non-cache correction tranche, #129 security-test foundations, and the #226 managed-apply terminal-order correction are included in the current baseline; CACHE-01 and CACHE-02 are corrected by #131, CACHE-04 by #133, and #132 is next
+**Execution status (2026-08-07):** programme/audit truth, the non-cache correction tranche, #129 security-test foundations, and the #226 managed-apply terminal-order correction are included in the current baseline
 **Supersedes for current planning:** `2026-07-31-full-repository-audit.md` while preserving that document as historical evidence
+
+> **Current status notice (2026-08-07).** The findings below are preserved
+> exactly as recorded on 2026-08-03. The cache correctness programme they opened
+> has since completed: CACHE-01 and CACHE-02 were corrected by #131, CACHE-04 by
+> #133, the shared-cache conformance contract by #132, and #134 delivered the
+> integrated source audit, executable behavior matrix, race and protocol
+> evidence, benchmarks, soak and the GA decision. Epic #107 is closed and the
+> response cache retains GA; see
+> [`2026-08-07-cache-recertification.md`](2026-08-07-cache-recertification.md).
+> The next foundation item is #89, closed-world lifecycle authority. Nothing in
+> this document is rewritten to make the original findings look resolved from the
+> start — read it as the dated record that opened that programme.
 
 > This audit is the source of truth for the current programme. It separates shipped behavior, confirmed defects, probable defects, operational enhancements, architecture decisions and bounded experiments. A linked issue is not implementation approval when its title contains `[DRAFT]` or `[GATED]`.
 

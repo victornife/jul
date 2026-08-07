@@ -97,8 +97,8 @@ func TestDiffRBACEnableIsHotReload(t *testing.T) {
 		t.Errorf("RBAC enable produced a restart warning: %+v", d.Warnings)
 	}
 	// Consistency with the authoritative lifecycle registry.
-	if got := lifecycle.FieldClass("admin.rbac.enabled"); got != lifecycle.HotReloadClass {
-		t.Errorf("registry classifies admin.rbac.enabled as %v, want HotReloadClass", got)
+	if got, err := lifecycle.ClassOf("admin.rbac.enabled"); err != nil || got != lifecycle.HotReloadClass {
+		t.Errorf("registry classifies admin.rbac.enabled as %v (err=%v), want HotReloadClass", got, err)
 	}
 }
 

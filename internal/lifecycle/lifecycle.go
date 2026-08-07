@@ -1,11 +1,20 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-// Package lifecycle is the single source of truth for which configuration
-// fields can be hot-reloaded and which require a process restart (or a new
-// listener only). It is used by the reload path, admin preflight, diff,
-// Console UI, and documentation validators so that all consumers agree on the
-// reload semantics of every field.
+// Package lifecycle is the single machine authority for how every public
+// configuration field behaves across a reload.
+//
+// The Go registry in registry.go classifies each leaf of the TOML schema
+// (config.SchemaLeaves) exactly once. The runtime — reload gating, admin
+// preflight, planned restart, diff projections and the configuration preview
+// API — reads classification only from this package; it never parses
+// docs/config-lifecycle.yaml, generated Markdown or generated JSON. Those
+// artifacts are deterministic renderings of this registry produced by
+// `make lifecycle-generate` and verified by `make generated-check`.
+//
+// The world is closed: TestRegistryCoversEverySchemaLeaf fails when a schema
+// leaf has no disposition, and Lookup reports absence instead of assuming a
+// new field is safe to hot reload.
 package lifecycle
 
 import (
@@ -17,402 +26,163 @@ import (
 type Class int
 
 const (
-	// HotReloadClass means the field can be changed at runtime via config reload.
+	// HotReloadClass means the field takes effect on the next successful
+	// configuration reload without restarting the process.
 	HotReloadClass Class = iota
-	// RestartRequiredClass means the field is consumed at process startup and cannot
-	// change without restarting the server.
+	// RestartRequiredClass means the field is consumed while the process starts
+	// and cannot change without restarting it.
 	RestartRequiredClass
-	// NewListenerOnlyClass means the change is honored only when a new listener is
-	// created (e.g. a bind address change); existing listeners keep the old value
-	// until they are recreated.
+	// NewListenerOnlyClass means the value is frozen when a socket binds: a new
+	// listen address picks it up immediately, while an address that survives the
+	// reload keeps the value it bound with until the process restarts.
 	NewListenerOnlyClass
-	// IgnoredDeprecatedClass means the field remains parseable for v1
-	// compatibility but is not consumed by runtime behavior. Changing it never
-	// creates a pending restart; lint and diff surfaces point to the replacement.
+	// IgnoredDeprecatedClass means the field stays parseable for v1
+	// compatibility but no runtime consumer reads it. Changing it never creates
+	// a pending restart and preview must not claim it was applied.
 	IgnoredDeprecatedClass
+	// ValidationRejectedReservedClass means the field names a reserved seam that
+	// configuration validation rejects today, so no running process can ever
+	// have consumed it.
+	ValidationRejectedReservedClass
 )
 
-func (c Class) String() string {
-	switch c {
-	case HotReloadClass:
-		return "hot_reload"
-	case RestartRequiredClass:
-		return "restart_required"
-	case NewListenerOnlyClass:
-		return "new_listener_only"
-	case IgnoredDeprecatedClass:
-		return "ignored_deprecated"
-	default:
-		return fmt.Sprintf("lifecycle.Class(%d)", c)
+// classNames is the closed set of class identifiers rendered into generated
+// artifacts and API responses.
+var classNames = map[Class]string{
+	HotReloadClass:                  "hot_reload",
+	RestartRequiredClass:            "restart_required",
+	NewListenerOnlyClass:            "new_listener_only",
+	IgnoredDeprecatedClass:          "ignored_deprecated",
+	ValidationRejectedReservedClass: "validation_rejected_reserved",
+}
+
+// AllClasses returns every class in declaration order.
+func AllClasses() []Class {
+	return []Class{
+		HotReloadClass,
+		RestartRequiredClass,
+		NewListenerOnlyClass,
+		IgnoredDeprecatedClass,
+		ValidationRejectedReservedClass,
 	}
 }
 
-// Entry describes one configuration path and its reload semantics.
+func (c Class) String() string {
+	if s, ok := classNames[c]; ok {
+		return s
+	}
+	return fmt.Sprintf("lifecycle.Class(%d)", int(c))
+}
+
+// Description explains the class in operator-facing terms. Generated references
+// render it verbatim, so it must stay free of configured values.
+func (c Class) Description() string {
+	switch c {
+	case HotReloadClass:
+		return "Takes effect on the next successful configuration reload; no process restart is needed."
+	case RestartRequiredClass:
+		return "Consumed while the process starts. A change is persisted and reported, but the running process keeps the startup value until it restarts."
+	case NewListenerOnlyClass:
+		return "Frozen when a socket binds. A newly added listen address adopts the value immediately; an address kept across the reload keeps the value it bound with until the process restarts."
+	case IgnoredDeprecatedClass:
+		return "Parsed for compatibility but read by no runtime consumer. Changing it has no runtime effect and never creates a pending restart."
+	case ValidationRejectedReservedClass:
+		return "A reserved seam that configuration validation rejects today, so no running process can have consumed it."
+	default:
+		return ""
+	}
+}
+
+// Subsystem is a bounded identifier grouping paths that share an operational
+// owner. The set is closed (see SubsystemDescription) so metadata, metrics
+// labels and generated documentation stay low-cardinality and reviewable.
+type Subsystem string
+
+// Entry is the complete disposition of one configuration path.
 type Entry struct {
-	// Path is the TOML path, e.g. "global.log_format" or "servers.*.tls.cert_file".
+	// Path is the canonical TOML path with "*" for every dynamic collection
+	// key, e.g. "servers.*.tls.client_auth.ca_file".
 	Path string
 	// Class is how the field may be changed at runtime.
 	Class Class
-	// Subsystem is a short human-readable group, e.g. "log_format" or "tls".
-	Subsystem string
-	// Reason explains why the field has this class.
+	// Subsystem groups the path with its operational owner.
+	Subsystem Subsystem
+	// Reason states, in one sentence, why the path has this class.
 	Reason string
-	// StartupConsumed is true when the effective value of this field is captured
-	// in the startup fingerprint and must not change without a restart.
+	// StartupConsumed is true when the effective value is captured in the
+	// startup fingerprint and compared on every reload.
 	StartupConsumed bool
+	// AddressKeyed is true when the fingerprint value is a map keyed by listen
+	// address, so adding or removing a listener does not produce a false
+	// restart-required verdict for addresses that were not touched.
+	AddressKeyed bool
+	// Deprecated marks a field that is superseded by another path.
+	Deprecated bool
+	// Ignored marks a field that no runtime consumer reads.
+	Ignored bool
+	// Reserved marks a field that configuration validation rejects today.
+	Reserved bool
+	// Conditional marks a field whose effective disposition depends on the live
+	// listener set. Classify resolves it against a concrete transition.
+	Conditional bool
+	// Secret marks a field whose value must never leave the process: the
+	// extractor emits a digest instead of the value.
+	Secret bool
 }
 
-// Registry is the authoritative list of classified configuration paths.
-//
-// The list is intentionally flat (no wildcards in code) so that every path is
-// explicit and reviewable. Wildcard paths in docs/config-lifecycle.yaml are
-// expanded against this registry at validation time.
-var Registry = []Entry{
-	// Global process settings.
-	{Path: "global.worker_threads", Class: HotReloadClass, Subsystem: "worker_threads", Reason: "log level and GOMAXPROCS are applied dynamically via OnReloaded"},
-	{Path: "global.access_log", Class: IgnoredDeprecatedClass, Subsystem: "access_log", Reason: "deprecated compatibility field; use observability.access_log"},
-	{Path: "global.error_log", Class: IgnoredDeprecatedClass, Subsystem: "error_log", Reason: "deprecated compatibility field; structured process logs use stderr"},
-	{Path: "global.log_level", Class: HotReloadClass, Subsystem: "log_level", Reason: "log level is applied dynamically via OnReloaded"},
-	{Path: "global.log_format", Class: RestartRequiredClass, Subsystem: "log_format", Reason: "log handler format is chosen once at startup", StartupConsumed: true},
-	{Path: "global.shutdown_timeout", Class: HotReloadClass, Subsystem: "shutdown_timeout", Reason: "shutdown timeout is read from effective config on each graceful stop"},
-	{Path: "global.reload_timeout", Class: HotReloadClass, Subsystem: "reload_timeout", Reason: "reload timeout threshold is read on each reload"},
-	{Path: "global.redact_min_secret_length", Class: HotReloadClass, Subsystem: "redact", Reason: "redaction state is rebuilt and installed atomically on each reload"},
+// registryIndex is the exact-path index of Registry, built once at init.
+var registryIndex map[string]int
 
-	// Admin settings.
-	{Path: "admin.enabled", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin listener is created at startup", StartupConsumed: true},
-	{Path: "admin.listen", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin listener address is chosen at startup", StartupConsumed: true},
-	{Path: "admin.token", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin token is consumed at startup and its digest is part of the startup fingerprint", StartupConsumed: true},
-	{Path: "admin.console", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin console flag is read at startup", StartupConsumed: true},
-	{Path: "admin.history_dir", Class: RestartRequiredClass, Subsystem: "admin", Reason: "config history directory is opened at startup", StartupConsumed: true},
-	{Path: "admin.history_keep", Class: RestartRequiredClass, Subsystem: "admin", Reason: "config history retention is configured at startup", StartupConsumed: true},
-	{Path: "admin.rate_limit_read_per_min", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin rate-limit buckets are created at startup", StartupConsumed: true},
-	{Path: "admin.rate_limit_write_per_min", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin rate-limit buckets are created at startup", StartupConsumed: true},
-	{Path: "admin.rate_limit_apply_per_min", Class: RestartRequiredClass, Subsystem: "admin", Reason: "admin rate-limit buckets are created at startup", StartupConsumed: true},
-	{Path: "admin.max_event_conns", Class: RestartRequiredClass, Subsystem: "admin", Reason: "event-source connection limit is configured at startup", StartupConsumed: true},
-	{Path: "admin.audit_log_file", Class: RestartRequiredClass, Subsystem: "admin", Reason: "audit log sink is opened at startup", StartupConsumed: true},
-	{Path: "admin.audit_log_rotate_max_mb", Class: RestartRequiredClass, Subsystem: "admin", Reason: "audit log rotation is configured at startup", StartupConsumed: true},
-	{Path: "admin.audit_log_rotate_keep", Class: RestartRequiredClass, Subsystem: "admin", Reason: "audit log rotation is configured at startup", StartupConsumed: true},
-	{Path: "admin.plugin_upload_dir", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload directory is opened at startup", StartupConsumed: true},
-	{Path: "admin.plugin_upload_max_size", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload limits are configured at startup", StartupConsumed: true},
-	{Path: "admin.plugin_upload_enabled", Class: RestartRequiredClass, Subsystem: "admin", Reason: "plugin upload endpoint is configured at startup", StartupConsumed: true},
-	// RBAC enabled flag is hot-reloadable: requirePermission reads the current
-	// policy on every request via s.currentPolicy(), so toggling RBAC on or off
-	// takes effect on the next successful hot reload without a restart (M-03).
-	{Path: "admin.rbac.enabled", Class: HotReloadClass, Subsystem: "rbac", Reason: "RBAC policy (including enabled/disabled) is rebuilt and atomically swapped on each successful hot reload"},
-	// RBAC policy contents (roles, principals, tokens) are hot-reloadable through
-	// atomic policy swap after a successful config apply (P3-01). They are not
-	// in the startup fingerprint because changing them does not require a restart.
-	{Path: "admin.rbac.principals.*", Class: HotReloadClass, Subsystem: "rbac", Reason: "RBAC policy is rebuilt and atomically swapped on each successful hot reload"},
-	{Path: "admin.rbac.roles.*", Class: HotReloadClass, Subsystem: "rbac", Reason: "RBAC policy is rebuilt and atomically swapped on each successful hot reload"},
-	{Path: "admin.rbac.default_role", Class: HotReloadClass, Subsystem: "rbac", Reason: "RBAC policy is rebuilt and atomically swapped on each successful hot reload"},
-	// Plugin definitions.
-	{Path: "plugins.*.path", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.inline", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.type", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.config", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.memory_limit", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.timeout", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.kv", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.fetch", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.allowed_hosts", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.max_request_body", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.max_response_body", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.fetch_timeout", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.max_fetch_response", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.kv_max_entries", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-	{Path: "plugins.*.kv_max_bytes", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin set is rebuilt on reload"},
-
-	// Cache settings.
-	{Path: "cache.enabled", Class: RestartRequiredClass, Subsystem: "cache", Reason: "cache backend is initialized once at startup", StartupConsumed: true},
-	{Path: "cache.memory_max_size", Class: RestartRequiredClass, Subsystem: "cache", Reason: "cache memory cap is fixed at backend creation", StartupConsumed: true},
-	{Path: "cache.disk_path", Class: RestartRequiredClass, Subsystem: "cache", Reason: "disk cache directory is opened at startup", StartupConsumed: true},
-	{Path: "cache.disk_max_size", Class: RestartRequiredClass, Subsystem: "cache", Reason: "disk cache cap is fixed at backend creation", StartupConsumed: true},
-	{Path: "cache.default_ttl", Class: RestartRequiredClass, Subsystem: "cache", Reason: "cache default TTL is fixed at backend creation", StartupConsumed: true},
-	{Path: "cache.stale_while_revalidate", Class: RestartRequiredClass, Subsystem: "cache", Reason: "cache stale policy is fixed at backend creation", StartupConsumed: true},
-	{Path: "cache.stale_if_error", Class: RestartRequiredClass, Subsystem: "cache", Reason: "cache stale policy is fixed at backend creation", StartupConsumed: true},
-
-	// Observability settings.
-	{Path: "observability.metrics.host_label", Class: RestartRequiredClass, Subsystem: "metrics", Reason: "metrics registry is created at startup", StartupConsumed: true},
-	{Path: "observability.tracing.enabled", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "tracer provider is initialized at startup", StartupConsumed: true},
-	{Path: "observability.tracing.exporter", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "tracer exporter is created at startup", StartupConsumed: true},
-	{Path: "observability.tracing.endpoint", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "tracer exporter is created at startup", StartupConsumed: true},
-	{Path: "observability.tracing.sample_ratio", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "sampler is configured at startup", StartupConsumed: true},
-	{Path: "observability.tracing.service_name", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "tracer resource attributes are configured at startup", StartupConsumed: true},
-	{Path: "observability.tracing.insecure", Class: RestartRequiredClass, Subsystem: "tracing", Reason: "tracer transport security is configured at startup", StartupConsumed: true},
-	{Path: "observability.access_log.enabled", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "access-log middleware and sinks are wired at startup", StartupConsumed: true},
-	{Path: "observability.access_log.sinks", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "access-log sinks are built once at startup", StartupConsumed: true},
-	{Path: "observability.access_log.file", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "file sink handle is opened at startup", StartupConsumed: true},
-	{Path: "observability.access_log.format", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "sink formatter is chosen at startup", StartupConsumed: true},
-	{Path: "observability.access_log.rotate_max_mb", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "file sink rotation is configured at startup", StartupConsumed: true},
-	{Path: "observability.access_log.rotate_keep", Class: RestartRequiredClass, Subsystem: "access_log", Reason: "file sink rotation is configured at startup", StartupConsumed: true},
-
-	// Egress settings.
-	{Path: "egress.enabled", Class: RestartRequiredClass, Subsystem: "egress", Reason: "egress allow-list is built once at startup", StartupConsumed: true},
-	{Path: "egress.allow", Class: RestartRequiredClass, Subsystem: "egress", Reason: "egress allow-list is built once at startup", StartupConsumed: true},
-
-	// Server-level listener settings.
-	{Path: "servers.*.listen", Class: NewListenerOnlyClass, Subsystem: "listener", Reason: "listen address change requires a new socket"},
-	{Path: "servers.*.tls", Class: RestartRequiredClass, Subsystem: "tls", Reason: "TLS configuration including certificates is bound to a listener at creation and refreshed only on restart", StartupConsumed: true},
-	{Path: "servers.*.http3", Class: RestartRequiredClass, Subsystem: "http3", Reason: "HTTP/3 is bound to a listener at creation", StartupConsumed: true},
-	{Path: "servers.*.h2c", Class: RestartRequiredClass, Subsystem: "h2c", Reason: "h2c is negotiated at listener creation", StartupConsumed: true},
-	{Path: "servers.*.read_timeout", Class: NewListenerOnlyClass, Subsystem: "listener_timeouts", Reason: "read timeout is fixed when the socket binds"},
-	{Path: "servers.*.read_header_timeout", Class: NewListenerOnlyClass, Subsystem: "listener_timeouts", Reason: "read header timeout is fixed when the socket binds"},
-	{Path: "servers.*.write_timeout", Class: NewListenerOnlyClass, Subsystem: "listener_timeouts", Reason: "write timeout is fixed when the socket binds"},
-	{Path: "servers.*.idle_timeout", Class: NewListenerOnlyClass, Subsystem: "listener_timeouts", Reason: "idle timeout is fixed when the socket binds"},
-	{Path: "servers.*.max_header_bytes", Class: NewListenerOnlyClass, Subsystem: "listener_limits", Reason: "max header bytes is fixed when the socket binds"},
-	{Path: "servers.*.client_max_body_size", Class: HotReloadClass, Subsystem: "server_limits", Reason: "handler tree reads the value per request"},
-	{Path: "servers.*.server_names", Class: HotReloadClass, Subsystem: "server_names", Reason: "virtual host routing uses the current handler tree"},
-	{Path: "servers.*.redirect_https", Class: HotReloadClass, Subsystem: "server_redirect", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.error_pages", Class: HotReloadClass, Subsystem: "error_pages", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.plugins", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin chain is rebuilt on reload"},
-	{Path: "servers.*.access_log", Class: IgnoredDeprecatedClass, Subsystem: "access_log", Reason: "deprecated compatibility field; use observability.access_log"},
-	{Path: "servers.*.error_log", Class: IgnoredDeprecatedClass, Subsystem: "error_log", Reason: "deprecated compatibility field; structured process logs use stderr"},
-
-	// Rate limiting.
-	{Path: "rate_limit.enabled", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},
-	{Path: "rate_limit.rate", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},
-	{Path: "rate_limit.burst", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},
-	{Path: "rate_limit.key", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter store supports policy updates"},
-	{Path: "rate_limit.max_conns", Class: NewListenerOnlyClass, Subsystem: "rate_limit", Reason: "connection cap is enforced per listener"},
-
-	// Location settings.
-	{Path: "servers.*.locations.*.proxy_pass", Class: HotReloadClass, Subsystem: "proxy_pass", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.root", Class: HotReloadClass, Subsystem: "root", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.cache", Class: HotReloadClass, Subsystem: "cache", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.rate_limit", Class: HotReloadClass, Subsystem: "rate_limit", Reason: "rate limiter policy is updated on reload"},
-	{Path: "servers.*.locations.*.auth", Class: HotReloadClass, Subsystem: "auth", Reason: "auth handlers are rebuilt on reload"},
-	{Path: "servers.*.locations.*.waf", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "servers.*.locations.*.plugins", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin chain is rebuilt on reload"},
-	{Path: "servers.*.locations.*.plugin", Class: HotReloadClass, Subsystem: "plugins", Reason: "plugin chain is rebuilt on reload"},
-	{Path: "servers.*.locations.*.redirect", Class: HotReloadClass, Subsystem: "redirect", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.return", Class: HotReloadClass, Subsystem: "return", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.rewrites", Class: HotReloadClass, Subsystem: "rewrites", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.headers", Class: HotReloadClass, Subsystem: "headers", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.try_files", Class: HotReloadClass, Subsystem: "try_files", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.index", Class: HotReloadClass, Subsystem: "index", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.allow_hidden", Class: HotReloadClass, Subsystem: "static_files", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.directory_listing", Class: HotReloadClass, Subsystem: "static_files", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.cache_control", Class: HotReloadClass, Subsystem: "static_files", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.deny", Class: HotReloadClass, Subsystem: "access_control", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.client_max_body_size", Class: HotReloadClass, Subsystem: "server_limits", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.require_client_cert", Class: HotReloadClass, Subsystem: "mtls", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.proxy_connect_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.proxy_read_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.proxy_send_timeout", Class: HotReloadClass, Subsystem: "proxy_timeouts", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.proxy_retries", Class: HotReloadClass, Subsystem: "proxy_retries", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.grpc", Class: HotReloadClass, Subsystem: "grpc", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.grpc_transcode", Class: HotReloadClass, Subsystem: "grpc_transcode", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.fastcgi_pass", Class: HotReloadClass, Subsystem: "fastcgi", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.fastcgi_params", Class: HotReloadClass, Subsystem: "fastcgi", Reason: "handler tree is rebuilt on reload"},
-	{Path: "servers.*.locations.*.uwsgi_pass", Class: HotReloadClass, Subsystem: "uwsgi", Reason: "handler tree is rebuilt on reload"},
-
-	// Upstream settings.
-	{Path: "upstreams.*.name", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
-	{Path: "upstreams.*.strategy", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
-	{Path: "upstreams.*.servers", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
-	{Path: "upstreams.*.max_fails", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
-	{Path: "upstreams.*.fail_timeout", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
-	{Path: "upstreams.*.health_check", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
-	{Path: "upstreams.*.discovery", Class: HotReloadClass, Subsystem: "upstream", Reason: "upstream registry supports staged replacement"},
-
-	// Compression.
-	{Path: "compression.enabled", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
-	{Path: "compression.types", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
-	{Path: "compression.encoders", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
-	{Path: "compression.level", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
-	{Path: "compression.min_size", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
-	{Path: "compression.precompressed", Class: HotReloadClass, Subsystem: "compression", Reason: "middleware chain is rebuilt on reload"},
-
-	// WAF global.
-	{Path: "waf.enabled", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "waf.mode", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "waf.crs_enabled", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "waf.block_status", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "waf.directives_files", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "waf.inline_rules", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "waf.paranoia", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "waf.request_body_limit", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-	{Path: "waf.response_body_check", Class: HotReloadClass, Subsystem: "waf", Reason: "WAF policy is rebuilt on reload"},
-
-	// Stream (L4).
-	{Path: "stream.*.listen", Class: NewListenerOnlyClass, Subsystem: "stream", Reason: "L4 listen address change requires a new socket"},
-	{Path: "stream.*.protocol", Class: RestartRequiredClass, Subsystem: "stream", Reason: "L4 protocol is bound at listener creation", StartupConsumed: true},
-	{Path: "stream.*.proxy_pass", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
-	{Path: "stream.*.sni_routes", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
-	{Path: "stream.*.connect_timeout", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
-	{Path: "stream.*.idle_timeout", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
-	{Path: "stream.*.max_udp_sessions", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
-	{Path: "stream.*.proxy_protocol", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
-	{Path: "stream.*.tls_passthrough", Class: HotReloadClass, Subsystem: "stream", Reason: "L4 routing table is reloaded"},
-}
-
-// ByPath returns the registry entry for an exact path, or nil if none is
-// registered.
-func ByPath(path string) *Entry {
+func init() {
+	registryIndex = make(map[string]int, len(Registry))
 	for i := range Registry {
-		if Registry[i].Path == path {
-			return &Registry[i]
-		}
-	}
-	return nil
-}
-
-// normalizeStreamProtocol returns the canonical protocol name for a stream
-// listener, treating the empty string as the "tcp" default.
-func normalizeStreamProtocol(p string) string {
-	p = strings.ToLower(strings.TrimSpace(p))
-	if p == "" {
-		return "tcp"
-	}
-	return p
-}
-
-// StartupFields returns all entries whose effective value is captured in the
-// startup fingerprint.
-func StartupFields() []Entry {
-	var out []Entry
-	for _, e := range Registry {
-		if e.StartupConsumed {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// addressKeyedPaths are startup-consumed paths whose value is a map keyed by
-// listen address. Existing addresses are compared one-by-one; added or removed
-// addresses are ignored so that listener addition/removal does not trigger a
-// false restart-required rejection.
-var addressKeyedPaths = map[string]struct{}{
-	"servers.*.tls":     {},
-	"servers.*.http3":   {},
-	"servers.*.h2c":     {},
-	"stream.*.protocol": {},
-}
-
-// RestartRequired returns the first restart-required field that differs between
-// the startup and candidate fingerprints. The comparison uses the effective
-// (expanded) values of startup-consumed fields only.
-func RestartRequired(startup, candidate Fingerprint) (string, bool) {
-	paths := DiffAddressAware(startup, candidate)
-	if len(paths) == 0 {
-		return "", false
-	}
-	first := ByPath(paths[0])
-	if first == nil {
-		return fmt.Sprintf("%s changed", paths[0]), true
-	}
-	return fmt.Sprintf("%s changed (%s)", first.Path, first.Reason), true
-}
-
-// DiffAddressAware returns the list of startup-consumed paths that differ
-// between a and b, treating address-keyed paths (TLS, HTTP/3, h2c, stream
-// protocol) per-address so that re-added startup addresses do not produce a
-// false diff.
-func DiffAddressAware(a, b Fingerprint) []string {
-	var out []string
-	for _, e := range StartupFields() {
-		av, ok1 := a.Values[e.Path]
-		bv, ok2 := b.Values[e.Path]
-		if !ok1 || !ok2 {
-			out = append(out, e.Path)
-			continue
-		}
-		if _, addressKeyed := addressKeyedPaths[e.Path]; addressKeyed {
-			if diffAddressKeyed(av, bv) {
-				out = append(out, e.Path)
-			}
-			continue
-		}
-		if !deepEqualValues(av, bv) {
-			out = append(out, e.Path)
-		}
-	}
-	return out
-}
-
-// diffAddressKeyed reports whether two address-keyed maps differ for any
-// address present in both. Added or removed addresses are ignored.
-func diffAddressKeyed(startup, candidate any) bool {
-	om, ok1 := startup.(map[string]any)
-	nm, ok2 := candidate.(map[string]any)
-	if !ok1 || !ok2 {
-		return true
-	}
-	for addr, sv := range om {
-		cv, ok := nm[addr]
-		if !ok {
-			continue // listener removed; no longer relevant
-		}
-		if !deepEqualValues(sv, cv) {
-			return true
-		}
-	}
-	return false
-}
-
-// deepEqualValues compares two values produced by the fingerprint. It handles
-// slices and maps explicitly so order differences in backend lists etc. are
-// treated consistently.
-func deepEqualValues(a, b any) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	switch av := a.(type) {
-	case string:
-		bv, ok := b.(string)
-		return ok && av == bv
-	case int:
-		bv, ok := b.(int)
-		return ok && av == bv
-	case bool:
-		bv, ok := b.(bool)
-		return ok && av == bv
-	case []any:
-		bv, ok := b.([]any)
-		if !ok || len(av) != len(bv) {
-			return false
-		}
-		for i := range av {
-			if !deepEqualValues(av[i], bv[i]) {
-				return false
-			}
-		}
-		return true
-	case map[string]any:
-		bv, ok := b.(map[string]any)
-		if !ok || len(av) != len(bv) {
-			return false
-		}
-		for k, va := range av {
-			vb, ok := bv[k]
-			if !ok || !deepEqualValues(va, vb) {
-				return false
-			}
-		}
-		return true
-	default:
-		return fmt.Sprint(a) == fmt.Sprint(b)
+		registryIndex[Registry[i].Path] = i
 	}
 }
 
-// FieldClass returns the class for an exact registered path. It returns
-// HotReloadClass for unknown fields so the default is permissive.
-func FieldClass(path string) Class {
-	if e := ByPath(path); e != nil {
-		return e.Class
+// Lookup returns the entry that governs path. The second result reports whether
+// a disposition exists: an unregistered path is never assumed to be hot
+// reloadable, because a newly added startup-consumed field would then be
+// written to disk while the process keeps serving the old value.
+//
+// path may be canonical ("servers.*.tls.cert") or concrete
+// ("servers.0.tls.cert"); a concrete path matches the canonical entry whose
+// wildcard segments align with it.
+func Lookup(path string) (Entry, bool) {
+	if i, ok := registryIndex[path]; ok {
+		return Registry[i], true
 	}
-	return HotReloadClass
+	for i := range Registry {
+		if MatchWildcard(Registry[i].Path, path) {
+			return Registry[i], true
+		}
+	}
+	return Entry{}, false
 }
 
-// MatchWildcard returns true if concrete matches a registry path that uses
-// wildcards, e.g. "servers.0.listen" matches "servers.*.listen".
-func MatchWildcard(registryPath, concretePath string) bool {
+// ErrUnclassified reports a path with no lifecycle disposition. It is returned
+// instead of a permissive default so an unclassified field fails closed.
+type ErrUnclassified struct{ Path string }
+
+func (e *ErrUnclassified) Error() string {
+	return fmt.Sprintf("lifecycle: configuration path %q has no disposition; add it to internal/lifecycle/registry.go and run `make lifecycle-generate`", e.Path)
+}
+
+// ClassOf returns the class governing path, or an *ErrUnclassified when the
+// path has no disposition.
+func ClassOf(path string) (Class, error) {
+	e, ok := Lookup(path)
+	if !ok {
+		return 0, &ErrUnclassified{Path: path}
+	}
+	return e.Class, nil
+}
+
+// MatchWildcard reports whether concrete is an instance of registryPath, where
+// "*" in registryPath matches exactly one path segment.
+func MatchWildcard(registryPath, concrete string) bool {
 	rs := strings.Split(registryPath, ".")
-	cs := strings.Split(concretePath, ".")
+	cs := strings.Split(concrete, ".")
 	if len(rs) != len(cs) {
 		return false
 	}
@@ -427,16 +197,36 @@ func MatchWildcard(registryPath, concretePath string) bool {
 	return true
 }
 
-// Lookup returns the registry entry that matches concretePath, including
-// wildcard entries, or nil if none matches.
-func Lookup(concretePath string) *Entry {
-	if e := ByPath(concretePath); e != nil {
-		return e
-	}
-	for i := range Registry {
-		if MatchWildcard(Registry[i].Path, concretePath) {
-			return &Registry[i]
+// StartupFields returns every entry whose effective value is captured in the
+// startup fingerprint, in registry order.
+func StartupFields() []Entry {
+	out := make([]Entry, 0, 64)
+	for _, e := range Registry {
+		if e.StartupConsumed {
+			out = append(out, e)
 		}
 	}
-	return nil
+	return out
+}
+
+// ClassCounts returns how many entries carry each class.
+func ClassCounts() map[Class]int {
+	out := make(map[Class]int, len(classNames))
+	for _, c := range AllClasses() {
+		out[c] = 0
+	}
+	for _, e := range Registry {
+		out[e.Class]++
+	}
+	return out
+}
+
+// normalizeStreamProtocol returns the canonical protocol name for a stream
+// listener, treating the empty string as the "tcp" default.
+func normalizeStreamProtocol(p string) string {
+	p = strings.ToLower(strings.TrimSpace(p))
+	if p == "" {
+		return "tcp"
+	}
+	return p
 }

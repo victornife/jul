@@ -20,6 +20,7 @@ internal/
   cache/               # HTTP response cache (memory + disk backends)
   config/              # TOML config schema, parser, validation, and defaults
   handler/             # HTTP request handlers (static files, proxy, gRPC, plugins)
+  lifecycle/           # Machine authority for configuration reload behavior; generates the lifecycle mirrors
   middleware/          # Reusable middleware (compression, rate-limit, WAF)
   migrate/             # NGINX config importer
   observability/       # Metrics, tracing, access logging
@@ -47,6 +48,13 @@ docs/adr/              # Architecture Decision Records
   (`acme`, `brotli`, `console`, `http3`, `otel`, `stream`, `wasmplugins`, etc.).
 - **Config-driven:** All runtime behaviour is expressed through the TOML config
   schema in `internal/config/schema.go`.
+- **One schema inventory, one lifecycle authority:** `config.SchemaPaths` is the
+  single reflection over that schema, and `internal/lifecycle/registry.go`
+  classifies every leaf it reports exactly once. The runtime never reads reload
+  behavior from YAML, Markdown or JSON; `docs/config-lifecycle.yaml` and
+  `docs/generated/config-lifecycle.{md,json}` are generated mirrors kept honest
+  by `make generated-check`. An unclassified path fails closed rather than
+  defaulting to hot reload.
 - **Zero external runtime deps:** The shipped binary is statically linked and
   needs no interpreter or shared libraries (Go standard library + chosen deps).
 

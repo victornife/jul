@@ -236,6 +236,180 @@ def test_check_roadmap_active_ids_passes_valid():
         assert ok >= 1, f"expected at least one OK, got {ok}"
 
 
+# ── Lifecycle artifact checks ────────────────────────────────────────────────
+#
+# docs-check.py no longer reimplements lifecycle semantics: the Go generator is
+# the authority and this script only verifies structural properties of the
+# committed mirrors. These tests pin those properties against synthetic
+# metadata so a regression in the checker itself is caught.
+
+import json
+
+
+def _write_lifecycle_tree(root: Path, fields, subsystems=None, counts=None, version=2,
+                          reload_semantics="# Reload semantics\n\nadmin cache tls\n"):
+    """Write a minimal docs/ tree carrying generated lifecycle artifacts."""
+    subsystems = subsystems if subsystems is not None else [{"name": "admin", "description": "Admin listener."}]
+    counts = counts if counts is not None else {
+        "schema_paths": len(fields),
+        "schema_leaves": len(fields),
+        "registry_entries": len(fields),
+        "startup_consumed": sum(1 for f in fields if f.get("startup_consumed")),
+        "by_class": {},
+    }
+    meta = {
+        "version": version,
+        "generated_by": "internal/lifecycle",
+        "regenerate_command": "make lifecycle-generate",
+        "classes": [],
+        "subsystems": subsystems,
+        "counts": counts,
+        "conditions": [],
+        "fields": fields,
+        "schema_exemptions": [],
+    }
+    docs = root / "docs"
+    (docs / "generated").mkdir(parents=True, exist_ok=True)
+    (docs / "generated" / "config-lifecycle.json").write_text(json.dumps(meta), encoding="utf-8")
+    (docs / "generated" / "config-lifecycle.md").write_text(
+        "# Configuration lifecycle reference\n\n"
+        + "".join(f"| `{f['path']}` | `{f['class']}` |\n" for f in fields),
+        encoding="utf-8",
+    )
+    (docs / "config-lifecycle.yaml").write_text(
+        f"version: {version}\nfields:\n"
+        + "".join(f'  - path: "{f["path"]}"\n' for f in fields),
+        encoding="utf-8",
+    )
+    (docs / "reload-semantics.md").write_text(reload_semantics, encoding="utf-8")
+    return meta
+
+
+def _field(path, cls="hot_reload", subsystem="admin", reason="because", startup=False):
+    return {
+        "path": path,
+        "class": cls,
+        "subsystem": subsystem,
+        "reason": reason,
+        "startup_consumed": startup,
+        "address_keyed": False,
+        "conditional": False,
+        "deprecated": False,
+        "ignored": False,
+        "reserved": False,
+        "secret_digested": False,
+    }
+
+
+def _run_lifecycle_checks(root: Path):
+    """Run check_lifecycle_manifest with the generator step stubbed out."""
+    original = docs_check._run_lifecycle_generator_check
+    docs_check._run_lifecycle_generator_check = lambda: True
+    try:
+        return _run_in_tmp(root, docs_check.check_lifecycle_manifest)
+    finally:
+        docs_check._run_lifecycle_generator_check = original
+
+
+def test_lifecycle_detects_missing_disposition():
+    """A schema leaf without a disposition breaks the closed world."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        fields = [_field("admin.listen", "restart_required", startup=True)]
+        _write_lifecycle_tree(root, fields, counts={
+            "schema_paths": 2, "schema_leaves": 2, "registry_entries": 1,
+            "startup_consumed": 1, "by_class": {},
+        })
+        _, fail = _run_lifecycle_checks(root)
+        assert fail >= 1, "an unclassified schema leaf must fail the closed-world check"
+
+
+def test_lifecycle_detects_restart_entry_without_extractor():
+    """A restart-required path that is not startup-consumed must be flagged."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_lifecycle_tree(root, [_field("admin.listen", "restart_required", startup=False)])
+        _, fail = _run_lifecycle_checks(root)
+        assert fail >= 1, "a restart-required path outside the fingerprint must fail"
+
+
+def test_lifecycle_detects_undocumented_subsystem():
+    """A bounded subsystem set means every used subsystem is described."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_lifecycle_tree(root, [_field("admin.listen", subsystem="mystery")])
+        _, fail = _run_lifecycle_checks(root)
+        assert fail >= 1, "an undocumented subsystem must fail"
+
+
+def test_lifecycle_detects_missing_reason():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_lifecycle_tree(root, [_field("admin.listen", reason="   ")])
+        _, fail = _run_lifecycle_checks(root)
+        assert fail >= 1, "a path without a reason must fail"
+
+
+def test_lifecycle_detects_yaml_version_drift():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_lifecycle_tree(root, [_field("admin.listen")])
+        yaml_path = root / "docs" / "config-lifecycle.yaml"
+        yaml_path.write_text(yaml_path.read_text(encoding="utf-8").replace("version: 2", "version: 1"), encoding="utf-8")
+        _, fail = _run_lifecycle_checks(root)
+        assert fail >= 1, "a YAML version that disagrees with the metadata must fail"
+
+
+def test_lifecycle_detects_missing_reload_semantics_coverage():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_lifecycle_tree(
+            root,
+            [_field("cache.enabled", "restart_required", subsystem="cache", startup=True)],
+            subsystems=[{"name": "cache", "description": "Cache."}],
+            reload_semantics="# Reload semantics\n\nnothing relevant here\n",
+        )
+        _, fail = _run_lifecycle_checks(root)
+        assert fail >= 1, "a restart-required subsystem missing from reload-semantics.md must fail"
+
+
+def test_lifecycle_passes_on_a_consistent_tree():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_lifecycle_tree(
+            root,
+            [_field("admin.listen", "restart_required", startup=True)],
+            reload_semantics="# Reload semantics\n\nThe admin listener is startup-owned.\n",
+        )
+        ok, fail = _run_lifecycle_checks(root)
+        assert fail == 0, f"expected zero failures, got {fail}"
+        assert ok >= 1, f"expected at least one OK, got {ok}"
+
+
+def test_lifecycle_generator_check_is_non_mutating_and_names_the_remedy():
+    """Check mode must leave the tree byte-identical and print the remedy."""
+    repo_root = Path(__file__).resolve().parent.parent
+    generated = repo_root / "docs" / "generated" / "config-lifecycle.json"
+    if not generated.exists():
+        print("skip: generated lifecycle metadata is absent")
+        return
+
+    import subprocess
+
+    before = {p: p.read_bytes() for p in sorted((repo_root / "docs" / "generated").iterdir())}
+    before[repo_root / "docs" / "config-lifecycle.yaml"] = (repo_root / "docs" / "config-lifecycle.yaml").read_bytes()
+
+    result = subprocess.run(
+        ["go", "run", "./internal/lifecycle/lifecyclegen", "-out", "docs", "-check"],
+        cwd=repo_root, capture_output=True, text=True, timeout=300,
+    )
+    for path, content in before.items():
+        assert path.read_bytes() == content, f"check mode modified {path}"
+    if result.returncode != 0:
+        assert "make lifecycle-generate" in result.stderr, \
+            f"stale-artifact failure must name the regeneration command: {result.stderr}"
+
+
 if __name__ == "__main__":
     test_check_finding_uniqueness_detects_conflict()
     test_check_finding_uniqueness_allows_decimal_suffixes()
@@ -246,4 +420,12 @@ if __name__ == "__main__":
     test_check_roadmap_active_ids_detects_duplicate()
     test_check_roadmap_active_ids_detects_delivered_overlap()
     test_check_roadmap_active_ids_passes_valid()
+    test_lifecycle_detects_missing_disposition()
+    test_lifecycle_detects_restart_entry_without_extractor()
+    test_lifecycle_detects_undocumented_subsystem()
+    test_lifecycle_detects_missing_reason()
+    test_lifecycle_detects_yaml_version_drift()
+    test_lifecycle_detects_missing_reload_semantics_coverage()
+    test_lifecycle_passes_on_a_consistent_tree()
+    test_lifecycle_generator_check_is_non_mutating_and_names_the_remedy()
     print("OK")

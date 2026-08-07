@@ -435,105 +435,65 @@ def _compare_feature_row(manifest: Path, entry: dict, row: dict):
     ok(f"feature-status.yaml: {feat_id} row data matches status.md")
 
 
-def _load_go_lifecycle_registry():
-    """Run the Go dump script and return the registry as a list of dicts."""
+def _run_lifecycle_generator_check():
+    """Run the Go generator in check mode and report staleness.
+
+    The Go lifecycle registry is the machine authority; this script does not
+    reimplement lifecycle semantics. It only asks the generator whether the
+    committed mirrors match what the registry renders, and surfaces the
+    generator's own remediation message.
+    """
     import subprocess
 
-    dump_script = ROOT / "scripts" / "dump-lifecycle-registry.go"
+    gen = "internal/lifecycle/lifecyclegen"
     try:
         result = subprocess.run(
-            ["go", "run", str(dump_script.relative_to(ROOT))],
+            ["go", "run", "./" + gen, "-out", "docs", "-check"],
             cwd=ROOT,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=180,
         )
     except FileNotFoundError:
-        error(ROOT / "scripts" / "dump-lifecycle-registry.go", 0,
-              "'go' not found in PATH; cannot load lifecycle registry")
-        return None
-    except subprocess.TimeoutExpired:
-        error(ROOT / "scripts" / "dump-lifecycle-registry.go", 0,
-              "timeout running dump-lifecycle-registry.go")
-        return None
-    if result.returncode != 0:
-        error(ROOT / "scripts" / "dump-lifecycle-registry.go", 0,
-              f"dump-lifecycle-registry.go failed: {result.stderr.strip()}")
-        return None
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        error(ROOT / "scripts" / "dump-lifecycle-registry.go", 0,
-              f"invalid JSON from dump-lifecycle-registry.go: {exc}")
-        return None
-
-
-def _normalize_yaml_field(field: str) -> str:
-    """Convert a YAML field expression to dotted wildcard path notation.
-
-    Examples:
-        '[global].log_format' -> 'global.log_format'
-        '[[servers]].tls.enabled' -> 'servers.*.tls.enabled'
-        '[observability.access_log].*' -> 'observability.access_log.*'
-    """
-    # Order matters: more specific bracket prefixes first.
-    field = field.strip()
-    replacements = [
-        ("[observability.access_log]", "observability.access_log"),
-        ("[observability.metrics]", "observability.metrics"),
-        ("[observability.tracing]", "observability.tracing"),
-        ("[rate_limit]", "rate_limit"),
-        ("[compression]", "compression"),
-        ("[global]", "global"),
-        ("[cache]", "cache"),
-        ("[admin]", "admin"),
-        ("[egress]", "egress"),
-        ("[waf]", "waf"),
-        ("[plugins]", "plugins.*"),
-        ("[[servers]]", "servers.*"),
-        ("[[stream]]", "stream.*"),
-        ("[[upstreams]]", "upstreams.*"),
-    ]
-    for old, new in replacements:
-        if field.startswith(old):
-            field = new + field[len(old):]
-            break
-    return field
-
-
-def _path_matches(registry_path: str, yaml_field: str) -> bool:
-    """Return True if yaml_field is covered by registry_path or vice versa."""
-    if registry_path == yaml_field:
-        return True
-    # Registry path covers a sub-field of the YAML field (YAML uses wildcard).
-    if yaml_field.endswith(".*") and registry_path.startswith(yaml_field[:-2] + "."):
-        return True
-    # YAML field is a sub-field of the registry path (registry uses wildcard).
-    if registry_path + "." in yaml_field and yaml_field.startswith(registry_path + "."):
-        return True
-    # Segment-wise wildcard match for paths like servers.*.listen.
-    rs = registry_path.split(".")
-    ys = yaml_field.split(".")
-    if len(rs) != len(ys):
+        error(ROOT / gen, 0, "'go' not found in PATH; cannot verify generated lifecycle artifacts")
         return False
-    for r, y in zip(rs, ys):
-        if r == "*" or y == "*":
-            continue
-        if r != y:
-            return False
+    except subprocess.TimeoutExpired:
+        error(ROOT / gen, 0, "timeout running the lifecycle generator in check mode")
+        return False
+    if result.returncode != 0:
+        error(ROOT / "docs" / "config-lifecycle.yaml", 0, result.stderr.strip() or result.stdout.strip())
+        return False
+    ok("generated lifecycle artifacts match the Go registry")
     return True
 
 
-def check_lifecycle_manifest():
-    """Validate docs/config-lifecycle.yaml against the Go lifecycle registry.
+def _load_lifecycle_metadata():
+    """Load the generated machine-readable lifecycle metadata."""
+    path = ROOT / "docs" / "generated" / "config-lifecycle.json"
+    if not path.exists():
+        error(path, 0, "generated lifecycle metadata is missing — run: make lifecycle-generate")
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        error(path, 0, f"generated lifecycle metadata is not valid JSON: {exc}")
+        return None
 
-    Checks:
-    1. The manifest file parses as valid YAML.
-    2. Every entry has a non-empty subsystem and reason.
-    3. Every field normalizes to a path that matches at least one Go registry
-       entry, and the lifecycle class agrees.
-    4. Every Go registry entry is covered by at least one YAML field.
-    5. Every restart-required subsystem is mentioned in reload-semantics.md.
+
+def check_lifecycle_manifest():
+    """Validate the generated lifecycle artifacts structurally.
+
+    Semantic authority lives in internal/lifecycle. This function verifies the
+    properties a reviewer relies on when reading the committed artifacts:
+
+    1. The generator's check mode passes, so the mirrors are not stale.
+    2. The YAML mirror parses and declares the same version as the metadata.
+    3. The world is closed: every schema leaf is either classified or carries an
+       explicit exemption.
+    4. Every restart-required field is startup-consumed, so the reload gate
+       actually compares it.
+    5. Every field carries a bounded subsystem that the artifact documents.
+    6. Every restart-required subsystem is described in reload-semantics.md.
     """
     try:
         import yaml
@@ -542,11 +502,14 @@ def check_lifecycle_manifest():
               "pyyaml is required for YAML manifest checks — install with: pip install pyyaml")
         return
 
-    manifest = ROOT / "docs" / "config-lifecycle.yaml"
-    if not manifest.exists():
-        error(manifest, 0, "config-lifecycle.yaml is missing from docs/")
+    if not _run_lifecycle_generator_check():
         return
 
+    meta = _load_lifecycle_metadata()
+    if meta is None:
+        return
+
+    manifest = ROOT / "docs" / "config-lifecycle.yaml"
     try:
         data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
@@ -557,219 +520,73 @@ def check_lifecycle_manifest():
     if not isinstance(data, dict):
         error(manifest, 0, "config-lifecycle.yaml must be a mapping")
         return
+    if data.get("version") != meta.get("version"):
+        error(manifest, 0,
+              f"YAML version {data.get('version')} does not match the metadata version {meta.get('version')}")
 
-    registry = _load_go_lifecycle_registry()
-    if registry is None:
-        return
+    counts = meta.get("counts", {})
+    leaves = counts.get("schema_leaves", 0)
+    entries = counts.get("registry_entries", 0)
+    exemptions = len(meta.get("schema_exemptions", []))
+    if leaves != entries + exemptions:
+        error(
+            ROOT / "internal" / "lifecycle" / "registry.go", 0,
+            f"closed-world violation: {leaves} schema leaves, {entries} registry entries, "
+            f"{exemptions} exemptions — every public leaf needs exactly one disposition",
+        )
+    else:
+        ok(f"closed world: {entries} registry entries cover {leaves} schema leaves ({exemptions} exemptions)")
 
-    yaml_class_sections = {
-        "restart_required": "restart_required",
-        "new_listener_only": "new_listener_only",
-        "hot_reload": "hot_reload",
-        "ignored_deprecated": "ignored_deprecated",
-    }
-    registry_paths = {e["path"] for e in registry}
-    covered_registry_paths: set[str] = set()
+    documented_subsystems = {s["name"] for s in meta.get("subsystems", [])}
+    yaml_fields = {f.get("path") for f in data.get("fields", [])}
+    restart_subsystems = set()
 
-    for section, class_name in yaml_class_sections.items():
-        section_data = data.get(section, [])
-        # Allow sections to be wrapped in a mapping with an explicit 'entries' list
-        # (used by hot_reload to keep the free-form note and deprecated list as
-        # sibling keys).
-        if isinstance(section_data, dict):
-            section_data = section_data.get("entries", [])
-        for idx, entry in enumerate(section_data):
-            if not isinstance(entry, dict):
-                # Entries may be free-form note strings or a 'deprecated' list;
-                # only validate structured entries.
-                continue
-            subsystem = entry.get("subsystem", "")
-            reason = entry.get("reason", "")
-            fields = entry.get("fields", [])
-            if not subsystem or not str(subsystem).strip():
-                error(manifest, 0, f"{section}[{idx}] missing subsystem")
-            if not reason or not str(reason).strip():
-                error(manifest, 0, f"{section}[{idx}] ({subsystem or '?'}) missing reason")
-            for raw_field in fields:
-                field = _normalize_yaml_field(raw_field)
-                matches = [e for e in registry if _path_matches(e["path"], field)]
-                if not matches:
-                    error(
-                        manifest, 0,
-                        f"{section}[{idx}] field '{raw_field}' ({field}) does not match any Go registry path",
-                    )
-                    continue
-                for m in matches:
-                    covered_registry_paths.add(m["path"])
-                    if m["class"] != class_name:
-                        error(
-                            manifest, 0,
-                            f"{section}[{idx}] field '{raw_field}' class mismatch: "
-                            f"YAML says {class_name}, Go registry says {m['class']} ({m['path']})",
-                        )
-
-    # Every registered path must be mentioned in the YAML manifest.
-    for entry in registry:
-        path = entry["path"]
-        if path not in covered_registry_paths:
-            # The hot_reload note may cover unlisted fields. All startup-bound,
-            # new-listener-only, and ignored/deprecated paths are explicit.
-            if entry["class"] in ("restart_required", "new_listener_only", "ignored_deprecated"):
+    for field in meta.get("fields", []):
+        path = field.get("path", "?")
+        if field.get("class") == "restart_required":
+            restart_subsystems.add(field.get("subsystem", ""))
+            if not field.get("startup_consumed"):
                 error(
-                    manifest, 0,
-                    f"Go registry path '{path}' ({entry['class']}) is missing from config-lifecycle.yaml",
+                    ROOT / "internal" / "lifecycle" / "registry.go", 0,
+                    f"restart_required path '{path}' is not startup-consumed; the reload gate would ignore it",
                 )
-
-    # Enforcement check: every restart-required registry entry must be
-    # StartupConsumed so RestartRequired actually compares it (R6-02/R6-10).
-    for entry in registry:
-        if entry["class"] == "restart_required" and not entry.get("startup_consumed", False):
+        if field.get("subsystem") not in documented_subsystems:
             error(
-                ROOT / "internal" / "lifecycle" / "lifecycle.go",
-                0,
-                f"restart_required registry entry '{entry['path']}' ({entry['subsystem']}) "
-                f"is not StartupConsumed; RestartRequired will silently ignore it",
+                ROOT / "internal" / "lifecycle" / "registry.go", 0,
+                f"path '{path}' uses undocumented subsystem '{field.get('subsystem')}'",
             )
+        if not str(field.get("reason", "")).strip():
+            error(ROOT / "internal" / "lifecycle" / "registry.go", 0, f"path '{path}' has no reason")
+        if path not in yaml_fields:
+            error(manifest, 0, f"path '{path}' is in the metadata but missing from config-lifecycle.yaml")
 
-    # Schema coverage check: every TOML schema leaf must be covered by a
-    # lifecycle registry entry or an explicit exemption (R6-08).
-    check_schema_lifecycle_coverage(registry)
+    generated_md = ROOT / "docs" / "generated" / "config-lifecycle.md"
+    if not generated_md.exists():
+        error(generated_md, 0, "generated lifecycle reference is missing — run: make lifecycle-generate")
+    else:
+        md_text = generated_md.read_text(encoding="utf-8")
+        for field in meta.get("fields", []):
+            if f"| `{field['path']}` |" not in md_text:
+                error(generated_md, 0, f"path '{field['path']}' is missing from the generated reference")
 
-    # Cross-check: each restart-required subsystem must appear in reload-semantics.md.
     reload_doc = ROOT / "docs" / "reload-semantics.md"
     if not reload_doc.exists():
         error(reload_doc, 0, "docs/reload-semantics.md is missing")
         return
-
     reload_text = reload_doc.read_text(encoding="utf-8").lower()
-    for entry in data.get("restart_required", []):
-        subsystem = entry.get("subsystem", "")
+    for subsystem in sorted(restart_subsystems):
         if not subsystem:
             continue
         keyword = subsystem.split("_")[0]
         if keyword not in reload_text:
             error(
-                reload_doc,
-                0,
-                f"restart-required subsystem '{subsystem}' from config-lifecycle.yaml "
-                f"not mentioned in reload-semantics.md — keep both in sync",
+                reload_doc, 0,
+                f"restart-required subsystem '{subsystem}' is not mentioned in reload-semantics.md — "
+                f"keep the conceptual doc in sync with the registry",
             )
         else:
             ok(f"reload-semantics.md covers restart-required subsystem '{subsystem}'")
 
-
-def _load_schema_leaves():
-    """Run the Go schema-leaves dump script and return a list of dicts."""
-    import subprocess
-
-    dump_script = ROOT / "scripts" / "dump-schema-leaves.go"
-    try:
-        result = subprocess.run(
-            ["go", "run", str(dump_script.relative_to(ROOT))],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except FileNotFoundError:
-        error(dump_script, 0, "'go' not found in PATH; cannot load schema leaves")
-        return None
-    except subprocess.TimeoutExpired:
-        error(dump_script, 0, "timeout running dump-schema-leaves.go")
-        return None
-    if result.returncode != 0:
-        error(dump_script, 0, f"dump-schema-leaves.go failed: {result.stderr.strip()}")
-        return None
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        error(dump_script, 0, f"invalid JSON from dump-schema-leaves.go: {exc}")
-        return None
-
-
-# Schema-leaf paths that are not operator-editable runtime configuration and
-# therefore do not require a lifecycle/diff entry. Each entry must carry a
-# short justification.
-SCHEMA_EXEMPTIONS = {
-    # Display/identifier fields with no runtime effect.
-    "servers.*.name": "server display name; not consumed by runtime",
-    "upstreams.*.servers.*.address": "covered by upstreams.*.servers aggregate",
-    "upstreams.*.servers.*.weight": "covered by upstreams.*.servers aggregate",
-    "stream.*.sni_routes.*": "covered by stream.*.sni_routes aggregate",
-    "servers.*.locations.*.match": "covered by match.type and match.path",
-    "servers.*.locations.*.match.type": "routing key; hot-reloadable via handler rebuild",
-    "servers.*.locations.*.match.path": "routing key; hot-reloadable via handler rebuild",
-}
-
-
-def _segment_match(path_a: str, path_b: str) -> bool:
-    """Return True if two dotted paths match segment-wise, with '*' as wildcard."""
-    a = path_a.split(".")
-    b = path_b.split(".")
-    if len(a) != len(b):
-        return False
-    for x, y in zip(a, b):
-        if x == "*" or y == "*" or x == y:
-            continue
-        return False
-    return True
-
-
-def _registry_covers_leaf(registry_paths: set[str], leaf: str) -> bool:
-    """Return True if a registry path (exact, wildcard, or ancestor container) covers leaf."""
-    segments = leaf.split(".")
-    # Exact or wildcard match.
-    for rp in registry_paths:
-        if _segment_match(rp, leaf):
-            return True
-    # Ancestor container coverage: a registry path that is a prefix of the leaf
-    # (with wildcard segments matching) covers all descendant leaves.
-    for rp in registry_paths:
-        rs = rp.split(".")
-        if len(rs) > len(segments):
-            continue
-        match = True
-        for i in range(len(rs)):
-            if rs[i] == "*" or rs[i] == segments[i]:
-                continue
-            match = False
-            break
-        if match:
-            return True
-    return False
-
-
-def check_schema_lifecycle_coverage(registry):
-    """Verify every TOML schema leaf is covered by the lifecycle registry or an exemption."""
-    leaves = _load_schema_leaves()
-    if leaves is None:
-        return
-
-    registry_paths = {e["path"] for e in registry}
-    container_paths = {leaf["path"] for leaf in leaves if leaf.get("container", False)}
-
-    uncovered: list[str] = []
-    for leaf in leaves:
-        path = leaf["path"]
-        if leaf.get("container", False):
-            # Container paths group their children; children are checked individually.
-            continue
-        if path in SCHEMA_EXEMPTIONS:
-            ok(f"schema leaf '{path}' exempted: {SCHEMA_EXEMPTIONS[path]}")
-            continue
-        if _registry_covers_leaf(registry_paths, path):
-            ok(f"schema leaf '{path}' covered by lifecycle registry")
-            continue
-        uncovered.append(path)
-
-    if uncovered:
-        for path in sorted(uncovered):
-            error(
-                ROOT / "internal" / "config" / "schema.go",
-                0,
-                f"schema leaf '{path}' has no lifecycle registry entry or exemption — "
-                f"add it to internal/lifecycle/lifecycle.go or document an exemption",
-            )
 
 
 # Standard banner required on Year 3–5 horizon specs so they cannot be read as

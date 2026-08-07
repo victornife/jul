@@ -1,7 +1,7 @@
 # ADR 0011 — ReloadPlan: a single, side-effect-free reload transaction
 
-- **Status:** Accepted — ReloadPlan transaction implemented; lifecycle registry single-sources restart classification (R5-01 through R5-17, 2026-07-19)
-- **Date:** 2026-07-16 (updated 2026-07-19)
+- **Status:** Accepted — ReloadPlan transaction implemented; the Go lifecycle registry is the sole machine authority for configuration lifecycle behavior and its human/machine mirrors are generated and checked (R5-01 through R5-17, 2026-07-19; closed-world amendment 2026-08-07)
+- **Date:** 2026-07-16 (updated 2026-07-19; amended 2026-08-07 for #89)
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** configuration reload, secret resolution, listener lifecycle, upstream pool lifecycle, HTTP/3, ACME, admin preflight, lifecycle governance
 - **Source:** Round 5 external re-audit (R5-01 through R5-17)
@@ -39,7 +39,10 @@ Secret expansion was moved from `internal/config/secrets.go` into `config.NewCan
 
 ### 3. Lifecycle registry
 
-`internal/lifecycle/lifecycle.go` now declares every restart-required, new-listener-only, and hot-reloadable field in a single registry. `lifecycle.RestartRequired`, `lifecycle.PendingRestarts`, `lifecycle.FieldClass`, and `lifecycle.StartupFields` are consumed by:
+`internal/lifecycle/registry.go` declares the disposition of every public
+configuration path in a single registry. `lifecycle.RestartRequired`,
+`lifecycle.Classify`, `lifecycle.Lookup` and `lifecycle.StartupFields` are
+consumed by:
 
 - `Preflight.Apply` (admin write gate);
 - `Server.doReload` (direct reload gate);
@@ -47,7 +50,70 @@ Secret expansion was moved from `internal/config/secrets.go` into `config.NewCan
 - diff warnings;
 - docs generation/validation.
 
-The registry also drives the effective startup fingerprint, which captures resolved values and file-content digests for startup-bound fields.
+The registry also drives the effective startup fingerprint, which captures
+resolved values and file-content digests for startup-bound fields.
+
+### 3a. Closed-world Go authority and generated mirrors (amendment, #89)
+
+The 2026-07-19 registry was flat but not closed: it grouped whole subtrees such
+as `servers.*.tls` behind one entry, and `FieldClass` returned `hot_reload` for
+an unregistered path. A newly added startup-consumed field was therefore
+persisted and reported as applied while the running process kept serving the
+startup value. This amendment closes that gap.
+
+1. **One schema inventory.** `config.SchemaPaths` / `config.SchemaLeaves`
+   (`internal/config/inventory.go`) is the single reflection over the TOML
+   schema. It represents every dynamic collection key as the canonical wildcard
+   segment `*`, is deterministic, and is independent of build tags. Lifecycle
+   classification, generated references and later configuration-contract tooling
+   consume it instead of re-walking the struct tree.
+
+2. **Closed world.** Every leaf of `config.SchemaLeaves` has exactly one
+   disposition in `lifecycle.Registry`, or an explicit entry in
+   `lifecycle.SchemaExemptions` carrying a specific source-backed justification.
+   The exemption map is currently empty. Tests reject a schema leaf with no
+   disposition, a registry path the schema does not expose, a duplicate path, and
+   two entries that can match the same concrete path.
+
+3. **Fail-closed lookup.** `lifecycle.Lookup` returns `(Entry, bool)` and
+   `lifecycle.ClassOf` returns an `*ErrUnclassified` naming the regeneration
+   command. No API returns `hot_reload` for an unknown path.
+
+4. **Human and machine mirrors are generated.** `docs/config-lifecycle.yaml`,
+   `docs/generated/config-lifecycle.md` and
+   `docs/generated/config-lifecycle.json` are rendered from the registry by
+   `go generate ./internal/lifecycle` (`make lifecycle-generate`). Generation is
+   deterministic: sorted, network-free, and free of timestamps, absolute paths
+   and map-iteration order. `make generated-check` compares the rendered bytes,
+   writes nothing, and fails with the exact regeneration command. The runtime
+   never reads lifecycle behavior from YAML, Markdown or JSON.
+
+5. **One conditional classification service.** `lifecycle.Classify(before,
+   candidate, live)` is side-effect-free and resolves the entries whose
+   disposition depends on the live listener set: a bind-time value edited on a
+   retained address is restart-required, while the same edit confined to an
+   address the reload adds or removes is adopted when the socket binds. Reload
+   gating, managed apply preflight, planned restart, diff projections and the
+   Phase 5 preview API consume this one service, so preview cannot disagree with
+   apply. `internal/server.listenerBindFingerprint` remains the socket-level
+   comparator but is a *checked mirror*: a test asserts each property it freezes
+   maps to a registry path classified as listener-bound, and that a new
+   listener-bound registry entry is added to that mapping.
+
+6. **Bounded, secret-free output.** Registry metadata and classification results
+   contain canonical paths, closed class names, bounded subsystem identifiers and
+   fixed reason text. Secret-bearing paths are extracted as digests, and
+   certificate, key, CA and CRL material is digested by file content so an
+   in-place rotation is still detected without the bytes leaving the process.
+   `lifecycle.DiffEntry` carries no before/after values.
+
+7. **Classification records proven behavior.** Splitting a coarse entry never
+   promotes a field to `hot_reload` in anticipation of unlanded work: cache,
+   static certificate material, access-log sinks and tracing stay restart-bound
+   until #92/#93, #100 and #98 land. `stream.*.protocol` was reclassified to
+   `hot_reload` only after a real-socket characterization matrix proved the
+   listener transaction binds the candidate protocol before retiring the previous
+   one.
 
 ### 4. Activation order
 
@@ -71,7 +137,10 @@ The handler factory receives an immutable `upstream.SnapshotMap` at commit time.
 | `ReloadPlan` | `internal/server/reload_plan.go` | Transaction object owning candidate state and reload phases |
 | `config.Candidate` | `internal/config/candidate.go` | Immutable raw + effective config, redaction state, and secret digests |
 | `redact.State` | `internal/redact/state.go` | Self-contained redaction state installed only at Publish |
-| `lifecycle.Registry` | `internal/lifecycle/lifecycle.go` | Single source of truth for field lifecycle classification |
+| `lifecycle.Registry` | `internal/lifecycle/registry.go` | Sole machine authority for the disposition of every public configuration path |
+| `config.SchemaPaths` | `internal/config/inventory.go` | The one schema-path inventory; closed-world coverage is measured against it |
+| `lifecycle.Classify` | `internal/lifecycle/classify.go` | Side-effect-free conditional classification shared by preview and apply |
+| `lifecyclegen` | `internal/lifecycle/lifecyclegen/main.go` | Deterministic generator and non-mutating check mode for the YAML/Markdown/JSON mirrors |
 | `Preflight.Apply` | `internal/app/preflight.go` | Admin write gate using live snapshot and lifecycle registry |
 | `Server.doReload` | `internal/server/server.go` | Orchestrates `ReloadPlan` phases |
 | `GenerationResources` | `internal/app/generation.go` | Generational handler-closer and pool staging lifecycle |
