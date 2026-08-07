@@ -1,0 +1,55 @@
+name: Apply cache recertification documentation
+
+on:
+  push:
+    branches:
+      - audit/134-cache-recertification
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: audit/134-cache-recertification
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify and apply documentation patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/patches/134-docs-gz.part-* > /tmp/134-docs.patch.gz.b64
+          echo 'ff01b9ef45522a2fad703c772d75cfbbf2572385f17bcca07bad830293ba355c  /tmp/134-docs.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/134-docs.patch.gz.b64 > /tmp/134-docs.patch.gz
+          echo 'bb76bf3590535e6d43dc73eaed894d47ddfa4f87ee22497697dc0843c1fbb134  /tmp/134-docs.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/134-docs.patch.gz > /tmp/134-docs.patch
+          echo '8a61121ae9b61abfb9ac9b67d4975a14748dff1818200ffc656ceff0e66342e6  /tmp/134-docs.patch' | sha256sum -c -
+          git apply --check /tmp/134-docs.patch
+          git apply --index /tmp/134-docs.patch
+          git rm .github/patches/134-docs-gz.part-* .github/workflows/apply-134-docs.yml
+          git diff --cached --check
+      - name: Validate source and documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -l internal/cache/cache_test.go internal/cache/bench_test.go internal/cache/recertification_soak_test.go internal/observability/metrics.go)"
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          go test -count=1 ./internal/cache ./internal/observability
+          go test -race -count=1 ./internal/cache
+      - name: Commit validated recertification package
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs(cache): complete GA recertification (#134)'
+          git push origin HEAD:audit/134-cache-recertification
