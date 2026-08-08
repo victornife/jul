@@ -81,7 +81,7 @@ describe("patchConfig", () => {
     expect(JSON.parse(seenBody)).toMatchObject({ op: "route_set_target", target: "http://new" });
   });
 
-  it("discards candidate TOML from a preview response", async () => {
+  it("discards candidate TOML from a preview response", () => {
     // N-01 (WS05): the real /api/config/patch preview withholds the candidate
     // TOML so a principal without config:raw cannot extract secrets from a
     // preview. The client must tolerate the missing field and never fabricate
@@ -271,7 +271,7 @@ describe("patchConfig", () => {
     });
     expect(res.candidate).toBeUndefined();
     expect(res.validation_errors).toHaveLength(1);
-    expect(res.validation_errors?.[0]?.summary).toContain("unknown upstream");
+    expect(res.validation_errors[0]?.summary).toContain("unknown upstream");
   });
 
   it("throws ConfigRejectedError on a 400 structured rejection", async () => {
