@@ -204,7 +204,23 @@ describe("route creation batches", () => {
     ).toThrow(/cache cannot be enabled for a static/i);
   });
 
-  it("rejects unsupported protocol actions instead of degrading to HTTP proxy", () => {
+  it("delegates regex grammar to the Go/RE2 server preview", () => {
+      const spec = {
+        ...baseSpec,
+        matchType: "regex" as const,
+        path: "(?P<tenant>[a-z]+)",
+      };
+
+      expect(validateStructuredRouteSpec(spec)).toEqual([]);
+      expect(buildExistingServerRouteBatch(spec, inventory)).toEqual([
+        expect.objectContaining({
+          op: "location_add",
+          match_set: { type: "regex", path: "(?P<tenant>[a-z]+)" },
+        }),
+      ]);
+    });
+
+    it("rejects unsupported protocol actions instead of degrading to HTTP proxy", () => {
     const issues = validateStructuredRouteSpec({
       ...baseSpec,
       action: { kind: "grpc_proxy", target: "grpc://service" } as never,

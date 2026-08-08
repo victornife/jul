@@ -265,13 +265,12 @@ export function validateStructuredRouteSpec(spec: RouteCreateSpec): string[] {
     errors.push("A route match path is required.");
   } else if (spec.matchType !== "regex" && !path.startsWith("/")) {
     errors.push("A prefix or exact match path must start with '/'.");
-  } else if (spec.matchType === "regex") {
-    try {
-      new RegExp(path);
-    } catch {
-      errors.push("The route regular expression does not compile.");
-    }
   }
+
+  // Jul validates and executes route regexes with Go's regexp/RE2 grammar.
+  // Browser-side JavaScript compilation would reject valid RE2 constructs and
+  // accept JavaScript-only syntax, so the shared server preview remains the
+  // grammar authority for regex matches.
 
   // Keep the runtime boundary closed because session data and JavaScript callers
   // are not trusted to obey the compile-time discriminated union.

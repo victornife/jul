@@ -43,15 +43,13 @@ export function matchWarnings(d: MatchDraft): string[] {
     w.push("The match path is required.");
     return w;
   }
-  if (d.type === "regex") {
-    try {
-      new RegExp(path);
-    } catch {
-      w.push("The regex pattern does not compile.");
-    }
-  } else if (!path.startsWith("/")) {
+  if (d.type !== "regex" && !path.startsWith("/")) {
     w.push("A prefix or exact match path should start with '/'.");
   }
+
+  // Jul validates and executes route regexes with Go's regexp/RE2 grammar.
+  // JavaScript compilation would reject valid RE2 constructs and accept
+  // JavaScript-only syntax, so the shared server preview is authoritative.
   return w;
 }
 
