@@ -64,12 +64,13 @@ describe("routeEdit — match", () => {
     expect(matchChanged({ ...d, path: "/v2" }, l)).toBe(true);
   });
 
-  it("flags a missing path and a non-compiling regex", () => {
+  it("flags engine-neutral path issues and delegates regex grammar to Go preview", () => {
     expect(matchWarnings({ type: "prefix", path: "  " })).toHaveLength(1);
-    expect(matchWarnings({ type: "regex", path: "([" })).toHaveLength(1);
     expect(matchWarnings({ type: "prefix", path: "api" })).toHaveLength(1); // no leading /
     expect(matchWarnings({ type: "prefix", path: "/api" })).toHaveLength(0);
+    expect(matchWarnings({ type: "regex", path: "([" })).toHaveLength(0);
     expect(matchWarnings({ type: "regex", path: "^/api/" })).toHaveLength(0);
+    expect(matchWarnings({ type: "regex", path: "(?P<tenant>[a-z]+)" })).toHaveLength(0);
   });
 
   it("trims the path into the patch payload", () => {
