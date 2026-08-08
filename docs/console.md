@@ -449,23 +449,59 @@ that leaves the `[admin]` block unchanged is never gated, and changes that only
 
 ### Guided editors — scope (v2)
 
-The Routes and Apps panels provide **guided creation** that generates a
-complete `[[servers]]`/`[[upstreams]]` TOML fragment and routes it through the
-validated **Validate → Diff → Apply → Rollback** pipeline — the editors never
-write directly, so an invalid draft never replaces the running config.
+The Routes panel creates HTTP locations through one **ordered structured
+patch batch** rather than by appending browser-generated TOML. The editor has
+explicit modes:
 
-> **Append-as-draft vs. structured in-place edit.** "Clone route/app"
-> opens an existing block as a new draft appended to the raw config, which the
-> operator reviews in the editor before applying — a deliberately conservative
-> path that never rewrites existing TOML in the browser (so comments and
-> formatting are preserved). For the most common changes, the route detail
-> drawer also offers **structured in-place edits** (previewed as a diff, applied
-> through the validated pipeline): changing a route's **match** (path + type),
-> switching its **action** (proxy / static / redirect / return / deny), and
-> **renaming** a server block's host names (`server_names`). Because a route is
-> identified by its match — and a virtual host by its first host name — a
-> rename is reflected truthfully in the diff: the old route/block is listed
-> removed and the renamed one added when the identity key changes.
+- **Add to an existing server** selects the complete server identity — exact
+  `listen` plus an order-independent, case-sensitive `server_names` set — and
+  emits `location_add` first. It never emits `server_add` in this mode.
+- **Create a new server** rejects an exact identity collision and emits
+  `server_add`, then `location_add`, then optional modifiers in deterministic
+  order: auth, cache, rate limit, and middleware-plugin attachments. Plugin
+  attachment order is the operator's middleware order.
+
+Server-name order is canonicalized only for keys and display; comparison remains
+case-sensitive. Browser-session route restoration stores that full server
+identity plus the location's match type and path. A legacy listen-only selection
+is restored only when the listener is unambiguous, so sibling virtual hosts on
+one listener cannot be selected accidentally.
+
+The creator supports only actions it can represent faithfully: static files,
+HTTP reverse proxy, redirect, deny, and fixed-status return. Native gRPC,
+gRPC-JSON transcoding, FastCGI, uWSGI, and handler-plugin actions use their
+protocol-specific editor or the raw configuration escape hatch. The Console
+never silently substitutes an HTTP proxy for an unsupported protocol.
+
+Every route-side one-operation edit and every creation batch uses the same
+`POST /api/config/patch/preview` handoff. The resulting pending draft preserves
+the exact ordered operations, canonical base version, combined and per-operation
+summaries, validation issues, structured diff, and backend lifecycle verdict.
+Ordinary handoff and session storage never carry candidate TOML; ConfigPanel may
+request source separately from the `config:raw`-gated candidate endpoint.
+
+`config:write` gates creation, cloning, quick edits, and destructive previews;
+`config:apply` independently gates the final ConfigPanel write; and `config:raw`
+controls source visibility and the raw escape hatch. A diff-only operator may
+review and apply a valid structured patch without gaining access to secret-bearing
+canonical TOML.
+
+For structured patches, ConfigPanel treats the backend lifecycle assessment as
+the sole authority. A hot-capable preview goes to hot apply. A valid
+restart-bound preview goes directly to planned-restart staging instead of first
+submitting a doomed hot request. When a managed staged configuration already
+exists, an eligible patch updates that staged configuration. Missing, invalid,
+or lifecycle-rejected metadata fails closed and requires a fresh preview.
+
+> **Append-as-draft vs. structured in-place edit.** App cloning and guided
+> editors outside the migrated route workflow may still open a TOML draft in the
+> raw editor. For the common route changes, the detail drawer uses structured
+> in-place edits: changing a route's **match** (path + type), switching its
+> **action** (proxy / static / redirect / return / deny), editing auth/cache/rate
+> limit/WAF/plugins, and **renaming** a server block's host names. A route is
+> identified by match type + path inside its exact parent server; a virtual host
+> is identified by listener + the complete server-name set. Identity changes are
+> therefore reflected truthfully in the diff as removal plus addition.
 
 The Apps "New app" editor can optionally **mount the app on a route** in the
 same step (default on for a new app): alongside the `[[upstreams]]` pool it
@@ -499,21 +535,25 @@ global `[plugins.NAME]` — module path, type, host capabilities and limits,
 config — and attach or detach middleware plugins per route; handler and
 server-level plugins stay raw-only) |
 
-Whole **servers, routes, and upstream pools** can now also be **created and
-deleted** through structured patch-ops — `server_add` / `server_remove`,
+Whole **servers, routes, and upstream pools** can be **created and deleted**
+through structured patch operations — `server_add` / `server_remove`,
 `location_add` / `location_remove`, and `upstream_add` / `upstream_remove` —
-each previewed as a diff and applied through the same validated pipeline. This
-closes the last create/delete gap that previously forced a raw TOML-fragment
-hand-off. The ops guard their targets: a create errors if it would duplicate an
-existing server/route/pool, a delete errors if the target is missing,
-`upstream_remove` refuses a pool a route's `proxy_pass` still references, and
-`server_remove` refuses the final server block (at least one is required).
-Guided console *forms* for these ops are landing incrementally; the
-structured-patch API and the raw editor both cover them today. (Global-table
-edits — `[global]`, `[cache]`, `[compression]`, global `[rate_limit]` — keep
-their guided validated-TOML-upsert editors, which already give a diff-reviewed
-structured path; dedicated `*_set` patch-ops for those tables are a documented
-follow-on.)
+each previewed and applied through the same validated pipeline. The route detail
+**Danger zone** implements a deliberate two-step destructive flow: first preview
+the exact typed removal against the pinned base version, then show an accessible
+confirmation containing the listener, canonical server-name set, exact route or
+contained-route count/list, operation JSON, ordered summaries, validation output,
+and lifecycle outcome. Confirming only hands the preview to ConfigPanel; it does
+not apply from the drawer. Cancel performs no handoff or write.
+
+Route deletion is exact and non-cascading. `location_remove` targets one match
+type + path inside one exact server identity. `server_remove` targets one exact
+server and removes its contained locations only; it does not delete referenced
+upstreams, applications, credentials, plugins, sibling virtual hosts, or other
+resources. The server still enforces missing-target, final-server, and referenced
+upstream protections. (Global-table edits — `[global]`, `[cache]`,
+`[compression]`, global `[rate_limit]` — keep their guided validated-TOML-upsert
+editors; dedicated `*_set` patch operations remain a follow-on.)
 
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,

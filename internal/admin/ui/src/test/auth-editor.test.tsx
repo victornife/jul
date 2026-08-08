@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
 
 import { AuthEditor } from "@/features/routes/AuthEditor.tsx";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
-import type { LocationAuthState, RouteTarget } from "@/api/client.ts";
+import type { ConfigPatch, LocationAuthState, RouteTarget } from "@/api/client.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -45,15 +45,30 @@ beforeEach(() => {
   seenBody = "";
   takePendingDraft(); // clear any leftover handoff state
   globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
-    expect(input).toBe("/api/config/patch");
+    expect(input).toBe("/api/config/patch/preview");
     seenBody = typeof init?.body === "string" ? init.body : "";
     return Promise.resolve(
       json({
         ok: true,
         summary: "route :8080/api auth set",
-        candidate: 'listen = ":8080"\n',
+        operation_summaries: [
+          { op_index: 0, op: "location_set_auth", summary: "route auth set" },
+        ],
         diff: { summary: "1 change" },
         base_version: "deadbeef",
+        valid: true,
+        validation_errors: [],
+        lifecycle: {
+          changes: [],
+          can_apply_hot: true,
+          can_stage_restart: true,
+          hot_paths: ["servers.locations.auth"],
+          restart_required_paths: [],
+          new_listener_only_paths: [],
+          ignored_deprecated_paths: [],
+          validation_rejected_paths: [],
+          pending_subsystems: [],
+        },
       }),
     );
   }) as unknown as typeof fetch;
@@ -81,12 +96,12 @@ describe("AuthEditor", () => {
     expect(screen.getByDisplayValue("https://issuer.example/jwks.json")).toBeTruthy();
     expect(screen.getByText("Clear rule")).toBeTruthy();
 
-    fireEvent.click(screen.getByText("Review in editor →"));
+    fireEvent.click(screen.getByText("Review lifecycle and diff →"));
 
     await waitFor(() => {
       expect(seenBody).not.toBe("");
     });
-    expect(JSON.parse(seenBody)).toMatchObject({
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_set_auth",
       listen: ":8080",
       path: "/api",
@@ -107,7 +122,7 @@ describe("AuthEditor", () => {
         />
       </Wrapper>,
     );
-    const save = screen.getByRole("button", { name: "Review in editor →" });
+    const save = screen.getByRole("button", { name: "Review lifecycle and diff →" });
     expect(save).toBeDisabled();
     expect(screen.getByText("JWT auth needs a JWKS URL.")).toBeTruthy();
   });
@@ -126,7 +141,10 @@ describe("AuthEditor", () => {
     await waitFor(() => {
       expect(seenBody).not.toBe("");
     });
-    expect(JSON.parse(seenBody)).toMatchObject({ op: "location_clear_auth", path: "/api" });
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
+      op: "location_clear_auth",
+      path: "/api",
+    });
   });
 
   it("hides Clear when adding a rule to a location with none", () => {

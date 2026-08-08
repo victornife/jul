@@ -22,7 +22,6 @@ function baseDraft(auth: AuthDraft): RouteDraft {
     target: "http://127.0.0.1:3000",
     auth,
     cache: false,
-    compression: false,
     rateLimit: false,
   };
 }

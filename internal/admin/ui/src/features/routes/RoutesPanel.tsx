@@ -8,12 +8,22 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchRoutes, type RouteProjection, type LocationProjection } from "@/api/client.ts";
 import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
-import { RouteEditor } from "@/features/routes/RouteEditor.tsx";
+import { RouteEditor, type RouteEditorInitial } from "@/features/routes/RouteEditor.tsx";
 import { RouteTester } from "@/features/routes/RouteTester.tsx";
 import { PageHeader, Button, EmptyState, Loading } from "@/components/ui.tsx";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
-import { emptyAuthDraft, type RouteDraft } from "@/lib/routeToml.ts";
+import { emptyAuthDraft, type AuthDraft } from "@/lib/routeToml.ts";
+import { usePermission } from "@/auth/usePermission.ts";
+import {
+  canonicalServerNames,
+  restoreRouteSelection,
+  routeIdentityKey,
+  serverIdentityFromRoute,
+  serverIdentityKey,
+  type RouteSelection,
+} from "@/lib/routePatch.ts";
 
 const ACTION_COLORS: Record<string, string> = {
   proxy: "bg-jul-accent/15 text-jul-accent",
@@ -103,21 +113,15 @@ function RouteCard({
       <div className="flex flex-wrap items-center gap-2 border-b border-jul-border px-4 py-3">
         {route.name ? (
           <>
-            <span className="font-mono text-sm font-semibold text-jul-text">
-              {route.name}
-            </span>
-            <span className="text-xs text-jul-muted">
-              {route.listen}
-            </span>
+            <span className="font-mono text-sm font-semibold text-jul-text">{route.name}</span>
+            <span className="text-xs text-jul-muted">{route.listen}</span>
           </>
         ) : (
-          <span className="font-mono text-sm font-semibold text-jul-text">
-            {route.listen}
-          </span>
+          <span className="font-mono text-sm font-semibold text-jul-text">{route.listen}</span>
         )}
         {route.server_names && route.server_names.length > 0 && (
           <span className="text-xs text-jul-muted">
-            {route.server_names.join(", ")}
+            {canonicalServerNames(route.server_names).join(", ")}
           </span>
         )}
         <span className="ml-auto flex gap-1">
@@ -146,9 +150,12 @@ function RouteCard({
             </tr>
           </thead>
           <tbody>
-            {locations.map((loc, i) => (
+            {locations.map((loc) => (
               <LocationRow
-                key={i}
+                key={routeIdentityKey(serverIdentityFromRoute(route), {
+                  matchType: loc.type,
+                  path: loc.match,
+                })}
                 loc={loc}
                 onOpen={() => {
                   onOpen(loc);
@@ -160,11 +167,6 @@ function RouteCard({
       )}
     </div>
   );
-}
-
-interface Selection {
-  readonly route: RouteProjection;
-  readonly loc: LocationProjection;
 }
 
 // Filters narrow the route list (Milestone 4.7): by action/type and by the
@@ -205,50 +207,96 @@ function locationMatches(
   }
 }
 
+const ROUTE_EDITOR_REOPEN_KEY = "__jul_routeEditor_open";
+const ROUTE_EDITOR_SELECTION_KEY = "__jul_routeEditor_state";
+
+function authDraftFromLocation(loc: LocationProjection): AuthDraft {
+  const draft = emptyAuthDraft();
+  if (!loc.auth || loc.auth_detail === undefined) return draft;
+  const detail = loc.auth_detail;
+  switch (detail.method) {
+    case "basic":
+      return {
+        ...draft,
+        method: "basic",
+        basicFile: detail.basic_file ?? "",
+        basicRealm: detail.basic_realm ?? "",
+      };
+    case "jwt":
+      return {
+        ...draft,
+        method: "jwt",
+        jwtJwksUrl: detail.jwt_jwks_url ?? "",
+        jwtIssuer: detail.jwt_issuer ?? "",
+        jwtAudience: detail.jwt_audience ?? "",
+      };
+    case "forward":
+      return { ...draft, method: "forward", forwardUrl: detail.forward_url ?? "" };
+    case "cidr":
+      return {
+        ...draft,
+        method: "cidr",
+        allow: (detail.allow ?? []).join(", "),
+        deny: (detail.deny ?? []).join(", "),
+      };
+    default:
+      // The projection is intentionally open-ended for compatibility. Unknown
+      // auth methods are not silently re-created as a different policy.
+      return draft;
+  }
+}
+
+function cloneDraft(route: RouteProjection, loc: LocationProjection): RouteEditorInitial | null {
+  if (
+    loc.action !== "proxy" &&
+    loc.action !== "static" &&
+    loc.action !== "redirect" &&
+    loc.action !== "deny" &&
+    loc.action !== "return"
+  ) {
+    return null;
+  }
+  return {
+    listen: route.listen,
+    serverNames: canonicalServerNames(route.server_names ?? []).join(", "),
+    path: loc.match,
+    matchType: loc.type === "exact" || loc.type === "regex" ? loc.type : "prefix",
+    action: loc.action,
+    target: loc.target ?? "",
+    auth: authDraftFromLocation(loc),
+    cache: loc.cache,
+    rateLimit: loc.rate_limit,
+  };
+}
+
 export function RoutesPanel() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["routes"],
     queryFn: fetchRoutes,
   });
 
-  const [selected, setSelected] = useState<Selection | null>(null);
-  const [creating, setCreating] = useState<Partial<RouteDraft> | null>(null);
+  const [selected, setSelected] = useState<RouteSelection | null>(null);
+  const [creating, setCreating] = useState<RouteEditorInitial | null>(null);
   const [testing, setTesting] = useState(false);
   const navigate = useNavigate();
+  const { has } = usePermission();
+  const canWrite = has("config:write");
 
   useEffect(() => {
-    if (data) {
-      const flag = sessionStorage.getItem("__jul_routeEditor_open");
-      if (flag) {
-        sessionStorage.removeItem("__jul_routeEditor_open");
-        const stored = sessionStorage.getItem("__jul_routeEditor_state");
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored) as Selection;
-            const route = data.find((r) => r.listen === parsed.route.listen);
-            if (route) {
-              const loc = route.locations[parsed.loc.index];
-              if (loc) {
-                setSelected({ route, loc });
-                setCreating({
-                  listen: route.listen,
-                  serverNames: parsed.route.server_names?.join(", ") ?? "",
-                  path: loc.match,
-                  matchType: loc.type === "exact" || loc.type === "regex" ? loc.type : "prefix",
-                  action: loc.action as RouteDraft["action"],
-                  target: loc.target ?? "",
-                  auth: loc.auth ? { ...emptyAuthDraft(), method: "cidr" } : emptyAuthDraft(),
-                  cache: loc.cache,
-                  rateLimit: loc.rate_limit,
-                });
-              }
-            }
-            sessionStorage.removeItem("__jul_routeEditor_state");
-          } catch {
-            sessionStorage.removeItem("__jul_routeEditor_state");
-          }
-        }
-      }
+    if (!data || sessionStorage.getItem(ROUTE_EDITOR_REOPEN_KEY) === null) return;
+    sessionStorage.removeItem(ROUTE_EDITOR_REOPEN_KEY);
+    const stored = sessionStorage.getItem(ROUTE_EDITOR_SELECTION_KEY);
+    sessionStorage.removeItem(ROUTE_EDITOR_SELECTION_KEY);
+    if (stored === null) return;
+    try {
+      const restored = restoreRouteSelection(data, JSON.parse(stored) as unknown);
+      if (restored === null) return;
+      setSelected(restored);
+      const draft = cloneDraft(restored.route, restored.loc);
+      if (draft !== null) setCreating(draft);
+    } catch {
+      // Invalid or obsolete session data fails closed. In particular, a legacy
+      // listen-only selection never falls through to the first sibling vhost.
     }
   }, [data]);
 
@@ -296,6 +344,8 @@ export function RoutesPanel() {
             </Button>
             <Button
               variant="secondary"
+              disabled={!canWrite}
+              {...(!canWrite ? { title: "Requires config:write." } : {})}
               onClick={() => {
                 void navigate("/transcode");
               }}
@@ -304,6 +354,8 @@ export function RoutesPanel() {
             </Button>
             <Button
               variant="primary"
+              disabled={!canWrite}
+              {...(!canWrite ? { title: "Requires config:write." } : {})}
               onClick={() => {
                 setCreating({});
               }}
@@ -313,6 +365,8 @@ export function RoutesPanel() {
           </>
         }
       />
+
+      <ForbiddenAction permission="config:write" />
 
       {data.length > 0 && (
         <div className="flex flex-wrap items-end gap-3">
@@ -374,6 +428,8 @@ export function RoutesPanel() {
           action={
             <Button
               variant="primary"
+              disabled={!canWrite}
+              {...(!canWrite ? { title: "Requires config:write." } : {})}
               onClick={() => {
                 setCreating({});
               }}
@@ -400,9 +456,9 @@ export function RoutesPanel() {
         />
       ) : (
         <div className="space-y-4">
-          {filtered.map(({ route, locations }, i) => (
+          {filtered.map(({ route, locations }) => (
             <RouteCard
-              key={`${route.listen}-${String(i)}`}
+              key={serverIdentityKey(serverIdentityFromRoute(route))}
               route={route}
               locations={locations}
               onOpen={(loc) => {
@@ -421,30 +477,8 @@ export function RoutesPanel() {
             setSelected(null);
           }}
           onEdit={() => {
-            const { route, loc } = selected;
-            setCreating({
-              listen: route.listen,
-              serverNames: route.server_names?.join(", ") ?? "",
-              path: loc.match,
-              matchType: loc.type === "exact" || loc.type === "regex" ? loc.type : "prefix",
-              action:
-                loc.action === "proxy" ||
-                loc.action === "static" ||
-                loc.action === "redirect" ||
-                loc.action === "deny" ||
-                loc.action === "return"
-                  ? loc.action
-                  : "proxy",
-              target: loc.target ?? "",
-              // The route projection only reports whether auth is present, not
-              // which method or its parameters. When the source location had
-              // auth, preselect the CIDR method so the editor's warning prompts
-              // the operator to re-enter a concrete policy rather than silently
-              // carrying over an empty (allow-all) block; otherwise leave it off.
-              auth: loc.auth ? { ...emptyAuthDraft(), method: "cidr" } : emptyAuthDraft(),
-              cache: loc.cache,
-              rateLimit: loc.rate_limit,
-            });
+            const draft = cloneDraft(selected.route, selected.loc);
+            if (draft !== null) setCreating(draft);
           }}
         />
       )}
@@ -453,14 +487,10 @@ export function RoutesPanel() {
         <RouteEditor
           initial={creating}
           existingRoutes={data}
-          serverHasTls={selected?.route.tls?.enabled}
           closeLabel={selected ? "Back" : "Close"}
-          onReview={() => {
-            if (selected) {
-              sessionStorage.setItem("__jul_routeEditor_open", "1");
-              sessionStorage.setItem("__jul_routeEditor_state", JSON.stringify(selected));
-            }
-            void navigate("/config");
+          onReview={(targetSelection) => {
+            sessionStorage.setItem(ROUTE_EDITOR_REOPEN_KEY, "1");
+            sessionStorage.setItem(ROUTE_EDITOR_SELECTION_KEY, JSON.stringify(targetSelection));
           }}
           onClose={() => {
             setCreating(null);

@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   applyConfig,
   applyPatchBatch,
+  patchConfigBatch,
   diffConfig,
   discardPendingRestart,
   fetchOverview,
@@ -30,7 +31,9 @@ import { useManagedApplyRecord } from "@/lib/useManagedApplyRecord.ts";
 import { deriveFinalizationAdvisory } from "@/lib/finalizationAdvisory.ts";
 import { useConfigMutationMachine } from "@/features/config/useConfigMutationMachine.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
-import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
+import { takePendingDraft, type PendingPatchDraft } from "@/lib/configDraftHandoff.ts";
+import { patchResultToPendingDraft } from "@/lib/useRunPatchBatch.ts";
+import { decidePatchApplyAction } from "@/lib/patchPreviewAction.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, Spinner } from "@/components/ui.tsx";
@@ -184,6 +187,173 @@ function formatLocalTime(iso: string): string {
   return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleString();
 }
 
+function AssessmentPaths({
+  label,
+  paths,
+}: {
+  readonly label: string;
+  readonly paths: readonly string[];
+}) {
+  if (paths.length === 0) return null;
+  const visible = paths.slice(0, 12);
+  const remaining = paths.length - visible.length;
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-medium text-jul-text">{label}</p>
+      <ul className="space-y-0.5 pl-4 text-xs text-jul-muted">
+        {visible.map((path) => (
+          <li key={`${label}-${path}`} className="list-disc font-mono">
+            {path}
+          </li>
+        ))}
+      </ul>
+      {remaining > 0 && (
+        <p className="text-xs text-jul-muted">…and {String(remaining)} more paths</p>
+      )}
+    </div>
+  );
+}
+
+/** Renders only the server's secret-safe preview projection. */
+function PatchAssessment({
+  draft,
+  refreshing,
+  refreshError,
+}: {
+  readonly draft: PendingPatchDraft;
+  readonly refreshing: boolean;
+  readonly refreshError: Error | null;
+}) {
+  const lifecycle = draft.lifecycle;
+  return (
+    <section
+      aria-labelledby="patch-assessment-heading"
+      className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-3"
+    >
+      <div className="space-y-1">
+        <h3
+          id="patch-assessment-heading"
+          className="text-xs font-semibold uppercase tracking-wider text-jul-muted"
+        >
+          Structured preview assessment
+        </h3>
+        <p className="text-sm text-jul-text">{draft.summary}</p>
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-jul-text">Ordered operations</p>
+        <ol className="space-y-1 pl-5 text-xs text-jul-muted">
+          {draft.operationSummaries.map((operation) => (
+            <li key={`${String(operation.op_index)}-${operation.op}`} className="list-decimal">
+              <span className="font-mono text-jul-text">{operation.op}</span>
+              <span> — {operation.summary}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {draft.validationErrors.length > 0 && (
+        <div className="space-y-1 rounded-md border border-jul-danger/40 bg-jul-danger/5 p-2">
+          <p className="text-xs font-medium text-jul-danger">Validation issues</p>
+          {draft.validationErrors.map((issue, index) => (
+            <p key={`${issue.code}-${String(index)}`} className="text-xs text-jul-text">
+              {issue.path && <code className="mr-1 font-mono text-jul-danger">{issue.path}</code>}
+              {issue.summary}
+              {issue.detail ? ` — ${issue.detail}` : ""}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {lifecycle === undefined ? (
+        <div className="rounded-md border border-jul-warning/40 bg-jul-warning/5 p-2 text-xs">
+          <p className="font-medium text-jul-warning">Lifecycle preview required</p>
+          <p className="mt-1 text-jul-muted">
+            This draft predates the lifecycle-aware handoff. Apply remains disabled until the exact
+            ordered operations are previewed again against their pinned base version.
+          </p>
+          {refreshing && <p className="mt-1 text-jul-muted">Refreshing preview…</p>}
+          {refreshError && <p className="mt-1 text-jul-danger">{refreshError.message}</p>}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span
+              className={`rounded-full px-2 py-0.5 ${
+                lifecycle.can_apply_hot
+                  ? "bg-jul-success/15 text-jul-success"
+                  : "bg-jul-border/40 text-jul-muted"
+              }`}
+            >
+              Hot apply: {lifecycle.can_apply_hot ? "available" : "unavailable"}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 ${
+                lifecycle.can_stage_restart
+                  ? "bg-jul-warning/15 text-jul-warning"
+                  : "bg-jul-border/40 text-jul-muted"
+              }`}
+            >
+              Stage restart: {lifecycle.can_stage_restart ? "available" : "unavailable"}
+            </span>
+          </div>
+
+          {lifecycle.changes.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-jul-text">Lifecycle changes</p>
+              <ul className="space-y-1 text-xs text-jul-muted">
+                {lifecycle.changes.slice(0, 12).map((change, index) => (
+                  <li key={`${change.path}-${String(index)}`} className="rounded bg-jul-bg/50 p-2">
+                    <code className="font-mono text-jul-text">{change.path}</code>
+                    <span> — {change.reason}</span>
+                    <span className="block text-[0.7rem]">
+                      {change.subsystem}: {change.declared} → {change.effective}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {lifecycle.changes.length > 12 && (
+                <p className="text-xs text-jul-muted">
+                  {String(lifecycle.changes.length - 12)} more lifecycle changes are summarized by
+                  the path groups below.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <AssessmentPaths label="Hot paths" paths={lifecycle.hot_paths} />
+            <AssessmentPaths
+              label="Restart-required paths"
+              paths={lifecycle.restart_required_paths}
+            />
+            <AssessmentPaths
+              label="New-listener-only paths"
+              paths={lifecycle.new_listener_only_paths}
+            />
+            <AssessmentPaths
+              label="Validation-rejected paths"
+              paths={lifecycle.validation_rejected_paths}
+            />
+          </div>
+
+          {lifecycle.pending_subsystems.length > 0 && (
+            <p className="text-xs text-jul-muted">
+              Pending subsystems: {" "}
+              <span className="font-mono text-jul-text">
+                {lifecycle.pending_subsystems.slice(0, 12).join(", ")}
+                {lifecycle.pending_subsystems.length > 12
+                  ? `, …and ${String(lifecycle.pending_subsystems.length - 12)} more`
+                  : ""}
+              </span>
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function ConfigPanel() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -193,6 +363,8 @@ export function ConfigPanel() {
   // rejection.
   const { has: hasPermission } = usePermission();
   const canApplyPerm = hasPermission("config:apply");
+  const canWritePerm = hasPermission("config:write");
+  const canRawPerm = hasPermission("config:raw");
   // rawForbidden is true when the current principal is authenticated but lacks
   // config:raw. Structured patch review (config:write) must still work in that
   // case, so the panel degrades gracefully instead of failing outright.
@@ -372,6 +544,36 @@ export function ConfigPanel() {
   const dirty = isPatchMode || (draft !== null && draft !== baseline);
   const debounced = useDebouncedValue(isPatchMode ? "" : current, 400);
 
+  // Backward-compatible session migration: a pre-#78 draft does not carry the
+  // authoritative lifecycle projection. Re-preview the exact ordered batch at
+  // its pinned base version before any apply action can become available.
+  const patchNeedsAssessmentRefresh =
+    isPatchMode &&
+    (patchDraft.lifecycle === undefined ||
+      patchDraft.baseVersion === undefined ||
+      patchDraft.baseVersion.trim() === "");
+  const patchAssessmentRefresh = useQuery({
+    queryKey: [
+      "config-patch-assessment-refresh",
+      patchDraft?.baseVersion,
+      patchDraft?.ops ?? [],
+    ],
+    queryFn: async () => {
+      if (patchDraft === null) throw new Error("No structured patch is available to preview.");
+      const result = await patchConfigBatch(patchDraft.ops, patchDraft.baseVersion);
+      return patchResultToPendingDraft(patchDraft.ops, result, patchDraft.baseVersion);
+    },
+    enabled: patchNeedsAssessmentRefresh && canWritePerm,
+    retry: false,
+    staleTime: Infinity,
+  });
+
+  useEffect(() => {
+    const refreshed = patchAssessmentRefresh.data;
+    if (refreshed === undefined || patchDraft === null || !patchNeedsAssessmentRefresh) return;
+    setPatchDraft(refreshed);
+  }, [patchAssessmentRefresh.data, patchDraft, patchNeedsAssessmentRefresh, setPatchDraft]);
+
   const validation = useQuery({
     queryKey: ["config-validate", debounced],
     queryFn: () => validateConfig(debounced),
@@ -382,7 +584,17 @@ export function ConfigPanel() {
     retry: false,
   });
 
-  const valid = isPatchMode || validation.data?.ok === true;
+  const patchLifecycleRejected =
+    patchDraft?.lifecycle !== undefined &&
+    patchDraft.lifecycle.validation_rejected_paths.length > 0;
+  const valid = isPatchMode
+    ? patchDraft.valid && patchDraft.validationErrors.length === 0 && !patchLifecycleRejected
+    : validation.data?.ok === true;
+  const patchAction = decidePatchApplyAction(
+    patchDraft,
+    hasPendingRestart,
+    isPatchMode && conflictVersion !== undefined,
+  );
 
   const rawDiff = useQuery({
     queryKey: ["config-diff", debounced],
@@ -407,23 +619,43 @@ export function ConfigPanel() {
   // surfaces as a stale preview (409) rather than being silently clobbered.
   const patchCandidateQuery = useQuery({
     queryKey: ["config-patch-candidate", patchDraft?.baseVersion, patchDraft?.ops ?? []],
-    queryFn: () => fetchPatchCandidate(patchDraft?.ops ?? [], patchDraft?.baseVersion),
-    enabled: isPatchMode && !rawForbidden && patchDraft.candidate === undefined,
+    queryFn: async () => {
+      const expectedBaseVersion = patchDraft?.baseVersion;
+      const result = await fetchPatchCandidate(patchDraft?.ops ?? [], expectedBaseVersion);
+      if (expectedBaseVersion !== undefined && result.base_version !== expectedBaseVersion) {
+        throw new Error("The candidate response did not match the reviewed base version.");
+      }
+      return result;
+    },
+    enabled:
+      isPatchMode &&
+      canRawPerm &&
+      !rawForbidden &&
+      patchDraft.baseVersion !== undefined &&
+      patchDraft.lifecycle !== undefined &&
+      patchDraft.candidate === undefined,
     retry: false,
     staleTime: Infinity,
   });
   const candidateError = patchCandidateQuery.error;
-  // A 409 means the persisted config moved since the preview was prepared; a
-  // 403 means this principal cannot read raw config, so the candidate stays
-  // hidden and the change is presented as a diff only.
+  // A 409 means the persisted config moved since the preview was prepared and
+  // must block apply. A 403 or an ordinary source-view failure hides candidate
+  // TOML and degrades to the already reviewed structured diff; config:raw is a
+  // rendering permission, not an additional prerequisite for atomic apply.
   const candidateStale = candidateError instanceof ConfigConflictError;
   const candidateForbidden = candidateError instanceof ApiError && candidateError.status === 403;
   const candidateFailed = patchCandidateQuery.isError && !candidateStale && !candidateForbidden;
-  // For a config:raw operator the candidate is unresolved (loading, stale, or
-  // failed) until it either loads or degrades to diff-only; apply is blocked
-  // until then so an operator never applies against an unverified preview.
+  // Wait only while the optional source view is actively loading. A stale
+  // base remains blocking, but a non-conflict source failure degrades to the
+  // structured diff because final apply recomputes the exact ops server-side.
   const candidatePending =
-    isPatchMode && !rawForbidden && !candidateForbidden && patchDraft.candidate === undefined;
+    isPatchMode &&
+    canRawPerm &&
+    !rawForbidden &&
+    patchCandidateQuery.isFetching &&
+    patchDraft.baseVersion !== undefined &&
+    patchDraft.lifecycle !== undefined &&
+    patchDraft.candidate === undefined;
 
   // Once the protected candidate arrives, pin it into the draft so the
   // read-only editor shows the proposed configuration and the source view
@@ -481,13 +713,16 @@ export function ConfigPanel() {
   const applyPatch = useMutation({
     mutationFn: ({ confirmAdmin }: { confirmAdmin: boolean; operationID: number }) => {
       if (!patchDraft) throw new Error("no patch draft to apply");
-      // H-03: If a managed staged restart is pending, patch applies should
-      // update the staged configuration instead of hot apply.
-      const mode = hasPendingRestart ? "stage_restart" : "hot";
+      if (patchDraft.baseVersion === undefined || patchDraft.baseVersion.trim() === "") {
+        throw new Error("The structured patch has no pinned base version; generate a fresh preview.");
+      }
+      // This mutation is reached only when the authoritative preview permits
+      // hot apply. Restart-bound and update-staged patches use applyStage
+      // directly, avoiding a known-doomed hot submission.
       return applyPatchBatch(
         patchDraft.ops,
-        patchDraft.baseVersion ?? conflictVersion,
-        mode,
+        patchDraft.baseVersion,
+        "hot",
         confirmAdmin,
       );
     },
@@ -541,9 +776,14 @@ export function ConfigPanel() {
   const applyStage = useMutation({
     mutationFn: ({ confirmAdmin }: { confirmAdmin: boolean; operationID: number }) => {
       if (patchDraft) {
+        if (patchDraft.baseVersion === undefined || patchDraft.baseVersion.trim() === "") {
+          throw new Error(
+            "The structured patch has no pinned base version; generate a fresh preview.",
+          );
+        }
         return applyPatchBatch(
           patchDraft.ops,
-          patchDraft.baseVersion ?? conflictVersion,
+          patchDraft.baseVersion,
           "stage_restart",
           confirmAdmin,
         );
@@ -606,7 +846,11 @@ export function ConfigPanel() {
   // so explicitly rather than showing the ordinary "apply now / apply patch"
   // copy, which implies a live change. One derived flag drives the button label,
   // dialog title, confirm label, explanatory copy, and success wording.
-  const updatingStagedPatch = isPatchMode && hasPendingRestart;
+  const updatingStagedPatch = isPatchMode && patchAction.action === "update_staged";
+  const patchUsesStage =
+    isPatchMode &&
+    (patchAction.action === "stage_restart" || patchAction.action === "update_staged");
+  const patchHasNoAction = isPatchMode && patchAction.action === "none";
 
   const applyActive = isPatchMode ? applyPatch : applyRaw;
   const applyError = applyActive.error;
@@ -862,11 +1106,11 @@ export function ConfigPanel() {
   //                 may differ from disk, so this is never called "live".
   //   - candidate-readonly: a server-computed PROPOSED candidate (structured
   //                 patch), shown read-only — it is NOT applied until confirm.
-  //   - persisted-baseline: patch mode where the candidate is not yet available
-  //                 (still loading, stale, or errored); the editor shows the
-  //                 current persisted bytes and the structured diff is the change.
-  //   - diff-only:  a structured change reviewed WITHOUT config:raw, so the
-  //                 candidate text is hidden and only the diff/summary is shown.
+  //   - persisted-baseline: patch mode where the candidate is still loading or
+  //                 stale; the editor shows the current persisted bytes and the
+  //                 structured diff is the change.
+  //   - diff-only:  candidate source is unavailable or not authorized, so only
+  //                 the secret-safe structured diff/summary is shown.
   // The candidate is computed server-side against a pinned base_version, which is
   // echoed back on apply so a concurrent change is rejected, not silently
   // clobbered.
@@ -881,12 +1125,13 @@ export function ConfigPanel() {
         detail:
           "These are the bytes currently stored in the configuration file. The runtime may differ while a staged restart or external divergence exists.",
       }
-    : rawForbidden || candidateForbidden
+    : rawForbidden || !canRawPerm || candidateForbidden || candidateFailed
       ? {
           tone: "diff-only",
           label: "Proposed change — diff only",
-          detail:
-            "The full candidate is hidden because this principal lacks config:raw. The structured diff is the proposed change.",
+          detail: candidateFailed
+            ? "Candidate source is temporarily unavailable. The server-reviewed structured diff remains the proposed change."
+            : "The full candidate is hidden because this principal lacks config:raw. The structured diff is the proposed change.",
         }
       : patchDraft.candidate !== undefined
         ? {
@@ -916,7 +1161,11 @@ export function ConfigPanel() {
   }
 
   const pill: "idle" | "checking" | "valid" | "invalid" = isPatchMode
-    ? "valid"
+    ? patchAssessmentRefresh.isFetching
+      ? "checking"
+      : valid
+        ? "valid"
+        : "invalid"
     : validation.isFetching
       ? "checking"
       : validation.data === undefined
@@ -924,7 +1173,7 @@ export function ConfigPanel() {
         : valid
           ? "valid"
           : "invalid";
-  const issues = validation.data?.errors ?? [];
+  const issues = isPatchMode ? patchDraft.validationErrors : (validation.data?.errors ?? []);
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -994,11 +1243,11 @@ export function ConfigPanel() {
             type="button"
             onClick={() => {
               startOperation();
-              // When a managed staged restart is active, hot apply is blocked —
-              // offer to update the staged configuration instead. External
-              // divergence or inconsistency blocks all applies. Operators who
-              // lack config:raw cannot author raw staged updates.
-              if (hasPendingRestart && !isPatchMode && !rawForbidden) {
+              // Route a known restart-bound patch directly to stage_restart;
+              // never submit it once in hot mode merely to learn what preview
+              // already established. Managed pending raw edits keep their
+              // established update-staged behavior.
+              if (patchUsesStage || (hasPendingRestart && !isPatchMode && !rawForbidden)) {
                 setStageConfirming(true);
               } else {
                 setConfirming(true);
@@ -1013,6 +1262,8 @@ export function ConfigPanel() {
               patchReconciling ||
               patchReconcileError !== null ||
               candidatePending ||
+              candidateStale ||
+              patchHasNoAction ||
               (restartBlocked && !hasPendingRestart) ||
               (rawForbidden && !isPatchMode) ||
               !canApplyPerm
@@ -1021,14 +1272,20 @@ export function ConfigPanel() {
           >
             {(applyActive.isPending || applyStage.isPending) && <Spinner />}
             {applyActive.isPending || applyStage.isPending
-              ? "Applying…"
+              ? patchUsesStage
+                ? "Saving…"
+                : "Applying…"
               : hasPendingRestart && !isPatchMode && !rawForbidden
                 ? "Update staged configuration"
-                : updatingStagedPatch
+                : patchAction.action === "update_staged"
                   ? "Update staged configuration"
-                  : isPatchMode
-                    ? "Apply patch"
-                    : "Apply changes"}
+                  : patchAction.action === "stage_restart"
+                    ? "Save for next restart"
+                    : patchAction.action === "hot"
+                      ? "Apply patch"
+                      : isPatchMode
+                        ? "No safe apply action"
+                        : "Apply changes"}
           </button>
         </div>
       </div>
@@ -1114,9 +1371,36 @@ export function ConfigPanel() {
             <div className="rounded-md border border-jul-danger/40 bg-jul-danger/5 p-3 text-sm">
               <p className="font-medium text-jul-danger">Candidate unavailable</p>
               <p className="mt-1 text-xs text-jul-muted">
-                The proposed candidate configuration could not be loaded. The structured diff below is
-                the proposed change; regenerate the preview from the originating editor to retry.
+                Candidate source could not be loaded. The structured diff below remains the reviewed
+                proposed change, and final apply will recompute the exact ordered operations
+                server-side.
               </p>
+            </div>
+          )}
+          {isPatchMode && (
+            <PatchAssessment
+              draft={patchDraft}
+              refreshing={patchAssessmentRefresh.isFetching}
+              refreshError={
+                patchAssessmentRefresh.error instanceof Error
+                  ? patchAssessmentRefresh.error
+                  : null
+              }
+            />
+          )}
+          {isPatchMode && patchHasNoAction && (
+            <div
+              role="status"
+              className="rounded-md border border-jul-warning/40 bg-jul-warning/5 p-3 text-sm"
+            >
+              <p className="font-medium text-jul-warning">No apply action is available</p>
+              <p className="mt-1 text-xs text-jul-muted">{patchAction.reason}</p>
+              {patchAction.requiresFreshPreview && !canWritePerm && (
+                <p className="mt-1 text-xs text-jul-muted">
+                  Refreshing this preview requires the <span className="font-mono">config:write</span>{" "}
+                  permission.
+                </p>
+              )}
             </div>
           )}
           {/* AC-08: deadline-aware finalization hint while a saved-not-live apply
@@ -1277,14 +1561,24 @@ export function ConfigPanel() {
                     <button
                       type="button"
                       onClick={() => {
-                        // Discard the stale draft and re-seed from the latest
-                        // persisted config so the editor text and the base_version
-                        // token both reflect the concurrent change.
+                        if (isPatchMode) {
+                          // A structured patch may be retried only after the
+                          // originating editor produces a new preview. Never
+                          // substitute the current version into the old ops.
+                          cancelOperation();
+                          setPatchDraft(null);
+                          setConflictVersion(undefined);
+                          applyPatch.reset();
+                          applyStage.reset();
+                          void navigate(-1);
+                          return;
+                        }
+
+                        // Raw editor flow: discard the stale text and re-seed
+                        // from the latest persisted config and version.
                         const operationID = startOperation();
-                        setPatchDraft(null);
                         setConflictVersion(undefined);
                         applyRaw.reset();
-                        applyPatch.reset();
                         void qc
                           .fetchQuery({ queryKey: ["raw-config"], queryFn: fetchRawConfig })
                           .then((fresh) => {
@@ -1296,7 +1590,7 @@ export function ConfigPanel() {
                       }}
                       className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
                     >
-                      Reload latest config
+                      {isPatchMode ? "Discard stale patch and preview again" : "Reload latest config"}
                     </button>
                   </div>
                 )}
@@ -1440,9 +1734,16 @@ export function ConfigPanel() {
       {/* Stage-restart confirm dialog */}
       {stageConfirming && (
         <ConfirmDialog
-          title={hasPendingRestart ? "Update staged configuration?" : "Save for next restart?"}
+          title={
+            hasPendingRestart
+              ? "Update staged configuration?"
+              : isPatchMode
+                ? "Save structured patch for next restart?"
+                : "Save for next restart?"
+          }
           confirmLabel={hasPendingRestart ? "Update staged config" : "Save for next restart"}
           busy={applyStage.isPending}
+          confirmDisabled={applyStage.error instanceof ConfigConflictError}
           onConfirm={() => {
             const operationID = operationIDRef.current;
             const confirmAdmin =
@@ -1474,6 +1775,23 @@ export function ConfigPanel() {
               The staged configuration will be replaced with this draft. The running server will
               remain unchanged until the process is restarted.
             </p>
+          ) : isPatchMode ? (
+            <>
+              <p>
+                The authoritative preview marked this exact ordered patch as restart-bound. It will
+                be validated and saved for the next process restart; no hot-apply attempt is made and
+                the running server remains unchanged.
+              </p>
+              {patchDraft.lifecycle?.pending_subsystems &&
+                patchDraft.lifecycle.pending_subsystems.length > 0 && (
+                  <p className="mt-2 text-xs text-jul-muted">
+                    Pending subsystems:{" "}
+                    <span className="font-mono">
+                      {patchDraft.lifecycle.pending_subsystems.join(", ")}
+                    </span>
+                  </p>
+                )}
+            </>
           ) : (
             <>
               <p>
@@ -1492,7 +1810,11 @@ export function ConfigPanel() {
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
           {applyStage.error && !(applyStage.error instanceof ConfigAdminChangeError) && (
             <p className="mt-2 text-xs text-jul-danger">
-              {applyStage.error instanceof Error ? applyStage.error.message : "Stage failed."}
+              {applyStage.error instanceof ConfigConflictError
+                ? "The base configuration changed. Cancel this dialog and generate a fresh preview; the stale patch cannot be forced."
+                : applyStage.error instanceof Error
+                  ? applyStage.error.message
+                  : "Stage failed."}
             </p>
           )}
         </ConfirmDialog>

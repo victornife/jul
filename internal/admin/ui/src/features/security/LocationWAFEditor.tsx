@@ -4,15 +4,11 @@
  */
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import {
-  patchConfig,
-  ConfigRejectedError,
-  type ConfigPatch,
-  type LocationWAF,
-} from "@/api/client.ts";
-import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import type { LocationWAF } from "@/api/client.ts";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { usePermission } from "@/auth/usePermission.ts";
+import { useRunPatch } from "@/lib/useRunPatch.ts";
 import {
   seedWAFOverride,
   wafOverrideToPatch,
@@ -57,10 +53,10 @@ function routeTarget(w: LocationWAF) {
  * editor for Validate → Diff → Apply.
  */
 export function LocationWAFEditor({ target, existing = true, onClose }: LocationWAFEditorProps) {
-  const navigate = useNavigate();
   const [draft, setDraft] = useState<WAFOverrideDraft>(() => seedWAFOverride(target));
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { run: runPatch, error, busy } = useRunPatch();
+  const { has } = usePermission();
+  const canWrite = has("config:write");
   const warnings = wafOverrideWarnings(draft);
 
   const where = `${target.listen}${target.path ? ` ${target.path}` : ""}`;
@@ -69,26 +65,8 @@ export function LocationWAFEditor({ target, existing = true, onClose }: Location
     setDraft((d) => ({ ...d, [key]: val }));
   }
 
-  async function runPatch(patch: ConfigPatch): Promise<void> {
-    setError(null);
-    setBusy(true);
-    try {
-      const res = await patchConfig(patch);
-      setPendingDraft({
-        kind: "patch",
-        ops: [patch],
-        baseVersion: res.base_version,
-        previewDiff: res.diff,
-      });
-      void navigate("/config");
-    } catch (err) {
-      setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");
-      setBusy(false);
-    }
-  }
-
   function save(): void {
-    void runPatch({
+    runPatch({
       op: "location_waf_set",
       ...routeTarget(target),
       waf: wafOverrideToPatch(draft),
@@ -96,7 +74,7 @@ export function LocationWAFEditor({ target, existing = true, onClose }: Location
   }
 
   function clearOverride(): void {
-    void runPatch({ op: "location_waf_clear", ...routeTarget(target) });
+    runPatch({ op: "location_waf_clear", ...routeTarget(target) });
   }
 
   return (
@@ -105,26 +83,29 @@ export function LocationWAFEditor({ target, existing = true, onClose }: Location
       subtitle={`Override for ${where}`}
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          {existing && (
+        <div className="w-full space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            {existing && (
+              <button
+                type="button"
+                disabled={busy || !canWrite}
+                onClick={clearOverride}
+                className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-danger hover:bg-jul-bg disabled:opacity-40"
+              >
+                Clear override
+              </button>
+            )}
             <button
               type="button"
-              disabled={busy}
-              onClick={clearOverride}
-              className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-danger hover:bg-jul-bg disabled:opacity-40"
+              disabled={busy || warnings.length > 0 || !canWrite}
+              onClick={save}
+              className="rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
             >
-              Clear override
+              {busy ? "Previewing…" : "Review lifecycle and diff →"}
             </button>
-          )}
-          <button
-            type="button"
-            disabled={busy || warnings.length > 0}
-            onClick={save}
-            className="rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
-          >
-            Review in editor →
-          </button>
+          </div>
+          <ForbiddenAction permission="config:write" className="justify-end" />
         </div>
       }
     >

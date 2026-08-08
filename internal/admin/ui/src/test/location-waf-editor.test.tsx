@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
 
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
-import type { LocationWAF } from "@/api/client.ts";
+import type { ConfigPatch, LocationWAF } from "@/api/client.ts";
 
 const realFetch = globalThis.fetch;
 let seenBody = "";
@@ -49,15 +49,30 @@ beforeEach(() => {
   seenBody = "";
   takePendingDraft();
   globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
-    expect(input).toBe("/api/config/patch");
+    expect(input).toBe("/api/config/patch/preview");
     seenBody = typeof init?.body === "string" ? init.body : "";
     return Promise.resolve(
       json({
         ok: true,
         summary: "route :8080 /api WAF override set",
-        candidate: 'listen = ":8080"\n',
+        operation_summaries: [
+          { op_index: 0, op: "location_waf_set", summary: "WAF override set" },
+        ],
         diff: { summary: "1 change" },
         base_version: "deadbeef",
+        valid: true,
+        validation_errors: [],
+        lifecycle: {
+          changes: [],
+          can_apply_hot: true,
+          can_stage_restart: true,
+          hot_paths: ["servers.locations.waf"],
+          restart_required_paths: [],
+          new_listener_only_paths: [],
+          ignored_deprecated_paths: [],
+          validation_rejected_paths: [],
+          pending_subsystems: [],
+        },
       }),
     );
   }) as unknown as typeof fetch;
@@ -94,12 +109,12 @@ describe("LocationWAFEditor", () => {
     expect(screen.getByDisplayValue("256k")).toBeTruthy();
     expect(screen.getByDisplayValue("/etc/jul/waf/custom.conf")).toBeTruthy();
 
-    fireEvent.click(screen.getByText("Review in editor →"));
+    fireEvent.click(screen.getByText("Review lifecycle and diff →"));
 
     await waitFor(() => {
       expect(seenBody).not.toBe("");
     });
-    expect(JSON.parse(seenBody)).toMatchObject({
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_waf_set",
       listen: ":8080",
       match_type: "prefix",
@@ -130,7 +145,7 @@ describe("LocationWAFEditor", () => {
       </Wrapper>,
     );
     expect(screen.getByText(/defines no rules/)).toBeInTheDocument();
-    expect(screen.getByText("Review in editor →")).toBeDisabled();
+    expect(screen.getByText("Review lifecycle and diff →")).toBeDisabled();
   });
 
   it("hides Clear override when adding a fresh override", () => {
@@ -160,7 +175,7 @@ describe("LocationWAFEditor", () => {
     await waitFor(() => {
       expect(seenBody).not.toBe("");
     });
-    expect(JSON.parse(seenBody)).toMatchObject({
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_waf_clear",
       listen: ":8080",
       path: "/api",

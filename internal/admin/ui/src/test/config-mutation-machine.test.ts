@@ -190,7 +190,27 @@ describe("configMutationReducer", () => {
     let s = initialConfigMutationState("v1");
     s = configMutationReducer(s, {
       type: "setPatchDraft",
-      draft: { ops: [], previewDiff: { summary: "x" }, baseVersion: "v1" },
+      draft: {
+        kind: "patch",
+        ops: [],
+        baseVersion: "v1",
+        summary: "x",
+        operationSummaries: [],
+        valid: true,
+        validationErrors: [],
+        previewDiff: { summary: "x" },
+        lifecycle: {
+          changes: [],
+          can_apply_hot: true,
+          can_stage_restart: true,
+          hot_paths: [],
+          restart_required_paths: [],
+          new_listener_only_paths: [],
+          ignored_deprecated_paths: [],
+          validation_rejected_paths: [],
+          pending_subsystems: [],
+        },
+      },
     });
     expect(s.patchDraft?.baseVersion).toBe("v1");
     s = configMutationReducer(s, { type: "setBaseVersion", baseVersion: "v2" });

@@ -27,6 +27,7 @@ function Wrapper({ children }: { readonly children: ReactNode }) {
 
 import {
   MTLSProjectionSchema,
+  type ConfigPatch,
   type MTLSServerProjection,
   type LocationProjection,
   type RouteProjection,
@@ -241,7 +242,8 @@ describe("RouteDetail require client cert quick edit", () => {
   function stubPatch(onPatch: (body: string) => void): void {
     vi.stubGlobal(
       "fetch",
-      vi.fn((_url: string, init?: RequestInit) => {
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url !== "/api/config/patch/preview") throw new Error(`unexpected fetch: ${url}`);
         onPatch(typeof init?.body === "string" ? init.body : "");
         return Promise.resolve({
           ok: true,
@@ -249,8 +251,24 @@ describe("RouteDetail require client cert quick edit", () => {
             Promise.resolve({
               ok: true,
               summary: "ok",
-              candidate: 'listen = ":443"\n',
+              operation_summaries: [
+                { op_index: 0, op: "location_toggle_require_client_cert", summary: "ok" },
+              ],
               diff: { summary: "1 change" },
+              base_version: "v1",
+              valid: true,
+              validation_errors: [],
+              lifecycle: {
+                changes: [],
+                can_apply_hot: true,
+                can_stage_restart: true,
+                hot_paths: [],
+                restart_required_paths: [],
+                new_listener_only_paths: [],
+                ignored_deprecated_paths: [],
+                validation_rejected_paths: [],
+                pending_subsystems: [],
+              },
             }),
         });
       }),
@@ -278,7 +296,7 @@ describe("RouteDetail require client cert quick edit", () => {
     await waitFor(() => {
       expect(body).not.toBe("");
     });
-    expect(JSON.parse(body)).toMatchObject({
+    expect((JSON.parse(body) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_toggle_require_client_cert",
       listen: ":443",
       match_type: "prefix",

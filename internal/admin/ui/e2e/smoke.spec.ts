@@ -78,12 +78,27 @@ const TRAFFIC_CONTROLS = {
   },
 };
 
-/** PatchResult returned for POST /api/config/patch. */
+const PATCH_CANDIDATE = `[[servers]]\nlisten = ":8080"\n\n  [[servers.locations]]\n  match = { type = "prefix", path = "/" }\n  proxy_pass = "http://new-app:4000"\n`;
+
+/** PatchResult returned for POST /api/config/patch/preview. */
 const PATCH_RESULT = {
   ok: true,
   summary: "route :8080 / target changed",
-  candidate: `[[servers]]\nlisten = ":8080"\n\n  [[servers.locations]]\n  match = { type = "prefix", path = "/" }\n  proxy_pass = "http://new-app:4000"\n`,
+  operation_summaries: [],
   base_version: "v1",
+  valid: true,
+  validation_errors: [],
+  lifecycle: {
+    changes: [],
+    can_apply_hot: true,
+    can_stage_restart: true,
+    hot_paths: ["servers.locations"],
+    restart_required_paths: [],
+    new_listener_only_paths: [],
+    ignored_deprecated_paths: [],
+    validation_rejected_paths: [],
+    pending_subsystems: [],
+  },
   diff: {
     summary: "1 modification",
     modifications: [
@@ -175,11 +190,24 @@ async function setupApiMocks(page: Page): Promise<void> {
   await page.route("/api/config/history/snap-001", (route) => json(route, HISTORY_SNAPSHOT));
 
   // Write endpoints — handled per-step so we can await them explicitly.
-  await page.route("/api/config/patch", (route) => json(route, PATCH_RESULT));
+  await page.route("/api/config/patch/preview", (route) => {
+    const body = route.request().postDataJSON() as {
+      ops?: Array<{ readonly op: string }>;
+    };
+    const ops = body.ops ?? [];
+    return json(route, {
+      ...PATCH_RESULT,
+      operation_summaries: ops.map((operation, opIndex) => ({
+        op_index: opIndex,
+        op: operation.op,
+        summary: `${operation.op} previewed`,
+      })),
+    });
+  });
   await page.route("/api/config/patch/candidate", (route) =>
     json(route, {
       ok: true,
-      candidate: PATCH_RESULT.candidate,
+      candidate: PATCH_CANDIDATE,
       base_version: PATCH_RESULT.base_version,
     }),
   );
@@ -232,8 +260,8 @@ test.describe("Console SPA smoke (UI-1)", () => {
     await targetInput.fill("http://new-app:4000");
 
     // The "Set target →" button is now enabled (value differs from current).
-    // Clicking it sends POST /api/config/patch and then navigates to /config.
-    const patchRequest = page.waitForRequest("/api/config/patch");
+    // Clicking it sends POST /api/config/patch/preview and then navigates to /config.
+    const patchRequest = page.waitForRequest("/api/config/patch/preview");
     await page.getByRole("button", { name: "Set target →" }).click();
     await patchRequest;
 
@@ -296,6 +324,97 @@ test.describe("Console SPA smoke (UI-1)", () => {
 
     // The dialog is dismissed after the rollback POST returns.
     await expect(page.getByText("Roll back to this snapshot?")).not.toBeVisible();
+  });
+
+  test("creates routes with deterministic existing-server and new-server batches", async ({
+    page,
+  }) => {
+    await setupApiMocks(page);
+    await page.goto("/routes");
+
+    await page.getByRole("button", { name: "New route" }).first().click();
+    await expect(page.getByRole("heading", { name: "Create route" })).toBeVisible();
+    await page.getByLabel("Path").fill("/api");
+    await page.getByLabel("HTTP upstream target").fill("http://api:3000");
+
+    const existingPreview = page.waitForRequest("/api/config/patch/preview");
+    await page.getByRole("button", { name: "Review lifecycle and diff →" }).click();
+    const existingBody = (await existingPreview).postDataJSON() as {
+      ops: Array<Record<string, unknown>>;
+    };
+    expect(existingBody.ops.map((operation) => operation.op)).toEqual(["location_add"]);
+    expect(existingBody.ops[0]).toMatchObject({
+      op: "location_add",
+      listen: ":8080",
+      server_names: [],
+      match_set: { type: "prefix", path: "/api" },
+      action: { kind: "proxy", target: "http://api:3000" },
+    });
+    await expect(page).toHaveURL(/\/config$/);
+
+    await page.getByRole("link", { name: "Routes" }).click();
+    await page.getByRole("button", { name: "New route" }).first().click();
+    await page.getByRole("radio", { name: /Create a new server/ }).check();
+    await page.getByLabel("New listener").fill(":9090");
+    await page.getByLabel("New server names (optional)").fill("b.example, a.example");
+    await page.getByLabel("Path").fill("/v2");
+    await page.getByLabel("HTTP upstream target").fill("http://v2:3000");
+
+    const newServerPreview = page.waitForRequest("/api/config/patch/preview");
+    await page.getByRole("button", { name: "Review lifecycle and diff →" }).click();
+    const newServerBody = (await newServerPreview).postDataJSON() as {
+      ops: Array<Record<string, unknown>>;
+    };
+    expect(newServerBody.ops.map((operation) => operation.op)).toEqual([
+      "server_add",
+      "location_add",
+    ]);
+    expect(newServerBody.ops[0]).toMatchObject({
+      op: "server_add",
+      listen: ":9090",
+      server_names: ["a.example", "b.example"],
+    });
+    expect(newServerBody.ops[1]).toMatchObject({
+      op: "location_add",
+      listen: ":9090",
+      server_names: ["a.example", "b.example"],
+      match_set: { type: "prefix", path: "/v2" },
+    });
+    await expect(page).toHaveURL(/\/config$/);
+  });
+
+  test("previews exact route deletion and cancel performs no handoff or apply", async ({ page }) => {
+    await setupApiMocks(page);
+    let applyCalls = 0;
+    await page.route("/api/config/patch/apply", (route) => {
+      applyCalls += 1;
+      return json(route, PATCH_APPLY_RESULT);
+    });
+
+    await page.goto("/routes");
+    await page.getByText("http://app:3000").click();
+
+    const deletePreview = page.waitForRequest("/api/config/patch/preview");
+    await page.getByRole("button", { name: /Delete route prefix \/ from/ }).click();
+    const deletionBody = (await deletePreview).postDataJSON() as {
+      ops: Array<Record<string, unknown>>;
+    };
+    expect(deletionBody.ops).toEqual([
+      {
+        op: "location_remove",
+        listen: ":8080",
+        server_names: [],
+        match_type: "prefix",
+        path: "/",
+      },
+    ]);
+
+    await expect(page.getByRole("dialog", { name: "Remove this exact route?" })).toBeVisible();
+    await expect(page.getByText(/does not cascade to upstreams/)).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("dialog", { name: "Remove this exact route?" })).not.toBeVisible();
+    await expect(page).toHaveURL(/\/routes$/);
+    expect(applyCalls).toBe(0);
   });
 });
 
@@ -392,6 +511,12 @@ test.describe("Console RBAC gating (P3-04)", () => {
     const rollback = page.getByRole("button", { name: "Rollback" });
     await expect(rollback).toBeDisabled();
     await expect(rollback).toHaveAttribute("title", /history:rollback permission/);
+
+    // Route authoring is independently gated by config:write.
+    await page.getByRole("link", { name: "Routes" }).click();
+    const newRoute = page.getByRole("button", { name: "New route" }).first();
+    await expect(newRoute).toBeDisabled();
+    await expect(newRoute).toHaveAttribute("title", /config:write/);
   });
 
   test("operator identity enables the rollback control", async ({ page }) => {

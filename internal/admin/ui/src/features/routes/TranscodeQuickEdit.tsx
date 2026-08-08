@@ -5,15 +5,14 @@
 
 import { useState } from "react";
 import {
-  patchConfig,
-  ConfigRejectedError,
   type ConfigPatch,
   type LocationProjection,
   type RouteProjection,
   type TranscodePatch,
 } from "@/api/client.ts";
-import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
-import { useNavigate } from "react-router-dom";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { usePermission } from "@/auth/usePermission.ts";
+import { useRunPatch } from "@/lib/useRunPatch.ts";
 
 function Toggle({
   label,
@@ -38,10 +37,8 @@ function Toggle({
 }
 
 function useTranscodeQuickEdit(route: RouteProjection, loc: LocationProjection) {
-  const navigate = useNavigate();
   const t = loc.transcode;
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { run, busy, error } = useRunPatch();
 
   const [tcTarget, setTcTarget]               = useState(loc.target ?? "");
   const [tcDescPath, setTcDescPath]           = useState(t?.descriptor_set ?? "");
@@ -92,23 +89,8 @@ function useTranscodeQuickEdit(route: RouteProjection, loc: LocationProjection) 
     };
   }
 
-  async function save() {
-    setError(null);
-    setBusy(true);
-    try {
-      const patch = buildPatch();
-      const res = await patchConfig(patch);
-      setPendingDraft({
-        kind: "patch",
-        ops: [patch],
-        baseVersion: res.base_version,
-        previewDiff: res.diff,
-      });
-      void navigate("/config");
-    } catch (err) {
-      setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");
-      setBusy(false);
-    }
+  function save(): void {
+    run(buildPatch());
   }
 
   return {
@@ -135,6 +117,8 @@ export function TranscodeQuickEdit({
   readonly loc: LocationProjection;
 }) {
   const edit = useTranscodeQuickEdit(route, loc);
+  const { has } = usePermission();
+  const canWrite = has("config:write");
 
   return (
     <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
@@ -202,17 +186,19 @@ export function TranscodeQuickEdit({
           type="button"
           disabled={
             edit.busy ||
+            !canWrite ||
             !edit.dirty ||
             edit.tcTarget.trim() === "" ||
             (!edit.tcReflect && edit.tcDescPath.trim() === "")
           }
-          onClick={() => void edit.save()}
+          onClick={edit.save}
           className="rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
         >
-          Save transcode settings →
+          {edit.busy ? "Previewing…" : "Save transcode settings →"}
         </button>
       </div>
       {edit.error && <p className="text-xs text-jul-danger">{edit.error}</p>}
+      <ForbiddenAction permission="config:write" />
     </div>
   );
 }

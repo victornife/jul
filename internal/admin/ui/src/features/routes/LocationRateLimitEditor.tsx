@@ -4,16 +4,11 @@
  */
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import {
-  patchConfig,
-  ConfigRejectedError,
-  type ConfigPatch,
-  type LocationProjection,
-  type RouteProjection,
-} from "@/api/client.ts";
-import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import type { LocationProjection, RouteProjection } from "@/api/client.ts";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { usePermission } from "@/auth/usePermission.ts";
+import { useRunPatch } from "@/lib/useRunPatch.ts";
 
 export interface LocationRateLimitEditorProps {
   readonly route: RouteProjection;
@@ -29,9 +24,9 @@ export function LocationRateLimitEditor({
   loc,
   onClose,
 }: LocationRateLimitEditorProps) {
-  const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { run: runPatch, error, busy } = useRunPatch();
+  const { has } = usePermission();
+  const canWrite = has("config:write");
 
   const seed = loc.rate_limit_detail;
   const [enabled, setEnabled] = useState(seed?.enabled ?? false);
@@ -59,30 +54,8 @@ export function LocationRateLimitEditor({
     warnings.push('Key must be "ip", "header:<Name>" or "jwt:<claim>".');
   }
 
-  async function runPatch(patch: ConfigPatch): Promise<void> {
-    setError(null);
-    setBusy(true);
-    try {
-      const res = await patchConfig(patch);
-      setPendingDraft({
-        kind: "patch",
-        ops: [patch],
-        baseVersion: res.base_version,
-        previewDiff: res.diff,
-      });
-      void navigate("/config");
-    } catch (err) {
-      setError(
-        err instanceof ConfigRejectedError
-          ? err.message
-          : "The edit could not be applied.",
-      );
-      setBusy(false);
-    }
-  }
-
   function save(): void {
-    void runPatch({
+    runPatch({
       op: "route_set_rate_limit",
       listen: route.listen,
       server_names: route.server_names ?? [],
@@ -103,16 +76,21 @@ export function LocationRateLimitEditor({
       subtitle={`${loc.type} ${loc.match} on ${route.listen}`}
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          <button
-            type="button"
-            disabled={busy || warnings.length > 0 || (!enabled && !seed?.enabled)}
-            onClick={save}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
-          >
-            Preview change →
-          </button>
+        <div className="w-full space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            <button
+              type="button"
+              disabled={
+                busy || warnings.length > 0 || (!enabled && !seed?.enabled) || !canWrite
+              }
+              onClick={save}
+              className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              {busy ? "Previewing…" : "Preview change →"}
+            </button>
+          </div>
+          <ForbiddenAction permission="config:write" className="justify-end" />
         </div>
       }
     >
