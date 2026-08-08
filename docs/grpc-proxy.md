@@ -76,6 +76,17 @@ On a **TLS** listener you do not need `h2c` — HTTP/2 is negotiated through ALP
 during the handshake. Inbound h2c uses the Go standard library's HTTP/2 server
 support, so it adds no dependency.
 
+### Console native-gRPC mounts
+
+The Apps creator emits only the typed `grpc_proxy` action for native gRPC; it
+never degrades the request to a plain HTTP proxy. An exact existing TLS server is
+accepted without an h2c mutation. An exact existing plaintext server is accepted
+only when h2c is already enabled. For a new plaintext server the ordered batch is
+`server_add`, `server_toggle_h2c`, then `location_add`, and only on an unused
+dedicated listener: h2c is listener-address scoped, so the workflow refuses to
+change sibling virtual hosts sharing an address. The complete upstream and route
+operations are previewed as one candidate before Configuration may apply them.
+
 ### Terminating TLS at the edge
 
 A common topology terminates TLS at Jul.IA and reaches the backend over h2c:

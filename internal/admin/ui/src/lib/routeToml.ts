@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: agpl
  */
 
-// Compatibility TOML generators for the older guided Route/App flows. Route
-// creation now uses deterministic typed patch batches in routePatch.ts; this
-// route generator remains for focused compatibility tests and explicit raw
-// handoffs. App migration belongs to #79 and still uses its existing TOML flow.
+// Compatibility TOML generator for explicit raw/import Route handoffs.
+// Structured Route and App creation use deterministic typed patch batches in
+// routePatch.ts and appPatch.ts; no App TOML generator remains.
 
 export type RouteAction = "static" | "proxy" | "grpc" | "redirect" | "deny" | "return";
 
@@ -213,99 +212,16 @@ export function generateRouteToml(d: RouteDraft): string {
       break;
   }
   if (d.cache) lines.push(`  cache = true`);
-  if (d.rateLimit) lines.push(`  rate_limit = { enabled = true, rate = 100, burst = 100, key = "ip" }`);
+  if (d.rateLimit)
+    lines.push(`  rate_limit = { enabled = true, rate = 100, burst = 100, key = "ip" }`);
   for (const line of authLines(d.auth)) lines.push(line);
   return lines.join("\n");
 }
 
-export interface BackendDraft {
-  address: string;
-  weight: number;
-}
-
-export interface AppDraft {
-  name: string;
-  strategy: "round_robin" | "weighted_round_robin" | "least_conn";
-  backends: BackendDraft[];
-  healthCheck: boolean;
-  healthCheckPath: string;
-  healthCheckInterval: string;
-}
-
-/** Generates a complete [[upstreams]] block for a new app/upstream pool. */
-export function generateAppToml(d: AppDraft): string {
-  const lines: string[] = [];
-  lines.push("[[upstreams]]");
-  lines.push(`name = ${tomlString(d.name.trim())}`);
-  lines.push(`strategy = ${tomlString(d.strategy)}`);
-  const servers = d.backends
-    .filter((b) => b.address.trim().length > 0)
-    .map((b) =>
-      b.weight > 1 ? `${b.address.trim()} weight=${String(b.weight)}` : b.address.trim(),
-    );
-  if (servers.length > 0) {
-    lines.push(`servers = ${tomlStringArray(servers)}`);
-  }
-  if (d.healthCheck) {
-    lines.push("");
-    lines.push("  [upstreams.health_check]");
-    lines.push("  enabled = true");
-    lines.push(`  type = "http"`);
-    if (d.healthCheckPath.trim()) {
-      lines.push(`  path = ${tomlString(d.healthCheckPath.trim())}`);
-    }
-    if (d.healthCheckInterval.trim()) {
-      lines.push(`  interval = ${tomlString(d.healthCheckInterval.trim())}`);
-    }
-  }
-  return lines.join("\n");
-}
-
 /**
- * Options for mounting a newly created app on a route (P2-13). When provided,
- * generateAppWithRouteToml appends a reverse-proxy [[servers]] block whose
- * location targets the app pool, so a new app can actually serve traffic
- * instead of only existing as a backend pool.
+ * Raw/import compatibility helper. Structured Route and App workflows do not
+ * call this path; they preview typed ConfigPatch operations instead.
  */
-export interface MountRouteOptions {
-  listen: string;
-  path: string;
-  // grpc, when true, mounts the route as a native gRPC passthrough: the
-  // location gets grpc = true and the generated cleartext listener gets
-  // h2c = true so gRPC clients can negotiate HTTP/2 without TLS. Without it a
-  // gRPC backend would be proxied as plain HTTP/1.1 and never work.
-  grpc?: boolean;
-}
-
-/**
- * Generates the [[upstreams]] block for an app and, when mount is given, a
- * matching reverse-proxy [[servers]] block that proxies the chosen path to the
- * app pool (proxy_pass = "http://<name>"). This unifies "create an app" with
- * "serve it" — the gap that previously left a new app unreachable.
- */
-export function generateAppWithRouteToml(d: AppDraft, mount?: MountRouteOptions): string {
-  const upstream = generateAppToml(d);
-  if (!mount) return upstream;
-  const name = d.name.trim();
-  const listen = mount.listen.trim() || ":8080";
-  const path = mount.path.trim() || "/";
-  const lines: string[] = [];
-  lines.push("[[servers]]");
-  lines.push(`listen = ${tomlString(listen)}`);
-  // gRPC needs end-to-end HTTP/2. The generated listener is cleartext (no TLS
-  // block is emitted here), so enable h2c to let native gRPC clients negotiate
-  // HTTP/2 without TLS; the matching location below sets grpc = true.
-  if (mount.grpc) lines.push(`h2c = true`);
-  lines.push("");
-  lines.push("  [[servers.locations]]");
-  lines.push(`  match = { type = "prefix", path = ${tomlString(path)} }`);
-  lines.push(`  proxy_pass = ${tomlString(`http://${name}`)}`);
-  // grpc = true proxies the native gRPC stream unchanged (http:// dials the
-  // backend over h2c). Requires a server build with the "grpc" tag.
-  if (mount.grpc) lines.push(`  grpc = true`);
-  return `${upstream}\n\n${lines.join("\n")}`;
-}
-
 /** Appends a generated TOML fragment to the running raw config. */
 export function appendFragment(raw: string, fragment: string): string {
   const base = raw.trimEnd();

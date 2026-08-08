@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchApps,
@@ -11,45 +11,48 @@ import {
   type AppProjection,
   type BackendProjection,
 } from "@/api/client.ts";
+import { usePermission } from "@/auth/usePermission.ts";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { PanelError } from "@/components/PanelError.tsx";
+import { Button, EmptyState, Loading, PageHeader } from "@/components/ui.tsx";
 import { AppDetail } from "@/features/apps/AppDetail.tsx";
 import { AppEditor } from "@/features/apps/AppEditor.tsx";
-import { PageHeader, Button, EmptyState, Loading } from "@/components/ui.tsx";
-import { PanelError } from "@/components/PanelError.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
 
+const APP_REOPEN_KEY = "jul-apps-reopen-selection";
+
 function HealthDot({ healthy }: { readonly healthy: boolean | undefined }) {
-  if (healthy === undefined)
-    return (
-      <span
-        title="health unknown — no active checks"
-        className="inline-block h-2 w-2 rounded-full bg-jul-muted/50"
-      />
-    );
+  const label =
+    healthy === undefined ? "health unknown — no active checks" : healthy ? "healthy" : "unhealthy";
   return (
-    <span
-      title={healthy ? "healthy" : "unhealthy"}
-      className={`inline-block h-2 w-2 rounded-full ${
-        healthy ? "bg-jul-success" : "bg-jul-danger"
-      }`}
-    />
+    <span className="inline-flex items-center">
+      <span
+        aria-hidden
+        title={label}
+        className={`inline-block h-2 w-2 rounded-full ${
+          healthy === undefined ? "bg-jul-muted/50" : healthy ? "bg-jul-success" : "bg-jul-danger"
+        }`}
+      />
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 
-function BackendRow({ b }: { readonly b: BackendProjection }) {
+function BackendRow({ backend }: { readonly backend: BackendProjection }) {
   return (
-    <tr className="border-b border-jul-border last:border-b-0 hover:bg-jul-border/30 transition-colors">
-      <td className="px-4 py-2 truncate">
+    <tr className="border-b border-jul-border transition-colors last:border-b-0 hover:bg-jul-border/30">
+      <td className="truncate px-4 py-2">
         <div className="flex items-center gap-2">
-          <HealthDot healthy={b.healthy} />
-          <span className="font-mono text-sm text-jul-text">{b.address}</span>
+          <HealthDot healthy={backend.healthy} />
+          <span className="font-mono text-sm text-jul-text">{backend.address}</span>
         </div>
       </td>
-      <td className="px-4 py-2 text-sm text-jul-muted">{b.weight}</td>
+      <td className="px-4 py-2 text-sm text-jul-muted">{backend.weight}</td>
       <td className="px-4 py-2 text-sm text-jul-muted">
-        {b.inflight !== undefined && b.inflight > 0 ? (
-          <span className="text-jul-warning">{b.inflight}</span>
+        {backend.inflight !== undefined && backend.inflight > 0 ? (
+          <span className="text-jul-warning">{backend.inflight}</span>
         ) : (
-          b.inflight ?? "—"
+          (backend.inflight ?? "—")
         )}
       </td>
     </tr>
@@ -58,13 +61,18 @@ function BackendRow({ b }: { readonly b: BackendProjection }) {
 
 function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen: () => void }) {
   const totalCount = app.backends.length;
-  const healthyCount = app.backends.filter((b) => b.healthy === true).length;
-  const unhealthyCount = app.backends.filter((b) => b.healthy === false).length;
+  const healthyCount = app.backends.filter((backend) => backend.healthy === true).length;
+  const unhealthyCount = app.backends.filter((backend) => backend.healthy === false).length;
   const known = healthyCount + unhealthyCount;
 
   return (
-    <div className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface transition-colors hover:bg-jul-border/10" onClick={onOpen}>
-      <div className="flex flex-wrap items-center gap-3 border-b border-jul-border px-4 py-3">
+    <article className="rounded-lg border border-jul-border bg-jul-surface transition-colors hover:bg-jul-border/10">
+      <button
+        type="button"
+        aria-label={`Open App ${app.name}`}
+        onClick={onOpen}
+        className="flex w-full flex-wrap items-center gap-3 border-b border-jul-border px-4 py-3 text-left focus:outline-none focus:ring-2 focus:ring-inset focus:ring-jul-accent"
+      >
         <span className="font-semibold text-jul-text">{app.name}</span>
         <span className="rounded-full bg-jul-border px-2 py-0.5 text-xs text-jul-muted">
           {app.strategy}
@@ -91,7 +99,7 @@ function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen
               ? `${String(totalCount)} backends · health unknown`
               : `${String(healthyCount)}/${String(totalCount)} healthy${unhealthyCount > 0 ? ` · ${String(unhealthyCount)} down` : ""}`}
         </span>
-      </div>
+      </button>
 
       {app.backends.length === 0 ? (
         <p className="px-4 py-3 text-xs text-jul-muted">No backends configured.</p>
@@ -99,34 +107,31 @@ function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen
         <table className="w-full table-fixed text-left text-sm">
           <thead>
             <tr className="border-b border-jul-border text-xs text-jul-muted">
-              <th className="px-4 py-2 w-1/2">Address</th>
-              <th className="px-4 py-2 w-1/4">Weight</th>
-              <th className="px-4 py-2 w-1/4">In-flight</th>
+              <th className="w-1/2 px-4 py-2">Address</th>
+              <th className="w-1/4 px-4 py-2">Weight</th>
+              <th className="w-1/4 px-4 py-2">In-flight</th>
             </tr>
           </thead>
           <tbody>
-            {app.backends.map((b) => (
-              <BackendRow key={b.address} b={b} />
+            {app.backends.map((backend) => (
+              <BackendRow key={backend.address} backend={backend} />
             ))}
           </tbody>
         </table>
       )}
-    </div>
+    </article>
   );
 }
 
-// Filters narrow the app list (Milestone 4.7): by backend health and by whether
-// any route references the app. They run client-side over the projection and
-// persist across sessions.
+// Filters narrow the App list by live health and route usage. They run over the
+// projection and persist across sessions; they never alter exact App selection.
 type HealthFilter = "all" | "healthy" | "degraded";
 type UsageFilter = "all" | "used" | "unused";
 
 function appMatches(app: AppProjection, health: HealthFilter, usage: UsageFilter): boolean {
   const total = app.backends.length;
-  const healthy = app.backends.filter((b) => b.healthy === true).length;
-  const unhealthy = app.backends.filter((b) => b.healthy === false).length;
-  // "healthy" means every backend is known-healthy; "degraded" means at least
-  // one backend is known-unhealthy. Unknown-health backends match neither.
+  const healthy = app.backends.filter((backend) => backend.healthy === true).length;
+  const unhealthy = app.backends.filter((backend) => backend.healthy === false).length;
   if (health === "healthy" && (total === 0 || healthy < total)) return false;
   if (health === "degraded" && unhealthy === 0) return false;
   const used = (app.routes_using ?? []).length > 0;
@@ -136,55 +141,88 @@ function appMatches(app: AppProjection, health: HealthFilter, usage: UsageFilter
 }
 
 export function AppsPanel() {
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { has } = usePermission();
+  const canWrite = has("config:write");
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ["apps"],
     queryFn: fetchApps,
     refetchInterval: 5_000,
   });
-
   const routesQuery = useQuery({
     queryKey: ["routes"],
     queryFn: fetchRoutes,
-    staleTime: 5000,
+    staleTime: 5_000,
   });
 
-  const [selected, setSelected] = useState<AppProjection | null>(null);
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [healthFilter, setHealthFilter] = usePersistentState<HealthFilter>(
     "apps_health_filter",
     "all",
   );
-  const [usageFilter, setUsageFilter] = usePersistentState<UsageFilter>(
-    "apps_usage_filter",
-    "all",
-  );
+  const [usageFilter, setUsageFilter] = usePersistentState<UsageFilter>("apps_usage_filter", "all");
 
   const filtersActive = healthFilter !== "all" || usageFilter !== "all";
-
+  const selected = useMemo(
+    () =>
+      selectedName === null
+        ? null
+        : ((data ?? []).find((app) => app.name === selectedName) ?? null),
+    [data, selectedName],
+  );
   const filtered = useMemo(
     () => (data ?? []).filter((app) => appMatches(app, healthFilter, usageFilter)),
     [data, healthFilter, usageFilter],
   );
 
+  useEffect(() => {
+    if (!data || isFetching || typeof sessionStorage === "undefined") return;
+    try {
+      const intendedName = sessionStorage.getItem(APP_REOPEN_KEY);
+      if (intendedName === null) return;
+      sessionStorage.removeItem(APP_REOPEN_KEY);
+      if (data.some((app) => app.name === intendedName)) {
+        setSelectedName(intendedName);
+      }
+    } catch {
+      // Selection restoration is a convenience. Invalid or unavailable browser
+      // storage never changes the authoritative Apps projection.
+    }
+  }, [data, isFetching]);
+
+  useEffect(() => {
+    if (selectedName !== null && data && !data.some((app) => app.name === selectedName)) {
+      setSelectedName(null);
+    }
+  }, [data, selectedName]);
+
   if (isLoading) return <Loading label="Loading apps…" />;
-  if (isError || !data)
+  if (isError || !data) {
     return <PanelError error={error} resource="apps" onRetry={() => void refetch()} />;
+  }
+
+  const newAppAction = (
+    <div className="space-y-1 text-right">
+      <Button
+        variant="primary"
+        disabled={!canWrite}
+        title={canWrite ? "Create an App/upstream" : "Requires config:write"}
+        onClick={() => {
+          if (canWrite) setCreating(true);
+        }}
+      >
+        New app
+      </Button>
+      <ForbiddenAction permission="config:write" className="justify-end text-left" />
+    </div>
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Apps & Upstreams"
-        description="An app is a named pool of backend instances that routes proxy to by name. Jul balances traffic across the healthy backends and can run active health checks. Click an app to see which routes depend on it."
-        actions={
-          <Button
-            variant="primary"
-            onClick={() => {
-              setCreating(true);
-            }}
-          >
-            New app
-          </Button>
-        }
+        description="An app is a named pool of backend instances that routes proxy to by name. Jul balances traffic across healthy backends and can run active health checks. Open an exact App name to see its settings and dependencies."
+        actions={newAppAction}
       />
 
       {data.length > 0 && (
@@ -193,8 +231,8 @@ export function AppsPanel() {
             <span className="text-sm font-medium text-jul-text">Health</span>
             <select
               value={healthFilter}
-              onChange={(e) => {
-                setHealthFilter(e.target.value as HealthFilter);
+              onChange={(event) => {
+                setHealthFilter(event.target.value as HealthFilter);
               }}
               className="rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
             >
@@ -207,8 +245,8 @@ export function AppsPanel() {
             <span className="text-sm font-medium text-jul-text">Usage</span>
             <select
               value={usageFilter}
-              onChange={(e) => {
-                setUsageFilter(e.target.value as UsageFilter);
+              onChange={(event) => {
+                setUsageFilter(event.target.value as UsageFilter);
               }}
               className="rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
             >
@@ -234,22 +272,13 @@ export function AppsPanel() {
       {data.length === 0 ? (
         <EmptyState
           title="No apps are configured yet"
-          description="Add an app when you want Jul to send traffic to a backend service such as Express, Apollo, FastAPI, Django, or a Go API. An app groups one or more backend instances that routes can proxy to by name."
-          action={
-            <Button
-              variant="primary"
-              onClick={() => {
-                setCreating(true);
-              }}
-            >
-              New app
-            </Button>
-          }
+          description="Add an app when Jul should send traffic to a backend service. The typed creator can make only the upstream, mount it on one exact existing server, or add one exact new server in the same reviewed batch."
+          action={newAppAction}
         />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="No apps match these filters"
-          description="No app matches the selected health and usage filters. Clear the filters to see every configured app."
+          description="No App matches the selected health and usage filters. Clear the filters to see every configured App."
           action={
             <Button
               variant="secondary"
@@ -269,25 +298,36 @@ export function AppsPanel() {
               key={app.name}
               app={app}
               onOpen={() => {
-                setSelected(app);
+                setSelectedName(app.name);
               }}
             />
           ))}
         </div>
       )}
 
-      {selected && (
+      {selected !== null && (
         <AppDetail
           app={selected}
           onClose={() => {
-            setSelected(null);
+            setSelectedName(null);
           }}
         />
       )}
 
       {creating && (
         <AppEditor
+          existingApps={data}
           existingRoutes={routesQuery.data ?? []}
+          routeInventoryReady={routesQuery.isSuccess}
+          onReview={(appName) => {
+            if (typeof sessionStorage === "undefined") return;
+            try {
+              sessionStorage.setItem(APP_REOPEN_KEY, appName);
+            } catch {
+              // Final apply remains authoritative even when restoration cannot
+              // be persisted for the next visit to this panel.
+            }
+          }}
           onClose={() => {
             setCreating(false);
           }}

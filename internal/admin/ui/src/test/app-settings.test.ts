@@ -88,16 +88,16 @@ describe("healthCheckToPatch", () => {
     expect(patch).not.toHaveProperty("unhealthy_threshold");
   });
 
-  it("drops expect_body for tcp probes", () => {
+  it("drops HTTP-only path, statuses, and body for tcp probes", () => {
     const patch = healthCheckToPatch({
       enabled: true,
       type: "tcp",
-      path: "",
+      path: "/stale-http-path",
       interval: "",
       timeout: "",
       healthyThreshold: "",
       unhealthyThreshold: "",
-      expectStatus: "",
+      expectStatus: "200, 204",
       expectBody: "ignored",
     });
     expect(patch).toEqual({ enabled: true, type: "tcp" });

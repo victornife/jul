@@ -4,10 +4,10 @@
  */
 
 import { useState } from "react";
+import { usePermission } from "@/auth/usePermission.ts";
 import { Drawer } from "@/components/Drawer.tsx";
-import {
-  type AppProjection,
-} from "@/api/client.ts";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import type { AppProjection } from "@/api/client.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
 import {
   discoveryToPatch,
@@ -98,11 +98,13 @@ export interface AppEditorDrawerProps {
 }
 
 /**
- * Guided editor for an upstream pool's active health checks (Phase 4b). It seeds
+ * Guided editor for an upstream pool's active health checks. It seeds
  * from the Apps projection, edits the [health_check] block, and routes the
  * change through the upstream_set_health_check patch op as a reviewed diff.
  */
 export function HealthCheckEditor({ app, onClose }: AppEditorDrawerProps) {
+  const { has } = usePermission();
+  const canWrite = has("config:write");
   const { error, busy, run } = useRunPatch();
   const [draft, setDraft] = useState<HealthCheckDraft>(() => seedHealthCheck(app));
   const warnings = healthCheckWarnings(draft);
@@ -112,7 +114,11 @@ export function HealthCheckEditor({ app, onClose }: AppEditorDrawerProps) {
   }
 
   function save(): void {
-    run({ op: "upstream_set_health_check", upstream: app.name, health_check: healthCheckToPatch(draft) });
+    run({
+      op: "upstream_set_health_check",
+      upstream: app.name,
+      health_check: healthCheckToPatch(draft),
+    });
   }
 
   return (
@@ -121,20 +127,23 @@ export function HealthCheckEditor({ app, onClose }: AppEditorDrawerProps) {
       subtitle={app.name}
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          <button
-            type="button"
-            disabled={busy || warnings.length > 0}
-            onClick={save}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
-          >
-            Review in editor →
-          </button>
+        <div className="w-full space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            <button
+              type="button"
+              disabled={busy || warnings.length > 0 || !canWrite}
+              onClick={save}
+              className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              Review in editor →
+            </button>
+          </div>
+          <ForbiddenAction permission="config:write" className="text-left" />
         </div>
       }
     >
-      <div className="space-y-4">
+      <fieldset disabled={!canWrite || busy} className="space-y-4 disabled:opacity-70">
         <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
           Active probes mark a backend unhealthy after repeated failures (and healthy again after
           recoveries) without waiting for live traffic. Disabling leaves only passive health checks.
@@ -238,27 +247,30 @@ export function HealthCheckEditor({ app, onClose }: AppEditorDrawerProps) {
         )}
 
         <Warnings items={warnings} />
-      </div>
+      </fieldset>
     </Drawer>
   );
 }
 
-const DISCOVERY_OPTIONS: ReadonlyArray<{ readonly value: DiscoveryKind; readonly label: string }> = [
-  { value: "static", label: "Static (no discovery)" },
-  { value: "dns", label: "DNS (A/AAAA)" },
-  { value: "dns_srv", label: "DNS SRV" },
-  { value: "consul", label: "Consul" },
-  { value: "kubernetes", label: "Kubernetes" },
-];
+const DISCOVERY_OPTIONS: ReadonlyArray<{ readonly value: DiscoveryKind; readonly label: string }> =
+  [
+    { value: "static", label: "Static (no discovery)" },
+    { value: "dns", label: "DNS (A/AAAA)" },
+    { value: "dns_srv", label: "DNS SRV" },
+    { value: "consul", label: "Consul" },
+    { value: "kubernetes", label: "Kubernetes" },
+  ];
 
 /**
- * Guided editor for an upstream pool's dynamic discovery (Phase 4b). It seeds
+ * Guided editor for an upstream pool's dynamic discovery. It seeds
  * from the Apps projection, edits the [discovery] block (static / dns / dns_srv
  * / consul / kubernetes), and routes the change through upstream_set_discovery
  * as a reviewed diff. Secret tokens are never shown or sent — the backend keeps
  * the existing token when the provider type is unchanged.
  */
 export function DiscoveryEditor({ app, onClose }: AppEditorDrawerProps) {
+  const { has } = usePermission();
+  const canWrite = has("config:write");
   const { error, busy, run } = useRunPatch();
   const [draft, setDraft] = useState<DiscoveryDraft>(() => seedDiscovery(app));
   const warnings = discoveryWarnings(draft);
@@ -278,20 +290,23 @@ export function DiscoveryEditor({ app, onClose }: AppEditorDrawerProps) {
       subtitle={app.name}
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          <button
-            type="button"
-            disabled={busy || warnings.length > 0}
-            onClick={save}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
-          >
-            Review in editor →
-          </button>
+        <div className="w-full space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            <button
+              type="button"
+              disabled={busy || warnings.length > 0 || !canWrite}
+              onClick={save}
+              className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              Review in editor →
+            </button>
+          </div>
+          <ForbiddenAction permission="config:write" className="text-left" />
         </div>
       }
     >
-      <div className="space-y-4">
+      <fieldset disabled={!canWrite || busy} className="space-y-4 disabled:opacity-70">
         <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
           Discovery resolves this pool&apos;s backends from an external source and refreshes them
           live without a reload. Choose Static to manage the backend list yourself.
@@ -453,7 +468,7 @@ export function DiscoveryEditor({ app, onClose }: AppEditorDrawerProps) {
         )}
 
         <Warnings items={warnings} />
-      </div>
+      </fieldset>
     </Drawer>
   );
 }

@@ -59,6 +59,144 @@ func TestExecutePatchBatchAppliesOrderedOperations(t *testing.T) {
 	}
 }
 
+func TestExecutePatchBatchCreatesAppAndNativeGRPCMountInOneCandidate(t *testing.T) {
+	before := patchProxyConfig()
+	enabled := true
+	ops := []patchRequest{
+		{
+			Op: "upstream_add", Upstream: "grpc-api", Address: "127.0.0.1:50051",
+			Weight: 2, Strategy: "weighted_round_robin",
+		},
+		{
+			Op: "upstream_add_backend", Upstream: "grpc-api",
+			Address: "127.0.0.1:50052", Weight: 3,
+		},
+		{
+			Op: "upstream_set_health_check", Upstream: "grpc-api",
+			HealthCheck: &upstreamHealthCheck{
+				Enabled: true, Type: "tcp", Interval: "5s", Timeout: "2s",
+				HealthyThreshold: 2, UnhealthyThreshold: 3,
+			},
+		},
+		{
+			Op: "upstream_set_discovery", Upstream: "grpc-api",
+			Discovery: &upstreamDiscovery{
+				Type: "dns", Target: "grpc.internal:50051", Refresh: "30s",
+			},
+		},
+		{Op: "server_add", Listen: ":9090", ServerNames: []string{"grpc.example"}},
+		{Op: "server_toggle_h2c", Listen: ":9090", Enabled: &enabled},
+		{
+			Op: "location_add", Listen: ":9090", ServerNames: []string{"grpc.example"},
+			Match:  &locationMatch{Type: "prefix", Path: "/"},
+			Action: &locationActionPayload{Kind: "grpc_proxy", Target: "http://grpc-api"},
+		},
+	}
+
+	got, err := executePatchBatch(context.Background(), patchBatchBaseline{
+		Config: before,
+		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
+	}, "", ops)
+	if err != nil {
+		t.Fatalf("executePatchBatch: %v", err)
+	}
+	if !got.Valid {
+		t.Fatalf("candidate valid = false; validation errors: %+v", got.ValidationErrors)
+	}
+	wantOrder := []string{
+		"upstream_add",
+		"upstream_add_backend",
+		"upstream_set_health_check",
+		"upstream_set_discovery",
+		"server_add",
+		"server_toggle_h2c",
+		"location_add",
+	}
+	if len(got.OperationSummaries) != len(wantOrder) {
+		t.Fatalf("operation summaries = %d, want %d", len(got.OperationSummaries), len(wantOrder))
+	}
+	for i, wantOp := range wantOrder {
+		if got.OperationSummaries[i].OpIndex != i || got.OperationSummaries[i].Op != wantOp {
+			t.Fatalf("summary[%d] = %+v, want index=%d op=%q", i, got.OperationSummaries[i], i, wantOp)
+		}
+	}
+
+	var upstream *config.UpstreamConfig
+	for i := range got.CandidateConfig.Upstreams {
+		if got.CandidateConfig.Upstreams[i].Name == "grpc-api" {
+			upstream = &got.CandidateConfig.Upstreams[i]
+			break
+		}
+	}
+	if upstream == nil {
+		t.Fatal("candidate is missing grpc-api upstream")
+	}
+	if upstream.Strategy != "weighted_round_robin" || len(upstream.Servers) != 2 {
+		t.Fatalf("candidate upstream = %+v, want weighted pool with two backends", upstream)
+	}
+	if upstream.HealthCheck == nil || !upstream.HealthCheck.Enabled || upstream.HealthCheck.Type != "tcp" {
+		t.Fatalf("candidate health check = %+v, want enabled tcp probe", upstream.HealthCheck)
+	}
+	if upstream.Discovery == nil || upstream.Discovery.Type != "dns" || upstream.Discovery.Target != "grpc.internal:50051" {
+		t.Fatalf("candidate discovery = %+v, want dns target", upstream.Discovery)
+	}
+
+	var mounted *config.ServerConfig
+	for i := range got.CandidateConfig.Servers {
+		if got.CandidateConfig.Servers[i].Listen == ":9090" {
+			mounted = &got.CandidateConfig.Servers[i]
+			break
+		}
+	}
+	if mounted == nil {
+		t.Fatal("candidate is missing :9090 server")
+	}
+	if !mounted.H2C || len(mounted.Locations) != 1 {
+		t.Fatalf("candidate server = %+v, want h2c with one location", mounted)
+	}
+	location := mounted.Locations[0]
+	if !location.GRPC || location.ProxyPass != "http://grpc-api" {
+		t.Fatalf("candidate location = %+v, want native grpc_proxy to new upstream", location)
+	}
+	if !got.Lifecycle.CanApplyHot || len(got.Lifecycle.NewListenerOnly) == 0 {
+		t.Fatalf("candidate lifecycle = %+v, want hot-capable new-listener classification", got.Lifecycle)
+	}
+	if len(before.Upstreams) == len(got.CandidateConfig.Upstreams) {
+		t.Fatal("executor appears to have reused or mutated the baseline upstream slice")
+	}
+}
+
+func TestExecutePatchBatchUpstreamRemoveReferenceRaceIsAtomic(t *testing.T) {
+	before := crudConfig()
+	before.Servers[0].Locations[0].ProxyPass = "http://cache"
+	canonicalBefore, err := config.Marshal(before)
+	if err != nil {
+		t.Fatalf("marshal before: %v", err)
+	}
+
+	_, err = executePatchBatch(context.Background(), patchBatchBaseline{Config: before}, "", []patchRequest{
+		{Op: "upstream_set_strategy", Upstream: "cache", Strategy: "least_conn"},
+		{Op: "upstream_remove", Upstream: "cache"},
+	})
+	var opErr *patchOperationError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("error = %T %v, want *patchOperationError", err, err)
+	}
+	if opErr.OpIndex != 1 || opErr.Op != "upstream_remove" {
+		t.Fatalf("operation error = %+v, want index 1 upstream_remove", opErr)
+	}
+	if !strings.Contains(opErr.Error(), "still referenced") {
+		t.Fatalf("operation error = %v, want authoritative route-reference rejection", opErr)
+	}
+	after, marshalErr := config.Marshal(before)
+	if marshalErr != nil {
+		t.Fatalf("marshal after: %v", marshalErr)
+	}
+	if !bytes.Equal(after, canonicalBefore) {
+		t.Fatal("failed App deletion batch mutated the caller-owned baseline")
+	}
+}
+
 func TestExecutePatchBatchReportsExactFailedOperationWithoutMutation(t *testing.T) {
 	before := patchProxyConfig()
 	canonicalBefore, err := config.Marshal(before)

@@ -345,6 +345,18 @@ An upstream is a named pool of backend servers. Locations reference them via
 so you can change servers, add health checks, or switch to service discovery
 without touching the location rules.
 
+In the Console, **New app** builds one typed, ordered configuration batch rather
+than generated TOML: the first backend is carried by `upstream_add`, later
+backends retain their visible order through `upstream_add_backend`, optional
+health and discovery operations follow in that order, and an optional route mount
+is added last. The mount choice is explicit: no route, one exact existing server
+identity, or one exact new server identity. App deletion is a separately reviewed
+one-operation `upstream_remove`; projected route references block it, the backend
+re-checks those references during preview, and no route, server, plugin,
+credential, or external discovery resource is removed as a cascade. Structured
+preview requires `config:write`, final apply or staging requires `config:apply`,
+and raw candidate/source access remains independently gated by `config:raw`.
+
 ```toml
 [[upstreams]]
 name = "backend"
