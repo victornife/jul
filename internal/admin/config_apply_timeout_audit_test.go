@@ -27,12 +27,15 @@ func TestManagedWriteRoutesRecordTimeoutAudit(t *testing.T) {
 	const phase = "preflight_handlers"
 
 	valid := validTOML(t, "./public", ":8080")
+	// validTOML builds a static route. Change the action wholesale so the
+	// shared executor clears root and validates the complete candidate before
+	// reaching the coordinator path this test exercises.
 	patchBody, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{{
-		Op:        "route_set_target",
+		Op:        "location_set_action",
 		Listen:    ":8080",
 		MatchType: "prefix",
 		Path:      "/",
-		Target:    "http://127.0.0.1:9999",
+		Action:    &locationActionPayload{Kind: "proxy", Target: "http://127.0.0.1:9999"},
 	}}})
 	if err != nil {
 		t.Fatalf("marshal patch: %v", err)

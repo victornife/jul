@@ -3,17 +3,12 @@
 
 package admin
 
-// This file holds the admin HTTP handlers for the structured-patch API:
-//   POST /api/config/patch            — preview a single op (handleConfigPatch)
-//   POST /api/config/patch/preview    — preview a batch atomically (handleConfigPatchPreview)
-//   POST /api/config/patch/candidate  — return the full candidate TOML for a batch,
-//                                       gated by config:raw so operators never see
-//                                       secret-bearing config (N-01)
-//   POST /api/config/patch/apply      — apply a batch atomically (handleConfigPatchApply)
-// and their supporting types (patchApplyRequest, conflictResponse) and
-// the configVersion fingerprint helper. Separating these from patch.go lets
-// the operation dispatch (applyPatch) and helpers (patch_helpers.go) be
-// read independently of the HTTP/serialization layer.
+// This file holds the HTTP/wire layer for the structured patch API. Candidate
+// construction itself lives in patch_batch.go and is deliberately shared by:
+//   POST /api/config/patch            — legacy one-op force preview
+//   POST /api/config/patch/preview    — conflict-checked batch preview
+//   POST /api/config/patch/candidate  — privileged canonical source view
+//   POST /api/config/patch/apply      — atomic managed apply
 
 import (
 	"context"
@@ -29,19 +24,161 @@ import (
 	"jul/internal/config"
 )
 
-// handleConfigPatch applies a single structured edit to the running config and
-// returns the generated diff for review BEFORE the change is applied — it does
-// not persist and does not return the full candidate TOML, so operators cannot
-// extract secrets from the structured preview (N-01). The UI shows the diff and
-// the operator confirms via /api/config/patch/apply, which recomputes the
-// candidate server-side.
-// POST /api/config/patch
+// patchApplyRequest is a server-side, atomic, conflict-checked batch of patch
+// operations. Empty BaseVersion is the existing explicit force mode.
+type patchApplyRequest struct {
+	BaseVersion string         `json:"base_version,omitempty"`
+	Ops         []patchRequest `json:"ops"`
+}
+
+// conflictResponse is the 409 body returned when the current editable
+// configuration no longer matches the version reviewed by the caller.
+type conflictResponse struct {
+	OK             bool   `json:"ok"`
+	Conflict       bool   `json:"conflict"`
+	Message        string `json:"message"`
+	CurrentVersion string `json:"current_version,omitempty"`
+}
+
+// patchPreviewResponse is the secret-safe typed assessment shared by the
+// legacy single preview, batch preview, and privileged candidate route.
+type patchPreviewResponse struct {
+	OK                 bool                    `json:"ok"`
+	Summary            string                  `json:"summary"`
+	OperationSummaries []patchOperationSummary `json:"operation_summaries"`
+	BaseVersion        string                  `json:"base_version"`
+	Valid              bool                    `json:"valid"`
+	Diff               ConfigDiff              `json:"diff"`
+	ValidationErrors   []validationError       `json:"validation_errors"`
+	Lifecycle          patchLifecycleSummary   `json:"lifecycle"`
+}
+
+// patchCandidateResponse adds unresolved canonical TOML to the same assessment.
+// The route is separately authorized with config:raw.
+type patchCandidateResponse struct {
+	patchPreviewResponse
+	Candidate string `json:"candidate"`
+}
+
+// patchOperationFailureResponse carries the exact zero-based operation index
+// and discriminator that rejected an otherwise atomic batch.
+type patchOperationFailureResponse struct {
+	OK      bool              `json:"ok"`
+	Message string            `json:"message"`
+	Errors  []validationError `json:"errors"`
+	OpIndex int               `json:"op_index"`
+	Op      string            `json:"op"`
+}
+
+// configVersion is a short, stable fingerprint of canonical configuration
+// bytes. currentWriteState uses the same canonical representation through
+// server.CanonicalVersion.
+func configVersion(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:8])
+}
+
+func (s *Server) patchPreviewResponse(execution patchBatchExecution) patchPreviewResponse {
+	operationSummaries := make([]patchOperationSummary, len(execution.OperationSummaries))
+	copy(operationSummaries, execution.OperationSummaries)
+	validationErrors := make([]validationError, len(execution.ValidationErrors))
+	copy(validationErrors, execution.ValidationErrors)
+	return patchPreviewResponse{
+		OK:                 true,
+		Summary:            execution.summaryText(),
+		OperationSummaries: operationSummaries,
+		BaseVersion:        execution.BaseVersion,
+		Valid:              execution.Valid,
+		Diff:               execution.Diff,
+		ValidationErrors:   validationErrors,
+		Lifecycle:          s.patchLifecycleProjection(execution.Lifecycle, execution.Valid),
+	}
+}
+
+func patchReadAvailable(s *Server) bool {
+	return s.deps.ReadConfigRaw != nil || s.deps.LoadConfig != nil
+}
+
+func decodePatchBatch(r *http.Request) (patchApplyRequest, error) {
+	var req patchApplyRequest
+	err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
+	return req, err
+}
+
+func writeEmptyPatchBatch(w http.ResponseWriter, subject string) {
+	writeJSON(w, http.StatusBadRequest, validationErrorResponse{
+		OK:      false,
+		Message: "No patch operations were provided.",
+		Errors:  humanizeErr(subject + ": at least one operation is required"),
+	})
+}
+
+// writePatchExecutionError renders failures common to preview and candidate.
+// It returns false only for an internal executor error the caller should report
+// as 500. No candidate bytes or configured values are serialized here.
+func writePatchExecutionError(w http.ResponseWriter, err error) bool {
+	var baselineErr *patchBaselineError
+	if errors.As(err, &baselineErr) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "cannot load current configuration: " + baselineErr.Error(),
+		})
+		return true
+	}
+	var conflictErr *patchVersionConflictError
+	if errors.As(err, &conflictErr) {
+		writeJSON(w, http.StatusConflict, conflictResponse{
+			OK:             false,
+			Conflict:       true,
+			Message:        "The configuration changed since this edit was prepared; reload and try again.",
+			CurrentVersion: conflictErr.CurrentVersion,
+		})
+		return true
+	}
+	var operationErr *patchOperationError
+	if errors.As(err, &operationErr) {
+		writeJSON(w, http.StatusBadRequest, patchOperationFailureResponse{
+			OK:      false,
+			Message: fmt.Sprintf("Operation %d (%s) could not be applied; no change was made.", operationErr.OpIndex+1, operationErr.Op),
+			Errors:  humanizeErr(operationErr.Err.Error()),
+			OpIndex: operationErr.OpIndex,
+			Op:      operationErr.Op,
+		})
+		return true
+	}
+	var candidateErr *patchCandidateError
+	if errors.As(err, &candidateErr) {
+		switch {
+		case errors.Is(candidateErr, context.DeadlineExceeded):
+			writeJSON(w, http.StatusGatewayTimeout, validationErrorResponse{
+				OK:      false,
+				Message: "Patch assessment exceeded the configured deadline; nothing was changed.",
+			})
+		case errors.Is(candidateErr, context.Canceled):
+			writeJSON(w, http.StatusRequestTimeout, validationErrorResponse{
+				OK:      false,
+				Message: "Patch assessment was canceled before completion; nothing was changed.",
+			})
+		default:
+			writeJSON(w, http.StatusBadRequest, validationErrorResponse{
+				OK:      false,
+				Message: "The configuration contains errors.",
+				Errors:  humanizeErr(candidateErr.Error()),
+			})
+		}
+		return true
+	}
+	return false
+}
+
+// handleConfigPatch is the legacy one-operation force-preview wrapper. It uses
+// the same executor and typed assessment as batch preview but keeps its historic
+// request shape and never returns candidate TOML.
 func (s *Server) handleConfigPatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if s.deps.LoadConfig == nil {
+	if !patchReadAvailable(s) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -50,252 +187,81 @@ func (s *Server) handleConfigPatch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	resp, err := s.previewPatchOps(r.Context(), []patchRequest{req})
+	_, execution, err := s.executeCurrentPatchBatch(r.Context(), nil, false, "", []patchRequest{req})
 	if err != nil {
-		if ppe, ok := err.(*patchPreviewError); ok {
-			writeJSON(w, http.StatusBadRequest, validationErrorResponse{
-				OK:      false,
-				Message: ppe.Message,
-				Errors:  ppe.Errors,
-			})
-			return
+		if !writePatchExecutionError(w, err) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, s.patchPreviewResponse(execution))
 }
 
-// configVersion is a short, stable fingerprint of a configuration used for
-// optimistic concurrency. It is computed over the canonical marshaled form, so
-// it is insensitive to comments and whitespace in the on-disk file and matches
-// between a preview and a later apply of the same logical config.
-func configVersion(raw []byte) string {
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:8])
-}
-
-// previewPatchOps applies ops to a freshly-loaded config and returns a secret-
-// safe preview response: summary, diff, base_version, and optional validation
-// diagnostics. It never includes the full candidate TOML (N-01).
-func (s *Server) previewPatchOps(ctx context.Context, ops []patchRequest) (map[string]any, error) {
-	base, err := s.deps.LoadConfig()
-	if err != nil {
-		return nil, err
-	}
-	before, err := config.Marshal(base)
-	if err != nil {
-		return nil, err
-	}
-	// AC-07: never mutate the object returned by LoadConfig. A loader may
-	// legally return a cached or shared pointer, so applying patch operations
-	// to it would mutate shared state even though a preview claims no change
-	// was made. Apply the ops to an independent deep clone instead.
-	cfg, err := base.Clone()
-	if err != nil {
-		return nil, err
-	}
-	summaries := make([]string, 0, len(ops))
-	for i, op := range ops {
-		summary, aerr := applyPatch(cfg, op)
-		if aerr != nil {
-			return nil, &patchPreviewError{
-				Message: fmt.Sprintf("Operation %d could not be applied; no change was made.", i+1),
-				Errors:  humanizeErr(aerr.Error()),
-			}
-		}
-		summaries = append(summaries, summary)
-	}
-	candidate, err := config.Marshal(cfg)
-	if err != nil {
-		return nil, err
-	}
-	beforeCfg, err := config.Parse(before)
-	if err != nil {
-		return nil, err
-	}
-	resp := map[string]any{
-		"ok":           true,
-		"summary":      strings.Join(summaries, "; "),
-		"diff":         diffConfigs(beforeCfg, cfg),
-		"base_version": configVersion(before),
-	}
-	if verr := validateRaw(ctx, candidate); verr != nil {
-		resp["validation_errors"] = humanizeErr(verr.Error())
-	}
-	return resp, nil
-}
-
-// patchPreviewError carries a structured validation failure from previewPatchOps
-// so the HTTP layer can return 400 without leaking the candidate bytes.
-type patchPreviewError struct {
-	Message string
-	Errors  []validationError
-}
-
-func (e *patchPreviewError) Error() string { return e.Message }
-
-// handleConfigPatchPreview previews a batch of structured patch operations
-// without persisting. It applies every op to a freshly-loaded config and
-// returns the generated diff for review, exactly like handleConfigPatch but for
-// multiple ops. The full candidate TOML is intentionally omitted; callers that
-// need it must use /api/config/patch/candidate, which requires config:raw
-// (N-01).
-// POST /api/config/patch/preview
+// handleConfigPatchPreview assesses an ordered batch without persistence.
 func (s *Server) handleConfigPatchPreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if s.deps.LoadConfig == nil {
+	if !patchReadAvailable(s) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
-	var req patchApplyRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+	req, err := decodePatchBatch(r)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if len(req.Ops) == 0 {
-		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
-			OK:      false,
-			Message: "No patch operations were provided.",
-			Errors:  humanizeErr("patch preview: at least one operation is required"),
-		})
+		writeEmptyPatchBatch(w, "patch preview")
 		return
 	}
-	resp, err := s.previewPatchOps(r.Context(), req.Ops)
+	_, execution, err := s.executeCurrentPatchBatch(r.Context(), nil, false, req.BaseVersion, req.Ops)
 	if err != nil {
-		if ppe, ok := err.(*patchPreviewError); ok {
-			writeJSON(w, http.StatusBadRequest, validationErrorResponse{
-				OK:      false,
-				Message: ppe.Message,
-				Errors:  ppe.Errors,
-			})
-			return
+		if !writePatchExecutionError(w, err) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, s.patchPreviewResponse(execution))
 }
 
-// handleConfigPatchCandidate returns the full candidate TOML that results from
-// applying a batch of structured patch operations. It is gated by config:raw
-// because the marshaled configuration may contain literal secrets (legacy admin
-// token, RBAC principal tokens, discovery tokens, etc.). Operators with only
-// config:write must review the structured diff instead (N-01).
-// POST /api/config/patch/candidate
+// handleConfigPatchCandidate returns unresolved canonical TOML to config:raw
+// callers, together with the exact same assessment produced by preview.
 func (s *Server) handleConfigPatchCandidate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if s.deps.LoadConfig == nil {
+	if !patchReadAvailable(s) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
-	var req patchApplyRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+	req, err := decodePatchBatch(r)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if len(req.Ops) == 0 {
-		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
-			OK:      false,
-			Message: "No patch operations were provided.",
-			Errors:  humanizeErr("patch candidate: at least one operation is required"),
-		})
+		writeEmptyPatchBatch(w, "patch candidate")
 		return
 	}
-	base, err := s.deps.LoadConfig()
+	_, execution, err := s.executeCurrentPatchBatch(r.Context(), nil, false, req.BaseVersion, req.Ops)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	baseRaw, err := config.Marshal(base)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	// AC-07: honor base_version so the source view can never show a candidate
-	// generated from a different baseline than the structured diff. A matching
-	// version generates the candidate; a stale version is a 409 with the
-	// current version; an empty base_version is an explicit force-preview.
-	baseVersion := configVersion(baseRaw)
-	if req.BaseVersion != "" && req.BaseVersion != baseVersion {
-		writeJSON(w, http.StatusConflict, conflictResponse{
-			OK:             false,
-			Conflict:       true,
-			Message:        "The configuration changed since this edit was prepared; reload and try again.",
-			CurrentVersion: baseVersion,
-		})
-		return
-	}
-	// AC-07: never mutate the object returned by LoadConfig. Apply the ops to an
-	// independent deep clone so generating the candidate cannot mutate shared
-	// state.
-	cfg, err := base.Clone()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	for i, op := range req.Ops {
-		if _, aerr := applyPatch(cfg, op); aerr != nil {
-			writeJSON(w, http.StatusBadRequest, validationErrorResponse{
-				OK:      false,
-				Message: fmt.Sprintf("Operation %d could not be applied; no change was made.", i+1),
-				Errors:  humanizeErr(aerr.Error()),
-			})
-			return
+		if !writePatchExecutionError(w, err) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
-	}
-	candidate, err := config.Marshal(cfg)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":           true,
-		"candidate":    string(candidate),
-		"base_version": baseVersion,
+	writeJSON(w, http.StatusOK, patchCandidateResponse{
+		patchPreviewResponse: s.patchPreviewResponse(execution),
+		Candidate:            string(execution.CandidateRaw),
 	})
 }
 
-// patchApplyRequest is a server-side, atomic, conflict-checked batch of patch
-// operations. Unlike the preview endpoint it persists the result: every op is
-// applied to a single freshly-loaded config under a lock, and the result is
-// written through the same validated preflight as /api/config/apply.
-type patchApplyRequest struct {
-	// BaseVersion is the config version the ops were computed against (returned
-	// by the preview as base_version, or by a config read). When non-empty the
-	// apply is rejected with 409 Conflict if the live config has changed since,
-	// preventing a stale edit from silently clobbering a concurrent change. An
-	// empty value skips the check (an explicit force-apply).
-	BaseVersion string `json:"base_version,omitempty"`
-	// Ops are applied in order to one config; a failure in any op aborts the
-	// whole batch before anything is written (all-or-nothing).
-	Ops []patchRequest `json:"ops"`
-}
-
-// conflictResponse is the 409 body when an apply is rejected because the live
-// config changed since the edit was prepared. CurrentVersion lets the client
-// reload, recompute, and retry.
-type conflictResponse struct {
-	OK             bool   `json:"ok"`
-	Conflict       bool   `json:"conflict"`
-	Message        string `json:"message"`
-	CurrentVersion string `json:"current_version,omitempty"`
-}
-
-// handleConfigPatchApply applies a batch of structured patch operations
-// atomically and entirely server-side — it never trusts a client-rendered
-// candidate. All ops are applied to one freshly-loaded config under s.applyMu,
-// and the result is persisted through the same validated apply preflight as
-// /api/config/apply, so a config that passes cannot fail the subsequent build.
-// Optimistic concurrency (base_version) prevents a stale edit from silently
-// clobbering a concurrent change (P2-12 lost update).
-// POST /api/config/patch/apply
+// handleConfigPatchApply re-executes the same batch from a fresh authoritative
+// baseline under applyMu, then delegates persistence/reload/staging to the
+// existing managed-apply coordinator.
 func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
@@ -303,8 +269,9 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationPatchApply)
 	s.bindManagedApplyDeadline(&reqCtx)
-	// Prefer the new correlated apply path; fall back to the legacy
-	// WriteConfigRaw closure for tests and callers that have not migrated.
+
+	// Prefer the correlated managed path; retain the legacy closure only for
+	// tests and embedding callers that have not migrated.
 	applyConfig := s.deps.ApplyConfig
 	if applyConfig == nil && s.deps.WriteConfigRaw != nil {
 		applyConfig = func(_ ApplyRequestContext, cfg *config.Config, mode string) (ConfigApplyResult, error) {
@@ -329,82 +296,21 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 			}, nil
 		}
 	}
-	if s.deps.LoadConfig == nil || applyConfig == nil {
+	if applyConfig == nil || s.deps.ReadConfigRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
-	var req patchApplyRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+
+	req, err := decodePatchBatch(r)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if len(req.Ops) == 0 {
-		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
-			OK:      false,
-			Message: "No patch operations were provided.",
-			Errors:  humanizeErr("patch: at least one operation is required"),
-		})
+		writeEmptyPatchBatch(w, "patch")
 		return
 	}
 
-	// Serialize the whole read-modify-write so the version check and the write
-	// are atomic. Without this, two concurrent applies could both read the same
-	// base version, both pass the conflict check, and the second would silently
-	// clobber the first.
-	s.applyMu.Lock()
-	defer s.applyMu.Unlock()
-
-	// M-06: Fail-closed prerequisite using shared currentWriteState helper.
-	state, err := s.currentWriteState(true)
-	if err != nil {
-		s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot load current config: "+err.Error())
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + err.Error()})
-		return
-	}
-	reqCtx.Baseline = &state
-	currentEffective := bindEffectiveBaseline(s, &reqCtx, state.Config)
-	// C-01: authorize against a pristine baseline. Never mutate state.Config in
-	// place: LoadConfig may return a shared pointer, so mutating it and then
-	// reloading for authorization would alias current == candidate and skip the
-	// admin:manage guard. Keep the loaded config as the immutable baseline and
-	// apply ops to an independent deep clone.
-	cfg, cloneErr := state.Config.Clone()
-	if cloneErr != nil {
-		s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot clone current config: "+cloneErr.Error())
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot prepare configuration candidate: " + cloneErr.Error()})
-		return
-	}
-
-	if req.BaseVersion != "" && req.BaseVersion != state.Version {
-		s.recordAudit(r, "config.patch", "config", "failure", "rejected: base version stale (concurrent change)")
-		writeJSON(w, http.StatusConflict, conflictResponse{
-			OK:             false,
-			Conflict:       true,
-			Message:        "The configuration changed since this edit was prepared; reload and try again.",
-			CurrentVersion: state.Version,
-		})
-		return
-	}
-
-	// Apply every op to the single loaded config. A failure in any op aborts the
-	// whole batch before anything is written, so the apply is all-or-nothing.
-	summaries := make([]string, 0, len(req.Ops))
-	for i, op := range req.Ops {
-		summary, aerr := applyPatch(cfg, op)
-		if aerr != nil {
-			writeJSON(w, http.StatusBadRequest, validationErrorResponse{
-				OK:      false,
-				Message: fmt.Sprintf("Operation %d could not be applied; no change was made.", i+1),
-				Errors:  humanizeErr(aerr.Error()),
-			})
-			return
-		}
-		summaries = append(summaries, summary)
-	}
-	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
-	defer cancel()
-	// Validate the apply mode before candidate resolution so a resolution
-	// deadline can be classified against the mode the client requested.
 	mode := r.URL.Query().Get("mode")
 	switch mode {
 	case "", "hot":
@@ -417,31 +323,70 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	effectiveCandidate, candidateErr := prepareMutationCandidateContext(opCtx, &reqCtx, cfg)
-	if candidateErr != nil {
-		// A resolution deadline is a pre-persistence timeout (504), not a
-		// validation error; a cancellation is a client abort (408). Only a
-		// genuine invalid value falls through to the 400 validation response.
-		if s.writeCandidatePreparationFailure(w, r, reqCtx, mode, candidateErr) {
+
+	// The lock makes baseline read, version check, execution, and coordinator
+	// submission one atomic read-modify-write sequence.
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
+	defer cancel()
+	state, execution, err := s.executeCurrentPatchBatch(opCtx, &reqCtx, true, req.BaseVersion, req.Ops)
+	if err != nil {
+		var baselineErr *patchBaselineError
+		if errors.As(err, &baselineErr) {
+			s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot load current config: "+baselineErr.Error())
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + baselineErr.Error()})
 			return
 		}
-		writeJSON(w, http.StatusBadRequest, validationErrorResponse{OK: false, Message: "The configuration contains errors.", Errors: humanizeErr(candidateErr.Error())})
+		var conflictErr *patchVersionConflictError
+		if errors.As(err, &conflictErr) {
+			s.recordAudit(r, "config.patch", "config", "failure", "rejected: base version stale (concurrent change)")
+			writeJSON(w, http.StatusConflict, conflictResponse{
+				OK:             false,
+				Conflict:       true,
+				Message:        "The configuration changed since this edit was prepared; reload and try again.",
+				CurrentVersion: conflictErr.CurrentVersion,
+			})
+			return
+		}
+		var operationErr *patchOperationError
+		if errors.As(err, &operationErr) {
+			s.recordAudit(r, "config.patch", "config", "failure", fmt.Sprintf("rejected: operation %d (%s)", operationErr.OpIndex, operationErr.Op))
+			writeJSON(w, http.StatusBadRequest, patchOperationFailureResponse{
+				OK:      false,
+				Message: fmt.Sprintf("Operation %d (%s) could not be applied; no change was made.", operationErr.OpIndex+1, operationErr.Op),
+				Errors:  humanizeErr(operationErr.Err.Error()),
+				OpIndex: operationErr.OpIndex,
+				Op:      operationErr.Op,
+			})
+			return
+		}
+		var candidateErr *patchCandidateError
+		if errors.As(err, &candidateErr) {
+			if s.writeCandidatePreparationFailure(w, r, reqCtx, mode, candidateErr) {
+				return
+			}
+			s.recordAudit(r, "config.patch", "config", "failure", "rejected: candidate preparation failed")
+			writeJSON(w, http.StatusBadRequest, validationErrorResponse{
+				OK:      false,
+				Message: "The configuration contains errors.",
+				Errors:  humanizeErr(candidateErr.Error()),
+			})
+			return
+		}
+		s.recordAudit(r, "config.patch", "config", "failure", "executor error: "+err.Error())
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	// Object-level guard: a structured patch may target [admin] fields (e.g.
-	// rate limits via future ops). Any change in the [admin] subtree requires
-	// admin:manage in addition to config:apply. Authorize the mutated candidate
-	// against the immutable baseline (no reload) to defeat aliasing (C-01).
-	if !s.authorizeConfigTransition(w, r, "config.patch", currentEffective, effectiveCandidate.Effective) {
+
+	currentEffective := execution.BeforeEffective
+	if !s.authorizeConfigTransition(w, r, "config.patch", currentEffective, execution.CandidateEffective) {
 		return
 	}
-	// Self-lockout guard (finding 9): a structured patch can move the admin
-	// listener, rotate the legacy token, disable the console, or invalidate the
-	// current operator's RBAC principal. Require the same explicit confirmation
-	// used by the raw apply/settings endpoints unless confirm_admin=true.
 	if r.URL.Query().Get("confirm_admin") != "true" {
 		id, _ := rbacIdentityFromRequest(r)
-		if changes := s.reachabilityChanges(currentEffective, effectiveCandidate.Effective, id); len(changes) > 0 {
+		if changes := s.reachabilityChanges(currentEffective, execution.CandidateEffective, id); len(changes) > 0 {
 			s.recordAudit(r, "config.patch", "config", "failure", "rejected: admin-reachability change needs confirmation")
 			s.emit("config", "apply_failed", "warn", "Structured patch would change admin access and was held for confirmation.")
 			writeJSON(w, http.StatusConflict, adminGuardResponse{
@@ -453,14 +398,28 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	// Snapshot the prior config, then persist through the authoritative apply
-	// preflight. A rejection here means nothing was written, preserving the
-	// all-or-nothing guarantee.
+	if !execution.Valid {
+		s.recordAudit(r, "config.patch", "config", "failure", "rejected: validation failed")
+		s.emit("config", "apply_failed", "warn", "Structured patch apply rejected: validation failed.")
+		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
+			OK:      false,
+			Message: "The configuration contains errors.",
+			Errors:  patchExecutionValidationErrors(execution),
+		})
+		return
+	}
+
 	prev := state.Raw
-	result, err := applyConfig(reqCtx, cfg, mode)
-	if err != nil {
-		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+err.Error())
-		status := configApplyErrorStatus(result, err)
+	result, applyErr := applyConfig(reqCtx, execution.CandidateConfig, mode)
+	result.Summary = execution.summaryStrings()
+	result.OperationSummaries = append([]patchOperationSummary(nil), execution.OperationSummaries...)
+	result.Diff = execution.Diff
+	lifecycleProjection := s.patchLifecycleProjection(execution.Lifecycle, execution.Valid)
+	result.Lifecycle = &lifecycleProjection
+
+	if applyErr != nil {
+		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+applyErr.Error())
+		status := configApplyErrorStatus(result, applyErr)
 		if status == http.StatusServiceUnavailable {
 			if result.Reload != nil && result.Reload.FailedPhase == "enqueue" {
 				s.emit("config", "apply_failed", "error", result.Message)
@@ -471,17 +430,13 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		s.emit("config", "apply_failed", "error", "Structured patch apply coordinator failed.")
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": applyErr.Error()})
 		return
 	}
 
 	if result.RestartRequired {
-		// Return the full structured result so the client receives can_stage
-		// and subsystem information, not just a plain message.
-		s.recordAudit(r, "config.patch", "config", "failure",
-			"rejected: restart required")
-		s.emit("config", "apply_failed", "warn",
-			"Structured patch apply needs a restart to take effect; no change was applied.")
+		s.recordAudit(r, "config.patch", "config", "failure", "rejected: restart required")
+		s.emit("config", "apply_failed", "warn", "Structured patch apply needs a restart to take effect; no change was applied.")
 		writeJSON(w, http.StatusConflict, result)
 		return
 	}
@@ -495,28 +450,33 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-
 	if result.TimedOutPhase != "" {
-		// AC-08 / defect 9: a preflight timeout before persistence records a
-		// dedicated failure audit naming the timed-out phase. The shared status
-		// mapping below writes the 504 Gateway Timeout; nothing was persisted.
 		s.recordTimeoutAudit(r, reqCtx.Operation, result)
 	}
-
 	if result.OK && isTerminalApplyResult(result) {
-		// AC-05: skip eager handler-side history when the managed coordinator
-		// records it at terminalization (see handleConfigRaw for rationale).
 		if !s.deps.ManagedHistoryActive {
 			s.recordHistory(prev)
 		}
-		s.recordAudit(r, "config.patch", "config", "success", strings.Join(summaries, "; "))
+		s.recordAudit(r, "config.patch", "config", "success", execution.summaryText())
 		s.emit("config", "apply", "info", "Structured patch validated and saved.")
 	}
 
-	beforeCfg, _ := config.Parse(state.Raw)
-	result.Summary = summaries
-	result.Diff = diffConfigs(beforeCfg, cfg)
+	writeJSON(w, configApplyResultStatus(result), result)
+}
 
-	status := configApplyResultStatus(result)
-	writeJSON(w, status, result)
+func patchExecutionValidationErrors(execution patchBatchExecution) []validationError {
+	if len(execution.ValidationErrors) > 0 {
+		return append([]validationError(nil), execution.ValidationErrors...)
+	}
+	out := make([]validationError, 0, len(execution.Lifecycle.ValidationRejected))
+	for _, path := range execution.Lifecycle.ValidationRejected {
+		out = append(out, validationError{
+			Code:     "reserved_configuration_field",
+			Path:     path,
+			Summary:  "The candidate changes a reserved configuration field.",
+			Detail:   "Remove the reserved field before applying the batch.",
+			Severity: "error",
+		})
+	}
+	return out
 }

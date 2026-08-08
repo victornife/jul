@@ -193,7 +193,13 @@ func TestConfigPatchReturnsStructuredEnqueueFailure(t *testing.T) {
 			Reload:   &server.ReloadResult{ID: "rl_43", Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, FailedPhase: "enqueue"},
 		}, errors.New("enqueue failed")
 	}
-	body, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9999"}}})
+	body, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{{
+		Op:        "location_set_action",
+		Listen:    ":8080",
+		MatchType: "prefix",
+		Path:      "/",
+		Action:    &locationActionPayload{Kind: "proxy", Target: "http://127.0.0.1:9999"},
+	}}})
 	if err != nil {
 		t.Fatalf("marshal patch: %v", err)
 	}

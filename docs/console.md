@@ -277,6 +277,43 @@ it explains the operational consequences of changes to:
 - **Server timeouts and body limits**, and the global **cache**,
   **compression**, and **rate-limit** blocks.
 
+### Atomic structured patch assessment
+
+The structured editor assesses exactly the ordered operations it will later
+apply. `POST /api/config/patch/preview`, `POST /api/config/patch/candidate`, and
+`POST /api/config/patch/apply` all call the same side-effect-free batch executor:
+it binds one authoritative editable baseline, verifies `base_version`, clones the
+configuration, dispatches each operation in request order, canonicalizes and
+re-parses the complete candidate, resolves references once, validates the full
+candidate, computes the human diff, and asks the closed-world lifecycle registry
+for the whole-candidate verdict. Preview never persists, reloads, publishes
+handlers, or mutates a loader-owned configuration pointer.
+
+The normal preview response is deliberately secret-safe. It contains the legacy
+combined `summary` string, an ordered `operation_summaries` array with zero-based
+`op_index`, the canonical `base_version`, validation issues, the full diff, and a
+value-free `lifecycle` object. Lifecycle entries contain only canonical schema
+paths, closed class/subsystem names, and fixed explanations—never configured
+values or resolved secrets. `can_apply_hot` is false whenever any effective
+change in the complete candidate cannot take effect live. `can_stage_restart` is
+false for an invalid/reserved candidate or an inconsistent planned-restart store.
+
+Raw candidate TOML is available only from `POST /api/config/patch/candidate`,
+which requires `config:raw`; `/patch` and `/patch/preview` never include a
+`candidate` field. This separation matters because canonical TOML may contain
+legacy admin tokens, RBAC principal tokens, discovery credentials, or literal
+secret values. The candidate route returns the same assessment plus the
+unresolved canonical TOML so privileged source review cannot drift from the
+previewed operations.
+
+If operation *N* rejects the batch, the server returns HTTP 400 with the exact
+zero-based `op_index`, the operation discriminator in `op`, and structured
+validation details. No partial diff or persistent mutation is produced. A stale
+non-empty `base_version` returns HTTP 409 with `current_version` before any
+operation runs; an empty version remains the explicit force mode used by legacy
+callers. `POST /api/config/patch` remains the one-operation force-preview
+compatibility wrapper over the same executor.
+
 ### Validation errors
 
 When a draft fails validation — through `POST /api/config/validate`, an apply
@@ -310,8 +347,9 @@ browser tab) cannot silently overwrite a change applied in between:
 - The **raw TOML editor** (`POST /api/config/apply?base_version=<v>`) and the
   **structured quick edits** (`POST /api/config/patch/apply`) both reject a
   stale write with **HTTP 409 Conflict** when the live config changed since the
-  edit was prepared. `GET /api/config` and the patch preview
-  (`POST /api/config/patch`) both return the current `base_version`. The
+  edit was prepared. `GET /api/config`, the one-op compatibility preview
+  (`POST /api/config/patch`), and the ordered batch preview
+  (`POST /api/config/patch/preview`) return the current `base_version`. The
   fingerprint is computed over the canonical, comment-insensitive form, so a
   `base_version` is interchangeable between the raw and structured paths.
 - On a 409 the console shows a conflict banner with **Reload latest config**,
@@ -686,7 +724,7 @@ consumes the endpoints below.
 | Search & Discovery | `GET /api/search` |
 | Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history,logs}`, `GET /api/observability/logs/stream` (SSE), `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |
 | Audit | `GET /api/audit`, `GET /api/audit/export` |
-| Config editor / History | `GET /api/config` (+ `/raw`, `/validate`, `/diff`, `POST /apply`, `/patch`, `/patch/apply`, `/history`, `/history/{id}`, `/rollback`) |
+| Config editor / History | `GET /api/config` (+ `/raw`, `/validate`, `/diff`, `POST /apply`, `/patch`, `/patch/preview`, `/patch/candidate`, `/patch/apply`, `/history`, `/history/{id}`, `/rollback`) |
 | Setup Wizard | `GET /api/wizard`, `POST /api/wizard/generate` |
 | Operational actions | `POST /cache/purge`, `POST /reload` |
 

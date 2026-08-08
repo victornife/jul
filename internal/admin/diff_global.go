@@ -41,6 +41,7 @@ func diffGlobalSettings(before, after *config.Config, d *ConfigDiff) {
 	if b.ReloadTimeout != a.ReloadTimeout {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: durStr(b.ReloadTimeout), After: durStr(a.ReloadTimeout), Detail: "Change reload timeout threshold"}, "global reload_timeout")
 	}
+	d.cover("global.reload_timeout")
 	if b.RedactMinSecretLength != a.RedactMinSecretLength {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: fmt.Sprintf("%d", b.RedactMinSecretLength), After: fmt.Sprintf("%d", a.RedactMinSecretLength), Detail: "Change secret redaction minimum length"}, "global redact_min")
 	}
@@ -59,6 +60,9 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		d.cover("cache.memory_max_size")
 		d.cover("cache.disk_path")
 		d.cover("cache.disk_max_size")
+		d.cover("cache.default_ttl")
+		d.cover("cache.stale_while_revalidate")
+		d.cover("cache.stale_if_error")
 		return
 	}
 	if !a.Enabled {
@@ -87,6 +91,9 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	d.cover("cache.memory_max_size")
 	d.cover("cache.disk_path")
 	d.cover("cache.disk_max_size")
+	d.cover("cache.default_ttl")
+	d.cover("cache.stale_while_revalidate")
+	d.cover("cache.stale_if_error")
 }
 
 // diffGlobalCompression compares the [compression] block.
@@ -99,8 +106,11 @@ func diffGlobalCompression(before, after *config.Config, d *ConfigDiff) {
 		}
 		d.mod(DiffEntry{Kind: "compression", Name: "global", Detail: action + " response compression"}, "compression")
 		d.cover("compression.enabled")
+		d.cover("compression.encoders")
+		d.cover("compression.level")
+		d.cover("compression.min_size")
+		d.cover("compression.precompressed")
 		d.cover("compression.types")
-		d.cover("compression.min_length")
 		return
 	}
 	if !a.IsEnabled() {
@@ -127,8 +137,11 @@ func diffGlobalCompression(before, after *config.Config, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "compression", Name: "global", Detail: action + " precompressed sidecar serving"}, "compression precompressed")
 	}
 	d.cover("compression.enabled")
+	d.cover("compression.encoders")
+	d.cover("compression.level")
+	d.cover("compression.min_size")
+	d.cover("compression.precompressed")
 	d.cover("compression.types")
-	d.cover("compression.min_length")
 }
 
 // diffGlobalRateLimit compares the global [rate_limit] block.
@@ -144,8 +157,10 @@ func diffGlobalRateLimit(before, after *config.Config, d *ConfigDiff) {
 			d.warn("Disabling global rate limiting removes protection against request floods.")
 		}
 		d.cover("rate_limit.enabled")
+		d.cover("rate_limit.key")
 		d.cover("rate_limit.rate")
 		d.cover("rate_limit.burst")
+		d.cover("rate_limit.max_conns")
 		return
 	}
 	if !a.Enabled {
@@ -159,8 +174,10 @@ func diffGlobalRateLimit(before, after *config.Config, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: "global", Before: fmt.Sprintf("%d", b.MaxConns), After: fmt.Sprintf("%d", a.MaxConns), Detail: "Change max concurrent connections"}, "rate limit max conns")
 	}
 	d.cover("rate_limit.enabled")
+	d.cover("rate_limit.key")
 	d.cover("rate_limit.rate")
 	d.cover("rate_limit.burst")
+	d.cover("rate_limit.max_conns")
 }
 
 // diffGlobalWAF compares the global [waf] block.
