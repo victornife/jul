@@ -44,6 +44,7 @@ import {
   TrafficControlsSchema,
   HistoryEntrySchema,
   ConfigDiffSchema,
+  type ConfigPatch,
 } from "@/api/client.ts";
 
 describe("OverviewSchema", () => {
@@ -575,13 +576,13 @@ describe("SecurityPanel per-location WAF editor", () => {
   };
 
   // stubSecurityAndPatch routes the security GET to a projection carrying one
-  // per-location override, and captures the body of any /api/config/patch POST
-  // so a test can assert the structured op the editor dispatched.
+  // per-location override, and captures the body of the ordered batch preview
+  // so a test can assert the exact structured op the editor dispatched.
   function stubSecurityAndPatch(onPatch: (body: string) => void) {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string, init?: RequestInit) => {
-        if (typeof url === "string" && url.includes("/api/config/patch")) {
+        if (url === "/api/config/patch/preview") {
           onPatch(typeof init?.body === "string" ? init.body : "");
           return Promise.resolve({
             ok: true,
@@ -589,8 +590,22 @@ describe("SecurityPanel per-location WAF editor", () => {
               Promise.resolve({
                 ok: true,
                 summary: "ok",
-                candidate: 'listen = ":8080"\n',
+                operation_summaries: [{ op_index: 0, op: "location_waf_set", summary: "ok" }],
                 diff: { summary: "1 change" },
+                base_version: "v1",
+                valid: true,
+                validation_errors: [],
+                lifecycle: {
+                  changes: [],
+                  can_apply_hot: true,
+                  can_stage_restart: true,
+                  hot_paths: [],
+                  restart_required_paths: [],
+                  new_listener_only_paths: [],
+                  ignored_deprecated_paths: [],
+                  validation_rejected_paths: [],
+                  pending_subsystems: [],
+                },
               }),
           });
         }
@@ -627,13 +642,13 @@ describe("SecurityPanel per-location WAF editor", () => {
     // The drawer identifies the exact route it targets.
     expect(await screen.findByText(/Override for :8080 \/admin/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Review in editor/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Review lifecycle and diff/ }));
 
     await waitFor(() => {
       expect(body).not.toBe("");
     });
     // The seeded values round-trip into a structured set op on the right target.
-    expect(JSON.parse(body)).toMatchObject({
+    expect((JSON.parse(body) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_waf_set",
       listen: ":8080",
       path: "/admin",
@@ -655,7 +670,7 @@ describe("SecurityPanel per-location WAF editor", () => {
     await waitFor(() => {
       expect(body).not.toBe("");
     });
-    expect(JSON.parse(body)).toMatchObject({
+    expect((JSON.parse(body) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_waf_clear",
       listen: ":8080",
       path: "/admin",
@@ -695,11 +710,12 @@ describe("RouteDetail per-location WAF", () => {
     };
   }
 
-  // stubPatch captures the body of the /api/config/patch POST the editor fires.
+  // stubPatch captures the body of the ordered batch preview the editor fires.
   function stubPatch(onPatch: (body: string) => void) {
     vi.stubGlobal(
       "fetch",
-      vi.fn((_url: string, init?: RequestInit) => {
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url !== "/api/config/patch/preview") throw new Error(`unexpected fetch: ${url}`);
         onPatch(typeof init?.body === "string" ? init.body : "");
         return Promise.resolve({
           ok: true,
@@ -707,8 +723,22 @@ describe("RouteDetail per-location WAF", () => {
             Promise.resolve({
               ok: true,
               summary: "ok",
-              candidate: 'listen = ":8080"\n',
+              operation_summaries: [{ op_index: 0, op: "route edit", summary: "ok" }],
               diff: { summary: "1 change" },
+              base_version: "v1",
+              valid: true,
+              validation_errors: [],
+              lifecycle: {
+                changes: [],
+                can_apply_hot: true,
+                can_stage_restart: true,
+                hot_paths: [],
+                restart_required_paths: [],
+                new_listener_only_paths: [],
+                ignored_deprecated_paths: [],
+                validation_rejected_paths: [],
+                pending_subsystems: [],
+              },
             }),
         });
       }),
@@ -733,14 +763,14 @@ describe("RouteDetail per-location WAF", () => {
     // The detect-first default seeds an enabled override with no rules, which is
     // invalid (it would inspect nothing), so the save stays blocked until rules
     // are supplied — enabling the CRS unblocks it.
-    expect(screen.getByRole("button", { name: /Review in editor/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Review lifecycle and diff/ })).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox", { name: /Core Rule Set/ }));
 
-    fireEvent.click(screen.getByRole("button", { name: /Review in editor/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Review lifecycle and diff/ }));
     await waitFor(() => {
       expect(body).not.toBe("");
     });
-    expect(JSON.parse(body)).toMatchObject({
+    expect((JSON.parse(body) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_waf_set",
       listen: ":8080",
       path: "/admin",
@@ -793,7 +823,8 @@ describe("RouteDetail server toggles", () => {
   function stubPatch(onPatch: (body: string) => void) {
     vi.stubGlobal(
       "fetch",
-      vi.fn((_url: string, init?: RequestInit) => {
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url !== "/api/config/patch/preview") throw new Error(`unexpected fetch: ${url}`);
         onPatch(typeof init?.body === "string" ? init.body : "");
         return Promise.resolve({
           ok: true,
@@ -801,8 +832,22 @@ describe("RouteDetail server toggles", () => {
             Promise.resolve({
               ok: true,
               summary: "ok",
-              candidate: 'listen = ":8080"\n',
+              operation_summaries: [{ op_index: 0, op: "route edit", summary: "ok" }],
               diff: { summary: "1 change" },
+              base_version: "v1",
+              valid: true,
+              validation_errors: [],
+              lifecycle: {
+                changes: [],
+                can_apply_hot: true,
+                can_stage_restart: true,
+                hot_paths: [],
+                restart_required_paths: [],
+                new_listener_only_paths: [],
+                ignored_deprecated_paths: [],
+                validation_rejected_paths: [],
+                pending_subsystems: [],
+              },
             }),
         });
       }),
@@ -831,7 +876,11 @@ describe("RouteDetail server toggles", () => {
     await waitFor(() => {
       expect(body).not.toBe("");
     });
-    expect(JSON.parse(body)).toMatchObject({ op: "server_toggle_h2c", listen: ":8080", enabled: true });
+    expect((JSON.parse(body) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
+      op: "server_toggle_h2c",
+      listen: ":8080",
+      enabled: true,
+    });
   });
 
   it("enables HTTP/3 on a TLS listener and disables the h2c toggle", async () => {
@@ -857,7 +906,11 @@ describe("RouteDetail server toggles", () => {
     await waitFor(() => {
       expect(body).not.toBe("");
     });
-    expect(JSON.parse(body)).toMatchObject({ op: "server_toggle_http3", listen: ":443", enabled: true });
+    expect((JSON.parse(body) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
+      op: "server_toggle_http3",
+      listen: ":443",
+      enabled: true,
+    });
   });
 });
 

@@ -39,18 +39,12 @@
 import type {
   ApplyResult,
   ConfigApplyErrorKind,
-  ConfigPatch,
-  ConfigDiff,
   ManagedApplyRecord,
 } from "@/api/client.ts";
+import type { PendingPatchDraft } from "@/lib/configDraftHandoff.ts";
 
-/** The pending structured patch handed off to the panel for review + apply. */
-export interface PatchDraftState {
-  readonly ops: ConfigPatch[];
-  readonly baseVersion?: string | undefined;
-  readonly previewDiff: ConfigDiff;
-  readonly candidate?: string | undefined;
-}
+/** The complete secret-safe preview assessment held by ConfigPanel. */
+export type PatchDraftState = PendingPatchDraft;
 
 /** The correlated result of the most recent apply, once one exists. */
 export interface AppliedState {

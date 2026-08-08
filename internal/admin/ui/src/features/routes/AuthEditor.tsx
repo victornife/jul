@@ -4,17 +4,15 @@
  */
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
 import {
-  patchConfig,
-  ConfigRejectedError,
-  type ConfigPatch,
   type LocationAuthPatch,
   type LocationAuthState,
   type RouteTarget,
 } from "@/api/client.ts";
-import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { usePermission } from "@/auth/usePermission.ts";
+import { useRunPatch } from "@/lib/useRunPatch.ts";
 import {
   authWarnings,
   AUTH_METHODS,
@@ -115,38 +113,20 @@ function toPatch(d: AuthDraft): LocationAuthPatch {
  * Validate → Diff → Apply.
  */
 export function AuthEditor({ target, seed, existing = Boolean(seed), onClose }: AuthEditorProps) {
-  const navigate = useNavigate();
   const [draft, setDraft] = useState<AuthDraft>(() => seedDraft(seed));
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { run: runPatch, error, busy } = useRunPatch();
+  const { has } = usePermission();
+  const canWrite = has("config:write");
 
   const where = `${target.listen}${target.path ? ` ${target.path}` : ""}`;
   const warnings = authWarnings(draft);
 
-  async function runPatch(patch: ConfigPatch): Promise<void> {
-    setError(null);
-    setBusy(true);
-    try {
-      const res = await patchConfig(patch);
-      setPendingDraft({
-        kind: "patch",
-        ops: [patch],
-        baseVersion: res.base_version,
-        previewDiff: res.diff,
-      });
-      void navigate("/config");
-    } catch (err) {
-      setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");
-      setBusy(false);
-    }
-  }
-
   function save(): void {
-    void runPatch({ op: "location_set_auth", ...target, auth: toPatch(draft) });
+    runPatch({ op: "location_set_auth", ...target, auth: toPatch(draft) });
   }
 
   function clearRule(): void {
-    void runPatch({ op: "location_clear_auth", ...target });
+    runPatch({ op: "location_clear_auth", ...target });
   }
 
   return (
@@ -155,26 +135,29 @@ export function AuthEditor({ target, seed, existing = Boolean(seed), onClose }: 
       subtitle={`Auth for ${where}`}
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          {existing && (
+        <div className="w-full space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            {existing && (
+              <button
+                type="button"
+                disabled={busy || !canWrite}
+                onClick={clearRule}
+                className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-danger hover:bg-jul-bg disabled:opacity-40"
+              >
+                Clear rule
+              </button>
+            )}
             <button
               type="button"
-              disabled={busy}
-              onClick={clearRule}
-              className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-danger hover:bg-jul-bg disabled:opacity-40"
+              disabled={busy || warnings.length > 0 || !canWrite}
+              onClick={save}
+              className="rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
             >
-              Clear rule
+              {busy ? "Previewing…" : "Review lifecycle and diff →"}
             </button>
-          )}
-          <button
-            type="button"
-            disabled={busy || warnings.length > 0}
-            onClick={save}
-            className="rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
-          >
-            Review in editor →
-          </button>
+          </div>
+          <ForbiddenAction permission="config:write" className="justify-end" />
         </div>
       }
     >

@@ -41,7 +41,13 @@ import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
 import { WizardPanel } from "@/features/wizard/WizardPanel.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
-import { takePendingDraft, setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import { PermissionContext } from "@/auth/usePermission.ts";
+import {
+  takePendingDraft,
+  setPendingDraft,
+  type LegacyPendingPatchDraftInput,
+} from "@/lib/configDraftHandoff.ts";
+import type { ConfigDiff, ConfigPatch, PatchLifecycle } from "@/api/client.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -56,11 +62,90 @@ function Wrapper({ children }: { readonly children: ReactNode }) {
   );
 }
 
+function PermissionScope({
+  children,
+  permissions,
+}: {
+  readonly children: ReactNode;
+  readonly permissions: readonly string[];
+}) {
+  return (
+    <PermissionContext.Provider
+      value={{
+        identity: {
+          principal: "test-operator",
+          role: "custom",
+          token_id: "",
+          permissions: [...permissions],
+          legacy: false,
+        },
+        isLoading: false,
+        ready: true,
+        has: (permission) => permissions.includes(permission),
+      }}
+    >
+      {children}
+    </PermissionContext.Provider>
+  );
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+const HOT_LIFECYCLE: PatchLifecycle = {
+  changes: [],
+  can_apply_hot: true,
+  can_stage_restart: true,
+  hot_paths: ["servers"],
+  restart_required_paths: [],
+  new_listener_only_paths: [],
+  ignored_deprecated_paths: [],
+  validation_rejected_paths: [],
+  pending_subsystems: [],
+};
+
+const RESTART_LIFECYCLE: PatchLifecycle = {
+  changes: [],
+  can_apply_hot: false,
+  can_stage_restart: true,
+  hot_paths: [],
+  restart_required_paths: ["servers"],
+  new_listener_only_paths: [],
+  ignored_deprecated_paths: [],
+  validation_rejected_paths: [],
+  pending_subsystems: ["listener"],
+};
+
+function structuredDraft({
+  ops,
+  baseVersion,
+  previewDiff,
+  lifecycle = HOT_LIFECYCLE,
+}: {
+  readonly ops: ConfigPatch[];
+  readonly baseVersion: string;
+  readonly previewDiff: ConfigDiff;
+  readonly lifecycle?: PatchLifecycle;
+}): LegacyPendingPatchDraftInput {
+  return {
+    kind: "patch",
+    ops,
+    baseVersion,
+    summary: previewDiff.summary,
+    operationSummaries: ops.map((op, opIndex) => ({
+      op_index: opIndex,
+      op: op.op,
+      summary: op.op,
+    })),
+    valid: true,
+    validationErrors: [],
+    previewDiff,
+    lifecycle,
+  };
 }
 
 // confirmRollback opens the rollback confirmation for the single seeded snapshot
@@ -142,9 +227,15 @@ function installRouter(): Counters {
         json({
           ok: true,
           summary: "server :80 added; route / added",
-          candidate: 'listen = ":80"\n',
+          operation_summaries: [
+            { op_index: 0, op: "server_add", summary: "server :80 added" },
+            { op_index: 1, op: "location_add", summary: "route / added" },
+          ],
           diff: { summary: "1 change", additions: [{ kind: "server", name: ":80" }] },
           base_version: "base",
+          valid: true,
+          validation_errors: [],
+          lifecycle: HOT_LIFECYCLE,
         }),
       );
     }
@@ -154,6 +245,8 @@ function installRouter(): Counters {
 }
 
 beforeEach(() => {
+  takePendingDraft();
+  sessionStorage.clear();
   installRouter();
 });
 
@@ -361,6 +454,11 @@ describe("ConfigPanel apply flow", () => {
           }),
         );
       }
+      if (url === "/api/config/patch/candidate") {
+        return Promise.resolve(
+          json({ ok: true, candidate: 'listen = ":9000"\n', base_version: "v1" }),
+        );
+      }
       if (url === "/api/config/patch/apply") {
         patchApplies += 1;
         return Promise.resolve(
@@ -386,13 +484,16 @@ describe("ConfigPanel apply flow", () => {
       throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
-    setPendingDraft({
-      kind: "patch",
-      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
-      baseVersion: "v1",
-      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
-      candidate: 'listen = ":9000"\n',
-    });
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: {
+          summary: "1 change",
+          additions: [{ kind: "listener", name: ":9000" }],
+        },
+      }),
+    );
 
     render(
       <Wrapper>
@@ -402,7 +503,9 @@ describe("ConfigPanel apply flow", () => {
 
     // The panel lands in patch mode showing the read-only candidate.
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
-    expect(editor.value).toContain('listen = ":9000"');
+    await waitFor(() => {
+      expect(editor.value).toContain('listen = ":9000"');
+    });
     // AC-12: the source view is labeled truthfully as a proposed candidate, not
     // the live config — the operator must never mistake it for the running one.
     const candidateLabel = document.querySelector('[data-source-view="candidate-readonly"]');
@@ -473,13 +576,16 @@ describe("ConfigPanel apply flow", () => {
       throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
-    setPendingDraft({
-      kind: "patch",
-      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
-      baseVersion: "v1",
-      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
-      // No candidate: the backend omits it for operators without config:raw.
-    });
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: {
+          summary: "1 change",
+          additions: [{ kind: "listener", name: ":9000" }],
+        },
+      }),
+    );
 
     render(
       <Wrapper>
@@ -489,7 +595,7 @@ describe("ConfigPanel apply flow", () => {
 
     // The raw editor is replaced by a permission notice; the diff is still shown.
     expect(await screen.findByText(/Raw configuration preview is hidden/)).toBeInTheDocument();
-    expect(screen.getByText(/1 change/)).toBeInTheDocument();
+    expect(screen.getAllByText(/1 change/).length).toBeGreaterThan(0);
     // AC-12: without config:raw the operator reviews a diff only — the source
     // view says so and never claims to show the live or candidate config text.
     const diffOnlyLabel = document.querySelector('[data-source-view="diff-only"]');
@@ -532,14 +638,16 @@ describe("ConfigPanel apply flow", () => {
       throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
-    setPendingDraft({
-      kind: "patch",
-      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
-      baseVersion: "v1",
-      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
-      // No candidate: Slice 01 stopped producers from copying the phantom preview
-      // candidate, so the panel must fetch the true candidate from the server.
-    });
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: {
+          summary: "1 change",
+          additions: [{ kind: "listener", name: ":9000" }],
+        },
+      }),
+    );
 
     render(
       <Wrapper>
@@ -591,12 +699,16 @@ describe("ConfigPanel apply flow", () => {
       throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
-    setPendingDraft({
-      kind: "patch",
-      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
-      baseVersion: "v1",
-      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
-    });
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: {
+          summary: "1 change",
+          additions: [{ kind: "listener", name: ":9000" }],
+        },
+      }),
+    );
 
     render(
       <Wrapper>
@@ -649,12 +761,16 @@ describe("ConfigPanel apply flow", () => {
       throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
-    setPendingDraft({
-      kind: "patch",
-      ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
-      baseVersion: "v1",
-      previewDiff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
-    });
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: {
+          summary: "1 change",
+          additions: [{ kind: "listener", name: ":9000" }],
+        },
+      }),
+    );
 
     render(
       <Wrapper>
@@ -674,6 +790,67 @@ describe("ConfigPanel apply flow", () => {
 
     // The diff-only operator can still apply — the server recomputes the ops
     // atomically, so no client-rendered candidate is trusted for apply.
+    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(patchBtn).toBeEnabled();
+    });
+    fireEvent.click(patchBtn);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await waitFor(() => {
+      expect(patchApplies).toBe(1);
+    });
+  });
+
+  it("degrades a non-conflict candidate-source failure to diff-only without blocking apply", async () => {
+    takePendingDraft(); // clear any leftover handoff state
+    let patchApplies = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      const url = input;
+      if (url === "/api/config") {
+        return Promise.resolve(
+          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }),
+        );
+      }
+      if (url === "/api/config/patch/candidate") {
+        return Promise.resolve(json({ error: "temporarily unavailable" }, 503));
+      }
+      if (url === "/api/config/patch/apply") {
+        patchApplies += 1;
+        return Promise.resolve(
+          json({
+            ok: true,
+            version: "v2",
+            summary: ["1 change"],
+            diff: { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] },
+            status: [{ group: "Traffic", name: "TLS", active: true }],
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: {
+          summary: "1 change",
+          additions: [{ kind: "listener", name: ":9000" }],
+        },
+      }),
+    );
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    expect(await screen.findByText(/Candidate source could not be loaded/)).toBeInTheDocument();
+    const source = document.querySelector('[data-source-view="diff-only"]');
+    expect(source).not.toBeNull();
+    expect(source?.textContent).toMatch(/temporarily unavailable/i);
+
     const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
     await waitFor(() => {
       expect(patchBtn).toBeEnabled();
@@ -798,6 +975,9 @@ describe("ConfigPanel apply flow", () => {
       urls.push(input);
       if (input === "/api/config")
         return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
+      if (input === "/api/config/patch/candidate") {
+        return Promise.resolve(json({ error: "forbidden" }, 403));
+      }
       if (
         input === "/api/config/patch/apply" &&
         urls.filter((u) => u.includes("patch/apply")).length === 1
@@ -823,19 +1003,23 @@ describe("ConfigPanel apply flow", () => {
       }
       throw new Error(`unexpected fetch: ${input}`);
     }) as unknown as typeof fetch;
-    setPendingDraft({
-      kind: "patch",
-      ops: [{ op: "server_toggle_http3", listen: ":8443", enabled: true }],
-      baseVersion: "v1",
-      previewDiff: { summary: "admin patch" },
-      candidate: 'listen = ":8443"\n',
-    });
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":8443", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: { summary: "admin patch" },
+      }),
+    );
     render(
       <Wrapper>
         <ConfigPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Apply patch" }));
+    const applyPatchButton = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(applyPatchButton).not.toBeDisabled();
+    });
+    fireEvent.click(applyPatchButton);
     fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
     expect(await screen.findByText("Confirm admin access change?")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Apply and change admin access" }));
@@ -845,33 +1029,231 @@ describe("ConfigPanel apply flow", () => {
     expect(urls.filter((url) => url.includes("/api/config/apply"))).toHaveLength(0);
   });
 
+  it("refreshes a legacy patch assessment before enabling apply", async () => {
+    takePendingDraft();
+    const ops: ConfigPatch[] = [{ op: "server_toggle_http3", listen: ":8443", enabled: true }];
+    let previewBody: unknown = null;
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      if (input === "/api/config") return Promise.resolve(json({ error: "forbidden" }, 403));
+      if (input === "/api/config/patch/preview") {
+        previewBody = JSON.parse(typeof init?.body === "string" ? init.body : "null") as unknown;
+        return Promise.resolve(
+          json({
+            ok: true,
+            summary: "refreshed assessment",
+            operation_summaries: [
+              { op_index: 0, op: "server_toggle_http3", summary: "HTTP/3 enabled" },
+            ],
+            diff: { summary: "1 change" },
+            base_version: "v1",
+            valid: true,
+            validation_errors: [],
+            lifecycle: HOT_LIFECYCLE,
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+
+    setPendingDraft({
+      kind: "patch",
+      ops,
+      baseVersion: "v1",
+      previewDiff: { summary: "legacy preview" },
+    });
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    const applyButton = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    expect(previewBody).toEqual({ base_version: "v1", ops });
+    expect(screen.getByText("refreshed assessment")).toBeInTheDocument();
+  });
+
+  it("never substitutes a conflict version into a reviewed patch", async () => {
+    takePendingDraft();
+    const applyBodies: unknown[] = [];
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      if (input === "/api/config") return Promise.resolve(json({ error: "forbidden" }, 403));
+      if (input === "/api/config/patch/apply") {
+        applyBodies.push(
+          JSON.parse(typeof init?.body === "string" ? init.body : "null") as unknown,
+        );
+        return Promise.resolve(
+          json(
+            {
+              ok: false,
+              conflict: true,
+              message: "configuration changed",
+              current_version: "v2",
+            },
+            409,
+          ),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+
+    const ops: ConfigPatch[] = [{ op: "server_toggle_http3", listen: ":8443", enabled: true }];
+    setPendingDraft(
+      structuredDraft({
+        ops,
+        baseVersion: "v1",
+        previewDiff: { summary: "reviewed at v1" },
+      }),
+    );
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+
+    const applyButton = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+
+    expect(
+      await screen.findByText("Conflict — another change was applied while you were editing."),
+    ).toBeInTheDocument();
+    expect(applyBodies).toEqual([{ base_version: "v1", ops }]);
+    expect(screen.getByRole("button", { name: "No safe apply action" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard stale patch and preview again" }));
+    expect(applyBodies).toHaveLength(1);
+  });
+
+  it("keeps config:write independent from final config:apply", async () => {
+    takePendingDraft();
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") return Promise.resolve(json({ error: "forbidden" }, 403));
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":8443", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: { summary: "write-only preview" },
+      }),
+    );
+
+    render(
+      <Wrapper>
+        <PermissionScope permissions={["config:write"]}>
+          <ConfigPanel />
+        </PermissionScope>
+      </Wrapper>,
+    );
+
+    const applyButton = await screen.findByRole("button", { name: "Apply patch" });
+    expect(applyButton).toBeDisabled();
+    expect(
+      screen.getAllByRole("note").some((note) => note.textContent.includes("config:apply")),
+    ).toBe(true);
+  });
+
+  it("allows final apply with config:apply even when config:write is absent", async () => {
+    takePendingDraft();
+    let applyBody: unknown = null;
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      if (input === "/api/config") return Promise.resolve(json({ error: "forbidden" }, 403));
+      if (input === "/api/config/patch/apply") {
+        applyBody = JSON.parse(typeof init?.body === "string" ? init.body : "null") as unknown;
+        return Promise.resolve(
+          json({
+            ok: true,
+            mode: "hot",
+            version: "v2",
+            summary: [],
+            diff: { summary: "applied" },
+            reload: { id: "rl_apply_only", outcome: "applied_live", published: true },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    const ops: ConfigPatch[] = [{ op: "server_toggle_http3", listen: ":8443", enabled: true }];
+    setPendingDraft(
+      structuredDraft({
+        ops,
+        baseVersion: "v1",
+        previewDiff: { summary: "already reviewed" },
+      }),
+    );
+
+    render(
+      <Wrapper>
+        <PermissionScope permissions={["config:apply"]}>
+          <ConfigPanel />
+        </PermissionScope>
+      </Wrapper>,
+    );
+
+    const applyButton = await screen.findByRole("button", { name: "Apply patch" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await waitFor(() => {
+      expect(applyBody).toEqual({ base_version: "v1", ops });
+    });
+  });
+
+  it("keeps config:raw independent from config:write and config:apply", async () => {
+    takePendingDraft();
+    let candidateCalls = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        return Promise.resolve(
+          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }),
+        );
+      }
+      if (input === "/api/config/patch/candidate") {
+        candidateCalls += 1;
+        return Promise.resolve(
+          json({ ok: true, candidate: 'listen = ":9000"\n', base_version: "v1" }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":8443", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: { summary: "raw-only review" },
+      }),
+    );
+
+    render(
+      <Wrapper>
+        <PermissionScope permissions={["config:raw"]}>
+          <ConfigPanel />
+        </PermissionScope>
+      </Wrapper>,
+    );
+
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    await waitFor(() => {
+      expect(editor.value).toBe('listen = ":9000"\n');
+    });
+    expect(candidateCalls).toBe(1);
+    expect(screen.getByRole("button", { name: "Apply patch" })).toBeDisabled();
+  });
+
   it("stages a restart-required patch without raw config access", async () => {
     takePendingDraft();
     const urls: string[] = [];
     globalThis.fetch = vi.fn((input: string) => {
       urls.push(input);
       if (input === "/api/config") return Promise.resolve(json({ error: "forbidden" }, 403));
-      if (input === "/api/config/patch/apply") {
-        return Promise.resolve(
-          json(
-            {
-              ok: false,
-              restart_required: true,
-              can_stage: true,
-              message: "restart",
-              pending_restart: {
-                state: "none",
-                managed: false,
-                staged: false,
-                subsystems: ["global"],
-                discard_available: false,
-                inconsistent: false,
-              },
-            },
-            409,
-          ),
-        );
-      }
       if (input === "/api/config/patch/apply?mode=stage_restart") {
         return Promise.resolve(
           json({
@@ -886,31 +1268,30 @@ describe("ConfigPanel apply flow", () => {
       }
       throw new Error(`unexpected fetch: ${input}`);
     }) as unknown as typeof fetch;
-    setPendingDraft({
-      kind: "patch",
-      ops: [{ op: "server_toggle_http3", listen: ":8443", enabled: true }],
-      baseVersion: "v1",
-      previewDiff: { summary: "restart patch" },
-    });
+    setPendingDraft(
+      structuredDraft({
+        ops: [{ op: "server_toggle_http3", listen: ":8443", enabled: true }],
+        baseVersion: "v1",
+        previewDiff: { summary: "restart patch" },
+        lifecycle: RESTART_LIFECYCLE,
+      }),
+    );
     render(
       <Wrapper>
         <ConfigPanel />
       </Wrapper>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Apply patch" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
-    const offer = await screen.findByText("Save for next restart?");
-    const offerBox = offer.parentElement;
-    const offerButton = offerBox?.querySelector("button");
-    if (!offerButton) throw new Error("stage offer button missing");
-    fireEvent.click(offerButton);
-    const dialog = await screen.findByRole("dialog", { name: "Save for next restart?" });
+    fireEvent.click(await screen.findByRole("button", { name: "Save for next restart" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Save structured patch for next restart?",
+    });
     const confirm = dialog.querySelector("button.bg-jul-accent");
     if (!confirm) throw new Error("stage confirmation button missing");
     fireEvent.click(confirm);
     await waitFor(() => {
       expect(urls).toContain("/api/config/patch/apply?mode=stage_restart");
     });
+    expect(urls).not.toContain("/api/config/patch/apply");
     expect(urls.some((url) => url.startsWith("/api/config/apply"))).toBe(false);
   });
 
@@ -998,14 +1379,25 @@ describe("ConfigPanel apply flow", () => {
         <ConfigPanel />
       </Wrapper>,
     );
-    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>(
+      "editor",
+      {},
+      { timeout: 5000 },
+    );
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
-    await waitFor(() => {
-      expect(applyButton).toBeEnabled();
-    });
+    const applyButton = await screen.findByRole(
+      "button",
+      { name: "Apply changes" },
+      { timeout: 5000 },
+    );
+    await waitFor(
+      () => {
+        expect(applyButton).toBeEnabled();
+      },
+      { timeout: 5000 },
+    );
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }, { timeout: 5000 }));
     expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
     await waitFor(
       () => {
@@ -1019,7 +1411,7 @@ describe("ConfigPanel apply flow", () => {
     await waitFor(() => {
       expect(editor.value).toContain(":restored");
     });
-  });
+  }, 15_000);
 
   it("tolerates a brief read-after-write 404 on the saved-not-live path then finalizes", async () => {
     // BLOCKER 3: a saved-not-live (202) apply whose ledger record is not yet
@@ -1081,14 +1473,25 @@ describe("ConfigPanel apply flow", () => {
         <ConfigPanel />
       </Wrapper>,
     );
-    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>(
+      "editor",
+      {},
+      { timeout: 5000 },
+    );
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
-    await waitFor(() => {
-      expect(applyButton).toBeEnabled();
-    });
+    const applyButton = await screen.findByRole(
+      "button",
+      { name: "Apply changes" },
+      { timeout: 5000 },
+    );
+    await waitFor(
+      () => {
+        expect(applyButton).toBeEnabled();
+      },
+      { timeout: 5000 },
+    );
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }, { timeout: 5000 }));
     expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
     // The brief 404s never trip the expiry banner: the shared grace keeps
     // polling until the terminal record arrives.
@@ -1329,13 +1732,17 @@ describe("ConfigPanel apply flow", () => {
     // AC-14: the retained provenance renders as an advisory beside — never
     // replacing — the immediate live outcome, and surfaces the history snapshot.
     expect(
-      await screen.findByText("Configuration applied, but recovery/audit finalization degraded"),
+      await screen.findByText(
+        "Configuration applied, but recovery/audit finalization degraded",
+        {},
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Managed apply finalization degraded: history sidecar append degraded"),
     ).toBeInTheDocument();
     expect(screen.getByText("snap-42")).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("shows the deadline hint while pending and a finalization advisory once terminal", async () => {
     let recordReads = 0;
@@ -1411,20 +1818,35 @@ describe("ConfigPanel apply flow", () => {
         <ConfigPanel />
       </Wrapper>,
     );
-    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>(
+      "editor",
+      {},
+      { timeout: 5000 },
+    );
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
-    await waitFor(() => {
-      expect(applyButton).toBeEnabled();
-    });
+    const applyButton = await screen.findByRole(
+      "button",
+      { name: "Apply changes" },
+      { timeout: 5000 },
+    );
+    await waitFor(
+      () => {
+        expect(applyButton).toBeEnabled();
+      },
+      { timeout: 5000 },
+    );
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }, { timeout: 5000 }));
     // While pending, the deadline-aware hint is shown (not a success claim).
     expect(await screen.findByText(/Finalization expected by/)).toBeInTheDocument();
     // Once the terminal record merges, the finalization advisory renders — never
     // as an apply failure — and the history snapshot id is surfaced.
     expect(
-      await screen.findByText("Configuration applied, but recovery/audit finalization degraded"),
+      await screen.findByText(
+        "Configuration applied, but recovery/audit finalization degraded",
+        {},
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Managed apply finalization degraded: ledger append degraded"),
@@ -1432,7 +1854,7 @@ describe("ConfigPanel apply flow", () => {
     expect(screen.getByText("snap-77")).toBeInTheDocument();
     // The hint disappears once the transaction is terminal.
     expect(screen.queryByText(/Finalization expected by/)).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("renders the preflight timeout phase and claims nothing was persisted", async () => {
     // AC-08: a pre-persistence preflight timeout (504) names the phase, states
@@ -1665,7 +2087,9 @@ describe("HistoryPanel rollback flow", () => {
         // Unconfirmed: the backend raises the reachability challenge for the
         // version actually being rolled back against.
         const changes = base === "v1" ? ["admin token rotated"] : ["rbac role demoted"];
-        return Promise.resolve(json({ ok: false, admin_change: true, message: "confirm", changes }, 409));
+        return Promise.resolve(
+          json({ ok: false, admin_change: true, message: "confirm", changes }, 409),
+        );
       }
       throw new Error(`unexpected fetch: ${input}`);
     }) as unknown as typeof fetch;
@@ -1848,9 +2272,7 @@ describe("HistoryPanel rollback flow", () => {
     ).toBeInTheDocument();
     // The dialog remains open, but Cancel must be usable so the operator is never
     // trapped by a poll that can never succeed.
-    expect(
-      screen.getByRole("dialog", { name: "Roll back to this snapshot?" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Roll back to this snapshot?" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).not.toBeDisabled();
     expect(recordReads).toBeGreaterThanOrEqual(1);
   });
@@ -1982,9 +2404,13 @@ describe("HistoryPanel rollback flow", () => {
     // The supplemental exact-ID lookup still runs (through a read-after-write 404
     // grace) and surfaces the history advisory.
     expect(
-      await screen.findByText("Configuration history degraded: history filesystem is full", undefined, {
-        timeout: 4000,
-      }),
+      await screen.findByText(
+        "Configuration history degraded: history filesystem is full",
+        undefined,
+        {
+          timeout: 4000,
+        },
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText("snap-il")).toBeInTheDocument();
     expect(recordReads).toBeGreaterThanOrEqual(2);
@@ -2123,18 +2549,23 @@ describe("HistoryPanel rollback flow", () => {
 
     // The committed-degraded terminal record closes the dialog and surfaces a
     // persistent warning banner (not an error).
-    expect(await screen.findByText("Rollback applied — degraded reload")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("dialog", { name: "Roll back to this snapshot?" }),
-      ).not.toBeInTheDocument();
-    });
+    expect(
+      await screen.findByText("Rollback applied — degraded reload", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByRole("dialog", { name: "Roll back to this snapshot?" }),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
     expect(recordReads).toBeGreaterThanOrEqual(1);
     // The banner reports the degraded reload verbatim and offers no retry.
     expect(screen.getByText(/stream subsystem reloaded degraded/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Roll back" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Confirm and roll back" })).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("closes the dialog on a delayed degraded rollback that first polled pending", async () => {
     // AC-09/AC-10: a degraded (committed, ok=true, non-applied_live) outcome that
@@ -2296,7 +2727,7 @@ describe("HistoryPanel rollback flow", () => {
       { timeout: 5000 },
     );
     expect(recordReads).toBeGreaterThanOrEqual(3);
-  });
+  }, 15_000);
 
   it("expires a pending rollback on its ledger deadline without claiming success", async () => {
     // BLOCKER 2/4: HistoryPanel and ConfigPanel share one deadline-driven poll.

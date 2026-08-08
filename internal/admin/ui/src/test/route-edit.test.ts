@@ -86,13 +86,13 @@ describe("routeEdit — action", () => {
     expect(isEditableAction("fastcgi")).toBe(false);
   });
 
-  it("seeds from the projection and falls back to proxy for non-editable actions", () => {
+  it("seeds supported actions and fails closed for protocol-specific actions", () => {
     expect(seedAction(loc({ action: "static", target: "/var/www" }))).toEqual({
       kind: "static",
       target: "/var/www",
       status: "",
     });
-    expect(seedAction(loc({ action: "grpc" })).kind).toBe("proxy");
+    expect(() => seedAction(loc({ action: "grpc" }))).toThrow(/protocol-specific workflow/i);
   });
 
   it("detects a change of kind, target, or status", () => {
@@ -106,8 +106,12 @@ describe("routeEdit — action", () => {
     expect(actionWarnings({ kind: "proxy", target: "", status: "" })).toHaveLength(1);
     expect(actionWarnings({ kind: "static", target: "", status: "" })).toHaveLength(1);
     expect(actionWarnings({ kind: "redirect", target: "", status: "" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "redirect", target: "https://x", status: "200" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "redirect", target: "https://x", status: "301" })).toHaveLength(0);
+    expect(actionWarnings({ kind: "redirect", target: "https://x", status: "200" })).toHaveLength(
+      1,
+    );
+    expect(actionWarnings({ kind: "redirect", target: "https://x", status: "301" })).toHaveLength(
+      0,
+    );
     expect(actionWarnings({ kind: "return", target: "", status: "" })).toHaveLength(1);
     expect(actionWarnings({ kind: "return", target: "", status: "700" })).toHaveLength(1);
     expect(actionWarnings({ kind: "return", target: "", status: "404" })).toHaveLength(0);
@@ -154,7 +158,9 @@ describe("routeEdit — rename", () => {
   it("seeds from server_names and detects set changes ignoring order", () => {
     expect(seedRename(["a.example", "b.example"])).toEqual({ hosts: "a.example\nb.example" });
     expect(seedRename(undefined)).toEqual({ hosts: "" });
-    expect(renameChanged({ hosts: "b.example\na.example" }, ["a.example", "b.example"])).toBe(false);
+    expect(renameChanged({ hosts: "b.example\na.example" }, ["a.example", "b.example"])).toBe(
+      false,
+    );
     expect(renameChanged({ hosts: "a.example" }, ["a.example", "b.example"])).toBe(true);
     expect(renameChanged({ hosts: "" }, [])).toBe(false);
   });
@@ -166,10 +172,7 @@ describe("routeEdit — rename", () => {
   });
 
   it("produces the new server_names list", () => {
-    expect(renameToNewNames({ hosts: "a.example, b.example" })).toEqual([
-      "a.example",
-      "b.example",
-    ]);
+    expect(renameToNewNames({ hosts: "a.example, b.example" })).toEqual(["a.example", "b.example"]);
     expect(renameToNewNames({ hosts: "" })).toEqual([]);
   });
 });

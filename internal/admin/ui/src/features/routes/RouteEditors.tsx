@@ -4,16 +4,11 @@
  */
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import {
-  patchConfig,
-  ConfigRejectedError,
-  type ConfigPatch,
-  type LocationProjection,
-  type RouteProjection,
-} from "@/api/client.ts";
-import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import type { LocationProjection, RouteProjection } from "@/api/client.ts";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { usePermission } from "@/auth/usePermission.ts";
+import { useRunPatch } from "@/lib/useRunPatch.ts";
 import {
   actionChanged,
   actionToPatch,
@@ -41,34 +36,6 @@ import {
 // Apply. The pure draft <-> patch logic lives in lib/routeEdit.ts so it is unit
 // tested independently of React.
 
-// usePatchHandoff centralizes the preview → /config hand-off shared by the three
-// editors, mirroring LocationWAFEditor.
-function usePatchHandoff() {
-  const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function runPatch(patch: ConfigPatch): Promise<void> {
-    setError(null);
-    setBusy(true);
-    try {
-      const res = await patchConfig(patch);
-      setPendingDraft({
-        kind: "patch",
-        ops: [patch],
-        baseVersion: res.base_version,
-        previewDiff: res.diff,
-      });
-      void navigate("/config");
-    } catch (err) {
-      setError(err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.");
-      setBusy(false);
-    }
-  }
-
-  return { runPatch, error, busy };
-}
-
 function routeTarget(route: RouteProjection, loc: LocationProjection) {
   return {
     listen: route.listen,
@@ -92,13 +59,19 @@ export interface RouteMatchEditorProps {
  * route's identity, so the diff lists the old route removed and the renamed
  * route added — the warning copy makes that explicit. */
 export function RouteMatchEditor({ route, loc, onClose }: RouteMatchEditorProps) {
-  const { runPatch, error, busy } = usePatchHandoff();
+  const { run: runPatch, error, busy } = useRunPatch();
+  const { has } = usePermission();
+  const canWrite = has("config:write");
   const [draft, setDraft] = useState<MatchDraft>(() => seedMatch(loc));
   const warnings = matchWarnings(draft);
   const changed = matchChanged(draft, loc);
 
   function save(): void {
-    void runPatch({ op: "location_set_match", ...routeTarget(route, loc), match_set: matchToPatch(draft) });
+    runPatch({
+      op: "location_set_match",
+      ...routeTarget(route, loc),
+      match_set: matchToPatch(draft),
+    });
   }
 
   return (
@@ -107,16 +80,19 @@ export function RouteMatchEditor({ route, loc, onClose }: RouteMatchEditorProps)
       subtitle={`${loc.type} ${loc.match} on ${route.listen}`}
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          <button
-            type="button"
-            disabled={busy || !changed || warnings.length > 0}
-            onClick={save}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
-          >
-            Preview change →
-          </button>
+        <div className="w-full space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            <button
+              type="button"
+              disabled={busy || !changed || warnings.length > 0 || !canWrite}
+              onClick={save}
+              className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              {busy ? "Previewing…" : "Preview change →"}
+            </button>
+          </div>
+          <ForbiddenAction permission="config:write" className="justify-end" />
         </div>
       }
     >
@@ -165,7 +141,13 @@ export function RouteMatchEditor({ route, loc, onClose }: RouteMatchEditorProps)
 
 // ── Action editor ────────────────────────────────────────────────────────────
 
-const ACTION_KINDS: readonly EditableActionKind[] = ["proxy", "static", "redirect", "return", "deny"];
+const ACTION_KINDS: readonly EditableActionKind[] = [
+  "proxy",
+  "static",
+  "redirect",
+  "return",
+  "deny",
+];
 
 const ACTION_HINT: Record<EditableActionKind, string> = {
   proxy: "Forward matching requests to an app (an upstream reference or URL).",
@@ -181,19 +163,25 @@ export interface RouteActionEditorProps {
   readonly onClose: () => void;
 }
 
-/** Switch a route's action in place among the tag-free kinds (proxy / static /
- * redirect / return / deny). The backend clears every other action field, so
- * exactly one remains. Richer actions stay read-only and never reach here. */
+/** Switch a route's action in place among the tag-free kinds represented by
+ * the generic editor. Protocol-specific actions remain on dedicated/raw paths. */
 export function RouteActionEditor({ route, loc, onClose }: RouteActionEditorProps) {
-  const { runPatch, error, busy } = usePatchHandoff();
+  const { run: runPatch, error, busy } = useRunPatch();
+  const { has } = usePermission();
+  const canWrite = has("config:write");
   const [draft, setDraft] = useState<ActionDraft>(() => seedAction(loc));
   const warnings = actionWarnings(draft);
   const changed = actionChanged(draft, loc);
-  const needsTarget = draft.kind === "proxy" || draft.kind === "static" || draft.kind === "redirect";
+  const needsTarget =
+    draft.kind === "proxy" || draft.kind === "static" || draft.kind === "redirect";
   const needsStatus = draft.kind === "redirect" || draft.kind === "return";
 
   function save(): void {
-    void runPatch({ op: "location_set_action", ...routeTarget(route, loc), action: actionToPatch(draft) });
+    runPatch({
+      op: "location_set_action",
+      ...routeTarget(route, loc),
+      action: actionToPatch(draft),
+    });
   }
 
   return (
@@ -202,16 +190,19 @@ export function RouteActionEditor({ route, loc, onClose }: RouteActionEditorProp
       subtitle={`${loc.type} ${loc.match} on ${route.listen}`}
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          <button
-            type="button"
-            disabled={busy || !changed || warnings.length > 0}
-            onClick={save}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
-          >
-            Preview change →
-          </button>
+        <div className="w-full space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            <button
+              type="button"
+              disabled={busy || !changed || warnings.length > 0 || !canWrite}
+              onClick={save}
+              className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              {busy ? "Previewing…" : "Preview change →"}
+            </button>
+          </div>
+          <ForbiddenAction permission="config:write" className="justify-end" />
         </div>
       }
     >
@@ -236,7 +227,11 @@ export function RouteActionEditor({ route, loc, onClose }: RouteActionEditorProp
         {needsTarget && (
           <label className="block space-y-1">
             <span className="text-sm font-medium text-jul-text">
-              {draft.kind === "static" ? "Root directory" : draft.kind === "redirect" ? "Redirect URL" : "Target"}
+              {draft.kind === "static"
+                ? "Root directory"
+                : draft.kind === "redirect"
+                  ? "Redirect URL"
+                  : "Target"}
             </span>
             <input
               type="text"
@@ -287,13 +282,15 @@ export interface RouteRenameEditorProps {
  * virtual host's identity, so the diff may re-create the block when the first
  * host name changes — the warning copy makes that explicit. */
 export function RouteRenameEditor({ route, onClose }: RouteRenameEditorProps) {
-  const { runPatch, error, busy } = usePatchHandoff();
+  const { run: runPatch, error, busy } = useRunPatch();
+  const { has } = usePermission();
+  const canWrite = has("config:write");
   const [draft, setDraft] = useState<RenameDraft>(() => seedRename(route.server_names));
   const warnings = renameWarnings(draft);
   const changed = renameChanged(draft, route.server_names);
 
   function save(): void {
-    void runPatch({
+    runPatch({
       op: "route_rename",
       listen: route.listen,
       server_names: route.server_names ?? [],
@@ -307,16 +304,19 @@ export function RouteRenameEditor({ route, onClose }: RouteRenameEditorProps) {
       subtitle={`Server on ${route.listen}`}
       onClose={onClose}
       footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          <button
-            type="button"
-            disabled={busy || !changed || warnings.length > 0}
-            onClick={save}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
-          >
-            Preview change →
-          </button>
+        <div className="w-full space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            <button
+              type="button"
+              disabled={busy || !changed || warnings.length > 0 || !canWrite}
+              onClick={save}
+              className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              {busy ? "Previewing…" : "Preview change →"}
+            </button>
+          </div>
+          <ForbiddenAction permission="config:write" className="justify-end" />
         </div>
       }
     >

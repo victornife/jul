@@ -21,7 +21,7 @@ import {
   RouteRenameEditor,
 } from "@/features/routes/RouteEditors.tsx";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
-import type { LocationProjection, RouteProjection } from "@/api/client.ts";
+import type { ConfigPatch, LocationProjection, RouteProjection } from "@/api/client.ts";
 
 const realFetch = globalThis.fetch;
 let seenBody = "";
@@ -69,15 +69,28 @@ beforeEach(() => {
   seenBody = "";
   takePendingDraft();
   globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
-    expect(input).toBe("/api/config/patch");
+    expect(input).toBe("/api/config/patch/preview");
     seenBody = typeof init?.body === "string" ? init.body : "";
     return Promise.resolve(
       json({
         ok: true,
         summary: "route changed",
-        candidate: 'listen = ":443"\n',
+        operation_summaries: [{ op_index: 0, op: "route_edit", summary: "route changed" }],
         diff: { summary: "1 change" },
         base_version: "deadbeef",
+        valid: true,
+        validation_errors: [],
+        lifecycle: {
+          changes: [],
+          can_apply_hot: true,
+          can_stage_restart: true,
+          hot_paths: ["servers.locations"],
+          restart_required_paths: [],
+          new_listener_only_paths: [],
+          ignored_deprecated_paths: [],
+          validation_rejected_paths: [],
+          pending_subsystems: [],
+        },
       }),
     );
   }) as unknown as typeof fetch;
@@ -102,7 +115,7 @@ describe("RouteMatchEditor", () => {
     await waitFor(() => {
       expect(seenBody).not.toBe("");
     });
-    expect(JSON.parse(seenBody)).toMatchObject({
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_set_match",
       listen: ":443",
       server_names: ["a.example"],
@@ -138,7 +151,7 @@ describe("RouteActionEditor", () => {
     await waitFor(() => {
       expect(seenBody).not.toBe("");
     });
-    expect(JSON.parse(seenBody)).toMatchObject({
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "location_set_action",
       match_type: "prefix",
       path: "/api",
@@ -174,7 +187,7 @@ describe("RouteRenameEditor", () => {
     await waitFor(() => {
       expect(seenBody).not.toBe("");
     });
-    expect(JSON.parse(seenBody)).toMatchObject({
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
       op: "route_rename",
       listen: ":443",
       server_names: ["a.example"],

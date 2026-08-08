@@ -3,11 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import type {
-  LocationActionPatch,
-  LocationMatchPatch,
-  LocationProjection,
-} from "@/api/client.ts";
+import type { LocationActionPatch, LocationMatchPatch, LocationProjection } from "@/api/client.ts";
 
 // routeEdit holds the pure draft <-> patch mapping and validation for the
 // in-place route editors added in Phase 4f: changing a route's match (type +
@@ -90,8 +86,12 @@ export interface ActionDraft {
 }
 
 export function seedAction(loc: LocationProjection): ActionDraft {
-  const kind: EditableActionKind = isEditableAction(loc.action) ? loc.action : "proxy";
-  return { kind, target: loc.target ?? "", status: "" };
+  if (!isEditableAction(loc.action)) {
+    throw new Error(
+      `The ${loc.action} action is not supported by the generic route action editor; use its protocol-specific workflow or raw configuration.`,
+    );
+  }
+  return { kind: loc.action, target: loc.target ?? "", status: "" };
 }
 
 export function actionChanged(d: ActionDraft, loc: LocationProjection): boolean {

@@ -1344,6 +1344,7 @@ export type ConfigPatch =
   | { op: "upstream_set_health_check"; upstream: string; health_check: HealthCheckPatch }
   | { op: "upstream_set_discovery"; upstream: string; discovery: DiscoveryPatch }
   | { op: "server_add"; listen: string; server_names?: string[] }
+  | { op: "server_remove"; listen: string; server_names: string[] }
   | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch }
   | { op: "server_toggle_http3"; listen: string; enabled: boolean }
   | { op: "server_toggle_h2c"; listen: string; enabled: boolean }
