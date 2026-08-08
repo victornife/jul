@@ -4,7 +4,7 @@
  */
 
 /**
- * Component tests for the guided Apps editors (Phase 4b). They mount the
+ * Component tests for the guided Apps settings editors. They mount the
  * HealthCheck and Discovery drawers, seed them from the Apps projection, and
  * assert that saving posts the structured patch op and stages the resulting
  * diff for the Config editor — never writing directly, and never sending a
@@ -21,6 +21,7 @@ import type { AppProjection, ConfigPatch } from "@/api/client.ts";
 
 const realFetch = globalThis.fetch;
 let seenBody = "";
+let rejectedOp: ConfigPatch["op"] | null = null;
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
   return <MemoryRouter>{children}</MemoryRouter>;
@@ -45,11 +46,27 @@ function app(over: Partial<AppProjection> = {}): AppProjection {
 
 beforeEach(() => {
   seenBody = "";
+  rejectedOp = null;
   takePendingDraft(); // clear any leftover handoff state
   globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
     expect(input).toBe("/api/config/patch/preview");
     seenBody = typeof init?.body === "string" ? init.body : "";
     const ops = (JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops;
+    const first = ops[0];
+    if (first !== undefined && rejectedOp === first.op) {
+      return Promise.resolve(
+        json(
+          {
+            ok: false,
+            message: "authoritative settings rejection",
+            errors: [],
+            op_index: 0,
+            op: first.op,
+          },
+          400,
+        ),
+      );
+    }
     return Promise.resolve(
       json({
         ok: true,
@@ -117,6 +134,35 @@ describe("HealthCheckEditor", () => {
     expect(takePendingDraft()?.kind).toBe("patch");
   });
 
+  it("preserves the health draft after an authoritative preview rejection", async () => {
+    rejectedOp = "upstream_set_health_check";
+    render(
+      <Wrapper>
+        <HealthCheckEditor
+          app={app({
+            health_check: true,
+            health_check_type: "http",
+            health_check_path: "/healthz",
+          })}
+          onClose={() => undefined}
+        />
+      </Wrapper>,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Path" }), {
+      target: { value: "/still-here" },
+    });
+    fireEvent.click(screen.getByText("Review in editor →"));
+
+    expect(
+      await screen.findByText(
+        /Operation 0 \(upstream_set_health_check\) was rejected: authoritative settings rejection/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Path" })).toHaveValue("/still-here");
+    expect(takePendingDraft()).toBeNull();
+  });
+
   it("blocks save while an enabled http probe has no path", () => {
     render(
       <Wrapper>
@@ -162,5 +208,32 @@ describe("DiscoveryEditor", () => {
     });
     expect(seenBody).not.toContain("token");
     expect(takePendingDraft()?.kind).toBe("patch");
+  });
+
+  it("preserves the discovery draft after an authoritative preview rejection", async () => {
+    rejectedOp = "upstream_set_discovery";
+    render(
+      <Wrapper>
+        <DiscoveryEditor
+          app={app({ discovery: "dns", discovery_target: "api.internal:8080" })}
+          onClose={() => undefined}
+        />
+      </Wrapper>,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: /^Target/ }), {
+      target: { value: "replacement.internal:8080" },
+    });
+    fireEvent.click(screen.getByText("Review in editor →"));
+
+    expect(
+      await screen.findByText(
+        /Operation 0 \(upstream_set_discovery\) was rejected: authoritative settings rejection/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /^Target/ })).toHaveValue(
+      "replacement.internal:8080",
+    );
+    expect(takePendingDraft()).toBeNull();
   });
 });

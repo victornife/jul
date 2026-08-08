@@ -86,6 +86,23 @@ strategy = "round_robin"
   refresh = "15s"
 ```
 
+### Console workflow and secret boundary
+
+The Apps creator supports `static`, `dns`, `dns_srv`, `consul`, and `kubernetes`
+without switching to generated TOML. Non-static settings are emitted as one
+`upstream_set_discovery` operation after any health-check operation and before an
+optional route mount. Static discovery emits no operation. Existing discovery
+pools are edited through the same one-operation preview path, and their already
+configured Consul/Kubernetes token is preserved server-side when the provider
+type is unchanged.
+
+Typed App patches never carry a new token. When authenticated Consul or
+Kubernetes creation requires one, the creator stops before preview and offers the
+separately authorized raw configuration editor only to an identity with
+`config:raw`; it never silently omits the token. Discovery owns the live backend
+set, so the App detail drawer also hides manual add/remove controls until the pool
+is returned to `static`.
+
 ## DNS
 
 `type = "dns"` resolves a hostname's A/AAAA records and attaches the port from

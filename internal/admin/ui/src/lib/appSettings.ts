@@ -6,7 +6,7 @@
 import type { AppProjection, DiscoveryPatch, HealthCheckPatch } from "@/api/client.ts";
 
 // appSettings holds the pure draft <-> patch mapping and warning logic for the
-// guided Apps editor (Phase 4b): active health checks and dynamic discovery.
+// guided Apps editor: active health checks and dynamic discovery.
 // Keeping it free of React makes the round-trip and validation directly unit
 // testable, mirroring tracingToml.ts. Secret tokens never appear here — the
 // backend preserves them when the provider type is unchanged.
@@ -57,10 +57,11 @@ export function healthCheckToPatch(d: HealthCheckDraft): HealthCheckPatch {
   const status = parseIntList(d.expectStatus);
   const healthy = Number(d.healthyThreshold);
   const unhealthy = Number(d.unhealthyThreshold);
+  const http = d.type === "http";
   return {
     enabled: true,
     type: d.type,
-    ...(d.path.trim() ? { path: d.path.trim() } : {}),
+    ...(http && d.path.trim() ? { path: d.path.trim() } : {}),
     ...(d.interval.trim() ? { interval: d.interval.trim() } : {}),
     ...(d.timeout.trim() ? { timeout: d.timeout.trim() } : {}),
     ...(d.healthyThreshold.trim() && Number.isInteger(healthy)
@@ -69,8 +70,8 @@ export function healthCheckToPatch(d: HealthCheckDraft): HealthCheckPatch {
     ...(d.unhealthyThreshold.trim() && Number.isInteger(unhealthy)
       ? { unhealthy_threshold: unhealthy }
       : {}),
-    ...(status.length > 0 ? { expect_status: status } : {}),
-    ...(d.type === "http" && d.expectBody.trim() ? { expect_body: d.expectBody.trim() } : {}),
+    ...(http && status.length > 0 ? { expect_status: status } : {}),
+    ...(http && d.expectBody.trim() ? { expect_body: d.expectBody.trim() } : {}),
   };
 }
 
@@ -210,4 +211,3 @@ export function discoveryTokenNote(d: DiscoveryDraft): string | null {
   }
   return null;
 }
-
