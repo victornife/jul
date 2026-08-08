@@ -66,6 +66,15 @@ func (d *ConfigDiff) cover(path string) {
 		d.coveredPaths = make(map[string]bool)
 	}
 	d.coveredPaths[path] = true
+	// Some high-level comparators intentionally summarize an entire subtree
+	// (for example servers.*.tls). Mark every canonical registry descendant as
+	// covered too, otherwise the completeness pass emits duplicate leaf rows.
+	prefix := path + "."
+	for _, entry := range lifecycle.Registry {
+		if strings.HasPrefix(entry.Path, prefix) {
+			d.coveredPaths[entry.Path] = true
+		}
+	}
 }
 
 // diffConfigs produces a human-auditable diff between the current running

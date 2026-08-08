@@ -267,39 +267,64 @@ func validateRaw(ctx context.Context, body []byte) error {
 	if err != nil {
 		return err
 	}
-	// Preflight: expand secrets on a clone so structural checks (file paths,
-	// URLs) work against resolved values, then dry-run every runtime component
-	// that can fail during reload (WAF rule compilation, auth init, etc.).
-	wafExtra := func(c *config.Config) error {
-		if !waf.Compiled {
-			return waf.Check(c)
-		}
-		for i := range c.Servers {
-			for j := range c.Servers[i].Locations {
-				loc := c.Servers[i].Locations[j]
-				wcfg, ok := effectiveWAF(c, loc)
-				if !ok {
-					continue
-				}
-				if _, err := waf.New(ctx, wcfg, waf.Options{}); err != nil {
-					return fmt.Errorf("waf: %w", err)
-				}
-			}
-		}
-		for i := range c.Servers {
-			for j := range c.Servers[i].Locations {
-				loc := c.Servers[i].Locations[j]
-				if loc.Auth == nil {
-					continue
-				}
-				if _, err := auth.New(ctx, *loc.Auth, auth.Options{}); err != nil {
-					return fmt.Errorf("auth: %w", err)
-				}
-			}
-		}
-		return nil
+	candidate, err := config.NewCandidateContext(ctx, cfg)
+	if err != nil {
+		return err
 	}
-	return config.PreflightClone(cfg, wafExtra)
+	return validateEffectiveConfig(ctx, candidate.Effective)
+}
+
+// validateEffectiveConfig performs the side-effect-free validation/build
+// preflight against an already-resolved effective configuration. The patch
+// batch executor uses this helper so each candidate resolves secrets exactly
+// once, while /api/config/validate reaches the same checks through validateRaw.
+func validateEffectiveConfig(ctx context.Context, effective *config.Config) error {
+	if effective == nil {
+		return errors.New("effective configuration is nil")
+	}
+	// Work on a private copy because validators are not allowed to mutate the
+	// immutable candidate retained by the managed-apply request context.
+	cfg, err := effective.Clone()
+	if err != nil {
+		return err
+	}
+	if err := config.Validate(cfg); err != nil {
+		return err
+	}
+	return validateRuntimeComponents(ctx, cfg)
+}
+
+// validateRuntimeComponents dry-runs runtime components that can reject a
+// reload after structural validation. It preserves the existing build-tag
+// behavior and never publishes handlers, redaction state, or policies.
+func validateRuntimeComponents(ctx context.Context, cfg *config.Config) error {
+	if !waf.Compiled {
+		return waf.Check(cfg)
+	}
+	for i := range cfg.Servers {
+		for j := range cfg.Servers[i].Locations {
+			loc := cfg.Servers[i].Locations[j]
+			wcfg, ok := effectiveWAF(cfg, loc)
+			if !ok {
+				continue
+			}
+			if _, err := waf.New(ctx, wcfg, waf.Options{}); err != nil {
+				return fmt.Errorf("waf: %w", err)
+			}
+		}
+	}
+	for i := range cfg.Servers {
+		for j := range cfg.Servers[i].Locations {
+			loc := cfg.Servers[i].Locations[j]
+			if loc.Auth == nil {
+				continue
+			}
+			if _, err := auth.New(ctx, *loc.Auth, auth.Options{}); err != nil {
+				return fmt.Errorf("auth: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 // effectiveWAF resolves the WAF policy for a location: the location override

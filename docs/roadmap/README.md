@@ -68,9 +68,11 @@ v1.32.1-rc.1 — independently verified published prerelease (complete; not stab
     ↓
 #131 → #133 → #132 → #134 — cache correctness and recertification (complete; #107 closed)
     ↓
-#89 — closed-world lifecycle authority (current)
+#89 — closed-world lifecycle authority (complete)
     ↓
-#77 → #82 — Phase 5 structured configuration
+#77 — atomic lifecycle-aware patch assessment (complete)
+    ↓
+#78 → #82 — remaining Phase 5 structured configuration
     ↓
 #115 → #118 — core architecture decisions
     ↓
@@ -81,9 +83,10 @@ The selected correction tranche and its published `v1.32.1-rc.1`
 prerelease checkpoint are complete and independently verified. The cache
 correctness programme is complete and #107 is closed: the response cache retains
 GA on the strength of the 2026-08-07 recertification. Closed-world lifecycle
-authority (#89) is now the immediate correctness gate and the hard predecessor of
-Phase 5 preview (#77). Shared edits to the configuration schema, lifecycle,
-composition root, reload transaction, or Console patch contracts remain serial.
+authority (#89) and the shared atomic patch assessment (#77) are complete. The
+next serial Phase 5 item is #78. Shared edits to the configuration schema,
+lifecycle, composition root, reload transaction, or Console patch contracts
+remain serial.
 
 ## Correctness and security backlog
 

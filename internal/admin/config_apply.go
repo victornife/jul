@@ -199,9 +199,14 @@ type ConfigApplyResult struct {
 	// provenance is threaded to the finalization surface, never serialized in
 	// the apply result, so it is transport-only (json:"-").
 	FinalizationError string `json:"-"`
-	// Summary and Diff are populated by the structured-patch apply path.
-	Summary []string   `json:"summary,omitempty"`
-	Diff    ConfigDiff `json:"diff,omitempty"`
+	// Summary and Diff are populated by the structured-patch apply path. Summary
+	// remains the legacy ordered string slice for apply clients; the preview
+	// contract keeps its existing string and OperationSummaries is the new typed
+	// cross-route representation.
+	Summary            []string                `json:"summary,omitempty"`
+	OperationSummaries []patchOperationSummary `json:"operation_summaries,omitempty"`
+	Diff               ConfigDiff              `json:"diff,omitempty"`
+	Lifecycle          *patchLifecycleSummary  `json:"lifecycle,omitempty"`
 }
 
 // ConfigMutationResponse preserves compatibility metadata used by legacy raw,

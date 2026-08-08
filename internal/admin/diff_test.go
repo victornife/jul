@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 )
 
 // diffHas reports whether any entry across additions/removals/modifications
@@ -532,5 +533,25 @@ func TestDiffRateLimitEnabledAndMaxConnsVisible(t *testing.T) {
 	}
 	if !diffHas(d, "Change rate-limit max_conns") {
 		t.Errorf("expected max_conns change to be reported, got %+v", d)
+	}
+}
+
+// TestConfigDiffCoverMarksCanonicalDescendants prevents an aggregate diff row
+// from being followed by duplicate registry-generated leaf rows.
+func TestConfigDiffCoverMarksCanonicalDescendants(t *testing.T) {
+	var d ConfigDiff
+	d.cover("servers.*.tls")
+	found := 0
+	for _, entry := range lifecycle.Registry {
+		if !strings.HasPrefix(entry.Path, "servers.*.tls.") {
+			continue
+		}
+		found++
+		if !d.coveredPaths[entry.Path] {
+			t.Errorf("aggregate TLS coverage omitted canonical descendant %q", entry.Path)
+		}
+	}
+	if found == 0 {
+		t.Fatal("lifecycle registry has no TLS descendants; test fixture is stale")
 	}
 }

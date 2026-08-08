@@ -13,6 +13,8 @@ import {
   ConfigConflictError,
   ConfigAdminChangeError,
   ApiError,
+  PatchOperationRejectedError,
+  PatchResultSchema,
 } from "@/api/client.ts";
 
 const realFetch = globalThis.fetch;
@@ -36,7 +38,7 @@ afterEach(() => {
 });
 
 describe("patchConfig", () => {
-  it("posts the patch and returns candidate + diff on success", async () => {
+  it("posts the patch and returns the typed secret-safe assessment", async () => {
     let seenBody = "";
     mockFetch((url, init) => {
       expect(url).toBe("/api/config/patch");
@@ -44,8 +46,22 @@ describe("patchConfig", () => {
       return json({
         ok: true,
         summary: "route :8080/api proxy_pass set to http://new",
-        candidate: 'listen = ":8080"\n',
+        operation_summaries: [
+          { op_index: 0, op: "route_set_target", summary: "route target changed" },
+        ],
+        valid: true,
         diff: { summary: "1 change" },
+        lifecycle: {
+          changes: [],
+          can_apply_hot: true,
+          can_stage_restart: true,
+          hot_paths: [],
+          restart_required_paths: [],
+          new_listener_only_paths: [],
+          ignored_deprecated_paths: [],
+          validation_rejected_paths: [],
+          pending_subsystems: [],
+        },
       });
     });
     const res = await patchConfig({
@@ -57,37 +73,33 @@ describe("patchConfig", () => {
       target: "http://new",
     });
     expect(res.summary).toContain("proxy_pass set to http://new");
-    expect(res.candidate).toContain('listen = ":8080"');
+    expect(res.candidate).toBeUndefined();
     expect(res.diff.summary).toBe("1 change");
-    expect(res.validation_errors).toBeUndefined();
+    expect(res.operation_summaries[0]).toMatchObject({ op_index: 0, op: "route_set_target" });
+    expect(res.lifecycle?.can_apply_hot).toBe(true);
+    expect(res.validation_errors).toEqual([]);
     expect(JSON.parse(seenBody)).toMatchObject({ op: "route_set_target", target: "http://new" });
   });
 
-  it("resolves with an undefined candidate when the preview omits it (the production case)", async () => {
+  it("discards candidate TOML from a preview response", async () => {
     // N-01 (WS05): the real /api/config/patch preview withholds the candidate
     // TOML so a principal without config:raw cannot extract secrets from a
     // preview. The client must tolerate the missing field and never fabricate
     // one — callers that need the candidate use the config:raw-gated
     // fetchPatchCandidate instead.
-    mockFetch((url) => {
-      expect(url).toBe("/api/config/patch");
-      return json({
-        ok: true,
-        summary: "route :8080/api proxy_pass set to http://new",
-        diff: { summary: "1 change" },
-        base_version: "deadbeefdeadbeef",
-      });
+    const parsed = PatchResultSchema.parse({
+      ok: true,
+      summary: "route changed",
+      candidate: 'listen = ":8080"\n',
+      diff: { summary: "1 change" },
     });
-    const res = await patchConfig({
-      op: "route_set_target",
-      listen: ":8080",
-      server_names: [],
-      match_type: "prefix",
-      path: "/api",
-      target: "http://new",
-    });
-    expect(res.candidate).toBeUndefined();
-    expect(res.base_version).toBe("deadbeefdeadbeef");
+    expect(parsed.candidate).toBeUndefined();
+  });
+
+  it("keeps the legacy summary field a string", () => {
+    expect(() =>
+      PatchResultSchema.parse({ ok: true, summary: ["route changed"], diff: { summary: "1" } }),
+    ).toThrow();
   });
 
   it("serializes a per-location WAF set with the nested waf payload", async () => {
@@ -98,7 +110,6 @@ describe("patchConfig", () => {
       return json({
         ok: true,
         summary: "route :8080/admin WAF override set (enabled — detect, CRS)",
-        candidate: 'listen = ":8080"\n',
         diff: { summary: "1 change" },
       });
     });
@@ -128,7 +139,6 @@ describe("patchConfig", () => {
       return json({
         ok: true,
         summary: "route :8080/admin WAF override cleared (inherits the global [waf])",
-        candidate: 'listen = ":8080"\n',
         diff: { summary: "1 change" },
       });
     });
@@ -151,7 +161,6 @@ describe("patchConfig", () => {
       return json({
         ok: true,
         summary: "route :8080/api auth set (JWT)",
-        candidate: 'listen = ":8080"\n',
         diff: { summary: "1 change" },
       });
     });
@@ -181,7 +190,6 @@ describe("patchConfig", () => {
       return json({
         ok: true,
         summary: "route :8080/api auth cleared",
-        candidate: 'listen = ":8080"\n',
         diff: { summary: "1 change" },
       });
     });
@@ -204,7 +212,6 @@ describe("patchConfig", () => {
       return json({
         ok: true,
         summary: "server :443 HTTP/3 on",
-        candidate: 'listen = ":443"\n',
         diff: { summary: "1 change" },
       });
     });
@@ -225,7 +232,6 @@ describe("patchConfig", () => {
       return json({
         ok: true,
         summary: "server :8080 h2c off",
-        candidate: 'listen = ":8080"\n',
         diff: { summary: "1 change" },
       });
     });
@@ -243,7 +249,6 @@ describe("patchConfig", () => {
       json({
         ok: true,
         summary: "route :8080/api proxy_pass set to http://ghost",
-        candidate: 'listen = ":8080"\n',
         diff: { summary: "1 change" },
         validation_errors: [
           {
@@ -264,7 +269,7 @@ describe("patchConfig", () => {
       path: "/api",
       target: "http://ghost",
     });
-    expect(res.candidate).toContain('listen = ":8080"');
+    expect(res.candidate).toBeUndefined();
     expect(res.validation_errors).toHaveLength(1);
     expect(res.validation_errors?.[0]?.summary).toContain("unknown upstream");
   });
@@ -325,6 +330,48 @@ describe("patchConfigBatch", () => {
     expect(res.candidate).toBeUndefined();
     expect(res.diff.summary).toBe("1 change");
     expect(res.base_version).toBe("deadbeefdeadbeef");
+    expect(res.validation_errors).toEqual([]);
+  });
+
+  it("throws ConfigConflictError for a stale preview", async () => {
+    mockFetch(() =>
+      json(
+        {
+          ok: false,
+          conflict: true,
+          message: "reload and try again",
+          current_version: "fresh-version",
+        },
+        409,
+      ),
+    );
+    await expect(patchConfigBatch([op], "stale")).rejects.toMatchObject({
+      name: "ConfigConflictError",
+      currentVersion: "fresh-version",
+    });
+  });
+
+  it("preserves the zero-based failed operation index", async () => {
+    mockFetch(() =>
+      json(
+        {
+          ok: false,
+          message: "Operation 2 failed; no change was made.",
+          errors: [],
+          op_index: 1,
+          op: "location_add",
+        },
+        400,
+      ),
+    );
+    try {
+      await patchConfigBatch([op]);
+      expect.unreachable("expected operation rejection");
+    } catch (err) {
+      expect(err).toBeInstanceOf(PatchOperationRejectedError);
+      expect((err as PatchOperationRejectedError).opIndex).toBe(1);
+      expect((err as PatchOperationRejectedError).op).toBe("location_add");
+    }
   });
 });
 
@@ -349,7 +396,21 @@ describe("applyPatchBatch", () => {
         pending_reload: true,
         version: "feedfacefeedface",
         summary: ["route :8080/ proxy_pass set to http://127.0.0.1:9100"],
+        operation_summaries: [
+          { op_index: 0, op: "route_set_target", summary: "route target changed" },
+        ],
         diff: { summary: "1 change" },
+        lifecycle: {
+          changes: [],
+          can_apply_hot: true,
+          can_stage_restart: true,
+          hot_paths: [],
+          restart_required_paths: [],
+          new_listener_only_paths: [],
+          ignored_deprecated_paths: [],
+          validation_rejected_paths: [],
+          pending_subsystems: [],
+        },
         message: "Structured patch validated and saved.",
       });
     });
@@ -362,6 +423,8 @@ describe("applyPatchBatch", () => {
     expect(res.version).toBe("feedfacefeedface");
     expect(res.pending_reload).toBe(true);
     expect(res.summary).toHaveLength(1);
+    expect(res.operation_summaries[0]?.op_index).toBe(0);
+    expect(res.lifecycle?.can_apply_hot).toBe(true);
   });
 
   it("throws ConfigConflictError with current_version on a 409", async () => {
@@ -388,11 +451,17 @@ describe("applyPatchBatch", () => {
   it("throws ConfigRejectedError on a 400 structured rejection", async () => {
     mockFetch(() =>
       json(
-        { ok: false, message: "Operation 2 could not be applied; no change was made.", errors: [] },
+        {
+          ok: false,
+          message: "Operation 2 could not be applied; no change was made.",
+          errors: [],
+          op_index: 1,
+          op: "route_set_target",
+        },
         400,
       ),
     );
-    await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(ConfigRejectedError);
+    await expect(applyPatchBatch([op])).rejects.toBeInstanceOf(PatchOperationRejectedError);
   });
 
   it("throws ApiError on a non-structured transport failure", async () => {

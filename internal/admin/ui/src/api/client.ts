@@ -1423,25 +1423,63 @@ export const ValidationIssueSchema = z.object({
 });
 export type ValidationIssue = z.infer<typeof ValidationIssueSchema>;
 
+export const PatchOperationSummarySchema = z.object({
+  op_index: z.number().int().nonnegative(),
+  op: z.string(),
+  summary: z.string(),
+});
+export type PatchOperationSummary = z.infer<typeof PatchOperationSummarySchema>;
+
+export const PatchLifecycleChangeSchema = z.object({
+  path: z.string(),
+  declared: z.string(),
+  effective: z.string(),
+  subsystem: z.string(),
+  reason: z.string(),
+  detail: z.string().optional(),
+  ignored: z.boolean(),
+  reserved: z.boolean(),
+});
+export type PatchLifecycleChange = z.infer<typeof PatchLifecycleChangeSchema>;
+
+export const PatchLifecycleSchema = z.object({
+  changes: z.array(PatchLifecycleChangeSchema).default([]),
+  can_apply_hot: z.boolean(),
+  can_stage_restart: z.boolean(),
+  hot_paths: z.array(z.string()).default([]),
+  restart_required_paths: z.array(z.string()).default([]),
+  new_listener_only_paths: z.array(z.string()).default([]),
+  ignored_deprecated_paths: z.array(z.string()).default([]),
+  validation_rejected_paths: z.array(z.string()).default([]),
+  pending_subsystems: z.array(z.string()).default([]),
+});
+export type PatchLifecycle = z.infer<typeof PatchLifecycleSchema>;
+
+export const PatchOperationFailureSchema = z.object({
+  ok: z.literal(false),
+  message: z.string(),
+  errors: z.array(ValidationIssueSchema).default([]),
+  op_index: z.number().int().nonnegative(),
+  op: z.string(),
+});
+export type PatchOperationFailure = z.infer<typeof PatchOperationFailureSchema>;
+
 export const PatchResultSchema = z.object({
   ok: z.literal(true),
+  // Preserve the legacy combined string; ordered machine-readable entries live
+  // in operation_summaries instead of silently changing summary to an array.
   summary: z.string(),
-  // @deprecated The preview endpoints (/api/config/patch and
-  // /api/config/patch/preview) never return the candidate TOML — it is withheld
-  // so an operator without config:raw cannot extract secrets from a preview
-  // (N-01). This field is retained only for wire back-compat and must not be
-  // depended on for review; callers that need the real candidate use
-  // fetchPatchCandidate, which the server gates on config:raw.
-  candidate: z.string().optional(),
+  operation_summaries: z.array(PatchOperationSummarySchema).default([]),
+  // Keep the established property for Console handoff code, but always discard
+  // preview payloads. A legacy/misconfigured server cannot surface raw TOML.
+  candidate: z.unknown().optional().transform((): undefined => undefined),
   diff: ConfigDiffSchema,
-  // base_version fingerprints the config this candidate was computed from. The
-  // UI echoes it back to applyPatchBatch so a stale edit is rejected (409)
-  // instead of silently clobbering a concurrent change.
+  // Optional in the parser for compatibility with old fixtures/servers; #77
+  // responses always include the authoritative current editable version.
   base_version: z.string().optional(),
-  // validation_errors is present when the candidate fails the cheap preview
-  // validation (parse + structural/WAF/auth checks). The edit still produced a
-  // diff, but applying it would be rejected — the UI surfaces these as warnings.
-  validation_errors: z.array(ValidationIssueSchema).optional(),
+  valid: z.boolean().default(true),
+  validation_errors: z.array(ValidationIssueSchema).default([]),
+  lifecycle: PatchLifecycleSchema.optional(),
 });
 export type PatchResult = z.infer<typeof PatchResultSchema>;
 
@@ -1471,14 +1509,7 @@ export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
   }
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
-    const rejected = ValidationResultSchema.safeParse(data);
-    if (rejected.success) {
-      throw new ConfigRejectedError(
-        rejected.data.message ?? "The edit was rejected.",
-        rejected.data.errors ?? [],
-      );
-    }
-    throw new ApiError("/config/patch", resp.status, `${String(resp.status)} ${resp.statusText}`);
+    classifyPatchFailure("/config/patch", resp.status, resp.statusText, data, resp);
   }
   return PatchResultSchema.parse(data);
 }
@@ -1513,18 +1544,7 @@ export async function patchConfigBatch(
   }
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
-    const rejected = ValidationResultSchema.safeParse(data);
-    if (rejected.success) {
-      throw new ConfigRejectedError(
-        rejected.data.message ?? "The edit was rejected.",
-        rejected.data.errors ?? [],
-      );
-    }
-    throw new ApiError(
-      "/config/patch/preview",
-      resp.status,
-      `${String(resp.status)} ${resp.statusText}`,
-    );
+    classifyPatchFailure("/config/patch/preview", resp.status, resp.statusText, data, resp);
   }
   return PatchResultSchema.parse(data);
 }
@@ -1534,7 +1554,7 @@ export async function patchConfigBatch(
 // base_version it was computed against. Unlike the preview endpoints this DOES
 // carry the candidate, so the source view can display the true proposed
 // configuration instead of the current persisted bytes (N-01, WS05).
-export const PatchCandidateSchema = z.object({
+export const PatchCandidateSchema = PatchResultSchema.partial().extend({
   ok: z.literal(true),
   candidate: z.string(),
   base_version: z.string(),
@@ -1553,8 +1573,8 @@ export type PatchCandidate = z.infer<typeof PatchCandidateSchema>;
  *   - 409 (the config changed since the edit was prepared) →
  *     ConfigConflictError, carrying the current version so the caller can
  *     recompute and retry;
- *   - 400 (an op could not be applied) → ConfigRejectedError, carrying the
- *     structured issues.
+ *   - 400 (an op could not be applied) → PatchOperationRejectedError, carrying
+ *     the structured issues plus the zero-based op index and discriminator.
  */
 export async function fetchPatchCandidate(
   ops: ConfigPatch[],
@@ -1578,25 +1598,7 @@ export async function fetchPatchCandidate(
   }
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
-    const conflict = ConflictBodySchema.safeParse(data);
-    if (resp.status === 409 && conflict.success && conflict.data.conflict) {
-      throw new ConfigConflictError(
-        conflict.data.message ??
-          "The configuration changed since this edit was prepared; reload and try again.",
-        conflict.data.current_version,
-      );
-    }
-    const rejected = ValidationResultSchema.safeParse(data);
-    if (resp.status === 400 && rejected.success) {
-      throw new ConfigRejectedError(
-        rejected.data.message ?? "The edit was rejected.",
-        rejected.data.errors ?? [],
-      );
-    }
-    let msg = `${String(resp.status)} ${resp.statusText}`;
-    const body = data as { error?: string } | null;
-    if (body?.error) msg = body.error;
-    throw new ApiError("/config/patch/candidate", resp.status, msg, parseRetryAfter(resp));
+    classifyPatchFailure("/config/patch/candidate", resp.status, resp.statusText, data, resp);
   }
   return PatchCandidateSchema.parse(data);
 }
@@ -1628,6 +1630,19 @@ export class ConfigRejectedError extends Error {
   ) {
     super(message);
     this.name = "ConfigRejectedError";
+  }
+}
+
+/** A structured patch batch rejection tied to one zero-based request op. */
+export class PatchOperationRejectedError extends ConfigRejectedError {
+  constructor(
+    message: string,
+    issues: ValidationIssue[],
+    public readonly opIndex: number,
+    public readonly op: string,
+  ) {
+    super(message, issues);
+    this.name = "PatchOperationRejectedError";
   }
 }
 
@@ -1852,6 +1867,44 @@ export async function fetchManagedApply(id: string): Promise<ManagedApplyLookup>
   return { kind: "record", record: ManagedApplyRecordSchema.parse(data) };
 }
 
+function classifyPatchFailure(
+  path: string,
+  status: number,
+  statusText: string,
+  data: unknown,
+  response: Response,
+): never {
+  if (status === 403) notifyForbidden();
+  const conflict = ConflictBodySchema.safeParse(data);
+  if (status === 409 && conflict.success && conflict.data.conflict) {
+    throw new ConfigConflictError(
+      conflict.data.message ??
+        "The configuration changed since this edit was prepared; reload and try again.",
+      conflict.data.current_version,
+    );
+  }
+  const operation = PatchOperationFailureSchema.safeParse(data);
+  if (status === 400 && operation.success) {
+    throw new PatchOperationRejectedError(
+      operation.data.message,
+      operation.data.errors,
+      operation.data.op_index,
+      operation.data.op,
+    );
+  }
+  const rejected = ValidationResultSchema.safeParse(data);
+  if (status === 400 && rejected.success) {
+    throw new ConfigRejectedError(
+      rejected.data.message ?? "The edit was rejected.",
+      rejected.data.errors ?? [],
+    );
+  }
+  let message = `${String(status)} ${statusText}`;
+  const body = data as { error?: string } | null;
+  if (body?.error) message = body.error;
+  throw new ApiError(path, status, message, parseRetryAfter(response));
+}
+
 function classifyApplyFailure(path: string, status: number, data: unknown): never {
   // A gated write was forbidden: refresh proactive gating (N-02).
   if (status === 403) notifyForbidden();
@@ -1876,6 +1929,15 @@ function classifyApplyFailure(path: string, status: number, data: unknown): neve
       conflict.data.message ??
         "The configuration changed since this edit was prepared; reload and try again.",
       conflict.data.current_version,
+    );
+  }
+  const operation = PatchOperationFailureSchema.safeParse(data);
+  if (status === 400 && operation.success) {
+    throw new PatchOperationRejectedError(
+      operation.data.message,
+      operation.data.errors,
+      operation.data.op_index,
+      operation.data.op,
     );
   }
   const rejected = ValidationResultSchema.safeParse(data);
@@ -2019,7 +2081,9 @@ export const PatchApplyResultSchema = ConfigApplyResultBaseSchema.extend({
   // check after this apply lands.
   version: z.string().optional(),
   summary: z.array(z.string()),
+  operation_summaries: z.array(PatchOperationSummarySchema).default([]),
   diff: ConfigDiffSchema,
+  lifecycle: PatchLifecycleSchema.optional(),
   // status is the post-apply runtime delta derived from the persisted config.
 }).transform((value) => ({
   ...value,
