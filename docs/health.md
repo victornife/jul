@@ -20,6 +20,17 @@ servers  = ["127.0.0.1:3000", "127.0.0.1:3001"]
   timeout  = "2s"
 ```
 
+### Console workflow
+
+The Apps creator carries every supported active-health field into the same
+ordered typed batch as the new upstream: `upstream_add`, additional backends,
+then `upstream_set_health_check`. Editing an existing App uses one reviewed
+`upstream_set_health_check` operation. Both paths preview validation, diff and
+authoritative lifecycle before Configuration can apply or stage the change; the
+Apps drawer never applies directly. Secret-safe operation summaries do not echo
+`expect_body`, although the exact value remains in the typed operation and the
+server-side candidate.
+
 ## How it works
 
 Each upstream pool with active health checks gets a dedicated goroutine that probes every backend on a timer. A backend is:

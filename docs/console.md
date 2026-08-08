@@ -493,22 +493,30 @@ submitting a doomed hot request. When a managed staged configuration already
 exists, an eligible patch updates that staged configuration. Missing, invalid,
 or lifecycle-rejected metadata fails closed and requires a fresh preview.
 
-> **Append-as-draft vs. structured in-place edit.** App cloning and guided
-> editors outside the migrated route workflow may still open a TOML draft in the
-> raw editor. For the common route changes, the detail drawer uses structured
-> in-place edits: changing a route's **match** (path + type), switching its
-> **action** (proxy / static / redirect / return / deny), editing auth/cache/rate
-> limit/WAF/plugins, and **renaming** a server block's host names. A route is
-> identified by match type + path inside its exact parent server; a virtual host
-> is identified by listener + the complete server-name set. Identity changes are
+> **Draft generation vs. typed structured edits.** Guided editors that have not
+> yet migrated may still open a TOML draft in the raw editor. Route and App
+> creation/deletion no longer do: they build typed operations and use the shared
+> batch-preview handoff. A route is identified by match type + path inside its
+> exact parent server; a virtual host is identified by listener + the complete
+> order-independent, case-sensitive server-name set. Identity changes are
 > therefore reflected truthfully in the diff as removal plus addition.
 
-The Apps "New app" editor can optionally **mount the app on a route** in the
-same step (default on for a new app): alongside the `[[upstreams]]` pool it
-generates a reverse-proxy `[[servers]]` block whose location proxies a chosen
-path to the pool, so a newly created app actually serves traffic instead of
-existing only as a backend. Both blocks go through the same Validate → Diff →
-Apply pipeline.
+The Apps **New app** editor creates an upstream through one deterministic ordered
+batch. It emits `upstream_add` first, then any additional backends, the complete
+active-health-check block when enabled, non-secret discovery settings when
+selected, optional server creation/protocol preparation, and the final route
+mount. Mounting is explicit: **No route mount**, **Existing exact server**, or
+**New exact server**. The Console never infers a virtual host from a listener or
+from a blank host-name set.
+
+HTTP mounts use `proxy`; native gRPC mounts use only `grpc_proxy` and never fall
+back to HTTP. Existing TLS servers already provide HTTP/2 and are not mutated.
+Existing plaintext servers are eligible only when h2c is already enabled. A new
+plaintext gRPC server may enable h2c only on an unused dedicated listener, because
+that setting is listener-address scoped and must not alter sibling virtual hosts.
+Token-required Consul/Kubernetes creation stops before preview: typed App patches
+never collect, reveal, or silently omit a new secret, and the raw-editor escape
+hatch is shown only to an operator with `config:raw`.
 
 The TLS panel provides **guided creation** of a new TLS-enabled server via
 **New TLS server** — a static certificate or automatic HTTPS (ACME) in staging
@@ -538,20 +546,23 @@ server-level plugins stay raw-only) |
 Whole **servers, routes, and upstream pools** can be **created and deleted**
 through structured patch operations — `server_add` / `server_remove`,
 `location_add` / `location_remove`, and `upstream_add` / `upstream_remove` —
-each previewed and applied through the same validated pipeline. The route detail
-**Danger zone** implements a deliberate two-step destructive flow: first preview
+each previewed and applied through the same validated pipeline. Route and App
+**Danger zones** implement a deliberate two-step destructive flow: first preview
 the exact typed removal against the pinned base version, then show an accessible
-confirmation containing the listener, canonical server-name set, exact route or
-contained-route count/list, operation JSON, ordered summaries, validation output,
-and lifecycle outcome. Confirming only hands the preview to ConfigPanel; it does
-not apply from the drawer. Cancel performs no handoff or write.
+confirmation containing the target identity, operation JSON, ordered summaries,
+validation output, lifecycle outcome, and explicit no-cascade scope. Confirming
+only hands the preview to ConfigPanel; it does not apply from the drawer. Cancel
+performs no handoff or write.
 
 Route deletion is exact and non-cascading. `location_remove` targets one match
 type + path inside one exact server identity. `server_remove` targets one exact
 server and removes its contained locations only; it does not delete referenced
 upstreams, applications, credentials, plugins, sibling virtual hosts, or other
-resources. The server still enforces missing-target, final-server, and referenced
-upstream protections. (Global-table edits — `[global]`, `[cache]`,
+resources. App deletion is one `upstream_remove` operation and is blocked while
+projected routes reference the pool; the drawer shows a bounded dependency list
+and links to Routes, while the backend re-checks references during preview so a
+race is rejected visibly. The server still enforces missing-target, final-server,
+and referenced-upstream protections. (Global-table edits — `[global]`, `[cache]`,
 `[compression]`, global `[rate_limit]` — keep their guided validated-TOML-upsert
 editors; dedicated `*_set` patch operations remain a follow-on.)
 

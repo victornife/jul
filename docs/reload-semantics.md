@@ -71,6 +71,15 @@ means:
   (`Outcome=not_applied`); existing listeners continue serving the previous
   handler generation.
 
+The structured App workflow uses that same classifier during preview. It preserves
+the exact ordered operations and `base_version` from preview through handoff, and
+only Configuration performs the final apply or planned-restart staging. Upstream,
+health-check, discovery, and route changes are classified from the complete
+candidate. A new dedicated plaintext gRPC listener can carry an h2c toggle as a
+`new_listener_only` change; changing h2c on a retained address is
+restart-required, so the Apps creator never mutates an existing plaintext
+listener and refuses same-address sibling risk before preview.
+
 For the strongest guarantees, use the Console or admin API for configuration
 changes. Direct file edits followed by SIGHUP are safe for hot-reloadable
 changes; for restart-required changes they produce a clearly recorded failed

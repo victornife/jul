@@ -576,7 +576,7 @@ export const AppProjectionSchema = z.object({
   discovery_target: z.string().optional(),
   routes_using: z.array(z.string()).optional(),
   warnings: z.array(z.string()).optional(),
-  // Guided-editor seed fields (Phase 4b). Non-secret health-check and discovery
+  // Guided App-editor seed fields. Non-secret health-check and discovery
   // detail; tokens are never projected (only has_token is exposed).
   health_check_timeout: z.string().optional(),
   health_check_healthy_threshold: z.number().optional(),
@@ -1473,7 +1473,10 @@ export const PatchResultSchema = z.object({
   operation_summaries: z.array(PatchOperationSummarySchema).default([]),
   // Keep the established property for Console handoff code, but always discard
   // preview payloads. A legacy/misconfigured server cannot surface raw TOML.
-  candidate: z.unknown().optional().transform((): undefined => undefined),
+  candidate: z
+    .unknown()
+    .optional()
+    .transform((): undefined => undefined),
   diff: ConfigDiffSchema,
   // Optional in the parser for compatibility with old fixtures/servers; #77
   // responses always include the authoritative current editable version.
