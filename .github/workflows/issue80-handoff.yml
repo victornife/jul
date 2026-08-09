@@ -1,0 +1,78 @@
+name: issue80-post-merge-handoff
+
+on:
+  push:
+    branches:
+      - agent/80-post-merge-handoff
+
+permissions:
+  contents: write
+
+jobs:
+  publish-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Apply serial handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          roadmap = Path("docs/roadmap/README.md")
+          text = roadmap.read_text()
+          replacements = {
+              "> Version 2.4 · Updated 2026-08-09": "> Version 2.5 · Updated 2026-08-09",
+              "| **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ▶ in progress: #77/#78/#79 complete; #80 implementation active |": "| **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ▶ in progress: #77/#78/#79/#80 complete; #81 next; #82 blocked by #81 |",
+              "- roadmap Stage 4 = #62 structured configuration Phase 5, current with #79 complete and #80 implementation active.": "- roadmap Stage 4 = #62 structured configuration Phase 5, current with #80 complete and #81 next.",
+              "#80 — sparse global/compression/rate-limit operations (implementation active)\n    ↓\n#81 → #82 — remaining Phase 5 structured configuration (blocked until #80 merges)": "#80 — sparse global/compression/rate-limit operations (complete)\n    ↓\n#81 — Global and Traffic Controls UI migration (next)\n    ↓\n#82 — Phase 5 E2E/accessibility/adoption closure (blocked until #81 merges)",
+              "The current serial\nPhase 5 item is #80 and its backend/API implementation is active; #81 and #82 remain downstream until that evidence merges.": "The #80 backend/API operation tranche is complete. The next serial Phase 5 item is #81; #82 remains blocked until #81 merges with evidence.",
+              "Closed-world generated lifecycle authority (#89) is complete. #79 is complete and\n#80 is the current serial structured-configuration implementation; #81 and #82 remain\nblocked until #80 merges with evidence.": "Closed-world generated lifecycle authority (#89) is complete. #80 is complete and\n#81 is the next serial structured-configuration item; #82 remains blocked until\n#81 merges with evidence.",
+              "closed-world lifecycle authority have since completed on `main`; the serial\nstructured-configuration programme is now implementing #80.": "closed-world lifecycle authority and the #80 sparse global-table operations have\nsince completed on `main`; the serial structured-configuration programme now\nadvances to #81.",
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f"missing expected roadmap text: {old!r}")
+              text = text.replace(old, new)
+          roadmap.write_text(text)
+
+          status = Path("docs/status.md")
+          status_text = status.read_text()
+          old = "> Version 2.4 · Updated 2026-08-09"
+          new = "> Version 2.5 · Updated 2026-08-09"
+          if old not in status_text:
+              raise SystemExit("missing expected status version marker")
+          status.write_text(status_text.replace(old, new, 1))
+          PY
+
+      - name: Validate documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+
+      - name: Publish clean handoff commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/issue80-handoff.yml
+          git add docs/roadmap/README.md docs/status.md
+          git diff --cached --check
+          git config user.name "Marmitakus"
+          git config user.email "72155289+victornife@users.noreply.github.com"
+          git commit -m "docs: hand off Phase 5 from issue 80 to issue 81" -m "Signed-off-by: Marmitakus <72155289+victornife@users.noreply.github.com>"
+          git push origin HEAD
