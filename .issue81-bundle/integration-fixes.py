@@ -169,6 +169,14 @@ replace_once(
     "traffic controls compatibility input",
 )
 
+traffic_editor = Path("internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx")
+replace_once(
+    traffic_editor,
+    '''  const routeOptions = current.servers;''',
+    '''  const routeOptions = current.servers ?? [];''',
+    "optional server projection default",
+)
+
 # Bring older direct PendingPatchDraft fixtures up to the v4 internal contract.
 mutation_test = Path("internal/admin/ui/src/test/config-mutation-machine.test.ts")
 replace_once(
@@ -226,10 +234,11 @@ text = traffic_test.read_text(encoding="utf-8")
 for marker in (
     '      encoders: ["gzip", "br"],\n      minSize: "1k",',
     '      encoders: ["gzip"],\n      minSize: "1k",',
+    '        encoders: ["gzip"],\n        minSize: "1k",',
 ):
     if marker not in text:
         raise SystemExit(f"{traffic_test}: compression fixture marker missing: {marker!r}")
-    text = text.replace(marker, marker.replace('\n      minSize', '\n      level: 0,\n      minSize'))
+    text = text.replace(marker, marker.replace('\n' + marker.split('\n')[1].split('minSize')[0] + 'minSize', '\n' + marker.split('\n')[1].split('minSize')[0] + 'level: 0,\n' + marker.split('\n')[1].split('minSize')[0] + 'minSize'))
 cache_marker = '''      diskPath: "/var/cache",
       defaultTTL: "60s",
       staleWhileRevalidate: "10s",'''
