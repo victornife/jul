@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.4 · Updated 2026-08-08
+> Version 2.4 · Updated 2026-08-09
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
