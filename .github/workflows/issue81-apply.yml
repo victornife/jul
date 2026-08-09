@@ -317,10 +317,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --dir "${CONSOLE_UI}" run typecheck
-          pnpm --dir "${CONSOLE_UI}" run lint
-          pnpm --dir "${CONSOLE_UI}" run test:coverage
-          pnpm --dir "${CONSOLE_UI}" run build
+          pnpm --dir "${CONSOLE_UI}" run typecheck 2>&1 | tee issue81-frontend.log
+          pnpm --dir "${CONSOLE_UI}" run lint 2>&1 | tee -a issue81-frontend.log
+          pnpm --dir "${CONSOLE_UI}" run test:coverage 2>&1 | tee -a issue81-frontend.log
+          pnpm --dir "${CONSOLE_UI}" run build 2>&1 | tee -a issue81-frontend.log
+
+      - name: Upload frontend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: issue81-frontend-diagnostics
+          path: issue81-frontend.log
+          if-no-files-found: ignore
 
       - name: Run docs and formatting checks
         shell: bash
