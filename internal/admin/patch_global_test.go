@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -154,13 +155,19 @@ func TestApplyGlobalSetRejectsInvalidFieldsWithoutMutation(t *testing.T) {
 }
 
 func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
+	workerThreads := lifecycle.InitialGOMAXPROCS() + 1
+	if workerThreads == 4 {
+		workerThreads++
+	}
+	workerThreadsText := strconv.Itoa(workerThreads)
+
 	hot, err := executePatchBatch(context.Background(), patchBatchBaseline{
 		Config: issue80BaseConfig(),
 		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
 	}, "", []patchRequest{{
 		Op: "global_set",
 		Global: &globalPatch{
-			WorkerThreads:   ptr("auto"),
+			WorkerThreads:   &workerThreadsText,
 			LogLevel:        ptr("debug"),
 			ShutdownTimeout: ptr("45s"),
 			ReloadTimeout:   ptr("25s"),
@@ -183,7 +190,7 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 			t.Errorf("missing canonical hot lifecycle change for %s: %+v", path, hot.Lifecycle)
 		}
 	}
-	if strings.Contains(hot.summaryText(), "debug") || strings.Contains(hot.summaryText(), "auto") || strings.Contains(hot.summaryText(), "25s") {
+	if strings.Contains(hot.summaryText(), "debug") || strings.Contains(hot.summaryText(), workerThreadsText) || strings.Contains(hot.summaryText(), "25s") {
 		t.Fatalf("summary leaked values: %q", hot.summaryText())
 	}
 	if hot.CandidateConfig.Global.ReloadTimeout.Std() != 25*time.Second {
