@@ -180,7 +180,7 @@ jobs:
           PY
 
           python3 /tmp/issue81-integration-fixes.py
-          gofmt -w internal/admin/projection_issue81_test.go internal/admin/raw_preview_test.go internal/admin/route_catalog_test.go
+          gofmt -w internal/admin/projection_types.go internal/admin/projections.go internal/admin/projection_issue81_test.go internal/admin/raw_preview_test.go internal/admin/route_catalog_test.go
           git diff --check
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
