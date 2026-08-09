@@ -363,4 +363,5 @@ jobs:
             exit 1
           fi
 
-          git push origin "HEAD:${TARGET_BRANCH}"
+          git fetch origin "${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          git push --force-with-lease origin "HEAD:${TARGET_BRANCH}"
