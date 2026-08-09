@@ -414,3 +414,14 @@ replacement = (
 )
 mtls_text = mtls_text[: match.start()] + replacement + mtls_text[match.end() :]
 mtls_path.write_text(mtls_text, encoding="utf-8")
+
+# Temporary reconstruction diagnostics; removed after the callback fix.
+for rel, ranges in (
+    ("internal/admin/ui/src/test/consolev2.test.tsx", ((578, 592), (720, 734), (838, 852))),
+    ("internal/admin/ui/src/test/mtls.test.tsx", ((247, 261),)),
+):
+    lines = Path(rel).read_text(encoding="utf-8").splitlines()
+    print(f"ISSUE81_CALLBACK_DEBUG {rel}")
+    for start, end in ranges:
+        for number in range(start, min(end, len(lines)) + 1):
+            print(f"{number:04d}: {lines[number - 1]}")
