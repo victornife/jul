@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.4 · Updated 2026-08-09
+> Version 2.5 · Updated 2026-08-09
 >
 > This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
 > with a portfolio model. Delivered feature maturity remains authoritative in the
@@ -36,7 +36,7 @@ portfolio has parallel lanes.
 | **1 — Immediate non-cache correctness** | Strict configuration, HTTP/3 mTLS, ACME, compression, access logs, metrics and WAF contracts | No known non-cache P0; selected P1 corrections documented and tested | ✅ verified in `v1.32.1-rc.1`; #129 remains a non-blocking quality track |
 | **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ✅ complete: #131, #133 and #132 merged; #134 recertification closed #107; the cache retains GA |
 | **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ✅ complete: #89 |
-| **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ▶ in progress: #77/#78/#79 complete; #80 implementation active |
+| **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ▶ in progress: #77/#78/#79/#80 complete; #81 next; #82 blocked by #81 |
 | **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ⬜ planned |
 | **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ⬜ planned |
 | **7 — Selected runtime dynamics** | Value-ranked certificate, credential, logging, sink, cache-policy, and Alt-Svc transitions | Selected settings are safely dynamic; structural settings retain planned restart | ⬜ planned |
@@ -53,7 +53,7 @@ The roadmap deliberately consolidates the more granular numbering in #62:
 - roadmap Stage 1 = the completed #62 Stage 2 non-cache correctness tranche;
 - roadmap Stage 2 = #62 Stage 3 cache correctness and recertification (complete);
 - roadmap Stage 3 = #62 lifecycle authority (#89), complete;
-- roadmap Stage 4 = #62 structured configuration Phase 5, current with #79 complete and #80 implementation active.
+- roadmap Stage 4 = #62 structured configuration Phase 5, current with #80 complete and #81 next.
 
 This avoids two competing execution models. #62 owns issue-level status;
 this roadmap owns the durable portfolio sequence.
@@ -77,9 +77,11 @@ v1.32.1-rc.1 — independently verified published prerelease (complete; not stab
     ↓
 #79 — typed App/upstream creation/deletion (complete)
     ↓
-#80 — sparse global/compression/rate-limit operations (implementation active)
+#80 — sparse global/compression/rate-limit operations (complete)
     ↓
-#81 → #82 — remaining Phase 5 structured configuration (blocked until #80 merges)
+#81 — Global and Traffic Controls UI migration (next)
+    ↓
+#82 — Phase 5 E2E/accessibility/adoption closure (blocked until #81 merges)
     ↓
 #115 → #118 — core architecture decisions
     ↓
@@ -91,8 +93,7 @@ prerelease checkpoint are complete and independently verified. The cache
 correctness programme is complete and #107 is closed: the response cache retains
 GA on the strength of the 2026-08-07 recertification. Closed-world lifecycle
 authority (#89), the shared atomic patch assessment (#77), typed Route workflows
-(#78), and typed App/upstream workflows (#79) are complete. The current serial
-Phase 5 item is #80 and its backend/API implementation is active; #81 and #82 remain downstream until that evidence merges.
+(#78), and typed App/upstream workflows (#79) are complete. The #80 backend/API operation tranche is complete. The next serial Phase 5 item is #81; #82 remains blocked until #81 merges with evidence.
 Shared edits to the configuration schema, lifecycle, composition root, reload
 transaction, or Console patch contracts remain serial.
 
@@ -115,9 +116,9 @@ transaction, or Console patch contracts remain serial.
 
 ### Remaining immediate correctness
 
-Closed-world generated lifecycle authority (#89) is complete. #79 is complete and
-#80 is the current serial structured-configuration implementation; #81 and #82 remain
-blocked until #80 merges with evidence.
+Closed-world generated lifecycle authority (#89) is complete. #80 is complete and
+#81 is the next serial structured-configuration item; #82 remains blocked until
+#81 merges with evidence.
 
 ### Required quality foundation
 
@@ -135,8 +136,9 @@ checksums, embedded SPDX SBOMs, and all provenance/SBOM attestations passed. The
 GitHub Release is published as a prerelease; see the
 [candidate evidence](../release-candidates/v1.32.1-rc.1.md). Stable publication
 remains a later explicit decision. The response-cache correctness programme and
-closed-world lifecycle authority have since completed on `main`; the serial
-structured-configuration programme is now implementing #80.
+closed-world lifecycle authority and the #80 sparse global-table operations have
+since completed on `main`; the serial structured-configuration programme now
+advances to #81.
 
 ## Core Gateway Completeness backlog
 
