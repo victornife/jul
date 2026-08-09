@@ -393,7 +393,7 @@ for rel, expected in (
             f'{indent}if (typeof requestBody !== "string") {{\n'
             f'{indent}  throw new Error("expected string request body");\n'
             f"{indent}}}\n"
-            f"{indent}onPatch(requestBody);"
+            f"{indent}onPatch(requestBody as string);"
         )
         replacements.append((match.start(), match.end(), replacement))
     for start, end, replacement in reversed(replacements):
