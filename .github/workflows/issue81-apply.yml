@@ -7,13 +7,6 @@ on:
     paths:
       - .github/workflows/issue81-apply.yml
       - .issue81-bundle/integration-fixes.py
-  pull_request:
-    branches:
-      - main
-    types: [opened, reopened, synchronize]
-    paths:
-      - .github/workflows/issue81-apply.yml
-      - .issue81-bundle/integration-fixes.py
 
 permissions:
   contents: write
@@ -22,7 +15,7 @@ env:
   BASE_SHA: ba07efcf45fcf4e114e13ef17ba9261e5429e292
   FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
   CONSOLE_UI: internal/admin/ui
-  TARGET_BRANCH: ${{ github.head_ref || github.ref_name }}
+  TARGET_BRANCH: agent/issue-81-final
 
 jobs:
   apply-and-verify:
@@ -32,7 +25,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: agent/issue-81-global-traffic-controls
 
       - name: Reconstruct and verify implementation bundle
         shell: bash
