@@ -407,3 +407,45 @@ for rel, expected in (
     replacement_count += len(matches)
 if replacement_count != 4:
     raise SystemExit(f"expected 4 total request-body guards, found {replacement_count}")
+
+# Temporary diagnostics for the final three generated frontend failures.
+def print_around(rel: str, needle: str, before: int = 35, after: int = 110) -> None:
+    path = Path(rel)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if needle in line:
+            start = max(0, index - before)
+            end = min(len(lines), index + after + 1)
+            print(f"ISSUE81_SOURCE_BEGIN {rel} needle={needle!r} line={index + 1}")
+            for number in range(start, end):
+                print(f"{number + 1:04d}: {lines[number]}")
+            print(f"ISSUE81_SOURCE_END {rel} needle={needle!r}")
+            return
+    print(f"ISSUE81_SOURCE_MISSING {rel} needle={needle!r}")
+
+print_around(
+    "internal/admin/ui/src/test/consolev2.test.tsx",
+    "rate limit editor previews structured sparse operations",
+)
+print_around(
+    "internal/admin/ui/src/test/consolev2.test.tsx",
+    "cache raw handoff stores only a versioned marker",
+)
+print_around(
+    "internal/admin/ui/src/test/patch-preview-action.test.ts",
+    "allows a no-op preview to apply live without a candidate",
+    before=25,
+    after=45,
+)
+print_around(
+    "internal/admin/ui/src/api/client.ts",
+    "const TrafficControlsSchema",
+    before=130,
+    after=80,
+)
+print_around(
+    "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
+    'kind === "rate_limit"',
+    before=70,
+    after=150,
+)
