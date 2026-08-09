@@ -1,451 +1,109 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+
+PREVIOUS_PAYLOAD_COMMIT = "aa17e662cb57ff56d8d90e96827875a2378b2762"
+PREVIOUS_SCRIPT = ".issue81-bundle/integration-fixes.py"
+
+# Reuse the already-audited integration repair script from the immutable parent
+# commit, then layer the compatibility fixes discovered by the one-shot test run.
+previous = subprocess.check_output(
+    ["git", "show", f"{PREVIOUS_PAYLOAD_COMMIT}:{PREVIOUS_SCRIPT}"],
+    text=True,
+)
+exec(compile(previous, f"{PREVIOUS_PAYLOAD_COMMIT}:{PREVIOUS_SCRIPT}", "exec"), {"__name__": "__main__"})
 
 
 def replace_once(path: Path, old: str, new: str, label: str) -> None:
     text = path.read_text(encoding="utf-8")
+    if new in text:
+        return
     count = text.count(old)
     if count != 1:
         raise SystemExit(f"{path}: {label}: expected one anchor, found {count}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
-# Preserve legacy raw-editor handoffs without weakening the enhanced cache/raw
-# handoff. Legacy TOML stays memory-only and follows the historical raw-editor
-# validation/diff/apply path; only metadata-complete handoffs enter rawHandoff.
-handoff = Path("internal/admin/ui/src/lib/configDraftHandoff.ts")
-replace_once(
-    handoff,
-    '''export interface PendingRawDraft {
-  readonly kind: "toml";
-  readonly toml: string;
-  readonly baseVersion: string;
-  readonly previewDiff: ConfigDiff;
-  readonly lifecycle: PatchLifecycle;
-  readonly recommendedAction: "stage_restart" | "update_staged" | "none";
-  readonly pendingRestart: PendingRestartSnapshot;
-  readonly candidateState: "memory_only";
-}
-
-export interface LegacyPendingPatchDraftInput {''',
-    '''export interface PendingRawDraft {
-  readonly kind: "toml";
-  readonly toml: string;
-  readonly baseVersion: string;
-  readonly previewDiff: ConfigDiff;
-  readonly lifecycle: PatchLifecycle;
-  readonly recommendedAction: "stage_restart" | "update_staged" | "none";
-  readonly pendingRestart: PendingRestartSnapshot;
-  readonly candidateState: "memory_only";
-}
-
-/**
- * Compatibility input for raw editors that have not yet migrated to the
- * lifecycle-aware candidate preview. It remains same-tab and memory-only and is
- * deliberately never treated as an assessed cache/raw handoff.
- */
-export interface LegacyPendingRawDraft {
-  readonly kind: "toml";
-  readonly toml: string;
-}
-
-export interface LegacyPendingPatchDraftInput {''',
-    "legacy raw handoff type",
-)
-replace_once(
-    handoff,
-    '''export type PendingDraft = PendingRawDraft | PendingPatchDraft;
-export type PendingDraftInput = PendingRawDraft | LegacyPendingPatchDraftInput;''',
-    '''export type PendingDraft = PendingRawDraft | LegacyPendingRawDraft | PendingPatchDraft;
-export type PendingDraftInput = PendingRawDraft | LegacyPendingRawDraft | LegacyPendingPatchDraftInput;''',
-    "pending draft unions",
-)
-replace_once(
-    handoff,
-    '''  if (object.kind === "toml") {
-    // Raw handoffs are accepted only through setPendingDraft's in-memory value;
-    // normalization supports tests/direct callers but parseStored rejects them.
-    const diff = ConfigDiffSchema.safeParse(object.previewDiff);
-    const lifecycle = PatchLifecycleSchema.safeParse(object.lifecycle);
-    const pendingRestart = parsePendingSnapshot(object.pendingRestart);
-    if (
-      typeof object.toml !== "string" ||
-      typeof object.baseVersion !== "string" ||
-      !diff.success ||
-      !lifecycle.success ||
-      pendingRestart === undefined
-    ) {
-      return null;
-    }
-    const action = object.recommendedAction;
-    if (action !== "stage_restart" && action !== "update_staged" && action !== "none") return null;
-    return {
-      kind: "toml",
-      toml: object.toml,
-      baseVersion: object.baseVersion,
-      previewDiff: diff.data,
-      lifecycle: lifecycle.data,
-      recommendedAction: action,
-      pendingRestart,
-      candidateState: "memory_only",
-    };
-  }''',
-    '''  if (object.kind === "toml") {
-    // Raw handoffs are accepted only through setPendingDraft's in-memory value;
-    // parseStored still rejects every raw form. Metadata-complete handoffs use
-    // the lifecycle-aware path; legacy editors retain the historical raw flow.
-    if (typeof object.toml !== "string") return null;
-    const diff = ConfigDiffSchema.safeParse(object.previewDiff);
-    const lifecycle = PatchLifecycleSchema.safeParse(object.lifecycle);
-    const pendingRestart = parsePendingSnapshot(object.pendingRestart);
-    const action = object.recommendedAction;
-    if (
-      typeof object.baseVersion === "string" &&
-      diff.success &&
-      lifecycle.success &&
-      pendingRestart !== undefined &&
-      (action === "stage_restart" || action === "update_staged" || action === "none")
-    ) {
-      return {
-        kind: "toml",
-        toml: object.toml,
-        baseVersion: object.baseVersion,
-        previewDiff: diff.data,
-        lifecycle: lifecycle.data,
-        recommendedAction: action,
-        pendingRestart,
-        candidateState: "memory_only",
-      };
-    }
-    return { kind: "toml", toml: object.toml };
-  }''',
-    "normalize raw handoff compatibility",
-)
-
-config_panel = Path("internal/admin/ui/src/features/config/ConfigPanel.tsx")
-replace_once(
-    config_panel,
-    '''        if (handoff.kind === "toml") {
-          // Candidate and base are one inseparable unit. Never replace the
-          // pinned token with the newer raw-config response.
-          setRawHandoff(handoff);
-          setBaseline(raw);
-          setDraft(handoff.toml);
-          setBaseVersion(handoff.baseVersion);
-          if (data.base_version !== undefined && data.base_version !== handoff.baseVersion) {
-            setConflictVersion(data.base_version);
-          }
-        } else {''',
-    '''        if (handoff.kind === "toml") {
-          setBaseline(raw);
-          setDraft(handoff.toml);
-          if ("baseVersion" in handoff) {
-            // Candidate and base are one inseparable unit. Never replace the
-            // pinned token with the newer raw-config response.
-            setRawHandoff(handoff);
-            setBaseVersion(handoff.baseVersion);
-            if (data.base_version !== undefined && data.base_version !== handoff.baseVersion) {
-              setConflictVersion(data.base_version);
-            }
-          } else {
-            // Compatibility for raw editors outside issue #81. They retain the
-            // existing raw validation/diff path and do not inherit cache's
-            // lifecycle assessment or planned-restart claims.
-            setBaseVersion(data.base_version);
-          }
-        } else {''',
-    "legacy raw initialization",
-)
-
-# Keep component/test fixture compatibility while the server parser still
-# returns the complete projection. Callers may supply only the panel slice they
-# exercise; all issue #81 seed helpers already default absent sections safely.
+# The issue-81 projection is additive: older fixtures may omit any of the new
+# top-level sections. Keep the runtime parser aligned with the Partial public
+# type while production responses continue to supply the complete projection.
 client = Path("internal/admin/ui/src/api/client.ts")
-replace_once(
-    client,
-    '''export type TrafficControls = z.infer<typeof TrafficControlsSchema>;''',
-    '''export type TrafficControls = Partial<z.output<typeof TrafficControlsSchema>>;''',
-    "traffic controls compatibility input",
-)
-
-traffic_editor = Path("internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx")
-replace_once(
-    traffic_editor,
-    '''  const routeOptions = current.servers;''',
-    '''  const routeOptions = current.servers ?? [];''',
-    "optional server projection default",
-)
-replace_once(
-    traffic_editor,
-    '''                  void purgeCache()
-                    .then(() => setPurgeMessage("Cache purged."))
-                    .catch(() => setPurgeMessage("Could not purge the cache."));''',
-    '''                  void purgeCache()
-                    .then(() => {
-                      setPurgeMessage("Cache purged.");
-                    })
-                    .catch(() => {
-                      setPurgeMessage("Could not purge the cache.");
-                    });''',
-    "cache purge promise callbacks",
-)
-for old, new, label in (
-    (
-        '''onChange={(proxyConnectTimeout) => setReferenceLimits((previous) => ({ ...previous, proxyConnectTimeout }))}''',
-        '''onChange={(proxyConnectTimeout) => {
-                setReferenceLimits((previous) => ({ ...previous, proxyConnectTimeout }));
-              }}''',
-        "proxy connect callback",
-    ),
-    (
-        '''onChange={(proxyReadTimeout) => setReferenceLimits((previous) => ({ ...previous, proxyReadTimeout }))}''',
-        '''onChange={(proxyReadTimeout) => {
-                setReferenceLimits((previous) => ({ ...previous, proxyReadTimeout }));
-              }}''',
-        "proxy read callback",
-    ),
-    (
-        '''onChange={(proxySendTimeout) => setReferenceLimits((previous) => ({ ...previous, proxySendTimeout }))}''',
-        '''onChange={(proxySendTimeout) => {
-                setReferenceLimits((previous) => ({ ...previous, proxySendTimeout }));
-              }}''',
-        "proxy send callback",
-    ),
-    (
-        '''onChange={(maxFails) => setReferenceLimits((previous) => ({ ...previous, maxFails }))}''',
-        '''onChange={(maxFails) => {
-                setReferenceLimits((previous) => ({ ...previous, maxFails }));
-              }}''',
-        "max failures callback",
-    ),
-    (
-        '''onChange={(failTimeout) => setReferenceLimits((previous) => ({ ...previous, failTimeout }))}''',
-        '''onChange={(failTimeout) => {
-                setReferenceLimits((previous) => ({ ...previous, failTimeout }));
-              }}''',
-        "failure timeout callback",
-    ),
+for field, schema in (
+    ("compression", "CompressionProjectionSchema"),
+    ("rate_limit", "GlobalRateLimitProjectionSchema"),
+    ("cache", "CacheProjectionSchema"),
 ):
-    replace_once(traffic_editor, old, new, label)
-
-traffic_panel = Path("internal/admin/ui/src/features/traffic-controls/TrafficControlsPanel.tsx")
-for old, new, label in (
-    ('onEdit={() => setGlobalEditing(true)}', 'onEdit={() => { setGlobalEditing(true); }}', "global edit callback"),
-    ('onEdit={() => setEditing("compression")}', 'onEdit={() => { setEditing("compression"); }}', "compression edit callback"),
-    ('onEdit={() => setEditing("rate_limit")}', 'onEdit={() => { setEditing("rate_limit"); }}', "rate-limit edit callback"),
-    ('onEdit={() => setEditing("cache")}', 'onEdit={() => { setEditing("cache"); }}', "cache edit callback"),
-    ('onEdit={() => setEditing("limits")}', 'onEdit={() => { setEditing("limits"); }}', "limits edit callback"),
-    ('onEdit={() => setAccessLogEditing(true)}', 'onEdit={() => { setAccessLogEditing(true); }}', "access-log edit callback"),
-    ('onEdit={() => setTracingEditing(true)}', 'onEdit={() => { setTracingEditing(true); }}', "tracing edit callback"),
-    ('onClose={() => setGlobalEditing(false)}', 'onClose={() => { setGlobalEditing(false); }}', "global close callback"),
-    ('onClose={() => setEditing(null)}', 'onClose={() => { setEditing(null); }}', "traffic close callback"),
-    ('onClose={() => setTracingEditing(false)}', 'onClose={() => { setTracingEditing(false); }}', "tracing close callback"),
-    ('onClose={() => setAccessLogEditing(false)}', 'onClose={() => { setAccessLogEditing(false); }}', "access-log close callback"),
-):
-    replace_once(traffic_panel, old, new, label)
-
-builders = Path("internal/admin/ui/src/lib/trafficPatchBuilders.ts")
-replace_once(
-    builders,
-    '''    bodyLimit: route.client_max_body_size ?? "",
-    readTimeout: route.read_timeout ?? "",
-    writeTimeout: route.write_timeout ?? "",
-    idleTimeout: route.idle_timeout ?? "",''',
-    '''    bodyLimit: route.client_max_body_size,
-    readTimeout: route.read_timeout,
-    writeTimeout: route.write_timeout,
-    idleTimeout: route.idle_timeout,''',
-    "required server-limit projection fields",
-)
-
-console_test = Path("internal/admin/ui/src/test/consolev2.test.tsx")
-replace_once(
-    console_test,
-    '''    expect(t.compression?.encoders).toContain("gzip");
-    expect(t.rate_limit?.rate).toBe(100);''',
-    '''    expect(t.compression.encoders).toContain("gzip");
-    expect(t.rate_limit.rate).toBe(100);''',
-    "full traffic projection assertions",
-)
-
-# Bring older direct PendingPatchDraft fixtures up to the v4 internal contract.
-mutation_test = Path("internal/admin/ui/src/test/config-mutation-machine.test.ts")
-replace_once(
-    mutation_test,
-    '''        lifecycle: {
-          changes: [],
-          can_apply_hot: true,
-          can_stage_restart: true,
-          hot_paths: [],
-          restart_required_paths: [],
-          new_listener_only_paths: [],
-          ignored_deprecated_paths: [],
-          validation_rejected_paths: [],
-          pending_subsystems: [],
-        },
-      },''',
-    '''        lifecycle: {
-          changes: [],
-          can_apply_hot: true,
-          can_stage_restart: true,
-          hot_paths: [],
-          restart_required_paths: [],
-          new_listener_only_paths: [],
-          ignored_deprecated_paths: [],
-          validation_rejected_paths: [],
-          pending_subsystems: [],
-        },
-        recommendedAction: "hot",
-        pendingRestart: { state: "none", subsystems: [] },
-        candidateState: "not_requested",
-        requiresFreshPreview: false,
-      },''',
-    "mutation-machine v4 fixture",
-)
-
-preview_test = Path("internal/admin/ui/src/test/patch-preview-action.test.ts")
-replace_once(
-    preview_test,
-    '''    previewDiff: { summary: "1 change" },
-    lifecycle: lifecycle(),
-    ...overrides,''',
-    '''    previewDiff: { summary: "1 change" },
-    lifecycle: lifecycle(),
-    recommendedAction: "hot",
-    pendingRestart: { state: "none", subsystems: [] },
-    candidateState: "not_requested",
-    requiresFreshPreview: false,
-    ...overrides,''',
-    "patch-preview v4 fixture",
-)
-
-traffic_test = Path("internal/admin/ui/src/test/traffic-toml.test.ts")
-text = traffic_test.read_text(encoding="utf-8")
-# Every legacy CompressionDraft literal gets the newly round-tripped level.
-for marker in (
-    '      encoders: ["gzip", "br"],\n      minSize: "1k",',
-    '      encoders: ["gzip"],\n      minSize: "1k",',
-    '        encoders: ["gzip"],\n        minSize: "1k",',
-):
-    if marker not in text:
-        raise SystemExit(f"{traffic_test}: compression fixture marker missing: {marker!r}")
-    indent = marker.split('\n')[1].split('minSize')[0]
-    text = text.replace(
-        marker,
-        marker.replace(
-            '\n' + indent + 'minSize',
-            '\n' + indent + 'level: 0,\n' + indent + 'minSize',
-        ),
+    replace_once(
+        client,
+        f"  {field}: {schema},\n",
+        f"  {field}: {schema}.optional(),\n",
+        f"optional {field} projection",
     )
-cache_marker = '''      diskPath: "/var/cache",
-      defaultTTL: "60s",
-      staleWhileRevalidate: "10s",'''
-if cache_marker not in text:
-    raise SystemExit(f"{traffic_test}: cache generator fixture marker missing")
-text = text.replace(
-    cache_marker,
-    '''      diskPath: "/var/cache",
-      diskMaxSize: "",
-      defaultTTL: "60s",
-      staleWhileRevalidate: "10s",
-      staleIfError: "",''',
-)
-cache_warning = '''        diskPath: "",
-        defaultTTL: "60s",
-        staleWhileRevalidate: "",'''
-if cache_warning not in text:
-    raise SystemExit(f"{traffic_test}: cache warning fixture marker missing")
-text = text.replace(
-    cache_warning,
-    '''        diskPath: "",
-        diskMaxSize: "",
-        defaultTTL: "60s",
-        staleWhileRevalidate: "",
-        staleIfError: "",''',
-)
-traffic_test.write_text(text, encoding="utf-8")
 
-# Patch-preview requests must always carry a string JSON body. Fail the test
-# stub explicitly when that contract is broken; the guard gives TypeScript a
-# stable string narrowing without unsafe conversion or optional dereference.
-import re
+# op_index is an API index, not a human ordinal. Preserve the server's zero-based
+# discriminator in errors so operators can correlate it to the submitted batch.
+hook = Path("internal/admin/ui/src/lib/useRunPatchBatch.ts")
+replace_once(
+    hook,
+    "String(error.opIndex + 1)",
+    "String(error.opIndex)",
+    "zero-based failed operation index",
+)
 
-capture_pattern = re.compile(
-    r'^(?P<indent>[ \t]*)onPatch\(typeof init\?\.body === "string" \? init\.body : ""\);$',
-    re.MULTILINE,
-)
-replacement_count = 0
-for rel, expected in (
-    ("internal/admin/ui/src/test/consolev2.test.tsx", 3),
-    ("internal/admin/ui/src/test/mtls.test.tsx", 1),
-):
-    target = Path(rel)
-    source = target.read_text(encoding="utf-8")
-    matches = list(capture_pattern.finditer(source))
-    if len(matches) != expected:
-        raise SystemExit(f"{rel}: expected {expected} request-body captures, found {len(matches)}")
-    replacements = []
-    for index, match in enumerate(matches):
-        indent = match.group("indent")
-        on_patch = (
-            "onPatch(requestBody);"
-            if rel.endswith("consolev2.test.tsx") and index == 0
-            else "onPatch(requestBody as string);"
-        )
-        replacement = (
-            f"{indent}const requestBody = init?.body;\n"
-            f'{indent}if (typeof requestBody !== "string") {{\n'
-            f'{indent}  throw new Error("expected string request body");\n'
-            f"{indent}}}\n"
-            f"{indent}{on_patch}"
-        )
-        replacements.append((match.start(), match.end(), replacement))
-    for start, end, replacement in reversed(replacements):
-        source = source[:start] + replacement + source[end:]
-    target.write_text(source, encoding="utf-8")
-    replacement_count += len(matches)
-if replacement_count != 4:
-    raise SystemExit(f"expected 4 total request-body guards, found {replacement_count}")
+# The new lifecycle-aware preview always reads pending-restart state. Existing
+# component tests use fetch mocks written before that endpoint existed, and many
+# of them intentionally ignore the request URL. Provide a test-harness default
+# only when a mock does not explicitly mention the pending endpoint; tests that
+# exercise pending=true/failed pending requests retain full control.
+setup = Path("internal/admin/ui/src/test/setup.ts")
+text = setup.read_text(encoding="utf-8")
+marker = "function wrapIssue81Fetch"
+if marker not in text:
+    if 'import "@testing-library/jest-dom";\n' not in text:
+        raise SystemExit(f"{setup}: jest-dom setup anchor missing")
+    text = text.replace(
+        'import "@testing-library/jest-dom";\n',
+        'import "@testing-library/jest-dom";\nimport { vi } from "vitest";\n',
+        1,
+    )
+    text += r'''
 
-# Temporary diagnostics for the final three generated frontend failures.
-def print_around(rel: str, needle: str, before: int = 35, after: int = 110) -> None:
-    path = Path(rel)
-    lines = path.read_text(encoding="utf-8").splitlines()
-    for index, line in enumerate(lines):
-        if needle in line:
-            start = max(0, index - before)
-            end = min(len(lines), index + after + 1)
-            print(f"ISSUE81_SOURCE_BEGIN {rel} needle={needle!r} line={index + 1}")
-            for number in range(start, end):
-                print(f"{number + 1:04d}: {lines[number]}")
-            print(f"ISSUE81_SOURCE_END {rel} needle={needle!r}")
-            return
-    print(f"ISSUE81_SOURCE_MISSING {rel} needle={needle!r}")
+type Issue81FetchMock = typeof fetch & {
+  getMockImplementation?: () => ((...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>) | undefined;
+};
 
-print_around(
-    "internal/admin/ui/src/test/consolev2.test.tsx",
-    "rate limit editor previews structured sparse operations",
-)
-print_around(
-    "internal/admin/ui/src/test/consolev2.test.tsx",
-    "cache raw handoff stores only a versioned marker",
-)
-print_around(
-    "internal/admin/ui/src/test/patch-preview-action.test.ts",
-    "allows a no-op preview to apply live without a candidate",
-    before=25,
-    after=45,
-)
-print_around(
-    "internal/admin/ui/src/api/client.ts",
-    "const TrafficControlsSchema",
-    before=130,
-    after=80,
-)
-print_around(
-    "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-    'kind === "rate_limit"',
-    before=70,
-    after=150,
-)
+function issue81RequestPath(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === "string") return new URL(input, "http://localhost").pathname;
+  if (input instanceof URL) return input.pathname;
+  return new URL(input.url, "http://localhost").pathname;
+}
+
+function wrapIssue81Fetch(next: typeof fetch): typeof fetch {
+  const implementation = (next as Issue81FetchMock).getMockImplementation?.();
+  const handlesPendingRestart =
+    typeof implementation === "function" && implementation.toString().includes("pending-restart");
+
+  return vi.fn(async (...args: Parameters<typeof fetch>): Promise<Response> => {
+    if (issue81RequestPath(args[0]) === "/api/config/pending-restart" && !handlesPendingRestart) {
+      return new Response(JSON.stringify({ pending: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return next(...args);
+  }) as typeof fetch;
+}
+
+let issue81Fetch = wrapIssue81Fetch(globalThis.fetch);
+Object.defineProperty(globalThis, "fetch", {
+  configurable: true,
+  get(): typeof fetch {
+    return issue81Fetch;
+  },
+  set(next: typeof fetch) {
+    issue81Fetch = wrapIssue81Fetch(next);
+  },
+});
+'''
+    setup.write_text(text, encoding="utf-8")
