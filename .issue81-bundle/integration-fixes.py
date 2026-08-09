@@ -108,7 +108,7 @@ function wrapIssue81Fetch(next: typeof fetch): typeof fetch {
       });
     }
     return next(...args);
-  }) as typeof fetch;
+  });
 }
 
 let issue81Fetch = wrapIssue81Fetch(globalThis.fetch);
