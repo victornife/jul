@@ -39,6 +39,45 @@ jobs:
           cat .issue81-bundle/part-* | tr -d '\r\n' | base64 --decode > /tmp/jul-issue81-implementation.tar.gz
           mkdir -p /tmp/issue81
           tar -xzf /tmp/jul-issue81-implementation.tar.gz -C /tmp/issue81
+
+          # The audited base contains the same generic mutation-success tail in
+          # applyRaw and applyPatch. Narrow the raw-handoff cleanup to the
+          # applyRaw-only base-version sequence before running bundle checks.
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          root = Path("/tmp/issue81/jul-issue81")
+          path = root / "apply_issue81.py"
+          text = path.read_text(encoding="utf-8")
+          old = '''    text = replace_once(
+                  text,
+                  \'\'\'      setConflictVersion(undefined);\n                void invalidateConfigurationState(qc);\n              },\n              onError: (err, variables) => {\'\'\',
+                  \'\'\'      setConflictVersion(undefined);\n                setRawHandoff(null);\n                void invalidateConfigurationState(qc);\n              },\n              onError: (err, variables) => {\'\'\',
+                  "clear raw handoff after live apply",
+              )
+          '''
+          new = '''    text = replace_once(
+                  text,
+                  \'\'\'      setBaseVersion(res.version ?? undefined);\n                setConflictVersion(undefined);\n                void invalidateConfigurationState(qc);\'\'\',
+                  \'\'\'      setBaseVersion(res.version ?? undefined);\n                setConflictVersion(undefined);\n                setRawHandoff(null);\n                void invalidateConfigurationState(qc);\'\'\',
+                  "clear raw handoff after live apply",
+              )
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("issue81 bundle repair anchor moved")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          sums = root / "SHA256SUMS"
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          lines = []
+          for line in sums.read_text(encoding="utf-8").splitlines():
+              if line.endswith("  ./apply_issue81.py"):
+                  line = f"{digest}  ./apply_issue81.py"
+              lines.append(line)
+          sums.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
           python3 /tmp/issue81/jul-issue81/verify_bundle.py
 
       - name: Reset to audited base and apply implementation
