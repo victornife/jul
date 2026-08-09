@@ -1,0 +1,56 @@
+name: Issue 81 final lint hotfix
+
+on:
+  push:
+    branches:
+      - agent/issue-81-global-traffic-controls
+    paths:
+      - .github/workflows/issue81-finalize-hotfix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/issue-81-global-traffic-controls
+
+      - name: Keep only the required body assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.issue81-bundle/integration-fixes.py')
+          text = path.read_text(encoding='utf-8')
+          old_loop = '    for match in matches:\n        indent = match.group("indent")\n        replacement = (\n'
+          new_loop = '''    for index, match in enumerate(matches):
+              indent = match.group("indent")
+              on_patch = (
+                  "onPatch(requestBody);"
+                  if rel.endswith("consolev2.test.tsx") and index == 0
+                  else "onPatch(requestBody as string);"
+              )
+              replacement = (
+          '''
+          if text.count(old_loop) != 1:
+              raise SystemExit(f'expected one request-body replacement loop, found {text.count(old_loop)}')
+          text = text.replace(old_loop, new_loop, 1)
+          old_call = '            f"{indent}onPatch(requestBody as string);"\n'
+          new_call = '            f"{indent}{on_patch}"\n'
+          if text.count(old_call) != 1:
+              raise SystemExit(f'expected one generated onPatch call, found {text.count(old_call)}')
+          path.write_text(text.replace(old_call, new_call, 1), encoding='utf-8')
+          PY
+
+          rm -f .github/workflows/issue81-finalize-hotfix.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .issue81-bundle/integration-fixes.py .github/workflows
+          git commit -m "fix(ci): preserve required issue 81 body assertions"
+          git push origin HEAD:agent/issue-81-global-traffic-controls
