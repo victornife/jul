@@ -366,17 +366,51 @@ text = text.replace(
 )
 traffic_test.write_text(text, encoding="utf-8")
 
-# Narrow RequestInit.body without dereferencing an optional RequestInit in the
-# success branch. These are test callback fixes, not production behavior.
-unsafe_body_capture = 'onPatch(typeof init?.body === "string" ? init.body : "");'
-safe_body_capture = 'onPatch(typeof init?.body === "string" ? String(init?.body) : "");'
-for rel, expected in (
-    ("internal/admin/ui/src/test/consolev2.test.tsx", 3),
-    ("internal/admin/ui/src/test/mtls.test.tsx", 1),
-):
-    path = Path(rel)
-    text = path.read_text(encoding="utf-8")
-    count = text.count(unsafe_body_capture)
-    if count != expected:
-        raise SystemExit(f"{rel}: expected {expected} unsafe body capture(s), found {count}")
-    path.write_text(text.replace(unsafe_body_capture, safe_body_capture), encoding="utf-8")
+# Narrow RequestInit.body through stable local bindings. The first Console
+# callback receives a non-null RequestInit; the remaining callbacks do not.
+import re
+
+capture_pattern = re.compile(
+    r'^(?P<indent>[ \t]*)onPatch\(typeof init\?\.body === "string" \? init\.body : ""\);$',
+    re.MULTILINE,
+)
+
+console_path = Path("internal/admin/ui/src/test/consolev2.test.tsx")
+console_text = console_path.read_text(encoding="utf-8")
+console_matches = list(capture_pattern.finditer(console_text))
+if len(console_matches) != 3:
+    raise SystemExit(
+        f"{console_path}: expected 3 request-body captures, found {len(console_matches)}"
+    )
+console_replacements = []
+for index, match in enumerate(console_matches):
+    indent = match.group("indent")
+    if index == 0:
+        replacement = (
+            f'{indent}onPatch(typeof init.body === "string" ? init.body : "");'
+        )
+    else:
+        replacement = (
+            f"{indent}const requestBody = init?.body;\n"
+            f'{indent}onPatch(typeof requestBody === "string" ? requestBody : "");'
+        )
+    console_replacements.append((match.start(), match.end(), replacement))
+for start, end, replacement in reversed(console_replacements):
+    console_text = console_text[:start] + replacement + console_text[end:]
+console_path.write_text(console_text, encoding="utf-8")
+
+mtls_path = Path("internal/admin/ui/src/test/mtls.test.tsx")
+mtls_text = mtls_path.read_text(encoding="utf-8")
+mtls_matches = list(capture_pattern.finditer(mtls_text))
+if len(mtls_matches) != 1:
+    raise SystemExit(
+        f"{mtls_path}: expected 1 request-body capture, found {len(mtls_matches)}"
+    )
+match = mtls_matches[0]
+indent = match.group("indent")
+replacement = (
+    f"{indent}const requestBody = init?.body;\n"
+    f'{indent}onPatch(typeof requestBody === "string" ? requestBody : "");'
+)
+mtls_text = mtls_text[: match.start()] + replacement + mtls_text[match.end() :]
+mtls_path.write_text(mtls_text, encoding="utf-8")
