@@ -42,7 +42,7 @@ jobs:
 
           # The audited base contains the same generic mutation-success tail in
           # applyRaw and applyPatch. Replace the one patch-driver block identified
-          # by its diagnostic label with the applyRaw-only base-version anchor.
+          # by its diagnostic label with an edit bounded to the applyRaw section.
           python3 - <<'PY'
           from pathlib import Path
           import hashlib
@@ -58,13 +58,30 @@ jobs:
           block_end = text.index("    )\n", label_pos) + len("    )\n")
           if block_start < 0:
               raise SystemExit("issue81 bundle repair block start missing")
-          replacement = '''    text = replace_once(
-                  text,
-                  \'\'\'      setBaseVersion(res.version ?? undefined);\n                setConflictVersion(undefined);\n                void invalidateConfigurationState(qc);\'\'\',
-                  \'\'\'      setBaseVersion(res.version ?? undefined);\n                setConflictVersion(undefined);\n                setRawHandoff(null);\n                void invalidateConfigurationState(qc);\'\'\',
-                  "clear raw handoff after live apply",
-              )
-          '''
+
+          replacement_lines = [
+              '    apply_raw_start = text.index("  const applyRaw = useMutation({")',
+              '    apply_patch_start = text.index("  const applyPatch = useMutation({", apply_raw_start)',
+              '    apply_raw = text[apply_raw_start:apply_patch_start]',
+              "    old = '''      setConflictVersion(undefined);",
+              '      void invalidateConfigurationState(qc);',
+              "'''",
+              "    new = '''      setConflictVersion(undefined);",
+              '      setRawHandoff(null);',
+              '      void invalidateConfigurationState(qc);',
+              "'''",
+              '    if apply_raw.count(old) != 1:',
+              '        raise SystemExit(',
+              '            f"clear raw handoff after live apply: expected exactly one applyRaw anchor, "',
+              '            f"found {apply_raw.count(old)}"',
+              '        )',
+              '    text = (',
+              '        text[:apply_raw_start]',
+              '        + apply_raw.replace(old, new, 1)',
+              '        + text[apply_patch_start:]',
+              '    )',
+          ]
+          replacement = "\n".join(replacement_lines) + "\n"
           path.write_text(text[:block_start] + replacement + text[block_end:], encoding="utf-8")
 
           sums = root / "SHA256SUMS"
