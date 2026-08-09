@@ -3,28 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
-PREVIOUS_PAYLOAD_COMMIT = "f18f2d72f5384033009292dcc638d5ee931fedc2"
+PREVIOUS_PAYLOAD_COMMIT = "f032df9649f72e03220d1ccd35cd6b5788d64973"
 PREVIOUS_SCRIPT = ".issue81-bundle/integration-fixes.py"
 
-# Reuse the already-audited integration repair chain from the previous payload
-# commit, then fix the final frontend lint issue discovered by the one-shot run.
+# Reuse the complete audited repair chain from the previous payload commit.
 previous = subprocess.check_output(
     ["git", "show", f"{PREVIOUS_PAYLOAD_COMMIT}:{PREVIOUS_SCRIPT}"],
     text=True,
 )
 exec(compile(previous, f"{PREVIOUS_PAYLOAD_COMMIT}:{PREVIOUS_SCRIPT}", "exec"), {"__name__": "__main__"})
 
-# The request-body guard above each callback already narrows requestBody to a
-# string. Keeping an explicit `as string` assertion is redundant and rejected by
-# @typescript-eslint/no-unnecessary-type-assertion.
-for rel, expected in (
-    ("internal/admin/ui/src/test/consolev2.test.tsx", 2),
-    ("internal/admin/ui/src/test/mtls.test.tsx", 1),
-):
-    path = Path(rel)
-    text = path.read_text(encoding="utf-8")
-    old = "onPatch(requestBody as string);"
-    count = text.count(old)
-    if count != expected:
-        raise SystemExit(f"{rel}: expected {expected} redundant request-body assertions, found {count}")
-    path.write_text(text.replace(old, "onPatch(requestBody);"), encoding="utf-8")
+# The docs-check unit tests import helper modules and may leave Python bytecode
+# caches behind. They are runner-local build artifacts, not implementation
+# output, so ignore them in this reconstructed worktree's private exclude file
+# instead of letting the final cleanliness guard mistake them for source changes.
+exclude = Path(".git/info/exclude")
+text = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+pattern = "__pycache__/"
+if pattern not in text.splitlines():
+    if text and not text.endswith("\n"):
+        text += "\n"
+    exclude.write_text(text + pattern + "\n", encoding="utf-8")
