@@ -176,6 +176,98 @@ replace_once(
     '''  const routeOptions = current.servers ?? [];''',
     "optional server projection default",
 )
+replace_once(
+    traffic_editor,
+    '''                  void purgeCache()
+                    .then(() => setPurgeMessage("Cache purged."))
+                    .catch(() => setPurgeMessage("Could not purge the cache."));''',
+    '''                  void purgeCache()
+                    .then(() => {
+                      setPurgeMessage("Cache purged.");
+                    })
+                    .catch(() => {
+                      setPurgeMessage("Could not purge the cache.");
+                    });''',
+    "cache purge promise callbacks",
+)
+for old, new, label in (
+    (
+        '''onChange={(proxyConnectTimeout) => setReferenceLimits((previous) => ({ ...previous, proxyConnectTimeout }))}''',
+        '''onChange={(proxyConnectTimeout) => {
+                setReferenceLimits((previous) => ({ ...previous, proxyConnectTimeout }));
+              }}''',
+        "proxy connect callback",
+    ),
+    (
+        '''onChange={(proxyReadTimeout) => setReferenceLimits((previous) => ({ ...previous, proxyReadTimeout }))}''',
+        '''onChange={(proxyReadTimeout) => {
+                setReferenceLimits((previous) => ({ ...previous, proxyReadTimeout }));
+              }}''',
+        "proxy read callback",
+    ),
+    (
+        '''onChange={(proxySendTimeout) => setReferenceLimits((previous) => ({ ...previous, proxySendTimeout }))}''',
+        '''onChange={(proxySendTimeout) => {
+                setReferenceLimits((previous) => ({ ...previous, proxySendTimeout }));
+              }}''',
+        "proxy send callback",
+    ),
+    (
+        '''onChange={(maxFails) => setReferenceLimits((previous) => ({ ...previous, maxFails }))}''',
+        '''onChange={(maxFails) => {
+                setReferenceLimits((previous) => ({ ...previous, maxFails }));
+              }}''',
+        "max failures callback",
+    ),
+    (
+        '''onChange={(failTimeout) => setReferenceLimits((previous) => ({ ...previous, failTimeout }))}''',
+        '''onChange={(failTimeout) => {
+                setReferenceLimits((previous) => ({ ...previous, failTimeout }));
+              }}''',
+        "failure timeout callback",
+    ),
+):
+    replace_once(traffic_editor, old, new, label)
+
+traffic_panel = Path("internal/admin/ui/src/features/traffic-controls/TrafficControlsPanel.tsx")
+for old, new, label in (
+    ('onEdit={() => setGlobalEditing(true)}', 'onEdit={() => { setGlobalEditing(true); }}', "global edit callback"),
+    ('onEdit={() => setEditing("compression")}', 'onEdit={() => { setEditing("compression"); }}', "compression edit callback"),
+    ('onEdit={() => setEditing("rate_limit")}', 'onEdit={() => { setEditing("rate_limit"); }}', "rate-limit edit callback"),
+    ('onEdit={() => setEditing("cache")}', 'onEdit={() => { setEditing("cache"); }}', "cache edit callback"),
+    ('onEdit={() => setEditing("limits")}', 'onEdit={() => { setEditing("limits"); }}', "limits edit callback"),
+    ('onEdit={() => setAccessLogEditing(true)}', 'onEdit={() => { setAccessLogEditing(true); }}', "access-log edit callback"),
+    ('onEdit={() => setTracingEditing(true)}', 'onEdit={() => { setTracingEditing(true); }}', "tracing edit callback"),
+    ('onClose={() => setGlobalEditing(false)}', 'onClose={() => { setGlobalEditing(false); }}', "global close callback"),
+    ('onClose={() => setEditing(null)}', 'onClose={() => { setEditing(null); }}', "traffic close callback"),
+    ('onClose={() => setTracingEditing(false)}', 'onClose={() => { setTracingEditing(false); }}', "tracing close callback"),
+    ('onClose={() => setAccessLogEditing(false)}', 'onClose={() => { setAccessLogEditing(false); }}', "access-log close callback"),
+):
+    replace_once(traffic_panel, old, new, label)
+
+builders = Path("internal/admin/ui/src/lib/trafficPatchBuilders.ts")
+replace_once(
+    builders,
+    '''    bodyLimit: route.client_max_body_size ?? "",
+    readTimeout: route.read_timeout ?? "",
+    writeTimeout: route.write_timeout ?? "",
+    idleTimeout: route.idle_timeout ?? "",''',
+    '''    bodyLimit: route.client_max_body_size,
+    readTimeout: route.read_timeout,
+    writeTimeout: route.write_timeout,
+    idleTimeout: route.idle_timeout,''',
+    "required server-limit projection fields",
+)
+
+console_test = Path("internal/admin/ui/src/test/consolev2.test.tsx")
+replace_once(
+    console_test,
+    '''    expect(t.compression?.encoders).toContain("gzip");
+    expect(t.rate_limit?.rate).toBe(100);''',
+    '''    expect(t.compression.encoders).toContain("gzip");
+    expect(t.rate_limit.rate).toBe(100);''',
+    "full traffic projection assertions",
+)
 
 # Bring older direct PendingPatchDraft fixtures up to the v4 internal contract.
 mutation_test = Path("internal/admin/ui/src/test/config-mutation-machine.test.ts")
@@ -238,7 +330,14 @@ for marker in (
 ):
     if marker not in text:
         raise SystemExit(f"{traffic_test}: compression fixture marker missing: {marker!r}")
-    text = text.replace(marker, marker.replace('\n' + marker.split('\n')[1].split('minSize')[0] + 'minSize', '\n' + marker.split('\n')[1].split('minSize')[0] + 'level: 0,\n' + marker.split('\n')[1].split('minSize')[0] + 'minSize'))
+    indent = marker.split('\n')[1].split('minSize')[0]
+    text = text.replace(
+        marker,
+        marker.replace(
+            '\n' + indent + 'minSize',
+            '\n' + indent + 'level: 0,\n' + indent + 'minSize',
+        ),
+    )
 cache_marker = '''      diskPath: "/var/cache",
       defaultTTL: "60s",
       staleWhileRevalidate: "10s",'''
