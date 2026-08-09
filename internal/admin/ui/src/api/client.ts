@@ -1318,6 +1318,35 @@ export type ClientAuthPatch = {
   verify_san?: string[];
 };
 
+// GlobalPatch is the sparse, non-secret global_set payload. Omitted properties
+// preserve the existing value; intentional false/zero/empty values remain on
+// the wire because the operation is discriminated by op.
+export type GlobalPatch = {
+  worker_threads?: string;
+  log_level?: "debug" | "info" | "warn" | "error";
+  log_format?: "text" | "json";
+  shutdown_timeout?: string;
+  reload_timeout?: string;
+  redact_min_secret_length?: number;
+};
+
+export type CompressionPatch = {
+  enabled?: boolean;
+  encoders?: string[];
+  level?: number;
+  min_size?: string;
+  types?: string[];
+  precompressed?: boolean;
+};
+
+export type GlobalRateLimitPatch = {
+  enabled?: boolean;
+  key?: string;
+  rate?: number;
+  burst?: number;
+  max_conns?: number;
+};
+
 export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
@@ -1370,6 +1399,9 @@ export type ConfigPatch =
     }
   | { op: "upstream_add"; upstream: string; address: string; weight?: number; strategy?: string }
   | { op: "upstream_remove"; upstream: string }
+  | { op: "global_set"; global: GlobalPatch }
+  | { op: "compression_set"; compression: CompressionPatch }
+  | { op: "rate_limit_global_set"; rate_limit: GlobalRateLimitPatch }
   | ({ op: "location_toggle_require_client_cert"; enabled: boolean } & RouteTarget);
 
 // HealthCheckPatch is the upstream active health-check block the guided Apps

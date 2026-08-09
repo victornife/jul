@@ -562,9 +562,14 @@ resources. App deletion is one `upstream_remove` operation and is blocked while
 projected routes reference the pool; the drawer shows a bounded dependency list
 and links to Routes, while the backend re-checks references during preview so a
 race is rejected visibly. The server still enforces missing-target, final-server,
-and referenced-upstream protections. (Global-table edits — `[global]`, `[cache]`,
-`[compression]`, global `[rate_limit]` — keep their guided validated-TOML-upsert
-editors; dedicated `*_set` patch operations remain a follow-on.)
+and referenced-upstream protections. The backend/API also accepts sparse
+`global_set`, `compression_set`, and `rate_limit_global_set` operations. Omitted
+fields are preserved; explicit false, zero, empty string, and empty-list values
+retain their documented parser semantics; summaries list field names only. A
+candidate containing `global.log_format` or a retained-listener `max_conns`
+change is staged as one complete candidate. The current Global and Traffic
+Controls forms keep their guided validated-TOML-upsert path until #81; `[cache]`
+remains truthful stage-only and the raw editor remains available.
 
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,

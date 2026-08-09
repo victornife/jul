@@ -15,6 +15,7 @@ import (
 
 	"jul/internal/auth"
 	"jul/internal/config"
+	"jul/internal/middleware"
 	"jul/internal/rbac"
 	"jul/internal/server"
 	"jul/internal/waf"
@@ -299,17 +300,20 @@ func validateEffectiveConfig(ctx context.Context, effective *config.Config) erro
 // behavior and never publishes handlers, redaction state, or policies.
 func validateRuntimeComponents(ctx context.Context, cfg *config.Config) error {
 	if !waf.Compiled {
-		return waf.Check(cfg)
-	}
-	for i := range cfg.Servers {
-		for j := range cfg.Servers[i].Locations {
-			loc := cfg.Servers[i].Locations[j]
-			wcfg, ok := effectiveWAF(cfg, loc)
-			if !ok {
-				continue
-			}
-			if _, err := waf.New(ctx, wcfg, waf.Options{}); err != nil {
-				return fmt.Errorf("waf: %w", err)
+		if err := waf.Check(cfg); err != nil {
+			return err
+		}
+	} else {
+		for i := range cfg.Servers {
+			for j := range cfg.Servers[i].Locations {
+				loc := cfg.Servers[i].Locations[j]
+				wcfg, ok := effectiveWAF(cfg, loc)
+				if !ok {
+					continue
+				}
+				if _, err := waf.New(ctx, wcfg, waf.Options{}); err != nil {
+					return fmt.Errorf("waf: %w", err)
+				}
 			}
 		}
 	}
@@ -322,6 +326,16 @@ func validateRuntimeComponents(ctx context.Context, cfg *config.Config) error {
 			if _, err := auth.New(ctx, *loc.Auth, auth.Options{}); err != nil {
 				return fmt.Errorf("auth: %w", err)
 			}
+		}
+	}
+	if cfg.Compression.IsEnabled() {
+		if _, err := middleware.NewCompression(middleware.CompressionOptions{
+			Encoders: cfg.Compression.Encoders,
+			Level:    cfg.Compression.Level,
+			MinSize:  cfg.Compression.MinSize.Bytes(),
+			Types:    cfg.Compression.Types,
+		}); err != nil {
+			return fmt.Errorf("compression: %w", err)
 		}
 	}
 	return nil

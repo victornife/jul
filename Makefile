@@ -41,7 +41,11 @@ format:
 
 # Non-mutating formatting gate (matches CI). Fails if any file needs gofmt.
 format-check:
-	@files=$$(gofmt -l .); \
+	@files=$$(find . -type f -name '*.go' \
+		-not -path './.git/*' \
+		-not -path './vendor/*' \
+		-not -path './internal/admin/ui/node_modules/*' \
+		-exec gofmt -l {} +); \
 	if [ -n "$$files" ]; then \
 		echo "gofmt needed on:"; echo "$$files"; exit 1; \
 	fi
