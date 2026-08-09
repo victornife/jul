@@ -183,3 +183,12 @@ the soak test (criterion 5) was completed on 2026-07-04.
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | n/a — uses go-toml parser (Y1-08); q-value parser is covered by unit tests |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** panel shows compression enabled + active encoders |
+
+## Console round-trip behavior (#81)
+
+The Traffic Controls editor now initializes all six editable compression fields
+from the complete safe projection and sends one sparse `compression_set`.
+Reviewing without edits emits no operation. Disabling compression changes only
+`enabled`; dormant encoder order, `level`, `min_size`, MIME types, and
+`precompressed` remain intact. Explicit `false`, `0`, and intentionally empty
+encoder/type arrays are transmitted rather than dropped by truthiness checks.

@@ -210,3 +210,12 @@ the soak test (criterion 5) was completed on 2026-07-04.
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | n/a — uses config parser (Y1-08), no custom parser |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** reports rate-limited request count |
+
+## Console global-policy behavior (#81)
+
+The global editor uses the distinct complete global projection and a sparse
+`rate_limit_global_set`, while route projections and `route_set_rate_limit`
+remain unchanged and cannot use `max_conns`. Disabled policies retain dormant
+key/rate/burst/max-connections values. `max_conns` is listener-level and not
+unconditionally restart-required: the canonical lifecycle preview stages a
+retained-listener transition and may permit an all-new-listener transition.

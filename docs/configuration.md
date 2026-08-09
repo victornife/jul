@@ -1158,3 +1158,23 @@ under `-strict`.
 On failure `ok` is `false` and either `error` (single message) or `errors`
 (string array) is present.
 
+### Console handoff and planned-restart race safety (#81)
+
+A structured console preview carries the exact ordered operations, pinned base
+version, value-free diff and lifecycle result, validation and operation
+summaries, recommended action, candidate availability, and a value-free snapshot
+of managed pending-restart state. ConfigPanel loads current pending state before
+enabling its primary action. If the snapshot changed it re-previews the exact
+ordered operations against the pinned base; if the base moved it blocks and
+requires regeneration. It never pairs an old candidate with a newer token.
+
+A managed staged update preserves the original rollback base, and a mixed
+hot/restart candidate stages as one complete candidate. Final result correlation
+continues through the exact apply ID; overview values and unrelated polls are
+not success evidence. A `reload_timeout` edit uses the currently active timeout
+for its own transaction and governs later transactions.
+
+Full candidate TOML remains a `config:raw` capability and memory-only UI state.
+The versioned browser-storage handoff contains only established non-secret
+structured operations and preview metadata. Literal candidate persistence was
+intentionally not implemented because it would weaken the raw/secret boundary.

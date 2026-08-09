@@ -306,3 +306,13 @@ When work changes state:
 - [Operating model](../operating-model.md)
 - [Core Gateway Completeness](../specs/core-gateway-completeness.md)
 - [Combined audit](../audit/combined-audit-2026-08-03.md)
+
+### P5-05 / issue #81 implementation boundary
+
+P5-05 migrates Global, Compression, global Rate Limit, and adjacent server
+Limits to sparse typed patches, and makes the existing complete cache table
+stage-only with pinned raw handoff safety. Deferred work remains explicit: no
+`cache_set`, no dynamic cache hot swap, no combined `admin_set`, and no
+`access_log_set`. Mark this item delivered only after the exact implementation
+SHA has full Go, Console, E2E, documentation, generated-file, and `make ci-pr`
+evidence.

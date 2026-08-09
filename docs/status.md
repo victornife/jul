@@ -224,3 +224,13 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 | 2026-07-11 | 1.32 | **L4 stream proxy soak completed + promotion to GA.** Isolated 8h Linux soak (`TestSoakUDPChurn`) completed with 54,892,354 sends and 0 errors; goroutine/heap growth stayed bounded. Evidence logged in the soak log and status table. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [stream.md](stream.md) |
 | 2026-07-12 | 1.32 | **WASM plugin soak completed + promotion to GA.** Isolated Linux smoke and 8h soak completed with 286/33,428 successful requests and 0 errors; plugin execution remained healthy throughout. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [plugins.md](plugins.md) |
 | 2026-07-13 | 1.32 | **HTTP/3 soak completed + promotion to GA.** Isolated 8h Linux soak completed with 55,302,486 successful requests and 0 failures over QUIC/TLS on `:8443`. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [http3.md](http3.md), [ga-push.md](ga-push.md) |
+
+### Issue #81 delivery note (2026-08-09)
+
+The Global and Traffic Controls console migration is implemented on the typed
+patch/planned-restart foundation from #80/PR #251. The scope deliberately does
+not add `cache_set`, dynamic cache hot swapping, combined `admin_set`, or
+`access_log_set`. Cache stays raw and stage-only; lifecycle remains registry
+owned; exact apply-ID finalization, history, rollback, and staged discard remain
+part of the same configuration workflow. Delivery state must not be promoted
+past *implemented* until the exact final commit passes the full project gates.
