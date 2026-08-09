@@ -40,9 +40,9 @@ jobs:
           mkdir -p /tmp/issue81
           tar -xzf /tmp/jul-issue81-implementation.tar.gz -C /tmp/issue81
 
-          # The audited base contains the same generic mutation-success tail in
-          # applyRaw and applyPatch. Replace the one patch-driver block identified
-          # by its diagnostic label with an edit bounded to the applyRaw section.
+          # Repair two exact-base assumptions in the patch driver before the
+          # bundle is verified: a duplicated mutation-success tail and the many
+          # historical Added headings in CHANGELOG.md.
           python3 - <<'PY'
           from pathlib import Path
           import hashlib
@@ -50,6 +50,7 @@ jobs:
           root = Path("/tmp/issue81/jul-issue81")
           path = root / "apply_issue81.py"
           text = path.read_text(encoding="utf-8")
+
           label = '"clear raw handoff after live apply"'
           if text.count(label) != 1:
               raise SystemExit("issue81 bundle repair label moved")
@@ -58,7 +59,6 @@ jobs:
           block_end = text.index("    )\n", label_pos) + len("    )\n")
           if block_start < 0:
               raise SystemExit("issue81 bundle repair block start missing")
-
           replacement_lines = [
               '    apply_raw_start = text.index("  const applyRaw = useMutation({")',
               '    apply_patch_start = text.index("  const applyPatch = useMutation({", apply_raw_start)',
@@ -82,7 +82,18 @@ jobs:
               '    )',
           ]
           replacement = "\n".join(replacement_lines) + "\n"
-          path.write_text(text[:block_start] + replacement + text[block_end:], encoding="utf-8")
+          text = text[:block_start] + replacement + text[block_end:]
+
+          old_line = '    write(changelog, insert_once(text, anchor, entry, "CHANGELOG Added section"))\n'
+          changelog_lines = [
+              '    unreleased = text.index("## [Unreleased]")',
+              '    added = text.index(anchor, unreleased)',
+              '    write(changelog, text[: added + len(anchor)] + entry + text[added + len(anchor) :])',
+          ]
+          if text.count(old_line) != 1:
+              raise SystemExit("issue81 changelog repair line moved")
+          text = text.replace(old_line, "\n".join(changelog_lines) + "\n", 1)
+          path.write_text(text, encoding="utf-8")
 
           sums = root / "SHA256SUMS"
           digest = hashlib.sha256(path.read_bytes()).hexdigest()
