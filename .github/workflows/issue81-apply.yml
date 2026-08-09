@@ -41,8 +41,8 @@ jobs:
           tar -xzf /tmp/jul-issue81-implementation.tar.gz -C /tmp/issue81
 
           # The audited base contains the same generic mutation-success tail in
-          # applyRaw and applyPatch. Narrow the raw-handoff cleanup to the
-          # applyRaw-only base-version sequence before running bundle checks.
+          # applyRaw and applyPatch. Replace the one patch-driver block identified
+          # by its diagnostic label with the applyRaw-only base-version anchor.
           python3 - <<'PY'
           from pathlib import Path
           import hashlib
@@ -50,23 +50,22 @@ jobs:
           root = Path("/tmp/issue81/jul-issue81")
           path = root / "apply_issue81.py"
           text = path.read_text(encoding="utf-8")
-          old = '''    text = replace_once(
-                  text,
-                  \'\'\'      setConflictVersion(undefined);\n                void invalidateConfigurationState(qc);\n              },\n              onError: (err, variables) => {\'\'\',
-                  \'\'\'      setConflictVersion(undefined);\n                setRawHandoff(null);\n                void invalidateConfigurationState(qc);\n              },\n              onError: (err, variables) => {\'\'\',
-                  "clear raw handoff after live apply",
-              )
-          '''
-          new = '''    text = replace_once(
+          label = '"clear raw handoff after live apply"'
+          if text.count(label) != 1:
+              raise SystemExit("issue81 bundle repair label moved")
+          label_pos = text.index(label)
+          block_start = text.rfind("    text = replace_once(\n", 0, label_pos)
+          block_end = text.index("    )\n", label_pos) + len("    )\n")
+          if block_start < 0:
+              raise SystemExit("issue81 bundle repair block start missing")
+          replacement = '''    text = replace_once(
                   text,
                   \'\'\'      setBaseVersion(res.version ?? undefined);\n                setConflictVersion(undefined);\n                void invalidateConfigurationState(qc);\'\'\',
                   \'\'\'      setBaseVersion(res.version ?? undefined);\n                setConflictVersion(undefined);\n                setRawHandoff(null);\n                void invalidateConfigurationState(qc);\'\'\',
                   "clear raw handoff after live apply",
               )
           '''
-          if text.count(old) != 1:
-              raise SystemExit("issue81 bundle repair anchor moved")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          path.write_text(text[:block_start] + replacement + text[block_end:], encoding="utf-8")
 
           sums = root / "SHA256SUMS"
           digest = hashlib.sha256(path.read_bytes()).hexdigest()
