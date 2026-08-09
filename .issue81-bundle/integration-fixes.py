@@ -58,6 +58,26 @@ replace_once(
     "optional rate-limit assertion",
 )
 
+# The workflow later inserts its pending-restart fallback immediately before
+# legacy `throw new Error(...)` anchors. Four old RouteDetail stubs use that
+# throw as the body of a one-line if; inserting multiple statements there makes
+# the final throw unconditional. Add braces first so the workflow's insertion
+# remains inside the guard and the real patch-preview request can reach onPatch.
+inline_preview_guard = '        if (url !== "/api/config/patch/preview") throw new Error(`unexpected fetch: ${url}`);'
+braced_preview_guard = '''        if (url !== "/api/config/patch/preview") {
+          throw new Error(`unexpected fetch: ${url}`);
+        }'''
+for rel, expected in (
+    ("internal/admin/ui/src/test/consolev2.test.tsx", 3),
+    ("internal/admin/ui/src/test/mtls.test.tsx", 1),
+):
+    path = Path(rel)
+    source = path.read_text(encoding="utf-8")
+    count = source.count(inline_preview_guard)
+    if count != expected:
+        raise SystemExit(f"{rel}: expected {expected} inline preview guards, found {count}")
+    path.write_text(source.replace(inline_preview_guard, braced_preview_guard), encoding="utf-8")
+
 # op_index is an API index, not a human ordinal. Preserve the server's zero-based
 # discriminator in errors so operators can correlate it to the submitted batch.
 hook = Path("internal/admin/ui/src/lib/useRunPatchBatch.ts")
@@ -151,5 +171,12 @@ old_admin_confirmation = '''    expect(await screen.findByText("Confirm admin ac
 '''
 if text.count(old_admin_confirmation) != 1:
     raise SystemExit(f"{write_test}: legacy admin confirmation anchor moved")
-text = text.replace(old_admin_confirmation, "", 1)
+text = text.replace(
+    old_admin_confirmation,
+    '''    // The issue-81 UI uses the same truthful Apply live confirmation copy
+    // for the server-requested admin-access retry. Confirm the second gate too.
+    await confirmApplyLive();
+''',
+    1,
+)
 write_test.write_text(text, encoding="utf-8")
