@@ -210,6 +210,10 @@ describe("configMutationReducer", () => {
           validation_rejected_paths: [],
           pending_subsystems: [],
         },
+        recommendedAction: "hot",
+        pendingRestart: { state: "none", subsystems: [] },
+        candidateState: "not_requested",
+        requiresFreshPreview: false,
       },
     });
     expect(s.patchDraft?.baseVersion).toBe("v1");

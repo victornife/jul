@@ -153,10 +153,15 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleSecurity) },
 	},
 	{
-		Pattern:    "/api/traffic-controls",
-		Methods:    []string{http.MethodGet},
-		Permission: rbac.StatusRead,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleTrafficControls) },
+		Pattern: "/api/traffic-controls",
+		Methods: []string{http.MethodGet},
+		AnyPermissions: []rbac.Permission{
+			rbac.StatusRead,
+			rbac.ConfigRead,
+			rbac.ConfigWrite,
+			rbac.ConfigApply,
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleTrafficControls) },
 	},
 	{
 		Pattern:    "/api/plugins",
@@ -219,10 +224,14 @@ var Catalog = []RouteSpec{
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigSettings) },
 	},
 	{
-		Pattern:    "/api/config/pending-restart",
-		Methods:    []string{http.MethodGet},
-		Permission: rbac.ConfigRead,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handlePendingRestart) },
+		Pattern: "/api/config/pending-restart",
+		Methods: []string{http.MethodGet},
+		AnyPermissions: []rbac.Permission{
+			rbac.ConfigRead,
+			rbac.ConfigWrite,
+			rbac.ConfigApply,
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handlePendingRestart) },
 	},
 	// Exact-ID managed apply lookup (AC-02). Retrieves the terminal (or
 	// pending) result of a managed apply transaction by its rl_N id. The
@@ -277,6 +286,12 @@ var Catalog = []RouteSpec{
 		Methods:    []string{http.MethodPost},
 		Permission: rbac.ConfigWrite,
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigValidate) },
+	},
+	{
+		Pattern:    "/api/config/preview",
+		Methods:    []string{http.MethodPost},
+		Permission: rbac.ConfigRaw,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPreview) },
 	},
 	{
 		Pattern:    "/api/config/diff",

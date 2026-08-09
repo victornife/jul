@@ -45,7 +45,7 @@ import { PermissionContext } from "@/auth/usePermission.ts";
 import {
   takePendingDraft,
   setPendingDraft,
-  type LegacyPendingPatchDraftInput,
+  type PendingPatchDraft,
 } from "@/lib/configDraftHandoff.ts";
 import type { ConfigDiff, ConfigPatch, PatchLifecycle } from "@/api/client.ts";
 
@@ -130,7 +130,7 @@ function structuredDraft({
   readonly baseVersion: string;
   readonly previewDiff: ConfigDiff;
   readonly lifecycle?: PatchLifecycle;
-}): LegacyPendingPatchDraftInput {
+}): PendingPatchDraft {
   return {
     kind: "patch",
     ops,
@@ -145,7 +145,22 @@ function structuredDraft({
     validationErrors: [],
     previewDiff,
     lifecycle,
+    recommendedAction: lifecycle.can_apply_hot
+      ? "hot"
+      : lifecycle.can_stage_restart
+        ? "stage_restart"
+        : "none",
+    pendingRestart: { state: "none", subsystems: [] },
+    candidateState: "not_requested",
+    requiresFreshPreview: false,
   };
+}
+
+async function confirmApplyLive(): Promise<void> {
+  const buttons = await screen.findAllByRole("button", { name: "Apply live" });
+  const confirm = buttons[buttons.length - 1];
+  if (confirm === undefined) throw new Error("Apply live confirmation button was not rendered.");
+  fireEvent.click(confirm);
 }
 
 // confirmRollback opens the rollback confirmation for the single seeded snapshot
@@ -239,7 +254,15 @@ function installRouter(): Counters {
         }),
       );
     }
-    throw new Error(`unexpected fetch: ${url}`);
+    if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
   }) as unknown as typeof fetch;
   return counters;
 }
@@ -315,18 +338,18 @@ describe("ConfigPanel apply flow", () => {
 
     // Edit → becomes dirty → validates → Apply enabled.
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyBtn = await screen.findByRole("button", { name: "Apply changes" });
+    const applyBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyBtn).toBeEnabled();
     });
 
     // Opening the confirm dialog must NOT apply yet.
     fireEvent.click(applyBtn);
-    expect(await screen.findByText("Apply configuration?")).toBeInTheDocument();
+    expect(await screen.findByText("Apply live?")).toBeInTheDocument();
     expect(counters.apply).toBe(0);
 
     // Confirm → apply happens, outcome banner shown.
-    fireEvent.click(screen.getByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     await waitFor(() => {
       expect(counters.apply).toBe(1);
     });
@@ -363,7 +386,15 @@ describe("ConfigPanel apply flow", () => {
         // async stream-reload outcome; a clean snapshot settles it to fully live.
         return Promise.resolve(json({ product: "jul", version: "1", status: [] }));
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     render(
@@ -374,12 +405,12 @@ describe("ConfigPanel apply flow", () => {
 
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyBtn = await screen.findByRole("button", { name: "Apply changes" });
+    const applyBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyBtn).toBeEnabled();
     });
     fireEvent.click(applyBtn);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
 
     // While the request is pending the button reports progress.
     expect(await screen.findByRole("button", { name: "Applying…" })).toBeInTheDocument();
@@ -415,7 +446,15 @@ describe("ConfigPanel apply flow", () => {
           }),
         );
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     render(
@@ -434,7 +473,7 @@ describe("ConfigPanel apply flow", () => {
     ).toBeInTheDocument();
 
     // An invalid draft must keep Apply disabled.
-    expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apply live" })).toBeDisabled();
   });
 
   it("reconciles the raw editor after an atomic patch apply", async () => {
@@ -481,7 +520,15 @@ describe("ConfigPanel apply flow", () => {
       if (url === "/api/config/diff") {
         return Promise.resolve(json({ summary: "1 change" }));
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -512,21 +559,21 @@ describe("ConfigPanel apply flow", () => {
     expect(candidateLabel?.textContent).toMatch(/proposed candidate/i);
     expect((candidateLabel?.textContent ?? "").toLowerCase()).not.toContain("editable");
     expect(document.querySelector('[data-source-view="persisted-editable"]')).toBeNull();
-    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    const patchBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(patchBtn).toBeEnabled();
     });
 
     // Apply the patch through the confirm gate.
     fireEvent.click(patchBtn);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     await waitFor(() => {
       expect(patchApplies).toBe(1);
     });
 
     // Patch mode is exited only after fetching the authoritative persisted raw
-    // configuration, so a fresh "Apply changes" button is disabled.
-    const rawBtn = await screen.findByRole("button", { name: "Apply changes" });
+    // configuration, so a fresh "Apply live" button is disabled.
+    const rawBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(rawBtn).toBeDisabled();
       expect(editor.value).toContain('listen = ":9000"');
@@ -539,7 +586,7 @@ describe("ConfigPanel apply flow", () => {
       expect(rawBtn).toBeEnabled();
     });
     fireEvent.click(rawBtn);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     await waitFor(() => {
       expect(rawApplyBaseVersion).toBe("v2");
     });
@@ -573,7 +620,15 @@ describe("ConfigPanel apply flow", () => {
           }),
         );
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -603,13 +658,13 @@ describe("ConfigPanel apply flow", () => {
     expect(diffOnlyLabel?.textContent).toMatch(/diff only/i);
     expect(document.querySelector('[data-source-view="candidate-readonly"]')).toBeNull();
 
-    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    const patchBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(patchBtn).toBeEnabled();
     });
 
     fireEvent.click(patchBtn);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     await waitFor(() => {
       expect(patchApplies).toBe(1);
     });
@@ -635,7 +690,15 @@ describe("ConfigPanel apply flow", () => {
           json({ ok: true, candidate: 'listen = ":9000"\n', base_version: "v1" }),
         );
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -676,7 +739,7 @@ describe("ConfigPanel apply flow", () => {
       ops: [{ op: "server_toggle_http3", listen: ":9000", enabled: true }],
     });
     // Apply is enabled only once the candidate has resolved.
-    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    const patchBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(patchBtn).toBeEnabled();
     });
@@ -696,7 +759,15 @@ describe("ConfigPanel apply flow", () => {
           json({ conflict: true, message: "stale", current_version: "v2" }, 409),
         );
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -723,7 +794,7 @@ describe("ConfigPanel apply flow", () => {
     expect(baselineLabel).not.toBeNull();
     expect(baselineLabel?.textContent).toMatch(/current persisted baseline/i);
     expect(document.querySelector('[data-source-view="candidate-readonly"]')).toBeNull();
-    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    const patchBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(patchBtn).toBeDisabled();
     });
@@ -758,7 +829,15 @@ describe("ConfigPanel apply flow", () => {
           }),
         );
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -790,12 +869,12 @@ describe("ConfigPanel apply flow", () => {
 
     // The diff-only operator can still apply — the server recomputes the ops
     // atomically, so no client-rendered candidate is trusted for apply.
-    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    const patchBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(patchBtn).toBeEnabled();
     });
     fireEvent.click(patchBtn);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     await waitFor(() => {
       expect(patchApplies).toBe(1);
     });
@@ -826,7 +905,15 @@ describe("ConfigPanel apply flow", () => {
           }),
         );
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -851,12 +938,12 @@ describe("ConfigPanel apply flow", () => {
     expect(source).not.toBeNull();
     expect(source?.textContent).toMatch(/temporarily unavailable/i);
 
-    const patchBtn = await screen.findByRole("button", { name: "Apply patch" });
+    const patchBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(patchBtn).toBeEnabled();
     });
     fireEvent.click(patchBtn);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     await waitFor(() => {
       expect(patchApplies).toBe(1);
     });
@@ -892,7 +979,15 @@ describe("ConfigPanel apply flow", () => {
       if (url === "/api/config/validate") {
         return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     render(
@@ -943,7 +1038,15 @@ describe("ConfigPanel apply flow", () => {
       if (url === "/api/config/validate") {
         return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     render(
@@ -962,7 +1065,7 @@ describe("ConfigPanel apply flow", () => {
     expect(screen.getByText(/listener/)).toBeInTheDocument();
 
     // Apply is disabled because hot applies are blocked by external divergence.
-    const applyBtn = await screen.findByRole("button", { name: "Apply changes" });
+    const applyBtn = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyBtn).toBeDisabled();
     });
@@ -1015,14 +1118,15 @@ describe("ConfigPanel apply flow", () => {
         <ConfigPanel />
       </Wrapper>,
     );
-    const applyPatchButton = await screen.findByRole("button", { name: "Apply patch" });
+    const applyPatchButton = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyPatchButton).not.toBeDisabled();
     });
     fireEvent.click(applyPatchButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
-    expect(await screen.findByText("Confirm admin access change?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Apply and change admin access" }));
+    await confirmApplyLive();
+    // The issue-81 UI uses the same truthful Apply live confirmation copy
+    // for the server-requested admin-access retry. Confirm the second gate too.
+    await confirmApplyLive();
     await waitFor(() => {
       expect(urls).toContain("/api/config/patch/apply?confirm_admin=true");
     });
@@ -1067,7 +1171,7 @@ describe("ConfigPanel apply flow", () => {
       </Wrapper>,
     );
 
-    const applyButton = await screen.findByRole("button", { name: "Apply patch" });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyButton).toBeEnabled();
     });
@@ -1113,12 +1217,12 @@ describe("ConfigPanel apply flow", () => {
       </Wrapper>,
     );
 
-    const applyButton = await screen.findByRole("button", { name: "Apply patch" });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyButton).toBeEnabled();
     });
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
 
     expect(
       await screen.findByText("Conflict — another change was applied while you were editing."),
@@ -1152,7 +1256,7 @@ describe("ConfigPanel apply flow", () => {
       </Wrapper>,
     );
 
-    const applyButton = await screen.findByRole("button", { name: "Apply patch" });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
     expect(applyButton).toBeDisabled();
     expect(
       screen.getAllByRole("note").some((note) => note.textContent.includes("config:apply")),
@@ -1196,12 +1300,12 @@ describe("ConfigPanel apply flow", () => {
       </Wrapper>,
     );
 
-    const applyButton = await screen.findByRole("button", { name: "Apply patch" });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyButton).toBeEnabled();
     });
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     await waitFor(() => {
       expect(applyBody).toEqual({ base_version: "v1", ops });
     });
@@ -1245,7 +1349,7 @@ describe("ConfigPanel apply flow", () => {
       expect(editor.value).toBe('listen = ":9000"\n');
     });
     expect(candidateCalls).toBe(1);
-    expect(screen.getByRole("button", { name: "Apply patch" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apply live" })).toBeDisabled();
   });
 
   it("stages a restart-required patch without raw config access", async () => {
@@ -1283,7 +1387,7 @@ describe("ConfigPanel apply flow", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Save for next restart" }));
     const dialog = await screen.findByRole("dialog", {
-      name: "Save structured patch for next restart?",
+      name: "Save for next restart?",
     });
     const confirm = dialog.querySelector("button.bg-jul-accent");
     if (!confirm) throw new Error("stage confirmation button missing");
@@ -1387,7 +1491,7 @@ describe("ConfigPanel apply flow", () => {
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
     const applyButton = await screen.findByRole(
       "button",
-      { name: "Apply changes" },
+      { name: "Apply live" },
       { timeout: 5000 },
     );
     await waitFor(
@@ -1397,7 +1501,7 @@ describe("ConfigPanel apply flow", () => {
       { timeout: 5000 },
     );
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }, { timeout: 5000 }));
+    await confirmApplyLive();
     expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
     await waitFor(
       () => {
@@ -1481,7 +1585,7 @@ describe("ConfigPanel apply flow", () => {
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
     const applyButton = await screen.findByRole(
       "button",
-      { name: "Apply changes" },
+      { name: "Apply live" },
       { timeout: 5000 },
     );
     await waitFor(
@@ -1491,7 +1595,7 @@ describe("ConfigPanel apply flow", () => {
       { timeout: 5000 },
     );
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }, { timeout: 5000 }));
+    await confirmApplyLive();
     expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
     // The brief 404s never trip the expiry banner: the shared grace keeps
     // polling until the terminal record arrives.
@@ -1561,12 +1665,12 @@ describe("ConfigPanel apply flow", () => {
     );
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyButton).toBeEnabled();
     });
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
     expect(await screen.findByText("Final result still unavailable")).toBeInTheDocument();
     // The expiry copy is explicit that this is NOT a success confirmation, names
@@ -1631,12 +1735,12 @@ describe("ConfigPanel apply flow", () => {
     );
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyButton).toBeEnabled();
     });
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     expect(await screen.findByText("Saved — final outcome pending")).toBeInTheDocument();
     await waitFor(() => {
       expect(recordReads).toBeGreaterThanOrEqual(1);
@@ -1709,12 +1813,12 @@ describe("ConfigPanel apply flow", () => {
     );
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyButton).toBeEnabled();
     });
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     // The immediate live outcome banner is shown right away — never delayed by,
     // nor downgraded to "pending" for, the supplemental ledger fetch.
     expect(await screen.findByText("Applied and live")).toBeInTheDocument();
@@ -1826,7 +1930,7 @@ describe("ConfigPanel apply flow", () => {
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
     const applyButton = await screen.findByRole(
       "button",
-      { name: "Apply changes" },
+      { name: "Apply live" },
       { timeout: 5000 },
     );
     await waitFor(
@@ -1836,7 +1940,7 @@ describe("ConfigPanel apply flow", () => {
       { timeout: 5000 },
     );
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }, { timeout: 5000 }));
+    await confirmApplyLive();
     // While pending, the deadline-aware hint is shown (not a success claim).
     expect(await screen.findByText(/Finalization expected by/)).toBeInTheDocument();
     // Once the terminal record merges, the finalization advisory renders — never
@@ -1895,12 +1999,12 @@ describe("ConfigPanel apply flow", () => {
     );
     const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
     fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
-    const applyButton = await screen.findByRole("button", { name: "Apply changes" });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
     await waitFor(() => {
       expect(applyButton).toBeEnabled();
     });
     fireEvent.click(applyButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));
+    await confirmApplyLive();
     expect(
       await screen.findByText("Configuration not changed — preflight timed out"),
     ).toBeInTheDocument();
