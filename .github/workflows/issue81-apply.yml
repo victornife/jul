@@ -1,12 +1,6 @@
 name: Issue 81 one-shot apply
 
 on:
-  push:
-    branches:
-      - agent/issue-81-global-traffic-controls
-    paths:
-      - .github/workflows/issue81-apply.yml
-      - .issue81-bundle/integration-fixes.py
   pull_request:
     branches:
       - main
@@ -14,6 +8,10 @@ on:
     paths:
       - .github/workflows/issue81-apply.yml
       - .issue81-bundle/integration-fixes.py
+
+concurrency:
+  group: issue81-final-v2-writer
+  cancel-in-progress: true
 
 permissions:
   contents: write
