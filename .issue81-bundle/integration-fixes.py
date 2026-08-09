@@ -81,3 +81,52 @@ replace_once(
     '''import "@testing-library/jest-dom";\nimport { vi } from "vitest";\n\ntype FetchMockWithImplementation = typeof fetch & {\n  getMockImplementation?: () =>\n    | ((...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>)\n    | undefined;\n};\n\nvi.mock("@/api/client.ts", async (importOriginal) => {\n  const actual = await importOriginal<typeof import("@/api/client.ts")>();\n  return {\n    ...actual,\n    fetchPendingRestart: async () => {\n      const currentFetch = globalThis.fetch as FetchMockWithImplementation;\n      const implementation = currentFetch.getMockImplementation?.();\n      if (\n        typeof implementation === "function" &&\n        implementation.toString().includes("pending-restart")\n      ) {\n        return actual.fetchPendingRestart();\n      }\n      return { pending: false };\n    },\n  };\n});\n''',
     "legacy pending-restart test compatibility",
 )
+
+# ConfigPanel's older tests build a legacy patch handoff because that was the
+# contract before issue #81. Their purpose is to exercise apply/finalization,
+# not the new stale-preview recovery path. Upgrade only this test helper to the
+# complete, already-authoritative draft contract so production still refreshes
+# genuinely legacy handoffs.
+write_test = Path("internal/admin/ui/src/test/console-v2-write.test.tsx")
+text = write_test.read_text(encoding="utf-8")
+old_import = "  type LegacyPendingPatchDraftInput,\n"
+new_import = "  type PendingPatchDraft,\n"
+if old_import not in text:
+    raise SystemExit(f"{write_test}: legacy draft import anchor missing")
+text = text.replace(old_import, new_import, 1)
+old_return = "}): LegacyPendingPatchDraftInput {"
+new_return = "}): PendingPatchDraft {"
+if old_return not in text:
+    raise SystemExit(f"{write_test}: structured draft return anchor missing")
+text = text.replace(old_return, new_return, 1)
+old_tail = '''    previewDiff,
+    lifecycle,
+  };
+}'''
+new_tail = '''    previewDiff,
+    lifecycle,
+    recommendedAction: lifecycle.can_apply_hot
+      ? "hot"
+      : lifecycle.can_stage_restart
+        ? "stage_restart"
+        : "none",
+    pendingRestart: { state: "none", subsystems: [] },
+    candidateState: "not_requested",
+    requiresFreshPreview: false,
+  };
+}'''
+if text.count(old_tail) != 1:
+    raise SystemExit(f"{write_test}: structured draft metadata anchor moved")
+text = text.replace(old_tail, new_tail, 1)
+
+# The migrated confirmation action is also named "Apply live". Keep legacy
+# tests scoped to the confirmation action rather than letting Testing Library
+# see both the page action and the modal action with the same accessible name.
+confirm_old = 'fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));'
+confirm_new = 'fireEvent.click((await screen.findAllByRole("button", { name: "Apply live" })).at(-1)!);'
+confirm_count = text.count(confirm_old)
+if confirm_count == 0:
+    raise SystemExit(f"{write_test}: no legacy apply confirmation selectors found")
+text = text.replace(confirm_old, confirm_new)
+text = text.replace('"Apply configuration?"', '"Apply live?"')
+write_test.write_text(text, encoding="utf-8")
