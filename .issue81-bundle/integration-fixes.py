@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import subprocess
 
 PREVIOUS_PAYLOAD_COMMIT = "aa17e662cb57ff56d8d90e96827875a2378b2762"
@@ -137,10 +138,18 @@ helper = '''async function confirmApplyLive(): Promise<void> {
 if text.count(helper_anchor) != 1:
     raise SystemExit(f"{write_test}: confirm helper anchor moved")
 text = text.replace(helper_anchor, helper, 1)
-confirm_old = 'fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));'
-confirm_count = text.count(confirm_old)
+confirm_pattern = re.compile(
+    r'fireEvent\.click\((?:await )?screen\.(?:find|get)ByRole\("button", \{ name: "Apply now" \}(?:, \{ timeout: 5000 \})?\)\);'
+)
+text, confirm_count = confirm_pattern.subn('await confirmApplyLive();', text)
 if confirm_count == 0:
     raise SystemExit(f"{write_test}: no legacy apply confirmation selectors found")
-text = text.replace(confirm_old, 'await confirmApplyLive();')
 text = text.replace('"Apply configuration?"', '"Apply live?"')
+text = text.replace('"Save structured patch for next restart?"', '"Save for next restart?"')
+old_admin_confirmation = '''    expect(await screen.findByText("Confirm admin access change?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply and change admin access" }));
+'''
+if text.count(old_admin_confirmation) != 1:
+    raise SystemExit(f"{write_test}: legacy admin confirmation anchor moved")
+text = text.replace(old_admin_confirmation, "", 1)
 write_test.write_text(text, encoding="utf-8")
