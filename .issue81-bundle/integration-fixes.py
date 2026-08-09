@@ -365,3 +365,20 @@ text = text.replace(
         staleIfError: "",''',
 )
 traffic_test.write_text(text, encoding="utf-8")
+
+# Strict RequestInit typing requires an explicit string guard before parsing
+# captured request bodies in three legacy component tests.
+for rel, expected in (
+    ("internal/admin/ui/src/test/consolev2.test.tsx", 2),
+    ("internal/admin/ui/src/test/mtls.test.tsx", 1),
+):
+    path = Path(rel)
+    text = path.read_text(encoding="utf-8")
+    old = "JSON.parse(init.body)"
+    count = text.count(old)
+    if count != expected:
+        raise SystemExit(f"{rel}: expected {expected} unsafe body parse(s), found {count}")
+    path.write_text(
+        text.replace(old, 'JSON.parse(typeof init?.body === "string" ? init.body : "")'),
+        encoding="utf-8",
+    )
