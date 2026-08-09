@@ -78,7 +78,7 @@ func TestWizardPatchIncludesCompression(t *testing.T) {
 	for _, op := range resp.Ops {
 		if op.Op == "compression_set" && op.Compression != nil && *op.Compression.Enabled {
 			found = true
-			if len(op.Compression.Encoders) == 0 {
+			if op.Compression.Encoders == nil || len(*op.Compression.Encoders) == 0 {
 				t.Error("compression_set op should include encoders")
 			}
 		}

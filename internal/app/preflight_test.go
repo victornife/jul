@@ -126,7 +126,7 @@ func TestPreflightApplyReturnsCandidate(t *testing.T) {
 	cfg := &config.Config{
 		Admin: config.AdminConfig{Token: "${env:PREFLIGHT_SECRET}"},
 		Servers: []config.ServerConfig{{
-			Listen:    ":8080",
+			Listen:    "127.0.0.1:0",
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
 		}},
 	}
@@ -158,6 +158,31 @@ func TestPreflightApplyReturnsCandidate(t *testing.T) {
 	}
 	if cand.Raw.Admin.Token != "${env:PREFLIGHT_SECRET}" {
 		t.Fatalf("candidate raw admin token = %q, want original reference", cand.Raw.Admin.Token)
+	}
+}
+
+func TestPreflightApplyUsesPreviousConfigForOwnedListenerWithoutSnapshot(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve test listener: %v", err)
+	}
+	defer ln.Close()
+
+	prev := config.ProxyTarget("127.0.0.1:9000", ln.Addr().String())
+	next, err := prev.Clone()
+	if err != nil {
+		t.Fatalf("clone config: %v", err)
+	}
+	next.Global.LogLevel = "debug"
+
+	p := Preflight{
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			return map[string]http.Handler{}, nil, nil
+		},
+		Stream: &mockStreamPreflighter{},
+	}
+	if _, err := p.Apply(context.Background(), next, prev, PreflightHot); err != nil {
+		t.Fatalf("owned previous listener was probed as new: %v", err)
 	}
 }
 

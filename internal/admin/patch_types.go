@@ -109,22 +109,35 @@ type patchRequest struct {
 	// addressed by Listen + ServerNames above.
 	ClientAuth *clientAuthDef `json:"client_auth,omitempty"`
 
-	// compression_set payload: the global [compression] block. The op replaces
-	// the block wholesale so the editor can toggle or reconfigure compression in
-	// a single structured edit.
+	// global_set payload: the supported non-secret [global] fields. Every field
+	// tracks presence so omission preserves the current value.
+	Global *globalPatch `json:"global,omitempty"`
+
+	// compression_set payload: the supported global [compression] fields. Every
+	// field tracks presence so explicit false/zero/empty values remain distinct
+	// from omission.
 	Compression *compressionPatch `json:"compression,omitempty"`
 }
 
-// compressionPatch carries the global [compression] settings the guided editor
-// controls. Replacing the block wholesale keeps the patch semantics simple and
-// matches how the wizard emits a complete compression block.
+// globalPatch carries the supported non-secret [global] settings. Legacy
+// compatibility-only access_log/error_log destinations are deliberately absent.
+type globalPatch struct {
+	WorkerThreads         *string `json:"worker_threads,omitempty"`
+	LogLevel              *string `json:"log_level,omitempty"`
+	LogFormat             *string `json:"log_format,omitempty"`
+	ShutdownTimeout       *string `json:"shutdown_timeout,omitempty"`
+	ReloadTimeout         *string `json:"reload_timeout,omitempty"`
+	RedactMinSecretLength *int    `json:"redact_min_secret_length,omitempty"`
+}
+
+// compressionPatch carries the sparse global [compression] settings.
 type compressionPatch struct {
-	Enabled       *bool    `json:"enabled,omitempty"`
-	Encoders      []string `json:"encoders,omitempty"`
-	Level         int      `json:"level,omitempty"`
-	MinSize       string   `json:"min_size,omitempty"` // size string, e.g. "1k"
-	Types         []string `json:"types,omitempty"`
-	Precompressed bool     `json:"precompressed,omitempty"`
+	Enabled       *bool     `json:"enabled,omitempty"`
+	Encoders      *[]string `json:"encoders,omitempty"`
+	Level         *int      `json:"level,omitempty"`
+	MinSize       *string   `json:"min_size,omitempty"` // size string, e.g. "1k"
+	Types         *[]string `json:"types,omitempty"`
+	Precompressed *bool     `json:"precompressed,omitempty"`
 }
 
 // locationMatch is the new match (type + path) for location_set_match. It
@@ -182,14 +195,16 @@ type locationWAF struct {
 	InlineRules       string   `json:"inline_rules,omitempty"`
 }
 
-// rateLimitPatch carries the per-location rate-limit fields the guided editor
-// controls. The patch replaces the location's rate_limit wholesale (it does not
-// merge), which matches how the WAF override works.
+// rateLimitPatch is the one wire payload behind the public "rate_limit" JSON
+// key. route_set_rate_limit adapts it to the existing complete/replace route
+// semantics and rejects MaxConns; rate_limit_global_set consumes it sparsely and
+// accepts MaxConns. Keeping one DTO avoids ambiguous duplicate JSON tags.
 type rateLimitPatch struct {
-	Enabled bool   `json:"enabled"`
-	Rate    int    `json:"rate,omitempty"`
-	Burst   int    `json:"burst,omitempty"`
-	Key     string `json:"key,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
+	Key      *string `json:"key,omitempty"`
+	Rate     *int    `json:"rate,omitempty"`
+	Burst    *int    `json:"burst,omitempty"`
+	MaxConns *int    `json:"max_conns,omitempty"`
 }
 
 // locationAuth carries the per-location access-control fields the guided auth

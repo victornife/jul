@@ -101,8 +101,24 @@ func patchReadAvailable(s *Server) bool {
 
 func decodePatchBatch(r *http.Request) (patchApplyRequest, error) {
 	var req patchApplyRequest
-	err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
+	err := decodePatchJSON(io.LimitReader(r.Body, 1<<16), &req)
 	return req, err
+}
+
+func decodePatchJSON(r io.Reader, dst any) error {
+	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("request body must contain exactly one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func writeEmptyPatchBatch(w http.ResponseWriter, subject string) {
@@ -183,7 +199,7 @@ func (s *Server) handleConfigPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req patchRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+	if err := decodePatchJSON(io.LimitReader(r.Body, 1<<16), &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

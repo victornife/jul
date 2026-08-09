@@ -298,72 +298,65 @@ only on a loopback/dedicated port, documented in [SECURITY.md](../../SECURITY.md
 global tables through structured patch-ops, instead of falling back to the raw
 TOML editor for those operations.
 
-**Status (2026 — Phase 1 delivered).** The **entity create/delete** gap is closed:
-six structured ops now cover the full lifecycle of servers, routes, and upstream
-pools (`server_add` / `server_remove`, `location_add` / `location_remove`,
-`upstream_add` / `upstream_remove`) — the operations that previously *had no
-structured path at all* and forced a raw TOML-fragment hand-off. They reuse the
-existing finders/builders and inherit the batch, optimistic-concurrency
-(`base_version`), validated-preflight, history, and audit machinery unchanged, so a
-create/delete previews as a diff and applies exactly like every edit-existing op.
-The **global-table** ops (`global_set` / `cache_set` / `compression_set` /
-`rate_limit_global_set` / `admin_set` / `access_log_set`) are **deferred to a
-follow-on**: those tables already have guided console editors that upsert a
-validated TOML table (a structured-enough path with diff review), whereas
-entity creation was genuinely raw-only — so this phase spends its budget on the
-higher-value gap and lets the global-table parity degrade gracefully per the risk
-note below.
+**Status (2026 — Phase 5 active).** Entity CRUD is delivered through typed,
+ordered operations for servers, routes, and upstream pools. Issue #80 adds the
+three selected sparse global-table operations: `global_set`, `compression_set`,
+and `rate_limit_global_set`. They use pointer/list presence, validate a copy
+before assigning, defensively copy request slices, and then rely on the shared
+marshal/reparse/default/validate executor. Operation summaries contain stable
+field names only. Preview and apply continue to use the closed-world lifecycle
+registry, so `global.log_format` remains restart-required and `max_conns` is
+conditional on retained versus all-new listener addresses.
 
-**Prior state.** The raw TOML editor has **full** parity (validate → diff → apply
-→ reload, optimistic concurrency, history/rollback). The structured patch-op layer
-(`internal/admin/patch.go`, `client.ts` `ConfigPatch`) was a curated **edit-existing**
-subset: it could retarget routes, toggle cache/rate-limit/WAF, edit locations and
-upstream backends, etc., but had **no create op** for a server/route/upstream pool
-(creation was a TOML-fragment hand-off to the raw editor) and **no structured op**
-for global tables.
+The current Console forms for Global settings and Traffic Controls still use
+the guided validated-TOML path; their migration to these operations is #81.
+Raw TOML remains the complete escape hatch.
 
-**Design — new patch-op shapes.** Reuse existing config structs; error if a create
-would duplicate an existing target and if a delete/target is missing; refuse an
-`upstream_remove` that would leave a dangling `proxy_pass` reference.
+**Prior state.** The raw TOML editor has full parity (validate → diff → apply →
+reload, optimistic concurrency, history/rollback). The structured patch layer
+first closed entity create/delete through #78/#79; #80 closes the selected
+backend/API global-table gap without introducing another executor or lifecycle
+list.
+
+**Delivered operation shapes.** The route and global rate-limit operations share
+one public `rate_limit` JSON key and are discriminated by `op`; route behavior
+remains a complete replacement and rejects global-only `max_conns`.
 
 ```
-# Delivered (Phase 1) — entity CRUD for servers / routes / upstream pools
-server_add            {op, listen, server_names?}                     // bare block; lint-warns until a route is added
-server_remove         {op, listen, server_names?}                     // refuses the last remaining server block
-location_add          {op, listen, server_names?, match_set, action}  // action via setLocationAction (proxy/static/redirect/return/deny)
+# Delivered entity CRUD
+server_add            {op, listen, server_names?}
+server_remove         {op, listen, server_names?}
+location_add          {op, listen, server_names?, match_set, action}
 location_remove       {op, listen, server_names?, match_type, path}
-upstream_add          {op, upstream, address, weight?, strategy?}      // one static backend; strategy round_robin|weighted_round_robin|least_conn
-upstream_remove       {op, upstream}                                   // refuses if a route's proxy_pass still references it
+upstream_add          {op, upstream, address, weight?, strategy?}
+upstream_remove       {op, upstream}
 
-# Deferred (Phase 2) — global-table structured ops (guided TOML-upsert editors cover these today)
-global_set            {op, global:{worker_threads?,log_level?,log_format?,access_log?,error_log?,shutdown_timeout?}}   // sparse
-cache_set             {op, cache:{enabled,max_size?,max_object_size?,default_ttl?,...}}
-compression_set       {op, compression:{enabled,encoders?,level?,min_size?,types?}}
-rate_limit_global_set {op, rate_limit:RateLimitPatch}
-admin_set             {op, admin:{...}, confirm:true}   // GUARDED — ties to the admin self-lockout guard
-access_log_set        {op, access_log:{file?/syslog?/rotation?}}
+# Selected sparse global-table operations (#80)
+global_set            {op, global:{worker_threads?,log_level?,log_format?,shutdown_timeout?,reload_timeout?,redact_min_secret_length?}}
+compression_set       {op, compression:{enabled?,encoders?,level?,min_size?,types?,precompressed?}}
+rate_limit_global_set {op, rate_limit:{enabled?,key?,rate?,burst?,max_conns?}}
 ```
 
-**Tasks.** ✅ extended `patchRequest`/`applyPatch` (`patch.go`) with the six entity
-CRUD ops (no new DTO fields — all reuse existing `patchRequest` fields); ◻ mirror the
-`ConfigPatch` union + Zod schema (`client.ts`) and add structured Console create/delete
-forms; ◻ Phase 2 global-table ops (route `admin_set` through the existing
-`confirm_admin` guard).
+**Deferred boundaries.** `cache_set` remains stage-only future work because the
+current cache runtime is startup-bound. Admin configuration must be decomposed
+after RBAC into listener/auth/limits/history/audit/plugin-upload operations,
+not one oversized `admin_set`. `access_log_set` remains a separate staged
+observability operation until sink generations can be prepared, atomically
+published, drained, and retired. No ignored legacy `[global].access_log` or
+`[global].error_log` destination is reintroduced.
 
-**Tests.** ✅ Go: each entity op round-trips (apply → re-marshal → re-parse →
-`Validate`), duplicate-target creates error, missing-target deletes error, empty
-required fields error, `upstream_remove` refuses a referenced pool, `server_remove`
-refuses the last block (`internal/admin/patch_crud_test.go`). ◻ UI: each form emits
-the documented shape; create-then-edit flows.
+**Tests and DoD.** Backend tests cover nil/empty payload rejection, sparse
+false/zero/empty-list presence, copy/validate/assign atomicity, canonical
+round-trips, the shared route/global rate-limit wire contract, build-tag
+preflight, retained/all-new listener classification, mixed-candidate staging,
+and staged create/update/discard correlation. TypeScript represents the three
+operations without wiring the #81 forms. The raw editor, entity workflows,
+history, rollback, pending restart, and permission boundaries remain intact.
 
-**DoD.** ✅ *for entity CRUD* — the console can create and delete servers, routes, and
-upstream pools structurally (previewed as a diff, applied through the validated path)
-without dropping to TOML; the raw editor remains the escape hatch. ◻ global-table ops
-remain Phase 2. Documented in [console.md](../console.md).
-
-**Risks.** patch-op surface growth — kept ops minimal and reused config structs; the
-raw editor and the guided global-table editors stay the universal fallback so the
-deferred global-table parity gap degrades gracefully.
+**Risks.** Patch-surface growth is bounded to the agreed fields and one existing
+executor. Lifecycle decisions stay in the canonical registry; summaries are
+value-free; route clients keep their existing semantics; and deferred tables
+retain truthful guided/raw workflows.
 
 ---
 

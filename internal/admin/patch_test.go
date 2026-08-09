@@ -688,10 +688,10 @@ func TestApplyPatchCompressionSet(t *testing.T) {
 		Op: "compression_set",
 		Compression: &compressionPatch{
 			Enabled:  boolPtr(true),
-			Encoders: []string{"gzip", "br"},
-			Level:    6,
-			MinSize:  "2k",
-			Types:    []string{"text/html", "application/json"},
+			Encoders: ptr([]string{"gzip", "br"}),
+			Level:    ptr(6),
+			MinSize:  ptr("2k"),
+			Types:    ptr([]string{"text/html", "application/json"}),
 		},
 	})
 	if err != nil {
@@ -726,7 +726,7 @@ func TestApplyPatchCompressionSet(t *testing.T) {
 func TestApplyPatchCompressionSetErrors(t *testing.T) {
 	cases := []patchRequest{
 		{Op: "compression_set"}, // nil payload
-		{Op: "compression_set", Compression: &compressionPatch{MinSize: "x"}}, // bad size
+		{Op: "compression_set", Compression: &compressionPatch{MinSize: ptr("x")}}, // bad size
 	}
 	for _, req := range cases {
 		c := patchTestConfig()
@@ -927,7 +927,7 @@ func TestApplyPatchRouteSetRateLimit(t *testing.T) {
 	// Enable with explicit values.
 	if _, err := applyPatch(c, patchRequest{
 		Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api",
-		RateLimit: &rateLimitPatch{Enabled: true, Rate: 50, Burst: 80, Key: "ip"},
+		RateLimit: &rateLimitPatch{Enabled: ptr(true), Rate: ptr(50), Burst: ptr(80), Key: ptr("ip")},
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -947,7 +947,7 @@ func TestApplyPatchRouteSetRateLimit(t *testing.T) {
 	// Disable.
 	if _, err := applyPatch(c, patchRequest{
 		Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api",
-		RateLimit: &rateLimitPatch{Enabled: false},
+		RateLimit: &rateLimitPatch{Enabled: ptr(false)},
 	}); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
@@ -963,13 +963,13 @@ func TestApplyPatchRouteSetRateLimitErrors(t *testing.T) {
 		// nil payload
 		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api"},
 		// zero rate
-		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: true, Rate: 0}},
+		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: ptr(true), Rate: ptr(0)}},
 		// negative rate
-		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: true, Rate: -1}},
+		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: ptr(true), Rate: ptr(-1)}},
 		// invalid key
-		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: true, Rate: 10, Key: "bogus"}},
+		{Op: "route_set_rate_limit", Listen: ":8080", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: ptr(true), Rate: ptr(10), Key: ptr("bogus")}},
 		// no such route
-		{Op: "route_set_rate_limit", Listen: ":9999", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: true, Rate: 10}},
+		{Op: "route_set_rate_limit", Listen: ":9999", MatchType: "prefix", Path: "/api", RateLimit: &rateLimitPatch{Enabled: ptr(true), Rate: ptr(10)}},
 	}
 	for _, req := range cases {
 		c := patchTestConfig()

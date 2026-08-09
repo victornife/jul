@@ -231,11 +231,11 @@ func wizardPatchOps(cfg *config.Config, existing *config.Config) ([]patchRequest
 			Op: "compression_set",
 			Compression: &compressionPatch{
 				Enabled:       ptr(true),
-				Encoders:      cfg.Compression.Encoders,
-				Level:         cfg.Compression.Level,
-				MinSize:       cfg.Compression.MinSize.String(),
-				Types:         cfg.Compression.Types,
-				Precompressed: cfg.Compression.Precompressed,
+				Encoders:      ptr(append([]string(nil), cfg.Compression.Encoders...)),
+				Level:         ptr(cfg.Compression.Level),
+				MinSize:       ptr(cfg.Compression.MinSize.String()),
+				Types:         ptr(append([]string(nil), cfg.Compression.Types...)),
+				Precompressed: ptr(cfg.Compression.Precompressed),
 			},
 		})
 	}

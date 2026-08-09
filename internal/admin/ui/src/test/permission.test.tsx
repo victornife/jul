@@ -190,7 +190,9 @@ describe("PermissionProvider unauthorized handling", () => {
       expect(screen.getByTestId("ready").textContent).toBe("true");
     });
     // A 401 broadcast clears the identity; gating reverts to fail-open (unknown).
-    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+    act(() => {
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+    });
     await waitFor(() => {
       expect(screen.getByTestId("ready").textContent).toBe("false");
     });

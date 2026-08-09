@@ -196,11 +196,20 @@ func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candid
 	// listener-related gates. If unavailable, fall back to the on-disk prev
 	// config (legacy path).
 	var live server.LiveSnapshot
+	var httpBound map[string]struct{}
+	var http3Bound map[string]struct{}
 	if p.LiveSnapshot != nil {
 		live = p.LiveSnapshot()
+		httpBound = boundAddrs(live)
+		http3Bound = boundHTTP3Addrs(live)
+	} else {
+		// Legacy/test callers may not expose a runtime snapshot. In that case
+		// the previous effective config is the best available description of
+		// listeners already owned by this process. Treat those addresses as
+		// bound so preflight does not try to bind them a second time. The hot
+		// rebind gate below still compares prev/next configuration directly.
+		httpBound, http3Bound = configuredBoundAddrs(prev)
 	}
-	httpBound := boundAddrs(live)
-	http3Bound := boundHTTP3Addrs(live)
 	streamBound := streamBoundKeys(p.Stream)
 
 	// Probe only addresses NOT currently bound (new listeners). Occupied
@@ -351,6 +360,25 @@ func boundHTTP3Addrs(s server.LiveSnapshot) map[string]struct{} {
 		}
 	}
 	return m
+}
+
+func configuredBoundAddrs(c *config.Config) (map[string]struct{}, map[string]struct{}) {
+	httpBound := make(map[string]struct{})
+	http3Bound := make(map[string]struct{})
+	if c == nil {
+		return httpBound, http3Bound
+	}
+	for i := range c.Servers {
+		addr := c.Servers[i].Listen
+		if addr == "" {
+			continue
+		}
+		httpBound[addr] = struct{}{}
+		if c.Servers[i].HTTP3 != nil && c.Servers[i].HTTP3.Enabled {
+			http3Bound[addr] = struct{}{}
+		}
+	}
+	return httpBound, http3Bound
 }
 
 func streamBoundKeys(sp StreamPreflighter) map[string]struct{} {
