@@ -59,7 +59,7 @@ replace_once(
 )
 
 # The workflow later inserts its pending-restart fallback immediately before
-# legacy `throw new Error(...)` anchors. Four old RouteDetail stubs use that
+# legacy `throw new Error(...)` anchors. Three old RouteDetail stubs use that
 # throw as the body of a one-line if; inserting multiple statements there makes
 # the final throw unconditional. Add braces first so the workflow's insertion
 # remains inside the guard and the real patch-preview request can reach onPatch.
@@ -68,7 +68,7 @@ braced_preview_guard = '''        if (url !== "/api/config/patch/preview") {
           throw new Error(`unexpected fetch: ${url}`);
         }'''
 for rel, expected in (
-    ("internal/admin/ui/src/test/consolev2.test.tsx", 3),
+    ("internal/admin/ui/src/test/consolev2.test.tsx", 2),
     ("internal/admin/ui/src/test/mtls.test.tsx", 1),
 ):
     path = Path(rel)
