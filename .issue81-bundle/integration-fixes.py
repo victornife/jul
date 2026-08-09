@@ -371,7 +371,7 @@ traffic_test.write_text(text, encoding="utf-8")
 unsafe_body_capture = 'onPatch(typeof init?.body === "string" ? init.body : "");'
 safe_body_capture = 'onPatch(typeof init?.body === "string" ? String(init?.body) : "");'
 for rel, expected in (
-    ("internal/admin/ui/src/test/consolev2.test.tsx", 2),
+    ("internal/admin/ui/src/test/consolev2.test.tsx", 3),
     ("internal/admin/ui/src/test/mtls.test.tsx", 1),
 ):
     path = Path(rel)
