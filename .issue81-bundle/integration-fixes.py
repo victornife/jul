@@ -112,7 +112,7 @@ function wrapIssue81Fetch(next: typeof fetch): typeof fetch {
           }),
         );
       }
-      return Reflect.apply(target, thisArg, args);
+      return Reflect.apply(target, thisArg, args) as ReturnType<typeof fetch>;
     },
   });
 }
