@@ -41,6 +41,22 @@ for field, schema in (
         f"optional {field} projection",
     )
 
+# Legacy parser assertions intentionally exercise partial traffic projections.
+# Keep their property access consistent with the additive schema above.
+console_test = Path("internal/admin/ui/src/test/consolev2.test.tsx")
+replace_once(
+    console_test,
+    "expect(t.compression.encoders).toContain(\"gzip\");",
+    "expect(t.compression?.encoders).toContain(\"gzip\");",
+    "optional compression assertion",
+)
+replace_once(
+    console_test,
+    "expect(t.rate_limit.rate).toBe(100);",
+    "expect(t.rate_limit?.rate).toBe(100);",
+    "optional rate-limit assertion",
+)
+
 # op_index is an API index, not a human ordinal. Preserve the server's zero-based
 # discriminator in errors so operators can correlate it to the submitted batch.
 hook = Path("internal/admin/ui/src/lib/useRunPatchBatch.ts")
