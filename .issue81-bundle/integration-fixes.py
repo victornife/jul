@@ -66,3 +66,18 @@ replace_once(
     "String(error.opIndex)",
     "zero-based failed operation index",
 )
+
+# Issue #81 adds one authoritative pending-restart read to every structured
+# preview. Most pre-existing component tests intentionally mock only the request
+# they exercise, so letting the new read hit those mocks either consumes a queued
+# response or feeds a patch-preview payload into PendingRestartResponseSchema.
+# Keep this compatibility strictly in Vitest: endpoint-aware mocks continue to
+# call the real client, while legacy mocks receive the truthful default that no
+# staged restart exists. Production code remains strict and unchanged.
+setup = Path("internal/admin/ui/src/test/setup.ts")
+replace_once(
+    setup,
+    'import "@testing-library/jest-dom";\n',
+    '''import "@testing-library/jest-dom";\nimport { vi } from "vitest";\n\ntype FetchMockWithImplementation = typeof fetch & {\n  getMockImplementation?: () =>\n    | ((...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>)\n    | undefined;\n};\n\nvi.mock("@/api/client.ts", async (importOriginal) => {\n  const actual = await importOriginal<typeof import("@/api/client.ts")>();\n  return {\n    ...actual,\n    fetchPendingRestart: async () => {\n      const currentFetch = globalThis.fetch as FetchMockWithImplementation;\n      const implementation = currentFetch.getMockImplementation?.();\n      if (\n        typeof implementation === "function" &&\n        implementation.toString().includes("pending-restart")\n      ) {\n        return actual.fetchPendingRestart();\n      }\n      return { pending: false };\n    },\n  };\n});\n''',
+    "legacy pending-restart test compatibility",
+)
