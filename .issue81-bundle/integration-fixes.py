@@ -387,13 +387,13 @@ for rel, expected in (
         raise SystemExit(f"{rel}: expected {expected} request-body captures, found {len(matches)}")
     replacements = []
     for index, match in enumerate(matches):
-    indent = match.group("indent")
-    on_patch = (
-        "onPatch(requestBody);"
-        if rel.endswith("consolev2.test.tsx") and index == 0
-        else "onPatch(requestBody as string);"
-    )
-    replacement = (
+        indent = match.group("indent")
+        on_patch = (
+            "onPatch(requestBody);"
+            if rel.endswith("consolev2.test.tsx") and index == 0
+            else "onPatch(requestBody as string);"
+        )
+        replacement = (
             f"{indent}const requestBody = init?.body;\n"
             f'{indent}if (typeof requestBody !== "string") {{\n'
             f'{indent}  throw new Error("expected string request body");\n'
