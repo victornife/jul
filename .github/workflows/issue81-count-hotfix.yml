@@ -1,0 +1,41 @@
+name: Issue 81 callback-count hotfix
+
+on:
+  push:
+    branches:
+      - agent/issue-81-global-traffic-controls
+    paths:
+      - .github/workflows/issue81-count-hotfix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-count:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/issue-81-global-traffic-controls
+
+      - name: Correct Console callback count
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.issue81-bundle/integration-fixes.py')
+          text = path.read_text(encoding='utf-8')
+          old = '("internal/admin/ui/src/test/consolev2.test.tsx", 2),'
+          new = '("internal/admin/ui/src/test/consolev2.test.tsx", 3),'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one callback-count anchor, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .issue81-bundle/integration-fixes.py
+          git commit -m "fix(ci): account for all issue 81 request-body callbacks"
+          git push origin HEAD:agent/issue-81-global-traffic-controls
