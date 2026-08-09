@@ -80,6 +80,15 @@ candidate. A new dedicated plaintext gRPC listener can carry an h2c toggle as a
 restart-required, so the Apps creator never mutates an existing plaintext
 listener and refuses same-address sibling risk before preview.
 
+The sparse global operations use the same path. `global_set`,
+`compression_set`, and `rate_limit_global_set` first produce one canonical
+complete candidate, then the registry classifies it. `global.log_format`
+therefore stages the complete candidate, not only that field. A changed global
+`max_conns` stages whenever any desired address is already bound; only an
+all-new affected listener set can adopt it during live bind. Compression and
+global rate/key/burst changes remain hot. Operation summaries contain field
+names only, and a stage update preserves the original pre-stage rollback base.
+
 For the strongest guarantees, use the Console or admin API for configuration
 changes. Direct file edits followed by SIGHUP are safe for hot-reloadable
 changes; for restart-required changes they produce a clearly recorded failed

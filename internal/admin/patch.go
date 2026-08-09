@@ -75,47 +75,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s rate limit %s", req.Listen, req.Path, onOff(*req.Enabled)), nil
 
 	case "route_set_rate_limit":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
-		if err != nil {
-			return "", err
-		}
-		if req.RateLimit == nil {
-			return "", fmt.Errorf("route_set_rate_limit: rate_limit payload is required")
-		}
-		if req.RateLimit.Enabled {
-			// Validate before mutating so a rejected op leaves no partial state.
-			rate := req.RateLimit.Rate
-			if rate <= 0 {
-				return "", fmt.Errorf("route_set_rate_limit: rate must be > 0")
-			}
-			burst := req.RateLimit.Burst
-			if burst <= 0 {
-				burst = rate
-			}
-			key := strings.TrimSpace(req.RateLimit.Key)
-			if key == "" {
-				key = "ip"
-			}
-			if !config.ValidRateKey(key) {
-				return "", fmt.Errorf("route_set_rate_limit: invalid key %q", key)
-			}
-			if loc.RateLimit == nil {
-				loc.RateLimit = &config.RateLimitConfig{}
-			}
-			loc.RateLimit.Enabled = true
-			loc.RateLimit.Rate = rate
-			loc.RateLimit.Burst = burst
-			loc.RateLimit.Key = key
-		} else {
-			if loc.RateLimit != nil {
-				loc.RateLimit.Enabled = false
-			}
-		}
-		if loc.RateLimit != nil && loc.RateLimit.Enabled {
-			return fmt.Sprintf("route %s%s rate limit set (%d req/s, burst %d, key %s)",
-				req.Listen, req.Path, loc.RateLimit.Rate, loc.RateLimit.Burst, loc.RateLimit.Key), nil
-		}
-		return fmt.Sprintf("route %s%s rate limit disabled", req.Listen, req.Path), nil
+		return applyRouteRateLimit(c, req)
 
 	case "location_waf_set":
 		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
@@ -728,29 +688,14 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		c.Upstreams = append(c.Upstreams[:idx], c.Upstreams[idx+1:]...)
 		return fmt.Sprintf("upstream %s removed", name), nil
 
+	case "global_set":
+		return applyGlobalSet(c, req.Global)
+
 	case "compression_set":
-		if req.Compression == nil {
-			return "", fmt.Errorf("compression_set: compression payload is required")
-		}
-		cp := req.Compression
-		c.Compression.Encoders = cp.Encoders
-		c.Compression.Level = cp.Level
-		c.Compression.Types = cp.Types
-		c.Compression.Precompressed = cp.Precompressed
-		if cp.MinSize != "" {
-			var sz config.Size
-			if err := sz.UnmarshalText([]byte(cp.MinSize)); err != nil {
-				return "", fmt.Errorf("compression_set: invalid min_size %q", cp.MinSize)
-			}
-			c.Compression.MinSize = sz
-		} else {
-			c.Compression.MinSize = 0
-		}
-		if cp.Enabled != nil {
-			c.Compression.Enabled = config.Bool(*cp.Enabled)
-		}
-		return fmt.Sprintf("compression set (enabled=%v, encoders=%v, level=%d, min_size=%s)",
-			c.Compression.IsEnabled(), c.Compression.Encoders, c.Compression.Level, c.Compression.MinSize.String()), nil
+		return applyCompressionSet(c, req.Compression)
+
+	case "rate_limit_global_set":
+		return applyGlobalRateLimitSet(c, req.RateLimit)
 
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)

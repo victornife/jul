@@ -5,6 +5,7 @@ package admin
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -126,5 +127,64 @@ func TestManagedApplyDeadlineOmittedWithoutServingTimeout(t *testing.T) {
 	}
 	if captured.RequestContext == nil {
 		t.Fatal("RequestContext was not carried to the coordinator")
+	}
+}
+
+// TestStructuredGlobalSetUsesServingReloadTimeoutForCurrentTransaction proves
+// issue #80's reload_timeout patch changes only the candidate. The transaction
+// that carries the change remains bounded by the currently serving timeout;
+// later transactions may then use the newly published value.
+func TestStructuredGlobalSetUsesServingReloadTimeoutForCurrentTransaction(t *testing.T) {
+	const servingTimeout = 7 * time.Second
+	live := config.ServeDir("./public", ":8080")
+	live.Global.ReloadTimeout = config.Duration(servingTimeout)
+
+	var captured ApplyRequestContext
+	var candidateTimeout time.Duration
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{EffectiveConfig: live}
+		},
+		ReadConfigRaw: func() ([]byte, error) { return config.Marshal(live) },
+		LoadConfig:    func() (*config.Config, error) { return live, nil },
+		ApplyConfig: func(ctx ApplyRequestContext, candidate *config.Config, mode string) (ConfigApplyResult, error) {
+			captured = ctx
+			candidateTimeout = candidate.Global.ReloadTimeout.Std()
+			return ConfigApplyResult{
+				ApplyID:             "issue80-reload-timeout",
+				OK:                  true,
+				Mode:                mode,
+				Version:             "candidate",
+				PersistedVersion:    "candidate",
+				ServingVersion:      "candidate",
+				FinalDiskVersion:    "candidate",
+				FinalServingVersion: "candidate",
+			}, nil
+		},
+	})
+
+	body, err := json.Marshal(patchApplyRequest{Ops: []patchRequest{{
+		Op:     "global_set",
+		Global: &globalPatch{ReloadTimeout: ptr("1h")},
+	}}})
+	if err != nil {
+		t.Fatalf("marshal patch: %v", err)
+	}
+	before := time.Now().UTC()
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost,
+		"/api/config/patch/apply", bytes.NewReader(body)))
+	after := time.Now().UTC()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	if captured.StartedAt.Before(before) || captured.StartedAt.After(after) {
+		t.Fatalf("StartedAt %v outside admission window [%v, %v]", captured.StartedAt, before, after)
+	}
+	if want := captured.StartedAt.Add(servingTimeout); !captured.Deadline.Equal(want) {
+		t.Fatalf("deadline = %v, want serving timeout deadline %v", captured.Deadline, want)
+	}
+	if candidateTimeout != time.Hour {
+		t.Fatalf("candidate reload_timeout = %v, want 1h for later transactions", candidateTimeout)
 	}
 }

@@ -16,6 +16,7 @@ This is **Y1-03**, in **core** — no build tag.
 - [Algorithm](#algorithm)
 - [Connection cap](#connection-cap)
 - [Config reference](#config-reference)
+- [Structured sparse updates](#structured-sparse-updates)
 - [Benchmarks](#benchmarks)
 - [Security / threat note](#security--threat-note)
 - [GA status](#ga-status)
@@ -120,7 +121,7 @@ Use cases:
 ```toml
 [rate_limit]
 enabled   = true        # master switch
-crate     = 100         # sustained requests/second per key
+rate      = 100         # sustained requests/second per key
 burst     = 200         # maximum burst (must be >= rate)
 key       = "ip"        # "ip" | "header:<Name>" | "jwt:<claim>"
 max_conns = 1024        # concurrent connections per listener (0 = unlimited)
@@ -139,6 +140,32 @@ Validation rules:
 - `burst` ≥ `rate`
 - `max_conns` ≥ 0; not allowed on per-location override
 - `key` must match `ip`, `header:<Name>`, or `jwt:<claim>`
+
+## Structured sparse updates
+
+`rate_limit_global_set` sparsely updates the global policy. Omitted fields are
+preserved. Explicit `enabled: false` retains dormant key/rate/burst settings;
+`burst: 0` resets through the canonical rate/default behavior; and
+`max_conns: 0` means unlimited. Enabling requires a positive effective rate,
+and all supplied values are validated against a copy before assignment.
+Changing rate or burst does not replace the `RateLimiterStore`; existing bucket
+state is updated in place on subsequent use. Changing the key naturally selects
+a new bucket-key space, while old idle buckets expire through the existing
+janitor.
+
+The public structured wire key remains `rate_limit` for both route and global
+operations. The `op` discriminator is authoritative: `route_set_rate_limit`
+keeps its established complete-replacement/default behavior and rejects
+`max_conns`; `rate_limit_global_set` is sparse and accepts the listener-global
+field.
+
+`enabled`, `key`, `rate`, and `burst` are hot. `max_conns` is listener-bound: a
+change requires planned restart if any currently bound desired address is
+retained, including a candidate that adds a new listener while retaining an old
+one. It may apply live only when every affected desired listener is newly bound
+in the same complete candidate. Mixed hot and listener-bound changes stage the
+whole candidate. Summaries contain field names only. The current Traffic
+Controls form migrates to this operation in #81.
 
 ## Benchmarks
 

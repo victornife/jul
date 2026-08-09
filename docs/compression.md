@@ -17,6 +17,7 @@ tag and `zstd` requires the `zstd` build tag.
 - [When compression applies](#when-compression-applies)
 - [Precompressed sidecars](#precompressed-sidecars)
 - [Config reference](#config-reference)
+- [Structured sparse updates](#structured-sparse-updates)
 - [Benchmarks](#benchmarks)
 - [Security / threat note](#security--threat-note)
 - [GA status](#ga-status)
@@ -114,8 +115,29 @@ precompressed   = true
 Validation:
 
 - Each encoder in `encoders` must be compiled into the build (or startup fails).
-- `level` is clamped to the encoder's valid range.
+- `level` must be in the configured 0–11 range; `0` selects the encoder default.
 - `min_size` must be ≥ 0.
+
+## Structured sparse updates
+
+`compression_set` updates `[compression]` without regenerating a whole TOML
+table. Omitted fields are preserved. Supplying `enabled = false` disables the
+middleware while retaining dormant encoder, level, size, type, and sidecar
+settings for a later re-enable. Explicit `level: 0` selects the encoder default,
+and explicit `precompressed: false` is retained.
+
+Supplied encoder and MIME arrays replace the current arrays and are defensively
+copied. An empty `encoders` or `types` array resets that field through the
+normal parser defaults after the complete candidate is marshaled and reparsed.
+Blank entries and malformed sizes are rejected. Duplicate behavior stays the
+same as raw configuration validation. An unavailable `br` or `zstd` encoder
+fails authoritative build-tag preflight; it is never silently removed.
+
+The operation validates a copy before assigning, so a malformed late field
+cannot partially mutate earlier fields. Its audit/preview summary lists only
+changed field names. Compression changes remain hot-reloadable according to the
+canonical lifecycle registry. The current Traffic Controls form moves to this
+operation in #81; its existing guided TOML path remains supported meanwhile.
 
 ## Benchmarks
 

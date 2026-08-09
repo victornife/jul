@@ -131,6 +131,42 @@ downgrades a runtime-invalid value to a warning. `jul fmt` validates before
 printing or writing canonical TOML, so formatting cannot persist an invalid
 candidate.
 
+### Structured sparse global operations
+
+The structured patch API supports three process-wide operations:
+
+- `global_set` for `worker_threads`, `log_level`, `log_format`,
+  `shutdown_timeout`, `reload_timeout`, and `redact_min_secret_length`;
+- `compression_set` for every field in `[compression]`;
+- `rate_limit_global_set` for `enabled`, `key`, `rate`, `burst`, and
+  listener-global `max_conns`.
+
+Each payload is required and must contain at least one field. Omitted fields
+preserve the current value; explicit false, zero, empty string, and empty arrays
+are supplied values. Lists are copied before they enter candidate state. Every
+supplied field is parsed and validated against a copy, and the target block is
+assigned only after the whole operation succeeds. The ordered batch executor
+then marshals, reparses, applies canonical defaults, validates the complete
+candidate, performs build-tag preflight, computes the diff, and classifies the
+whole candidate through the lifecycle registry.
+
+`route_set_rate_limit` and `rate_limit_global_set` deliberately share the public
+`rate_limit` JSON key. The `op` discriminator selects the contract: route
+patches retain their established complete-replacement behavior and reject
+`max_conns`; the global operation is sparse and accepts it.
+
+Operation summaries are deterministic field-name lists and never contain
+configured values. `global.log_format` remains restart-required. A changed
+`max_conns` requires staging whenever any currently bound desired address is
+retained; it can apply live only when all affected desired listeners are new in
+the same complete candidate. Mixed hot/restart batches stage the whole
+candidate. A `reload_timeout` change uses the currently serving timeout for that
+transaction and governs later transactions only.
+
+The backend/API operations are available in #80. The Global and Traffic
+Controls form migration is #81; current guided TOML and raw TOML workflows
+remain supported.
+
 ## Configuration apply modes
 
 The admin API `POST /api/config/apply` accepts an optional `?mode=` query
