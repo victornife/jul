@@ -34,7 +34,7 @@ RUN mkdir -p /seed/etc/jul /seed/var/lib/jul /seed/var/cache/jul /seed/var/log/j
 
 # --- runtime stage ----------------------------------------------------------
 # distroless provides CA certificates and a nonroot user, with no shell.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
 
 COPY --from=build /out/jul /usr/local/bin/jul
 
