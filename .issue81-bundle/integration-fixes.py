@@ -230,18 +230,18 @@ for marker in (
     if marker not in text:
         raise SystemExit(f"{traffic_test}: compression fixture marker missing: {marker!r}")
     text = text.replace(marker, marker.replace('\n      minSize', '\n      level: 0,\n      minSize'))
-cache_marker = '''        diskPath: "/var/cache",
-        defaultTTL: "60s",
-        staleWhileRevalidate: "10s",'''
+cache_marker = '''      diskPath: "/var/cache",
+      defaultTTL: "60s",
+      staleWhileRevalidate: "10s",'''
 if cache_marker not in text:
     raise SystemExit(f"{traffic_test}: cache generator fixture marker missing")
 text = text.replace(
     cache_marker,
-    '''        diskPath: "/var/cache",
-        diskMaxSize: "",
-        defaultTTL: "60s",
-        staleWhileRevalidate: "10s",
-        staleIfError: "",''',
+    '''      diskPath: "/var/cache",
+      diskMaxSize: "",
+      defaultTTL: "60s",
+      staleWhileRevalidate: "10s",
+      staleIfError: "",''',
 )
 cache_warning = '''        diskPath: "",
         defaultTTL: "60s",
