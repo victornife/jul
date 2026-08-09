@@ -39,8 +39,8 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -56,8 +56,8 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -97,8 +97,8 @@ jobs:
         # tags) and `full` (the complete opt-in feature set, env.FULL_TAGS).
         profile: [lean, full]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -171,7 +171,7 @@ jobs:
       # Keyless build provenance: cryptographically links this binary to the
       # workflow run/commit that produced it (SLSA-style attestation via Sigstore).
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4
         with:
           subject-path: stage/${{ steps.prof.outputs.name }}/jul${{ steps.prof.outputs.ext }}
       # Sign the SBOM the same way so its integrity can be verified offline.
@@ -196,7 +196,7 @@ jobs:
     steps:
       # Collect every matrix build's archive + checksum into a single dir.
       - name: Download all build artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           path: artifacts
           merge-multiple: true
@@ -210,7 +210,7 @@ jobs:
           cat SHA256SUMS
       # Publish a DRAFT release so a human reviews assets before going public.
       - name: Create draft release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
           tag_name: ${{ github.ref_name }}
           draft: true
