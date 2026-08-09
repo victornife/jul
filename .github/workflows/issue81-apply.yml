@@ -22,7 +22,7 @@ env:
   BASE_SHA: ba07efcf45fcf4e114e13ef17ba9261e5429e292
   FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
   CONSOLE_UI: internal/admin/ui
-  TARGET_BRANCH: agent/issue-81-final
+  TARGET_BRANCH: issue81-final
 
 jobs:
   apply-and-verify:
