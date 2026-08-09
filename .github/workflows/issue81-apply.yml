@@ -114,6 +114,77 @@ jobs:
           git reset --hard "${BASE_SHA}"
           git clean -fdx
           python3 /tmp/issue81/jul-issue81/apply_issue81.py
+
+          # Integrate the new tests with the current nested MatchConfig TOML
+          # shape and teach the pre-existing catalog assertion to recognize the
+          # intentional AnyPermissions OR contract.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          fixture_old = '''[[servers.locations]]
+          path = "/"
+          root = "."
+          '''
+          fixture_new = '''[[servers.locations]]
+          root = "."
+          [servers.locations.match]
+          type = "prefix"
+          path = "/"
+          '''
+          for rel in (
+              "internal/admin/projection_issue81_test.go",
+              "internal/admin/raw_preview_test.go",
+          ):
+              path = Path(rel)
+              text = path.read_text(encoding="utf-8")
+              count = text.count(fixture_old)
+              if count == 0:
+                  raise SystemExit(f"{rel}: legacy location fixture anchor missing")
+              path.write_text(text.replace(fixture_old, fixture_new), encoding="utf-8")
+
+          path = Path("internal/admin/route_catalog_test.go")
+          text = path.read_text(encoding="utf-8")
+          old = '''		got := spec.Permission
+          		if len(spec.Permissions) > 0 {
+          			got = spec.Permissions[http.MethodGet]
+          			if got == "" {
+          				got = spec.Permissions[http.MethodPost]
+          			}
+          		}
+          		if got != perm {
+          			t.Errorf("planned-restart route %q: got permission %q, want %q", pattern, got, perm)
+          		}
+          '''
+          new = '''		if len(spec.AnyPermissions) > 0 {
+          			found := false
+          			for _, candidate := range spec.AnyPermissions {
+          				if candidate == perm {
+          					found = true
+          					break
+          				}
+          			}
+          			if !found {
+          				t.Errorf("planned-restart route %q: OR permissions %v do not include %q", pattern, spec.AnyPermissions, perm)
+          			}
+          			continue
+          		}
+          		got := spec.Permission
+          		if len(spec.Permissions) > 0 {
+          			got = spec.Permissions[http.MethodGet]
+          			if got == "" {
+          				got = spec.Permissions[http.MethodPost]
+          			}
+          		}
+          		if got != perm {
+          			t.Errorf("planned-restart route %q: got permission %q, want %q", pattern, got, perm)
+          		}
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("route catalog planned-restart assertion anchor moved")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+          gofmt -w internal/admin/projection_issue81_test.go internal/admin/raw_preview_test.go internal/admin/route_catalog_test.go
           git diff --check
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
