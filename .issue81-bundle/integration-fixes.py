@@ -366,62 +366,39 @@ text = text.replace(
 )
 traffic_test.write_text(text, encoding="utf-8")
 
-# Narrow RequestInit.body through stable local bindings. The first Console
-# callback receives a non-null RequestInit; the remaining callbacks do not.
+# Patch-preview requests must always carry a string JSON body. Fail the test
+# stub explicitly when that contract is broken; the guard gives TypeScript a
+# stable string narrowing without unsafe conversion or optional dereference.
 import re
 
 capture_pattern = re.compile(
     r'^(?P<indent>[ \t]*)onPatch\(typeof init\?\.body === "string" \? init\.body : ""\);$',
     re.MULTILINE,
 )
-
-console_path = Path("internal/admin/ui/src/test/consolev2.test.tsx")
-console_text = console_path.read_text(encoding="utf-8")
-console_matches = list(capture_pattern.finditer(console_text))
-if len(console_matches) != 3:
-    raise SystemExit(
-        f"{console_path}: expected 3 request-body captures, found {len(console_matches)}"
-    )
-console_replacements = []
-for index, match in enumerate(console_matches):
-    indent = match.group("indent")
-    if index == 0:
-        replacement = (
-            f'{indent}onPatch(typeof init.body === "string" ? init.body : "");'
-        )
-    else:
+replacement_count = 0
+for rel, expected in (
+    ("internal/admin/ui/src/test/consolev2.test.tsx", 3),
+    ("internal/admin/ui/src/test/mtls.test.tsx", 1),
+):
+    target = Path(rel)
+    source = target.read_text(encoding="utf-8")
+    matches = list(capture_pattern.finditer(source))
+    if len(matches) != expected:
+        raise SystemExit(f"{rel}: expected {expected} request-body captures, found {len(matches)}")
+    replacements = []
+    for match in matches:
+        indent = match.group("indent")
         replacement = (
             f"{indent}const requestBody = init?.body;\n"
-            f'{indent}onPatch(typeof requestBody === "string" ? requestBody : "");'
+            f'{indent}if (typeof requestBody !== "string") {{\n'
+            f'{indent}  throw new Error("expected string request body");\n'
+            f"{indent}}}\n"
+            f"{indent}onPatch(requestBody);"
         )
-    console_replacements.append((match.start(), match.end(), replacement))
-for start, end, replacement in reversed(console_replacements):
-    console_text = console_text[:start] + replacement + console_text[end:]
-console_path.write_text(console_text, encoding="utf-8")
-
-mtls_path = Path("internal/admin/ui/src/test/mtls.test.tsx")
-mtls_text = mtls_path.read_text(encoding="utf-8")
-mtls_matches = list(capture_pattern.finditer(mtls_text))
-if len(mtls_matches) != 1:
-    raise SystemExit(
-        f"{mtls_path}: expected 1 request-body capture, found {len(mtls_matches)}"
-    )
-match = mtls_matches[0]
-indent = match.group("indent")
-replacement = (
-    f"{indent}const requestBody = init?.body;\n"
-    f'{indent}onPatch(typeof requestBody === "string" ? requestBody : "");'
-)
-mtls_text = mtls_text[: match.start()] + replacement + mtls_text[match.end() :]
-mtls_path.write_text(mtls_text, encoding="utf-8")
-
-# Temporary reconstruction diagnostics; removed after the callback fix.
-for rel, ranges in (
-    ("internal/admin/ui/src/test/consolev2.test.tsx", ((578, 592), (720, 734), (838, 852))),
-    ("internal/admin/ui/src/test/mtls.test.tsx", ((247, 261),)),
-):
-    lines = Path(rel).read_text(encoding="utf-8").splitlines()
-    print(f"ISSUE81_CALLBACK_DEBUG {rel}")
-    for start, end in ranges:
-        for number in range(start, min(end, len(lines)) + 1):
-            print(f"{number:04d}: {lines[number - 1]}")
+        replacements.append((match.start(), match.end(), replacement))
+    for start, end, replacement in reversed(replacements):
+        source = source[:start] + replacement + source[end:]
+    target.write_text(source, encoding="utf-8")
+    replacement_count += len(matches)
+if replacement_count != 4:
+    raise SystemExit(f"expected 4 total request-body guards, found {replacement_count}")
