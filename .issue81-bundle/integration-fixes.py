@@ -71,18 +71,15 @@ replace_once(
 # component tests use fetch mocks written before that endpoint existed, and many
 # of them intentionally ignore the request URL. Provide a test-harness default
 # only when a mock does not explicitly mention the pending endpoint; tests that
-# exercise pending=true/failed pending requests retain full control.
+# exercise pending=true/failed pending requests retain full control. Keep the
+# original mock itself as the Proxy target so intercepted pending requests do
+# not consume queued mockResolvedValueOnce values or alter its call history.
 setup = Path("internal/admin/ui/src/test/setup.ts")
 text = setup.read_text(encoding="utf-8")
 marker = "function wrapIssue81Fetch"
 if marker not in text:
     if 'import "@testing-library/jest-dom";\n' not in text:
         raise SystemExit(f"{setup}: jest-dom setup anchor missing")
-    text = text.replace(
-        'import "@testing-library/jest-dom";\n',
-        'import "@testing-library/jest-dom";\nimport { vi } from "vitest";\n',
-        1,
-    )
     text += r'''
 
 type Issue81FetchMock = typeof fetch & {
@@ -95,19 +92,28 @@ function issue81RequestPath(input: Parameters<typeof fetch>[0]): string {
   return new URL(input.url, "http://localhost").pathname;
 }
 
-function wrapIssue81Fetch(next: typeof fetch): typeof fetch {
+function issue81HandlesPendingRestart(next: typeof fetch): boolean {
   const implementation = (next as Issue81FetchMock).getMockImplementation?.();
-  const handlesPendingRestart =
-    typeof implementation === "function" && implementation.toString().includes("pending-restart");
+  return typeof implementation === "function" && implementation.toString().includes("pending-restart");
+}
 
-  return vi.fn(async (...args: Parameters<typeof fetch>): Promise<Response> => {
-    if (issue81RequestPath(args[0]) === "/api/config/pending-restart" && !handlesPendingRestart) {
-      return new Response(JSON.stringify({ pending: false }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    return next(...args);
+function wrapIssue81Fetch(next: typeof fetch): typeof fetch {
+  return new Proxy(next, {
+    apply(target, thisArg, args) {
+      const [input] = args as Parameters<typeof fetch>;
+      if (
+        issue81RequestPath(input) === "/api/config/pending-restart" &&
+        !issue81HandlesPendingRestart(target)
+      ) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Reflect.apply(target, thisArg, args);
+    },
   });
 }
 
