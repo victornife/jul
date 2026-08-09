@@ -6,12 +6,14 @@ on:
       - agent/issue-81-global-traffic-controls
     paths:
       - .github/workflows/issue81-apply.yml
+      - .issue81-bundle/integration-fixes.py
   pull_request:
     branches:
       - main
     types: [opened, reopened, synchronize]
     paths:
       - .github/workflows/issue81-apply.yml
+      - .issue81-bundle/integration-fixes.py
 
 permissions:
   contents: write
@@ -36,13 +38,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cp .issue81-bundle/integration-fixes.py /tmp/issue81-integration-fixes.py
           cat .issue81-bundle/part-* | tr -d '\r\n' | base64 --decode > /tmp/jul-issue81-implementation.tar.gz
           mkdir -p /tmp/issue81
           tar -xzf /tmp/jul-issue81-implementation.tar.gz -C /tmp/issue81
 
-          # Repair two exact-base assumptions in the patch driver before the
-          # bundle is verified: a duplicated mutation-success tail and the many
-          # historical Added headings in CHANGELOG.md.
           python3 - <<'PY'
           from pathlib import Path
           import hashlib
@@ -81,8 +81,7 @@ jobs:
               '        + text[apply_patch_start:]',
               '    )',
           ]
-          replacement = "\n".join(replacement_lines) + "\n"
-          text = text[:block_start] + replacement + text[block_end:]
+          text = text[:block_start] + "\n".join(replacement_lines) + "\n" + text[block_end:]
 
           old_line = '    write(changelog, insert_once(text, anchor, entry, "CHANGELOG Added section"))\n'
           changelog_lines = [
@@ -115,9 +114,6 @@ jobs:
           git clean -fdx
           python3 /tmp/issue81/jul-issue81/apply_issue81.py
 
-          # Integrate the new tests with the current nested MatchConfig TOML
-          # shape and teach the pre-existing catalog assertion to recognize the
-          # intentional AnyPermissions OR contract.
           python3 - <<'PY'
           from pathlib import Path
 
@@ -137,8 +133,7 @@ jobs:
           ):
               path = Path(rel)
               text = path.read_text(encoding="utf-8")
-              count = text.count(fixture_old)
-              if count == 0:
+              if fixture_old not in text:
                   raise SystemExit(f"{rel}: legacy location fixture anchor missing")
               path.write_text(text.replace(fixture_old, fixture_new), encoding="utf-8")
 
@@ -184,6 +179,7 @@ jobs:
           path.write_text(text.replace(old, new, 1), encoding="utf-8")
           PY
 
+          python3 /tmp/issue81-integration-fixes.py
           gofmt -w internal/admin/projection_issue81_test.go internal/admin/raw_preview_test.go internal/admin/route_catalog_test.go
           git diff --check
 
