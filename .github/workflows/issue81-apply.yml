@@ -1,0 +1,120 @@
+name: Issue 81 one-shot apply
+
+on:
+  push:
+    branches:
+      - agent/issue-81-global-traffic-controls
+    paths:
+      - .github/workflows/issue81-apply.yml
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: ba07efcf45fcf4e114e13ef17ba9261e5429e292
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+  CONSOLE_UI: internal/admin/ui
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify implementation bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .issue81-bundle/part-* | tr -d '\r\n' | base64 --decode > /tmp/jul-issue81-implementation.tar.gz
+          mkdir -p /tmp/issue81
+          tar -xzf /tmp/jul-issue81-implementation.tar.gz -C /tmp/issue81
+          python3 /tmp/issue81/jul-issue81/verify_bundle.py
+
+      - name: Reset to audited base and apply implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --hard "${BASE_SHA}"
+          git clean -fdx
+          python3 /tmp/issue81/jul-issue81/apply_issue81.py
+          git diff --check
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.8.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install frontend and docs dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir "${CONSOLE_UI}" install --frozen-lockfile
+          python -m pip install tomli pyyaml
+
+      - name: Run focused Go checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./internal/admin
+          go test -tags "${FULL_TAGS}" ./internal/admin
+
+      - name: Run frontend checks and generate embedded assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir "${CONSOLE_UI}" run typecheck
+          pnpm --dir "${CONSOLE_UI}" run lint
+          pnpm --dir "${CONSOLE_UI}" run test:coverage
+          pnpm --dir "${CONSOLE_UI}" run build
+
+      - name: Run docs and formatting checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/docs-check.py
+          python scripts/test_docs_check.py
+          files=$(gofmt -l internal/admin | grep -v '^internal/admin/ui/node_modules/' || true)
+          if [ -n "${files}" ]; then
+            echo "gofmt needed on:"
+            echo "${files}"
+            exit 1
+          fi
+          git diff --check
+
+      - name: Replace staging history with implementation commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add internal/admin
+          git commit -m "feat(console): migrate global traffic controls to typed patches (#81)"
+
+          git add CHANGELOG.md docs
+          git commit -m "docs: document issue 81 lifecycle workflow"
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Uncommitted files remain:"
+            git status --short
+            exit 1
+          fi
+
+          git push --force origin "HEAD:${GITHUB_REF_NAME}"
