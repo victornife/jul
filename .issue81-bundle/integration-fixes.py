@@ -122,11 +122,25 @@ text = text.replace(old_tail, new_tail, 1)
 # The migrated confirmation action is also named "Apply live". Keep legacy
 # tests scoped to the confirmation action rather than letting Testing Library
 # see both the page action and the modal action with the same accessible name.
+helper_anchor = '''// confirmRollback opens the rollback confirmation for the single seeded snapshot
+// and clicks Confirm only once its diff preview has loaded — Confirm is disabled
+// until the rollback-scoped diff resolves (N-02).
+'''
+helper = '''async function confirmApplyLive(): Promise<void> {
+  const buttons = await screen.findAllByRole("button", { name: "Apply live" });
+  const confirm = buttons[buttons.length - 1];
+  if (confirm === undefined) throw new Error("Apply live confirmation button was not rendered.");
+  fireEvent.click(confirm);
+}
+
+''' + helper_anchor
+if text.count(helper_anchor) != 1:
+    raise SystemExit(f"{write_test}: confirm helper anchor moved")
+text = text.replace(helper_anchor, helper, 1)
 confirm_old = 'fireEvent.click(await screen.findByRole("button", { name: "Apply now" }));'
-confirm_new = 'fireEvent.click((await screen.findAllByRole("button", { name: "Apply live" })).at(-1)!);'
 confirm_count = text.count(confirm_old)
 if confirm_count == 0:
     raise SystemExit(f"{write_test}: no legacy apply confirmation selectors found")
-text = text.replace(confirm_old, confirm_new)
+text = text.replace(confirm_old, 'await confirmApplyLive();')
 text = text.replace('"Apply configuration?"', '"Apply live?"')
 write_test.write_text(text, encoding="utf-8")
