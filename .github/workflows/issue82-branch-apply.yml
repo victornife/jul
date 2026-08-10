@@ -1,634 +1,83 @@
 name: Issue 82 branch apply
 
 on:
-  push:
-    branches: [agent/issue-82-phase5-closure]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: agent/issue-82-phase5-closure
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: pnpm/action-setup@537643d3d5ecca1ef036c257c9f09a2bca9a4818 # v4
-        with:
-          version: 10
-          run_install: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
       - name: Apply narrow source changes
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
-          import re
 
           def replace(path: str, old: str, new: str, count: int = 1) -> None:
               p = Path(path)
               text = p.read_text()
               actual = text.count(old)
               if actual != count:
-                  raise SystemExit(f"{path}: expected {count} occurrences, found {actual}: {old[:80]!r}")
-              p.write_text(text.replace(old, new))
+                  raise SystemExit(f"{path}: expected {count} occurrences, found {actual}: {old!r}")
+              p.write_text(text.replace(old, new, count))
 
-          # Backend: preserve omitted-vs-empty server_names. New callers send exact
-          # listen+names; legacy listen-only calls work only for a unique listener.
           replace(
               "internal/admin/patch_helpers.go",
-              "\tsrv, err := findServer(c, req.Listen)\n",
-              "\tsrv, err := findServerTarget(c, req.Listen, req.ServerNames)\n",
-          )
-          helper_anchor = '''func findServer(c *config.Config, listen string) (*config.ServerConfig, error) {
-\tif strings.TrimSpace(listen) == "" {
-\t\treturn nil, fmt.Errorf("server target requires a listen address")
-\t}
-\tfor i := range c.Servers {
-\t\tif c.Servers[i].Listen == listen {
-\t\t\treturn &c.Servers[i], nil
-\t\t}
-\t}
-\treturn nil, fmt.Errorf("no server found for listen %q", listen)
-}
-'''
-          helper_new = helper_anchor + '''
-// findServerTarget resolves a server-level structured operation without ever
-// guessing between virtual hosts that share a listener. A non-nil ServerNames
-// slice means the client supplied the field, including an explicitly empty
-// slice for a catch-all vhost. A nil slice is the legacy listen-only contract:
-// it remains compatible only when exactly one block uses that listener.
-func findServerTarget(c *config.Config, listen string, serverNames []string) (*config.ServerConfig, error) {
-\tif serverNames != nil {
-\t\treturn findServerByNames(c, listen, serverNames)
-\t}
-\tif strings.TrimSpace(listen) == "" {
-\t\treturn nil, fmt.Errorf("server target requires a listen address")
-\t}
-\tvar found *config.ServerConfig
-\tmatches := 0
-\tfor i := range c.Servers {
-\t\tif c.Servers[i].Listen == listen {
-\t\t\tfound = &c.Servers[i]
-\t\t\tmatches++
-\t\t}
-\t}
-\tswitch {
-\tcase matches == 0:
-\t\treturn nil, fmt.Errorf("no server found for listen %q", listen)
-\tcase matches > 1:
-\t\treturn nil, fmt.Errorf("server target is ambiguous: %d blocks share listen %q; include server_names", matches, listen)
-\tdefault:
-\t\treturn found, nil
-\t}
-}
-'''
-          replace("internal/admin/patch_helpers.go", helper_anchor, helper_new)
-          replace(
-              "internal/admin/patch.go",
-              "\t\tsrv, err := findServer(c, req.Listen)\n",
-              "\t\tsrv, err := findServerTarget(c, req.Listen, req.ServerNames)\n",
-              count=2,
+              "\t\t\t\tmatches++\n\t\t\t}\n\t}\n\tswitch {",
+              "\t\t\t\tmatches++\n\t\t\t}\n\t\t}\n\t}\n\tswitch {",
           )
 
-          # Frontend wire contract: all new server-level operations carry exact names.
           replace(
-              "internal/admin/ui/src/api/client.ts",
-              '  | { op: "server_set_limits"; listen: string; limits: ServerLimitsPatch }\n  | { op: "server_toggle_http3"; listen: string; enabled: boolean }\n  | { op: "server_toggle_h2c"; listen: string; enabled: boolean }',
-              '  | { op: "server_set_limits"; listen: string; server_names: string[]; limits: ServerLimitsPatch }\n  | { op: "server_toggle_http3"; listen: string; server_names: string[]; enabled: boolean }\n  | { op: "server_toggle_h2c"; listen: string; server_names: string[]; enabled: boolean }',
-          )
-
-          old_builder = '''export function buildServerLimitsPatch(
-  listen: string,
-  initial: ServerLimitsDraft,
-  current: ServerLimitsDraft,
-): ConfigPatch | null {
-  const limits: Extract<ConfigPatch, { op: "server_set_limits" }>["limits"] = {};
-  if (current.bodyLimit !== initial.bodyLimit) limits.client_max_body_size = current.bodyLimit;
-  if (current.readTimeout !== initial.readTimeout) limits.read_timeout = current.readTimeout;
-  if (current.writeTimeout !== initial.writeTimeout) limits.write_timeout = current.writeTimeout;
-  if (current.idleTimeout !== initial.idleTimeout) limits.idle_timeout = current.idleTimeout;
-  return hasOwnFields(limits) ? { op: "server_set_limits", listen, limits } : null;
-}
-'''
-          new_builder = '''export function serverTargetKey(
-  server: Pick<ServerLimitsProjection, "listen" | "server_names">,
-): string {
-  return JSON.stringify([server.listen, [...(server.server_names ?? [])].sort()]);
-}
-
-export function buildServerLimitsPatch(
-  server: Pick<ServerLimitsProjection, "listen" | "server_names">,
-  initial: ServerLimitsDraft,
-  current: ServerLimitsDraft,
-): ConfigPatch | null {
-  const limits: Extract<ConfigPatch, { op: "server_set_limits" }>["limits"] = {};
-  if (current.bodyLimit !== initial.bodyLimit) limits.client_max_body_size = current.bodyLimit;
-  if (current.readTimeout !== initial.readTimeout) limits.read_timeout = current.readTimeout;
-  if (current.writeTimeout !== initial.writeTimeout) limits.write_timeout = current.writeTimeout;
-  if (current.idleTimeout !== initial.idleTimeout) limits.idle_timeout = current.idleTimeout;
-  return hasOwnFields(limits)
-    ? {
-        op: "server_set_limits",
-        listen: server.listen,
-        server_names: [...(server.server_names ?? [])],
-        limits,
-      }
-    : null;
-}
-'''
-          replace("internal/admin/ui/src/lib/trafficPatchBuilders.ts", old_builder, new_builder)
-
-          # Traffic editor retains complete selected projection and unique option identity.
-          replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              "  seedServerLimits,\n",
-              "  seedServerLimits,\n  serverTargetKey,\n",
+              "internal/admin/ui/src/features/traffic-controls/TrafficControlsPanel.tsx",
+              "  readonly active?: boolean;\n",
+              "  readonly active?: boolean | undefined;\n",
           )
           replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              '  return names.length > 0 ? `${route.listen} — ${names.join(", ")}` : route.listen;\n',
-              '  return names.length > 0 ? `${route.listen} — ${names.join(", ")}` : `${route.listen} — (any host)`;\n',
+              "internal/admin/ui/src/features/traffic-controls/TrafficControlsPanel.tsx",
+              "  readonly unavailableReason?: string;\n",
+              "  readonly unavailableReason?: string | undefined;\n",
+          )
+
+          replace(
+              "internal/admin/ui/src/test/issue81-traffic-patches.test.ts",
+              "buildServerLimitsPatch(server.listen, initial, { ...initial })",
+              "buildServerLimitsPatch(server, initial, { ...initial })",
           )
           replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              '  const [targetListen, setTargetListen] = useState("");\n',
-              '  const [targetServerKey, setTargetServerKey] = useState("");\n',
+              "internal/admin/ui/src/test/issue81-traffic-patches.test.ts",
+              "buildServerLimitsPatch(server.listen, initial, { ...initial, idleTimeout: \"0s\" })",
+              "buildServerLimitsPatch(server, initial, { ...initial, idleTimeout: \"0s\" })",
           )
           replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              '''  const routeOptions = current.servers ?? [];
-  const selectedRoute =
-    routeOptions.find((route) => route.listen === targetListen) ?? routeOptions[0] ?? null;
-''',
-              '''  const routeOptions = current.servers ?? [];
-  const selectedRoute =
-    routeOptions.find((route) => serverTargetKey(route) === targetServerKey) ?? routeOptions[0] ?? null;
-''',
+              "internal/admin/ui/src/test/issue81-traffic-patches.test.ts",
+              "      listen: server.listen,\n      limits: { idle_timeout: \"0s\" },",
+              "      listen: server.listen,\n      server_names: [],\n      limits: { idle_timeout: \"0s\" },",
           )
-          replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              '    setTargetListen(selectedRoute.listen);\n',
-              '    setTargetServerKey(serverTargetKey(selectedRoute));\n',
-          )
-          replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              '      ? buildServerLimitsPatch(selectedRoute.listen, limitBaseline, serverLimits)\n',
-              '      ? buildServerLimitsPatch(selectedRoute, limitBaseline, serverLimits)\n',
-          )
-          replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              '''    const dirty =
-      limitBaseline !== null &&
-      buildServerLimitsPatch(targetListen || next.listen, limitBaseline, serverLimits) !== null;
-''',
-              '''    const dirty =
-      limitBaseline !== null &&
-      buildServerLimitsPatch(selectedRoute ?? next, limitBaseline, serverLimits) !== null;
-''',
-          )
-          replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              '    setTargetListen(next.listen);\n',
-              '    setTargetServerKey(serverTargetKey(next));\n',
-          )
-          replace(
-              "internal/admin/ui/src/features/traffic-controls/TrafficControlEditor.tsx",
-              '''                  value={selectedRoute?.listen ?? ""}
-                  className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text"
-                  onChange={(event) => {
-                    const next = routeOptions.find((route) => route.listen === event.target.value);
-                    if (next !== undefined) selectServer(next);
-                  }}
-                >
-                  {routeOptions.map((route) => (
-                    <option key={`${route.listen}-${(route.server_names ?? []).join(",")}`} value={route.listen}>
-''',
-              '''                  value={selectedRoute === null ? "" : serverTargetKey(selectedRoute)}
-                  className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text"
-                  onChange={(event) => {
-                    const next = routeOptions.find((route) => serverTargetKey(route) === event.target.value);
-                    if (next !== undefined) selectServer(next);
-                  }}
-                >
-                  {routeOptions.map((route) => (
-                    <option key={serverTargetKey(route)} value={serverTargetKey(route)}>
-''',
-          )
-
-          # Pending-restart race: capture the authoritative value-free snapshot before preview.
-          hook = Path("internal/admin/ui/src/lib/useRunPatchBatch.ts")
-          text = hook.read_text()
-          anchor = '''export interface RunPatchBatch {
-'''
-          helper = '''export async function previewPatchBatchDraft(
-  ops: readonly ConfigPatch[],
-  baseVersion?: string,
-): Promise<PendingPatchDraft> {
-  const pendingResponse = await fetchPendingRestart();
-  const pendingSnapshot = snapshotPendingRestart(pendingResponse);
-  const result = await patchConfigBatch([...ops], baseVersion);
-  return patchResultToPendingDraft(ops, result, baseVersion, pendingSnapshot);
-}
-
-'''
-          if helper not in text:
-              if anchor not in text:
-                  raise SystemExit("useRunPatchBatch: helper anchor missing")
-              text = text.replace(anchor, helper + anchor, 1)
-          old = '''        const result = await patchConfigBatch([...ops], baseVersion);
-        const pendingResponse = await fetchPendingRestart();
-        const pendingSnapshot = snapshotPendingRestart(pendingResponse);
-        return patchResultToPendingDraft(ops, result, baseVersion, pendingSnapshot);
-'''
-          new = '''        return await previewPatchBatchDraft(ops, baseVersion);
-'''
-          if text.count(old) != 1:
-              raise SystemExit("useRunPatchBatch: ordering block mismatch")
-          hook.write_text(text.replace(old, new, 1))
-
-          # Optional projections: never label omitted data enabled/disabled and never expose a no-op editor.
-          panel = Path("internal/admin/ui/src/features/traffic-controls/TrafficControlsPanel.tsx")
-          text = panel.read_text()
-          text = text.replace(
-              '''  onEdit,
-  children,
-}: {
-  readonly title: string;
-  readonly active?: boolean;
-  readonly onEdit: () => void;
-  readonly children: ReactNode;
-}) {
-''',
-              '''  onEdit,
-  unavailableReason,
-  children,
-}: {
-  readonly title: string;
-  readonly active?: boolean;
-  readonly onEdit: () => void;
-  readonly unavailableReason?: string;
-  readonly children: ReactNode;
-}) {
-  const unavailableId = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-unavailable`;
-''',
-              1,
-          )
-          text = text.replace(
-              '''          type="button"
-          onClick={onEdit}
-          className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
-''',
-              '''          type="button"
-          onClick={onEdit}
-          disabled={unavailableReason !== undefined}
-          aria-describedby={unavailableReason !== undefined ? unavailableId : undefined}
-          className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg disabled:cursor-not-allowed disabled:opacity-40"
-''',
-              1,
-          )
-          text = text.replace(
-              '''      <div className="px-4 py-3">{children}</div>
-''',
-              '''      <div className="px-4 py-3">
-        {unavailableReason !== undefined && (
-          <p id={unavailableId} className="mb-2 text-xs text-jul-muted">{unavailableReason}</p>
-        )}
-        {children}
-      </div>
-''',
-              1,
-          )
-          text = text.replace(
-              '<SectionCard title="Global settings" onEdit={() => { setGlobalEditing(true); }}>',
-              '<SectionCard title="Global settings" unavailableReason={data.global === undefined ? "Unavailable on this server; no global projection was provided." : undefined} onEdit={() => { setGlobalEditing(true); }}>',
-              1,
-          )
-          text = text.replace('active={data.compression?.enabled ?? false}', 'active={data.compression?.enabled}', 1)
-          text = text.replace(
-              'title="Compression"\n          active={data.compression?.enabled}\n          onEdit=',
-              'title="Compression"\n          active={data.compression?.enabled}\n          unavailableReason={data.compression === undefined ? "Unavailable on this server; no compression projection was provided." : undefined}\n          onEdit=',
-              1,
-          )
-          text = text.replace('active={data.rate_limit?.enabled ?? false}', 'active={data.rate_limit?.enabled}', 1)
-          text = text.replace(
-              'title="Rate limiting"\n          active={data.rate_limit?.enabled}\n          onEdit=',
-              'title="Rate limiting"\n          active={data.rate_limit?.enabled}\n          unavailableReason={data.rate_limit === undefined ? "Unavailable on this server; no rate-limit projection was provided." : undefined}\n          onEdit=',
-              1,
-          )
-          text = text.replace('active={data.cache?.enabled ?? false}', 'active={data.cache?.enabled}', 1)
-          text = text.replace(
-              'title="Cache"\n          active={data.cache?.enabled}\n          onEdit=',
-              'title="Cache"\n          active={data.cache?.enabled}\n          unavailableReason={data.cache === undefined ? "Unavailable on this server; no cache projection was provided." : undefined}\n          onEdit=',
-              1,
-          )
-          text = text.replace(
-              '<SectionCard title="Limits & Timeouts" onEdit={() => { setEditing("limits"); }}>',
-              '<SectionCard title="Limits & Timeouts" unavailableReason={(data.servers?.length ?? 0) === 0 ? "Unavailable on this server; no server-limit projection was provided." : undefined} onEdit={() => { setEditing("limits"); }}>',
-              1,
-          )
-          text = text.replace('active={data.access_log?.enabled ?? true}', 'active={data.access_log?.enabled}', 1)
-          text = text.replace(
-              'title="Access Logging"\n          active={data.access_log?.enabled}\n          onEdit=',
-              'title="Access Logging"\n          active={data.access_log?.enabled}\n          unavailableReason={data.access_log === undefined ? "Unavailable on this server; no access-log projection was provided." : undefined}\n          onEdit=',
-              1,
-          )
-          text = text.replace('active={data.tracing?.enabled ?? false}', 'active={data.tracing?.enabled}', 1)
-          text = text.replace(
-              'title="Distributed Tracing"\n          active={data.tracing?.enabled}\n          onEdit=',
-              'title="Distributed Tracing"\n          active={data.tracing?.enabled}\n          unavailableReason={data.tracing === undefined ? "Unavailable on this server; no tracing projection was provided." : undefined}\n          onEdit=',
-              1,
-          )
-          panel.write_text(text)
-
-          # Remove typed-path-only TOML generators after caller proof (performed in shell below).
-          toml = Path("internal/admin/ui/src/lib/trafficToml.ts")
-          text = toml.read_text()
-          text = re.sub(r'\nfunction tomlStringArray\(items: readonly string\[\]\): string \{.*?\n\}\n', '\n', text, count=1, flags=re.S)
-          text = re.sub(r'\n/\*\*\n \* Legacy/raw compatibility generator\..*?\nexport function generateCompressionToml\(.*?\n\}\n', '\n', text, count=1, flags=re.S)
-          text = re.sub(r'\n/\*\* Legacy/raw compatibility only; the guided global editor uses rate_limit_global_set\. \*/\nexport function generateRateLimitToml\(.*?\n\}\n', '\n', text, count=1, flags=re.S)
-          toml.write_text(text)
-
-          tt = Path("internal/admin/ui/src/test/traffic-toml.test.ts")
-          text = tt.read_text()
-          text = text.replace('  generateCompressionToml,\n', '').replace('  generateRateLimitToml,\n', '')
-          text = re.sub(r'\n  it\("emits compression with encoders and types".*?\n  \}\);\n', '\n', text, count=1, flags=re.S)
-          text = re.sub(r'\n  it\("omits detail when disabled".*?\n  \}\);\n', '\n', text, count=1, flags=re.S)
-          text = re.sub(r'\n  it\("emits rate-limit fields and floors numbers".*?\n  \}\);\n', '\n', text, count=1, flags=re.S)
-          text = text.replace('describe("generators", () => {', 'describe("cache raw generator", () => {', 1)
-          tt.write_text(text)
-
-          # New backend characterization for exact shared-listener targeting and legacy fallback.
-          Path("internal/admin/issue82_server_target_test.go").write_text(r'''// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
-// SPDX-License-Identifier: agpl
-
-package admin
-
-import (
-    "strings"
-    "testing"
-
-    "jul/internal/config"
-)
-
-func issue82SharedListenerConfig() *config.Config {
-    return &config.Config{Servers: []config.ServerConfig{
-        {Listen: ":8443", ServerNames: []string{"a.example"}, TLS: &config.TLSConfig{Enabled: true}},
-        {Listen: ":8443", ServerNames: []string{"b.example"}, TLS: &config.TLSConfig{Enabled: true}},
-        {Listen: ":8443", ServerNames: []string{}, TLS: &config.TLSConfig{Enabled: true}},
-    }}
-}
-
-func TestIssue82ServerOperationsTargetExactSharedListenerVhost(t *testing.T) {
-    c := issue82SharedListenerConfig()
-    _, err := applyPatch(c, patchRequest{
-        Op: "server_set_limits", Listen: ":8443", ServerNames: []string{"b.example"},
-        Limits: &serverLimits{IdleTimeout: "19s"},
-    })
-    if err != nil { t.Fatalf("server_set_limits: %v", err) }
-    if c.Servers[0].IdleTimeout == c.Servers[1].IdleTimeout { t.Fatal("limits operation mutated or matched vhost A") }
-
-    _, err = applyPatch(c, patchRequest{Op: "server_toggle_http3", Listen: ":8443", ServerNames: []string{"b.example"}, Enabled: boolPtr(true)})
-    if err != nil { t.Fatalf("server_toggle_http3: %v", err) }
-    if c.Servers[1].HTTP3 == nil || !c.Servers[1].HTTP3.Enabled { t.Fatal("HTTP/3 was not enabled on vhost B") }
-    if c.Servers[0].HTTP3 != nil { t.Fatal("HTTP/3 operation mutated vhost A") }
-
-    _, err = applyPatch(c, patchRequest{Op: "server_toggle_h2c", Listen: ":8443", ServerNames: []string{"b.example"}, Enabled: boolPtr(false)})
-    if err != nil { t.Fatalf("server_toggle_h2c: %v", err) }
-    if c.Servers[0].H2C { t.Fatal("h2c operation mutated vhost A") }
-}
-
-func TestIssue82CatchAllServerTargetPreservesPresence(t *testing.T) {
-    c := issue82SharedListenerConfig()
-    names := []string{}
-    if names == nil { t.Fatal("fixture must carry an explicit empty server_names array") }
-    _, err := applyPatch(c, patchRequest{
-        Op: "server_set_limits", Listen: ":8443", ServerNames: names,
-        Limits: &serverLimits{ReadTimeout: "23s"},
-    })
-    if err != nil { t.Fatalf("target catch-all: %v", err) }
-    if c.Servers[2].ReadTimeout == c.Servers[0].ReadTimeout { t.Fatal("catch-all target did not resolve independently") }
-}
-
-func TestIssue82LegacyListenOnlyRejectsAmbiguousAndAllowsUnique(t *testing.T) {
-    c := issue82SharedListenerConfig()
-    _, err := applyPatch(c, patchRequest{
-        Op: "server_set_limits", Listen: ":8443",
-        Limits: &serverLimits{IdleTimeout: "7s"},
-    })
-    if err == nil || !strings.Contains(err.Error(), "ambiguous") {
-        t.Fatalf("legacy shared listener = %v, want bounded ambiguous error", err)
-    }
-
-    unique := &config.Config{Servers: []config.ServerConfig{{Listen: ":8080"}}}
-    _, err = applyPatch(unique, patchRequest{
-        Op: "server_set_limits", Listen: ":8080",
-        Limits: &serverLimits{IdleTimeout: "7s"},
-    })
-    if err != nil { t.Fatalf("unique legacy listener should remain compatible: %v", err) }
-}
-
-func TestIssue82ServerTargetIsIndependentOfServerOrder(t *testing.T) {
-    for _, reverse := range []bool{false, true} {
-        c := issue82SharedListenerConfig()
-        if reverse { c.Servers[0], c.Servers[1] = c.Servers[1], c.Servers[0] }
-        _, err := applyPatch(c, patchRequest{Op: "server_toggle_http3", Listen: ":8443", ServerNames: []string{"b.example"}, Enabled: boolPtr(true)})
-        if err != nil { t.Fatalf("reverse=%v: %v", reverse, err) }
-        for i := range c.Servers {
-            enabled := c.Servers[i].HTTP3 != nil && c.Servers[i].HTTP3.Enabled
-            if enabled != (len(c.Servers[i].ServerNames) == 1 && c.Servers[i].ServerNames[0] == "b.example") {
-                t.Fatalf("reverse=%v server=%v HTTP3=%v", reverse, c.Servers[i].ServerNames, enabled)
-            }
-        }
-    }
-}
-''')
-
-          Path("internal/admin/ui/src/test/issue82-server-target.test.ts").write_text(r'''/**
- * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
- * SPDX-License-Identifier: agpl
- */
-import { describe, expect, it } from "vitest";
-import type { ServerLimitsProjection } from "@/api/client.ts";
-import { buildServerLimitsPatch, seedServerLimits, serverTargetKey } from "@/lib/trafficPatchBuilders.ts";
-
-const a: ServerLimitsProjection = { listen: ":8443", server_names: ["a.example"], client_max_body_size: "1m", read_timeout: "10s", write_timeout: "10s", idle_timeout: "30s" };
-const b: ServerLimitsProjection = { ...a, server_names: ["b.example"] };
-const catchAll: ServerLimitsProjection = { ...a, server_names: [] };
-
-describe("issue #82 exact server coordinates", () => {
-  it("serializes the selected shared-listener vhost coordinates", () => {
-    const initial = seedServerLimits(b);
-    expect(buildServerLimitsPatch(b, initial, { ...initial, idleTimeout: "45s" })).toEqual({
-      op: "server_set_limits",
-      listen: ":8443",
-      server_names: ["b.example"],
-      limits: { idle_timeout: "45s" },
-    });
-    expect(serverTargetKey(a)).not.toBe(serverTargetKey(b));
-  });
-
-  it("serializes an explicit empty server_names array for the catch-all", () => {
-    const initial = seedServerLimits(catchAll);
-    expect(buildServerLimitsPatch(catchAll, initial, { ...initial, readTimeout: "20s" })).toMatchObject({
-      listen: ":8443",
-      server_names: [],
-    });
-  });
-
-  it("uses deterministic set identity independent of server-name order", () => {
-    expect(serverTargetKey({ listen: ":8443", server_names: ["b", "a"] })).toBe(
-      serverTargetKey({ listen: ":8443", server_names: ["a", "b"] }),
-    );
-  });
-});
-''')
-
-          Path("internal/admin/ui/src/test/issue82-handoff-race.test.ts").write_text(r'''/**
- * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
- * SPDX-License-Identifier: agpl
- */
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  fetchPendingRestart: vi.fn(),
-  patchConfigBatch: vi.fn(),
-}));
-vi.mock("@/api/client.ts", async () => {
-  const actual = await vi.importActual<typeof import("@/api/client.ts")>("@/api/client.ts");
-  return { ...actual, fetchPendingRestart: mocks.fetchPendingRestart, patchConfigBatch: mocks.patchConfigBatch };
-});
-
-import { previewPatchBatchDraft } from "@/lib/useRunPatchBatch.ts";
-import { pendingRestartSnapshotEqual, snapshotPendingRestart } from "@/lib/configDraftHandoff.ts";
-import { evaluateConfigHandoffGuard } from "@/lib/configHandoffGuard.ts";
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => { resolve = r; });
-  return { promise, resolve };
-}
-
-const lifecycle = { changes: [], can_apply_hot: true, can_stage_restart: true, hot_paths: ["compression"], restart_required_paths: [], new_listener_only_paths: [], ignored_deprecated_paths: [], validation_rejected_paths: [], pending_subsystems: [] };
-const result = { ok: true, summary: "compression changed", operation_summaries: [{ op_index: 0, op: "compression_set", summary: "compression changed" }], diff: { summary: "1 change" }, base_version: "base-a", valid: true, validation_errors: [], lifecycle };
-const op = { op: "compression_set" as const, compression: { enabled: true } };
-
-beforeEach(() => { mocks.fetchPendingRestart.mockReset(); mocks.patchConfigBatch.mockReset(); });
-
-describe("issue #82 pending snapshot ordering", () => {
-  it("does not start preview until the pre-preview pending snapshot resolves", async () => {
-    const pending = deferred<never>();
-    mocks.fetchPendingRestart.mockReturnValue(pending.promise);
-    mocks.patchConfigBatch.mockResolvedValue(result);
-    const draftPromise = previewPatchBatchDraft([op], "base-a");
-    await Promise.resolve();
-    expect(mocks.patchConfigBatch).not.toHaveBeenCalled();
-    pending.resolve({ pending: false, status: { state: "none", managed: false, staged: false, discard_available: false, inconsistent: false } } as never);
-    const draft = await draftPromise;
-    expect(mocks.patchConfigBatch).toHaveBeenCalledWith([op], "base-a");
-    expect(draft.pendingRestart).toEqual({ state: "none", subsystems: [] });
-  });
-
-  it.each([
-    ["another actor stages", { pending: false }, { pending: true, status: { state: "managed_staged", staged_version: "v2", subsystems: ["listener"] } }],
-    ["another actor discards", { pending: true, status: { state: "managed_staged", staged_version: "v1", subsystems: ["listener"] } }, { pending: false }],
-    ["staged version changes", { pending: true, status: { state: "managed_staged", staged_version: "v1", subsystems: ["listener"] } }, { pending: true, status: { state: "managed_staged", staged_version: "v2", subsystems: ["listener"] } }],
-    ["pending subsystem changes", { pending: true, status: { state: "managed_staged", staged_version: "v1", subsystems: ["listener"] } }, { pending: true, status: { state: "managed_staged", staged_version: "v1", subsystems: ["listener", "global"] } }],
-  ])("blocks stale handoff when %s", (_label, before, after) => {
-    const left = snapshotPendingRestart(before as never);
-    const right = snapshotPendingRestart(after as never);
-    expect(pendingRestartSnapshotEqual(left, right)).toBe(false);
-    expect(evaluateConfigHandoffGuard({ pendingKnown: true, pendingChanged: true, baseChanged: false, refreshing: false, refreshFailed: false })).toMatchObject({ blocked: true, requiresRefresh: true });
-  });
-
-  it("blocks when the pinned base moves instead of substituting a new token", () => {
-    expect(evaluateConfigHandoffGuard({ pendingKnown: true, pendingChanged: false, baseChanged: true, refreshing: false, refreshFailed: false })).toMatchObject({ blocked: true, requiresRefresh: false });
-  });
-});
-''')
-
-          Path("internal/admin/ui/src/test/issue82-compatibility.test.tsx").write_text(r'''/**
- * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
- * SPDX-License-Identifier: agpl
- */
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
-
-const mocks = vi.hoisted(() => ({ fetchTrafficControls: vi.fn() }));
-vi.mock("@/api/client.ts", async () => {
-  const actual = await vi.importActual<typeof import("@/api/client.ts")>("@/api/client.ts");
-  return { ...actual, fetchTrafficControls: mocks.fetchTrafficControls };
-});
-import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControlsPanel.tsx";
-
-function renderPanel() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}><MemoryRouter><TrafficControlsPanel /></MemoryRouter></QueryClientProvider>);
-}
-
-describe("issue #82 optional traffic-control projections", () => {
-  it("disables no-op actions and explains omitted compatibility projections", async () => {
-    mocks.fetchTrafficControls.mockResolvedValue({});
-    renderPanel();
-    for (const name of ["Global settings", "Compression", "Rate limiting", "Cache", "Limits & Timeouts", "Access Logging", "Distributed Tracing"]) {
-      expect(await screen.findByText(name)).toBeInTheDocument();
-    }
-    const edits = await screen.findAllByRole("button", { name: "Edit" });
-    expect(edits.length).toBeGreaterThan(0);
-    for (const edit of edits) expect(edit).toBeDisabled();
-    expect(screen.getAllByText(/Unavailable on this server/).length).toBe(edits.length);
-    expect(screen.queryByText(/^enabled$/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^disabled$/i)).not.toBeInTheDocument();
-  });
-});
-''')
           PY
-
-          # Prove compression/rate TOML generators had no production caller before removal.
-          if git show HEAD:internal/admin/ui/src/lib/trafficToml.ts | grep -q 'generateCompressionToml'; then
-            callers=$(git grep -l -E 'generateCompressionToml|generateRateLimitToml' HEAD -- ':!internal/admin/ui/src/lib/trafficToml.ts' ':!internal/admin/ui/src/test/*' || true)
-            if [ -n "$callers" ]; then
-              echo "Unexpected production TOML-generator callers:" >&2
-              echo "$callers" >&2
-              exit 1
-            fi
-          fi
-
-          # Prove the Issue 81 transport is no longer referenced outside itself before deleting it.
-          refs=$(git grep -l -E '\.issue81-bundle|issue81-apply\.yml' HEAD -- ':!.github/workflows/issue81-apply.yml' ':!.issue81-bundle/*' || true)
-          if [ -n "$refs" ]; then
-            echo "Obsolete Issue 81 transport still has consumers:" >&2
-            echo "$refs" >&2
-            exit 1
-          fi
-          git rm -rf .github/workflows/issue81-apply.yml .issue81-bundle
 
       - name: Format and targeted verification
         shell: bash
         run: |
           set -euo pipefail
-          gofmt -w internal/admin/patch_helpers.go internal/admin/patch.go internal/admin/issue82_server_target_test.go
+          gofmt -w internal/admin/patch_helpers.go
           git diff --check
-          go test ./internal/admin -run 'TestIssue82'
+          go vet ./internal/admin
+          go test ./internal/admin -run 'TestIssue82|TestApplyPatch'
           pnpm --dir internal/admin/ui install --frozen-lockfile
-          pnpm --dir internal/admin/ui exec vitest run src/test/issue82-server-target.test.ts src/test/issue82-handoff-race.test.ts src/test/issue82-compatibility.test.tsx src/test/traffic-toml.test.ts
           pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui exec vitest run \
+            src/test/issue81-traffic-patches.test.ts \
+            src/test/issue82-server-target.test.ts \
+            src/test/issue82-handoff-race.test.ts \
+            src/test/issue82-compatibility.test.tsx \
+            src/test/traffic-toml.test.ts
           pnpm --dir internal/admin/ui run lint
           pnpm --dir internal/admin/ui run build
+
       - name: Commit verified changes and remove one-shot patcher
         shell: bash
         run: |
@@ -638,5 +87,5 @@ describe("issue #82 optional traffic-control projections", () => {
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "fix: close phase 5 correctness gaps"
+          git commit -m "fix: repair issue 82 CI failures"
           git push origin HEAD:agent/issue-82-phase5-closure
