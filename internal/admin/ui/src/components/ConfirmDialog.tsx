@@ -61,14 +61,13 @@ export function ConfirmDialog({
       aria-label={title}
     >
       <div
-        className="flex w-full max-w-lg flex-col gap-4 overflow-hidden rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl outline-none"
+        className="flex w-full max-w-lg flex-col gap-4 rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl outline-none"
         ref={dialogRef}
         tabIndex={-1}
-        style={{ maxHeight: "calc(100vh - 2rem)" }}
       >
-        <h2 className="shrink-0 text-lg font-semibold text-jul-text">{title}</h2>
-        <div className="min-h-0 flex-1 overflow-y-auto text-sm text-jul-muted">{children}</div>
-        <div className="flex shrink-0 justify-end gap-3 pt-2">
+        <h2 className="text-lg font-semibold text-jul-text">{title}</h2>
+        <div className="text-sm text-jul-muted">{children}</div>
+        <div className="flex justify-end gap-3 pt-2">
           <button
             type="button"
             onClick={onCancel}
