@@ -32,6 +32,10 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   reporter: process.env.CI ? "github" : "list",
+  // The real-server files share one mutable jul process/config/history store.
+  // Run them sequentially so stateful lifecycle tests cannot invalidate each
+  // other's pending drafts, snapshots, or live configuration mid-assertion.
+  workers: runRealServer ? 1 : undefined,
   use: {
     headless: true,
     // Suppress verbose browser logs in CI but keep them locally for debugging.
