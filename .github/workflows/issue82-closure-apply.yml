@@ -1,0 +1,702 @@
+name: Issue 82 closure apply
+
+on:
+  push:
+    branches:
+      - agent/issue-82-phase5-closure
+    paths:
+      - .github/workflows/issue82-closure-apply.yml
+
+permissions:
+  contents: write
+
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+  CONSOLE_UI: internal/admin/ui
+
+jobs:
+  apply-verify-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+
+      - name: Apply closure changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from __future__ import annotations
+
+          from pathlib import Path
+          import re
+          import shutil
+          import subprocess
+
+          ROOT = Path('.')
+
+          def no_callers(symbol: str, definition_path: str) -> None:
+              proc = subprocess.run(
+                  ['git', 'grep', '-n', symbol, '--', ':!'+definition_path],
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+              )
+              if proc.returncode == 0 and proc.stdout.strip():
+                  raise SystemExit(f'{symbol} still has callers:\n{proc.stdout}')
+              if proc.returncode not in (0, 1):
+                  raise SystemExit(proc.stderr)
+
+          def append_once(path: str, marker: str, text: str) -> None:
+              p = Path(path)
+              current = p.read_text()
+              if marker in current:
+                  return
+              p.write_text(current.rstrip() + '\n\n' + text.strip() + '\n')
+
+          # Prove the typed editors no longer call the two legacy complete-table
+          # generators before deleting them. Cache and limits helpers remain live.
+          traffic_path = 'internal/admin/ui/src/lib/trafficToml.ts'
+          no_callers('generateCompressionToml', traffic_path)
+          no_callers('generateRateLimitToml', traffic_path)
+          traffic = Path(traffic_path).read_text()
+          traffic = re.sub(
+              r'\nfunction tomlStringArray\(items: readonly string\[\]\): string \{.*?\n\}\n',
+              '\n',
+              traffic,
+              flags=re.S,
+          )
+          traffic = re.sub(
+              r'\n/\*\*\n \* Legacy/raw compatibility generator\..*?\nexport function generateCompressionToml\(draft: CompressionDraft\): string \{.*?\n\}\n',
+              '\n',
+              traffic,
+              flags=re.S,
+          )
+          traffic = re.sub(
+              r'\n/\*\* Legacy/raw compatibility only; the guided global editor uses rate_limit_global_set\. \*/\nexport function generateRateLimitToml\(draft: RateLimitDraft\): string \{.*?\n\}\n',
+              '\n',
+              traffic,
+              flags=re.S,
+          )
+          if 'generateCompressionToml' in traffic or 'generateRateLimitToml' in traffic:
+              raise SystemExit('legacy TOML generator removal did not match expected source')
+          Path(traffic_path).write_text(traffic)
+
+          # Remove obsolete Issue 81 delivery transport only after the generated
+          # implementation is already represented by merged PR #254 / main.
+          old_workflow = Path('.github/workflows/issue81-apply.yml')
+          if old_workflow.exists():
+              old_workflow.unlink()
+          old_bundle = Path('.issue81-bundle')
+          if old_bundle.exists():
+              shutil.rmtree(old_bundle)
+
+          a11y = r'''/**
+           * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+           * SPDX-License-Identifier: agpl
+           */
+
+          import { fireEvent, render, screen, within } from "@testing-library/react";
+          import { useState } from "react";
+          import { describe, expect, it } from "vitest";
+          import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
+          import { Drawer } from "@/components/Drawer.tsx";
+          import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
+          import type { ApplyOutcome } from "@/lib/applyOutcome.ts";
+
+          function DrawerHarness() {
+            const [open, setOpen] = useState(false);
+            return (
+              <>
+                <button type="button" onClick={() => { setOpen(true); }}>
+                  Open drawer
+                </button>
+                {open && (
+                  <Drawer title="Keyboard drawer" onClose={() => { setOpen(false); }}>
+                    <button type="button">First action</button>
+                    <button type="button">Last action</button>
+                  </Drawer>
+                )}
+              </>
+            );
+          }
+
+          function ConfirmHarness() {
+            const [open, setOpen] = useState(false);
+            return (
+              <>
+                <button type="button" onClick={() => { setOpen(true); }}>
+                  Open confirmation
+                </button>
+                {open && (
+                  <ConfirmDialog
+                    title="Apply live?"
+                    confirmLabel="Apply live"
+                    onConfirm={() => { setOpen(false); }}
+                    onCancel={() => { setOpen(false); }}
+                  >
+                    The exact reviewed change will be applied.
+                  </ConfirmDialog>
+                )}
+              </>
+            );
+          }
+
+          describe("Phase 5 accessibility closure", () => {
+            it("keeps drawer keyboard focus inside, closes on Escape, and restores focus", () => {
+              render(<DrawerHarness />);
+              const trigger = screen.getByRole("button", { name: "Open drawer" });
+              trigger.focus();
+              fireEvent.click(trigger);
+
+              const dialog = screen.getByRole("dialog", { name: "Keyboard drawer" });
+              const buttons = within(dialog).getAllByRole("button");
+              const panelClose = buttons.find((button) => button.textContent === "Close");
+              const last = within(dialog).getByRole("button", { name: "Last action" });
+              expect(panelClose).toBeDefined();
+              expect(panelClose).toHaveFocus();
+
+              last.focus();
+              fireEvent.keyDown(last, { key: "Tab" });
+              expect(panelClose).toHaveFocus();
+
+              fireEvent.keyDown(window, { key: "Escape" });
+              expect(screen.queryByRole("dialog", { name: "Keyboard drawer" })).not.toBeInTheDocument();
+              expect(trigger).toHaveFocus();
+            });
+
+            it("focuses the confirmation action, traps both Tab directions, and restores focus", () => {
+              render(<ConfirmHarness />);
+              const trigger = screen.getByRole("button", { name: "Open confirmation" });
+              trigger.focus();
+              fireEvent.click(trigger);
+
+              const dialog = screen.getByRole("dialog", { name: "Apply live?" });
+              const confirm = within(dialog).getByRole("button", { name: "Apply live" });
+              const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+              expect(confirm).toHaveFocus();
+
+              fireEvent.keyDown(confirm, { key: "Tab" });
+              expect(cancel).toHaveFocus();
+              fireEvent.keyDown(cancel, { key: "Tab", shiftKey: true });
+              expect(confirm).toHaveFocus();
+
+              fireEvent.keyDown(window, { key: "Escape" });
+              expect(screen.queryByRole("dialog", { name: "Apply live?" })).not.toBeInTheDocument();
+              expect(trigger).toHaveFocus();
+            });
+
+            it("communicates apply state with text and an ARIA status/alert role, not colour alone", () => {
+              const warning: ApplyOutcome = {
+                kind: "partial-reload",
+                severity: "warning",
+                blocking: false,
+                title: "Applied with a degraded subsystem",
+                message: "HTTP is live; one subsystem still serves the previous generation.",
+                failures: [{ name: "stream", detail: "listener reload failed" }],
+              };
+              const { rerender } = render(<ApplyOutcomeBanner outcome={warning} />);
+              const alert = screen.getByRole("alert");
+              expect(alert).toHaveTextContent("Applied with a degraded subsystem");
+              expect(alert).toHaveTextContent("stream");
+
+              const success: ApplyOutcome = {
+                kind: "full-live",
+                severity: "success",
+                blocking: false,
+                title: "Configuration is live",
+                message: "The reviewed configuration is serving.",
+                failures: [],
+              };
+              rerender(<ApplyOutcomeBanner outcome={success} />);
+              expect(screen.getByRole("status")).toHaveTextContent("Configuration is live");
+            });
+          });
+          '''
+          Path('internal/admin/ui/src/test/issue82-accessibility.test.tsx').write_text(a11y.strip() + '\n')
+
+          e2e_path = Path('internal/admin/ui/e2e/real-server.spec.ts')
+          e2e = e2e_path.read_text()
+          marker = 'Phase 5 typed Console closure: create, prove data plane, stage/update/discard, delete, rollback'
+          if marker not in e2e:
+              e2e += r'''
+
+          // ── Phase 5 typed Console + data-plane closure (#82) ───────────────────────
+
+          test(
+            "Phase 5 typed Console closure: create, prove data plane, stage/update/discard, delete, rollback",
+            async ({ page, request }) => {
+              test.setTimeout(180_000);
+
+              const appName = "issue82-phase5-e2e";
+              const newListener = "127.0.0.1:9294";
+              const newTrafficURL = "http://127.0.0.1:9294/";
+
+              const rawBeforeResp = await request.get("/api/config");
+              expect(rawBeforeResp.status()).toBe(200);
+              const rawBefore = RawConfigSchema.parse(await rawBeforeResp.json());
+              const initialRaw = rawBefore.raw ?? "";
+
+              const historyBeforeResp = await request.get("/api/config/history");
+              expect(historyBeforeResp.status()).toBe(200);
+              const historyBefore = z.array(HistoryEntrySchema).parse(await historyBeforeResp.json());
+              const previousHistoryIDs = new Set(historyBefore.map((entry) => entry.id));
+
+              async function applyConfigAction(label: string): Promise<void> {
+                const action = page.getByRole("button", { name: label, exact: true });
+                await expect(action).toBeVisible();
+                await expect(action).toBeEnabled();
+                await action.click();
+                const dialog = page.getByRole("dialog", { name: `${label}?` });
+                await expect(dialog).toBeVisible();
+                const responsePromise = page.waitForResponse(
+                  (response) =>
+                    response.url().includes("/api/config/patch/apply") &&
+                    response.request().method() === "POST",
+                );
+                await dialog.getByRole("button", { name: label, exact: true }).click();
+                const response = await responsePromise;
+                expect(response.status()).toBe(200);
+                await expect(dialog).not.toBeVisible({ timeout: 20_000 });
+              }
+
+              async function openTrafficEditor(cardTitle: string, dialogTitle: string) {
+                await page.goto("/traffic");
+                await expect(
+                  page.getByRole("heading", { name: "Global & Traffic Controls" }),
+                ).toBeVisible();
+                const heading = page.getByText(cardTitle, { exact: true }).first();
+                const header = heading.locator("..");
+                await header.getByRole("button", { name: "Edit" }).click();
+                const dialog = page.getByRole("dialog", { name: dialogTitle });
+                await expect(dialog).toBeVisible();
+                return dialog;
+              }
+
+              async function expectNewListenerServing(): Promise<void> {
+                await expect
+                  .poll(
+                    async () => {
+                      try {
+                        const response = await request.get(newTrafficURL, {
+                          headers: { Authorization: "", Host: "localhost" },
+                        });
+                        return response.status();
+                      } catch {
+                        return 0;
+                      }
+                    },
+                    { timeout: 20_000 },
+                  )
+                  .toBe(200);
+                const response = await request.get(newTrafficURL, {
+                  headers: { Authorization: "", Host: "localhost" },
+                });
+                expect(await response.text()).toContain("Jul static OK");
+              }
+
+              // 1. Create one App/upstream plus a new listener and route through
+              // the real Console typed batch, then prove the new data plane.
+              await page.goto("/apps");
+              await page.getByRole("button", { name: "New app" }).click();
+              const appEditor = page.getByRole("dialog", { name: "New app / upstream" });
+              await appEditor.getByLabel("App / upstream name").fill(appName);
+              await appEditor.getByLabel("Address 1").fill("127.0.0.1:9292");
+              await appEditor.getByRole("radio", { name: /New exact server/ }).check();
+              await appEditor.getByLabel("Listener").fill(newListener);
+              await appEditor.getByLabel("Server names").fill("localhost");
+              await appEditor.getByLabel("Route path").fill("/");
+              await appEditor.getByRole("button", { name: /Review batch in editor/ }).click();
+              await expect(page).toHaveURL(/\/config$/);
+              await applyConfigAction("Apply live");
+              await expectNewListenerServing();
+
+              // Capture the new history snapshot that contains the exact
+              // pre-create configuration. We use it for the final browser rollback.
+              let baselineSnapshotID = "";
+              await expect
+                .poll(
+                  async () => {
+                    const response = await request.get("/api/config/history");
+                    if (response.status() !== 200) return "";
+                    const entries = z.array(HistoryEntrySchema).parse(await response.json());
+                    baselineSnapshotID =
+                      entries.find((entry) => !previousHistoryIDs.has(entry.id))?.id ?? "";
+                    return baselineSnapshotID;
+                  },
+                  { timeout: 20_000 },
+                )
+                .not.toBe("");
+
+              // 2. Enable typed compression live and verify the representation on
+              // the actual traffic listener, not only the projection.
+              const compression = await openTrafficEditor("Compression", "Edit compression");
+              const compressionEnabled = compression.getByRole("checkbox", {
+                name: "Enable compression",
+              });
+              if (!(await compressionEnabled.isChecked())) await compressionEnabled.check();
+              await compression.getByLabel("Minimum response size").fill("0");
+              await compression.getByRole("button", { name: "Review changes" }).click();
+              await expect(page).toHaveURL(/\/config$/);
+              await applyConfigAction("Apply live");
+              const compressed = await request.get(trafficURL, {
+                headers: {
+                  Authorization: "",
+                  Host: "localhost",
+                  "Accept-Encoding": "gzip",
+                },
+              });
+              expect(compressed.status()).toBe(200);
+              expect(compressed.headers()["content-encoding"]).toBe("gzip");
+
+              // 3. Enable the global typed rate limit and prove a real 429, then
+              // disable it again so subsequent control-flow checks are deterministic.
+              const limiter = await openTrafficEditor("Rate limiting", "Edit rate limiting");
+              const limiterEnabled = limiter.getByRole("checkbox", {
+                name: "Enable global rate limiting",
+              });
+              if (!(await limiterEnabled.isChecked())) await limiterEnabled.check();
+              await limiter.getByLabel("Key").fill("ip");
+              await limiter.getByLabel("Requests per second").fill("1");
+              await limiter.getByLabel("Burst").fill("1");
+              await limiter.getByRole("button", { name: "Review changes" }).click();
+              await expect(page).toHaveURL(/\/config$/);
+              await applyConfigAction("Apply live");
+
+              const statuses: number[] = [];
+              for (let index = 0; index < 4; index += 1) {
+                const limited = await request.get(trafficURL, {
+                  headers: { Authorization: "", Host: "localhost" },
+                });
+                statuses.push(limited.status());
+              }
+              expect(statuses).toContain(429);
+
+              const limiterOff = await openTrafficEditor("Rate limiting", "Edit rate limiting");
+              const limiterOffToggle = limiterOff.getByRole("checkbox", {
+                name: "Enable global rate limiting",
+              });
+              if (await limiterOffToggle.isChecked()) await limiterOffToggle.uncheck();
+              await limiterOff.getByRole("button", { name: "Review changes" }).click();
+              await expect(page).toHaveURL(/\/config$/);
+              await applyConfigAction("Apply live");
+
+              // 4. Stage a restart-bound typed global.log_format change. Runtime
+              // traffic remains live. Then update the managed staged candidate via
+              // retained-listener max_conns and discard it, proving byte-exact restore.
+              const preStageResp = await request.get("/api/config");
+              expect(preStageResp.status()).toBe(200);
+              const preStage = RawConfigSchema.parse(await preStageResp.json());
+              const preStageRaw = preStage.raw ?? "";
+
+              const globalEditor = await openTrafficEditor("Global settings", "Edit global settings");
+              const logFormat = globalEditor.getByLabel("Log format");
+              const currentFormat = await logFormat.inputValue();
+              await logFormat.selectOption(currentFormat === "json" ? "text" : "json");
+              await globalEditor.getByRole("button", { name: "Review changes" }).click();
+              await expect(page).toHaveURL(/\/config$/);
+              await applyConfigAction("Save for next restart");
+              await expect(page.getByText("Restart required — configuration staged")).toBeVisible();
+              await expectStaticOK(request, "Jul static OK");
+
+              const stagedLimiter = await openTrafficEditor("Rate limiting", "Edit rate limiting");
+              const maxConns = stagedLimiter.getByLabel("Maximum concurrent connections");
+              const currentMax = Number(await maxConns.inputValue()) || 0;
+              await maxConns.fill(String(currentMax + 17));
+              await stagedLimiter.getByRole("button", { name: "Review changes" }).click();
+              await expect(page).toHaveURL(/\/config$/);
+              await applyConfigAction("Update staged configuration");
+              await expect(page.getByText("Restart required — configuration staged")).toBeVisible();
+
+              await page.getByRole("button", { name: "Discard staged configuration" }).click();
+              await expect(page.getByText("Restart required — configuration staged")).not.toBeVisible({
+                timeout: 20_000,
+              });
+              await expect
+                .poll(
+                  async () => {
+                    const response = await request.get("/api/config");
+                    if (response.status() !== 200) return "";
+                    return RawConfigSchema.parse(await response.json()).raw ?? "";
+                  },
+                  { timeout: 20_000 },
+                )
+                .toBe(preStageRaw);
+              await expectStaticOK(request, "Jul static OK");
+
+              // 5. Dependency-aware deletion: App deletion is blocked while the
+              // route exists. Remove the exact route through a reviewed typed
+              // deletion, then remove the now-unreferenced App/upstream.
+              await page.goto("/apps");
+              await page.getByRole("button", { name: `Open App ${appName}` }).click();
+              const appDetail = page.getByRole("dialog", { name: appName });
+              await expect(appDetail).toContainText("Delete is blocked because 1 projected route still references this App");
+              await expect(
+                appDetail.getByRole("button", { name: "Delete App / upstream…" }),
+              ).toBeDisabled();
+
+              await page.goto("/routes");
+              const listenerLabel = page.getByText(newListener, { exact: true }).first();
+              const routeCard = listenerLabel.locator(
+                "xpath=ancestor::div[contains(@class,'rounded-lg')][1]",
+              );
+              await routeCard.locator("tbody tr").first().click();
+              const routeDetail = page.getByRole("dialog", { name: "prefix /" });
+              await routeDetail.getByRole("button", { name: /Delete route prefix \/ from/ }).click();
+              const routeDelete = page.getByRole("dialog", { name: "Remove this exact route?" });
+              await routeDelete
+                .getByRole("button", { name: "Hand off deletion for apply review" })
+                .click();
+              await expect(page).toHaveURL(/\/config$/);
+              await applyConfigAction("Apply live");
+
+              await page.goto("/apps");
+              await page.getByRole("button", { name: `Open App ${appName}` }).click();
+              const deletableApp = page.getByRole("dialog", { name: appName });
+              await deletableApp.getByRole("button", { name: "Delete App / upstream…" }).click();
+              const appDelete = page.getByRole("dialog", {
+                name: `Remove App/upstream ${appName}?`,
+              });
+              await appDelete
+                .getByRole("button", { name: "Hand off deletion for apply review" })
+                .click();
+              await expect(page).toHaveURL(/\/config$/);
+              await applyConfigAction("Apply live");
+
+              // 6. Use the actual History UI to roll back to the exact pre-create
+              // snapshot. This also proves rollback removes every test-only live
+              // mutation and returns the file to byte-for-byte baseline.
+              await page.goto("/history");
+              const historyRow = page
+                .getByText(baselineSnapshotID, { exact: true })
+                .locator("xpath=ancestor::tr");
+              await historyRow.getByRole("button", { name: "Rollback" }).click();
+              const rollbackDialog = page.getByRole("dialog", { name: "Roll back to this snapshot?" });
+              const rollbackResponse = page.waitForResponse(
+                (response) =>
+                  response.url().includes("/api/config/rollback") &&
+                  response.request().method() === "POST",
+              );
+              await rollbackDialog.getByRole("button", { name: "Roll back", exact: true }).click();
+              const rollback = await rollbackResponse;
+              expect([200, 204]).toContain(rollback.status());
+
+              await expect
+                .poll(
+                  async () => {
+                    const response = await request.get("/api/config");
+                    if (response.status() !== 200) return "";
+                    return RawConfigSchema.parse(await response.json()).raw ?? "";
+                  },
+                  { timeout: 30_000 },
+                )
+                .toBe(initialRaw);
+              await expectStaticOK(request, "Jul static OK");
+            },
+          );
+          '''
+              e2e_path.write_text(e2e)
+
+          append_once(
+              'docs/deployment.md',
+              '## Phase 5 production readiness checklist',
+              r'''
+          ## Phase 5 production readiness checklist
+
+          Use this checklist before promoting an editable or read-only installation to production:
+
+          1. **Validate the exact artifact and config.** Run `jul check -config /etc/jul/server.toml` and `jul lint -config /etc/jul/server.toml` with the same build tags as the production binary. Treat missing feature tags as a deployment error, not a warning.
+          2. **Lock down files.** Keep the service unprivileged; make the config and history readable only by the operator/service account; keep cache, ACME state and logs writable only where the deployment shape requires them. Back up the config and ACME material before upgrades.
+          3. **Constrain the admin plane.** Prefer loopback or a private management network. Set a token through a secret reference, enable RBAC when multiple operators exist, and expose the Console externally only behind an authenticated TLS/mTLS boundary. Never publish the admin listener as an unauthenticated public port.
+          4. **Supervise the process.** Use the shipped systemd units, the distroless container, or the Windows service wrapper. Configure restart policy, file-descriptor limits, and `/healthz` plus `/readyz` probes before accepting traffic.
+          5. **Choose log sinks deliberately.** Route process logs through the supervisor and size/rotate access-log storage. At high request rates, avoid an unbounded container stdout log stream.
+          6. **Exercise recovery.** Confirm a Configuration history snapshot can be viewed and rolled back, and test one planned-restart stage/update/discard cycle before the maintenance window.
+
+          ### Upgrade, planned restart, and rollback
+
+          For a binary upgrade, keep the previous binary/image and an exact copy of `server.toml`; validate the current file with the candidate binary before changing the service. Deploy the candidate, wait for readiness, verify a representative data-plane request, then monitor reload/admin health and logs. If startup or traffic validation fails, restore the previous binary/image and the saved config together and restart; do not mix an older binary with configuration fields it does not understand.
+
+          For a restart-bound **configuration** change, use the Console's server-authoritative action: **Save for next restart**. The process keeps serving the previous runtime while the complete candidate is staged. Further restart-bound edits use **Update staged configuration** and preserve the original pre-stage rollback base. If the maintenance is cancelled, use **Discard staged configuration**; Jul verifies the marker/digests and restores the exact pre-stage bytes. If the staged candidate is intended, restart the process and verify `/readyz`, the serving version, and representative traffic after startup. See [reload semantics](reload-semantics.md#planned-restart-staging) for the crash-consistency contract.
+
+          ### Reference deployment shapes
+
+          These are maintained starting points rather than six divergent copies of the schema:
+
+          | Shape | Reference starting point | Production note |
+          | --- | --- | --- |
+          | Single-node public reverse proxy | The reverse-proxy example in [configuration.md](configuration.md#reverse-proxy) | Add TLS, an explicit upstream pool, health/readiness probes and a private admin listener. |
+          | Internal gRPC gateway | [Native gRPC quick start](grpc-proxy.md#quick-start) or [REST/JSON transcoding](grpc-transcoding.md) | Use h2c only on trusted plaintext networks; otherwise terminate TLS at the edge. |
+          | WAF + mTLS security gateway | [WAF](waf.md) plus [mTLS](mtls.md) | Roll WAF out detect → block and keep client-CA/CRL material under the same restricted file policy as TLS keys. |
+          | Container deployment | [`deploy/docker/server.toml`](../deploy/docker/server.toml) and the Docker section above | Persist config/history/cache/ACME/log volumes and do not publish the admin port until a token/auth boundary is configured. |
+          | Discovery-backed service | [`[upstreams.discovery]`](configuration.md#upstreamsdiscovery) | DNS/SRV are core; Consul/Kubernetes require their build tags. Last-good backends are retained on failed refreshes. |
+          | Console-managed changes | [`testdata/console-e2e.toml`](../testdata/console-e2e.toml) plus [Console operations](console.md) | Use editable storage, history, a private authenticated admin listener, typed preview/apply, and staged-restart workflow. |
+          '''
+          )
+
+          append_once(
+              'docs/nginx-importer.md',
+              '## Production migration and rollback path',
+              r'''
+          ## Production migration and rollback path
+
+          Treat importer output as a reviewed migration draft, not as proof of NGINX semantic equivalence. The directive matrix above is the authoritative supported/approximate/unsupported mapping.
+
+          1. Record the running NGINX version, included files, certificates, upstream addresses, and a small set of representative requests/responses before conversion.
+          2. Run `jul import nginx -o jul.toml /etc/nginx/nginx.conf`; read every emitted TODO/skipped directive and manually port or explicitly accept each unsupported behavior. Import included snippets separately because `include` is not followed.
+          3. Run `jul check -config jul.toml` and `jul lint -config jul.toml` with the production build tags. Resolve every startup/preflight failure before traffic testing.
+          4. Start Jul on a **shadow listener** that does not conflict with NGINX. Replay representative Host/path/TLS/auth/proxy requests, including the cases called out as approximate above (trailing-slash proxying, alias, regex case sensitivity, and server-level return precedence).
+          5. Cut over with the external load balancer/DNS/listener owner only after shadow verification. Keep the original NGINX config and package/image intact during the observation window.
+          6. **Rollback:** route traffic back to the unchanged NGINX listener and stop Jul. A migration rollback does not require reverse-translating Jul TOML; the original NGINX configuration remains the recovery artifact. If Jul-side configuration was subsequently edited through the Console, its History rollback is independent of the NGINX cutback.
+
+          This sequence deliberately makes no universal performance or feature-superiority claim: it proves the behavior that matters for the specific deployment and leaves unsupported directives visible to the operator.
+          '''
+          )
+
+          append_once(
+              'docs/grpc-proxy.md',
+              '## First production gateway walkthrough',
+              r'''
+          ## First production gateway walkthrough
+
+          A minimal production-oriented first deployment is:
+
+          1. Build the same artifact you will deploy: `go build -tags grpc -trimpath -o jul ./cmd/jul` (add other required tags explicitly).
+          2. Run a known gRPC backend on `127.0.0.1:50051` and start from the [Quick start](#quick-start) configuration. For an internal plaintext network, set `h2c = true`; for an Internet-facing edge, terminate TLS at Jul and let ALPN negotiate HTTP/2.
+          3. Validate before start with `./jul check -config server.toml` and `./jul lint -config server.toml`.
+          4. Start Jul and call a known method through the gateway with your normal gRPC client (for example `grpcurl -plaintext 127.0.0.1:8095 list` when reflection is enabled). Verify status/trailers and, for streaming services, one streaming method rather than only unary health.
+          5. Add the second backend only after the single-backend path is healthy; then verify the selected load-balancing strategy and passive failure behavior.
+          6. Rollback is configuration/binary rollback, not protocol translation: restore the prior listener/upstream config (or use Console History) and keep the backend unchanged. A started gRPC stream is never replayed to a different backend.
+
+          The Console **New app** workflow can create the upstream and native-gRPC mount as one typed previewed batch. It will not silently enable h2c on a retained shared listener; use a dedicated new plaintext listener or an already-correct existing listener.
+          '''
+          )
+
+          append_once(
+              'docs/plugins.md',
+              '## First WASM plugin quickstart',
+              r'''
+          ## First WASM plugin quickstart
+
+          1. Build Jul with the capability explicitly present: `go build -tags wasmplugins -trimpath -o jul ./cmd/jul`.
+          2. Copy one of the [`examples/plugins`](../examples/plugins) guests, keep the versioned [`jul-abi/v1`](#the-jul-abiv1-abi) contract, and build it for `GOOS=wasip1 GOARCH=wasm` as shown above.
+          3. Configure the module with the smallest capability set: no `kv` or `fetch` unless the guest genuinely needs them; if `fetch` is enabled, keep `allowed_hosts` narrow and also review the server-wide [egress policy](egress.md#plugin-fetch).
+          4. Run `jul check`/`jul lint` before deployment, then exercise both the success path and a guest failure/timeout path. The sandbox must contain the failure to the request rather than the process.
+          5. Treat Console upload as a code-execution credential boundary. Prefer out-of-band deployment; if upload is enabled, keep the admin listener private/authenticated and retain the size/path hardening described in [Uploading modules](#uploading-modules-console-api).
+          6. Roll back by removing the route/plugin reference and restoring the prior config through History (or the deployment pipeline); deleting a module file while a live config still references it is not a safe rollback.
+
+          Before production use, read the [ABI compatibility contract](abi.md), the [Sandbox & capabilities](#sandbox--capabilities) section, and the upload trust model above. The quickstart grants no ambient file or network authority.
+          '''
+          )
+
+          append_once(
+              'docs/benchmarks.md',
+              '## Phase 5 reproducible product evidence',
+              r'''
+          ## Phase 5 reproducible product evidence
+
+          Phase 5 records the dimensions Jul.IA is designed to optimize without claiming universal superiority over another proxy. Results are hardware-, kernel-, Go-version-, feature-tag-, TLS- and workload-dependent; publish hardware metadata and the exact command whenever quoting a number.
+
+          | Dimension | Current recorded evidence | Reproduce / compare |
+          | --- | --- | --- |
+          | Startup to health | ~520 ms for the recorded lean/full local-VM baseline in [Runtime footprint](#runtime-footprint) | Build the exact profile, start a minimal config, poll `/healthz`, and record wall time from process start to first 2xx. Repeat after warming the filesystem cache and report p50/p95 rather than a single best run. |
+          | Lean/full binary size | ~21 MiB lean / ~51 MiB full on the recorded windows/amd64 baseline | Build stripped lean and full-tag binaries with the same Go toolchain; record `stat`/`Get-Item .Length`. CI enforces the deterministic size budget separately. |
+          | Idle memory | ~27 MiB lean / ~33 MiB full recorded working set | Start the minimal HTTP+admin config, send no traffic, wait for readiness plus a fixed settle interval, then record RSS/working set with the OS process tool. |
+          | Plain HTTP proxy throughput + latency | Machine-specific; not a shared-runner numeric gate | Run a loopback backend and a Jul `proxy_pass` listener, then use a pinned load generator (for example `oha -z 30s -c 64`) and record requests/s plus p50/p95/p99. Repeat the identical backend/client command for any comparison proxy; do not compare numbers from different machines. |
+          | Hot reload latency | The admin result exposes correlated `reload.duration_ms` and `phase_durations_ms` | Apply a one-field hot change such as `global.log_level` through the admin API, record those fields, roll back, and repeat. Use the currently serving `reload_timeout`; a staged restart is a different lifecycle and must not be mixed into the sample. |
+          | gRPC capability/cost | Native unary proxy baseline and direct baseline are recorded in [grpc-proxy.md](grpc-proxy.md#benchmarks); transcoding is documented separately | Run `go test -tags grpc -run '^$' -bench . -benchmem -benchtime=3s ./internal/handler/` and report the direct and proxy rows from the same run. Include streaming/trailer conformance separately from unary throughput. |
+          | Deployment steps/dependencies | Lean is a single core binary; optional capabilities are build-tagged and their size deltas are recorded above | Compare the exact artifact, required build tags, config files, service/container units, external cert/secret material, and health-check steps. See [deployment.md](deployment.md) and the Phase 5 reference deployment shapes. |
+
+          The CI `benchmarks (smoke)` job runs every in-tree `Benchmark*` with the full opt-in tag set and uploads its raw output. Shared GitHub runners are intentionally **not** used as a nanosecond regression gate; use a quiet dedicated machine for publishable comparative numbers. The purpose of the table is reproducibility and decision support, not a universal "faster than" claim.
+          '''
+          )
+
+          changelog = Path('CHANGELOG.md')
+          current = changelog.read_text()
+          marker = '**Phase 5 structured-configuration closure (#82):**'
+          if marker not in current:
+              needle = '### Changed\n'
+              bullet = (
+                  '- **Phase 5 structured-configuration closure (#82):** completed the post-#81 correctness and adoption gate: exact shared-listener server targeting; pre-preview pending-restart race protection; compatibility-safe optional projections; real-server Console proof for typed App/route creation, compression, global rate limiting, managed stage/update/discard, dependency-aware deletion and History rollback; keyboard/focus/status accessibility coverage; production/NGINX/gRPC/WASM/upgrade guidance; reproducible product-evidence dimensions; and removal of obsolete Issue 81 transport plus dead compression/rate-limit TOML generators after caller checks.\n'
+              )
+              if needle not in current:
+                  raise SystemExit('CHANGELOG Changed heading not found')
+              current = current.replace(needle, needle + bullet, 1)
+              changelog.write_text(current)
+
+          # This workflow is a temporary branch writer, never permanent source.
+          self_path = Path('.github/workflows/issue82-closure-apply.yml')
+          if self_path.exists():
+              self_path.unlink()
+          PY
+
+          # Re-prove there are no obsolete helper symbols after deletion.
+          if git grep -n -E 'generateCompressionToml|generateRateLimitToml' -- ':!internal/admin/assets/dist/**'; then
+            echo 'obsolete TOML generator still present' >&2
+            exit 1
+          fi
+
+      - name: Format and install frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir "$CONSOLE_UI" install --frozen-lockfile
+          pnpm --dir "$CONSOLE_UI" exec prettier --write \
+            e2e/real-server.spec.ts \
+            src/test/issue82-accessibility.test.tsx \
+            src/lib/trafficToml.ts
+
+      - name: Verify targeted backend and frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w internal/admin/patch.go internal/admin/patch_helpers.go internal/admin/issue82_server_target_test.go
+          go test ./internal/admin/...
+          pnpm --dir "$CONSOLE_UI" run typecheck
+          pnpm --dir "$CONSOLE_UI" run lint
+          pnpm --dir "$CONSOLE_UI" exec vitest run \
+            src/test/issue82-accessibility.test.tsx \
+            src/test/issue82-compatibility.test.tsx \
+            src/test/issue82-handoff-race.test.ts \
+            src/test/issue82-server-target.test.ts
+          pnpm --dir "$CONSOLE_UI" run build
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+
+      - name: Verify real-server Phase 5 browser flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -tags "console grpc" -o jul ./cmd/jul
+          pnpm --dir "$CONSOLE_UI" exec playwright install chromium --with-deps
+          pnpm --dir "$CONSOLE_UI" exec playwright test --project=real-server --grep "Phase 5 typed Console closure"
+
+      - name: Commit verified closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "test: complete Phase 5 closure evidence (#82)"
+          git push origin HEAD:agent/issue-82-phase5-closure
+
+          # #62 policy keeps main as the only persistent programme branch. These
+          # Issue 81 branches were previously proven fully behind main/no-unique.
+          git push origin --delete agent/issue-81-final || true
+          git push origin --delete issue81-final || true
