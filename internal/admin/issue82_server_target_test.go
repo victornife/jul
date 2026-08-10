@@ -11,6 +11,8 @@ import (
 	"jul/internal/config"
 )
 
+// issue82SharedListenerConfig is the canonical regression fixture for server
+// operations that must distinguish virtual hosts sharing one listener.
 func issue82SharedListenerConfig() *config.Config {
 	return &config.Config{Servers: []config.ServerConfig{
 		{Listen: ":8443", ServerNames: []string{"a.example"}},
