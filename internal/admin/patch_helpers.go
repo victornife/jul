@@ -25,7 +25,7 @@ func applyServerLimits(c *config.Config, req patchRequest) (string, error) {
 	if req.Limits == nil {
 		return "", fmt.Errorf("server_set_limits: limits payload is required")
 	}
-	srv, err := findServer(c, req.Listen)
+	srv, err := findServerTarget(c, req.Listen, req.ServerNames)
 	if err != nil {
 		return "", err
 	}
@@ -78,17 +78,34 @@ func applyServerLimits(c *config.Config, req patchRequest) (string, error) {
 	return fmt.Sprintf("server %s limits updated (%s)", req.Listen, strings.Join(applied, ", ")), nil
 }
 
-// findServer returns a pointer to the first server block bound to listen.
-func findServer(c *config.Config, listen string) (*config.ServerConfig, error) {
+// findServerTarget resolves a server-level structured operation without
+// guessing between virtual hosts that share a listener. A non-nil serverNames
+// slice means the client supplied the field, including an explicitly empty
+// slice for a catch-all vhost. A nil slice is the legacy listen-only contract:
+// it remains compatible only when exactly one block uses that listener.
+func findServerTarget(c *config.Config, listen string, serverNames []string) (*config.ServerConfig, error) {
+	if serverNames != nil {
+		return findServerByNames(c, listen, serverNames)
+	}
 	if strings.TrimSpace(listen) == "" {
 		return nil, fmt.Errorf("server target requires a listen address")
 	}
+	var found *config.ServerConfig
+	matches := 0
 	for i := range c.Servers {
 		if c.Servers[i].Listen == listen {
-			return &c.Servers[i], nil
+			found = &c.Servers[i]
+			matches++
 		}
 	}
-	return nil, fmt.Errorf("no server found for listen %q", listen)
+	switch {
+	case matches == 0:
+		return nil, fmt.Errorf("no server found for listen %q", listen)
+	case matches > 1:
+		return nil, fmt.Errorf("server target is ambiguous: %d blocks share listen %q; include server_names", matches, listen)
+	default:
+		return found, nil
+	}
 }
 
 // findServerByNames returns the single server block bound to listen whose

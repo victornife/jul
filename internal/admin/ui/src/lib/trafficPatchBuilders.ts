@@ -53,6 +53,10 @@ export interface ServerLimitsDraft {
   idleTimeout: string;
 }
 
+export type ServerLimitsConfigPatch = Extract<ConfigPatch, { op: "server_set_limits" }> & {
+  readonly server_names: string[];
+};
+
 function sameArray(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -164,15 +168,29 @@ export function seedServerLimits(route: ServerLimitsProjection): ServerLimitsDra
   };
 }
 
+/** Deterministic identity for vhosts that may share a listener. */
+export function serverTargetKey(
+  server: Pick<ServerLimitsProjection, "listen" | "server_names">,
+): string {
+  return JSON.stringify([server.listen, [...(server.server_names ?? [])].sort()]);
+}
+
 export function buildServerLimitsPatch(
-  listen: string,
+  server: Pick<ServerLimitsProjection, "listen" | "server_names">,
   initial: ServerLimitsDraft,
   current: ServerLimitsDraft,
-): ConfigPatch | null {
+): ServerLimitsConfigPatch | null {
   const limits: Extract<ConfigPatch, { op: "server_set_limits" }>["limits"] = {};
   if (current.bodyLimit !== initial.bodyLimit) limits.client_max_body_size = current.bodyLimit;
   if (current.readTimeout !== initial.readTimeout) limits.read_timeout = current.readTimeout;
   if (current.writeTimeout !== initial.writeTimeout) limits.write_timeout = current.writeTimeout;
   if (current.idleTimeout !== initial.idleTimeout) limits.idle_timeout = current.idleTimeout;
-  return hasOwnFields(limits) ? { op: "server_set_limits", listen, limits } : null;
+  return hasOwnFields(limits)
+    ? {
+        op: "server_set_limits",
+        listen: server.listen,
+        server_names: [...(server.server_names ?? [])],
+        limits,
+      }
+    : null;
 }

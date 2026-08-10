@@ -13,15 +13,14 @@ const baseURL = `http://localhost:${String(PREVIEW_PORT)}`;
 
 // Real-server project: a real jul binary serves the admin API on loopback so
 // real-server.spec.ts can validate that the Go admin API response shapes match
-// the Zod schemas in client.ts without any mocking. The binary must be
-// pre-built before running. Include the "grpc" tag so the gRPC passthrough
-// tests can hot-reload:
-//   go build -tags "console grpc" -o jul ./cmd/jul
+// the Zod schemas in client.ts without any mocking. Playwright rebuilds the
+// console-enabled binary after the SPA build so Go embeds the exact frontend
+// under test. Include the "grpc" tag so the gRPC passthrough tests can hot-reload.
 const REAL_SERVER_PORT = 9291;
 const realServerURL = `http://127.0.0.1:${String(REAL_SERVER_PORT)}`;
 
 // Determine whether the real-server project is selected so the browser-smoke
-// job does not need a pre-built jul binary (exit 127).
+// job does not need Go or a jul binary (exit 127).
 const selectedProjects = process.argv
   .filter((arg) => arg.startsWith("--project="))
   .map((arg) => arg.slice("--project=".length));
@@ -33,6 +32,10 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   reporter: process.env.CI ? "github" : "list",
+  // The real-server files share one mutable jul process/config/history store.
+  // Run them sequentially so stateful lifecycle tests cannot invalidate each
+  // other's pending drafts, snapshots, or live configuration mid-assertion.
+  workers: runRealServer ? 1 : undefined,
   use: {
     headless: true,
     // Suppress verbose browser logs in CI but keep them locally for debugging.
@@ -46,10 +49,9 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], baseURL },
     },
     {
-      // real-server project: API-level tests against a real jul binary.
-      // Does not use a browser; Playwright's request fixture is sufficient.
+      // real-server project: API-level and browser tests against a real jul binary.
       name: "real-server",
-      testMatch: "e2e/real-server.spec.ts",
+      testMatch: ["e2e/real-server.spec.ts", "e2e/issue82-phase5.spec.ts"],
       use: {
         baseURL: realServerURL,
         extraHTTPHeaders: { Authorization: "Bearer jul-e2e-test-token" },
@@ -57,8 +59,8 @@ export default defineConfig({
     },
   ],
   // webServer entries: the mocked-API smoke test uses vite preview; the
-  // real-server tests use a pre-built jul binary (built in CI before this job,
-  // or locally via: go build -tags console -o jul ./cmd/jul from repo root).
+  // real-server project rebuilds jul at launch so the binary embeds the SPA that
+  // the job just produced, rather than an older committed dist snapshot.
   webServer: [
     {
       command: `node node_modules/vite/bin/vite.js preview --port ${String(PREVIEW_PORT)}`,
@@ -69,13 +71,11 @@ export default defineConfig({
     ...(runRealServer
       ? [
           {
-            // Path to the pre-built jul binary is relative to the ui/ directory.
-            // In CI, the real-server job builds it into the repo root first.
             command:
-              "cd ../../../ && ./jul serve -config testdata/console-e2e.toml",
+              'cd ../../../ && go build -tags "console grpc" -o jul ./cmd/jul && ./jul serve -config testdata/console-e2e.toml',
             url: `${realServerURL}/healthz`,
             reuseExistingServer: !process.env.CI,
-            timeout: 30_000,
+            timeout: 60_000,
           },
         ]
       : []),

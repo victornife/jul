@@ -348,7 +348,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return applyServerLimits(c, req)
 
 	case "server_toggle_http3":
-		srv, err := findServer(c, req.Listen)
+		srv, err := findServerTarget(c, req.Listen, req.ServerNames)
 		if err != nil {
 			return "", err
 		}
@@ -375,7 +375,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("server %s HTTP/3 %s", req.Listen, onOff(*req.Enabled)), nil
 
 	case "server_toggle_h2c":
-		srv, err := findServer(c, req.Listen)
+		srv, err := findServerTarget(c, req.Listen, req.ServerNames)
 		if err != nil {
 			return "", err
 		}

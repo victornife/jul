@@ -15,10 +15,6 @@ function tomlString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function tomlStringArray(items: readonly string[]): string {
-  return `[${items.map((item) => tomlString(item)).join(", ")}]`;
-}
-
 function escapeRe(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -64,24 +60,6 @@ export function upsertTopLevelTable(raw: string, table: string, fragment: string
 }
 
 /**
- * Legacy/raw compatibility generator. The guided compression editor uses
- * compression_set; this remains for examples/tests and never drops dormant
- * values merely because compression is disabled.
- */
-export function generateCompressionToml(draft: CompressionDraft): string {
-  const lines = [
-    "[compression]",
-    `enabled = ${String(draft.enabled)}`,
-    `encoders = ${tomlStringArray(draft.encoders)}`,
-    `level = ${String(draft.level)}`,
-  ];
-  if (draft.minSize.trim() !== "") lines.push(`min_size = ${tomlString(draft.minSize.trim())}`);
-  lines.push(`types = ${tomlStringArray(draft.types)}`);
-  lines.push(`precompressed = ${String(draft.precompressed)}`);
-  return lines.join("\n");
-}
-
-/**
  * Generates the complete current [cache] table. Values are emitted independently
  * of enabled so dormant disk/TTL/stale settings survive disable/enable cycles.
  * Empty values represent schema fields that were absent and remain absent.
@@ -105,18 +83,6 @@ export function generateCacheToml(draft: CacheDraft): string {
     lines.push(`stale_if_error = ${tomlString(draft.staleIfError.trim())}`);
   }
   return lines.join("\n");
-}
-
-/** Legacy/raw compatibility only; the guided global editor uses rate_limit_global_set. */
-export function generateRateLimitToml(draft: RateLimitDraft): string {
-  return [
-    "[rate_limit]",
-    `enabled = ${String(draft.enabled)}`,
-    `key = ${tomlString(draft.key)}`,
-    `rate = ${String(draft.rate)}`,
-    `burst = ${String(draft.burst)}`,
-    `max_conns = ${String(draft.maxConns)}`,
-  ].join("\n");
 }
 
 export function compressionWarnings(draft: CompressionDraft): string[] {

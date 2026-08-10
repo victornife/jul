@@ -76,6 +76,21 @@ export function patchResultToPendingDraft(
   };
 }
 
+/**
+ * Capture the value-free pending-restart state before previewing the pinned
+ * operation batch. ConfigPanel compares this exact pre-preview snapshot with
+ * current state and forces an exact re-preview when anything moved.
+ */
+export async function previewPatchBatchDraft(
+  ops: readonly ConfigPatch[],
+  baseVersion?: string,
+): Promise<PendingPatchDraft> {
+  const pendingResponse = await fetchPendingRestart();
+  const pendingSnapshot = snapshotPendingRestart(pendingResponse);
+  const result = await patchConfigBatch([...ops], baseVersion);
+  return patchResultToPendingDraft(ops, result, baseVersion, pendingSnapshot);
+}
+
 export interface RunPatchBatch {
   readonly error: PatchBatchPreviewError | null;
   readonly busy: boolean;
@@ -107,10 +122,7 @@ export function useRunPatchBatch(): RunPatchBatch {
       }
       setBusy(true);
       try {
-        const result = await patchConfigBatch([...ops], baseVersion);
-        const pendingResponse = await fetchPendingRestart();
-        const pendingSnapshot = snapshotPendingRestart(pendingResponse);
-        return patchResultToPendingDraft(ops, result, baseVersion, pendingSnapshot);
+        return await previewPatchBatchDraft(ops, baseVersion);
       } catch (caught) {
         setError(toError(caught));
         return null;

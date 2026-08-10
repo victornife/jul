@@ -20,13 +20,16 @@ function SectionCard({
   title,
   active,
   onEdit,
+  unavailableReason,
   children,
 }: {
   readonly title: string;
-  readonly active?: boolean;
+  readonly active?: boolean | undefined;
   readonly onEdit: () => void;
+  readonly unavailableReason?: string | undefined;
   readonly children: ReactNode;
 }) {
+  const unavailableId = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-unavailable`;
   return (
     <div className="rounded-lg border border-jul-border bg-jul-surface">
       <div className="flex items-center gap-3 border-b border-jul-border px-4 py-3">
@@ -43,12 +46,21 @@ function SectionCard({
         <button
           type="button"
           onClick={onEdit}
-          className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+          disabled={unavailableReason !== undefined}
+          aria-describedby={unavailableReason !== undefined ? unavailableId : undefined}
+          className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg disabled:cursor-not-allowed disabled:opacity-40"
         >
           Edit
         </button>
       </div>
-      <div className="px-4 py-3">{children}</div>
+      <div className="px-4 py-3">
+        {unavailableReason !== undefined && (
+          <p id={unavailableId} className="mb-2 text-xs text-jul-muted">
+            {unavailableReason}
+          </p>
+        )}
+        {children}
+      </div>
     </div>
   );
 }
@@ -90,7 +102,17 @@ export function TrafficControlsPanel() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <SectionCard title="Global settings" onEdit={() => { setGlobalEditing(true); }}>
+        <SectionCard
+          title="Global settings"
+          unavailableReason={
+            data.global === undefined
+              ? "Unavailable on this server; no global projection was provided."
+              : undefined
+          }
+          onEdit={() => {
+            setGlobalEditing(true);
+          }}
+        >
           <div className="space-y-1">
             <KV k="worker threads" v={data.global?.worker_threads} />
             <KV k="log level" v={data.global?.log_level} />
@@ -101,8 +123,15 @@ export function TrafficControlsPanel() {
 
         <SectionCard
           title="Compression"
-          active={data.compression?.enabled ?? false}
-          onEdit={() => { setEditing("compression"); }}
+          active={data.compression?.enabled}
+          unavailableReason={
+            data.compression === undefined
+              ? "Unavailable on this server; no compression projection was provided."
+              : undefined
+          }
+          onEdit={() => {
+            setEditing("compression");
+          }}
         >
           <div className="space-y-1">
             <KV k="encoders" v={(data.compression?.encoders ?? []).join(", ")} />
@@ -113,8 +142,15 @@ export function TrafficControlsPanel() {
 
         <SectionCard
           title="Rate limiting"
-          active={data.rate_limit?.enabled ?? false}
-          onEdit={() => { setEditing("rate_limit"); }}
+          active={data.rate_limit?.enabled}
+          unavailableReason={
+            data.rate_limit === undefined
+              ? "Unavailable on this server; no rate-limit projection was provided."
+              : undefined
+          }
+          onEdit={() => {
+            setEditing("rate_limit");
+          }}
         >
           <div className="space-y-1">
             <KV k="key" v={data.rate_limit?.key} />
@@ -126,8 +162,15 @@ export function TrafficControlsPanel() {
 
         <SectionCard
           title="Cache"
-          active={data.cache?.enabled ?? false}
-          onEdit={() => { setEditing("cache"); }}
+          active={data.cache?.enabled}
+          unavailableReason={
+            data.cache === undefined
+              ? "Unavailable on this server; no cache projection was provided."
+              : undefined
+          }
+          onEdit={() => {
+            setEditing("cache");
+          }}
         >
           <div className="space-y-1">
             <KV k="default TTL" v={data.cache?.default_ttl} />
@@ -137,7 +180,17 @@ export function TrafficControlsPanel() {
           </div>
         </SectionCard>
 
-        <SectionCard title="Limits & Timeouts" onEdit={() => { setEditing("limits"); }}>
+        <SectionCard
+          title="Limits & Timeouts"
+          unavailableReason={
+            (data.servers?.length ?? 0) === 0
+              ? "Unavailable on this server; no server-limit projection was provided."
+              : undefined
+          }
+          onEdit={() => {
+            setEditing("limits");
+          }}
+        >
           <p className="text-xs text-jul-muted">
             Per-server body/read/write/idle values are seeded from the selected server and sent only
             when changed. Listener-bound lifecycle remains authoritative on the server.
@@ -146,19 +199,33 @@ export function TrafficControlsPanel() {
 
         <SectionCard
           title="Access Logging"
-          active={data.access_log?.enabled ?? true}
-          onEdit={() => { setAccessLogEditing(true); }}
+          active={data.access_log?.enabled}
+          unavailableReason={
+            data.access_log === undefined
+              ? "Unavailable on this server; no access-log projection was provided."
+              : undefined
+          }
+          onEdit={() => {
+            setAccessLogEditing(true);
+          }}
         >
           <div className="space-y-1">
-            <KV k="sinks" v={(data.access_log?.sinks ?? ["stdout"]).join(", ")} />
-            <KV k="format" v={data.access_log?.format || "text"} />
+            <KV k="sinks" v={(data.access_log?.sinks ?? []).join(", ")} />
+            <KV k="format" v={data.access_log?.format} />
           </div>
         </SectionCard>
 
         <SectionCard
           title="Distributed Tracing"
-          active={data.tracing?.enabled ?? false}
-          onEdit={() => { setTracingEditing(true); }}
+          active={data.tracing?.enabled}
+          unavailableReason={
+            data.tracing === undefined
+              ? "Unavailable on this server; no tracing projection was provided."
+              : undefined
+          }
+          onEdit={() => {
+            setTracingEditing(true);
+          }}
         >
           <div className="space-y-1">
             <KV k="exporter" v={data.tracing?.exporter} />

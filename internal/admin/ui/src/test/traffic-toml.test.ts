@@ -6,9 +6,7 @@
 import { describe, it, expect } from "vitest";
 import {
   upsertTopLevelTable,
-  generateCompressionToml,
   generateCacheToml,
-  generateRateLimitToml,
   compressionWarnings,
   cacheWarnings,
   rateLimitWarnings,
@@ -54,41 +52,7 @@ describe("upsertTopLevelTable", () => {
   });
 });
 
-describe("generators", () => {
-  it("emits compression with encoders and types", () => {
-    const toml = generateCompressionToml({
-      enabled: true,
-      encoders: ["gzip", "br"],
-      level: 0,
-      minSize: "1k",
-      types: ["text/*"],
-      precompressed: true,
-    });
-    expect(toml).toContain("[compression]");
-    expect(toml).toContain('encoders = ["gzip", "br"]');
-    expect(toml).toContain('min_size = "1k"');
-    expect(toml).toContain("precompressed = true");
-  });
-
-  it("omits detail when disabled", () => {
-    expect(generateCompressionToml({
-      enabled: false,
-      encoders: ["gzip"],
-      level: 0,
-      minSize: "1k",
-      types: [],
-      precompressed: false,
-    })).toBe([
-      "[compression]",
-      "enabled = false",
-      'encoders = ["gzip"]',
-      "level = 0",
-      'min_size = "1k"',
-      "types = []",
-      "precompressed = false",
-    ].join("\n"));
-  });
-
+describe("cache generator", () => {
   it("emits cache fields", () => {
     const toml = generateCacheToml({
       enabled: true,
@@ -102,20 +66,6 @@ describe("generators", () => {
     expect(toml).toContain('memory_max_size = "64m"');
     expect(toml).toContain('disk_path = "/var/cache"');
     expect(toml).toContain('stale_while_revalidate = "10s"');
-  });
-
-  it("emits rate-limit fields and floors numbers", () => {
-    const toml = generateRateLimitToml({
-      enabled: true,
-      key: "header:X-Api-Key",
-      rate: 100.7,
-      burst: 50,
-      maxConns: 10,
-    });
-    expect(toml).toContain('key = "header:X-Api-Key"');
-    expect(toml).toContain("rate = 100");
-    expect(toml).toContain("burst = 50");
-    expect(toml).toContain("max_conns = 10");
   });
 });
 
