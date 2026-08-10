@@ -67,10 +67,8 @@ export default defineConfig({
     ...(runRealServer
       ? [
           {
-            // Preserve the generated dist in the job's existing Playwright artifact
-            // so this closure run can sync the exact content-addressed bundle.
             command:
-              'mkdir -p playwright-report/console-dist && cp -R ../assets/dist/. playwright-report/console-dist/ && cd ../../../ && go build -tags "console grpc" -o jul ./cmd/jul && ./jul serve -config testdata/console-e2e.toml',
+              'cd ../../../ && go build -tags "console grpc" -o jul ./cmd/jul && ./jul serve -config testdata/console-e2e.toml',
             url: `${realServerURL}/healthz`,
             reuseExistingServer: !process.env.CI,
             timeout: 60_000,
