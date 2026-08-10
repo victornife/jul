@@ -193,9 +193,12 @@ test(
       .toBe(preStageRaw);
     await expectStaticOK(request, "Jul static OK");
 
+    // App creation intentionally stores a one-shot reopen selection so the
+    // operator lands back on the exact created App after apply. Reuse that
+    // authoritative restored drawer instead of trying to click through it.
     await page.goto("/apps");
-    await page.getByRole("button", { name: `Open App ${appName}` }).click();
     const appDetail = page.getByRole("dialog", { name: appName });
+    await expect(appDetail).toBeVisible();
     await expect(appDetail).toContainText("Delete is blocked because 1 projected route still references this App");
     await expect(appDetail.getByRole("button", { name: "Delete App / upstream…" })).toBeDisabled();
 
