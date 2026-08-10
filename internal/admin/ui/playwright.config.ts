@@ -46,10 +46,9 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], baseURL },
     },
     {
-      // real-server project: API-level tests against a real jul binary.
-      // Does not use a browser; Playwright's request fixture is sufficient.
+      // real-server project: API-level and browser tests against a real jul binary.
       name: "real-server",
-      testMatch: "e2e/real-server.spec.ts",
+      testMatch: ["e2e/real-server.spec.ts", "e2e/issue82-phase5.spec.ts"],
       use: {
         baseURL: realServerURL,
         extraHTTPHeaders: { Authorization: "Bearer jul-e2e-test-token" },
