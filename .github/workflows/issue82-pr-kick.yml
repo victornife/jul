@@ -1,0 +1,54 @@
+name: Issue 82 PR patch trigger
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/issue-82-phase5-closure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/issue-82-phase5-closure
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@537643d3d5ecca1ef036c257c9f09a2bca9a4818 # v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - name: Execute branch patcher steps
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/issue82-branch-apply.yml
+          extract_step() {
+            local start="$1" stop="$2" out="$3"
+            awk -v start="$start" -v stop="$stop" '
+              index($0, start) { active=1; next }
+              active && index($0, stop) { exit }
+              active && /run: \|/ { script=1; next }
+              script { sub(/^          /, ""); print }
+            ' "$workflow" > "$out"
+            test -s "$out"
+          }
+          extract_step "- name: Apply narrow source changes" "- name: Format and targeted verification" /tmp/issue82-apply.sh
+          extract_step "- name: Format and targeted verification" "- name: Commit verified changes" /tmp/issue82-verify.sh
+          extract_step "- name: Commit verified changes" "__END__" /tmp/issue82-commit.sh
+          bash /tmp/issue82-apply.sh
+          bash /tmp/issue82-verify.sh
+          git rm .github/workflows/issue82-pr-kick.yml
+          bash /tmp/issue82-commit.sh
