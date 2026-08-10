@@ -61,7 +61,7 @@ export function ConfirmDialog({
       aria-label={title}
     >
       <div
-        className="flex w-full max-w-lg flex-col gap-4 rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl outline-none"
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-lg border border-jul-border bg-jul-bg p-6 shadow-xl outline-none"
         ref={dialogRef}
         tabIndex={-1}
       >
