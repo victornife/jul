@@ -226,11 +226,17 @@ test(
     const historyRow = page.getByText(baselineSnapshotID, { exact: true }).locator("xpath=ancestor::tr");
     await historyRow.getByRole("button", { name: "Rollback" }).click();
     const rollbackDialog = page.getByRole("dialog", { name: "Roll back to this snapshot?" });
+    await expect(rollbackDialog).toBeVisible();
+    const rollbackButton = rollbackDialog.getByRole("button", { name: "Roll back", exact: true });
+    // Rollback confirmation is intentionally gated on the async server-side
+    // diff preview. Wait for that reviewed baseline before submitting it.
+    await expect(rollbackButton).toBeEnabled({ timeout: 20_000 });
+    await rollbackButton.scrollIntoViewIfNeeded();
     const rollbackResponse = page.waitForResponse(
       (response) =>
         response.url().includes("/api/config/rollback") && response.request().method() === "POST",
     );
-    await rollbackDialog.getByRole("button", { name: "Roll back", exact: true }).click();
+    await rollbackButton.click();
     const rollback = await rollbackResponse;
     expect([200, 204]).toContain(rollback.status());
 
