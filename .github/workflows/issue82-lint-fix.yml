@@ -44,18 +44,8 @@ jobs:
 
           replace(
               "internal/admin/patch_helpers.go",
-              '''\tvar found *config.ServerConfig\n\tmatches := 0\n''',
-              '''\tmatches := 0\n''',
-          )
-          replace(
-              "internal/admin/patch_helpers.go",
-              '''\t\tif c.Servers[i].Listen == listen {\n\t\t\tfound = &c.Servers[i]\n\t\t\tmatches++\n\t\t}\n''',
-              '''\t\tif c.Servers[i].Listen == listen {\n\t\t\tmatches++\n\t\t}\n''',
-          )
-          replace(
-              "internal/admin/patch_helpers.go",
-              '''\tdefault:\n\t\treturn found, nil\n\t}\n}\n\n// findServerByNames''',
-              '''\tdefault:\n\t\treturn findServer(c, listen)\n\t}\n}\n\n// findServerByNames''',
+              '''// findServer returns a pointer to the first server block bound to listen.\nfunc findServer(c *config.Config, listen string) (*config.ServerConfig, error) {\n\tif strings.TrimSpace(listen) == "" {\n\t\treturn nil, fmt.Errorf("server target requires a listen address")\n\t}\n\tfor i := range c.Servers {\n\t\tif c.Servers[i].Listen == listen {\n\t\t\treturn &c.Servers[i], nil\n\t\t}\n\t}\n\treturn nil, fmt.Errorf("no server found for listen %q", listen)\n}\n\n''',
+              '''''',
           )
           PY
           gofmt -w internal/admin/patch_helpers.go internal/admin/issue82_server_target_test.go
