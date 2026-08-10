@@ -55,8 +55,12 @@ jobs:
           script = textwrap.dedent(workflow[start:end])
           Path('/tmp/issue82-closure-apply.py').write_text(script)
           PY
+
+          # Remove the temporary workflow sources before the script proves that
+          # the legacy helper names have no callers. Otherwise git grep finds the
+          # helper names embedded in the writer itself and reports a false caller.
+          rm -f .github/workflows/issue82-closure-apply.yml .github/workflows/issue82-closure-kick.yml
           python3 /tmp/issue82-closure-apply.py
-          rm -f .github/workflows/issue82-closure-kick.yml
 
           if git grep -n -E 'generateCompressionToml|generateRateLimitToml' -- ':!internal/admin/assets/dist/**'; then
             echo 'obsolete TOML generator still present' >&2
