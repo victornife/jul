@@ -55,3 +55,26 @@
     color: var(--color-jul-text);
   }
 }
+
+/*
+ * Confirmation dialogs can contain large server-generated diffs (notably
+ * rollback previews). Keep the dialog inside the viewport, let only the body
+ * scroll, and keep the title/actions reachable. The selector is intentionally
+ * scoped to the max-w-lg confirmation panel so drawers and other dialogs retain
+ * their own layout contracts.
+ */
+[role="dialog"][aria-modal="true"] > .max-w-lg {
+  max-height: calc(100vh - 2rem);
+  overflow: hidden;
+}
+
+[role="dialog"][aria-modal="true"] > .max-w-lg > :first-child,
+[role="dialog"][aria-modal="true"] > .max-w-lg > :last-child {
+  flex-shrink: 0;
+}
+
+[role="dialog"][aria-modal="true"] > .max-w-lg > :nth-child(2) {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
