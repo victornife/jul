@@ -1,5 +1,5 @@
 /**
- * Copyright 2026 Victor Niharra <vniharra@gmail.com>
+ * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
  * SPDX-License-Identifier: agpl
  */
 
