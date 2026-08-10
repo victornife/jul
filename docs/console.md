@@ -862,3 +862,29 @@ commitments, keyboard-shortcut map, and verification live in
   `jul_tls_cert_expiry_seconds` metric is the always-on source.
 - The Status overview reflects the parsed configuration (what is enabled), not
   per-request live counters.
+
+## Global and Traffic Controls typed-patch workflow (#81)
+
+The Global and Traffic Controls screen reads only non-secret projections. The
+editable global projection exposes `worker_threads`, `log_level`, `log_format`,
+`shutdown_timeout`, `reload_timeout`, and `redact_min_secret_length`; lifecycle
+badges are generated from the Go lifecycle registry rather than a React table.
+Compression and global rate-limit projections retain dormant values while their
+feature is disabled, including compression level/types/precompressed and the
+listener-global `max_conns` value.
+
+Global, compression, global rate-limit, and the four server limit fields use
+sparse typed operations. Omitted properties preserve the persisted/staged
+value; explicit false, zero, empty strings where valid, and empty arrays remain
+present. A no-op cannot be reviewed. Final action selection stays
+server-authoritative: **Apply live**, **Save for next restart**, or **Update
+staged configuration**. `log_format` is restart-bound. `max_conns` is bound to
+listeners: a retained listener stages, while an all-new listener transition may
+be hot if the backend preview says so. Mixed candidates stage whole.
+
+Cache intentionally has no `cache_set`. The editor regenerates the complete
+seven-field `[cache]` table from the exact raw fetch and keeps the candidate and
+its `base_version` together in memory. It always stages and never offers Apply
+live. Raw candidate source requires `config:raw`; typed edits require
+`config:write`, and the final action independently requires `config:apply`.
+Candidate TOML is not serialized to `sessionStorage` or `localStorage`.

@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchTrafficControls } from "@/api/client.ts";
+import { GlobalSettingsEditor } from "@/features/config/GlobalSettingsEditor.tsx";
 import {
   TrafficControlEditor,
   type TrafficEditorKind,
@@ -22,21 +23,23 @@ function SectionCard({
   children,
 }: {
   readonly title: string;
-  readonly active: boolean;
+  readonly active?: boolean;
   readonly onEdit: () => void;
-  readonly children: React.ReactNode;
+  readonly children: ReactNode;
 }) {
   return (
     <div className="rounded-lg border border-jul-border bg-jul-surface">
       <div className="flex items-center gap-3 border-b border-jul-border px-4 py-3">
         <span className="font-medium text-jul-text">{title}</span>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-            active ? "bg-jul-success/15 text-jul-success" : "bg-jul-border text-jul-muted"
-          }`}
-        >
-          {active ? "enabled" : "disabled"}
-        </span>
+        {active !== undefined && (
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              active ? "bg-jul-success/15 text-jul-success" : "bg-jul-border text-jul-muted"
+            }`}
+          >
+            {active ? "enabled" : "disabled"}
+          </span>
+        )}
         <button
           type="button"
           onClick={onEdit}
@@ -54,7 +57,7 @@ function KV({ k, v }: { readonly k: string; readonly v: string | number | undefi
   if (v === undefined || v === "") return null;
   return (
     <div className="flex gap-3 text-sm">
-      <span className="w-28 shrink-0 text-jul-muted">{k}</span>
+      <span className="w-32 shrink-0 text-jul-muted">{k}</span>
       <span className="font-mono text-jul-text">{v}</span>
     </div>
   );
@@ -65,203 +68,117 @@ export function TrafficControlsPanel() {
     queryKey: ["traffic-controls"],
     queryFn: fetchTrafficControls,
   });
-
   const [editing, setEditing] = useState<TrafficEditorKind | null>(null);
+  const [globalEditing, setGlobalEditing] = useState(false);
   const [tracingEditing, setTracingEditing] = useState(false);
   const [accessLogEditing, setAccessLogEditing] = useState(false);
 
   if (isLoading) return <Loading label="Loading traffic controls…" />;
-  if (isError || !data)
+  if (isError || !data) {
     return <PanelError error={error} resource="traffic controls" onRetry={() => void refetch()} />;
+  }
 
   return (
     <div className="space-y-6">
-      {/* Self-explanatory header (Milestone 4.3) */}
       <div className="space-y-1">
-        <h1 className="text-xl font-semibold">Traffic Controls</h1>
+        <h1 className="text-xl font-semibold">Global & Traffic Controls</h1>
         <p className="max-w-3xl text-sm text-jul-muted">
-          Traffic controls shape how Jul handles requests and responses: compression, caching, rate
-          limits, access logging, and distributed tracing. Changes here are generated as
-          configuration and applied safely through validate → diff → apply, so nothing takes effect
-          until you confirm.
+          Guided global, compression, rate-limit, and server-limit edits use sparse typed patches.
+          Cache stays a complete raw table that is saved for the next restart. Every action is chosen
+          from the server lifecycle assessment and finalized through the correlated Config workflow.
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {/* Compression */}
+        <SectionCard title="Global settings" onEdit={() => { setGlobalEditing(true); }}>
+          <div className="space-y-1">
+            <KV k="worker threads" v={data.global?.worker_threads} />
+            <KV k="log level" v={data.global?.log_level} />
+            <KV k="log format" v={data.global?.log_format} />
+            <KV k="reload timeout" v={data.global?.reload_timeout} />
+          </div>
+        </SectionCard>
+
         <SectionCard
           title="Compression"
           active={data.compression?.enabled ?? false}
-          onEdit={() => {
-            setEditing("compression");
-          }}
+          onEdit={() => { setEditing("compression"); }}
         >
-          {data.compression?.enabled ? (
-            <div className="space-y-1">
-              <KV
-                k="encoders"
-                v={
-                  data.compression.encoders && data.compression.encoders.length > 0
-                    ? data.compression.encoders.join(", ")
-                    : "gzip"
-                }
-              />
-            </div>
-          ) : (
-            <p className="text-xs text-jul-muted">
-              Compression is off. Enable it to shrink text, JSON, and SVG responses before they are
-              sent to clients.
-            </p>
-          )}
+          <div className="space-y-1">
+            <KV k="encoders" v={(data.compression?.encoders ?? []).join(", ")} />
+            <KV k="level" v={data.compression?.level} />
+            <KV k="minimum size" v={data.compression?.min_size} />
+          </div>
         </SectionCard>
 
-        {/* Rate Limiting */}
         <SectionCard
-          title="Rate Limiting"
+          title="Rate limiting"
           active={data.rate_limit?.enabled ?? false}
-          onEdit={() => {
-            setEditing("rate_limit");
-          }}
+          onEdit={() => { setEditing("rate_limit"); }}
         >
-          {data.rate_limit?.enabled ? (
-            <div className="space-y-1">
-              <KV k="key" v={data.rate_limit.key || "ip"} />
-              <KV
-                k="rate"
-                v={
-                  data.rate_limit.rate !== undefined
-                    ? `${String(data.rate_limit.rate)}/s`
-                    : undefined
-                }
-              />
-              <KV k="burst" v={data.rate_limit.burst} />
-            </div>
-          ) : (
-            <p className="text-xs text-jul-muted">
-              No rate limit configured. Add one to protect upstreams from spikes and abuse, keyed by
-              client IP, a header, or a JWT claim.
-            </p>
-          )}
+          <div className="space-y-1">
+            <KV k="key" v={data.rate_limit?.key} />
+            <KV k="rate" v={data.rate_limit?.rate} />
+            <KV k="burst" v={data.rate_limit?.burst} />
+            <KV k="max connections" v={data.rate_limit?.max_conns} />
+          </div>
         </SectionCard>
 
-        {/* Cache */}
         <SectionCard
           title="Cache"
           active={data.cache?.enabled ?? false}
-          onEdit={() => {
-            setEditing("cache");
-          }}
+          onEdit={() => { setEditing("cache"); }}
         >
-          {data.cache?.enabled ? (
-            <div className="space-y-1">
-              <KV k="default TTL" v={data.cache.default_ttl} />
-              <KV k="memory max" v={data.cache.memory_max} />
-              {data.cache.disk_path && <KV k="disk" v="enabled" />}
-            </div>
-          ) : (
-            <p className="text-xs text-jul-muted">
-              No cache configured. Enable it to serve repeat responses from memory or disk and
-              reduce upstream load — avoid caching authenticated or per-user responses.
-            </p>
-          )}
+          <div className="space-y-1">
+            <KV k="default TTL" v={data.cache?.default_ttl} />
+            <KV k="memory max" v={data.cache?.memory_max_size ?? data.cache?.memory_max} />
+            <KV k="disk max" v={data.cache?.disk_max_size} />
+            <KV k="stale if error" v={data.cache?.stale_if_error} />
+          </div>
         </SectionCard>
 
-        {/* Limits & Timeouts (Milestone 3.4) */}
-        <SectionCard
-          title="Limits & Timeouts"
-          active={false}
-          onEdit={() => {
-            setEditing("limits");
-          }}
-        >
+        <SectionCard title="Limits & Timeouts" onEdit={() => { setEditing("limits"); }}>
           <p className="text-xs text-jul-muted">
-            Per-server request body limit and read/write/idle timeouts. Configure these to protect
-            the server from oversized or slow requests; the generated keys are placed under the
-            server block you choose in the editor. The read/write/idle timeouts are listener-level
-            and require a restart to change on an existing listener.
+            Per-server body/read/write/idle values are seeded from the selected server and sent only
+            when changed. Listener-bound lifecycle remains authoritative on the server.
           </p>
         </SectionCard>
 
-        {/* Request access logging */}
         <SectionCard
           title="Access Logging"
           active={data.access_log?.enabled ?? true}
-          onEdit={() => {
-            setAccessLogEditing(true);
-          }}
+          onEdit={() => { setAccessLogEditing(true); }}
         >
-          {(data.access_log?.enabled ?? true) ? (
-            <div className="space-y-1">
-              <KV k="sinks" v={(data.access_log?.sinks ?? ["stdout"]).join(", ")} />
-              <KV k="format" v={data.access_log?.format || "text"} />
-              {data.access_log?.file && <KV k="file" v={data.access_log.file} />}
-            </div>
-          ) : (
-            <p className="text-xs text-jul-muted">
-              Request access records are disabled. Process, security, audit, health, metrics, and
-              tracing remain active.
-            </p>
-          )}
+          <div className="space-y-1">
+            <KV k="sinks" v={(data.access_log?.sinks ?? ["stdout"]).join(", ")} />
+            <KV k="format" v={data.access_log?.format || "text"} />
+          </div>
         </SectionCard>
 
-        {/* Distributed tracing (Phase 4d) */}
         <SectionCard
           title="Distributed Tracing"
           active={data.tracing?.enabled ?? false}
-          onEdit={() => {
-            setTracingEditing(true);
-          }}
+          onEdit={() => { setTracingEditing(true); }}
         >
-          {data.tracing?.enabled ? (
-            <div className="space-y-1">
-              <KV k="exporter" v={data.tracing.exporter || "otlp-grpc"} />
-              <KV k="endpoint" v={data.tracing.endpoint} />
-              <KV
-                k="sample ratio"
-                v={
-                  data.tracing.sample_ratio !== undefined
-                    ? String(data.tracing.sample_ratio)
-                    : undefined
-                }
-              />
-              <KV k="service" v={data.tracing.service_name} />
-              {data.tracing.insecure && <KV k="transport" v="insecure (plaintext)" />}
-            </div>
-          ) : (
-            <p className="text-xs text-jul-muted">
-              Tracing is off. Enable it to export request spans to an OpenTelemetry collector
-              (OTLP). Requires a binary built with the otel tag.
-            </p>
-          )}
+          <div className="space-y-1">
+            <KV k="exporter" v={data.tracing?.exporter} />
+            <KV k="endpoint" v={data.tracing?.endpoint} />
+            <KV k="service" v={data.tracing?.service_name} />
+          </div>
         </SectionCard>
       </div>
 
+      {globalEditing && data.global && (
+        <GlobalSettingsEditor current={data.global} onClose={() => { setGlobalEditing(false); }} />
+      )}
       {editing && (
-        <TrafficControlEditor
-          kind={editing}
-          current={data}
-          onClose={() => {
-            setEditing(null);
-          }}
-        />
+        <TrafficControlEditor kind={editing} current={data} onClose={() => { setEditing(null); }} />
       )}
-
       {tracingEditing && (
-        <TracingEditor
-          current={data}
-          onClose={() => {
-            setTracingEditing(false);
-          }}
-        />
+        <TracingEditor current={data} onClose={() => { setTracingEditing(false); }} />
       )}
-
       {accessLogEditing && (
-        <AccessLogEditor
-          current={data}
-          onClose={() => {
-            setAccessLogEditing(false);
-          }}
-        />
+        <AccessLogEditor current={data} onClose={() => { setAccessLogEditing(false); }} />
       )}
     </div>
   );

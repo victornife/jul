@@ -135,6 +135,19 @@ func TestCatalogPlannedRestartHasPermissions(t *testing.T) {
 		if spec.Public {
 			t.Errorf("planned-restart route %q must not be public", pattern)
 		}
+		if len(spec.AnyPermissions) > 0 {
+			found := false
+			for _, candidate := range spec.AnyPermissions {
+				if candidate == perm {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("planned-restart route %q: OR permissions %v do not include %q", pattern, spec.AnyPermissions, perm)
+			}
+			continue
+		}
 		got := spec.Permission
 		if len(spec.Permissions) > 0 {
 			got = spec.Permissions[http.MethodGet]

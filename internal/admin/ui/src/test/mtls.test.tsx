@@ -243,8 +243,22 @@ describe("RouteDetail require client cert quick edit", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string, init?: RequestInit) => {
-        if (url !== "/api/config/patch/preview") throw new Error(`unexpected fetch: ${url}`);
-        onPatch(typeof init?.body === "string" ? init.body : "");
+        if (url !== "/api/config/patch/preview") {
+          if (url === "/api/config/pending-restart") {
+  return Promise.resolve(
+    new Response(JSON.stringify({ pending: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+throw new Error(`unexpected fetch: ${url}`);
+        }
+        const requestBody = init?.body;
+        if (typeof requestBody !== "string") {
+          throw new Error("expected string request body");
+        }
+        onPatch(requestBody);
         return Promise.resolve({
           ok: true,
           json: () =>

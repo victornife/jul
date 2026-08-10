@@ -724,11 +724,37 @@ export const SecurityProjectionSchema = z.object({
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
 
+export const LifecycleFieldProjectionSchema = z.object({
+  class: z.string(),
+  subsystem: z.string(),
+  reason: z.string(),
+  conditional: z.boolean().optional().default(false),
+});
+export type LifecycleFieldProjection = z.infer<typeof LifecycleFieldProjectionSchema>;
+
+export const GlobalSettingsProjectionSchema = z.object({
+  worker_threads: z.string().default("auto"),
+  log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  log_format: z.enum(["text", "json"]).default("text"),
+  shutdown_timeout: z.string().default("0s"),
+  reload_timeout: z.string().default("0s"),
+  redact_min_secret_length: z.number().int().nonnegative().default(0),
+  lifecycle: z.record(z.string(), LifecycleFieldProjectionSchema).default({}),
+});
+export type GlobalSettingsProjection = z.infer<typeof GlobalSettingsProjectionSchema>;
+
 export const CompressionProjectionSchema = z.object({
   enabled: z.boolean(),
-  encoders: z.array(z.string()).optional(),
+  encoders: z.array(z.string()).default([]),
+  level: z.number().int().default(0),
+  min_size: z.string().default(""),
+  types: z.array(z.string()).default([]),
+  precompressed: z.boolean().default(false),
 });
+export type CompressionProjection = z.infer<typeof CompressionProjectionSchema>;
 
+// Location rate-limit projection. Deliberately does not expose global-only
+// max_conns semantics.
 export const RateLimitProjectionSchema = z.object({
   enabled: z.boolean(),
   rate: z.number().optional(),
@@ -737,12 +763,37 @@ export const RateLimitProjectionSchema = z.object({
 });
 export type RateLimitPatch = z.infer<typeof RateLimitProjectionSchema>;
 
+export const GlobalRateLimitProjectionSchema = z.object({
+  enabled: z.boolean(),
+  rate: z.number().default(0),
+  burst: z.number().default(0),
+  key: z.string().default(""),
+  max_conns: z.number().int().nonnegative().default(0),
+});
+export type GlobalRateLimitProjection = z.infer<typeof GlobalRateLimitProjectionSchema>;
+
 export const CacheProjectionSchema = z.object({
   enabled: z.boolean(),
-  default_ttl: z.string().optional(),
+  memory_max_size: z.string().default(""),
+  // One-release compatibility alias for older console consumers.
   memory_max: z.string().optional(),
-  disk_path: z.string().optional(),
+  disk_path: z.string().default(""),
+  disk_max_size: z.string().default(""),
+  default_ttl: z.string().default(""),
+  stale_while_revalidate: z.string().default(""),
+  stale_if_error: z.string().default(""),
 });
+export type CacheProjection = z.infer<typeof CacheProjectionSchema>;
+
+export const ServerLimitsProjectionSchema = z.object({
+  listen: z.string(),
+  server_names: z.array(z.string()).optional(),
+  client_max_body_size: z.string().default(""),
+  read_timeout: z.string().default(""),
+  write_timeout: z.string().default(""),
+  idle_timeout: z.string().default(""),
+});
+export type ServerLimitsProjection = z.infer<typeof ServerLimitsProjectionSchema>;
 
 export const TracingProjectionSchema = z.object({
   enabled: z.boolean(),
@@ -763,13 +814,15 @@ export const AccessLogProjectionSchema = z.object({
 });
 
 export const TrafficControlsSchema = z.object({
+  global: GlobalSettingsProjectionSchema.optional(),
   compression: CompressionProjectionSchema.optional(),
-  rate_limit: RateLimitProjectionSchema.optional(),
+  rate_limit: GlobalRateLimitProjectionSchema.optional(),
   cache: CacheProjectionSchema.optional(),
+  servers: z.array(ServerLimitsProjectionSchema).default([]),
   tracing: TracingProjectionSchema.optional(),
   access_log: AccessLogProjectionSchema.optional(),
 });
-export type TrafficControls = z.infer<typeof TrafficControlsSchema>;
+export type TrafficControls = Partial<z.output<typeof TrafficControlsSchema>>;
 
 // PluginAttachmentSchema is one place a plugin is referenced — a location
 // middleware chain, a location handler action, or a server-level chain. The
@@ -1487,6 +1540,51 @@ export const PatchLifecycleSchema = z.object({
   pending_subsystems: z.array(z.string()).default([]),
 });
 export type PatchLifecycle = z.infer<typeof PatchLifecycleSchema>;
+
+export const RawConfigPreviewSchema = z.object({
+  ok: z.literal(true),
+  base_version: z.string(),
+  valid: z.boolean(),
+  validation_errors: z.array(ValidationIssueSchema).default([]),
+  diff: ConfigDiffSchema,
+  lifecycle: PatchLifecycleSchema,
+});
+export type RawConfigPreview = z.infer<typeof RawConfigPreviewSchema>;
+
+/**
+ * Classifies a raw candidate against the exact editable baseline used to build
+ * it. The candidate is sent only in this authorized request and is never
+ * returned, logged, or persisted in browser storage.
+ */
+export async function previewRawConfig(
+  candidate: string,
+  baseVersion: string,
+): Promise<RawConfigPreview> {
+  const headers = new Headers({
+    Accept: "application/json",
+    "Content-Type": "application/toml",
+    "X-Jul-Base-Version": baseVersion,
+  });
+  const token = authToken.get();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch("/api/config/preview", {
+    method: "POST",
+    headers,
+    body: candidate,
+  });
+  let data: unknown = null;
+  try {
+    data = (await resp.json()) as unknown;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    if (resp.status === 401) notifyUnauthorized();
+    else if (resp.status === 403) notifyForbidden();
+    classifyPatchFailure("/config/preview", resp.status, resp.statusText, data, resp);
+  }
+  return RawConfigPreviewSchema.parse(data);
+}
 
 export const PatchOperationFailureSchema = z.object({
   ok: z.literal(false),

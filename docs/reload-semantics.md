@@ -738,3 +738,19 @@ The admin apply path is guarded by `base_version`: if the live configuration
 changed since the edit was prepared, the apply is rejected with `409 Conflict`
 so a stale edit cannot clobber a concurrent change. See
 [console.md](console.md) for conflict handling.
+
+## Console planned-restart action selection (#81)
+
+The Console obtains lifecycle paths and subsystems from the canonical Go
+registry-backed preview. It does not maintain a frontend hot/restart table.
+Until pending-restart state is known, the primary action is disabled. A pending
+snapshot change forces a fresh preview of the exact ordered operations; a moved
+base blocks instead of substituting a newer token.
+
+The three primary labels are **Apply live**, **Save for next restart**, and
+**Update staged configuration**. Restart-required and mixed candidates stage the
+complete candidate. Listener-bound `rate_limit.max_conns` stages when an
+existing listener is retained but may follow a server-authorized hot path when
+all affected listeners are new. A `global.reload_timeout` edit uses the
+currently active timeout for that transaction; the new value governs later
+transactions.

@@ -59,6 +59,7 @@ describe("generators", () => {
     const toml = generateCompressionToml({
       enabled: true,
       encoders: ["gzip", "br"],
+      level: 0,
       minSize: "1k",
       types: ["text/*"],
       precompressed: true,
@@ -73,10 +74,19 @@ describe("generators", () => {
     expect(generateCompressionToml({
       enabled: false,
       encoders: ["gzip"],
+      level: 0,
       minSize: "1k",
       types: [],
       precompressed: false,
-    })).toBe("[compression]\nenabled = false");
+    })).toBe([
+      "[compression]",
+      "enabled = false",
+      'encoders = ["gzip"]',
+      "level = 0",
+      'min_size = "1k"',
+      "types = []",
+      "precompressed = false",
+    ].join("\n"));
   });
 
   it("emits cache fields", () => {
@@ -84,8 +94,10 @@ describe("generators", () => {
       enabled: true,
       memoryMaxSize: "64m",
       diskPath: "/var/cache",
+      diskMaxSize: "",
       defaultTTL: "60s",
       staleWhileRevalidate: "10s",
+      staleIfError: "",
     });
     expect(toml).toContain('memory_max_size = "64m"');
     expect(toml).toContain('disk_path = "/var/cache"');
@@ -113,6 +125,7 @@ describe("warnings", () => {
       compressionWarnings({
         enabled: true,
         encoders: ["gzip"],
+        level: 0,
         minSize: "1k",
         types: ["image/png"],
         precompressed: false,
@@ -126,8 +139,10 @@ describe("warnings", () => {
         enabled: true,
         memoryMaxSize: "",
         diskPath: "",
+        diskMaxSize: "",
         defaultTTL: "60s",
         staleWhileRevalidate: "",
+        staleIfError: "",
       }).length,
     ).toBeGreaterThan(0);
   });

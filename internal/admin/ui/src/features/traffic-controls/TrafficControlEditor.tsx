@@ -3,37 +3,54 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
+import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { usePermission } from "@/auth/usePermission.ts";
 import {
+  fetchPendingRestart,
   fetchRawConfig,
-  fetchStats,
   fetchRoutes,
+  fetchStats,
+  previewRawConfig,
   purgeCache,
+  type ConfigPatch,
+  type RouteProjection,
+  type ServerLimitsProjection,
   type TrafficControls,
 } from "@/api/client.ts";
-import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
-import { patchConfig, ConfigRejectedError } from "@/api/client.ts";
-import { usePermission } from "@/auth/usePermission.ts";
-import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import {
-  upsertTopLevelTable,
-  generateCompressionToml,
-  generateCacheToml,
-  generateRateLimitToml,
-  generateLimitsToml,
-  compressionWarnings,
-  cacheWarnings,
-  rateLimitWarnings,
-  limitsWarnings,
-  type CompressionDraft,
+  recommendPatchAction,
+  setPendingDraft,
+  snapshotPendingRestart,
+} from "@/lib/configDraftHandoff.ts";
+import {
+  buildCompressionPatch,
+  buildGlobalRateLimitPatch,
+  buildServerLimitsPatch,
+  seedCache,
+  seedCompression,
+  seedRateLimit,
+  seedServerLimits,
   type CacheDraft,
+  type CompressionDraft,
   type RateLimitDraft,
+  type ServerLimitsDraft,
+} from "@/lib/trafficPatchBuilders.ts";
+import {
+  cacheWarnings,
+  compressionWarnings,
+  generateCacheToml,
+  generateLimitsToml,
+  limitsWarnings,
+  rateLimitWarnings,
+  upsertTopLevelTable,
   type LimitsDraft,
 } from "@/lib/trafficToml.ts";
-import { TextField, NumberField, Toggle, CheckboxGroup, AffectedRoutes } from "./TrafficFormFields.tsx";
+import { describePatchBatchError, useRunPatchBatch } from "@/lib/useRunPatchBatch.ts";
+import { AffectedRoutes, CheckboxGroup, NumberField, TextField, Toggle } from "./TrafficFormFields.tsx";
 
 export type TrafficEditorKind = "compression" | "cache" | "rate_limit" | "limits";
 
@@ -41,22 +58,22 @@ const TITLES: Record<TrafficEditorKind, { title: string; subtitle: string }> = {
   compression: {
     title: "Compression",
     subtitle:
-      "Compression reduces response size before sending data to clients. It usually helps HTML, CSS, JavaScript, JSON, and SVG; it usually does not help images, video, or archives.",
+      "Compression reduces response size. This editor sends one sparse compression_set operation and preserves dormant values while disabled.",
   },
   cache: {
     title: "Cache",
     subtitle:
-      "The response cache stores upstream responses so repeat requests are served from memory or disk. Avoid caching authenticated or per-user responses.",
+      "Cache remains a complete-table, raw, stage-only path. The candidate is pinned to the exact configuration version used to generate it and never enters browser storage.",
   },
   rate_limit: {
     title: "Rate limiting",
     subtitle:
-      "Rate limiting bounds how many requests a client may make. Choose a key (client IP, a header, or a JWT claim), a sustained rate, and a burst allowance.",
+      "The global request policy uses rate_limit_global_set. max_conns is a listener-level concurrent-connection cap whose final lifecycle is decided by the server.",
   },
   limits: {
     title: "Limits & timeouts",
     subtitle:
-      "Request limits and timeouts protect the server from slow or oversized requests. These apply per server block, so the generated keys are placed under the [[servers]] block you choose in the editor. The read/write/idle timeouts are listener-level (from the first server block on the address) and require a restart to change on an existing listener.",
+      "The selected server is seeded from its persisted projection. Only changed server-level values are sent; upstream timeout/retry reference TOML remains informational.",
   },
 };
 
@@ -67,7 +84,41 @@ const DEFAULT_COMPRESSION_TYPES = [
   "application/xml",
   "image/svg+xml",
 ];
+const ENCODERS = ["gzip", "br", "zstd"];
 
+function unique(values: readonly string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function routeLabel(route: ServerLimitsProjection): string {
+  const names = route.server_names ?? [];
+  return names.length > 0 ? `${route.listen} — ${names.join(", ")}` : route.listen;
+}
+
+function affectedPaths(
+  routes: readonly RouteProjection[],
+  predicate: (route: RouteProjection, location: RouteProjection["locations"][number]) => boolean,
+): string[] {
+  const paths: string[] = [];
+  for (const route of routes) {
+    for (const location of route.locations) {
+      if (predicate(route, location)) paths.push(`${route.listen}${location.match}`);
+    }
+  }
+  return unique(paths);
+}
+
+function equalCache(left: CacheDraft, right: CacheDraft): boolean {
+  return (
+    left.enabled === right.enabled &&
+    left.memoryMaxSize === right.memoryMaxSize &&
+    left.diskPath === right.diskPath &&
+    left.diskMaxSize === right.diskMaxSize &&
+    left.defaultTTL === right.defaultTTL &&
+    left.staleWhileRevalidate === right.staleWhileRevalidate &&
+    left.staleIfError === right.staleIfError
+  );
+}
 
 export interface TrafficControlEditorProps {
   readonly kind: TrafficEditorKind;
@@ -75,79 +126,54 @@ export interface TrafficControlEditorProps {
   readonly onClose: () => void;
 }
 
-/**
- * Guided editor for the global traffic-control tables (Phase 3, Milestones
- * 3.1–3.3). It never writes directly: it upserts the relevant top-level table
- * into the running config and hands the draft to the Config editor where it
- * flows through Validate → Diff → Apply → Rollback.
- */
 export function TrafficControlEditor({ kind, current, onClose }: TrafficControlEditorProps) {
   const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
-  const [purgeMsg, setPurgeMsg] = useState<string | null>(null);
-  const { has, ready } = usePermission();
+  const queryClient = useQueryClient();
+  const { has } = usePermission();
+  const canWrite = has("config:write");
+  const canRaw = has("config:raw");
   const canPurge = has("cache:purge");
+  const batch = useRunPatchBatch();
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
+  const [cacheReviewing, setCacheReviewing] = useState(false);
 
-  // Live observability for the cache and rate-limit editors (Milestones 3.2/3.3):
-  // the cache hit ratio and the rate-limited request counts come from the runtime
-  // stats snapshot; the route list resolves which routes opt into each feature.
+  const routes = useQuery({ queryKey: ["routes"], queryFn: fetchRoutes });
   const stats = useQuery({
     queryKey: ["stats"],
     queryFn: fetchStats,
     enabled: kind === "cache" || kind === "rate_limit",
     refetchInterval: 5_000,
   });
-  // Every editor kind needs the route list now: compression/cache/rate-limit to
-  // show affected routes, and limits to pick the target [[servers]] block — so
-  // the query is always enabled.
-  const routes = useQuery({
-    queryKey: ["routes"],
-    queryFn: fetchRoutes,
+  const cacheBase = useQuery({
+    queryKey: ["raw-config", "cache-editor-base"],
+    queryFn: fetchRawConfig,
+    enabled: kind === "cache" && canRaw,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 
-  // The limits editor targets a concrete [[servers]] block (P3-15): the operator
-  // picks a listener and the server-level fields are applied in place via the
-  // structured patch API, instead of emitting a commented snippet to hand-place.
-  const listenAddrs = Array.from(new Set((routes.data ?? []).map((r) => r.listen)));
+  const compressionInitial = useRef<CompressionDraft>(seedCompression(current));
+  const rateLimitInitial = useRef<RateLimitDraft>(seedRateLimit(current));
+  const cacheInitial = useRef<CacheDraft>(seedCache(current));
+  const [compression, setCompression] = useState(compressionInitial.current);
+  const [rateLimit, setRateLimit] = useState(rateLimitInitial.current);
+  const [cache, setCache] = useState(cacheInitial.current);
+
   const [targetListen, setTargetListen] = useState("");
-  const effectiveListen = targetListen || listenAddrs[0] || "";
-
-  async function onPurge(): Promise<void> {
-    setPurgeMsg(null);
-    try {
-      await purgeCache();
-      setPurgeMsg("Cache purged.");
-    } catch {
-      setPurgeMsg("Could not purge the cache.");
-    }
-  }
-
-  const [compression, setCompression] = useState<CompressionDraft>({
-    enabled: current.compression?.enabled ?? false,
-    encoders: current.compression?.encoders ?? ["gzip"],
-    minSize: "1k",
-    types: DEFAULT_COMPRESSION_TYPES,
-    precompressed: false,
+  const [limitBaseline, setLimitBaseline] = useState<ServerLimitsDraft | null>(null);
+  const [serverLimits, setServerLimits] = useState<ServerLimitsDraft>({
+    bodyLimit: "",
+    readTimeout: "",
+    writeTimeout: "",
+    idleTimeout: "",
   });
-  const [cache, setCache] = useState<CacheDraft>({
-    enabled: current.cache?.enabled ?? false,
-    memoryMaxSize: current.cache?.memory_max ?? "64m",
-    diskPath: current.cache?.disk_path ?? "",
-    defaultTTL: current.cache?.default_ttl ?? "60s",
-    staleWhileRevalidate: "",
-  });
-  const [rateLimit, setRateLimit] = useState<RateLimitDraft>({
-    enabled: current.rate_limit?.enabled ?? false,
-    key: current.rate_limit?.key ?? "ip",
-    rate: current.rate_limit?.rate ?? 100,
-    burst: current.rate_limit?.burst ?? 0,
-    maxConns: 0,
-  });
-  const [limits, setLimits] = useState<LimitsDraft>({
-    bodyLimit: "10m",
-    readTimeout: "30s",
-    writeTimeout: "30s",
-    idleTimeout: "60s",
+  const [referenceLimits, setReferenceLimits] = useState<LimitsDraft>({
+    bodyLimit: "",
+    readTimeout: "",
+    writeTimeout: "",
+    idleTimeout: "",
     proxyConnectTimeout: "5s",
     proxyReadTimeout: "30s",
     proxySendTimeout: "30s",
@@ -155,536 +181,456 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
     failTimeout: "10s",
   });
 
-  let fragment = "";
-  let table = "";
-  let warnings: string[] = [];
-  switch (kind) {
-    case "compression":
-      fragment = generateCompressionToml(compression);
-      table = "compression";
-      warnings = compressionWarnings(compression);
-      break;
-    case "cache":
-      fragment = generateCacheToml(cache);
-      table = "cache";
-      warnings = cacheWarnings(cache);
-      break;
-    case "rate_limit":
-      fragment = generateRateLimitToml(rateLimit);
-      table = "rate_limit";
-      warnings = rateLimitWarnings(rateLimit);
-      break;
-    case "limits":
-      fragment = generateLimitsToml(limits);
-      table = "";
-      warnings = limitsWarnings(limits);
-      break;
-  }
+  const routeOptions = current.servers ?? [];
+  const selectedRoute =
+    routeOptions.find((route) => route.listen === targetListen) ?? routeOptions[0] ?? null;
 
-  function toggleEncoder(value: string, on: boolean): void {
-    setCompression((d) => ({
-      ...d,
-      encoders: on ? [...d.encoders, value] : d.encoders.filter((e) => e !== value),
-    }));
-  }
-  function toggleType(value: string, on: boolean): void {
-    setCompression((d) => ({
-      ...d,
-      types: on ? [...d.types, value] : d.types.filter((t) => t !== value),
-    }));
-  }
+  useEffect(() => {
+    if (kind !== "limits" || selectedRoute === null || limitBaseline !== null) return;
+    const seeded = seedServerLimits(selectedRoute);
+    setTargetListen(selectedRoute.listen);
+    setLimitBaseline(seeded);
+    setServerLimits(seeded);
+    setReferenceLimits((previous) => ({ ...previous, ...seeded }));
+  }, [kind, selectedRoute, limitBaseline]);
 
-  async function openInEditor(): Promise<void> {
-    setError(null);
-    // The limits editor applies the server-level fields in place to the chosen
-    // [[servers]] block via the structured patch API, so there is no snippet to
-    // hand-place. The patched candidate is handed to the Config editor for the
-    // usual diff review + apply.
-    if (kind === "limits") {
-      if (effectiveListen === "") {
-        setError("No server block is available to apply limits to.");
-        return;
-      }
-      try {
-        const res = await patchConfig({
-          op: "server_set_limits",
-          listen: effectiveListen,
-          limits: {
-            client_max_body_size: limits.bodyLimit,
-            read_timeout: limits.readTimeout,
-            write_timeout: limits.writeTimeout,
-            idle_timeout: limits.idleTimeout,
-          },
-        });
-        setPendingDraft({
-          kind: "patch",
-          ops: [
-            {
-              op: "server_set_limits",
-              listen: effectiveListen,
-              limits: {
-                client_max_body_size: limits.bodyLimit,
-                read_timeout: limits.readTimeout,
-                write_timeout: limits.writeTimeout,
-                idle_timeout: limits.idleTimeout,
-              },
-            },
-          ],
-          baseVersion: res.base_version,
-          previewDiff: res.diff,
-        });
-        void navigate("/config");
-      } catch (err) {
-        setError(
-          err instanceof ConfigRejectedError ? err.message : "The edit could not be applied.",
-        );
-      }
+  const compressionOperation = buildCompressionPatch(compressionInitial.current, compression);
+  const rateLimitOperation = buildGlobalRateLimitPatch(rateLimitInitial.current, rateLimit);
+  const limitsOperation =
+    selectedRoute !== null && limitBaseline !== null
+      ? buildServerLimitsPatch(selectedRoute.listen, limitBaseline, serverLimits)
+      : null;
+  const cacheDirty = !equalCache(cacheInitial.current, cache);
+
+  const warnings = useMemo(() => {
+    switch (kind) {
+      case "compression":
+        return compressionWarnings(compression);
+      case "cache":
+        return cacheWarnings(cache);
+      case "rate_limit":
+        return rateLimitWarnings(rateLimit);
+      case "limits":
+        return limitsWarnings(referenceLimits);
+    }
+  }, [kind, compression, cache, rateLimit, referenceLimits]);
+
+  const allRoutes = routes.data ?? [];
+  const affected =
+    kind === "cache"
+      ? affectedPaths(allRoutes, (_route, location) => location.cache)
+      : kind === "rate_limit"
+        ? affectedPaths(allRoutes, (_route, location) => location.rate_limit)
+        : kind === "compression"
+          ? affectedPaths(allRoutes, () => true)
+          : [];
+
+  const clearErrors = (): void => {
+    setLocalError(null);
+    batch.clearError();
+  };
+
+  const runTyped = (operation: ConfigPatch | null): void => {
+    clearErrors();
+    if (operation === null) return;
+    void batch.run([operation]);
+  };
+
+  const reviewCache = async (): Promise<void> => {
+    clearErrors();
+    if (!canRaw) {
+      setLocalError("Cache editing requires config:raw because it preserves and stages a complete [cache] table.");
       return;
     }
-    try {
-      const raw = await fetchRawConfig();
-      const next = upsertTopLevelTable(raw.raw ?? "", table, fragment);
-      setPendingDraft({ kind: "toml", toml: next });
-      void navigate("/config");
-    } catch {
-      setError("Could not load the current configuration to merge this change.");
+    const raw = cacheBase.data;
+    if (raw?.raw === undefined || raw.base_version === undefined || raw.base_version.trim() === "") {
+      setLocalError("The exact raw configuration and base version are not available. Reload the cache editor before reviewing.");
+      return;
     }
-  }
+    setCacheReviewing(true);
+    try {
+      const candidate = upsertTopLevelTable(raw.raw, "cache", generateCacheToml(cache));
+      const pendingResponse = await queryClient.fetchQuery({
+        queryKey: ["pending-restart"],
+        queryFn: fetchPendingRestart,
+        staleTime: 0,
+      });
+      const pendingSnapshot = snapshotPendingRestart(pendingResponse);
+      const preview = await previewRawConfig(candidate, raw.base_version);
+      if (preview.base_version !== raw.base_version) {
+        throw new Error("The cache preview did not match the source base version.");
+      }
+      if (!preview.valid || preview.validation_errors.length > 0) {
+        const details = preview.validation_errors
+          .map((issue) => `${issue.path ? `${issue.path}: ` : ""}${issue.summary}`)
+          .join("; ");
+        throw new Error(details || "The cache candidate is invalid.");
+      }
+      const action = recommendPatchAction(preview.lifecycle, pendingSnapshot);
+      if (action !== "stage_restart" && action !== "update_staged") {
+        throw new Error(
+          action === "hot"
+            ? "The server unexpectedly classified the cache change as hot-applicable; cache changes must be staged for restart."
+            : "The server did not offer a safe stage-restart action for this cache candidate.",
+        );
+      }
+      setPendingDraft({
+        kind: "toml",
+        toml: candidate,
+        baseVersion: raw.base_version,
+        previewDiff: preview.diff,
+        lifecycle: preview.lifecycle,
+        recommendedAction: action,
+        pendingRestart: pendingSnapshot,
+        candidateState: "memory_only",
+      });
+      void navigate("/config");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "The cache candidate could not be previewed.");
+    } finally {
+      setCacheReviewing(false);
+    }
+  };
+
+  const selectServer = (next: ServerLimitsProjection): void => {
+    const dirty =
+      limitBaseline !== null &&
+      buildServerLimitsPatch(targetListen || next.listen, limitBaseline, serverLimits) !== null;
+    if (dirty && !window.confirm("Changing server will discard unsaved Limits & Timeouts edits. Continue?")) {
+      return;
+    }
+    const seeded = seedServerLimits(next);
+    setTargetListen(next.listen);
+    setLimitBaseline(seeded);
+    setServerLimits(seeded);
+    setReferenceLimits((previous) => ({ ...previous, ...seeded }));
+    clearErrors();
+  };
 
   const meta = TITLES[kind];
+  const typedOperation =
+    kind === "compression"
+      ? compressionOperation
+      : kind === "rate_limit"
+        ? rateLimitOperation
+        : kind === "limits"
+          ? limitsOperation
+          : null;
+  const busy = batch.busy || cacheReviewing;
+  const reviewDisabled =
+    busy ||
+    !canWrite ||
+    (kind === "cache"
+      ? !cacheDirty || !canRaw || cacheBase.isLoading || cacheBase.isFetching || cacheBase.isError
+      : typedOperation === null);
+
+  const toggleListValue = (
+    values: readonly string[],
+    value: string,
+    on: boolean,
+  ): string[] => (on ? [...values, value] : values.filter((item) => item !== value));
 
   return (
-    <Drawer
-      title={`Edit ${meta.title.toLowerCase()}`}
-      subtitle="Review and apply safely in the editor."
-      onClose={onClose}
-      footer={
-        <div className="flex items-center justify-between gap-3">
-          {error && <span className="text-xs text-jul-danger">{error}</span>}
-          <button
-            type="button"
-            onClick={() => {
-              void openInEditor();
-            }}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
-          >
-            Review in editor →
-          </button>
-        </div>
-      }
-    >
-      <div className="space-y-5">
-        <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
-          {meta.subtitle}
-        </p>
+    <Drawer title={`Edit ${meta.title.toLowerCase()}`} subtitle="Review the server-authoritative preview before applying." onClose={onClose}>
+      <div className="space-y-5 p-4">
+        <p className="text-sm text-jul-muted">{meta.subtitle}</p>
 
         {kind === "compression" && (
-          <>
+          <div className="space-y-4">
             <Toggle
               label="Enable compression"
               checked={compression.enabled}
-              onChange={(v) => {
-                setCompression((d) => ({ ...d, enabled: v }));
+              onChange={(enabled) => {
+                setCompression((previous) => ({ ...previous, enabled }));
+                clearErrors();
               }}
             />
-            {compression.enabled && (
-              <>
-                <CheckboxGroup
-                  label="Encoders"
-                  options={["gzip", "br", "zstd"]}
-                  selected={compression.encoders}
-                  onToggle={toggleEncoder}
-                />
-                <TextField
-                  label="Minimum size"
-                  hint="Responses smaller than this are not compressed."
-                  value={compression.minSize}
-                  placeholder="1k"
-                  onChange={(v) => {
-                    setCompression((d) => ({ ...d, minSize: v }));
-                  }}
-                />
-                <CheckboxGroup
-                  label="Content types"
-                  options={DEFAULT_COMPRESSION_TYPES}
-                  selected={compression.types}
-                  onToggle={toggleType}
-                />
-                <Toggle
-                  label="Serve precompressed .br/.gz sidecars for static files"
-                  checked={compression.precompressed}
-                  onChange={(v) => {
-                    setCompression((d) => ({ ...d, precompressed: v }));
-                  }}
-                />
-                <AffectedRoutes
-                  title="Routes that opt into compression"
-                  paths={(routes.data ?? [])
-                    .flatMap((r) => r.locations)
-                    .filter((l) => l.compression)
-                    .map((l) => l.match)}
-                  emptyHint="No route sets a per-location compression override; the global setting applies everywhere."
-                />
-              </>
-            )}
-          </>
-        )}
-
-        {kind === "cache" && (
-          <>
-            <Toggle
-              label="Enable cache"
-              checked={cache.enabled}
-              onChange={(v) => {
-                setCache((d) => ({ ...d, enabled: v }));
+            <CheckboxGroup
+              label="Encoders (ordered as selected)"
+              options={unique([...ENCODERS, ...compressionInitial.current.encoders])}
+              selected={compression.encoders}
+              onToggle={(value, on) => {
+                setCompression((previous) => ({
+                  ...previous,
+                  encoders: toggleListValue(previous.encoders, value, on),
+                }));
+                clearErrors();
               }}
             />
-            {cache.enabled && (
-              <>
-                <TextField
-                  label="Memory max size"
-                  hint="In-memory tier cap, e.g. 64m."
-                  value={cache.memoryMaxSize}
-                  placeholder="64m"
-                  onChange={(v) => {
-                    setCache((d) => ({ ...d, memoryMaxSize: v }));
-                  }}
-                />
-                <TextField
-                  label="Disk path (optional)"
-                  hint="Enables a disk overflow tier when set."
-                  value={cache.diskPath}
-                  placeholder="/var/cache/jul"
-                  onChange={(v) => {
-                    setCache((d) => ({ ...d, diskPath: v }));
-                  }}
-                />
-                <TextField
-                  label="Default TTL"
-                  hint="Used when upstream gives no explicit freshness."
-                  value={cache.defaultTTL}
-                  placeholder="60s"
-                  onChange={(v) => {
-                    setCache((d) => ({ ...d, defaultTTL: v }));
-                  }}
-                />
-                <TextField
-                  label="Stale-while-revalidate (optional)"
-                  hint="Serve stale entries this long while refreshing."
-                  value={cache.staleWhileRevalidate}
-                  placeholder="10s"
-                  onChange={(v) => {
-                    setCache((d) => ({ ...d, staleWhileRevalidate: v }));
-                  }}
-                />
-                <AffectedRoutes
-                  title="Routes that opt into caching"
-                  paths={(routes.data ?? [])
-                    .flatMap((r) => r.locations)
-                    .filter((l) => l.cache)
-                    .map((l) => l.match)}
-                  emptyHint="No route opts into caching yet — enable it per route from the Route editor."
-                />
-              </>
-            )}
-
-            <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                Cache effectiveness
-              </span>
-              {stats.data?.available ? (
-                <div className="flex flex-wrap gap-4 text-sm">
-                  <span className="text-jul-text">
-                    Hit ratio:{" "}
-                    <span className="font-mono text-jul-accent">
-                      {((stats.data.cacheHitRatio || 0) * 100).toFixed(1)}%
-                    </span>
-                  </span>
-                  <span className="text-jul-muted">
-                    HIT {Math.round(stats.data.cacheEvents?.["HIT"] ?? 0).toLocaleString()}
-                  </span>
-                  <span className="text-jul-muted">
-                    MISS {Math.round(stats.data.cacheEvents?.["MISS"] ?? 0).toLocaleString()}
-                  </span>
-                  <span className="text-jul-muted">
-                    BYPASS {Math.round(stats.data.cacheEvents?.["BYPASS"] ?? 0).toLocaleString()}
-                  </span>
-                </div>
-              ) : (
-                <p className="text-xs text-jul-muted">No cache activity recorded yet.</p>
-              )}
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  disabled={!canPurge}
-                  title={
-                    ready && !canPurge
-                      ? "Requires the cache:purge permission; your role does not grant it."
-                      : undefined
-                  }
-                  onClick={() => {
-                    void onPurge();
-                  }}
-                  className="rounded-md border border-jul-danger/50 px-3 py-1 text-xs font-medium text-jul-danger hover:bg-jul-danger/10 disabled:opacity-50"
-                >
-                  Purge cache now
-                </button>
-                {purgeMsg && <span className="text-xs text-jul-muted">{purgeMsg}</span>}
-              </div>
-              <ForbiddenAction permission="cache:purge" />
-            </div>
-          </>
-        )}
-
-        {kind === "rate_limit" && (
-          <>
-            <Toggle
-              label="Enable rate limiting"
-              checked={rateLimit.enabled}
-              onChange={(v) => {
-                setRateLimit((d) => ({ ...d, enabled: v }));
-              }}
-            />
-            {rateLimit.enabled && (
-              <>
-                <TextField
-                  label="Key"
-                  hint='Client identity: "ip", "header:X-Api-Key", or "jwt:sub".'
-                  value={rateLimit.key}
-                  placeholder="ip"
-                  onChange={(v) => {
-                    setRateLimit((d) => ({ ...d, key: v }));
-                  }}
-                />
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberField
-                    label="Rate (req/s)"
-                    value={rateLimit.rate}
-                    onChange={(v) => {
-                      setRateLimit((d) => ({ ...d, rate: v }));
-                    }}
-                  />
-                  <NumberField
-                    label="Burst"
-                    value={rateLimit.burst}
-                    onChange={(v) => {
-                      setRateLimit((d) => ({ ...d, burst: v }));
-                    }}
-                  />
-                </div>
-                <NumberField
-                  label="Max connections (0 = unlimited)"
-                  value={rateLimit.maxConns}
-                  onChange={(v) => {
-                    setRateLimit((d) => ({ ...d, maxConns: v }));
-                  }}
-                />
-              </>
-            )}
-
-            <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                Rate-limited requests
-              </span>
-              {stats.data?.available && Object.keys(stats.data.rateLimited ?? {}).length > 0 ? (
-                <ul className="space-y-1">
-                  {Object.entries(stats.data.rateLimited ?? {})
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([keyKind, count]) => (
-                      <li key={keyKind} className="flex justify-between text-sm">
-                        <span className="font-mono text-jul-text">{keyKind}</span>
-                        <span className="text-jul-muted">
-                          {Math.round(count).toLocaleString()} rejected
-                        </span>
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-jul-muted">
-                  No requests have been rate-limited yet (or rate limiting is inactive).
-                </p>
-              )}
-            </div>
-
-            <AffectedRoutes
-              title="Routes that opt into rate limiting"
-              paths={(routes.data ?? [])
-                .flatMap((r) => r.locations)
-                .filter((l) => l.rate_limit)
-                .map((l) => l.match)}
-              emptyHint="No route sets a per-location rate-limit override; the global setting applies everywhere."
-            />
-          </>
-        )}
-
-        {kind === "limits" && (
-          <>
             <label className="block space-y-1">
-              <span className="text-sm font-medium text-jul-text">Apply to server</span>
-              <select
-                value={effectiveListen}
-                onChange={(e) => {
-                  setTargetListen(e.target.value);
+              <span className="text-sm font-medium text-jul-text">Compression level</span>
+              <input
+                type="number"
+                value={compression.level}
+                onChange={(event) => {
+                  setCompression((previous) => ({ ...previous, level: Number(event.target.value) }));
+                  clearErrors();
                 }}
-                className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
-              >
-                {listenAddrs.length === 0 ? (
-                  <option value="">(no server blocks found)</option>
-                ) : (
-                  listenAddrs.map((addr) => (
-                    <option key={addr} value={addr}>
-                      {addr}
-                    </option>
-                  ))
-                )}
-              </select>
-              <span className="text-xs text-jul-muted">
-                The body-size and server timeouts below are applied in place to this [[servers]]
-                block via a structured edit — you review the diff before it is saved.
-              </span>
+                className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text"
+              />
             </label>
-
-            <p className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-warning">
-              The read, write, and idle timeouts are <strong>listener-level</strong>: they are
-              taken from the first server block on the listen address and fixed when the socket is
-              bound. Changing them on an address the server already serves cannot be hot-applied —
-              the apply reports <strong>restart required</strong>. The max request body size
-              hot-applies normally.
-            </p>
-
             <TextField
-              label="Max request body size"
-              hint="Rejects bodies larger than this (e.g. 10m)."
-              value={limits.bodyLimit}
-              placeholder="10m"
-              onChange={(v) => {
-                setLimits((d) => ({ ...d, bodyLimit: v }));
+              label="Minimum response size"
+              value={compression.minSize}
+              placeholder="1k"
+              onChange={(minSize) => {
+                setCompression((previous) => ({ ...previous, minSize }));
+                clearErrors();
               }}
             />
-            <div className="grid grid-cols-2 gap-3">
-              <TextField
-                label="Read timeout"
-                hint="Max time to read a request."
-                value={limits.readTimeout}
-                placeholder="30s"
-                onChange={(v) => {
-                  setLimits((d) => ({ ...d, readTimeout: v }));
-                }}
-              />
-              <TextField
-                label="Write timeout"
-                hint="Max time to write a response."
-                value={limits.writeTimeout}
-                placeholder="30s"
-                onChange={(v) => {
-                  setLimits((d) => ({ ...d, writeTimeout: v }));
-                }}
-              />
-            </div>
-            <TextField
-              label="Idle timeout"
-              hint="Keep-alive idle connection timeout."
-              value={limits.idleTimeout}
-              placeholder="60s"
-              onChange={(v) => {
-                setLimits((d) => ({ ...d, idleTimeout: v }));
+            <CheckboxGroup
+              label="MIME types"
+              options={unique([...DEFAULT_COMPRESSION_TYPES, ...compressionInitial.current.types])}
+              selected={compression.types}
+              onToggle={(value, on) => {
+                setCompression((previous) => ({
+                  ...previous,
+                  types: toggleListValue(previous.types, value, on),
+                }));
+                clearErrors();
               }}
             />
-
-            <div className="space-y-1 border-t border-jul-border pt-4">
-              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                Upstream timeouts
-              </span>
-              <p className="text-xs text-jul-muted">
-                Timeouts stop Jul from waiting forever for a slow backend. These apply per proxied
-                location and are <strong>not</strong> part of the in-place server edit above; copy
-                them from the generated TOML below into the relevant [[servers.locations]] block.
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <TextField
-                label="Connect timeout"
-                hint="Dialling the backend."
-                value={limits.proxyConnectTimeout}
-                placeholder="5s"
-                onChange={(v) => {
-                  setLimits((d) => ({ ...d, proxyConnectTimeout: v }));
-                }}
-              />
-              <TextField
-                label="Read timeout"
-                hint="Reading the response."
-                value={limits.proxyReadTimeout}
-                placeholder="30s"
-                onChange={(v) => {
-                  setLimits((d) => ({ ...d, proxyReadTimeout: v }));
-                }}
-              />
-              <TextField
-                label="Send timeout"
-                hint="Sending the request."
-                value={limits.proxySendTimeout}
-                placeholder="30s"
-                onChange={(v) => {
-                  setLimits((d) => ({ ...d, proxySendTimeout: v }));
-                }}
-              />
-            </div>
-
-            <div className="space-y-1 border-t border-jul-border pt-4">
-              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                Retries & fail-over
-              </span>
-              <p className="text-xs text-jul-muted">
-                Retries can help with temporary backend failures, but too many retries can make
-                incidents worse. Jul retires a backend after max_fails failures and brings it back
-                after fail_timeout. These apply per upstream pool and are <strong>not</strong> part
-                of the in-place server edit above; copy them from the generated TOML below.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <NumberField
-                label="Max fails"
-                value={limits.maxFails}
-                onChange={(v) => {
-                  setLimits((d) => ({ ...d, maxFails: v }));
-                }}
-              />
-              <TextField
-                label="Fail timeout"
-                hint="How long a failed backend stays retired."
-                value={limits.failTimeout}
-                placeholder="10s"
-                onChange={(v) => {
-                  setLimits((d) => ({ ...d, failTimeout: v }));
-                }}
-              />
-            </div>
-          </>
-        )}
-
-        {warnings.length > 0 && (
-          <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-jul-warning">
-              Risk warnings
-            </span>
-            <ul className="list-disc space-y-1 pl-4">
-              {warnings.map((w) => (
-                <li key={w} className="text-xs text-jul-warning">
-                  {w}
-                </li>
-              ))}
-            </ul>
+            <Toggle
+              label="Serve precompressed sidecars"
+              checked={compression.precompressed}
+              onChange={(precompressed) => {
+                setCompression((previous) => ({ ...previous, precompressed }));
+                clearErrors();
+              }}
+            />
+            <AffectedRoutes title="Affected routes" paths={affected} emptyHint="No routes are currently projected." />
           </div>
         )}
 
-        <div className="space-y-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-            {kind === "limits" ? "Reference TOML (upstream/retry keys)" : "Generated TOML"}
-          </span>
-          <pre className="overflow-auto rounded-md border border-jul-border bg-jul-surface p-3 font-mono text-xs leading-relaxed text-jul-text">
-            {fragment}
-          </pre>
+        {kind === "rate_limit" && (
+          <div className="space-y-4">
+            <Toggle
+              label="Enable global rate limiting"
+              checked={rateLimit.enabled}
+              onChange={(enabled) => {
+                setRateLimit((previous) => ({ ...previous, enabled }));
+                clearErrors();
+              }}
+            />
+            <TextField
+              label="Key"
+              hint="Examples: ip, header:X-Client-ID, jwt:sub"
+              value={rateLimit.key}
+              onChange={(key) => {
+                setRateLimit((previous) => ({ ...previous, key }));
+                clearErrors();
+              }}
+            />
+            <NumberField
+              label="Requests per second"
+              value={rateLimit.rate}
+              onChange={(rate) => {
+                setRateLimit((previous) => ({ ...previous, rate }));
+                clearErrors();
+              }}
+            />
+            <NumberField
+              label="Burst"
+              value={rateLimit.burst}
+              onChange={(burst) => {
+                setRateLimit((previous) => ({ ...previous, burst }));
+                clearErrors();
+              }}
+            />
+            <NumberField
+              label="Maximum concurrent connections"
+              value={rateLimit.maxConns}
+              onChange={(maxConns) => {
+                setRateLimit((previous) => ({ ...previous, maxConns }));
+                clearErrors();
+              }}
+            />
+            <p className="text-xs text-jul-muted">
+              max_conns is listener-level. The authoritative preview may permit it for listeners that are all new; retained listeners are saved for the next restart.
+            </p>
+            <AffectedRoutes title="Routes with rate limiting" paths={affected} emptyHint="No locations currently opt into rate limiting." />
+            {stats.data?.rateLimited && (
+              <p className="text-xs text-jul-muted">
+                Recent limited requests: {Object.values(stats.data.rateLimited).reduce((sum, value) => sum + value, 0)}
+              </p>
+            )}
+          </div>
+        )}
+
+        {kind === "cache" && (
+          <div className="space-y-4">
+            {!canRaw && (
+              <div role="alert" className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-sm text-jul-warning">
+                Cache editing requires <span className="font-mono">config:raw</span> because the complete [cache] table is preserved as a raw, stage-only candidate. Typed compression and rate-limit editing remain available without this permission.
+              </div>
+            )}
+            {canRaw && cacheBase.isError && (
+              <div role="alert" className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-sm text-jul-danger">
+                The exact raw configuration could not be loaded. Cache review is blocked so a candidate can never be paired with the wrong base version.
+              </div>
+            )}
+            <Toggle
+              label="Enable cache"
+              checked={cache.enabled}
+              onChange={(enabled) => {
+                setCache((previous) => ({ ...previous, enabled }));
+                clearErrors();
+              }}
+            />
+            <TextField
+              label="Memory maximum size"
+              value={cache.memoryMaxSize}
+              onChange={(memoryMaxSize) => {
+                setCache((previous) => ({ ...previous, memoryMaxSize }));
+                clearErrors();
+              }}
+            />
+            <TextField
+              label="Disk path"
+              value={cache.diskPath}
+              onChange={(diskPath) => {
+                setCache((previous) => ({ ...previous, diskPath }));
+                clearErrors();
+              }}
+            />
+            <TextField
+              label="Disk maximum size"
+              value={cache.diskMaxSize}
+              onChange={(diskMaxSize) => {
+                setCache((previous) => ({ ...previous, diskMaxSize }));
+                clearErrors();
+              }}
+            />
+            <TextField
+              label="Default TTL"
+              value={cache.defaultTTL}
+              onChange={(defaultTTL) => {
+                setCache((previous) => ({ ...previous, defaultTTL }));
+                clearErrors();
+              }}
+            />
+            <TextField
+              label="Stale while revalidate"
+              value={cache.staleWhileRevalidate}
+              onChange={(staleWhileRevalidate) => {
+                setCache((previous) => ({ ...previous, staleWhileRevalidate }));
+                clearErrors();
+              }}
+            />
+            <TextField
+              label="Stale if error"
+              value={cache.staleIfError}
+              onChange={(staleIfError) => {
+                setCache((previous) => ({ ...previous, staleIfError }));
+                clearErrors();
+              }}
+            />
+            <AffectedRoutes title="Cached routes" paths={affected} emptyHint="No locations currently opt into caching." />
+            {stats.data && (
+              <p className="text-xs text-jul-muted">
+                Current cache hit ratio: {(stats.data.cacheHitRatio * 100).toFixed(1)}%
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!canPurge}
+                className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text disabled:opacity-40"
+                onClick={() => {
+                  setPurgeMessage(null);
+                  void purgeCache()
+                    .then(() => {
+                      setPurgeMessage("Cache purged.");
+                    })
+                    .catch(() => {
+                      setPurgeMessage("Could not purge the cache.");
+                    });
+                }}
+              >
+                Purge cache
+              </button>
+              <ForbiddenAction permission="cache:purge" />
+              {purgeMessage && <span className="text-xs text-jul-muted">{purgeMessage}</span>}
+            </div>
+          </div>
+        )}
+
+        {kind === "limits" && (
+          <div className="space-y-4">
+            {routeOptions.length === 0 ? (
+              <p className="text-sm text-jul-muted">No server block is available.</p>
+            ) : (
+              <label className="block space-y-1">
+                <span className="text-sm font-medium text-jul-text">Server</span>
+                <select
+                  value={selectedRoute?.listen ?? ""}
+                  className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text"
+                  onChange={(event) => {
+                    const next = routeOptions.find((route) => route.listen === event.target.value);
+                    if (next !== undefined) selectServer(next);
+                  }}
+                >
+                  {routeOptions.map((route) => (
+                    <option key={`${route.listen}-${(route.server_names ?? []).join(",")}`} value={route.listen}>
+                      {routeLabel(route)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <TextField label="Client maximum body size" value={serverLimits.bodyLimit} onChange={(bodyLimit) => { setServerLimits((previous) => ({ ...previous, bodyLimit })); setReferenceLimits((previous) => ({ ...previous, bodyLimit })); clearErrors(); }} />
+            <TextField label="Read timeout" value={serverLimits.readTimeout} onChange={(readTimeout) => { setServerLimits((previous) => ({ ...previous, readTimeout })); setReferenceLimits((previous) => ({ ...previous, readTimeout })); clearErrors(); }} />
+            <TextField label="Write timeout" value={serverLimits.writeTimeout} onChange={(writeTimeout) => { setServerLimits((previous) => ({ ...previous, writeTimeout })); setReferenceLimits((previous) => ({ ...previous, writeTimeout })); clearErrors(); }} />
+            <TextField label="Idle timeout" value={serverLimits.idleTimeout} onChange={(idleTimeout) => { setServerLimits((previous) => ({ ...previous, idleTimeout })); setReferenceLimits((previous) => ({ ...previous, idleTimeout })); clearErrors(); }} />
+            <div className="space-y-3 rounded-md border border-jul-border p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-jul-muted">Reference TOML only — not part of this structured operation</p>
+              <TextField label="Proxy connect timeout" value={referenceLimits.proxyConnectTimeout} onChange={(proxyConnectTimeout) => {
+                setReferenceLimits((previous) => ({ ...previous, proxyConnectTimeout }));
+              }} />
+              <TextField label="Proxy read timeout" value={referenceLimits.proxyReadTimeout} onChange={(proxyReadTimeout) => {
+                setReferenceLimits((previous) => ({ ...previous, proxyReadTimeout }));
+              }} />
+              <TextField label="Proxy send timeout" value={referenceLimits.proxySendTimeout} onChange={(proxySendTimeout) => {
+                setReferenceLimits((previous) => ({ ...previous, proxySendTimeout }));
+              }} />
+              <NumberField label="Maximum failures" value={referenceLimits.maxFails} onChange={(maxFails) => {
+                setReferenceLimits((previous) => ({ ...previous, maxFails }));
+              }} />
+              <TextField label="Failure timeout" value={referenceLimits.failTimeout} onChange={(failTimeout) => {
+                setReferenceLimits((previous) => ({ ...previous, failTimeout }));
+              }} />
+              <pre className="overflow-auto whitespace-pre-wrap rounded bg-jul-bg p-2 text-xs text-jul-muted">{generateLimitsToml(referenceLimits)}</pre>
+            </div>
+          </div>
+        )}
+
+        {warnings.length > 0 && (
+          <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-warning">
+            {warnings.map((warning) => <p key={warning}>{warning}</p>)}
+          </div>
+        )}
+        {(localError ?? describePatchBatchError(batch.error)) && (
+          <div role="alert" className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3 text-xs text-jul-danger">
+            {localError ?? describePatchBatchError(batch.error)}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-jul-border pt-4">
+          <ForbiddenAction permission="config:write" />
+          <button type="button" onClick={onClose} className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text">
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={reviewDisabled}
+            onClick={() => {
+              if (kind === "cache") void reviewCache();
+              else runTyped(typedOperation);
+            }}
+            className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg disabled:opacity-40"
+          >
+            {busy ? "Reviewing…" : kind === "cache" ? "Review staged change" : "Review changes"}
+          </button>
         </div>
       </div>
     </Drawer>

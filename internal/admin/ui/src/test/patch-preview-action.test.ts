@@ -34,6 +34,10 @@ function draft(overrides: Partial<PendingPatchDraft> = {}): PendingPatchDraft {
     validationErrors: [],
     previewDiff: { summary: "1 change" },
     lifecycle: lifecycle(),
+    recommendedAction: "hot",
+    pendingRestart: { state: "none", subsystems: [] },
+    candidateState: "not_requested",
+    requiresFreshPreview: false,
     ...overrides,
   };
 }

@@ -16,6 +16,7 @@ import {
   fetchPendingRestart,
   fetchPatchCandidate,
   fetchRawConfig,
+  previewRawConfig,
   validateConfig,
   ApiError,
   ConfigRejectedError,
@@ -31,9 +32,19 @@ import { useManagedApplyRecord } from "@/lib/useManagedApplyRecord.ts";
 import { deriveFinalizationAdvisory } from "@/lib/finalizationAdvisory.ts";
 import { useConfigMutationMachine } from "@/features/config/useConfigMutationMachine.ts";
 import { useDebouncedValue } from "@/lib/useDebouncedValue.ts";
-import { takePendingDraft, type PendingPatchDraft } from "@/lib/configDraftHandoff.ts";
+import {
+  pendingRestartSnapshotEqual,
+  recommendPatchAction,
+  snapshotPendingRestart,
+  takePendingDraft,
+  type PendingPatchDraft,
+  type PendingRawDraft,
+} from "@/lib/configDraftHandoff.ts";
 import { patchResultToPendingDraft } from "@/lib/useRunPatchBatch.ts";
 import { decidePatchApplyAction } from "@/lib/patchPreviewAction.ts";
+import { configActionLabel } from "@/lib/configActionPresentation.ts";
+import { evaluateConfigHandoffGuard } from "@/lib/configHandoffGuard.ts";
+import { invalidateConfigurationState } from "@/lib/configInvalidation.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, Spinner } from "@/components/ui.tsx";
@@ -354,6 +365,65 @@ function PatchAssessment({
   );
 }
 
+function RawAssessment({
+  draft,
+  refreshing,
+  refreshError,
+}: {
+  readonly draft: PendingRawDraft;
+  readonly refreshing: boolean;
+  readonly refreshError: Error | null;
+}) {
+  const lifecycle = draft.lifecycle;
+  return (
+    <section
+      aria-labelledby="raw-assessment-heading"
+      className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-3"
+    >
+      <div className="space-y-1">
+        <h3
+          id="raw-assessment-heading"
+          className="text-xs font-semibold uppercase tracking-wider text-jul-muted"
+        >
+          Cache lifecycle assessment
+        </h3>
+        <p className="text-sm text-jul-text">Complete [cache] candidate — stage only</p>
+        {refreshing && <p className="text-xs text-jul-muted">Refreshing preview…</p>}
+        {refreshError && <p className="text-xs text-jul-danger">{refreshError.message}</p>}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <AssessmentPaths
+          label="Restart-required paths"
+          paths={lifecycle.restart_required_paths}
+        />
+        <AssessmentPaths
+          label="Validation-rejected paths"
+          paths={lifecycle.validation_rejected_paths}
+        />
+      </div>
+      {lifecycle.changes.length > 0 && (
+        <ul className="space-y-1 text-xs text-jul-muted">
+          {lifecycle.changes.slice(0, 12).map((change, index) => (
+            <li key={`${change.path}-${String(index)}`} className="rounded bg-jul-bg/50 p-2">
+              <code className="font-mono text-jul-text">{change.path}</code>
+              <span> — {change.reason}</span>
+              <span className="block text-[0.7rem]">{change.subsystem}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {lifecycle.pending_subsystems.length > 0 && (
+        <p className="text-xs text-jul-muted">
+          Pending subsystems:{" "}
+          <span className="font-mono text-jul-text">
+            {lifecycle.pending_subsystems.join(", ")}
+          </span>
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function ConfigPanel() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -383,11 +453,14 @@ export function ConfigPanel() {
   const pendingRestartQuery = useQuery({
     queryKey: ["pending-restart"],
     queryFn: fetchPendingRestart,
-    staleTime: 5000,
+    staleTime: 0,
     refetchOnWindowFocus: true,
   });
   const pendingRestartStatus: PendingRestartStatus | null =
     pendingRestartQuery.data?.status ?? null;
+  const currentPendingSnapshot = pendingRestartQuery.isSuccess
+    ? snapshotPendingRestart(pendingRestartQuery.data)
+    : undefined;
   // hasPendingRestart is true only for a managed staged restart. In that case
   // the primary action switches from a hot apply to an update of the staged
   // configuration.
@@ -406,6 +479,7 @@ export function ConfigPanel() {
   const [baseline, setBaseline] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [stageConfirming, setStageConfirming] = useState(false);
+  const [rawHandoff, setRawHandoff] = useState<PendingRawDraft | null>(null);
 
   // AC-13: every interlocking piece of write state — operation generation, the
   // correlated apply result + its kind, the pending patch draft, the base and
@@ -515,55 +589,100 @@ export function ConfigPanel() {
     const handoff = takePendingDraft();
     if (data) {
       const raw = data.raw ?? "";
-      setBaseVersion(data.base_version);
       if (handoff) {
         if (handoff.kind === "toml") {
           setBaseline(raw);
           setDraft(handoff.toml);
+          if ("baseVersion" in handoff) {
+            // Candidate and base are one inseparable unit. Never replace the
+            // pinned token with the newer raw-config response.
+            setRawHandoff(handoff);
+            setBaseVersion(handoff.baseVersion);
+            if (data.base_version !== undefined && data.base_version !== handoff.baseVersion) {
+              setConflictVersion(data.base_version);
+            }
+          } else {
+            // Compatibility for raw editors outside issue #81. They retain the
+            // existing raw validation/diff path and do not inherit cache's
+            // lifecycle assessment or planned-restart claims.
+            setBaseVersion(data.base_version);
+          }
         } else {
           setPatchDraft(handoff);
+          setBaseVersion(handoff.baseVersion ?? data.base_version);
           setBaseline(raw);
-          // Seed with the persisted baseline until the server candidate is
-          // fetched (see the config-patch-candidate query below); the editor
-          // then flips to the read-only proposed candidate.
+          // Seed with the persisted baseline until the config:raw-gated
+          // candidate source is fetched. Ordinary structured handoff metadata
+          // never carries candidate TOML.
           setDraft(handoff.candidate ?? raw);
         }
       } else {
+        setBaseVersion(data.base_version);
         setBaseline(raw);
         setDraft(raw);
       }
     } else if (rawForbidden && handoff?.kind === "patch") {
       setPatchDraft(handoff);
+      setBaseVersion(handoff.baseVersion);
       setBaseline("");
       setDraft(handoff.candidate ?? "");
     }
-  }, [data, rawForbidden, setBaseVersion, setPatchDraft]);
+  }, [data, rawForbidden, setBaseVersion, setConflictVersion, setPatchDraft]);
 
   const current = draft ?? "";
   const isPatchMode = patchDraft !== null;
   const dirty = isPatchMode || (draft !== null && draft !== baseline);
   const debounced = useDebouncedValue(isPatchMode ? "" : current, 400);
 
-  // Backward-compatible session migration: a pre-#78 draft does not carry the
-  // authoritative lifecycle projection. Re-preview the exact ordered batch at
-  // its pinned base version before any apply action can become available.
+  const patchPendingChanged =
+    isPatchMode &&
+    currentPendingSnapshot !== undefined &&
+    !pendingRestartSnapshotEqual(patchDraft.pendingRestart, currentPendingSnapshot);
+  const rawPendingChanged =
+    rawHandoff !== null &&
+    currentPendingSnapshot !== undefined &&
+    !pendingRestartSnapshotEqual(rawHandoff.pendingRestart, currentPendingSnapshot);
+  const rawBaseChanged =
+    rawHandoff !== null &&
+    data?.base_version !== undefined &&
+    data.base_version !== rawHandoff.baseVersion;
+
+  // Old/incomplete handoffs and any pending-restart state race are re-previewed
+  // with the exact ordered operations and pinned base. A moved base fails with
+  // 409; the token is never silently substituted.
   const patchNeedsAssessmentRefresh =
     isPatchMode &&
-    (patchDraft.lifecycle === undefined ||
+    (patchDraft.requiresFreshPreview ||
+      patchDraft.lifecycle === undefined ||
       patchDraft.baseVersion === undefined ||
-      patchDraft.baseVersion.trim() === "");
+      patchDraft.baseVersion.trim() === "" ||
+      patchPendingChanged);
   const patchAssessmentRefresh = useQuery({
     queryKey: [
       "config-patch-assessment-refresh",
       patchDraft?.baseVersion,
       patchDraft?.ops ?? [],
+      currentPendingSnapshot?.state,
+      currentPendingSnapshot?.stagedVersion,
+      currentPendingSnapshot?.servingVersion,
+      currentPendingSnapshot?.subsystems ?? [],
     ],
     queryFn: async () => {
-      if (patchDraft === null) throw new Error("No structured patch is available to preview.");
+      if (patchDraft === null || currentPendingSnapshot === undefined) {
+        throw new Error("No structured patch is available to preview.");
+      }
       const result = await patchConfigBatch(patchDraft.ops, patchDraft.baseVersion);
-      return patchResultToPendingDraft(patchDraft.ops, result, patchDraft.baseVersion);
+      return patchResultToPendingDraft(
+        patchDraft.ops,
+        result,
+        patchDraft.baseVersion,
+        currentPendingSnapshot,
+      );
     },
-    enabled: patchNeedsAssessmentRefresh && canWritePerm,
+    enabled:
+      patchNeedsAssessmentRefresh &&
+      currentPendingSnapshot !== undefined &&
+      canWritePerm,
     retry: false,
     staleTime: Infinity,
   });
@@ -574,10 +693,70 @@ export function ConfigPanel() {
     setPatchDraft(refreshed);
   }, [patchAssessmentRefresh.data, patchDraft, patchNeedsAssessmentRefresh, setPatchDraft]);
 
+  useEffect(() => {
+    const refreshError = patchAssessmentRefresh.error;
+    if (refreshError instanceof ConfigConflictError) {
+      setConflictVersion(refreshError.currentVersion);
+    }
+  }, [patchAssessmentRefresh.error, setConflictVersion]);
+
+  // A raw/cache handoff is refreshed only when the value-free pending snapshot
+  // changes. The same candidate bytes remain paired with their original base;
+  // a moved base blocks and requires regeneration in the originating editor.
+  const rawAssessmentRefresh = useQuery({
+    queryKey: [
+      "config-raw-assessment-refresh",
+      rawHandoff?.baseVersion,
+      currentPendingSnapshot?.state,
+      currentPendingSnapshot?.stagedVersion,
+      currentPendingSnapshot?.servingVersion,
+      currentPendingSnapshot?.subsystems ?? [],
+    ],
+    queryFn: async () => {
+      if (rawHandoff === null || currentPendingSnapshot === undefined) {
+        throw new Error("No raw candidate is available to preview.");
+      }
+      const preview = await previewRawConfig(rawHandoff.toml, rawHandoff.baseVersion);
+      if (!preview.valid || preview.validation_errors.length > 0) {
+        throw new Error("The raw candidate is no longer valid against its pinned base.");
+      }
+      const recommended = recommendPatchAction(preview.lifecycle, currentPendingSnapshot);
+      return {
+        preview,
+        action:
+          recommended === "stage_restart" || recommended === "update_staged"
+            ? recommended
+            : ("none" as const),
+        pending: currentPendingSnapshot,
+      };
+    },
+    enabled:
+      rawHandoff !== null &&
+      currentPendingSnapshot !== undefined &&
+      rawPendingChanged &&
+      !rawBaseChanged &&
+      canWritePerm &&
+      canRawPerm,
+    retry: false,
+    staleTime: Infinity,
+  });
+
+  useEffect(() => {
+    const refreshed = rawAssessmentRefresh.data;
+    if (refreshed === undefined || rawHandoff === null) return;
+    setRawHandoff({
+      ...rawHandoff,
+      previewDiff: refreshed.preview.diff,
+      lifecycle: refreshed.preview.lifecycle,
+      recommendedAction: refreshed.action,
+      pendingRestart: refreshed.pending,
+    });
+  }, [rawAssessmentRefresh.data, rawHandoff]);
+
   const validation = useQuery({
     queryKey: ["config-validate", debounced],
     queryFn: () => validateConfig(debounced),
-    enabled: !isPatchMode && draft !== null && debounced.length > 0,
+    enabled: !isPatchMode && rawHandoff === null && draft !== null && debounced.length > 0,
     staleTime: Infinity,
     refetchInterval: false,
     refetchOnWindowFocus: false,
@@ -589,17 +768,40 @@ export function ConfigPanel() {
     patchDraft.lifecycle.validation_rejected_paths.length > 0;
   const valid = isPatchMode
     ? patchDraft.valid && patchDraft.validationErrors.length === 0 && !patchLifecycleRejected
-    : validation.data?.ok === true;
-  const patchAction = decidePatchApplyAction(
+    : rawHandoff !== null
+      ? true
+      : validation.data?.ok === true;
+  const patchGuard = evaluateConfigHandoffGuard({
+    pendingKnown: pendingRestartQuery.isSuccess,
+    pendingChanged: patchPendingChanged,
+    baseChanged: isPatchMode && conflictVersion !== undefined,
+    refreshing: patchAssessmentRefresh.isFetching,
+    refreshFailed: patchAssessmentRefresh.isError,
+  });
+  const basePatchAction = decidePatchApplyAction(
     patchDraft,
     hasPendingRestart,
     isPatchMode && conflictVersion !== undefined,
   );
+  const patchAction = patchGuard.blocked
+    ? {
+        action: "none" as const,
+        reason: patchGuard.reason,
+        requiresFreshPreview: patchGuard.requiresRefresh,
+      }
+    : basePatchAction;
+  const rawGuard = evaluateConfigHandoffGuard({
+    pendingKnown: pendingRestartQuery.isSuccess,
+    pendingChanged: rawPendingChanged,
+    baseChanged: rawBaseChanged,
+    refreshing: rawAssessmentRefresh.isFetching,
+    refreshFailed: rawAssessmentRefresh.isError,
+  });
 
   const rawDiff = useQuery({
     queryKey: ["config-diff", debounced],
     queryFn: () => diffConfig(debounced),
-    enabled: !isPatchMode && dirty && valid,
+    enabled: !isPatchMode && rawHandoff === null && dirty && valid,
     staleTime: Infinity,
     refetchInterval: false,
     refetchOnWindowFocus: false,
@@ -608,8 +810,8 @@ export function ConfigPanel() {
 
   // In patch mode the diff is pre-computed; in raw mode it is fetched.
   const previewDiff: ConfigDiff | undefined = useMemo(
-    () => patchDraft?.previewDiff ?? rawDiff.data,
-    [patchDraft, rawDiff.data],
+    () => patchDraft?.previewDiff ?? rawHandoff?.previewDiff ?? rawDiff.data,
+    [patchDraft, rawHandoff, rawDiff.data],
   );
 
   // N-01 (WS05): when a config:raw operator is reviewing a structured patch,
@@ -686,8 +888,8 @@ export function ConfigPanel() {
       // does not trip a spurious conflict.
       setBaseVersion(res.version ?? undefined);
       setConflictVersion(undefined);
-      void qc.invalidateQueries({ queryKey: ["pending-restart"] });
-      void qc.invalidateQueries();
+      setRawHandoff(null);
+      void invalidateConfigurationState(qc);
     },
     onError: (err, variables) => {
       if (operationIDRef.current !== variables.operationID) return;
@@ -748,8 +950,7 @@ export function ConfigPanel() {
       });
       setConfirming(false);
       setConflictVersion(undefined);
-      void qc.invalidateQueries({ queryKey: ["pending-restart"] });
-      void qc.invalidateQueries();
+      void invalidateConfigurationState(qc);
     },
     onError: (err, variables) => {
       if (operationIDRef.current !== variables.operationID) return;
@@ -808,8 +1009,8 @@ export function ConfigPanel() {
       setConflictVersion(undefined);
       applyRaw.reset();
       applyPatch.reset();
-      void qc.invalidateQueries({ queryKey: ["pending-restart"] });
-      void qc.invalidateQueries();
+      setRawHandoff(null);
+      void invalidateConfigurationState(qc);
     },
     onError: (err, variables) => {
       if (operationIDRef.current !== variables.operationID) return;
@@ -834,9 +1035,7 @@ export function ConfigPanel() {
     onSuccess: () => {
       cancelOperation();
       setAppliedState(null);
-      void qc.invalidateQueries({ queryKey: ["pending-restart"] });
-      void qc.invalidateQueries({ queryKey: ["raw-config"] });
-      void qc.invalidateQueries();
+      void invalidateConfigurationState(qc);
     },
   });
 
@@ -850,7 +1049,19 @@ export function ConfigPanel() {
   const patchUsesStage =
     isPatchMode &&
     (patchAction.action === "stage_restart" || patchAction.action === "update_staged");
-  const patchHasNoAction = isPatchMode && patchAction.action === "none";
+  const rawHandoffAction =
+    rawHandoff === null || rawGuard.blocked ? "none" : rawHandoff.recommendedAction;
+  const rawHandoffUsesStage =
+    rawHandoffAction === "stage_restart" || rawHandoffAction === "update_staged";
+  const primaryAction = isPatchMode
+    ? patchAction.action
+    : rawHandoff !== null
+      ? rawHandoffAction
+      : hasPendingRestart && !rawForbidden
+        ? "update_staged"
+        : "hot";
+  const primaryActionLabel = configActionLabel(primaryAction);
+  const primaryActionUnavailable = primaryAction === "none";
 
   const applyActive = isPatchMode ? applyPatch : applyRaw;
   const applyError = applyActive.error;
@@ -940,6 +1151,7 @@ export function ConfigPanel() {
     // Retain the FULL terminal record (finalization provenance included) and
     // merge its apply result into the applied result.
     mergeTerminalRecord(record);
+    if (terminal.ok) void invalidateConfigurationState(qc);
     // Editor reconciliation is only for a polled saved-not-live finalization; an
     // immediate terminal result already reconciled in the mutation's onSuccess,
     // and its supplemental fetch must not re-drive the editor or the banner.
@@ -960,6 +1172,7 @@ export function ConfigPanel() {
     refreshEditorAfterFailure,
     operationIDRef,
     mergeTerminalRecord,
+    qc,
   ]);
 
   // Fold the raw apply signals into one explicit, severity-tagged outcome so the
@@ -1118,8 +1331,15 @@ export function ConfigPanel() {
     readonly tone: "persisted-editable" | "candidate-readonly" | "persisted-baseline" | "diff-only";
     readonly label: string;
     readonly detail: string;
-  } = !isPatchMode
+  } = rawHandoff !== null
     ? {
+        tone: "candidate-readonly",
+        label: "Proposed cache candidate — read-only",
+        detail:
+          "This complete cache candidate is held only in memory and pinned to the exact configuration version used to generate it. It will be staged, never hot-applied.",
+      }
+    : !isPatchMode
+      ? {
         tone: "persisted-editable",
         label: "Persisted configuration — editable",
         detail:
@@ -1166,13 +1386,19 @@ export function ConfigPanel() {
       : valid
         ? "valid"
         : "invalid"
-    : validation.isFetching
-      ? "checking"
-      : validation.data === undefined
-        ? "idle"
-        : valid
-          ? "valid"
-          : "invalid";
+    : rawHandoff !== null
+      ? rawAssessmentRefresh.isFetching
+        ? "checking"
+        : rawGuard.blocked
+          ? "invalid"
+          : "valid"
+      : validation.isFetching
+        ? "checking"
+        : validation.data === undefined
+          ? "idle"
+          : valid
+            ? "valid"
+            : "invalid";
   const issues = isPatchMode ? patchDraft.validationErrors : (validation.data?.errors ?? []);
 
   return (
@@ -1221,6 +1447,7 @@ export function ConfigPanel() {
               cancelOperation();
               setDraft(baseline);
               setPatchDraft(null);
+              setRawHandoff(null);
               setAppliedState(null);
               setConflictVersion(undefined);
               applyRaw.reset();
@@ -1247,7 +1474,11 @@ export function ConfigPanel() {
               // never submit it once in hot mode merely to learn what preview
               // already established. Managed pending raw edits keep their
               // established update-staged behavior.
-              if (patchUsesStage || (hasPendingRestart && !isPatchMode && !rawForbidden)) {
+              if (
+                patchUsesStage ||
+                rawHandoffUsesStage ||
+                (hasPendingRestart && !isPatchMode && rawHandoff === null && !rawForbidden)
+              ) {
                 setStageConfirming(true);
               } else {
                 setConfirming(true);
@@ -1263,7 +1494,9 @@ export function ConfigPanel() {
               patchReconcileError !== null ||
               candidatePending ||
               candidateStale ||
-              patchHasNoAction ||
+              !pendingRestartQuery.isSuccess ||
+              primaryActionUnavailable ||
+              (rawHandoff !== null && rawGuard.blocked) ||
               (restartBlocked && !hasPendingRestart) ||
               (rawForbidden && !isPatchMode) ||
               !canApplyPerm
@@ -1272,20 +1505,10 @@ export function ConfigPanel() {
           >
             {(applyActive.isPending || applyStage.isPending) && <Spinner />}
             {applyActive.isPending || applyStage.isPending
-              ? patchUsesStage
-                ? "Saving…"
-                : "Applying…"
-              : hasPendingRestart && !isPatchMode && !rawForbidden
-                ? "Update staged configuration"
-                : patchAction.action === "update_staged"
-                  ? "Update staged configuration"
-                  : patchAction.action === "stage_restart"
-                    ? "Save for next restart"
-                    : patchAction.action === "hot"
-                      ? "Apply patch"
-                      : isPatchMode
-                        ? "No safe apply action"
-                        : "Apply changes"}
+              ? primaryAction === "hot"
+                ? "Applying…"
+                : "Saving…"
+              : primaryActionLabel}
           </button>
         </div>
       </div>
@@ -1317,6 +1540,7 @@ export function ConfigPanel() {
                 value={draft}
                 readOnly={
                   isPatchMode ||
+                  rawHandoff !== null ||
                   rawForbidden ||
                   applyActive.isPending ||
                   applyStage.isPending ||
@@ -1327,6 +1551,7 @@ export function ConfigPanel() {
                 onChange={(next) => {
                   cancelOperation();
                   setDraft(next);
+                  setRawHandoff(null);
                   if (applied) setAppliedState(null);
                   setConflictVersion(undefined);
                   applyRaw.reset();
@@ -1388,7 +1613,7 @@ export function ConfigPanel() {
               }
             />
           )}
-          {isPatchMode && patchHasNoAction && (
+          {isPatchMode && primaryActionUnavailable && (
             <div
               role="status"
               className="rounded-md border border-jul-warning/40 bg-jul-warning/5 p-3 text-sm"
@@ -1399,6 +1624,28 @@ export function ConfigPanel() {
                 <p className="mt-1 text-xs text-jul-muted">
                   Refreshing this preview requires the <span className="font-mono">config:write</span>{" "}
                   permission.
+                </p>
+              )}
+            </div>
+          )}
+          {rawHandoff !== null && (
+            <RawAssessment
+              draft={rawHandoff}
+              refreshing={rawAssessmentRefresh.isFetching}
+              refreshError={
+                rawAssessmentRefresh.error instanceof Error
+                  ? rawAssessmentRefresh.error
+                  : null
+              }
+            />
+          )}
+          {rawHandoff !== null && rawGuard.blocked && (
+            <div role="status" className="rounded-md border border-jul-warning/40 bg-jul-warning/5 p-3 text-sm">
+              <p className="font-medium text-jul-warning">Cache candidate cannot be staged yet</p>
+              <p className="mt-1 text-xs text-jul-muted">{rawGuard.reason}</p>
+              {rawGuard.requiresRefresh && !canWritePerm && (
+                <p className="mt-1 text-xs text-jul-muted">
+                  Refreshing the assessment requires <span className="font-mono">config:write</span>.
                 </p>
               )}
             </div>
@@ -1649,22 +1896,8 @@ export function ConfigPanel() {
 
       {confirming && (
         <ConfirmDialog
-          title={
-            adminChangeError
-              ? "Confirm admin access change?"
-              : updatingStagedPatch
-                ? "Update staged configuration?"
-                : isPatchMode
-                  ? "Apply atomic patch?"
-                  : "Apply configuration?"
-          }
-          confirmLabel={
-            adminChangeError
-              ? "Apply and change admin access"
-              : updatingStagedPatch
-                ? "Update staged config"
-                : "Apply now"
-          }
+          title={`${configActionLabel("hot")}?`}
+          confirmLabel={configActionLabel("hot")}
           busy={applyActive.isPending}
           onConfirm={() => {
             const operationID = operationIDRef.current;
@@ -1734,14 +1967,8 @@ export function ConfigPanel() {
       {/* Stage-restart confirm dialog */}
       {stageConfirming && (
         <ConfirmDialog
-          title={
-            hasPendingRestart
-              ? "Update staged configuration?"
-              : isPatchMode
-                ? "Save structured patch for next restart?"
-                : "Save for next restart?"
-          }
-          confirmLabel={hasPendingRestart ? "Update staged config" : "Save for next restart"}
+          title={`${primaryActionLabel}?`}
+          confirmLabel={primaryActionLabel}
           busy={applyStage.isPending}
           confirmDisabled={applyStage.error instanceof ConfigConflictError}
           onConfirm={() => {
@@ -1770,7 +1997,7 @@ export function ConfigPanel() {
                 ))}
               </ul>
             </>
-          ) : hasPendingRestart ? (
+          ) : primaryAction === "update_staged" ? (
             <p>
               The staged configuration will be replaced with this draft. The running server will
               remain unchanged until the process is restarted.

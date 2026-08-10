@@ -226,9 +226,21 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTrafficControls(w http.ResponseWriter, r *http.Request) {
-	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
-		writeJSON(w, http.StatusOK, projectTrafficControls(c))
-	})(w, r)
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	// Project the authoritative editable baseline. When a managed planned-restart
+	// candidate exists, currentWriteState selects that staged disk configuration
+	// rather than falsely presenting the currently serving runtime as editable.
+	state, err := s.currentWriteState(false)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "the editable configuration is unavailable",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, projectIssue81TrafficControls(state.Config))
 }
 
 // handleConfigValidate accepts a candidate config and returns structured
