@@ -229,9 +229,10 @@ test(
     await expect(rollbackDialog).toBeVisible();
     const rollbackButton = rollbackDialog.getByRole("button", { name: "Roll back", exact: true });
     // Rollback confirmation is intentionally gated on the async server-side
-    // diff preview. Wait for that reviewed baseline before submitting it.
+    // diff preview. Wait for that reviewed baseline, and prove the action
+    // remains physically reachable even when the diff is taller than the viewport.
     await expect(rollbackButton).toBeEnabled({ timeout: 20_000 });
-    await rollbackButton.scrollIntoViewIfNeeded();
+    await expect(rollbackButton).toBeInViewport();
     const rollbackResponse = page.waitForResponse(
       (response) =>
         response.url().includes("/api/config/rollback") && response.request().method() === "POST",
