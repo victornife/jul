@@ -21,13 +21,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: pnpm/action-setup@537643d3d5ecca1ef036c257c9f09a2bca9a4818 # v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v4
         with:
-          version: 10
+          version: 11.8.0
           run_install: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
-          node-version: 22
+          node-version-file: internal/admin/ui/package.json
           cache: pnpm
           cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
       - name: Execute branch patcher steps
