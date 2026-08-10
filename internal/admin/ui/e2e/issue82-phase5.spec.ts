@@ -86,7 +86,7 @@ test(
     }
 
     await page.goto("/apps");
-    await page.getByRole("button", { name: "New app" }).click();
+    await page.getByRole("button", { name: "New app", exact: true }).first().click();
     const appEditor = page.getByRole("dialog", { name: "New app / upstream" });
     await appEditor.getByLabel("App / upstream name").fill(appName);
     await appEditor.getByLabel("Address 1").fill("127.0.0.1:9292");
