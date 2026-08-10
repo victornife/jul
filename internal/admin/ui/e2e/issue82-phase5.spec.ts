@@ -116,7 +116,10 @@ test(
     const compression = await openTrafficEditor("Compression", "Edit compression");
     const compressionEnabled = compression.getByRole("checkbox", { name: "Enable compression" });
     if (!(await compressionEnabled.isChecked())) await compressionEnabled.check();
-    await compression.getByLabel("Minimum response size").fill("0");
+    // A zero Size is the configuration sentinel for the 1 KiB default after
+    // authoritative serialize/reparse. Use an explicit 1-byte threshold so
+    // this small fixture actually exercises the gzip data-plane path.
+    await compression.getByLabel("Minimum response size").fill("1");
     await compression.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Apply live");
