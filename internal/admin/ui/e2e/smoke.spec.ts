@@ -169,6 +169,7 @@ async function setupApiMocks(page: Page): Promise<void> {
   await page.route("/api/runtime/overview", (route) => json(route, OVERVIEW));
   await page.route("/api/routes", (route) => json(route, ROUTES));
   await page.route("/api/config", (route) => json(route, RAW_CONFIG));
+  await page.route("/api/config/pending-restart", (route) => json(route, { pending: false }));
   await page.route("/api/config/validate", (route) =>
     json(route, { ok: true, message: "Configuration is valid." }),
   );
@@ -269,7 +270,7 @@ test.describe("Console SPA smoke (UI-1)", () => {
     // The SPA navigated to /config after the patch was previewed. ConfigPanel
     // picks up the pending draft from the in-memory handoff, loads the raw
     // config from /api/config, and shows the pre-computed diff. The "atomic
-    // The "atomic patch" badge signals we are in patch mode, and the "Pending changes"
+    // patch" badge signals we are in patch mode, and the "Pending changes"
     // section shows the diff.
     await expect(page.getByText("atomic patch", { exact: true })).toBeVisible();
     await expect(page.getByText("Pending changes", { exact: true })).toBeVisible();
@@ -278,16 +279,16 @@ test.describe("Console SPA smoke (UI-1)", () => {
     await expect(page.getByText("1 modification", { exact: true })).toBeVisible();
 
     // ── 5. Apply the patch ─────────────────────────────────────────────────────
-    // "Apply patch" is the label for the primary CTA in patch mode. Clicking it
-    // opens a ConfirmDialog.
-    await page.getByRole("button", { name: "Apply patch" }).click();
+    // #81 standardizes the hot-path primary action on "Apply live". Clicking it
+    // opens a ConfirmDialog with the same action label.
+    await page.getByRole("button", { name: "Apply live" }).click();
 
-    // ConfirmDialog appears with the confirmation CTA.
-    await expect(page.getByRole("button", { name: "Apply now" })).toBeVisible();
+    const applyDialog = page.getByRole("dialog", { name: "Apply live?" });
+    await expect(applyDialog).toBeVisible();
 
     // Intercept the apply request so we can assert it was sent.
     const applyRequest = page.waitForRequest("/api/config/patch/apply");
-    await page.getByRole("button", { name: "Apply now" }).click();
+    await applyDialog.getByRole("button", { name: "Apply live" }).click();
     await applyRequest;
 
     // After a successful apply, ConfigPanel shows the ApplyOutcomeBanner. The
