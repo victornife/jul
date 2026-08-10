@@ -34,6 +34,7 @@ import {
   seedCompression,
   seedRateLimit,
   seedServerLimits,
+  serverTargetKey,
   type CacheDraft,
   type CompressionDraft,
   type RateLimitDraft,
@@ -92,7 +93,7 @@ function unique(values: readonly string[]): string[] {
 
 function routeLabel(route: ServerLimitsProjection): string {
   const names = route.server_names ?? [];
-  return names.length > 0 ? `${route.listen} — ${names.join(", ")}` : route.listen;
+  return names.length > 0 ? `${route.listen} — ${names.join(", ")}` : `${route.listen} — (any host)`;
 }
 
 function affectedPaths(
@@ -161,7 +162,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
   const [rateLimit, setRateLimit] = useState(rateLimitInitial.current);
   const [cache, setCache] = useState(cacheInitial.current);
 
-  const [targetListen, setTargetListen] = useState("");
+  const [targetServerKey, setTargetServerKey] = useState("");
   const [limitBaseline, setLimitBaseline] = useState<ServerLimitsDraft | null>(null);
   const [serverLimits, setServerLimits] = useState<ServerLimitsDraft>({
     bodyLimit: "",
@@ -183,12 +184,12 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
 
   const routeOptions = current.servers ?? [];
   const selectedRoute =
-    routeOptions.find((route) => route.listen === targetListen) ?? routeOptions[0] ?? null;
+    routeOptions.find((route) => serverTargetKey(route) === targetServerKey) ?? routeOptions[0] ?? null;
 
   useEffect(() => {
     if (kind !== "limits" || selectedRoute === null || limitBaseline !== null) return;
     const seeded = seedServerLimits(selectedRoute);
-    setTargetListen(selectedRoute.listen);
+    setTargetServerKey(serverTargetKey(selectedRoute));
     setLimitBaseline(seeded);
     setServerLimits(seeded);
     setReferenceLimits((previous) => ({ ...previous, ...seeded }));
@@ -198,7 +199,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
   const rateLimitOperation = buildGlobalRateLimitPatch(rateLimitInitial.current, rateLimit);
   const limitsOperation =
     selectedRoute !== null && limitBaseline !== null
-      ? buildServerLimitsPatch(selectedRoute.listen, limitBaseline, serverLimits)
+      ? buildServerLimitsPatch(selectedRoute, limitBaseline, serverLimits)
       : null;
   const cacheDirty = !equalCache(cacheInitial.current, cache);
 
@@ -295,12 +296,12 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
   const selectServer = (next: ServerLimitsProjection): void => {
     const dirty =
       limitBaseline !== null &&
-      buildServerLimitsPatch(targetListen || next.listen, limitBaseline, serverLimits) !== null;
+      buildServerLimitsPatch(selectedRoute ?? next, limitBaseline, serverLimits) !== null;
     if (dirty && !window.confirm("Changing server will discard unsaved Limits & Timeouts edits. Continue?")) {
       return;
     }
     const seeded = seedServerLimits(next);
-    setTargetListen(next.listen);
+    setTargetServerKey(serverTargetKey(next));
     setLimitBaseline(seeded);
     setServerLimits(seeded);
     setReferenceLimits((previous) => ({ ...previous, ...seeded }));
@@ -563,15 +564,15 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
               <label className="block space-y-1">
                 <span className="text-sm font-medium text-jul-text">Server</span>
                 <select
-                  value={selectedRoute?.listen ?? ""}
+                  value={selectedRoute === null ? "" : serverTargetKey(selectedRoute)}
                   className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text"
                   onChange={(event) => {
-                    const next = routeOptions.find((route) => route.listen === event.target.value);
+                    const next = routeOptions.find((route) => serverTargetKey(route) === event.target.value);
                     if (next !== undefined) selectServer(next);
                   }}
                 >
                   {routeOptions.map((route) => (
-                    <option key={`${route.listen}-${(route.server_names ?? []).join(",")}`} value={route.listen}>
+                    <option key={serverTargetKey(route)} value={serverTargetKey(route)}>
                       {routeLabel(route)}
                     </option>
                   ))}
