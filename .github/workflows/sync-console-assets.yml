@@ -1,0 +1,44 @@
+name: Sync console assets once
+
+on:
+  push:
+    branches:
+      - agent/issue-82-phase5-closure
+    paths:
+      - .github/workflows/sync-console-assets.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - name: install dependencies
+        run: pnpm --dir internal/admin/ui install --frozen-lockfile
+      - name: rebuild embedded Console assets
+        run: pnpm --dir internal/admin/ui run build
+      - name: commit exact generated dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A internal/admin/assets/dist
+          if git diff --cached --quiet; then
+            echo "Console dist is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(console): refresh embedded assets"
+          git push origin HEAD:agent/issue-82-phase5-closure
