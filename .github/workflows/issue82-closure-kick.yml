@@ -20,6 +20,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/issue-82-phase5-closure
+          fetch-depth: 0
 
       - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
         with:
@@ -27,12 +30,14 @@ jobs:
           cache: true
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 24
+          node-version-file: ${{ env.CONSOLE_UI }}/package.json
           cache: pnpm
-          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+          cache-dependency-path: ${{ env.CONSOLE_UI }}/pnpm-lock.yaml
 
       - name: Apply closure patch from audited writer
         shell: bash
