@@ -258,6 +258,7 @@ func findLocationIndex(c *config.Config, listen string, serverNames []string, ma
 				srvIdx, locIdx = i, j
 				matches++
 			}
+		}
 	}
 	switch {
 	case matches == 0:

@@ -24,9 +24,9 @@ function SectionCard({
   children,
 }: {
   readonly title: string;
-  readonly active?: boolean;
+  readonly active?: boolean | undefined;
   readonly onEdit: () => void;
-  readonly unavailableReason?: string;
+  readonly unavailableReason?: string | undefined;
   readonly children: ReactNode;
 }) {
   const unavailableId = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-unavailable`;

@@ -144,10 +144,11 @@ describe("issue #81 sparse patch builders", () => {
       writeTimeout: "22s",
       idleTimeout: "91s",
     });
-    expect(buildServerLimitsPatch(server.listen, initial, { ...initial })).toBeNull();
-    expect(buildServerLimitsPatch(server.listen, initial, { ...initial, idleTimeout: "0s" })).toEqual({
+    expect(buildServerLimitsPatch(server, initial, { ...initial })).toBeNull();
+    expect(buildServerLimitsPatch(server, initial, { ...initial, idleTimeout: "0s" })).toEqual({
       op: "server_set_limits",
       listen: server.listen,
+      server_names: [],
       limits: { idle_timeout: "0s" },
     });
   });
