@@ -46,9 +46,6 @@ func TestIssue82ServerSetLimitsTargetsExactSharedListenerVhost(t *testing.T) {
 func TestIssue82CatchAllServerTargetPreservesPresence(t *testing.T) {
 	c := issue82SharedListenerConfig()
 	names := []string{}
-	if names == nil {
-		t.Fatal("fixture must carry an explicit empty server_names array")
-	}
 	_, err := applyPatch(c, patchRequest{
 		Op:          "server_set_limits",
 		Listen:      ":8443",

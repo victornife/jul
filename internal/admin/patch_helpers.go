@@ -78,19 +78,6 @@ func applyServerLimits(c *config.Config, req patchRequest) (string, error) {
 	return fmt.Sprintf("server %s limits updated (%s)", req.Listen, strings.Join(applied, ", ")), nil
 }
 
-// findServer returns a pointer to the first server block bound to listen.
-func findServer(c *config.Config, listen string) (*config.ServerConfig, error) {
-	if strings.TrimSpace(listen) == "" {
-		return nil, fmt.Errorf("server target requires a listen address")
-	}
-	for i := range c.Servers {
-		if c.Servers[i].Listen == listen {
-			return &c.Servers[i], nil
-		}
-	}
-	return nil, fmt.Errorf("no server found for listen %q", listen)
-}
-
 // findServerTarget resolves a server-level structured operation without
 // guessing between virtual hosts that share a listener. A non-nil serverNames
 // slice means the client supplied the field, including an explicitly empty
