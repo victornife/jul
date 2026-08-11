@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.6 · Updated 2026-08-11
+> Version 2.5 · Updated 2026-08-09
 >
 > This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
 > with a portfolio model. Delivered feature maturity remains authoritative in the
