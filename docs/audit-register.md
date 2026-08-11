@@ -7,10 +7,10 @@ This page identifies the current authoritative audit and preserves the evidence 
 | Audit | Source baseline | Role | Current status | Programme |
 |---|---|---|---|---|
 | [2026-08-07 response-cache recertification](audit/2026-08-07-cache-recertification.md) | post-#131/#132/#133 merged cache tree | Current response-cache conformance and GA evidence | Complete; GA retained, closure evidence recorded in #107/#134 | #107, #134 |
-| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a` | Current implementation and planning source of truth | Active; cache programme complete, lifecycle authority (#89) and Phase 5 atomic preview (#77) implemented; #78 next | #62, #107-#162 |
+| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a` | Current implementation and planning baseline | Active planning baseline; cache correctness, lifecycle authority (#89), and structured configuration (#77 → #78 → #79 → #80 → #81 → #82) are complete; #115 is READY / NEXT and not started | #62, #107-#162 |
 | [2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediation commits | Historical audit and remediation evidence | Historical; exact-SHA maintainer-certified and superseded under #130, not independently two-human certified | #130 |
 
-The current combined audit does not rewrite the historical record. It supersedes the July audit for current prioritisation, sequencing, capability truth and implementation planning. The [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md) records the exact disposition, residual transfers and branch-cleanup gate.
+The current combined audit does not rewrite the historical record. It supersedes the July audit for current prioritisation, sequencing, capability truth and implementation planning. The [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md) records the exact disposition, residual transfers and branch-cleanup gate. Current issue-level sequencing remains owned by #62 and the roadmap.
 
 ## Current programme gates
 
@@ -18,12 +18,12 @@ The current combined audit does not rewrite the historical record. It supersedes
 - Non-blocking quality foundation: #129.
 - Cache correctness programme: #107 and #131-#134 complete; #92 is separately gated by #89/#90 and #93 remains draft/gated.
 - Lifecycle authority: #89 implemented — the Go registry classifies every public TOML leaf exactly once, unknown paths fail closed, and the YAML/Markdown/JSON mirrors are generated and drift-gated by `make generated-check`. #128 consumes the same metadata for semantic cross-artifact checks.
-- Phase 5 atomic batch assessment: #77 implemented with one shared executor and `lifecycle.Classify`; the next serial implementation item is #78.
-- Core Gateway Completeness decisions: #115-#118.
-- Core implementation: #135-#151.
+- Structured configuration Phase 5: #77 → #78 → #79 → #80 → #81 → #82 complete. Phase 5 closure does not imply universal hot reload or start Stage 6.
+- Core Gateway Completeness decisions: #115 → #116 → #117 → #118 are the next serial architecture-decision sequence; #115 is READY / NEXT and not started.
+- Core implementation: #135-#151 remains gated by the governing architecture decisions.
 - Selected runtime dynamics: #88-#106 and #157-#161.
 - Migration/diagnostics: #112 and #152-#156.
-- Bounded experiment: #113 and #162.
+- Bounded experiment: #113 and #162; AI remains gated and is not an automatic continuation from Phase 5.
 
 A release closure entry must record the exact SHA, commands actually run, CI runs, unavailable lanes and residual risk.
 
@@ -60,7 +60,7 @@ A release closure entry must record the exact SHA, commands actually run, CI run
 | R10-01 | Durable reload coordinator with sync enqueue ack and watcher echo suppression | `internal/app/serve.go`, `internal/app/wiring.go`, `internal/admin/server.go` | `TestMergeReloadSuppressesWatcherEcho`, `TestReloadReturns503OnEnqueueFailure` | Unit/integration test output | ✅ Implemented | `24de060` |
 | R10-02 | Publish coherent runtime snapshot atomically | `internal/server/server.go`, `internal/server/reload_plan.go` | `TestLiveSnapshotCoherentDuringReload` | Race test output | ✅ Implemented | `c80d4e1` |
 | R10-03 | One-shot discovery resolution during preflight | `internal/upstream/registry.go` | `TestRegistryPreflightSeedsDiscoveryPool` | Unit test output | ✅ Implemented | `b146d20` |
-| R10-04 | Run listener and restart gates with LiveSnapshot even when prev is nil | `internal/app/preflight.go` | `TestPreflightApplyUsesLiveSnapshotWithoutPrev` | Unit test output | ✅ Implemented | `bd87561` |
+| R10-04 | Run listener and restart gates with LiveSnapshot even when prev is nil | `internal/app/preflight.go`, `internal/server/server.go` | `TestPreflightApplyUsesLiveSnapshotWithoutPrev` | Unit test output | ✅ Implemented | `bd87561` |
 | R10-05 | Address-aware lifecycle diff and pending-restart alignment | `internal/lifecycle/lifecycle.go`, `internal/app/serve.go` | `TestDiffAddressAwareReaddedAddress` | Unit test output | ✅ Implemented | `6cb1a2d` |
 | R10-06 | Evict stale gRPC transcoder connections | `internal/transcode/invoke.go` | `TestTranscoderEvictsStaleConnections` | Unit test output | ✅ Implemented | `957d838` |
 | R10-07 | HTTP/3 UDP bind probe in preflight | `internal/server/server.go`, `internal/app/preflight.go` | `TestPreflightListenersHTTP3UDP` | Unit test output | ✅ Implemented | `b7ba281` |
@@ -70,7 +70,7 @@ A release closure entry must record the exact SHA, commands actually run, CI run
 
 | Finding | Title | Fix location | Test | Evidence | Status | Commit |
 |---|---|---|---|---|---|---|
-| R11-01 | Consume admin digest after suppressing watcher echo | `internal/app/wiring.go` | `TestMergeReloadConsumesAdminDigest` | Unit test output | ✅ Implemented | `e174f0c` |
+| R11-01 | Consume admin digest after suppressing watcher echo | `internal/app/wiring.go` | `TestMergeReloadConsumesAdminDigest` | Unit/integration test output | ✅ Implemented | `e174f0c` |
 | R11-02 | Restore live-aware preflight gates when `prev` is `nil` | `internal/app/preflight.go` | `TestPreflightApplyUsesLiveSnapshotWithoutPrev` | Unit test output | ✅ Implemented | `79aa1c0` |
 | R11-03 | Compare admin candidate digest against raw source bytes | `internal/server/server.go`, `internal/config/parser.go` | `TestAdminReloadRawDigestMatchesRawBytes` | Unit test output | ✅ Implemented | `ba4ddf5` |
 | R11-04 | Discovery-only upstream candidate snapshot for reflection | `internal/upstream/registry.go` | `TestTranscodeReflectionWithDiscoveryUpstream` | Integration test output | ✅ Implemented | `c2549df` |
@@ -123,4 +123,4 @@ go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithReusedD
 go test -tags grpc ./internal/transcode -run TestTranscoderRetiredConnectionConcurrentReappearance -race -count=1
 ```
 
-For the authoritative reload contract, see [reload-semantics.md](reload-semantics.md). For current programme sequencing, see [the combined audit](audit/combined-audit-2026-08-03.md) and #62.
+For the authoritative reload contract, see [reload-semantics.md](reload-semantics.md). For current programme sequencing, see the [roadmap](roadmap/README.md) and #62; the combined audit remains the planning baseline and historical evidence source.
