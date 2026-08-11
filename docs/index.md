@@ -25,7 +25,7 @@ binary.
 - **[Concepts appendix](vision/appendix.md)** — New to HTTP, proxies, TLS, caching, or observability? Start here.
 
 ### Evaluating or operating?
-- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit. The response-cache correctness programme (#107) is complete and the cache retains GA; the current foundation item is lifecycle authority (#89), which makes the Go lifecycle registry the sole machine authority for configuration reload behavior.
+- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit. The response-cache correctness programme (#107), lifecycle authority (#89), and structured-configuration sequence (#77 → #78 → #79 → #80 → #81 → #82) are complete. The next programme stage is the core architecture-decision sequence #115 → #116 → #117 → #118; #115 is READY / NEXT but implementation has not started.
 - **[Known limitations](known-limitations.md)** — Documented gaps and current correction notices.
 - **[Deployment guide](deployment.md)** — systemd, Windows service, Docker, and log rotation.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
