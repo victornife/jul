@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.5 · Updated 2026-08-09
+> Version 2.6 · Updated 2026-08-11
 >
 > This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
 > with a portfolio model. Delivered feature maturity remains authoritative in the
@@ -19,10 +19,10 @@ ready, draft, gated, selected, deferred, deliberately restart-bound, or complete
 
 | Lane | Objective | Entry rule | Current emphasis |
 | --- | --- | --- | --- |
-| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Preserve the certified cache and lifecycle baseline while Phase 5 proceeds |
+| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Preserve the certified cache, lifecycle, and structured-configuration baseline while architecture decisions proceed |
 | **Core Gateway Completeness** | Close material gaps inside the standalone gateway boundary | Architecture and product integrity | Trust boundaries, backend TLS/mTLS, resilience, routing policy, automation contracts |
 | **Operational enhancement** | Improve long-running operation without redefining the core | Value × leverage ÷ permanent complexity | Selected hot reload, diagnostics, recovery, migration assessment |
-| **Technical experiment** | Explore a new category through a bounded, removable tranche | Hypothesis, prerequisites, budget, evidence, exit decision | AI Gateway candidate after generic trust/resilience decisions |
+| **Technical experiment** | Explore a new category through a bounded, removable tranche | Hypothesis, prerequisites, budget, evidence, exit decision | AI Gateway candidate only after generic trust/resilience decisions and an explicit portfolio decision |
 | **Vision horizon** | Preserve possible large future categories | Separate activation decision | Fleet, Kubernetes controller, distributed state, Cloud, mesh, GSLB, GraphQL composition |
 
 ## Current execution sequence
@@ -36,14 +36,13 @@ portfolio has parallel lanes.
 | **1 — Immediate non-cache correctness** | Strict configuration, HTTP/3 mTLS, ACME, compression, access logs, metrics and WAF contracts | No known non-cache P0; selected P1 corrections documented and tested | ✅ verified in `v1.32.1-rc.1`; #129 remains a non-blocking quality track |
 | **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ✅ complete: #131, #133 and #132 merged; #134 recertification closed #107; the cache retains GA |
 | **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ✅ complete: #89 |
-| **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ▶ in progress: #77/#78/#79/#80 complete; #81 next; #82 blocked by #81 |
-| **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ⬜ planned |
-| **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ⬜ planned |
+| **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ✅ complete: #77 → #78 → #79 → #80 → #81 → #82 |
+| **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ▶ next: #115 → #116 → #117 → #118; #115 READY / NEXT, not started |
+| **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ⬜ planned; gated by governing ADRs |
 | **7 — Selected runtime dynamics** | Value-ranked certificate, credential, logging, sink, cache-policy, and Alt-Svc transitions | Selected settings are safely dynamic; structural settings retain planned restart | ⬜ planned |
 | **8 — Migration and diagnostics** | NGINX assessment, provenance, compatibility corpus, support bundle, `jul doctor` | Operator-safe evidence and recovery workflows | ⬜ planned |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | Promote, continue experimental, freeze, extract, remove, or defer | 🔒 gated |
 | **10 — Integrated closure** | Exact-SHA audit, protocol matrix, failure injection, E2E, soak, compatibility and release evidence | No unsupported claims or unresolved selected work | ⬜ planned |
-
 
 ### Tracker-numbering crosswalk
 
@@ -53,7 +52,8 @@ The roadmap deliberately consolidates the more granular numbering in #62:
 - roadmap Stage 1 = the completed #62 Stage 2 non-cache correctness tranche;
 - roadmap Stage 2 = #62 Stage 3 cache correctness and recertification (complete);
 - roadmap Stage 3 = #62 lifecycle authority (#89), complete;
-- roadmap Stage 4 = #62 structured configuration Phase 5, current with #80 complete and #81 next.
+- roadmap Stage 4 = #62 structured configuration Phase 5 (#77 → #78 → #79 → #80 → #81 → #82), complete;
+- roadmap Stage 5 = the next #62 core architecture-decision stage, ordered #115 → #116 → #117 → #118 and not yet started.
 
 This avoids two competing execution models. #62 owns issue-level status;
 this roadmap owns the durable portfolio sequence.
@@ -71,21 +71,11 @@ v1.32.1-rc.1 — independently verified published prerelease (complete; not stab
     ↓
 #89 — closed-world lifecycle authority (complete)
     ↓
-#77 — atomic lifecycle-aware patch assessment (complete)
+#77 → #78 → #79 → #80 → #81 → #82 — structured configuration Phase 5 (complete)
     ↓
-#78 — typed Route creation/deletion (complete)
+#115 → #116 → #117 → #118 — core architecture decisions (next; #115 READY / NEXT, not started)
     ↓
-#79 — typed App/upstream creation/deletion (complete)
-    ↓
-#80 — sparse global/compression/rate-limit operations (complete)
-    ↓
-#81 — Global and Traffic Controls UI migration (next)
-    ↓
-#82 — Phase 5 E2E/accessibility/adoption closure (blocked until #81 merges)
-    ↓
-#115 → #118 — core architecture decisions
-    ↓
-selected core implementations
+selected core implementations, each gated by its governing ADR
 ```
 
 The selected correction tranche and its published `v1.32.1-rc.1`
@@ -93,9 +83,16 @@ prerelease checkpoint are complete and independently verified. The cache
 correctness programme is complete and #107 is closed: the response cache retains
 GA on the strength of the 2026-08-07 recertification. Closed-world lifecycle
 authority (#89), the shared atomic patch assessment (#77), typed Route workflows
-(#78), and typed App/upstream workflows (#79) are complete. The #80 backend/API operation tranche is complete. The next serial Phase 5 item is #81; #82 remains blocked until #81 merges with evidence.
-Shared edits to the configuration schema, lifecycle, composition root, reload
-transaction, or Console patch contracts remain serial.
+(#78), typed App/upstream workflows (#79), sparse global operations (#80), the
+Global and Traffic Controls Console migration (#81), and the Phase 5 closure
+work (#82) are complete. The next stage is the architecture-decision sequence
+#115 → #116 → #117 → #118; #115 is READY / NEXT, but implementation has not
+started. Shared edits to configuration authority, trust, resilience, routing,
+or downstream implementation remain gated by those decisions.
+
+Phase 5 closure does not authorize universal hot reload, does not imply dynamic
+cache backend replacement, and does not automatically continue into an AI
+Gateway. Correctness or security findings may still interrupt later work.
 
 ## Correctness and security backlog
 
@@ -113,12 +110,15 @@ transaction, or Console patch contracts remain serial.
 - Path-only, bounded WAF matched-request logging with query and macro-expanded request data omitted (#127).
 - Explicit access-log enablement with restart-truthful sinks and deprecated legacy-field handling (#124).
 - Cache concurrency, lifecycle, protocol and HTTP conformance restored, with an integrated source audit, executable behavior matrix, race/protocol evidence, benchmarks and soak (#131, #133, #132, #134; epic #107 closed).
+- Closed-world lifecycle authority (#89) and the complete structured-configuration sequence #77 → #78 → #79 → #80 → #81 → #82.
 
 ### Remaining immediate correctness
 
-Closed-world generated lifecycle authority (#89) is complete. #80 is complete and
-#81 is the next serial structured-configuration item; #82 remains blocked until
-#81 merges with evidence.
+No Phase 5 correctness item remains open. Preserve the certified cache,
+lifecycle, and structured-configuration baseline while #115 → #116 → #117 →
+#118 proceeds through architecture decisions. Any newly discovered correctness
+or security defect may pre-empt that sequence and must be handled on its own
+focused correction path.
 
 ### Required quality foundation
 
@@ -135,10 +135,11 @@ preflight, full-tag gate, five-minute soak-smoke, 12-cell lean/full matrix,
 checksums, embedded SPDX SBOMs, and all provenance/SBOM attestations passed. The
 GitHub Release is published as a prerelease; see the
 [candidate evidence](../release-candidates/v1.32.1-rc.1.md). Stable publication
-remains a later explicit decision. The response-cache correctness programme and
-closed-world lifecycle authority and the #80 sparse global-table operations have
-since completed on `main`; the serial structured-configuration programme now
-advances to #81.
+remains a later explicit decision. The response-cache correctness programme,
+closed-world lifecycle authority, and the full #77 → #82 structured-configuration
+programme have since completed on `main`. The next programme stage is the
+#115 → #116 → #117 → #118 architecture-decision sequence; no Stage 6
+implementation has started.
 
 ## Core Gateway Completeness backlog
 
@@ -307,12 +308,12 @@ When work changes state:
 - [Core Gateway Completeness](../specs/core-gateway-completeness.md)
 - [Combined audit](../audit/combined-audit-2026-08-03.md)
 
-### P5-05 / issue #81 implementation boundary
+### P5-05 / issue #81 delivered boundary
 
-P5-05 migrates Global, Compression, global Rate Limit, and adjacent server
-Limits to sparse typed patches, and makes the existing complete cache table
-stage-only with pinned raw handoff safety. Deferred work remains explicit: no
-`cache_set`, no dynamic cache hot swap, no combined `admin_set`, and no
-`access_log_set`. Mark this item delivered only after the exact implementation
-SHA has full Go, Console, E2E, documentation, generated-file, and `make ci-pr`
-evidence.
+P5-05 migrated Global, Compression, global Rate Limit, and adjacent server
+Limits to sparse typed patches, and made the existing complete cache table
+stage-only with pinned raw handoff safety. The delivered boundary remains
+explicit: no `cache_set`, no dynamic cache hot swap, no combined `admin_set`,
+and no `access_log_set` were implied by #81. The exact implementation and closure
+evidence remains in #81/#82 and PR #255; this historical boundary does not
+start or authorize any Stage 6 work.
