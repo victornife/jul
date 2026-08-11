@@ -314,7 +314,7 @@ Acceptance mapping for issue #24:
 
 If both are PASS, close issue #24 as completed.
 
-## CI automation for live discovery (issue #46)
+## CI automation for live service discovery (issue #46)
 
 The local Consul lane above is also run **in CI** by the
 [`discovery-live`](../.github/workflows/discovery-live.yml) workflow, so the live
