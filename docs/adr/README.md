@@ -33,6 +33,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0013](0013-project-operating-model-and-completeness.md) | Project operating model, core completeness, and technical experiments | Accepted | 2026-08-03 |
 | [0014](0014-operability-surfaces.md) | Appropriate operability surfaces for Console, API, CLI, and raw configuration | Accepted | 2026-08-03 |
 | [0015](0015-managed-apply-terminal-ledger.md) | Managed-apply terminal ledger, exactly-once finalization, and audit-closure defaults | Accepted — amended by #226 | 2026-07-24 |
+| [0016](0016-inbound-identity-and-backend-peer-trust.md) | Inbound client identity and backend peer-trust boundaries | Accepted | 2026-08-12 |
 
 ## Reading order
 
@@ -42,6 +43,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
   [0009](0009-two-tier-editing.md), [0010](0010-console-rbac.md), [0006](0006-console-v2-stack.md).
 - **How the runtime behaves:** [0011](0011-reload-plan.md),
   [0015](0015-managed-apply-terminal-ledger.md), [0007](0007-composition-root-monolith.md).
+- **Security boundaries:** [0016](0016-inbound-identity-and-backend-peer-trust.md).
 - **Technology boundaries:** [0001](0001-language-strategy.md), [0002](0002-protocol-adaptation.md),
   [0008](0008-gofast-x-tools-technical-debt.md), [0005](0005-soak-post-ga-gate.md).
 

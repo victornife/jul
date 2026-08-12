@@ -58,6 +58,41 @@ docs/adr/              # Architecture Decision Records
 - **Zero external runtime deps:** The shipped binary is statically linked and
   needs no interpreter or shared libraries (Go standard library + chosen deps).
 
+## Trust boundaries
+
+Jul distinguishes five trust boundaries. They are deliberately separate: each answers a different
+question, is proved by a different mechanism, and fails in a different direction. Collapsing any pair
+into a generic "trusted" notion reintroduces a known vulnerability class, so no single configuration
+flag spans them. [ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md) is the authority.
+
+| | Boundary | Question | Proof | Failure |
+| --- | --- | --- | --- | --- |
+| **A** | Immediate transport peer | *What is the socket?* | Kernel fact | Cannot fail |
+| **B** | Asserted original client | *Who does A claim came before it?* | A is inside `trusted_proxies` | Degrade to A |
+| **C** | Auxiliary egress authorization | *May Jul connect outbound at all?* | Destination is allow-listed | Refuse the dial |
+| **D** | Data-plane backend selection | *Which address do I dial?* | Routing, load balancing, discovery | Retry or eject |
+| **E** | Backend peer identity | *Is that address the intended service?* | Certificate chain and name binding | Refuse the handshake |
+
+**A and B — inbound identity.** The socket peer is always retained as a separate fact. Forwarding
+headers are considered only when that peer is explicitly trusted by the matched listener's
+`[servers.client_address]` policy; otherwise they are ignored entirely. One canonical client address is
+derived once, per listen address and **before** virtual-host routing, and placed in the request context
+by `internal/clientaddr` for every downstream consumer — CIDR authentication, rate limiting, the WAF,
+access logs, upstream forwarding and the FastCGI environment. Deriving it before routing matters:
+server blocks are selected by the `Host` header, so a policy resolved afterwards would let a client
+choose the trust policy applied to its own request. `r.RemoteAddr` is never mutated.
+
+**C — auxiliary egress.** `internal/egress` governs config-driven outbound clients (JWKS,
+forward-auth, discovery, ACME/OCSP, plugin fetch). It authorizes a *destination*; it is not evidence
+about who answered.
+
+**D and E — backend trust.** Routing and discovery choose an address; they never establish identity.
+A `backend_tls` policy — private roots, client certificate, SNI override, minimum version, explicit
+peer identities — proves the peer is the intended backend. One normalized resolved policy is shared by
+the HTTP proxy, native gRPC, transcoding and active health checks, and transports never parse public
+configuration themselves. A discovery-returned address is a dial destination only: the configured
+logical name remains the verified identity.
+
 ## Composition-root helpers (`internal/app/`)
 
 The composition root — where every subsystem is initialised, dependencies are
