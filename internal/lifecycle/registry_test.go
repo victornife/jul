@@ -361,3 +361,37 @@ func TestStartupFieldsHaveExtractorsAndDigestSecrets(t *testing.T) {
 		}
 	}
 }
+
+// TestServerLevelListenerScopedPathsAreKnownToTheLinter is the other half of
+// the cross-check in internal/config: if a new server-level path is classified
+// as listener-bound here, the linter's duplicate list must be updated too, or a
+// divergent value across blocks sharing a listen will again be silently
+// discarded. The list below is the registry's own view; internal/config asserts
+// its disposition for each entry.
+func TestServerLevelListenerScopedPathsAreKnownToTheLinter(t *testing.T) {
+	known := map[string]bool{
+		"servers.*.read_header_timeout": true, "servers.*.read_timeout": true,
+		"servers.*.write_timeout": true, "servers.*.idle_timeout": true,
+		"servers.*.max_header_bytes": true, "servers.*.h2c": true,
+		"servers.*.http3.enabled": true, "servers.*.http3.alt_svc_max_age": true,
+		"servers.*.listen": true, "servers.*.tls.enabled": true,
+		"servers.*.tls.min_version": true, "servers.*.tls.cert": true,
+		"servers.*.tls.key": true, "servers.*.tls.client_auth.mode": true,
+		"servers.*.tls.client_auth.ca_file": true, "servers.*.tls.client_auth.crl_file": true,
+		"servers.*.tls.client_auth.verify_san": true, "servers.*.tls.acme.ca": true,
+		"servers.*.tls.acme.cache_dir": true, "servers.*.tls.acme.challenge": true,
+		"servers.*.tls.acme.domains": true, "servers.*.tls.acme.email": true,
+		"servers.*.tls.acme.enabled": true, "servers.*.tls.acme.ocsp_stapling": true,
+	}
+	for _, e := range Registry {
+		if !strings.HasPrefix(e.Path, "servers.*.") {
+			continue
+		}
+		if e.Class != NewListenerOnlyClass && !e.AddressKeyed {
+			continue
+		}
+		if !known[e.Path] {
+			t.Errorf("%s is listener-bound but unknown to the divergence linter; add it to the list in internal/config/listener_scope_test.go and decide whether it is linted or exempt", e.Path)
+		}
+	}
+}

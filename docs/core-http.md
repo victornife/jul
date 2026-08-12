@@ -112,6 +112,19 @@ simplified NGINX model:
 | Precompressed assets | `.br` then `.gz` sidecars served when the client accepts them |
 | Error pages | per-status file (served) or URL (302 redirect) |
 
+### Listener-scoped server fields
+
+A `[[servers]]` block is a virtual host, but a few of its fields describe the
+listening socket that several virtual hosts share. Those are resolved once per
+`listen` address: the timeouts and `max_header_bytes` take the **first** block's
+value, while `h2c` and `http3.enabled` are enabled if **any** block on the
+address enables them. `jul lint` warns when blocks disagree, naming the winning
+and the ignored block; see
+[the configuration reference](configuration.md#fields-resolved-once-per-listen-address).
+
+`client_max_body_size` is *not* in that set — the router applies the matched
+virtual host's limit per request.
+
 ## Reverse proxy
 
 Built on the standard library's `httputil.ReverseProxy` over a balancing
