@@ -38,10 +38,19 @@ func NewGRPCTranscode(ctx context.Context, _ config.ServerConfig, loc config.Loc
 		reflectSnap = reg.CandidateSnapshot(cfg.Target, "http")
 	}
 
+	// Resolved here, while the handler generation is prepared, so unreadable or
+	// malformed trust material aborts the reload instead of failing a call. The
+	// reflection fetch below uses the same policy as the transcoded calls.
+	policy, err := resolveBackendTLSFor(loc, upstreams, cfg.Target)
+	if err != nil {
+		return nil, err
+	}
+
 	return transcode.New(ctx, *cfg, pool, reflectSnap, transcode.Options{
 		Logger:      log,
 		OnResult:    onResult,
 		OnStreamMsg: onStreamMsg,
+		BackendTLS:  policy,
 	})
 }
 

@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/net/http2"
 
+	"jul/internal/backendtls"
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/upstream"
@@ -45,16 +46,24 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 	tlsBackend := scheme == "https"
 	target := &url.URL{Scheme: scheme, Path: basePath}
 
+	// Resolved while the handler generation is prepared, so unreadable or
+	// malformed trust material aborts the reload rather than failing a call.
+	policy, err := resolveBackendTLS(loc, upstreams)
+	if err != nil {
+		return nil, err
+	}
+
 	rp := &httputil.ReverseProxy{
 		// FlushInterval -1 flushes every write immediately: gRPC streaming
 		// frames (and unary trailers) must not be buffered, or a server-stream
 		// would stall until the whole call completed.
 		FlushInterval: -1,
 		Transport: &grpcBalancingTransport{
-			pool:     pool,
-			base:     newGRPCTransport(loc, tlsBackend),
-			log:      log,
-			onStream: onStream,
+			pool:       pool,
+			base:       newGRPCTransport(loc, tlsBackend, policy),
+			log:        log,
+			onStream:   onStream,
+			tlsBackend: tlsBackend,
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
@@ -87,12 +96,20 @@ type grpcBalancingTransport struct {
 	base     *http2.Transport
 	log      *slog.Logger
 	onStream func()
+	// tlsBackend records that the route is configured for TLS gRPC. A backend
+	// whose scheme is not https is refused rather than dialled: nothing may
+	// move a call from TLS gRPC to cleartext h2c.
+	tlsBackend bool
 }
 
 func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	b, err := t.pool.PickCtx(req.Context())
 	if err != nil {
 		return nil, err
+	}
+	if t.tlsBackend && b.URL.Scheme != "https" {
+		t.pool.Release(b)
+		return nil, fmt.Errorf("grpc backend %s is not https but the route is: refusing to downgrade to h2c", b.URL.Host)
 	}
 	req.URL.Scheme = b.URL.Scheme
 	req.URL.Host = b.URL.Host
@@ -117,7 +134,7 @@ func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, e
 // (h2c) backend it dials plain TCP and serves prior-knowledge HTTP/2; for a TLS
 // backend it dials TLS negotiating the h2 ALPN protocol. The connect timeout
 // comes from the location's proxy_connect_timeout.
-func newGRPCTransport(loc config.LocationConfig, tlsBackend bool) *http2.Transport {
+func newGRPCTransport(loc config.LocationConfig, tlsBackend bool, policy *backendtls.Policy) *http2.Transport {
 	connectTimeout := loc.ProxyConnectTimeout.Std()
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
@@ -125,8 +142,21 @@ func newGRPCTransport(loc config.LocationConfig, tlsBackend bool) *http2.Transpo
 	dialer := &net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second}
 
 	if tlsBackend {
+		// One config per transport, built here rather than per dial. ALPN must
+		// advertise h2 explicitly: this transport speaks HTTP/2 only, and a
+		// backend that negotiated http/1.1 would break gRPC framing.
+		var policyCfg *tls.Config
+		if policy != nil {
+			policyCfg = policy.ClientConfig()
+			policyCfg.NextProtos = []string{"h2"}
+		}
 		return &http2.Transport{
 			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				if policyCfg != nil {
+					// The policy decides the verified identity; the address is
+					// only where to dial.
+					cfg = policyCfg
+				}
 				td := &tls.Dialer{NetDialer: dialer, Config: cfg}
 				return td.DialContext(ctx, network, addr)
 			},

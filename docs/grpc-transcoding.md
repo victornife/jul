@@ -244,3 +244,14 @@ All GA criteria are satisfied.
 - [examples/grpc-gateway](../examples/grpc-gateway) — runnable transcoding sample
 - [ADR 0002 — protocol adaptation](adr/0002-protocol-adaptation.md)
 - [ADR 0003 — maturity & GA bar](adr/0003-maturity-and-ga.md)
+
+## Backend TLS
+
+With `tls = true` the transcoder dials the backend using the resolved
+[`backend_tls`](upstreams.md#backend-tls) policy, taken from the location's own
+block or, failing that, from the pool named by `grpc_transcode.target`. The
+gRPC **reflection** fetch uses the same policy as the transcoded calls, so
+descriptor discovery cannot reach a backend that live traffic would refuse.
+
+Without a block the previous behaviour is unchanged: a TLS 1.2 floor and the
+platform trust store.
