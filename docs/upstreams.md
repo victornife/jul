@@ -187,13 +187,44 @@ validation error rather than a no-op: an operator who writes one believes the
 backend is verified, and a silently inert security policy is worse than a
 rejected configuration.
 
+## What enforces the policy today
+
+| Consumer | Status |
+| --- | --- |
+| HTTP reverse proxy (named pools and literal `https://` targets, including WebSocket and streaming upgrades) | **enforced** |
+| Native gRPC passthrough and gRPC-JSON transcoding | not yet |
+| Active health probes | not yet |
+
+The HTTP proxy builds one `http.Transport` per handler generation from the
+resolved policy, so a policy change produces a new connection pool: a request
+admitted after the change cannot reuse a keep-alive or HTTP/2 connection
+established under the previous trust, and the retiring generation closes its
+idle connections when it retires. Requests already in flight finish on their own
+connection, which is the generation drain contract rather than an abrupt cut.
+
+A route configured for `https` never dials a plaintext backend. No retry,
+failover or discovery result may downgrade the connection; the request fails
+instead.
+
+### Failure categories
+
+A backend-trust failure is logged with a bounded `tls_failure` category
+alongside the usual proxy error, so it can be grepped and later counted without
+the raw error, host, certificate subject or file path becoming a label:
+
+`unknown_authority` · `hostname_mismatch` · `peer_identity_mismatch` ·
+`client_certificate` · `certificate_expired` · `certificate_invalid` ·
+`tls_version` · `tls_handshake` · `tls_other`
+
 ## Reload behaviour
 
-`backend_tls` is **restart-required**, and that classification is deliberate
-rather than pessimistic: no outbound client rebuilds its TLS material on reload
-today — `reloadCertificates` is a no-op, the transcoder caches its gRPC
-connections for the process lifetime, and the health client is built once. It is
-upgraded per consumer as each integration lands.
+`backend_tls` is **restart-required**. The HTTP proxy now rebuilds its transport
+per handler generation and would support hot reload on its own, but the same
+configuration path also feeds native gRPC, transcoding and the health client,
+and those still hold their material for the process lifetime. A field is
+classified `hot_reload` only when **every** consumer demonstrably adopts the
+candidate value, so the class stays restart-required until the remaining
+integrations land.
 
 The classification is conditional on the **backend set**, not on the listener
 set:

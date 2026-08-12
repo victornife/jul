@@ -151,6 +151,29 @@ runtime-reloading, degraded-subsystem, restart-required) are described in
 By design: a reload that fails to load or validate is rejected and the running
 configuration is kept. Check the logs for `reload aborted: ...` and fix the file.
 
+## Backend TLS failures
+
+A proxied request that fails at the TLS handshake logs `proxy upstream error`
+with a bounded `tls_failure` category. The category is the whole diagnostic
+payload — no host, certificate subject, SAN or file path is included — so match
+on it rather than on the error text:
+
+| Category | Meaning | Usual fix |
+| --- | --- | --- |
+| `unknown_authority` | The backend certificate does not chain to a trusted root | Set `ca_file` with `ca_mode = "system_and_file"` or `"file_only"` in [`backend_tls`](upstreams.md#backend-tls) |
+| `hostname_mismatch` | The chain is trusted but the certificate does not name the identity being verified | Set `server_name` to the name the certificate actually carries |
+| `peer_identity_mismatch` | Standard verification passed, but no configured `peer_identities` entry matched | Check the certificate's DNS/URI SANs against the configured list |
+| `client_certificate` | The backend demanded a client certificate, or rejected the one presented | Configure `client_cert` and `client_key`, or check which CA the backend trusts |
+| `certificate_expired` | The backend certificate is outside its validity window | Renew it; Jul does not issue backend certificates |
+| `tls_version` | No protocol version in common | Lower `min_version`, or raise the backend's |
+| `tls_handshake` | The handshake failed or timed out for another reason | Check reachability and any middlebox between Jul and the backend |
+
+Two behaviours are deliberate and are not bugs: a route configured for `https`
+**refuses** to dial a plaintext backend rather than downgrading, and a policy
+that cannot be resolved (unreadable CA, mismatched certificate and key) fails
+the **reload** rather than the first request.
+
+
 ## Service discovery
 
 Dynamic upstreams (`[upstreams.discovery]`) refresh a pool live from Consul,

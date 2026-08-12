@@ -201,11 +201,26 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			// (trailers preserved, no buffering); otherwise it is a plain
 			// HTTP reverse proxy. gRPC passthrough is not cacheable.
 			if loc.GRPC {
-				return handler.NewGRPCProxy(ctx, srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCProxyStream)
+				h, err := handler.NewGRPCProxy(ctx, srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCProxyStream)
+				if err != nil {
+					return nil, err
+				}
+				if c, ok := h.(io.Closer); ok {
+					gen.Stage(c)
+				}
+				return h, nil
 			}
 			h, err := handler.NewProxy(ctx, srv, loc, upstreams, f.PoolReg, f.Log)
 			if err != nil {
 				return nil, err
+			}
+			// The proxy owns an http.Transport with its own connection pool.
+			// Staging it means the pool is closed when this generation retires,
+			// so a connection established under a superseded backend_tls policy
+			// cannot be reused by a later one. Registered before the cache
+			// wrapper, which would otherwise hide the io.Closer.
+			if c, ok := h.(io.Closer); ok {
+				gen.Stage(c)
 			}
 			return withCache(loc, h), nil
 		},

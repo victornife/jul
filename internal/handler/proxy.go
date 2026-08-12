@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"jul/internal/backendtls"
 	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/middleware"
@@ -41,6 +42,15 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 		return nil, err
 	}
 
+	// The backend trust policy is resolved here, while the handler generation
+	// is being prepared, so unreadable or malformed material aborts the reload
+	// instead of failing the first request.
+	policy, err := resolveBackendTLS(loc, upstreams)
+	if err != nil {
+		return nil, err
+	}
+	transport := newProxyTransport(loc, policy)
+
 	// The target supplies the scheme and base path for path joining; the
 	// balancing transport overrides the scheme and host per selected backend on
 	// every request. The scheme comes from proxy_pass (not a backend) because a
@@ -49,7 +59,13 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 	target := &url.URL{Scheme: scheme, Path: basePath}
 
 	rp := &httputil.ReverseProxy{
-		Transport: &balancingTransport{pool: pool, base: newProxyTransport(loc), log: log, maxRetries: loc.ProxyRetries},
+		Transport: &balancingTransport{
+			pool:       pool,
+			base:       transport,
+			log:        log,
+			maxRetries: loc.ProxyRetries,
+			tlsBackend: scheme == "https",
+		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			// Secure defaults: clears client-supplied X-Forwarded-* and sets
@@ -60,19 +76,36 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			code := proxyErrorStatus(err)
 			if log != nil {
-				log.Error("proxy upstream error",
+				attrs := []any{
 					"upstream", pool.Name(),
 					"path", r.URL.Path,
 					"status", code,
 					"error", err,
 					"request_id", middleware.RequestIDFrom(r.Context()),
-				)
+				}
+				// A bounded category, so a backend-trust failure is greppable
+				// and countable without the raw error becoming a label.
+				if category := tlsFailureCategory(err); category != "" {
+					attrs = append(attrs, "tls_failure", category)
+				}
+				log.Error("proxy upstream error", attrs...)
 			}
 			http.Error(w, fmt.Sprintf("%d %s", code, http.StatusText(code)), code)
 		},
 	}
-	return rp, nil
+	return &proxyHandler{ReverseProxy: rp, transport: transport}, nil
 }
+
+// proxyHandler is the reverse proxy plus ownership of its transport. The
+// handler generation stages it, so the transport's idle connections — and with
+// them any connection established under a superseded trust policy — are closed
+// when that generation retires.
+type proxyHandler struct {
+	*httputil.ReverseProxy
+	transport *http.Transport
+}
+
+func (h *proxyHandler) Close() error { return transportCloser{t: h.transport}.Close() }
 
 // resolvePool turns proxy_pass into a backend pool plus the base path to join.
 // A reference to a named upstream is resolved through the registry (reg), which
@@ -111,6 +144,10 @@ type balancingTransport struct {
 	base       *http.Transport
 	log        *slog.Logger
 	maxRetries int // 0 means try every distinct backend once
+	// tlsBackend records that the configured target is https. A backend whose
+	// scheme is not https is then refused rather than dialled: no retry,
+	// failover or discovery result may move a request from TLS to plaintext.
+	tlsBackend bool
 }
 
 func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -159,6 +196,15 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			}
 			out = req.Clone(req.Context())
 			out.Body = body
+		}
+		if t.tlsBackend && b.URL.Scheme != "https" {
+			// Fail closed rather than downgrade. Reaching here would mean a
+			// backend entered the pool with a different scheme than the route
+			// was configured with.
+			t.pool.Release(b)
+			err := fmt.Errorf("backend %s is not https but the route is: refusing to downgrade", b.URL.Host)
+			span.RecordError(err)
+			return nil, err
 		}
 		out.URL.Scheme = b.URL.Scheme
 		out.URL.Host = b.URL.Host
@@ -252,7 +298,7 @@ func isIdempotent(method string) bool {
 
 // newProxyTransport returns a connection-reusing transport tuned by the
 // location's proxy timeouts.
-func newProxyTransport(loc config.LocationConfig) *http.Transport {
+func newProxyTransport(loc config.LocationConfig, policy *backendtls.Policy) *http.Transport {
 	connectTimeout := loc.ProxyConnectTimeout.Std()
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
@@ -293,6 +339,12 @@ func newProxyTransport(loc config.LocationConfig) *http.Transport {
 		// Time allowed to receive the response headers (time-to-first-byte).
 		// The per-read deadline above additionally bounds the body.
 		t.ResponseHeaderTimeout = readTimeout
+	}
+	if policy != nil {
+		// A fresh config per transport: the policy is shared, the tls.Config is
+		// not, so nothing here can affect another consumer. ForceAttemptHTTP2
+		// stays set, so HTTP/2 is still negotiated with a custom TLS config.
+		t.TLSClientConfig = policy.ClientConfig()
 	}
 	return t
 }
