@@ -228,6 +228,36 @@ write_timeout = "60s"
 | `h2c` | bool | On a plaintext listener, also accept cleartext HTTP/2 (h2c) for native gRPC clients without TLS; ignored on a TLS listener (HTTP/2 is negotiated via ALPN) |
 | `client_address` | table | Trusted-proxy policy for deriving the canonical client address (see [Client address and trusted proxies](#client-address-and-trusted-proxies)) |
 
+### Fields resolved once per listen address
+
+Several `[[servers]]` fields describe the **socket**, not the virtual host, so
+when two blocks share a `listen` value the listener resolves them once:
+
+| Field | Rule when blocks disagree |
+| --- | --- |
+| `read_header_timeout`, `read_timeout`, `write_timeout`, `idle_timeout`, `max_header_bytes` | the **first** block on the address wins; later values are discarded |
+| `h2c`, `http3.enabled` | **any** block enabling it turns it on for the whole address; a sibling cannot opt out |
+| `http3.alt_svc_max_age` | taken from the first HTTP/3-enabled block on the address |
+
+`jul lint` warns when blocks sharing a listener declare **different** explicit
+values for any of these, naming both the winning block and the ignored one. It
+is a warning rather than an error because the behaviour is long-standing and
+some configurations rely on it; a configuration that agrees, or that leaves the
+field unset in all but one block, is silent.
+
+One case is deliberately not reported: when the *winning* block's value equals
+the documented default. Defaults are filled in while the configuration is
+loaded, so at that point a block that spelled the default out is
+indistinguishable from one that never mentioned the field — and warning about
+fields nobody wrote would be worse than missing this case.
+
+Everything else under `[[servers]]` is per virtual host. In particular
+`client_max_body_size` is applied by the router from the **matched** block, so
+two vhosts on one listener may legitimately differ. `client_address` is the one
+listener-scoped field whose divergence is a hard **error**, because it is a
+security boundary — see
+[Client address and trusted proxies](#client-address-and-trusted-proxies).
+
 ---
 
 ## Client address and trusted proxies

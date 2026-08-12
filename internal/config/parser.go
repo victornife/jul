@@ -558,6 +558,11 @@ func applyACMEDefaults(srv *ServerConfig) {
 	}
 }
 
+// defaultAltSvcMaxAge is the Alt-Svc max-age applied to an enabled HTTP/3 block
+// that does not set one. It is named so the linter can tell an operator-written
+// value from a defaulted one.
+const defaultAltSvcMaxAge = 86400
+
 // applyHTTP3Defaults fills in defaults for an enabled HTTP/3 block on a server.
 // It is a no-op when HTTP/3 is absent or disabled.
 func applyHTTP3Defaults(srv *ServerConfig) {
@@ -565,7 +570,7 @@ func applyHTTP3Defaults(srv *ServerConfig) {
 		return
 	}
 	if srv.HTTP3.AltSvcMaxAge == 0 {
-		srv.HTTP3.AltSvcMaxAge = 86400
+		srv.HTTP3.AltSvcMaxAge = defaultAltSvcMaxAge
 	}
 }
 

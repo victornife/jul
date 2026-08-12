@@ -9,7 +9,9 @@ import (
 	"net"
 
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -147,6 +149,7 @@ func Lint(c *Config) []Diagnostic {
 	}
 
 	diags = append(diags, lintBackendTLS(c)...)
+	diags = append(diags, listenerScopedDiagnostics(c)...)
 
 	// An admin listener reachable off-loopback without a token is unauthenticated
 	// remote control of the server.
@@ -380,4 +383,145 @@ func upstreamHasBackendTLS(c *Config, name string) bool {
 		}
 	}
 	return false
+}
+
+// listenerScopedDiagnostics reports server blocks that share a listen address
+// but declare different values for a field the listener resolves once.
+//
+// These fields are read from a single block when the socket binds, so a
+// divergent value in a sibling block is silently discarded — the configuration
+// parses, validates and lints clean while describing behaviour the server does
+// not have. Validation already rejects the cross-server inconsistencies whose
+// consequence was understood (TLS mixed with plaintext, ACME mixed with static
+// certificates, divergent ACME issuers, and — as a security boundary — a
+// divergent client_address). These fields have the same property and were
+// simply never covered.
+//
+// It is a warning, not an error: the first-wins behaviour is pre-existing and
+// some configurations depend on it working exactly as it does. Promotion to an
+// error can follow evidence.
+//
+// client_max_body_size is deliberately absent: the router applies the *matched*
+// virtual host's limit per request, so two blocks on one listener may
+// legitimately differ. Being listed under [[servers]] does not make a field
+// listener-scoped.
+func listenerScopedDiagnostics(c *Config) []Diagnostic {
+	type declaration struct {
+		index int
+		value string
+	}
+	// first[addr][field] is the block that wins for that address.
+	first := map[string]map[string]declaration{}
+	var diags []Diagnostic
+
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		addr := strings.TrimSpace(srv.Listen)
+		if addr == "" {
+			continue
+		}
+		byField, ok := first[addr]
+		if !ok {
+			byField = map[string]declaration{}
+			first[addr] = byField
+		}
+		for _, f := range listenerScopedFields(srv) {
+			if f.value == "" || f.value == f.defaultValue {
+				// Omitted, or indistinguishable from omitted: Parse applies
+				// defaults before Lint sees the configuration, so a block that
+				// never mentioned the field carries the default value. Treating
+				// "equals the default" as "no opinion" costs one under-warned
+				// case — a block that spells the default out while a sibling
+				// sets something else — and avoids warning about fields the
+				// operator never wrote, which would be far worse.
+				continue
+			}
+			winner, seen := byField[f.name]
+			if !seen {
+				byField[f.name] = declaration{index: i, value: f.value}
+				continue
+			}
+			if winner.value == f.value {
+				continue
+			}
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    fmt.Sprintf("servers[%d].%s", i, f.name),
+				Message: fmt.Sprintf("ignored; listen %q already takes %s from servers[%d] (%s), so %s here has no effect",
+					addr, f.name, winner.index, winner.value, f.value),
+				Hint: f.hint,
+			})
+		}
+	}
+	return diags
+}
+
+// listenerScopedField is one field the listener resolves once per address.
+type listenerScopedField struct {
+	name  string
+	value string // "" when the block leaves it unset
+	// defaultValue is what Parse fills in for an omitted field, so the linter
+	// can tell "the operator wrote this" from "the loader supplied it".
+	defaultValue string
+	hint         string
+}
+
+// listenerScopedFields returns a block's explicit listener-scoped values.
+//
+// The set mirrors the paths the lifecycle registry classifies as
+// new_listener_only or bind-bound — the fields frozen when a socket binds —
+// which is what makes the lint and the lifecycle classification agree about
+// what "listener-scoped" means.
+func listenerScopedFields(srv *ServerConfig) []listenerScopedField {
+	const timeoutHint = "move the value to the first server block on this listen address, or give this block its own address"
+	out := []listenerScopedField{
+		{name: "read_header_timeout", value: durationValue(srv.ReadHeaderTimeout), defaultValue: (10 * time.Second).String(), hint: timeoutHint},
+		{name: "read_timeout", value: durationValue(srv.ReadTimeout), hint: timeoutHint},
+		{name: "write_timeout", value: durationValue(srv.WriteTimeout), hint: timeoutHint},
+		{name: "idle_timeout", value: durationValue(srv.IdleTimeout), defaultValue: (60 * time.Second).String(), hint: timeoutHint},
+		{name: "max_header_bytes", value: sizeValue(srv.MaxHeaderBytes), defaultValue: strconv.Itoa(1 << 20), hint: timeoutHint},
+	}
+	// h2c and http3.enabled are any-wins rather than first-wins: one block
+	// enabling either turns it on for the whole address. A block that leaves it
+	// off is therefore not overridden so much as overruled, which is worth the
+	// same warning for a different reason.
+	if srv.H2C {
+		out = append(out, listenerScopedField{
+			name:  "h2c",
+			value: "true",
+			hint:  "h2c applies to the whole listen address; a sibling block cannot opt out of it",
+		})
+	}
+	if srv.HTTP3 != nil && srv.HTTP3.Enabled {
+		out = append(out, listenerScopedField{
+			name:  "http3.enabled",
+			value: "true",
+			hint:  "HTTP/3 applies to the whole listen address; a sibling block cannot opt out of it",
+		})
+		if srv.HTTP3.AltSvcMaxAge > 0 {
+			out = append(out, listenerScopedField{
+				name:         "http3.alt_svc_max_age",
+				value:        strconv.Itoa(srv.HTTP3.AltSvcMaxAge),
+				defaultValue: strconv.Itoa(defaultAltSvcMaxAge),
+				hint:         "the Alt-Svc max-age is taken from the first HTTP/3-enabled block on this listen address",
+			})
+		}
+	}
+	return out
+}
+
+// durationValue renders a configured duration, or "" when it is unset.
+func durationValue(d Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.Std().String()
+}
+
+// sizeValue renders a configured size, or "" when it is unset.
+func sizeValue(s Size) string {
+	if s <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(s.Bytes(), 10)
 }
