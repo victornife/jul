@@ -63,7 +63,8 @@ func TestLogTailLogRedactsAndNormalizes(t *testing.T) {
 		Path:      "/users/12345/orders?token=secret",
 		Status:    200,
 		Duration:  1500 * time.Microsecond,
-		Remote:    "203.0.113.7",
+		Client:    "203.0.113.7",
+		Peer:      "203.0.113.7",
 		UserAgent: "curl/8.4.0",
 	})
 	e := lt.Snapshot(0)[0]
@@ -79,8 +80,11 @@ func TestLogTailLogRedactsAndNormalizes(t *testing.T) {
 	if e.DurationMs != 1.5 {
 		t.Errorf("duration_ms = %v, want 1.5", e.DurationMs)
 	}
-	if e.Remote != "203.0.113.7" {
-		t.Errorf("remote = %q, want preserved", e.Remote)
+	if e.ClientIP != "203.0.113.7" {
+		t.Errorf("client_ip = %q, want preserved", e.ClientIP)
+	}
+	if e.PeerIP != "" {
+		t.Errorf("peer_ip = %q, want omitted when it equals the client", e.PeerIP)
 	}
 }
 

@@ -63,6 +63,16 @@ references.
   shorthands such as `private` or `rfc1918` encourage over-broad trust.
 - **No chain projection.** The identity carries the canonical client, the direct
   peer, and bounded source/result enums — not the full asserted chain.
+- **Outbound forwarding is deliberately lossy.** Jul emits
+  `X-Forwarded-For: <canonical client>, <direct peer>`, so intermediate trusted
+  proxies are dropped: `client, P1` received from `P2` is forwarded as
+  `client, P2`. Jul is the last hop before the backend, and replaying a
+  third-party chain into a channel the backend authenticates would be worse than
+  losing it. Restoring full fidelity later is additive.
+- **The access log has no `remote` field.** It is replaced by `client_ip` and a
+  conditional `peer_ip`. Log consumers that parsed `remote` must be updated;
+  there is no compatibility alias, because keeping one would have shipped a
+  permanently ambiguous field.
 
 ---
 

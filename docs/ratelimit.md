@@ -67,7 +67,7 @@ The `key` field selects how requests are bucketed:
 
 | Key spec | Identity source | Fallback | Trust note |
 | --- | --- | --- | --- |
-| `"ip"` (or `""`) | Client IP (`RemoteAddr`) | — | Always the transport peer; never uses `X-Forwarded-For` |
+| `"ip"` (or `""`) | Canonical client address | — | The transport peer unless the listener's [`client_address`](configuration.md#client-address-and-trusted-proxies) policy trusts that peer as a proxy; a forwarding header from an untrusted sender is never consulted |
 | `"header:<Name>"` | Value of header `<Name>` | Client IP | Header is untrusted; use only behind a verified proxy |
 | `"jwt:<claim>"` | String claim from JWT context | Client IP | Requires auth middleware upstream; non-string claim falls back to IP |
 
@@ -81,7 +81,7 @@ The `key` field selects how requests are bucketed:
 | Distinct scopes | Same key, separate buckets | ✅ `TestRateLimiterScopesDoNotCollide` |
 | Config reload with new rate/burst | Existing bucket updated in place | ✅ `TestRateLimiterReloadUpdatesBucketParams` |
 | Idle bucket TTL expiry | Bucket evicted, memory bounded | ✅ `TestRateLimiterEviction` |
-| IP key extraction | Strips port, uses transport peer | ✅ `TestRateKeyFuncIP` |
+| IP key extraction | Canonical client address, one normalization for IPv4 and IPv6 | ✅ `TestRateKeyFuncIP`, `TestRateLimitKeyUsesCanonicalClient` |
 | Header key with missing header | Falls back to client IP | ✅ `TestRateKeyFuncHeader` |
 | JWT key with no auth context | Falls back to client IP | ✅ `TestRateKeyFuncJWTFallsBackToIP` |
 | JWT key with string claim | Uses claim value | ✅ `TestRateKeyFuncJWTReadsClaim` |
@@ -185,7 +185,7 @@ At 10 000 req/s per key the overhead is well under 1 % of request lifecycle.
 
 | Threat | Risk | Mitigation |
 | --- | --- | --- |
-| **IP spoofing via `X-Forwarded-For`** | Attacker bypasses per-IP limiting by faking the forwarded header | The IP key always uses the **transport peer** (`RemoteAddr`); `X-Forwarded-For` is never consulted implicitly.  Place a trusted proxy in front and use `header:X-Real-Ip` if you need client-origin limiting |
+| **IP spoofing via `X-Forwarded-For`** | Attacker bypasses per-IP limiting by faking the forwarded header | The IP key uses the **canonical client address**, which is the transport peer unless the immediate peer is listed in the listener's [`trusted_proxies`](configuration.md#client-address-and-trusted-proxies). An unlisted sender's header is ignored entirely, so a client cannot choose its own bucket. Behind a real proxy, declare it in `client_address` — do **not** key on a raw header for this |
 | **Key collision across scopes** | A per-location limiter accidentally shares buckets with the global limiter | `Scoped` namespaces keys with a null-terminated prefix; distinct scopes never collide |
 | **Memory exhaustion from churny keys** | An attacker rotates keys (e.g. spoofed headers, IPv6 rotation) to create unlimited buckets | Buckets are **evicted after idle TTL** (default 10 min); janitor runs every minute |
 | **Slowloris / connection exhaustion** | Attacker opens many idle connections without sending requests | `max_conns` caps concurrent connections per listener; excess connections wait |

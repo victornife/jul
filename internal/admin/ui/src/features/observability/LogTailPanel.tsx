@@ -20,14 +20,17 @@ function statusColor(status: number): string {
 }
 
 function haystack(e: LogEntry): string {
-  return [e.method, e.path, e.host, String(e.status), e.remote ?? "", e.proto ?? ""]
+  return [e.method, e.path, e.host, String(e.status), e.client_ip ?? "", e.peer_ip ?? "", e.proto ?? ""]
     .join(" ")
     .toLowerCase();
 }
 
 function LogRow({ row }: { readonly row: Row }) {
   const time = new Date(row.time).toLocaleTimeString();
-  const meta = [row.host, row.remote ?? "", row.user_agent ?? ""].filter(Boolean).join(" · ");
+  // The peer is shown after the client only when a trusted proxy made them
+  // differ, matching the access log's "omit what adds nothing" rule.
+  const addr = row.peer_ip ? `${row.client_ip ?? ""} via ${row.peer_ip}` : (row.client_ip ?? "");
+  const meta = [row.host, addr, row.user_agent ?? ""].filter(Boolean).join(" · ");
   return (
     <li className="flex gap-3 border-b border-jul-border px-4 py-1.5 font-mono text-xs last:border-b-0">
       <span className="shrink-0 text-jul-muted">{time}</span>

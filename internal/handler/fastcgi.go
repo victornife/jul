@@ -225,11 +225,25 @@ func buildCGIParams(loc config.LocationConfig, r *http.Request) map[string]strin
 	p["SERVER_NAME"] = host
 	p["SERVER_PORT"] = port
 
-	if ra, rp, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		p["REMOTE_ADDR"] = ra
-		p["REMOTE_PORT"] = rp
-	} else {
+	// REMOTE_ADDR is the canonical client: the transport peer unless the
+	// listener explicitly trusts the peer as a proxy. REMOTE_PORT stays the
+	// transport port, which is the only port that exists — an asserted client
+	// address carries none. JUL_PEER_ADDR keeps the direct peer available to
+	// the application as a separate fact.
+	client, peer := forwardedAddrs(r)
+	switch {
+	case client != "":
+		p["REMOTE_ADDR"] = client
+	case peer != "":
+		p["REMOTE_ADDR"] = peer
+	default:
 		p["REMOTE_ADDR"] = r.RemoteAddr
+	}
+	if peer != "" {
+		p["JUL_PEER_ADDR"] = peer
+	}
+	if _, rp, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		p["REMOTE_PORT"] = rp
 	}
 
 	scheme := "http"
@@ -250,6 +264,13 @@ func buildCGIParams(loc config.LocationConfig, r *http.Request) map[string]strin
 	for name, vals := range r.Header {
 		key := "HTTP_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 		p[key] = strings.Join(vals, ", ")
+	}
+	// The inbound chain is attacker input unless it came from a trusted proxy,
+	// and the application cannot tell the difference. Overwrite it with Jul's
+	// own trusted chain rather than laundering what arrived.
+	p["HTTP_X_FORWARDED_FOR"] = forwardedChain(client, peer)
+	if p["HTTP_X_FORWARDED_FOR"] == "" {
+		delete(p, "HTTP_X_FORWARDED_FOR")
 	}
 
 	// fastcgi_params doubles as the explicit param override map for uWSGI.

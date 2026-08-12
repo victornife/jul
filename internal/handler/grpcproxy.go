@@ -58,7 +58,7 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
-			pr.SetXForwarded()
+			setCanonicalXForwarded(pr)
 			applyProxyHeaders(pr, loc)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

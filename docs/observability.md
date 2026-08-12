@@ -182,15 +182,26 @@ no-ops and produce lint warnings.
 
 ### Access-log fields
 
-Each access-log entry includes:
+Each access record carries:
 
-- `ts` — ISO 8601 timestamp
-- `method`, `path`, `host`, `remote_addr`
-- `status`, `bytes_sent`, `duration_ms`
-- `upstream_addr`, `upstream_status`, `upstream_duration_ms` (when proxied)
-- `cache` — `HIT`, `MISS`, `STALE`, `REVALIDATED`, or `BYPASS`
+- `method`, `host`, `path`, `query`
+- `status`, `bytes`, `duration_ms`
+- `client_ip` — the **canonical client address** derived by the listener's
+  [`client_address`](configuration.md#client-address-and-trusted-proxies)
+  policy: the transport peer unless that peer is a declared trusted proxy
+- `peer_ip` — the **direct transport peer**, emitted only when it differs from
+  `client_ip` (that is, only when a trusted proxy asserted a client address),
+  following the same "omit what adds nothing" rule as `trace_id`
+- `request_id`, `user_agent`
 - `trace_id` — when tracing is active
-- `error` — when the request failed with an error
+
+There is no `remote` field: it was ambiguous about which of the two addresses it
+meant, and the two are now named explicitly. A direct deployment emits
+`client_ip` alone, with the same value the old field carried.
+
+The Console Operations Log tail projects the same record with paths redacted,
+query strings dropped and User-Agents reduced to a coarse family; it carries
+`client_ip` and the conditional `peer_ip` under those names too.
 
 ### WAF matched-rule logs
 

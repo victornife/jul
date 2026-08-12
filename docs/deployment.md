@@ -206,6 +206,11 @@ listen = ":443"
 trusted_proxies = ["10.0.0.0/8"]      # your load balancer subnet, nothing wider
 ```
 
+Once declared, the same address is used everywhere: CIDR authentication, IP
+rate-limit buckets, WAF rules, the access log's `client_ip`, the
+`X-Forwarded-For` sent to your backends, and the FastCGI `REMOTE_ADDR`. Until
+you declare it, all of those describe the proxy.
+
 Rules of thumb:
 
 - **List addresses you control.** `trusted_proxies` is a security boundary:

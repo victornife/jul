@@ -62,8 +62,11 @@ func TestAccessLogFanOut(t *testing.T) {
 	if rec.Bytes != 5 {
 		t.Errorf("Bytes = %d, want 5", rec.Bytes)
 	}
-	if rec.Remote != "192.0.2.1" {
-		t.Errorf("Remote = %q, want 192.0.2.1", rec.Remote)
+	if rec.Client != "192.0.2.1" {
+		t.Errorf("Client = %q, want 192.0.2.1", rec.Client)
+	}
+	if rec.Peer != "192.0.2.1" {
+		t.Errorf("Peer = %q, want 192.0.2.1", rec.Peer)
 	}
 	if rec.UserAgent != "test-agent" {
 		t.Errorf("UserAgent = %q, want test-agent", rec.UserAgent)

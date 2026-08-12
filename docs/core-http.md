@@ -120,12 +120,53 @@ transport that picks a backend from the named (or anonymous) upstream pool.
 | Aspect | Behaviour |
 | --- | --- |
 | Target | `proxy_pass` references a named upstream or a single hardcoded backend (static config only) |
-| Forwarded headers | `X-Forwarded-For` regenerated; `$proxy_add_x_forwarded_for`, `$remote_addr`, `$host`, `$scheme`, `$ssl_client_*` expandable in custom `headers` |
+| Forwarded headers | `X-Forwarded-*` regenerated from Jul's own view of the request (see [Forwarded headers to the backend](#forwarded-headers-to-the-backend)); `$proxy_add_x_forwarded_for`, `$remote_addr`, `$realip_remote_addr`, `$host`, `$scheme`, `$ssl_client_*` expandable in custom `headers` |
 | Failover | one retry per backend, **idempotent methods only** (GET/HEAD/OPTIONS/TRACE/PUT/DELETE) and only when the body is re-readable |
 | Timeouts | `proxy_connect_timeout` (default 10s); `proxy_read_timeout` / `proxy_send_timeout` are per-read / per-write **inactivity** bounds (NGINX semantics) — they cap the gap between successive reads of the response (headers and slow-trickle body) or writes of the request, not the total transfer, so a steady stream is never cut off; both default to unbounded. 90s idle keep-alive |
 | Connection reuse | `MaxIdleConns` 100, `MaxIdleConnsPerHost` 32, HTTP/2 attempted |
 | WebSocket / SSE | `Connection: Upgrade` (HTTP `101`) spliced bidirectionally; `text/event-stream` and chunked responses streamed (flushed per write, never buffered). Both work with `cache = true`: an upgrade bypasses the cache and an event stream is never stored |
 | Error mapping | 503 no backend, 504 timeout, 502 connection error |
+
+### Forwarded headers to the backend
+
+Every inbound `X-Forwarded-*` header is discarded and replaced. What Jul sends
+is built from its own trusted knowledge — the canonical client derived by the
+listener's [`client_address`](configuration.md#client-address-and-trusted-proxies)
+policy, and the peer the request actually arrived from — never by appending to
+what the client sent.
+
+```
+X-Forwarded-For: <canonical client>, <direct peer>
+```
+
+The peer is omitted when it equals the client, which is the direct case. Exact
+emission per deployment shape:
+
+| Inbound | Emitted `X-Forwarded-For` |
+| --- | --- |
+| Direct client `C`, no policy | `C` |
+| Direct client `C` sending `X-Forwarded-For: 10.9.9.9` | `C` — the spoofed chain is discarded |
+| Client `C` → trusted proxy `P` → Jul | `C, P` |
+| Client `C` → trusted `P1` → trusted `P2` → Jul | `C, P2` — intermediate trusted hops are dropped |
+| Untrusted peer `X` asserting `C` | `X` |
+| Trusted peer `P` sending a malformed chain | `P` |
+
+**The multi-proxy case is deliberately lossy.** Jul is the last hop before the
+backend, and reconstructing the full inbound chain would re-inject third-party
+data into a channel the backend authenticates. Full fidelity is restorable later
+without a breaking change.
+
+The NGINX-compatible variables follow the same model:
+
+| Variable | Value |
+| --- | --- |
+| `$remote_addr` | the **canonical client**, matching NGINX with its realip module configured — which is what `client_address` expresses. With no trusted proxy it is the transport peer, so a direct deployment is unchanged. |
+| `$realip_remote_addr` | the **direct transport peer**, NGINX's own name for the address the connection came from |
+| `$proxy_add_x_forwarded_for` | the same trusted chain shown above |
+
+Custom `headers` are applied **after** the forwarding headers are constructed,
+so an explicit operator value wins — and only an operator can set one. Nothing a
+client sends can reintroduce itself into a forwarded header.
 
 ### WebSocket & streaming passthrough
 
@@ -181,6 +222,19 @@ matrix in `internal/respwriter`.
 | Param overrides | `fastcgi_params` (last write wins) | — |
 
 > **SCGI is not implemented.**
+
+### Client address in the CGI environment
+
+| Param | Value |
+| --- | --- |
+| `REMOTE_ADDR` | the canonical client derived by the listener's [`client_address`](configuration.md#client-address-and-trusted-proxies) policy — the transport peer unless the peer is a trusted proxy |
+| `REMOTE_PORT` | the transport port. An address asserted by a proxy carries no port, so this always describes the real connection. |
+| `JUL_PEER_ADDR` | the direct transport peer, always available as a separate fact |
+| `HTTP_X_FORWARDED_FOR` | **overwritten** with Jul's own trusted chain, exactly as sent to a proxied backend |
+
+The inbound `X-Forwarded-For` is never passed through: the application cannot
+tell a trusted chain from an attacker-supplied one, so Jul replaces it with what
+it knows rather than laundering client input into the CGI environment.
 
 ## Load balancing
 
