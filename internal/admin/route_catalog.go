@@ -355,6 +355,33 @@ var Catalog = []RouteSpec{
 		Permission: rbac.ConfigApply,
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatchApply) },
 	},
+	// The trusted-proxy policy is listener scoped and privilege-escalation
+	// adjacent, so it is written through its own route with its own permission
+	// (config:trust) rather than through the general patch surface. Reading it
+	// back needs only config:read.
+	{
+		Pattern:    "/api/listeners",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.ConfigRead,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleListenersList) },
+	},
+	{
+		Pattern: "/api/listeners/{addr}/client_address",
+		Methods: []string{http.MethodGet, http.MethodPatch},
+		Permissions: map[string]rbac.Permission{
+			http.MethodGet:   rbac.ConfigRead,
+			http.MethodPatch: rbac.ConfigTrust,
+		},
+		Handler: func(s *Server) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					s.handleListenerClientAddressRead(w, r)
+					return
+				}
+				s.handleListenerClientAddress(w, r)
+			})
+		},
+	},
 	{
 		Pattern:    "/api/config/pending-restart/discard",
 		Methods:    []string{http.MethodPost},

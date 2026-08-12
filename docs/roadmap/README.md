@@ -158,8 +158,13 @@ implemented as #135 → #136 → #259.
 - ~~Right-to-left trusted-hop evaluation~~ — delivered by #135.
 - ~~One canonical effective client identity used by auth, rate limiting, WAF,
   access logs, diagnostics, and upstream forwarding~~ — derived and published by
-  #135, and adopted by every consumer in #136. The typed API, Console surface,
-  importer coverage and multi-proxy E2E close the capability in #259.
+  #135, adopted by every consumer in #136, and closed out by #259 with the
+  listener-granularity API, the Console editor, the NGINX realip import and the
+  multi-proxy H1/H2/H3 end-to-end coverage.
+
+Inbound identity is complete. The capability ships as **Beta** (see
+[status.md](../status.md)): it is merged but not yet tagged, released or soaked,
+so the post-GA soak gate is open by definition.
 
 ### Backend transport trust
 

@@ -534,6 +534,9 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		c.Streams = append(c.Streams[:idx], c.Streams[idx+1:]...)
 		return fmt.Sprintf("stream %s removed", streamSummary(st)), nil
 
+	case "listener_set_client_address":
+		return applyListenerClientAddress(c, req)
+
 	case "server_set_client_auth":
 		if req.ClientAuth == nil {
 			return "", fmt.Errorf("server_set_client_auth: client_auth is required")

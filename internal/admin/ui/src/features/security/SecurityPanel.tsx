@@ -5,7 +5,16 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSecurity, type SecurityProjection, type LocationWAF, type RBACPosture, type EgressProjection } from "@/api/client.ts";
+import {
+  fetchSecurity,
+  fetchListeners,
+  type SecurityProjection,
+  type LocationWAF,
+  type RBACPosture,
+  type EgressProjection,
+  type ListenerClientAddress,
+} from "@/api/client.ts";
+import { ClientAddressEditor } from "@/features/security/ClientAddressEditor.tsx";
 import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
@@ -186,14 +195,29 @@ function EgressDocsLink() {
   );
 }
 
+// clientAddressSummary describes one listener's trusted-proxy posture in
+// bounded terms: how many ranges it trusts and which header preference applies.
+// The ranges themselves are configuration the operator wrote, so showing them is
+// safe; nothing request-derived ever appears here.
+function clientAddressSummary(l: ListenerClientAddress): string {
+  if (!l.configured || l.trusted_proxies.length === 0) return "no proxy trusted";
+  const ranges = `${String(l.trusted_proxies.length)} range${l.trusted_proxies.length === 1 ? "" : "s"}`;
+  const headers = l.headers_disabled ? "headers off" : l.forwarded_headers.join(", ");
+  return `${ranges} · ${headers} · max ${String(l.max_hops)} hops`;
+}
+
 export function SecurityPanel() {
   const [editingWAF, setEditingWAF] = useState(false);
+  const [editingClientAddress, setEditingClientAddress] = useState<ListenerClientAddress | null>(
+    null,
+  );
   const [editingLocationWAF, setEditingLocationWAF] = useState<LocationWAF | null>(null);
   const [externalizing, setExternalizing] = useState(false);
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["security"],
     queryFn: fetchSecurity,
   });
+  const listeners = useQuery({ queryKey: ["listeners"], queryFn: fetchListeners });
 
   if (isLoading) return <Loading label="Loading security…" />;
   if (isError || !data)
@@ -305,6 +329,40 @@ export function SecurityPanel() {
             </span>
           </Row>
         )}
+        <Row label="Trusted client address">
+          <span className="flex w-full flex-col gap-1">
+            {(listeners.data ?? []).length === 0 ? (
+              <span className="text-jul-muted text-xs">no listeners</span>
+            ) : (
+              (listeners.data ?? []).map((l) => (
+                <span key={l.listen} className="flex items-center gap-2 text-xs">
+                  <span className="font-mono text-jul-text">{l.listen}</span>
+                  <span className={l.configured ? "text-jul-text" : "text-jul-muted"}>
+                    {clientAddressSummary(l)}
+                  </span>
+                  {l.trusts_every_client && (
+                    <span className="rounded-full bg-jul-warning/15 px-2 py-0.5 text-jul-warning">
+                      trusts every client
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingClientAddress(l);
+                    }}
+                    className="ml-auto shrink-0 rounded-md border border-jul-border px-2 py-0.5 text-jul-text hover:bg-jul-bg"
+                  >
+                    {l.configured ? "Edit" : "Configure"}
+                  </button>
+                </span>
+              ))
+            )}
+            <span className="text-jul-muted text-xs">
+              Forwarding headers are ignored unless the immediate peer is one of these ranges. This
+              is a security boundary: keep it as narrow as the deployment allows.
+            </span>
+          </span>
+        </Row>
         <Row label="Secret references">
           <span className="flex w-full items-center gap-2">
             {data.secret_refs > 0 ? (
@@ -352,6 +410,15 @@ export function SecurityPanel() {
           target={editingLocationWAF}
           onClose={() => {
             setEditingLocationWAF(null);
+          }}
+        />
+      )}
+
+      {editingClientAddress && (
+        <ClientAddressEditor
+          listener={editingClientAddress}
+          onClose={() => {
+            setEditingClientAddress(null);
           }}
         />
       )}

@@ -427,3 +427,62 @@ func upstreamReferences(c *config.Config, name string) []string {
 	}
 	return refs
 }
+
+// applyListenerClientAddress writes one trusted-proxy policy to every server
+// block sharing req.Listen.
+//
+// The policy is listener scoped by construction: identity is derived per listen
+// address before the Host header selects a block, and configuration validation
+// rejects siblings that disagree. Writing every block in one operation is
+// therefore the only way to express the change; a per-block edit would either
+// be rejected by validation or, worse, describe a policy that is not the one
+// applied. A nil payload clears the policy from every block, returning the
+// listener to peer-only identity.
+func applyListenerClientAddress(c *config.Config, req patchRequest) (string, error) {
+	addr := strings.TrimSpace(req.Listen)
+	if addr == "" {
+		return "", fmt.Errorf("listener_set_client_address: listen is required")
+	}
+	idx := make([]int, 0, len(c.Servers))
+	for i := range c.Servers {
+		if strings.TrimSpace(c.Servers[i].Listen) == addr {
+			idx = append(idx, i)
+		}
+	}
+	if len(idx) == 0 {
+		return "", fmt.Errorf("listener_set_client_address: no server block listens on %s", addr)
+	}
+
+	if req.ClientAddress == nil {
+		for _, i := range idx {
+			c.Servers[i].ClientAddress = nil
+		}
+		return fmt.Sprintf("listener %s trusted-proxy policy cleared on %s", addr, countUnit(len(idx), "server block")), nil
+	}
+
+	policy := config.ClientAddressConfig{
+		TrustedProxies: normalizeStringSlice(req.ClientAddress.TrustedProxies),
+	}
+	if req.ClientAddress.ForwardedHeaders != nil {
+		// Preserve the empty-versus-omitted distinction: an explicit [] means
+		// no forwarding header is read at all.
+		headers := *req.ClientAddress.ForwardedHeaders
+		policy.ForwardedHeaders = make([]string, 0, len(headers))
+		for _, h := range headers {
+			policy.ForwardedHeaders = append(policy.ForwardedHeaders, strings.TrimSpace(h))
+		}
+	}
+	if req.ClientAddress.MaxHops != nil {
+		policy.MaxHops = *req.ClientAddress.MaxHops
+	}
+	for _, i := range idx {
+		p := policy
+		p.TrustedProxies = append([]string(nil), policy.TrustedProxies...)
+		if policy.ForwardedHeaders != nil {
+			p.ForwardedHeaders = append([]string{}, policy.ForwardedHeaders...)
+		}
+		c.Servers[i].ClientAddress = &p
+	}
+	return fmt.Sprintf("listener %s trusts %s on %s", addr,
+		countUnit(len(policy.TrustedProxies), "proxy range"), countUnit(len(idx), "server block")), nil
+}

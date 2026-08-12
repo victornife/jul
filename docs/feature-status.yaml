@@ -196,3 +196,22 @@ features:
       and burn-in soak evidence; no custom benchmark target because reload
       latency is recorded by LastReload and the burn-in generator. Fuzzing is
       not applicable (no parser).
+
+  - id: CGC-IN
+    name: "Trusted client address (client_address)"
+    tags: ["core"]
+    maturity: Beta
+    doc: configuration.md
+    criteria: {1: true, 2: true, 3: true, 4: true, 5: false, 6: true, 7: true, 8: true, 9: true}
+    notes: >
+      Beta, not GA: the capability is merged under CHANGELOG [Unreleased] and
+      has not been tagged, released or soaked, so criterion 5 (the post-GA soak
+      gate) is open by definition. Criterion 1 is the derivation algorithm and
+      per-deployment forwarded-chain matrix in docs/configuration.md and
+      docs/core-http.md; criterion 2 is BenchmarkDeriveDirect (~9 ns/op, zero
+      allocations) and BenchmarkDeriveProxied (~265 ns/op) in
+      docs/benchmarks.md; criterion 4 is the lifecycle registry entries plus the
+      docs/config-value-contract.json dispositions; criterion 7 is the ADR 0016
+      threat model with SECURITY.md and docs/security-posture.md; criterion 8 is
+      FuzzDerive and FuzzParsePrefix in internal/clientaddr; criterion 9 is the
+      Security panel listener editor and the Trusted client address status row.

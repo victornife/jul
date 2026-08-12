@@ -26,6 +26,13 @@ const (
 	ConfigWrite Permission = "config:write"
 	// ConfigApply allows applying/reloading or staging a configuration change.
 	ConfigApply Permission = "config:apply"
+	// ConfigTrust allows changing a listener's trusted-proxy policy
+	// ([servers.client_address]). It is separate from ConfigWrite because
+	// widening trusted_proxies lets the named range assert any client address
+	// to CIDR authentication, rate limiting, the WAF and the audit trail — a
+	// privilege-escalation-adjacent change that deserves its own grant and its
+	// own audit category. No predefined role except admin holds it.
+	ConfigTrust Permission = "config:trust"
 	// HistoryRead allows listing configuration history metadata.
 	HistoryRead Permission = "history:read"
 	// HistoryReadRaw allows reading the raw TOML body of a historical snapshot.
@@ -61,6 +68,7 @@ var catalog = []Permission{
 	ConfigRaw,
 	ConfigWrite,
 	ConfigApply,
+	ConfigTrust,
 	HistoryRead,
 	HistoryReadRaw,
 	HistoryRollback,

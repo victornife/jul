@@ -646,6 +646,36 @@ rejects a config that enables the WAF (globally or per location), so the Securit
 panel warns up front and an apply diff flags the enable — matching the Plugins
 and Streams panels.
 
+### Trusted client address
+
+The Security panel lists every listen address with its trusted-proxy posture:
+how many ranges it trusts, which forwarding-header preference applies, and the
+hop limit. A range covering the whole address space is badged **trusts every
+client**, mirroring the `jul lint` finding, because such a range lets any client
+assert any address.
+
+The editor is **listener scoped**, and says so: the change is applied to every
+`[[servers]]` block on that address in one operation, because Jul derives the
+client address before the `Host` header selects a block. Editing "a virtual
+host's" policy in isolation is not a thing that exists.
+
+Three properties of the editor are deliberate:
+
+- **It validates nothing locally.** CIDR canonicalisation, the header enum and
+  the hop range are checked by the server, and its error is what the operator
+  sees — so the Console can never disagree with the configuration it edits.
+- **"None — always use the transport peer" is a real setting**, distinct from
+  leaving the preference at its default. It sends an explicitly empty header
+  list, which means no forwarding header is read even from a trusted peer.
+- **It requires its own permission,** `config:trust`, not `config:write`.
+  Widening `trusted_proxies` lets the named range assert any client address to
+  authentication, rate limiting, the WAF and the audit trail, so it is held to a
+  separate grant and recorded under its own audit category
+  (`config.client_address`). No predefined role except `admin` holds it.
+
+**Trust no proxy** clears the policy from every block on the listener, returning
+it to peer-only identity.
+
 ### Audit log
 
 Security- and config-relevant actions (apply, rollback, reload, auth failures)
@@ -772,7 +802,7 @@ consumes the endpoints below.
 | Routes | `GET /api/routes`, `POST /api/routes/test` |
 | Apps & Upstreams | `GET /api/apps` |
 | TLS & Certificates | `GET /api/tls`, `GET /api/certs`, `GET /api/mtls` |
-| Security | `GET /api/security` |
+| Security | `GET /api/security`, `GET /api/listeners`, `GET`/`PATCH /api/listeners/{addr}/client_address` |
 | Traffic Controls | `GET /api/traffic-controls` |
 | Plugins | `GET /api/plugins`, `POST /api/plugins/upload` |
 | Streams | `GET /api/streams` |
