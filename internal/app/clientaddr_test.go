@@ -149,3 +149,78 @@ func TestGlobalChainIdentityIsIndependentOfHost(t *testing.T) {
 		}
 	}
 }
+
+// TestClientAddressPolicyReloadUnderLiveTraffic proves that a policy change
+// takes effect through ordinary handler generation, with in-flight requests
+// continuing against the generation they started on.
+//
+// It uses Prepare/commit directly — the same seam the reload transaction uses —
+// so the assertion is about the real publication boundary rather than a
+// simulated one.
+func TestClientAddressPolicyReloadUnderLiveTraffic(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	withPolicy := func(trusted []string) *config.Config {
+		cfg := config.ProxyTarget("127.0.0.1:9001", "127.0.0.1:0")
+		if trusted != nil {
+			cfg.Servers[0].ClientAddress = &config.ClientAddressConfig{TrustedProxies: trusted}
+		}
+		return cfg
+	}
+
+	// Generation 1: no proxy trusted.
+	policy, err := ClientAddressPolicy(withPolicy(nil).Servers, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("initial policy: %v", err)
+	}
+	var got clientaddr.Identity
+	probe := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got, _ = clientaddr.FromContext(r.Context())
+	})
+	live := middleware.Chain(probe, f.globalChain(policy, nil)...)
+
+	req := func() *http.Request { return request("10.1.2.3:5555", "198.51.100.9") }
+	live.ServeHTTP(httptest.NewRecorder(), req())
+	if got.Client.String() != "10.1.2.3" || got.Result != clientaddr.ResultAccepted {
+		t.Fatalf("before reload: %+v, want the peer", got)
+	}
+
+	// Generation 2: the proxy becomes trusted. Preparing must succeed and the
+	// new chain must derive the asserted client.
+	candidate := withPolicy([]string{"10.0.0.0/8"})
+	_, _, commitFn, abortFn, err := f.Prepare(t.Context(), candidate)
+	if err != nil {
+		t.Fatalf("Prepare with a new policy: %v", err)
+	}
+	if _, retire := commitFn(); retire != nil {
+		retire()
+	}
+	_ = abortFn
+
+	next, err := ClientAddressPolicy(candidate.Servers, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reloaded policy: %v", err)
+	}
+	middleware.Chain(probe, f.globalChain(next, nil)...).ServeHTTP(httptest.NewRecorder(), req())
+	if got.Client.String() != "198.51.100.9" || got.Source != clientaddr.SourceXFF {
+		t.Fatalf("after reload: %+v, want the asserted client", got)
+	}
+
+	// The retired generation keeps deriving what it was built with, which is
+	// what lets an in-flight request finish coherently.
+	live.ServeHTTP(httptest.NewRecorder(), req())
+	if got.Client.String() != "10.1.2.3" {
+		t.Fatalf("retired generation changed behaviour mid-flight: %+v", got)
+	}
+
+	// A malformed policy must abort the reload before anything is published.
+	bad := withPolicy([]string{"10.1.2.3/8"})
+	if _, _, _, _, err := f.Prepare(t.Context(), bad); err == nil {
+		t.Fatal("Prepare accepted a policy that cannot compile")
+	}
+	middleware.Chain(probe, f.globalChain(next, nil)...).ServeHTTP(httptest.NewRecorder(), req())
+	if got.Client.String() != "198.51.100.9" {
+		t.Fatalf("a failed reload disturbed the live policy: %+v", got)
+	}
+}

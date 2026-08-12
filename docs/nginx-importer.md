@@ -45,6 +45,7 @@ reported in `Skipped` for manual porting.
 | `server` | ✅ | Translated to `[[servers]]` |
 | `upstream` | ✅ | Translated to `[[upstreams]]`; supports `round_robin`, `least_conn`, and `weighted_round_robin` |
 | `gzip` | ✅ | `gzip on` → `[compression] enabled = true` |
+| `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | Translated to `[servers.client_address]` and inherited by every server block — see [realip](#realip-set_real_ip_from--real_ip_header) |
 | `include` | ❌ | Reported; operator must import each included file separately |
 | `map`, `geo`, `split_clients` | ❌ | Reported |
 
@@ -61,6 +62,7 @@ reported in `Skipped` for manual porting.
 | `ssl_certificate_key` | ✅ | → `servers.tls.key` |
 | `ssl_protocols` | ⚠️ | Mapped to `tls.min_version` (`1.2` or `1.3`). Legacy protocols (`TLSv1`, `TLSv1.1`) raise the floor to `1.2` with a note. |
 | `return` | ⚠️ | Synthesises a catch-all `/` location.  Jul.IA evaluates locations before return, so order may differ from nginx; a note is emitted. |
+| `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | Translated to `[servers.client_address]` — see [realip](#realip-set_real_ip_from--real_ip_header) |
 | `if`, `rewrite` | ❌ | Reported at server level |
 
 ### `location` block
@@ -96,6 +98,50 @@ reported in `Skipped` for manual porting.
 | `~` | `regex` | |
 | `~*` | `regex` | Case-insensitivity is **not** preserved; noted |
 
+### realip (`set_real_ip_from` / `real_ip_header`)
+
+nginx's realip module and Jul's
+[`[servers.client_address]`](configuration.md#client-address-and-trusted-proxies)
+express the same idea — which proxies may assert a client address — so the
+mapping is direct. Jul's `$remote_addr` is the derived client and
+`$realip_remote_addr` is the socket peer, exactly as in nginx with realip
+configured, so `proxy_set_header X-Real-IP $remote_addr` and
+`X-Forwarded-For $proxy_add_x_forwarded_for` keep their meaning.
+
+| nginx | Jul.IA |
+| --- | --- |
+| `set_real_ip_from <cidr\|address>` | appended to `client_address.trusted_proxies` |
+| `real_ip_header X-Forwarded-For` | `forwarded_headers = ["x-forwarded-for"]` |
+| `real_ip_header Forwarded` | `forwarded_headers = ["forwarded"]` |
+| `real_ip_header X-Real-IP` (nginx's default) | **not supported** — reported |
+| `real_ip_header proxy_protocol` | **not supported** — reported |
+| `real_ip_recursive on` | already the default: the chain is always evaluated right to left |
+| `real_ip_recursive off` | **not supported** — reported |
+
+Four behaviours are worth knowing before importing:
+
+1. **An unsupported form emits no policy at all.** If any realip directive in a
+   scope cannot be expressed, the importer reports it and writes no
+   `[servers.client_address]` block rather than substituting a different rule.
+   A migrated server then keeps peer-only identity, which is the safe outcome.
+2. **`real_ip_header` defaults to `X-Real-IP` in nginx**, which Jul does not
+   support because a single address carries no chain to evaluate against a trust
+   boundary. A config with `set_real_ip_from` but no `real_ip_header` is
+   therefore reported, not silently translated to `X-Forwarded-For`.
+3. **The policy is hoisted to the listen address.** Jul derives the client
+   address before the `Host` header selects a server block, so one address has
+   one policy. A policy on any block is applied to every block on that address
+   and the hoist is noted. If two blocks on one address declare *different*
+   realip policies, neither is emitted and the conflict is reported — picking
+   one would silently apply it to the other, and merging them would widen trust.
+4. **A source without realip never gains trust.** No policy is invented.
+
+Outbound emission differs in one documented way: nginx's
+`$proxy_add_x_forwarded_for` appends to the inbound chain, while Jul rebuilds it
+as `<canonical client>, <direct peer>`. For a single proxy the result is
+identical; for a longer chain Jul drops the intermediate trusted hops
+deliberately (see [core-http.md](core-http.md#forwarded-headers-to-the-backend)).
+
 ## Known limitations
 
 1. **`include` is not followed.**  The importer processes a single file.  If the
@@ -113,6 +159,12 @@ reported in `Skipped` for manual porting.
 
 4. **`if` and `rewrite` inside locations are skipped.**  Complex control flow
    must be rewritten using Jul.IA rewrites, redirects, or middleware.
+
+5. **Per-virtual-host realip policies cannot be represented.**  Jul scopes the
+   trusted-proxy policy to the listen address, so a source config whose server
+   blocks on one port disagree about `set_real_ip_from` is reported instead of
+   translated.  Reconcile the policies (or split the listeners) before
+   importing.
 
 5. **Named locations (`@fallback`) are skipped.**  Error-page / named-location
    chains have no equivalent.

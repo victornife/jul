@@ -188,9 +188,28 @@ Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
 
 ## Beta (shipped; remaining GA gaps)
 
-> **All shipped features are now GA.** This section is retired.
-> See the GA table above for the canonical maturity matrix, and
-> [ga-push.md](ga-push.md) for the per-feature push plan.
+Shipped and documented, with a Console surface, but not yet released and
+therefore not yet through the post-GA soak gate. See
+[ga-push.md](ga-push.md) for the per-feature push plan.
+
+| Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
+| --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| Trusted client address (`client_address`) | CGC-IN | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [configuration.md](configuration.md) |
+
+**Trusted client address.** One canonical client address per request, derived
+per listen address from an explicit `trusted_proxies` policy before the `Host`
+header selects a server block, and read by CIDR authentication, IP rate limiting,
+the WAF, access logs, upstream forwarding and the FastCGI environment
+([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). Criterion 5
+is open because the capability is merged under `[Unreleased]` and has not been
+tagged, released or soaked — the post-GA gate cannot be claimed before a release
+exists. Everything else is met: the derivation algorithm and per-deployment
+forwarded-chain matrix ([configuration.md](configuration.md#client-address-and-trusted-proxies),
+[core-http.md](core-http.md#forwarded-headers-to-the-backend)), published
+benchmarks ([benchmarks.md](benchmarks.md)), the limitation list
+([known-limitations.md](known-limitations.md)), lifecycle and value-contract
+entries, the ADR threat model, `FuzzDerive`/`FuzzParsePrefix`, and the Security
+panel listener editor with its status row.
 
 ## Changelog
 

@@ -26,6 +26,8 @@ Each benchmark is named `Benchmark<Subsystem><Scenario>`. They are end-to-end wh
 
 | Package | Benchmark | What it measures | Typical use |
 | --- | --- | --- | --- |
+| `internal/clientaddr` | `BenchmarkDeriveDirect` | Canonical client derivation with no trusted proxy | Per-request cost on a directly exposed listener (~9 ns/op, 0 allocs — headers are never read) |
+| `internal/clientaddr` | `BenchmarkDeriveProxied` | Derivation of a two-hop `X-Forwarded-For` chain from a trusted peer | Per-request cost behind a proxy (~265 ns/op, 2 allocs) |
 | `internal/auth` | `BenchmarkBasicVerify` | bcrypt cost of a Basic auth check | Tune `bcrypt_cost` vs login latency |
 | `internal/auth` | `BenchmarkJWTValidate` | RS256 signature verification (cached JWKS) | JWT overhead per request |
 | `internal/handler` | `BenchmarkStaticServe` | End-to-end static file serve (open, MIME, ETag, `ServeContent`) | Static asset throughput baseline |

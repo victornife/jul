@@ -2839,3 +2839,54 @@ export async function uploadTranscodeDescriptor(file: File): Promise<TranscodeDe
   const data = (await resp.json()) as unknown;
   return TranscodeDescriptorResponseSchema.parse(data);
 }
+
+// ── Listener trusted-proxy policy (client_address) ───────────────────────────
+//
+// Mirrors admin.ListenerClientAddress. The policy is listener scoped because
+// Jul derives the client address before the Host header selects a server block,
+// so one address has exactly one policy however many virtual hosts share it.
+export const ListenerClientAddressSchema = z.object({
+  listen: z.string(),
+  server_blocks: z.number(),
+  configured: z.boolean(),
+  trusted_proxies: z.array(z.string()).default([]),
+  forwarded_headers: z.array(z.string()).default([]),
+  max_hops: z.number(),
+  // headers_disabled distinguishes an explicitly empty forwarded_headers list
+  // (read no forwarding header at all) from an omitted one (use the default
+  // preference). Collapsing them would silently change a security setting.
+  headers_disabled: z.boolean().default(false),
+  // trusts_every_client mirrors the `jul lint` finding for a range covering the
+  // whole address space.
+  trusts_every_client: z.boolean().default(false),
+});
+export type ListenerClientAddress = z.infer<typeof ListenerClientAddressSchema>;
+
+export function fetchListeners(): Promise<ListenerClientAddress[]> {
+  return api<unknown>("/listeners").then((d) => z.array(ListenerClientAddressSchema).parse(d));
+}
+
+/** The wire shape of a trusted-proxy policy edit. null clears the policy. */
+export interface ClientAddressPolicyInput {
+  readonly trusted_proxies: string[];
+  readonly forwarded_headers?: string[];
+  readonly max_hops?: number;
+}
+
+/**
+ * Applies one trusted-proxy policy to every server block on a listener.
+ *
+ * The Console deliberately performs no CIDR or enum validation of its own: the
+ * server validates the whole candidate and its error is what the operator sees,
+ * so the two can never disagree about what is acceptable.
+ */
+export function patchListenerClientAddress(
+  listen: string,
+  policy: ClientAddressPolicyInput | null,
+): Promise<ApplyResult> {
+  return api<unknown>(`/listeners/${encodeURIComponent(listen)}/client_address`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_address: policy }),
+  }).then((d) => ApplyResultSchema.parse(d));
+}

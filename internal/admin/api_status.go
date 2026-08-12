@@ -98,22 +98,26 @@ func countUnit(n int, unit string) string {
 // and assert it in TestStatusAPI; do not ship the feature without it.
 func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	var (
-		tlsServers      int
-		mtlsServers     int
-		acmeServers     int
-		http3Servers    int
-		h2cServers      int
-		staticLocs      int
-		proxyLocs       int
-		fastcgiLocs     int
-		grpcProxy       int
-		grpcTranscode   int
-		authLocs        int
-		requireCertLocs int
-		cacheLocs       int
-		pluginLocs      int
-		totalLocs       int
+		tlsServers       int
+		mtlsServers      int
+		acmeServers      int
+		http3Servers     int
+		h2cServers       int
+		trustedListeners int
+		trustedRanges    int
+		openTrust        bool
+		staticLocs       int
+		proxyLocs        int
+		fastcgiLocs      int
+		grpcProxy        int
+		grpcTranscode    int
+		authLocs         int
+		requireCertLocs  int
+		cacheLocs        int
+		pluginLocs       int
+		totalLocs        int
 	)
+	trustedAddrs := map[string]bool{}
 	for i := range c.Servers {
 		srv := &c.Servers[i]
 		if srv.TLS != nil && srv.TLS.Enabled {
@@ -130,6 +134,19 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 		if srv.H2C {
 			h2cServers++
+		}
+		if srv.ClientAddress != nil && len(srv.ClientAddress.TrustedProxies) > 0 {
+			// Counted per listen address, not per block: the policy is
+			// listener scoped and validation requires siblings to agree, so
+			// counting blocks would multiply one policy by its vhosts.
+			if !trustedAddrs[srv.Listen] {
+				trustedAddrs[srv.Listen] = true
+				trustedListeners++
+				trustedRanges += len(srv.ClientAddress.TrustedProxies)
+			}
+			if trustsEveryClient(srv.ClientAddress.TrustedProxies) {
+				openTrust = true
+			}
 		}
 		for j := range srv.Locations {
 			loc := &srv.Locations[j]
@@ -296,6 +313,17 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 	}
 
+	// Trusted-proxy policy detail is bounded metadata only: how many listeners
+	// declare a policy and how many ranges they cover. No address, prefix or
+	// header value is ever projected.
+	clientAddrDetail := ""
+	if trustedListeners > 0 {
+		clientAddrDetail = countUnit(trustedListeners, "listener") + ", " + countUnit(trustedRanges, "trusted range")
+		if openTrust {
+			clientAddrDetail += "; a range trusts every client"
+		}
+	}
+
 	return []FeatureStatus{
 		{Group: "Traffic", Name: "Virtual hosts", Active: len(c.Servers) > 0, Detail: vhostDetail},
 		{Group: "Traffic", Name: "Static file serving", Active: staticLocs > 0, Detail: countDetailIf(staticLocs, "location")},
@@ -310,6 +338,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Security", Name: "Automatic HTTPS (ACME)", Active: acmeServers > 0, Detail: countDetailIf(acmeServers, "server block")},
 		{Group: "Security", Name: "Access control (auth)", Active: authLocs > 0, Detail: countDetailIf(authLocs, "location")},
 		{Group: "Security", Name: "Web application firewall (WAF)", Active: wafLocs > 0, Detail: wafDetail},
+		{Group: "Security", Name: "Trusted client address", Active: trustedListeners > 0, Detail: clientAddrDetail},
 		{Group: "Security", Name: "Secret references", Active: secretRefs > 0, Detail: countDetailIf(secretRefs, "reference")},
 
 		{Group: "Protocols", Name: "HTTP/3 (QUIC)", Active: http3Servers > 0, Detail: countDetailIf(http3Servers, "server block")},

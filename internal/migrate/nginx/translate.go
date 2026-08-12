@@ -17,6 +17,9 @@ import (
 // translator accumulates a Report while walking an nginx directive tree.
 type translator struct {
 	report Report
+	// httpRealIP is the http-level realip scope, inherited by every server
+	// block exactly as nginx inherits the directives.
+	httpRealIP realIPPolicy
 }
 
 // Translate converts a parsed nginx configuration into a Jul.IA configuration,
@@ -39,6 +42,9 @@ func Translate(src *ngx.Config, source string) (out *config.Config, rep *Report)
 		switch d.GetName() {
 		case "http":
 			t.translateHTTP(d, out)
+			// The trusted-proxy policy is listener scoped, so it can only be
+			// resolved once every server block on an address is known.
+			t.hoistClientAddress(out)
 		case "stream", "mail":
 			t.report.skip(d, "the "+d.GetName()+" module is not supported")
 		case "include":
@@ -54,7 +60,16 @@ func Translate(src *ngx.Config, source string) (out *config.Config, rep *Report)
 
 // translateHTTP walks the directives inside an http block.
 func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
-	for _, c := range httpChildren(d) {
+	kids := httpChildren(d)
+	// realip directives are collected first: httpChildren yields the server
+	// blocks before their sibling directives, so a server would otherwise be
+	// translated before the http-level policy it inherits has been seen.
+	for _, c := range kids {
+		if isRealIPDirective(c.GetName()) {
+			t.realIPDirective(c.GetName(), paramValues(c), c.GetLine(), &t.httpRealIP)
+		}
+	}
+	for _, c := range kids {
 		switch c.GetName() {
 		case "server":
 			t.translateServer(c, out)
@@ -69,6 +84,9 @@ func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 		case "map", "geo", "split_clients":
 			t.report.skip(c, c.GetName()+" blocks are not supported")
 		default:
+			if isRealIPDirective(c.GetName()) {
+				continue // consumed in the pre-pass above
+			}
 			t.report.skip(c, "unsupported http-level directive")
 		}
 	}
@@ -77,6 +95,7 @@ func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 // translateServer converts one server block into a config.ServerConfig.
 func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 	var s config.ServerConfig
+	var realIP realIPPolicy
 	var tls config.TLSConfig
 	hasTLS := false
 	var serverRoot string
@@ -141,6 +160,9 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 		case "if", "rewrite":
 			t.report.skip(c, "server-level "+c.GetName()+" is not translated; port it manually")
 		default:
+			if t.realIPDirective(c.GetName(), cp, c.GetLine(), &realIP) {
+				continue
+			}
 			t.report.skip(c, "unsupported server-level directive")
 		}
 	}
@@ -179,6 +201,7 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 	if hasTLS {
 		s.TLS = &tls
 	}
+	s.ClientAddress = t.clientAddressFrom(t.httpRealIP.merge(realIP))
 	out.Servers = append(out.Servers, s)
 	t.report.Servers++
 }

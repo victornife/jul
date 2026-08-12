@@ -117,6 +117,24 @@ type patchRequest struct {
 	// field tracks presence so explicit false/zero/empty values remain distinct
 	// from omission.
 	Compression *compressionPatch `json:"compression,omitempty"`
+
+	// listener_set_client_address payload: the trusted-proxy policy applied to
+	// every server block sharing Listen. nil clears the policy from all of
+	// them, returning the listener to peer-only identity.
+	ClientAddress *clientAddressPatch `json:"client_address,omitempty"`
+}
+
+// clientAddressPatch carries the listener-scoped trusted-proxy policy.
+//
+// ForwardedHeaders is a pointer to a slice because omitting it and sending an
+// empty list mean different things: omitted keeps the default preference
+// ["forwarded", "x-forwarded-for"], while an explicit [] disables every
+// forwarding header and keeps peer-only identity even for a trusted peer.
+// Collapsing the two would silently change a security setting.
+type clientAddressPatch struct {
+	TrustedProxies   []string  `json:"trusted_proxies"`
+	ForwardedHeaders *[]string `json:"forwarded_headers,omitempty"`
+	MaxHops          *int      `json:"max_hops,omitempty"`
 }
 
 // globalPatch carries the supported non-secret [global] settings. Legacy

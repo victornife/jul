@@ -34,6 +34,16 @@ shared-token model above applies; enabling it replaces all-or-nothing access
 with least-privilege roles and attributable audit. External identity (OIDC/SSO)
 remains a [Y3-02](roadmap/) horizon item. See:
 
+One permission is deliberately outside every predefined role except `admin`:
+**`config:trust`**, required to change a listener's
+[`client_address`](configuration.md#client-address-and-trusted-proxies)
+trusted-proxy policy. Widening `trusted_proxies` lets the named range assert any
+client address to CIDR authentication, rate limiting, the WAF and the audit
+trail, so it is privilege-escalation adjacent and is held to its own grant with
+its own audit category (`config.client_address`). The check is on the effective
+configuration difference, not on the endpoint used, so the general structured
+patch surface cannot be used to route around it.
+
 - Design spec: [docs/specs/console-rbac.md](specs/console-rbac.md)
 - ADR: [docs/adr/0010-console-rbac.md](adr/0010-console-rbac.md)
 - Migration: the numbered enable → migrate → revoke procedure in [docs/console.md](console.md)

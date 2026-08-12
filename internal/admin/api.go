@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -888,6 +889,9 @@ func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Reques
 		writeForbidden(w, rbac.ConfigApply, id)
 		return false
 	}
+	if !s.authorizeTrustTransition(w, r, action, current, next) {
+		return false
+	}
 	if err := s.requireAdminManageAgainst(r, action, current, next); err != nil {
 		if authErr, ok := err.(*AuthorizationError); ok {
 			writeJSON(w, authErr.Status, map[string]string{"error": authErr.Message})
@@ -897,6 +901,54 @@ func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	return true
+}
+
+// authorizeTrustTransition requires config:trust for any change to a
+// listener's trusted-proxy policy, whatever route produced the candidate.
+//
+// Gating the dedicated endpoint alone would be theatre: the same change is
+// expressible through the generic structured patch surface, so the check is on
+// the effective difference rather than on the operation name. Widening
+// trusted_proxies lets the named range assert any client address to CIDR
+// authentication, rate limiting, the WAF and the audit trail, so it is held to
+// its own grant.
+func (s *Server) authorizeTrustTransition(w http.ResponseWriter, r *http.Request, action string, current, next *config.Config) bool {
+	if current == nil || next == nil || !clientAddressChanged(current, next) {
+		return true
+	}
+	id, ok := rbacIdentityFromRequest(r)
+	if !ok || id.Legacy || id.Has(rbac.ConfigTrust) {
+		return true
+	}
+	s.recordAudit(r, action, "config", "failure", "rejected: lacks config:trust for a trusted-proxy change")
+	writeForbidden(w, rbac.ConfigTrust, id)
+	return false
+}
+
+// clientAddressChanged reports whether any listener's effective trusted-proxy
+// policy differs between two configurations.
+func clientAddressChanged(current, next *config.Config) bool {
+	return !maps.Equal(clientAddressByListen(current), clientAddressByListen(next))
+}
+
+// clientAddressByListen renders each listen address's configured policy as a
+// comparable string. Addresses with no policy are absent rather than mapped to
+// an empty value, so renaming or adding an untrusting listener is not mistaken
+// for a trust change. Validation guarantees one policy per address, so the
+// first block that declares one is authoritative.
+func clientAddressByListen(c *config.Config) map[string]string {
+	out := make(map[string]string, len(c.Servers))
+	for i := range c.Servers {
+		addr := strings.TrimSpace(c.Servers[i].Listen)
+		if addr == "" || c.Servers[i].ClientAddress == nil {
+			continue
+		}
+		if _, seen := out[addr]; seen {
+			continue
+		}
+		out[addr] = clientAddressKey(c.Servers[i].ClientAddress)
+	}
+	return out
 }
 
 // requireAdminManageForCandidate enforces only the admin-subtree guard. It is

@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,11 +133,17 @@ func TestClientAddressParityAcrossProtocols(t *testing.T) {
 // the middle hop, and the emitted chain must be that client plus the peer —
 // with the attacker's entry and the intermediate proxy both dropped.
 func TestMultiProxyChainEndToEnd(t *testing.T) {
+	// The backend runs on its own goroutine, so what it observed is published
+	// through a mutex rather than read directly: an HTTP/3 client can return
+	// before the server-side handler goroutine has finished.
+	var mu sync.Mutex
 	var gotXFF, gotProto, gotRemote string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		gotXFF = r.Header.Get("X-Forwarded-For")
 		gotProto = r.Header.Get("X-Forwarded-Proto")
 		gotRemote = r.Header.Get("X-Test-Remote")
+		mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer backend.Close()
@@ -210,7 +217,9 @@ func TestMultiProxyChainEndToEnd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mu.Lock()
 			gotXFF, gotProto, gotRemote = "", "", ""
+			mu.Unlock()
 			req, err := http.NewRequest(http.MethodGet, tt.url+"/api", nil)
 			if err != nil {
 				t.Fatalf("NewRequest: %v", err)
@@ -228,27 +237,31 @@ func TestMultiProxyChainEndToEnd(t *testing.T) {
 			if resp.StatusCode != http.StatusNoContent {
 				t.Fatalf("status = %d, want 204", resp.StatusCode)
 			}
+			mu.Lock()
+			xff, proto, remote := gotXFF, gotProto, gotRemote
+			mu.Unlock()
+
 			// Peer is loopback; its exact form (127.0.0.1 or ::1) depends on
 			// the transport, so assert the client half exactly and the peer
 			// half by shape.
-			client, peer, found := strings.Cut(gotXFF, ", ")
+			client, peer, found := strings.Cut(xff, ", ")
 			if !found || client != "198.51.100.9" {
-				t.Fatalf("X-Forwarded-For = %q, want the canonical client 198.51.100.9 followed by the peer", gotXFF)
+				t.Fatalf("X-Forwarded-For = %q, want the canonical client 198.51.100.9 followed by the peer", xff)
 			}
 			if peerAddr := netip.MustParseAddr(peer); !peerAddr.IsLoopback() {
 				t.Fatalf("X-Forwarded-For peer = %q, want the loopback transport peer", peer)
 			}
-			if strings.Contains(gotXFF, "192.0.2.99") {
-				t.Fatalf("X-Forwarded-For = %q still carries the attacker-supplied entry", gotXFF)
+			if strings.Contains(xff, "192.0.2.99") {
+				t.Fatalf("X-Forwarded-For = %q still carries the attacker-supplied entry", xff)
 			}
-			if strings.Contains(gotXFF, "10.8.8.8") {
-				t.Fatalf("X-Forwarded-For = %q still carries the intermediate trusted proxy", gotXFF)
+			if strings.Contains(xff, "10.8.8.8") {
+				t.Fatalf("X-Forwarded-For = %q still carries the intermediate trusted proxy", xff)
 			}
-			if gotRemote != "198.51.100.9" {
-				t.Fatalf("$remote_addr = %q, want the canonical client", gotRemote)
+			if remote != "198.51.100.9" {
+				t.Fatalf("$remote_addr = %q, want the canonical client", remote)
 			}
-			if gotProto != "https" {
-				t.Fatalf("X-Forwarded-Proto = %q, want https", gotProto)
+			if proto != "https" {
+				t.Fatalf("X-Forwarded-Proto = %q, want https", proto)
 			}
 		})
 	}

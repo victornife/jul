@@ -283,6 +283,56 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
+	req, err := decodePatchBatch(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(req.Ops) == 0 {
+		writeEmptyPatchBatch(w, "patch")
+		return
+	}
+	mode := r.URL.Query().Get("mode")
+	switch mode {
+	case "", "hot":
+		mode = "hot"
+	case "stage_restart":
+		// valid
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("unknown apply mode %q; valid values: hot, stage_restart", mode),
+		})
+		return
+	}
+	s.applyPatchOps(w, r, patchApplyParams{
+		ops:         req.Ops,
+		baseVersion: req.BaseVersion,
+		mode:        mode,
+		auditAction: auditActionPatch,
+	})
+}
+
+// Audit actions for the structured patch pipeline. A trusted-proxy change gets
+// its own category so a trust-boundary edit is greppable in the audit log
+// without reading every config.patch entry.
+const (
+	auditActionPatch         = "config.patch"
+	auditActionClientAddress = "config.client_address"
+)
+
+// patchApplyParams is one already-decoded, already-authorized batch apply.
+type patchApplyParams struct {
+	ops         []patchRequest
+	baseVersion string
+	mode        string
+	auditAction string
+}
+
+// applyPatchOps runs the shared apply pipeline: fresh baseline under applyMu,
+// version check, execution, admin-reachability guard, validation, then the
+// managed-apply coordinator. Every caller reaches persistence through here, so
+// no route can bypass validation or the audit trail.
+func (s *Server) applyPatchOps(w http.ResponseWriter, r *http.Request, params patchApplyParams) {
 	reqCtx := applyRequestContext(r, ApplyOperationPatchApply)
 	s.bindManagedApplyDeadline(&reqCtx)
 
@@ -317,28 +367,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	req, err := decodePatchBatch(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if len(req.Ops) == 0 {
-		writeEmptyPatchBatch(w, "patch")
-		return
-	}
-
-	mode := r.URL.Query().Get("mode")
-	switch mode {
-	case "", "hot":
-		mode = "hot"
-	case "stage_restart":
-		// valid
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("unknown apply mode %q; valid values: hot, stage_restart", mode),
-		})
-		return
-	}
+	mode := params.mode
 
 	// The lock makes baseline read, version check, execution, and coordinator
 	// submission one atomic read-modify-write sequence.
@@ -347,17 +376,17 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 
 	opCtx, cancel := managedApplyPrePersistenceContext(reqCtx, r.Context())
 	defer cancel()
-	state, execution, err := s.executeCurrentPatchBatch(opCtx, &reqCtx, true, req.BaseVersion, req.Ops)
+	state, execution, err := s.executeCurrentPatchBatch(opCtx, &reqCtx, true, params.baseVersion, params.ops)
 	if err != nil {
 		var baselineErr *patchBaselineError
 		if errors.As(err, &baselineErr) {
-			s.recordAudit(r, "config.patch", "config", "failure", "rejected: cannot load current config: "+baselineErr.Error())
+			s.recordAudit(r, params.auditAction, "config", "failure", "rejected: cannot load current config: "+baselineErr.Error())
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + baselineErr.Error()})
 			return
 		}
 		var conflictErr *patchVersionConflictError
 		if errors.As(err, &conflictErr) {
-			s.recordAudit(r, "config.patch", "config", "failure", "rejected: base version stale (concurrent change)")
+			s.recordAudit(r, params.auditAction, "config", "failure", "rejected: base version stale (concurrent change)")
 			writeJSON(w, http.StatusConflict, conflictResponse{
 				OK:             false,
 				Conflict:       true,
@@ -368,7 +397,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		}
 		var operationErr *patchOperationError
 		if errors.As(err, &operationErr) {
-			s.recordAudit(r, "config.patch", "config", "failure", fmt.Sprintf("rejected: operation %d (%s)", operationErr.OpIndex, operationErr.Op))
+			s.recordAudit(r, params.auditAction, "config", "failure", fmt.Sprintf("rejected: operation %d (%s)", operationErr.OpIndex, operationErr.Op))
 			writeJSON(w, http.StatusBadRequest, patchOperationFailureResponse{
 				OK:      false,
 				Message: fmt.Sprintf("Operation %d (%s) could not be applied; no change was made.", operationErr.OpIndex+1, operationErr.Op),
@@ -383,7 +412,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 			if s.writeCandidatePreparationFailure(w, r, reqCtx, mode, candidateErr) {
 				return
 			}
-			s.recordAudit(r, "config.patch", "config", "failure", "rejected: candidate preparation failed")
+			s.recordAudit(r, params.auditAction, "config", "failure", "rejected: candidate preparation failed")
 			writeJSON(w, http.StatusBadRequest, validationErrorResponse{
 				OK:      false,
 				Message: "The configuration contains errors.",
@@ -391,19 +420,19 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 			})
 			return
 		}
-		s.recordAudit(r, "config.patch", "config", "failure", "executor error: "+err.Error())
+		s.recordAudit(r, params.auditAction, "config", "failure", "executor error: "+err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	currentEffective := execution.BeforeEffective
-	if !s.authorizeConfigTransition(w, r, "config.patch", currentEffective, execution.CandidateEffective) {
+	if !s.authorizeConfigTransition(w, r, params.auditAction, currentEffective, execution.CandidateEffective) {
 		return
 	}
 	if r.URL.Query().Get("confirm_admin") != "true" {
 		id, _ := rbacIdentityFromRequest(r)
 		if changes := s.reachabilityChanges(currentEffective, execution.CandidateEffective, id); len(changes) > 0 {
-			s.recordAudit(r, "config.patch", "config", "failure", "rejected: admin-reachability change needs confirmation")
+			s.recordAudit(r, params.auditAction, "config", "failure", "rejected: admin-reachability change needs confirmation")
 			s.emit("config", "apply_failed", "warn", "Structured patch would change admin access and was held for confirmation.")
 			writeJSON(w, http.StatusConflict, adminGuardResponse{
 				OK:          false,
@@ -415,7 +444,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if !execution.Valid {
-		s.recordAudit(r, "config.patch", "config", "failure", "rejected: validation failed")
+		s.recordAudit(r, params.auditAction, "config", "failure", "rejected: validation failed")
 		s.emit("config", "apply_failed", "warn", "Structured patch apply rejected: validation failed.")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
 			OK:      false,
@@ -434,7 +463,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	result.Lifecycle = &lifecycleProjection
 
 	if applyErr != nil {
-		s.recordAudit(r, "config.patch", "config", "failure", "coordinator error: "+applyErr.Error())
+		s.recordAudit(r, params.auditAction, "config", "failure", "coordinator error: "+applyErr.Error())
 		status := configApplyErrorStatus(result, applyErr)
 		if status == http.StatusServiceUnavailable {
 			if result.Reload != nil && result.Reload.FailedPhase == "enqueue" {
@@ -451,13 +480,13 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if result.RestartRequired {
-		s.recordAudit(r, "config.patch", "config", "failure", "rejected: restart required")
+		s.recordAudit(r, params.auditAction, "config", "failure", "rejected: restart required")
 		s.emit("config", "apply_failed", "warn", "Structured patch apply needs a restart to take effect; no change was applied.")
 		writeJSON(w, http.StatusConflict, result)
 		return
 	}
 	if len(result.ValidationErrors) > 0 {
-		s.recordAudit(r, "config.patch", "config", "failure", "rejected: validation failed")
+		s.recordAudit(r, params.auditAction, "config", "failure", "rejected: validation failed")
 		s.emit("config", "apply_failed", "warn", "Structured patch apply rejected: validation failed.")
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{
 			OK:      false,
@@ -473,7 +502,7 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		if !s.deps.ManagedHistoryActive {
 			s.recordHistory(prev)
 		}
-		s.recordAudit(r, "config.patch", "config", "success", execution.summaryText())
+		s.recordAudit(r, params.auditAction, "config", "success", execution.summaryText())
 		s.emit("config", "apply", "info", "Structured patch validated and saved.")
 	}
 
