@@ -39,8 +39,11 @@ proxy_pass = "http://127.0.0.1:3000"
 
 1. **CIDR gate** — `deny` is checked first (deny wins); then, if `allow` is
    non-empty, the client must fall inside one range. The client IP is the
-   transport peer (`RemoteAddr`) — **never** `X-Forwarded-For`, so it cannot be
-   spoofed.
+   **canonical client address**: the transport peer unless the listener's
+   [`client_address`](configuration.md#client-address-and-trusted-proxies)
+   policy explicitly trusts that peer as a proxy. A forwarding header from an
+   untrusted sender is never consulted, so it cannot be spoofed; with no policy
+   configured the gate sees exactly what it always did.
 2. **Credential method** — at most one of `basic`, `jwt`, `forward_auth`. They
    are independent (no AND-chaining of two credential methods).
 
@@ -87,7 +90,7 @@ Within the middleware chain, auth runs **before rate limiting**, so a
 
 | Method | Credential source | Success | Failure | Identity propagated |
 | --- | --- | --- | --- | --- |
-| CIDR | `RemoteAddr` | in `allow`, not in `deny` | **403** | — (gate only) |
+| CIDR | canonical client address | in `allow`, not in `deny` | **403** | — (gate only) |
 | Basic | `Authorization: Basic` | user in htpasswd + bcrypt match | **401** + `WWW-Authenticate: Basic realm="…"` | — |
 | JWT | `Authorization: Bearer` | valid signature + claims | **401** + `WWW-Authenticate: Bearer error="invalid_token"` | claims → request context (`ClaimsFrom`) |
 | Forward-auth | subrequest to `url` | endpoint returns **2xx** | endpoint's status relayed (non-error → 403); **503** if unreachable | `auth_response_headers` → upstream request |
@@ -97,7 +100,15 @@ Within the middleware chain, auth runs **before rate limiting**, so a
 ### CIDR gate
 
 Parsed once at reload. `deny` evaluated before `allow`; an empty `allow` admits
-any non-denied client. Unparseable client addresses are rejected.
+any non-denied client. Unidentifiable client addresses are rejected whenever an
+`allow` list is configured.
+
+The gate matches the canonical client, so behind a declared trusted proxy the
+range describes the **end client**, not the proxy. To express "only accept
+connections arriving from my proxy network", that is the `trusted_proxies`
+policy plus a network-level control — not an end-client CIDR range. Without a
+`client_address` policy the canonical client is the transport peer, so nothing
+changes for a directly exposed server.
 
 ### HTTP Basic
 

@@ -2464,7 +2464,10 @@ export const LogEntrySchema = z.object({
   status: z.number(),
   bytes: z.number(),
   duration_ms: z.number(),
-  remote: z.string().optional(),
+  // client_ip is the canonical client address; peer_ip appears only when a
+  // trusted proxy asserted a different address than the socket peer.
+  client_ip: z.string().optional(),
+  peer_ip: z.string().optional(),
   request_id: z.string().optional(),
   trace_id: z.string().optional(),
   user_agent: z.string().optional(),

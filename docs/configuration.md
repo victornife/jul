@@ -380,7 +380,7 @@ proxy_read_timeout = "30s"
 | `proxy_send_timeout` | duration | Per-write inactivity bound on sending the request to the upstream — the maximum gap between successive writes. `0` (default) leaves it unbounded |
 | `proxy_retries` | int | Maximum retry attempts for idempotent requests on connection failure. `0` (default) tries every distinct backend at most once. A positive value caps attempts to the configured count |
 | `grpc` | bool | Proxy `proxy_pass` as **native gRPC** over end-to-end HTTP/2 (trailers preserved, no buffering); `http://` dials the backend over cleartext HTTP/2 (h2c), `https://` over HTTP/2 with TLS — requires the `grpc` build tag |
-| `headers` | table | Upstream request headers; values support `$host`, `$remote_addr`, `$scheme`, `$proxy_add_x_forwarded_for` |
+| `headers` | table | Upstream request headers; values support `$host`, `$scheme`, `$remote_addr` (canonical client), `$realip_remote_addr` (direct transport peer), `$proxy_add_x_forwarded_for` (Jul's trusted chain) and `$ssl_client_*`. Applied **after** the `X-Forwarded-*` headers are constructed, so an explicit value wins — see [forwarded headers](core-http.md#forwarded-headers-to-the-backend) |
 
 ### FastCGI / uWSGI
 

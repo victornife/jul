@@ -72,7 +72,19 @@ to run it. The check is performed once at startup by `waf.Check`.
    short-circuited with the configured status (default **403**) and never
    reaches the upstream. In **detect** mode the same match is recorded but the
    request proceeds.
-4. Every matched rule that logs is reported to metrics and structured-log
+4. Rules see Jul's **canonical client address** in `REMOTE_ADDR`: the transport
+   peer unless the listener's
+   [`client_address`](configuration.md#client-address-and-trusted-proxies)
+   policy trusts that peer as a proxy. Coraza normally derives `REMOTE_ADDR`
+   from `RemoteAddr` itself; Jul substitutes the canonical address through
+   Coraza's transaction-options seam, so a rule behind a declared proxy matches
+   the end client rather than the proxy — without mutating `RemoteAddr` and
+   without forking the engine. A forwarding header from an untrusted sender is
+   never consulted, so a rule cannot be evaded by asserting another address.
+   The substitution also bypasses Coraza's own address split, which leaves the
+   brackets on an IPv6 peer, so IPv6 rules match the same normalized form as
+   IPv4 ones.
+5. Every matched rule that logs is reported to metrics and structured-log
    hooks. The metric keeps only bounded action/rule labels. The structured warning
    records `rule_id`, `mode`, `phase`, `severity`, a bounded/redacted `path`, and
    `query_omitted`; it never records the raw query or Coraza's macro-expanded
@@ -389,6 +401,11 @@ especially at higher paranoia levels (`paranoia ≥ 2`). Recommended mitigation:
 
 ### Bypass scenarios
 
+- **Over-broad `trusted_proxies`:** `REMOTE_ADDR` is the canonical client, so an
+  address range trusted by the listener's `client_address` policy can assert any
+  client address to the rule engine. Keep the trusted set to the proxies you
+  operate; `jul lint` warns when an entry covers everything. With no policy
+  configured — the default — rules always see the transport peer.
 - **Request-size evasion:** A body larger than `request_body_limit` is not
   inspected for body-based rules. Attackers might pad payloads to exceed the
   limit. Size the limit to the largest payload you need inspected, or front the

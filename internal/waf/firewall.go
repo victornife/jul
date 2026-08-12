@@ -68,7 +68,9 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	if err != nil {
 		return nil, fmt.Errorf("waf: compiling rules: %w", err)
 	}
-	return &Firewall{waf: w}, nil
+	// Wrap the engine so rules see Jul's canonical client address rather than
+	// Coraza's own parse of RemoteAddr (see clientaddr.go).
+	return &Firewall{waf: &clientAddrWAF{WAF: w}}, nil
 }
 
 // Middleware returns the per-location middleware that runs each request (and,

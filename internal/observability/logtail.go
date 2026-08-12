@@ -30,7 +30,8 @@ type LogEntry struct {
 	Status     int       `json:"status"`
 	Bytes      int64     `json:"bytes"`
 	DurationMs float64   `json:"duration_ms"`
-	Remote     string    `json:"remote,omitempty"`
+	ClientIP   string    `json:"client_ip,omitempty"`
+	PeerIP     string    `json:"peer_ip,omitempty"`
 	RequestID  string    `json:"request_id,omitempty"`
 	TraceID    string    `json:"trace_id,omitempty"`
 	UserAgent  string    `json:"user_agent,omitempty"` // coarse family only
@@ -75,12 +76,23 @@ func (t *LogTail) Log(rec middleware.AccessRecord) {
 		Status:     rec.Status,
 		Bytes:      rec.Bytes,
 		DurationMs: float64(rec.Duration.Microseconds()) / 1000.0,
-		Remote:     rec.Remote,
+		ClientIP:   rec.Client,
+		PeerIP:     peerIfDifferent(rec),
 		RequestID:  rec.RequestID,
 		TraceID:    rec.TraceID,
 		UserAgent:  userAgentFamily(rec.UserAgent),
 		Proto:      rec.Proto,
 	})
+}
+
+// peerIfDifferent returns the direct transport peer only when it differs from
+// the canonical client, so an ordinary direct request carries one address
+// rather than the same value twice.
+func peerIfDifferent(rec middleware.AccessRecord) string {
+	if rec.Peer == rec.Client {
+		return ""
+	}
+	return rec.Peer
 }
 
 // record appends one entry to the ring and fans it out to live followers. The

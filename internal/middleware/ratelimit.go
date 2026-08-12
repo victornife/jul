@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"jul/internal/clientaddr"
 )
 
 // Limiter decides whether an event identified by key may proceed now. It is the
@@ -207,9 +209,12 @@ func RateLimit(lim Limiter, key KeyFunc, onLimited func()) Middleware {
 // address, "header:<Name>" keys on a request header, and "jwt:<claim>" keys on a
 // validated JWT claim placed in the request context by the auth middleware (it
 // falls back to the client IP when no such claim is present). The client address
-// is always the real transport peer, never an untrusted X-Forwarded-For value,
-// so the key cannot be spoofed. Any empty extraction falls back to the client IP
-// so a non-empty key is always produced.
+// is the canonical one derived by internal/clientaddr: the transport peer unless
+// the listener explicitly trusts the peer as a proxy, so a forwarding header
+// from an untrusted sender cannot move a client to another bucket. A
+// "header:<Name>" key remains explicitly operator-selected and unauthenticated.
+// Any empty extraction falls back to the client IP so a non-empty key is always
+// produced.
 func RateKeyFunc(spec string) KeyFunc {
 	switch {
 	case strings.HasPrefix(spec, "header:"):
@@ -218,7 +223,7 @@ func RateKeyFunc(spec string) KeyFunc {
 			if v := r.Header.Get(name); v != "" {
 				return v
 			}
-			return clientIP(r)
+			return clientKey(r)
 		}
 	case strings.HasPrefix(spec, "jwt:"):
 		// Key on a validated JWT claim placed in the request context by the auth
@@ -231,9 +236,22 @@ func RateKeyFunc(spec string) KeyFunc {
 					return v
 				}
 			}
-			return clientIP(r)
+			return clientKey(r)
 		}
 	default:
-		return clientIP
+		return clientKey
 	}
+}
+
+// clientKey renders the canonical client address as a stable bucket key. It is
+// one normalization for IPv4 and IPv6 alike (netip's canonical text form), so
+// the same client always lands in the same bucket regardless of how its address
+// was written on the wire. An unidentifiable client falls back to the raw
+// transport address rather than sharing one bucket with every other such
+// request.
+func clientKey(r *http.Request) string {
+	if addr := clientaddr.Client(r); addr.IsValid() {
+		return addr.String()
+	}
+	return r.RemoteAddr
 }

@@ -3,7 +3,11 @@
 
 package auth
 
-import "testing"
+import (
+	"testing"
+
+	"jul/internal/clientaddr"
+)
 
 func TestCIDRGate(t *testing.T) {
 	tests := []struct {
@@ -30,7 +34,7 @@ func TestCIDRGate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := newCIDRGate(tt.allow, tt.deny)
-			if got := g.allowed(tt.remoteAddr); got != tt.want {
+			if got := g.allowed(clientaddr.PeerFromRemoteAddr(tt.remoteAddr)); got != tt.want {
 				t.Errorf("allowed(%q) = %v, want %v", tt.remoteAddr, got, tt.want)
 			}
 		})

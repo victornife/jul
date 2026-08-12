@@ -6,7 +6,10 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"time"
+
+	"jul/internal/clientaddr"
 )
 
 // AccessRecord is the data captured for one completed request. It is the stable
@@ -14,17 +17,23 @@ import (
 // new sinks consume structured fields rather than a pre-formatted line. Current
 // and planned sinks: the slog text/JSON writer (default); file/syslog writers
 // with rotation (Y1-10); the Console log-tail ring buffer (Y2-09); the audit
-// mirror (Y3-08). Add fields here (never remove) as later sinks need them.
+// mirror (Y3-08). Add fields here as later sinks need them; removing or
+// repurposing one changes every sink's output, so it is a reviewed change.
 type AccessRecord struct {
-	Time      time.Time
-	Method    string
-	Host      string
-	Path      string
-	Query     string
-	Status    int
-	Bytes     int64
-	Duration  time.Duration
-	Remote    string
+	Time     time.Time
+	Method   string
+	Host     string
+	Path     string
+	Query    string
+	Status   int
+	Bytes    int64
+	Duration time.Duration
+	// Client is the canonical client address derived by internal/clientaddr:
+	// the transport peer unless the listener trusts the peer as a proxy.
+	Client string
+	// Peer is the direct transport peer. It equals Client for a direct client
+	// and differs only when a trusted proxy asserted the client address.
+	Peer      string
 	RequestID string
 	TraceID   string
 	UserAgent string
@@ -60,9 +69,14 @@ func (s *SlogSink) Log(rec AccessRecord) {
 		"status", rec.Status,
 		"bytes", rec.Bytes,
 		"duration_ms", float64(rec.Duration.Microseconds()) / 1000.0,
-		"remote", rec.Remote,
+		"client_ip", rec.Client,
 		"request_id", rec.RequestID,
 		"user_agent", rec.UserAgent,
+	}
+	// peer_ip is emitted only when a trusted proxy actually changed the answer,
+	// following the same "omit when it adds nothing" rule as trace_id.
+	if rec.Peer != "" && rec.Peer != rec.Client {
+		attrs = append(attrs, "peer_ip", rec.Peer)
 	}
 	if rec.TraceID != "" {
 		attrs = append(attrs, "trace_id", rec.TraceID)
@@ -94,7 +108,8 @@ func AccessLog(sinks ...AccessSink) Middleware {
 				Status:    rec.Status(),
 				Bytes:     rec.Bytes(),
 				Duration:  time.Since(start),
-				Remote:    clientIP(r),
+				Client:    addrText(clientaddr.Client(r)),
+				Peer:      addrText(clientaddr.Peer(r)),
 				RequestID: RequestIDFrom(r.Context()),
 				TraceID:   TraceIDFrom(r.Context()),
 				UserAgent: r.UserAgent(),
@@ -107,13 +122,11 @@ func AccessLog(sinks ...AccessSink) Middleware {
 	}
 }
 
-// clientIP extracts the remote IP without the port.
-func clientIP(r *http.Request) string {
-	addr := r.RemoteAddr
-	for i := len(addr) - 1; i >= 0; i-- {
-		if addr[i] == ':' {
-			return addr[:i]
-		}
+// addrText renders an address for the log, returning "" for an address that
+// could not be identified rather than a placeholder that reads like one.
+func addrText(addr netip.Addr) string {
+	if !addr.IsValid() {
+		return ""
 	}
-	return addr
+	return addr.String()
 }

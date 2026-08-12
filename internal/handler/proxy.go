@@ -12,11 +12,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/tracing"
@@ -51,8 +53,8 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			// Secure defaults: clears client-supplied X-Forwarded-* and sets
-			// them from the real connection.
-			pr.SetXForwarded()
+			// them from Jul's own trusted view of the request.
+			setCanonicalXForwarded(pr)
 			applyProxyHeaders(pr, loc)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -345,22 +347,25 @@ func applyProxyHeaders(pr *httputil.ProxyRequest, loc config.LocationConfig) {
 }
 
 // expandProxyVar substitutes NGINX-style variables used in proxy headers.
+//
+// $remote_addr is the canonical client address, matching NGINX with its realip
+// module configured — which is exactly what [servers.client_address] expresses.
+// With no trusted proxy it is the transport peer, so a direct deployment is
+// unchanged. $realip_remote_addr is NGINX's name for the address the connection
+// actually came from, and carries the direct peer here too.
 func expandProxyVar(tmpl string, in *http.Request) string {
 	if !strings.Contains(tmpl, "$") {
 		return tmpl
 	}
-	remote := clientIP(in)
+	client, peer := forwardedAddrs(in)
 	scheme := "http"
 	if in.TLS != nil {
 		scheme = "https"
 	}
-	xff := remote
-	if prior := in.Header.Get("X-Forwarded-For"); prior != "" {
-		xff = prior + ", " + remote
-	}
 	pairs := []string{
-		"$proxy_add_x_forwarded_for", xff,
-		"$remote_addr", remote,
+		"$proxy_add_x_forwarded_for", forwardedChain(client, peer),
+		"$realip_remote_addr", peer,
+		"$remote_addr", client,
 		"$host", in.Host,
 		"$scheme", scheme,
 	}
@@ -414,10 +419,50 @@ func proxyErrorStatus(err error) int {
 	return http.StatusBadGateway
 }
 
-// clientIP extracts the remote IP (without port) from a request.
-func clientIP(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
+// setCanonicalXForwarded replaces every client-supplied X-Forwarded-* header
+// with Jul's own view of the request, then overwrites X-Forwarded-For with the
+// canonical chain.
+//
+// SetXForwarded already clears the inbound values and sets X-Forwarded-Host and
+// X-Forwarded-Proto from the real connection; only the address chain needs the
+// canonical identity, because the standard library derives it from RemoteAddr
+// and therefore cannot know about trusted proxies.
+func setCanonicalXForwarded(pr *httputil.ProxyRequest) {
+	pr.SetXForwarded()
+	client, peer := forwardedAddrs(pr.In)
+	if chain := forwardedChain(client, peer); chain != "" {
+		pr.Out.Header.Set("X-Forwarded-For", chain)
 	}
-	return r.RemoteAddr
+}
+
+// forwardedAddrs returns the canonical client and direct peer as text.
+func forwardedAddrs(in *http.Request) (client, peer string) {
+	return addrText(clientaddr.Client(in)), addrText(clientaddr.Peer(in))
+}
+
+// forwardedChain builds the outbound X-Forwarded-For value.
+//
+// It is deliberately lossy: Jul emits its own trusted knowledge — the canonical
+// client and the peer it was received from — and never preserves an inbound
+// chain. An inbound "client, P1" received from peer P2 is emitted as
+// "client, P2", dropping intermediate trusted proxies. Jul is the last hop
+// before the backend, and reconstructing the full chain would re-inject
+// third-party data into a channel the backend authenticates.
+func forwardedChain(client, peer string) string {
+	switch {
+	case client == "":
+		return peer
+	case peer == "" || peer == client:
+		return client
+	default:
+		return client + ", " + peer
+	}
+}
+
+// addrText renders an address, returning "" when it could not be identified.
+func addrText(addr netip.Addr) string {
+	if !addr.IsValid() {
+		return ""
+	}
+	return addr.String()
 }

@@ -156,10 +156,10 @@ implemented as #135 → #136 → #259.
 - ~~Standards-aware `Forwarded` and X-Forwarded-For processing~~ — delivered by
   #135, fail-closed and fuzz-tested, with no chain merging.
 - ~~Right-to-left trusted-hop evaluation~~ — delivered by #135.
-- One canonical effective client identity used by auth, rate limiting, WAF,
-  access logs, diagnostics, and upstream forwarding — derived and published in
-  the request context by #135; **consumer migration is #136**, and the typed
-  API, Console surface and importer coverage close in #259.
+- ~~One canonical effective client identity used by auth, rate limiting, WAF,
+  access logs, diagnostics, and upstream forwarding~~ — derived and published by
+  #135, and adopted by every consumer in #136. The typed API, Console surface,
+  importer coverage and multi-proxy E2E close the capability in #259.
 
 ### Backend transport trust
 

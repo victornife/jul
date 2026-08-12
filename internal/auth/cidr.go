@@ -9,9 +9,10 @@
 package auth
 
 import (
-	"net"
 	"net/http"
 	"net/netip"
+
+	"jul/internal/clientaddr"
 )
 
 // cidrGate evaluates CIDR allow/deny lists against the client address. Deny
@@ -44,13 +45,13 @@ func parsePrefixes(cidrs []string) []netip.Prefix {
 func (g cidrGate) empty() bool { return len(g.allow) == 0 && len(g.deny) == 0 }
 
 // allowed reports whether the client address passes the gate.
-func (g cidrGate) allowed(remoteAddr string) bool {
-	addr, ok := addrOf(remoteAddr)
-	if !ok {
-		// An unparseable peer address cannot be matched; fail closed only when
-		// an allow list is configured (which is an explicit positive gate).
+func (g cidrGate) allowed(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		// An unidentifiable client cannot be matched; fail closed only when an
+		// allow list is configured (which is an explicit positive gate).
 		return len(g.allow) == 0
 	}
+	addr = addr.Unmap()
 	for _, p := range g.deny {
 		if p.Contains(addr) {
 			return false
@@ -67,21 +68,10 @@ func (g cidrGate) allowed(remoteAddr string) bool {
 	return false
 }
 
-// addrOf extracts the netip.Addr from a "host:port" RemoteAddr, tolerating a
-// bare host. The address is unmapped so an IPv4-in-IPv6 peer matches IPv4
-// prefixes.
-func addrOf(remoteAddr string) (netip.Addr, bool) {
-	host := remoteAddr
-	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		host = h
-	}
-	addr, err := netip.ParseAddr(host)
-	if err != nil {
-		return netip.Addr{}, false
-	}
-	return addr.Unmap(), true
-}
-
-// clientAddr returns the request's transport peer address (never a spoofable
-// X-Forwarded-For value).
-func clientAddr(r *http.Request) string { return r.RemoteAddr }
+// clientAddr returns the canonical client address of the request: the address
+// derived once by internal/clientaddr from the listener's trusted-proxy policy.
+// It equals the transport peer for a direct client and for every request whose
+// peer is not a trusted proxy, so a forwarding header from an untrusted sender
+// can never move a client into or out of an allow/deny range. This package
+// never parses a forwarding header itself.
+func clientAddr(r *http.Request) netip.Addr { return clientaddr.Client(r) }
