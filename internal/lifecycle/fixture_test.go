@@ -120,6 +120,16 @@ func fullConfig() *config.Config {
 				ProxySendTimeout:    config.Duration(5 * time.Second),
 				ProxyRetries:        2,
 				GRPC:                true,
+				BackendTLS: &config.BackendTLSConfig{
+					CAFile:             "/etc/jul/route-ca.pem",
+					CAMode:             "file_only",
+					ClientCert:         "/etc/jul/route-client.pem",
+					ClientKey:          "/etc/jul/route-client.key",
+					ServerName:         "route.internal",
+					MinVersion:         "1.2",
+					PeerIdentities:     []string{"uri:spiffe://example/route"},
+					InsecureSkipVerify: false,
+				},
 
 				FastCGIPass:   "127.0.0.1:9000",
 				FastCGIParams: map[string]string{"SCRIPT_FILENAME": "/srv/index.php"},
@@ -188,6 +198,16 @@ func fullConfig() *config.Config {
 			},
 			MaxFails:    3,
 			FailTimeout: config.Duration(10 * time.Second),
+			BackendTLS: &config.BackendTLSConfig{
+				CAFile:             "/etc/jul/backend-ca.pem",
+				CAMode:             "system_and_file",
+				ClientCert:         "/etc/jul/client.pem",
+				ClientKey:          "/etc/jul/client.key",
+				ServerName:         "app.internal",
+				MinVersion:         "1.3",
+				PeerIdentities:     []string{"dns:app.internal"},
+				InsecureSkipVerify: false,
+			},
 			HealthCheck: &config.HealthCheckConfig{
 				Enabled:            true,
 				Type:               "http",

@@ -289,6 +289,26 @@ func perListener(cfg *config.Config, fn func(*config.ServerConfig) any) any {
 	return byAddr
 }
 
+// locationBackendTLS groups a location's backend_tls field by listen address,
+// then by virtual host, then by the location's match path. The address keying
+// is what lets DiffAddressAware ignore listeners the reload added or removed
+// rather than reporting them as a restart for an untouched address.
+func locationBackendTLS(fn func(*config.BackendTLSConfig) any) func(*config.Config) any {
+	return func(cfg *config.Config) any {
+		return perListener(cfg, func(s *config.ServerConfig) any {
+			out := make(map[string]any, len(s.Locations))
+			for i := range s.Locations {
+				loc := &s.Locations[i]
+				if loc.BackendTLS == nil {
+					continue
+				}
+				out[loc.Match.Type+" "+loc.Match.Path] = fn(loc.BackendTLS)
+			}
+			return out
+		})
+	}
+}
+
 // perServer groups a per-block value by the block's operational identity.
 func perServer(cfg *config.Config, fn func(*config.ServerConfig) any) any {
 	out := make(map[string]any, len(cfg.Servers))
@@ -451,6 +471,22 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 		return func(cfg *config.Config) any {
 			return perServer(cfg, func(s *config.ServerConfig) any { return sortedCopy(s.Plugins) })
 		}, true
+	case "servers.*.locations.*.backend_tls.ca_file":
+		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return digestTLSMaterial(b.CAFile) }), true
+	case "servers.*.locations.*.backend_tls.ca_mode":
+		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return b.CAMode }), true
+	case "servers.*.locations.*.backend_tls.client_cert":
+		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return digestTLSMaterial(b.ClientCert) }), true
+	case "servers.*.locations.*.backend_tls.client_key":
+		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return digestTLSMaterial(b.ClientKey) }), true
+	case "servers.*.locations.*.backend_tls.insecure_skip_verify":
+		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return b.InsecureSkipVerify }), true
+	case "servers.*.locations.*.backend_tls.min_version":
+		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return b.MinVersion }), true
+	case "servers.*.locations.*.backend_tls.peer_identities":
+		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return sortedCopy(b.PeerIdentities) }), true
+	case "servers.*.locations.*.backend_tls.server_name":
+		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return b.ServerName }), true
 	case "servers.*.locations.*.plugins":
 		return func(cfg *config.Config) any {
 			return perServer(cfg, func(s *config.ServerConfig) any {

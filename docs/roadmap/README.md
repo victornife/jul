@@ -168,12 +168,21 @@ so the post-GA soak gate is open by definition.
 
 ### Backend transport trust
 
-- One normalized `BackendTLSConfig` supporting private roots, client
-  certificates, SNI, minimum version, and peer identity constraints.
+Decided by [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md);
+implemented as #137 → #138 and #139 (both required) → #140.
+
+- ~~One normalized backend TLS policy supporting private roots, client
+  certificates, SNI, minimum version, and peer identity constraints~~ —
+  delivered by #137 as `backend_tls` plus `internal/backendtls`, with an
+  explicit `ca_mode` enum and prefixed `peer_identities`.
 - Equivalent enforcement across HTTP proxy, native gRPC, transcoding, active
-  health checks, and discovery-backed targets.
+  health checks, and discovery-backed targets — **not yet**: #137 ships the
+  schema, validation and resolver only. #138 wires the HTTP transports, #139
+  native gRPC and transcoding, and #140 the health flip, status surface and the
+  lifecycle reclassification the wiring earns.
 - Named reusable TLS profiles remain a follow-up only if representative
-  configurations demonstrate sufficient repetition.
+  configurations demonstrate sufficient repetition. Every consumer accepts only
+  the resolved policy type, so adding them changes resolution, not transports.
 
 ### Generic resilience
 

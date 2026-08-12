@@ -241,6 +241,13 @@ type SecurityProjection struct {
 	// SecretRefs is the number of ${env:}/${file:} secret references in the
 	// configuration. The values themselves are never projected.
 	SecretRefs int `json:"secret_refs"`
+	// BackendTLSPolicies counts the backend_tls blocks in the configuration and
+	// BackendTLSInsecure counts those that disable verification. They are
+	// bounded counts on purpose: no upstream name, route, host, path or
+	// certificate detail is projected, so the panel can report the posture
+	// without becoming an inventory of who trusts whom.
+	BackendTLSPolicies int `json:"backend_tls_policies"`
+	BackendTLSInsecure int `json:"backend_tls_insecure"`
 	// RBAC summarises the admin RBAC posture as both the SERVING (installed,
 	// actively-enforced) and PERSISTED (on-disk) state, with a pending flag when
 	// they differ, so the Security panel never presents a staged-but-not-live

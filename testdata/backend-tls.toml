@@ -1,0 +1,77 @@
+# Backend TLS trust: private CA, mutual TLS, and an SNI override.
+#
+# Run:  jul -check -config testdata/backend-tls.toml
+#
+# backend_tls is the OUTBOUND policy. It is a different key from the inbound
+# [servers.tls] block because `tls` under [[servers]] already means termination.
+
+[global]
+log_level = "info"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  # 1. A pool behind a private CA. The CA file replaces the platform store, so
+  #    a publicly-signed impostor is rejected.
+  [[servers.locations]]
+  match      = { type = "prefix", path = "/inventory/" }
+  proxy_pass = "https://inventory"
+
+  # 2. Mutual TLS to a service that authenticates its callers.
+  [[servers.locations]]
+  match      = { type = "prefix", path = "/billing/" }
+  proxy_pass = "https://billing"
+
+  # 3. A route-level policy overriding the pool's, for one stricter path.
+  [[servers.locations]]
+  match      = { type = "prefix", path = "/inventory/admin/" }
+  proxy_pass = "https://inventory"
+
+    [servers.locations.backend_tls]
+    ca_file         = "testdata/tls/localhost.crt"
+    ca_mode         = "file_only"
+    server_name     = "inventory.internal"
+    min_version     = "1.3"
+    peer_identities = ["dns:inventory.internal"]
+
+  # 4. A literal https target dialled by IP, verified against its logical name
+  #    rather than the address. The address is where to connect; the name is
+  #    who must answer.
+  [[servers.locations]]
+  match      = { type = "prefix", path = "/legacy/" }
+  proxy_pass = "https://10.0.10.42:8443"
+
+    [servers.locations.backend_tls]
+    ca_file     = "testdata/tls/localhost.crt"
+    ca_mode     = "system_and_file"
+    server_name = "legacy.internal"
+
+# A pool reached over a private CA. The health check inherits the https scheme,
+# so the policy matters for probes as well as live traffic.
+[[upstreams]]
+name    = "inventory"
+servers = ["10.0.10.41:8443", "10.0.10.42:8443"]
+
+  [upstreams.backend_tls]
+  ca_file     = "testdata/tls/localhost.crt"
+  ca_mode     = "file_only"
+  server_name = "inventory.internal"
+
+  [upstreams.health_check]
+  enabled = true
+  type    = "http"
+  path    = "/healthz"
+
+# A pool that authenticates Jul with a client certificate.
+[[upstreams]]
+name    = "billing"
+servers = ["10.0.20.10:8443"]
+
+  [upstreams.backend_tls]
+  ca_file         = "testdata/tls/localhost.crt"
+  ca_mode         = "system_and_file"
+  client_cert     = "testdata/tls/localhost.crt"
+  client_key      = "testdata/tls/localhost.key"
+  server_name     = "billing.internal"
+  min_version     = "1.3"
+  peer_identities = ["dns:billing.internal", "uri:spiffe://example.org/billing"]

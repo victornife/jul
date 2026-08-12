@@ -22,6 +22,7 @@ subsystems:
   acme: "Automatic certificate management (ACME) for a TLS listener."
   admin: "The admin/observability listener and its startup-owned resources."
   auth: "Per-location credential checks (CIDR, Basic, JWT, forward-auth)."
+  backend_tls: "Outbound TLS trust for backend connections: roots, client certificate, verified name and peer identities."
   cache: "The two-tier response cache backend."
   client_address: "The per-listener trusted-proxy policy that derives the canonical client address."
   compression: "Negotiated response compression."
@@ -72,13 +73,13 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 270
-  schema_leaves: 227
-  registry_entries: 227
-  startup_consumed: 57
+  schema_paths: 288
+  schema_leaves: 243
+  registry_entries: 243
+  startup_consumed: 73
   by_class:
     hot_reload: 156
-    restart_required: 57
+    restart_required: 73
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 2
@@ -569,6 +570,57 @@ fields:
     class: hot_reload
     subsystem: auth
     reason: "auth modifiers are rebuilt around each location action on every successful reload"
+  - path: "servers.*.locations.*.backend_tls.ca_file"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+    startup_consumed: true
+    conditional: true
+    secret_digested: true
+  - path: "servers.*.locations.*.backend_tls.ca_mode"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+    startup_consumed: true
+    conditional: true
+  - path: "servers.*.locations.*.backend_tls.client_cert"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+    startup_consumed: true
+    conditional: true
+    secret_digested: true
+  - path: "servers.*.locations.*.backend_tls.client_key"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+    startup_consumed: true
+    conditional: true
+    secret_digested: true
+  - path: "servers.*.locations.*.backend_tls.insecure_skip_verify"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+    startup_consumed: true
+    conditional: true
+  - path: "servers.*.locations.*.backend_tls.min_version"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+    startup_consumed: true
+    conditional: true
+  - path: "servers.*.locations.*.backend_tls.peer_identities"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+    startup_consumed: true
+    conditional: true
+  - path: "servers.*.locations.*.backend_tls.server_name"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+    startup_consumed: true
+    conditional: true
   - path: "servers.*.locations.*.cache"
     class: hot_reload
     subsystem: cache
@@ -957,6 +1009,57 @@ fields:
     class: hot_reload
     subsystem: stream
     reason: "the stream listener swaps its route pointer atomically on each successful reload"
+  - path: "upstreams.*.backend_tls.ca_file"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
+    startup_consumed: true
+    conditional: true
+    secret_digested: true
+  - path: "upstreams.*.backend_tls.ca_mode"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
+    startup_consumed: true
+    conditional: true
+  - path: "upstreams.*.backend_tls.client_cert"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
+    startup_consumed: true
+    conditional: true
+    secret_digested: true
+  - path: "upstreams.*.backend_tls.client_key"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
+    startup_consumed: true
+    conditional: true
+    secret_digested: true
+  - path: "upstreams.*.backend_tls.insecure_skip_verify"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
+    startup_consumed: true
+    conditional: true
+  - path: "upstreams.*.backend_tls.min_version"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
+    startup_consumed: true
+    conditional: true
+  - path: "upstreams.*.backend_tls.peer_identities"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
+    startup_consumed: true
+    conditional: true
+  - path: "upstreams.*.backend_tls.server_name"
+    class: restart_required
+    subsystem: backend_tls
+    reason: "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
+    startup_consumed: true
+    conditional: true
   - path: "upstreams.*.discovery.consul.address"
     class: hot_reload
     subsystem: discovery

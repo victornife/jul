@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"net"
 
+	"net/url"
+	"strings"
+
 	"github.com/pelletier/go-toml/v2"
 
 	"jul/internal/clientaddr"
@@ -143,6 +146,8 @@ func Lint(c *Config) []Diagnostic {
 		}
 	}
 
+	diags = append(diags, lintBackendTLS(c)...)
+
 	// An admin listener reachable off-loopback without a token is unauthenticated
 	// remote control of the server.
 	if c.Admin.Enabled && c.Admin.Token == "" && !isLoopbackListen(c.Admin.Listen) {
@@ -266,4 +271,113 @@ func FormatError(err error) string {
 		return fmt.Sprintf("%s (line %d, column %d):\n%s", err.Error(), row, col, de.String())
 	}
 	return err.Error()
+}
+
+// lintBackendTLS reports outbound-trust findings.
+//
+// insecure_skip_verify is a SeverityError rather than a warning, so `jul lint`
+// exits 1 even without -strict: the field turns a verified backend connection
+// into an unverified one, and a deployment should not reach production with it
+// by accident. Validate still accepts it, because a field that exists to opt
+// into an insecure mode cannot be a validation rejection (ADR 0016 §8).
+func lintBackendTLS(c *Config) []Diagnostic {
+	var diags []Diagnostic
+
+	insecure := func(field string, cfg *BackendTLSConfig) {
+		if cfg == nil || !cfg.InsecureSkipVerify {
+			return
+		}
+		diags = append(diags, Diagnostic{
+			Severity: SeverityError,
+			Field:    field,
+			Message:  "backend certificate verification is disabled; the connection is encrypted but the peer is not authenticated",
+			Hint:     "remove insecure_skip_verify and configure ca_file with ca_mode, or set server_name to the name the certificate actually carries",
+		})
+	}
+
+	tlsUpstreams := upstreamsReachedOverTLS(c)
+	for i := range c.Upstreams {
+		up := &c.Upstreams[i]
+		where := fmt.Sprintf("upstreams[%d].backend_tls", i)
+		insecure(where, up.BackendTLS)
+
+		// An active health probe inherits the pool's scheme, so an https pool
+		// is probed over TLS and verified against the system roots alone. A
+		// private-CA backend therefore needs a policy — and will need one
+		// before the health path adopts the same trust as live traffic.
+		if up.HealthCheck != nil && up.HealthCheck.Enabled && tlsUpstreams[up.Name] && up.BackendTLS == nil {
+			probeType := strings.ToLower(strings.TrimSpace(up.HealthCheck.Type))
+			if probeType == "" || probeType == "http" {
+				diags = append(diags, Diagnostic{
+					Severity: SeverityWarning,
+					Field:    fmt.Sprintf("upstreams[%d].health_check", i),
+					Message:  "this pool is probed over https with no [upstreams.backend_tls] policy, so probes verify against the system roots only",
+					Hint:     "add a backend_tls block with the backend's trust roots; a private-CA backend will otherwise be reported unhealthy",
+				})
+			}
+		}
+	}
+
+	for i := range c.Servers {
+		for j := range c.Servers[i].Locations {
+			loc := &c.Servers[i].Locations[j]
+			where := fmt.Sprintf("servers[%d].locations[%d].backend_tls", i, j)
+			insecure(where, loc.BackendTLS)
+
+			// Both blocks may legitimately exist; the location's wins for this
+			// route. Say so, because a silent override of a security policy is
+			// exactly the kind of thing an operator should be told about.
+			if loc.BackendTLS == nil {
+				continue
+			}
+			if name, ok := upstreamRefOf(loc.ProxyPass); ok && upstreamHasBackendTLS(c, name) {
+				diags = append(diags, Diagnostic{
+					Severity: SeverityWarning,
+					Field:    where,
+					Message:  fmt.Sprintf("this location and upstream %q both define backend_tls; the location's policy applies to this route", name),
+					Hint:     "remove one of the two blocks unless the override is intended",
+				})
+			}
+		}
+	}
+	return diags
+}
+
+// upstreamsReachedOverTLS returns the names of pools referenced by at least one
+// https (or TLS transcoding) route.
+func upstreamsReachedOverTLS(c *Config) map[string]bool {
+	out := map[string]bool{}
+	for i := range c.Servers {
+		for j := range c.Servers[i].Locations {
+			loc := &c.Servers[i].Locations[j]
+			if loc.GRPCTranscode != nil && loc.GRPCTranscode.TLS {
+				out[loc.GRPCTranscode.Target] = true
+			}
+			if name, ok := upstreamRefOf(loc.ProxyPass); ok && locationUsesTLSBackend(*loc) {
+				out[name] = true
+			}
+		}
+	}
+	return out
+}
+
+// upstreamRefOf returns the upstream name a proxy_pass refers to.
+func upstreamRefOf(proxyPass string) (string, bool) {
+	if strings.TrimSpace(proxyPass) == "" {
+		return "", false
+	}
+	u, err := url.Parse(proxyPass)
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	return u.Host, true
+}
+
+func upstreamHasBackendTLS(c *Config, name string) bool {
+	for i := range c.Upstreams {
+		if c.Upstreams[i].Name == name && c.Upstreams[i].BackendTLS != nil {
+			return true
+		}
+	}
+	return false
 }

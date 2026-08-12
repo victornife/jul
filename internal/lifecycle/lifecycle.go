@@ -116,6 +116,15 @@ type Entry struct {
 	// address, so adding or removing a listener does not produce a false
 	// restart-required verdict for addresses that were not touched.
 	AddressKeyed bool
+	// CollectionKeyed is true when the fingerprint value is a map keyed by the
+	// identity of a configuration collection element — an upstream pool, or a
+	// route within a listener and virtual host — possibly nested. Comparison
+	// then considers only the elements present on both sides, so adding or
+	// removing a backend does not produce a restart-required verdict for the
+	// backends nobody edited. It is distinct from AddressKeyed, which means the
+	// value is frozen when a socket binds; a collection-keyed value is not a
+	// property of the inbound listener at all.
+	CollectionKeyed bool
 	// Deprecated marks a field that is superseded by another path.
 	Deprecated bool
 	// Ignored marks a field that no runtime consumer reads.

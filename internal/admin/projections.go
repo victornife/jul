@@ -394,6 +394,18 @@ func projectCertRisk(certs []CertProjection) *CertRiskProjection {
 
 func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 	sp := SecurityProjection{WAFCompiled: wafCompiled}
+	countBackendTLS := func(b *config.BackendTLSConfig) {
+		if b == nil {
+			return
+		}
+		sp.BackendTLSPolicies++
+		if b.InsecureSkipVerify {
+			sp.BackendTLSInsecure++
+		}
+	}
+	for i := range c.Upstreams {
+		countBackendTLS(c.Upstreams[i].BackendTLS)
+	}
 	for i := range c.Servers {
 		srv := &c.Servers[i]
 		if srv.TLS != nil && srv.TLS.ClientAuth != nil && srv.TLS.ClientAuth.Mode != "" && srv.TLS.ClientAuth.Mode != "none" {
@@ -410,6 +422,7 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 			if loc.RequireClientCert {
 				sp.RequireCertCount++
 			}
+			countBackendTLS(loc.BackendTLS)
 			// A non-nil loc.WAF is a per-location override that replaces the
 			// global policy for this location, so disclose it explicitly.
 			if loc.WAF != nil {

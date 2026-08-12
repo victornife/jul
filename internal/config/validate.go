@@ -61,6 +61,7 @@ func Validate(c *Config) error {
 			}
 		}
 		errs = append(errs, validateUpstreamValues(up, where)...)
+		errs = append(errs, validateBackendTLS(up.BackendTLS, where+".backend_tls")...)
 		errs = append(errs, validateHealthCheck(up.HealthCheck, where+".health_check")...)
 		errs = append(errs, validateDiscovery(up.Discovery, where+".discovery")...)
 	}
@@ -102,6 +103,12 @@ func Validate(c *Config) error {
 			}
 			if loc.WAF != nil {
 				errs = append(errs, validateWAF(*loc.WAF, locWhere+".waf")...)
+			}
+			errs = append(errs, validateBackendTLS(loc.BackendTLS, locWhere+".backend_tls")...)
+			if loc.BackendTLS != nil && !locationUsesTLSBackend(loc) {
+				// A policy that could never apply is a misconfiguration, not a
+				// harmless extra: the operator believes the backend is verified.
+				errs = append(errs, fmt.Errorf("%s.backend_tls: the backend is not reached over TLS; use an https:// proxy_pass, or grpc_transcode.tls = true", locWhere))
 			}
 			errs = append(errs, validateLocation(loc, locWhere, upstreamNames, c.Plugins)...)
 		}

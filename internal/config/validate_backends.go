@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
+
+	"jul/internal/backendtls"
 )
 
 // This file holds the backend-facing validators — L4 stream listeners, active
@@ -209,4 +212,59 @@ func validateDiscovery(d *DiscoveryConfig, where string) []error {
 		errs = append(errs, fmt.Errorf("%s: refresh must not be negative", where))
 	}
 	return errs
+}
+
+// validateBackendTLS checks one backend_tls block. Structure and cross-field
+// rules come from internal/backendtls, so configuration validation and the
+// runtime resolver can never disagree about what is acceptable; this function
+// adds the file-readability checks and the canonical path prefix.
+//
+// insecure_skip_verify is accepted here by design (ADR 0016 §8): a field whose
+// only purpose is opting into an insecure mode cannot be a validation
+// rejection, or it is unusable and the emergency path disappears. `jul lint`
+// reports it as an error instead. Self-contradictory combinations are still
+// hard errors, and those come from backendtls.Validate.
+func validateBackendTLS(c *BackendTLSConfig, where string) []error {
+	if c == nil {
+		return nil
+	}
+	var errs []error
+	for _, err := range backendtls.Validate(c.Options()) {
+		errs = append(errs, fmt.Errorf("%s.%v", where, err))
+	}
+	for _, f := range []struct {
+		field, path string
+	}{
+		{"ca_file", c.CAFile},
+		{"client_cert", c.ClientCert},
+		{"client_key", c.ClientKey},
+	} {
+		path := strings.TrimSpace(f.path)
+		if path == "" || strings.HasPrefix(path, "-----BEGIN") {
+			continue
+		}
+		if info, err := os.Stat(path); err != nil {
+			errs = append(errs, fmt.Errorf("%s.%s: %q is not readable: %v", where, f.field, path, err))
+		} else if info.IsDir() {
+			errs = append(errs, fmt.Errorf("%s.%s: %q is a directory, want a PEM file", where, f.field, path))
+		}
+	}
+	return errs
+}
+
+// locationUsesTLSBackend reports whether a location's backend is reached over
+// TLS, so a backend_tls block that could never apply is rejected instead of
+// silently doing nothing.
+func locationUsesTLSBackend(loc LocationConfig) bool {
+	if loc.GRPCTranscode != nil {
+		return loc.GRPCTranscode.TLS
+	}
+	if loc.ProxyPass == "" {
+		return false
+	}
+	u, err := url.Parse(loc.ProxyPass)
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "https"
 }

@@ -4,8 +4,10 @@
 package app
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"jul/internal/clientaddr"
@@ -223,4 +225,44 @@ func TestClientAddressPolicyReloadUnderLiveTraffic(t *testing.T) {
 	if got.Client.String() != "198.51.100.9" {
 		t.Fatalf("a failed reload disturbed the live policy: %+v", got)
 	}
+}
+
+// TestWarnInsecureBackends proves the startup restatement of the lint error:
+// one warning per affected backend, naming it in the log (never in a metric).
+func TestWarnInsecureBackends(t *testing.T) {
+	var buf strings.Builder
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamConfig{
+			{Name: "insecure-pool", BackendTLS: &config.BackendTLSConfig{InsecureSkipVerify: true}},
+			{Name: "verified-pool", BackendTLS: &config.BackendTLSConfig{ServerName: "ok.internal"}},
+			{Name: "no-policy"},
+		},
+		Servers: []config.ServerConfig{{
+			Listen: ":8443",
+			Locations: []config.LocationConfig{
+				{Match: config.MatchConfig{Type: "prefix", Path: "/api"}, BackendTLS: &config.BackendTLSConfig{InsecureSkipVerify: true}},
+				{Match: config.MatchConfig{Type: "prefix", Path: "/ok"}},
+			},
+		}},
+	}
+
+	warnInsecureBackends(log, cfg)
+	out := buf.String()
+
+	if n := strings.Count(out, "backend certificate verification is disabled"); n != 2 {
+		t.Fatalf("%d warnings, want one per affected backend (2): %s", n, out)
+	}
+	for _, want := range []string{"upstream=insecure-pool", "scope=upstream", "path=/api", "scope=location"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("warning is missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "verified-pool") || strings.Contains(out, "/ok") {
+		t.Errorf("a verified backend was warned about: %s", out)
+	}
+
+	// A nil logger or config must not panic during startup.
+	warnInsecureBackends(nil, cfg)
+	warnInsecureBackends(log, nil)
 }

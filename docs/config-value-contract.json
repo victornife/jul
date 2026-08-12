@@ -140,6 +140,39 @@
       "active_when": "always"
     },
     {
+      "go_field": "BackendTLSConfig.CAMode",
+      "path": "upstreams[].backend_tls.ca_mode / servers[].locations[].backend_tls.ca_mode",
+      "kind": "enum",
+      "constraint": "exact lowercase enum; never inferred from the presence of ca_file",
+      "zero_semantics": "omitted means system roots only",
+      "active_when": "the backend is reached over TLS",
+      "allowed": [
+        "system",
+        "system_and_file",
+        "file_only"
+      ]
+    },
+    {
+      "go_field": "BackendTLSConfig.MinVersion",
+      "path": "upstreams[].backend_tls.min_version / servers[].locations[].backend_tls.min_version",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to 1.2, matching Go's client default",
+      "active_when": "the backend is reached over TLS",
+      "allowed": [
+        "1.2",
+        "1.3"
+      ]
+    },
+    {
+      "go_field": "BackendTLSConfig.PeerIdentities",
+      "path": "upstreams[].backend_tls.peer_identities / servers[].locations[].backend_tls.peer_identities",
+      "kind": "grammar_list",
+      "constraint": "prefixed identities: dns:<name> or uri:<uri>; ORed, matched after standard verification, never by regex or substring",
+      "zero_semantics": "omitted or empty applies standard chain and name verification only",
+      "active_when": "the backend is reached over TLS and insecure_skip_verify is false"
+    },
+    {
       "go_field": "CacheConfig.DefaultTTL",
       "path": "cache.default_ttl",
       "kind": "duration",

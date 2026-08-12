@@ -11,7 +11,11 @@
 // and is active in builds with the "wasmplugins" tag.
 package config
 
-import "time"
+import (
+	"time"
+
+	"jul/internal/backendtls"
+)
 
 // Config is the root configuration document.
 type Config struct {
@@ -299,6 +303,13 @@ type LocationConfig struct {
 	// configured count.
 	ProxyRetries int `toml:"proxy_retries"`
 
+	// BackendTLS is the outbound TLS policy for this location's backend,
+	// whether the target is an https:// literal, a named upstream reached over
+	// TLS, native gRPC over TLS, or a TLS transcoding target. It is the same
+	// block, with the same meaning, as under [[upstreams]]; a location block
+	// overrides the pool's for this route.
+	BackendTLS *BackendTLSConfig `toml:"backend_tls"`
+
 	// GRPC turns the proxy_pass into a native gRPC / HTTP-2 passthrough: the
 	// request is forwarded end-to-end over HTTP/2 (preserving trailers such as
 	// grpc-status) with response buffering disabled so streaming frames flush
@@ -438,6 +449,69 @@ type UpstreamConfig struct {
 	// When discovery is enabled the Servers list is optional and acts only as a
 	// seed/fallback until the first successful resolution.
 	Discovery *DiscoveryConfig `toml:"discovery"`
+
+	// BackendTLS is the outbound TLS policy used when this pool is reached over
+	// https (or TLS gRPC): trust roots, client certificate, verified name,
+	// minimum version and explicit peer identities. It is the same block, with
+	// the same meaning, as under [[servers.locations]].
+	BackendTLS *BackendTLSConfig `toml:"backend_tls"`
+}
+
+// BackendTLSConfig is the outbound (backend) TLS policy. It is deliberately a
+// different key from the inbound [servers.tls] block: `tls` already means
+// *inbound* termination under [[servers]], so reusing it would give one key
+// opposite directions in two places.
+//
+// The same block appears under [[upstreams]] and [[servers.locations]] and is
+// resolved by internal/backendtls into one immutable policy shared by the HTTP
+// proxy, native gRPC, transcoding and active health checks. Transports never
+// read these fields directly.
+type BackendTLSConfig struct {
+	// CAFile is a PEM bundle of trust roots. It is consulted only when CAMode
+	// selects it — never inferred from its presence.
+	CAFile string `toml:"ca_file"`
+	// CAMode is "system" (default), "system_and_file" or "file_only". It is an
+	// explicit enum because inferring augment-versus-replace from the presence
+	// of ca_file cannot be changed later without silently altering which
+	// backends verify.
+	CAMode string `toml:"ca_mode"`
+	// ClientCert and ClientKey are the client certificate presented to the
+	// backend (mutual TLS). Both are required together.
+	ClientCert string `toml:"client_cert"`
+	ClientKey  string `toml:"client_key"`
+	// ServerName overrides the verified identity and the SNI value. It matters
+	// for a discovery-backed pool: the selected address is a dial destination,
+	// while the configured logical name stays the verified identity.
+	ServerName string `toml:"server_name"`
+	// MinVersion is "1.2" (default) or "1.3".
+	MinVersion string `toml:"min_version"`
+	// PeerIdentities are prefixed identities ("dns:name", "uri:spiffe://...")
+	// matched against the backend certificate after standard verification.
+	// They are ORed and are never matched by regex or substring.
+	PeerIdentities []string `toml:"peer_identities"`
+	// InsecureSkipVerify disables backend certificate verification. It is
+	// accepted by validation so an emergency path exists, but `jul lint`
+	// reports it as an error and it cannot be combined with peer_identities or
+	// a non-system ca_mode.
+	InsecureSkipVerify bool `toml:"insecure_skip_verify"`
+}
+
+// Options converts the public block into the resolver's input. It exists so
+// internal/backendtls never imports this package.
+func (c *BackendTLSConfig) Options() backendtls.Options {
+	if c == nil {
+		return backendtls.Options{}
+	}
+	return backendtls.Options{
+		CAFile:             c.CAFile,
+		CAMode:             c.CAMode,
+		ClientCert:         c.ClientCert,
+		ClientKey:          c.ClientKey,
+		ServerName:         c.ServerName,
+		MinVersion:         c.MinVersion,
+		PeerIdentities:     c.PeerIdentities,
+		InsecureSkipVerify: c.InsecureSkipVerify,
+	}
 }
 
 // DiscoveryConfig configures dynamic backend discovery for an upstream pool. A

@@ -490,3 +490,79 @@ func TestCmdCheckRuntimePreflightFailure(t *testing.T) {
 		t.Errorf("expected stderr to mention basic auth error; got:\n%s", errOut)
 	}
 }
+
+// insecureBackendConfig disables backend certificate verification, which Lint
+// reports at error severity.
+const insecureBackendConfig = `
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "https://api"
+
+[[upstreams]]
+name = "api"
+servers = ["10.0.0.1:8443"]
+
+  [upstreams.backend_tls]
+  insecure_skip_verify = true
+`
+
+// TestCmdLintFailsOnInsecureBackendWithoutStrict pins the contract from
+// ADR 0016 §8: a lint finding at error severity fails the command even without
+// -strict, while Validate (and therefore `jul check`) still accepts the
+// configuration so the emergency path remains usable.
+func TestCmdLintFailsOnInsecureBackendWithoutStrict(t *testing.T) {
+	path := writeTemp(t, insecureBackendConfig)
+
+	code, out, _ := capture(t, func() int { return cmdLint([]string{"-config", path}) })
+	if code != 1 {
+		t.Fatalf("lint exit code = %d, want 1 without -strict\n%s", code, out)
+	}
+	if !strings.Contains(out, "not authenticated") {
+		t.Errorf("output does not explain the finding:\n%s", out)
+	}
+	if !strings.Contains(out, "1 error(s)") {
+		t.Errorf("summary does not count the finding as an error:\n%s", out)
+	}
+
+	if code, out, _ := capture(t, func() int { return cmdCheck([]string{"-config", path}) }); code != 0 {
+		t.Errorf("check exit code = %d, want 0: an insecure mode must stay usable\n%s", code, out)
+	}
+
+	// -quiet suppresses warnings, not errors.
+	code, out, _ = capture(t, func() int { return cmdLint([]string{"-config", path, "-quiet"}) })
+	if code != 1 || !strings.Contains(out, "not authenticated") {
+		t.Errorf("-quiet hid an error-severity finding: exit %d\n%s", code, out)
+	}
+}
+
+func TestCmdLintJSONCarriesInsecureBackendSeverity(t *testing.T) {
+	path := writeTemp(t, insecureBackendConfig)
+	code, out, _ := capture(t, func() int { return cmdLint([]string{"-config", path, "-json"}) })
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1\n%s", code, out)
+	}
+	var parsed struct {
+		Warnings []struct {
+			Severity string `json:"severity"`
+			Field    string `json:"field"`
+		} `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	var found bool
+	for _, w := range parsed.Warnings {
+		if strings.Contains(w.Field, "backend_tls") {
+			found = true
+			if w.Severity != "error" {
+				t.Errorf("severity = %q, want error", w.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no backend_tls finding in JSON output:\n%s", out)
+	}
+}

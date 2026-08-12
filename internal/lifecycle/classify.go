@@ -152,6 +152,8 @@ const (
 	detailRetainedListener = "at least one listen address kept across this reload changed the value it bound with, so the running listener keeps the old value until the process restarts"
 	detailNewListenerOnly  = "only listen addresses that are added or removed by this reload are affected, so the new socket binds with the new value and no running listener is stranded"
 	detailAddressAdded     = "the change adds or removes a listener rather than editing one that is kept, so it takes effect on this reload"
+	detailRetainedBackend  = "a backend kept across this reload changed its trust material, and the outbound clients built with the old policy are not rebuilt, so the running process keeps its startup trust until it restarts"
+	detailBackendAdded     = "only backends that this reload adds or removes are affected, so their clients are built fresh and nothing is stranded"
 )
 
 // resolveConditional turns a declared class into the class that governs this
@@ -169,6 +171,15 @@ func resolveConditional(e Entry, before, candidate *config.Config, retained map[
 			return RestartRequiredClass, detailRetainedListener
 		}
 		return NewListenerOnlyClass, detailNewListenerOnly
+
+	case isBackendTLSPath(e.Path):
+		// Backend trust material is consumed when a backend's outbound clients
+		// are built. Editing it on a pool or route that survives the reload
+		// strands those clients; one the reload adds has none to strand.
+		if keyedValueChangedOnCommonKeys(e.Path, before, candidate) {
+			return RestartRequiredClass, detailRetainedBackend
+		}
+		return HotReloadClass, detailBackendAdded
 
 	case e.Path == "servers.*.listen" || e.Path == "stream.*.listen":
 		// Editing a listen address always creates a socket and retires another,
@@ -207,6 +218,48 @@ func retainedAddrs(before, candidate *config.Config, live Live) map[string]bool 
 		}
 	}
 	return out
+}
+
+// isBackendTLSPath reports whether path is part of a backend_tls block, under
+// either the pool-scoped or the route-scoped prefix.
+func isBackendTLSPath(path string) bool {
+	return strings.HasPrefix(path, "upstreams.*.backend_tls.") ||
+		strings.HasPrefix(path, "servers.*.locations.*.backend_tls.")
+}
+
+// keyedValueChangedOnCommonKeys reports whether a value differs for any
+// collection element present in *both* configurations, descending through the
+// nesting the extractor produced (pool name, or listen address → host set →
+// route match). Elements that appear on only one side are skipped: adding or
+// removing a backend cannot strand a client that never existed or is being
+// retired anyway.
+func keyedValueChangedOnCommonKeys(path string, before, candidate *config.Config) bool {
+	bv, ok1 := EffectiveValue(before, path)
+	av, ok2 := EffectiveValue(candidate, path)
+	if !ok1 || !ok2 {
+		return true
+	}
+	return commonKeysDiffer(bv, av)
+}
+
+// commonKeysDiffer compares two extracted values, recursing into maps and
+// considering only the keys they share.
+func commonKeysDiffer(before, candidate any) bool {
+	bm, ok1 := before.(map[string]any)
+	am, ok2 := candidate.(map[string]any)
+	if !ok1 || !ok2 {
+		return !deepEqualValues(before, candidate)
+	}
+	for key, bval := range bm {
+		aval, present := am[key]
+		if !present {
+			continue
+		}
+		if commonKeysDiffer(bval, aval) {
+			return true
+		}
+	}
+	return false
 }
 
 // addressKeyedChangedOnRetained reports whether an address-keyed path differs on
