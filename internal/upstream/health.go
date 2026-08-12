@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"jul/internal/backendtls"
 	"jul/internal/config"
 )
 
@@ -97,6 +98,21 @@ type healthChecker struct {
 // pool. onHealth and onProbe (either may be nil) receive health transitions and
 // per-probe outcomes for metrics.
 func (p *Pool) StartHealthChecks(cfg config.HealthCheckConfig, onHealth HealthHook, onProbe ProbeHook) {
+	p.StartHealthChecksWithTLS(cfg, nil, onHealth, onProbe)
+}
+
+// StartHealthChecksWithTLS is StartHealthChecks with the pool's resolved
+// backend trust policy.
+//
+// A backend is never reported healthy under weaker verification than the
+// requests Jul will send it (ADR 0016 §9): the probe client uses the same
+// resolved policy as live traffic, so a private-CA or mutually-authenticated
+// backend is probed exactly as it is used. A nil policy keeps the previous
+// behaviour — Go's defaults, which verify against the platform trust store.
+//
+// Raw TCP probes are unchanged: they are reachability checks and have never
+// represented identity verification.
+func (p *Pool) StartHealthChecksWithTLS(cfg config.HealthCheckConfig, policy *backendtls.Policy, onHealth HealthHook, onProbe ProbeHook) {
 	params := healthParamsFrom(cfg)
 	hc := &healthChecker{
 		pool:     p,
@@ -111,12 +127,7 @@ func (p *Pool) StartHealthChecks(cfg config.HealthCheckConfig, onHealth HealthHo
 		// Probes must not follow redirects: a 3xx that is not in expect_status
 		// is a failed probe, not a reason to chase another URL.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: &http.Transport{
-			// Each probe opens a fresh connection so a broken backend cannot be
-			// masked by a pooled, already-established keep-alive connection.
-			DisableKeepAlives:   true,
-			TLSHandshakeTimeout: params.timeout,
-		},
+		Transport:     probeTransport(params.timeout, policy),
 	}
 	go hc.run()
 }
@@ -289,4 +300,20 @@ func jitter(d time.Duration) time.Duration {
 		return d
 	}
 	return half + time.Duration(rand.Int64N(int64(half)))
+}
+
+// probeTransport builds the probe client's transport. It sets the resolved
+// backend TLS policy when there is one, so the probe verifies the backend the
+// same way live traffic does.
+func probeTransport(timeout time.Duration, policy *backendtls.Policy) *http.Transport {
+	t := &http.Transport{
+		// Each probe opens a fresh connection so a broken backend cannot be
+		// masked by a pooled, already-established keep-alive connection.
+		DisableKeepAlives:   true,
+		TLSHandshakeTimeout: timeout,
+	}
+	if policy != nil {
+		t.TLSClientConfig = policy.ClientConfig()
+	}
+	return t
 }

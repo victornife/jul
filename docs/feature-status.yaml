@@ -215,3 +215,24 @@ features:
       threat model with SECURITY.md and docs/security-posture.md; criterion 8 is
       FuzzDerive and FuzzParsePrefix in internal/clientaddr; criterion 9 is the
       Security panel listener editor and the Trusted client address status row.
+
+  - id: UT-BE
+    name: "Backend TLS trust (backend_tls)"
+    tags: ["core", "grpc"]
+    maturity: Beta
+    doc: upstreams.md
+    criteria: {1: true, 2: null, 3: true, 4: true, 5: false, 6: true, 7: true, 8: null, 9: true}
+    notes: >
+      Beta, not GA: merged under CHANGELOG [Unreleased] and neither tagged,
+      released nor soaked, so criterion 5 (the post-GA soak gate) is open by
+      definition. Criterion 1 is the enforcement table and per-consumer
+      behaviour in docs/upstreams.md plus the failure-category table in
+      docs/troubleshooting.md. Criterion 2 is n/a: the policy adds no
+      measurable per-request work — it is resolved once per handler generation
+      and the handshake cost is TLS itself, already covered by the existing TLS
+      benchmarks. Criterion 4 is the lifecycle registry entries plus the
+      docs/config-value-contract.json dispositions. Criterion 7 is the ADR 0016
+      threat model with SECURITY.md and docs/security-posture.md. Criterion 8 is
+      n/a: the block has no custom parser — PEM and certificate parsing are the
+      standard library's, and the enum/grammar validation is covered by
+      table-driven tests. Criterion 9 is the Backend TLS trust status row.

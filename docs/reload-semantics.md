@@ -636,35 +636,26 @@ new policy with the rest of the handler generation.
 
 ### Backend trust (`backend_tls`)
 
-The outbound TLS policy is **restart_required**, and that is a statement about
-the current code rather than caution. The HTTP reverse proxy, native gRPC and
-the gRPC-JSON transcoder now all rebuild with their handler generation, so on
-their own they would support hot reload — but the same configuration path also
-feeds the active health client, which is created once per pool. A field is
-classified `hot_reload` only when **every** consumer demonstrably adopts the
-candidate value, so the class stays restart-required until the health
-integration lands and can be shown to.
+The outbound TLS policy is **hot_reload**, and the class was earned rather than
+assumed: every consumer demonstrably rebuilds from the candidate policy.
 
-The classification is **conditional on the backend set**, not on the listener
-set, because backend trust is not a property of an inbound socket:
+- The HTTP reverse proxy, native gRPC passthrough and the gRPC-JSON transcoder
+  build their clients with the handler generation that owns them, so a new
+  generation dials with the new policy and cannot reuse a connection
+  established under the old one.
+- The resolved policy's **fingerprint is part of the upstream pool's identity**,
+  so a changed policy rebuilds the pool and with it the active health-check
+  client. That is what closed the last gap: a probe would otherwise have kept
+  verifying with the trust it started with.
 
-| Change | Verdict |
-| --- | --- |
-| A pool or route the reload **adds** carries a policy | applies on this reload — there is no running client to strand |
-| A pool or route the reload **removes** carried one | applies on this reload |
-| A pool or route that **survives** the reload changes its policy | restart required |
+Because the fingerprint digests file *contents*, rotating a certificate in place
+— with no configuration edit at all — changes the pool identity and is applied on
+the next reload. Detection and action are now the same thing for this field,
+where they were deliberately separated while the consumers were still being
+wired.
 
-This is expressed by a `CollectionKeyed` registry flag: the fingerprint value is
-a map keyed by the backend's identity (pool name, or listen address → host set →
-route match), and comparison considers only the keys present on both sides. It
-is deliberately distinct from `AddressKeyed`, which means "frozen when a socket
-binds" and feeds the listener rebind comparator.
-
-`ca_file`, `client_cert` and `client_key` are registered as secret-bearing from
-the first release, so the fingerprint digests their **contents**. Rotating a
-certificate in place, without editing the configuration, is detected as a change
-even though the action remains a restart — detection and action are separable,
-and getting detection right early costs nothing.
+A malformed policy fails while the candidate is prepared, so the reload aborts
+before anything is published rather than leaving a backend unverifiable.
 
 ## Reload timeout and deadlines (`[global].reload_timeout`)
 

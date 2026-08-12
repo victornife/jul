@@ -162,8 +162,8 @@ const (
 	reasonBindFrozen           = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
 	reasonTLSBindFrozen        = "TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart"
 	reasonClientAddressRebuild = "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
-	reasonBackendTLSStartup    = "backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts"
-	reasonBackendTLSRoute      = "the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh"
+	reasonBackendTLSPool       = "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+	reasonBackendTLSRoute      = "the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload"
 )
 
 // Registry is the authoritative disposition of every public configuration path,
@@ -633,32 +633,22 @@ func wafEntries() []Entry {
 // a restart. Detection and action are separable, and getting detection right
 // early costs nothing.
 func backendTLSEntries(prefix string, routeScoped bool) []Entry {
-	reason := reasonBackendTLSStartup
+	reason := reasonBackendTLSPool
 	if routeScoped {
 		reason = reasonBackendTLSRoute
 	}
-	// Conditional on the backend set rather than the listener set: Classify
-	// resolves an edit on a pool or route that survives the reload to
-	// restart_required, and one the reload adds to hot_reload, because a
-	// backend that did not exist has no client to strand. AddressKeyed is
-	// deliberately NOT set — it means "frozen when a socket binds", and backend
-	// trust is not a property of the inbound listener.
-	mark := func(entries []Entry) []Entry {
-		for i := range entries {
-			entries[i].Conditional = true
-			entries[i].CollectionKeyed = true
-		}
-		return entries
-	}
-	out := mark(restartGroup(SubBackendTLS, reason,
+	out := hotGroup(SubBackendTLS, reason,
 		prefix+"ca_mode",
 		prefix+"insecure_skip_verify",
 		prefix+"min_version",
 		prefix+"peer_identities",
 		prefix+"server_name",
-	))
+	)
+	// Trust material stays secret-bearing: the fingerprint digests file
+	// contents, so a certificate rotated in place — without any configuration
+	// edit — is detected and applied on the next reload.
 	for _, path := range []string{prefix + "ca_file", prefix + "client_cert", prefix + "client_key"} {
-		out = append(out, mark([]Entry{secretDigest(restart(path, SubBackendTLS, reason))})...)
+		out = append(out, secretDigest(hot(path, SubBackendTLS, reason)))
 	}
 	return out
 }

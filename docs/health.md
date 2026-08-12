@@ -134,7 +134,7 @@ config authors know what is available and what is not.
 | Redirect following | ☐ | n/a | 3xx is treated as failure unless listed in `expect_status` |
 | Custom HTTP method (`HEAD`, `POST`, …) | ☐ | n/a | Only `GET` is supported |
 | Custom request headers | ☐ | n/a | Not supported |
-| TLS certificate verification | ⚠️ | n/a | An `https` pool is probed over TLS and verified against the **system roots**; a private CA is not yet consulted — see below |
+| TLS certificate verification | ✅ | n/a | An `https` pool is probed with the pool's resolved [`backend_tls`](upstreams.md#backend-tls) policy — the same trust live traffic uses |
 | gRPC health-check protocol | ☐ | n/a | Not supported (use TCP probe as a coarse substitute) |
 | Prometheus gauge per backend | ✅ | ✅ | `jul_upstream_healthy` |
 | Prometheus probe counter + latency histogram | ✅ | ✅ | `jul_upstream_probes_total`, `jul_upstream_probe_duration_seconds` |
@@ -146,9 +146,9 @@ config authors know what is available and what is not.
 
 - **No shared state across instances:** Each Jul.IA process probes independently. In a multi-instance deployment, health state is local to each process.
 - **HTTP probes use a fresh connection per probe:** Keep-alive is disabled so that a broken pooled connection cannot mask an unhealthy backend.
-- **HTTP probes do not yet use the pool's `backend_tls` policy:** the probe client sets no TLS configuration of its own, so an `https` pool is probed with Go's defaults — full verification against the **platform trust store**. A backend behind a private CA, or one presenting a certificate for a different name, is therefore reported unhealthy even when live traffic to it is configured to succeed. `jul lint` warns about exactly that combination (an `https` pool with an enabled HTTP probe and no [`backend_tls`](upstreams.md#backend-tls) block). Until probes consume the resolved policy, use a TCP probe for such a backend, or add its CA to the platform store.
+- **Probes use the pool's policy, not a route's:** an HTTP probe verifies with the [`backend_tls`](upstreams.md#backend-tls) block declared on the **upstream**. A route-level override applies to that route's traffic only — a pool may serve several routes with different overrides, so no single one could govern the probe. Put the trust roots a probe needs on the pool.
 
-  *(Earlier revisions of this document stated that probes use `InsecureSkipVerify: true` "by design". That was never true of the shipped code, which sets no `TLSClientConfig` at all; the statement is corrected here rather than preserved.)*
+  *(Earlier revisions of this document stated that probes use `InsecureSkipVerify: true` "by design". That was never true of the shipped code, which set no `TLSClientConfig` at all and verified against the platform trust store; probes now use the resolved policy instead.)*
 - **Only `GET` is supported:** HTTP probes always use `GET`. There is no support for `HEAD`, `POST`, or custom headers.
 
 ## Metrics
