@@ -114,7 +114,11 @@ func TestStreamProtocolSwitchTCPToUDP(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeTCPAddr(t)
+	// Use a UDP-reserved address so the same port is accessible to both TCP and
+	// UDP. On Windows the TCP ephemeral range may overlap with excluded UDP
+	// ports, so obtaining the port via UDP guarantees it is in the usable range
+	// for the subsequent UDP bind after the protocol switch.
+	addr := freeUDPAddr(t)
 	s := newTestServer(t, Hooks{})
 
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
@@ -170,7 +174,7 @@ func TestStreamProtocolSwitchRepeated(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeTCPAddr(t)
+	addr := freeUDPAddr(t)
 	s := newTestServer(t, Hooks{})
 
 	for i := 0; i < 5; i++ {
@@ -258,7 +262,11 @@ func TestStreamProtocolSwitchPreflightProbesCandidateProtocol(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeTCPAddr(t)
+	// Use a UDP-reserved address: the preflight probes UDP, so the address must
+	// be in a range accessible to UDP. On Windows the TCP ephemeral range may
+	// overlap with excluded UDP ports, making any port from freeTCPAddr unusable
+	// for UDP probing even when no socket holds it.
+	addr := freeUDPAddr(t)
 	s := newTestServer(t, Hooks{})
 
 	bound := map[string]struct{}{"tcp|" + addr: {}}
@@ -294,7 +302,7 @@ func TestStreamProtocolSwitchDrainsEstablishedTCP(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeTCPAddr(t)
+	addr := freeUDPAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
 
@@ -396,7 +404,7 @@ func TestStreamProtocolSwitchLeavesNoGoroutines(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeTCPAddr(t)
+	addr := freeUDPAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
 	dialTCPAndEcho(t, addr, "warm")
@@ -427,7 +435,7 @@ func TestStreamProtocolSwitchConcurrentTraffic(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeTCPAddr(t)
+	addr := freeUDPAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
 
