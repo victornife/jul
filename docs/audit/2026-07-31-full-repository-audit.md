@@ -171,7 +171,7 @@ errors via `errors.Join`, includes build-tag gating so a `[waf]` block without t
 
 **Reload/apply model (Fact, strong).** ADR-0011 `ReloadPlan` is a single side-effect-free transaction
 owning candidate state from resolve through publish; `internal/lifecycle` single-sources hot-reload
-vs restart-required classification; ADR-0013 defines a managed-apply terminal ledger (single terminal
+vs restart-required classification; ADR-0015 defines a managed-apply terminal ledger (single terminal
 object per apply, 512-result/1h retention, `applied_degraded` committed, emergency snapshot on
 failure). Admin apply result codes are explicit (`internal/admin/config_apply.go`): 200 applied,
 202 saved/in-flight, 400 validation, 408/504 timeout, 409 conflict, 503 unavailable.
@@ -184,7 +184,7 @@ restart-required changes from the lifecycle registry; history + rollback.
 (DNS/Consul/K8s), gRPC transcoding descriptors, egress observer seam.
 
 **Intentional vs accidental (Inference).** Overwhelmingly *intentional*. Evidence: ADRs map to code
-(0007 composition root — verified `main.go` <100 LOC; 0011 ReloadPlan; 0013 ledger), and the audit
+(0007 composition root — verified `main.go` <100 LOC; 0011 ReloadPlan; 0015 ledger), and the audit
 register (Rounds 9–13) ties each fix to a test. The one architectural smell is scale, not design:
 `internal/admin` is very large (100+ files) and `internal/app` carries a lot of apply/finalize logic
 (~20 test files). These are *decomposed by seam* (per [docs/architecture.md](../architecture.md)) and

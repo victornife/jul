@@ -1,10 +1,11 @@
-# ADR 0013 — Managed-apply terminal ledger, exactly-once finalization, and audit-closure product defaults
+# ADR 0015 — Managed-apply terminal ledger, exactly-once finalization, and audit-closure product defaults
 
 - **Status:** Accepted — audit-closure implementation baseline (2026-07-24); terminal/admission ordering amended by #226 (2026-08-06)
 - **Date:** 2026-07-24
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** configuration mutation lifecycle, managed apply coordinator, terminal result retention, history snapshots, planned-restart promotion, admin Console correlation
 - **Source:** Configuration audit closure plan (post-Console reconciliation commit `427e75d`)
+- **Renumbered:** previously ADR 0013; renumbered 2026-08-12 (#257) to resolve a duplicate number shared with [ADR 0013](0013-project-operating-model-and-completeness.md). Historical audit records under `docs/audit/old/` still cite the old number.
 
 ## Context
 

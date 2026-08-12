@@ -80,6 +80,10 @@ The core product does not require:
 
 ## 4. Inbound identity and trusted proxies
 
+> **Decided.** [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) accepts D09 and D10 and
+> freezes the public names: `[servers.client_address]` inbound (`trusted_proxies`, `forwarded_headers`,
+> `max_hops`) and `backend_tls` outbound. Implementation is tracked by #135, #136 and #259.
+
 ### Target contract — D09
 
 Each server has an explicit trusted-proxy policy. Jul.IA preserves:
@@ -541,8 +545,8 @@ acceptable final outcome.
 | Domain | Decisions | Implementation |
 | --- | --- | --- |
 | Operating model and boundary | #114, this specification | #108 closure |
-| Inbound identity | #115 | #135-#136 |
-| Backend trust | #115 | #109, #137-#140 |
+| Inbound identity | #115 — accepted, [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) | #135-#136, #259 |
+| Backend trust | #115 — accepted, [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) | #109, #137-#140 |
 | Resilience | #116 | #110, #141-#144 |
 | Routing/response policy | #117 | #145-#147 |
 | Authority/generated contracts/API/CLI | #118 | #111, #148-#151 |

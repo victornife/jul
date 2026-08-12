@@ -73,7 +73,7 @@ disabled by default.
 
 ### Current boundary notes
 
-- The direct transport peer is the current source identity for CIDR/rate-limit decisions. A complete trusted-proxy chain model is not yet shipped; never trust client-supplied forwarding headers as security identity by default.
+- The direct transport peer is the current source identity for CIDR/rate-limit decisions. The trusted-proxy chain model is decided in [ADR 0016](docs/adr/0016-inbound-identity-and-backend-peer-trust.md) but not yet shipped; forwarding headers are ignored today, and even once the policy ships they are honoured only when the immediate peer is explicitly trusted. Never trust client-supplied forwarding headers as security identity by default.
 - The auxiliary `[egress]` allow-list and backend TLS identity solve different problems. Egress restricts selected configuration-driven fetch destinations; it does not authenticate reverse-proxy/gRPC backends.
 - HTTP/3 now applies the same complete prepared server-level TLS/mTLS policy as HTTP/1.1 and HTTP/2.
 - ACME HTTP-01 and TLS-ALPN-01 now expose only the configured challenge surface.

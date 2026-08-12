@@ -608,6 +608,57 @@ def check_horizon_specs():
             ok(f"year-{year}.md has horizon banner")
 
 
+def check_adr_numbering():
+    """ADR numbers must be unique, contiguous, match the heading, and be indexed."""
+    adr_dir = DOCS / "adr"
+    if not adr_dir.exists():
+        error(adr_dir, 0, "docs/adr is missing")
+        return
+
+    index = adr_dir / "README.md"
+    if not index.exists():
+        error(index, 0, "docs/adr/README.md index is missing")
+        return
+    index_text = index.read_text(encoding="utf-8")
+
+    records = sorted(p for p in adr_dir.glob("*.md") if p.name != "README.md")
+    if not records:
+        error(adr_dir, 0, "no ADR records found")
+        return
+
+    seen: dict[int, Path] = {}
+    for path in records:
+        match = re.fullmatch(r"(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md", path.name)
+        if not match:
+            error(path, 0, "ADR filename must be NNNN-kebab-case-title.md")
+            continue
+        number = int(match.group(1))
+
+        if number in seen:
+            error(path, 0, f"ADR {number:04d} is already used by {seen[number].name}")
+            continue
+        seen[number] = path
+
+        heading = path.read_text(encoding="utf-8").splitlines()[0] if path.stat().st_size else ""
+        head_match = re.match(r"#\s+ADR\s+(\d{4})\b", heading)
+        if not head_match:
+            error(path, 1, "first line must be '# ADR NNNN — Title'")
+        elif int(head_match.group(1)) != number:
+            error(path, 1, f"heading says ADR {head_match.group(1)} but the filename says {number:04d}")
+
+        if f"]({path.name})" not in index_text:
+            error(index, 0, f"{path.name} is not linked from the ADR index")
+
+    if seen:
+        numbers = sorted(seen)
+        expected = list(range(1, len(numbers) + 1))
+        if numbers != expected:
+            missing = sorted(set(expected) - set(numbers))
+            error(adr_dir, 0, f"ADR numbers are not contiguous from 0001; missing {missing}")
+        else:
+            ok(f"{len(numbers)} ADRs are uniquely and contiguously numbered, indexed, and self-consistent")
+
+
 def check_active_roadmap_links():
     """Links inside the Active operating roadmap section must resolve."""
     roadmap = DOCS / "roadmap" / "README.md"
@@ -872,6 +923,7 @@ def main():
     check_lifecycle_manifest()
     check_finding_uniqueness()
     check_horizon_specs()
+    check_adr_numbering()
     check_active_roadmap_links()
     check_roadmap_active_ids()
 

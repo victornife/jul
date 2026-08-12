@@ -170,6 +170,95 @@ def test_check_active_roadmap_links_ignores_external_links():
         assert fail == 0, f"expected zero failures, got {fail}"
 
 
+def _write_adrs(root: Path, records, index_names=None):
+    """Write an ADR tree; records is a list of (filename, heading_number)."""
+    adr = root / "docs" / "adr"
+    adr.mkdir(parents=True)
+    for name, heading in records:
+        (adr / name).write_text(f"# ADR {heading} — Title\n\n## Context\n", encoding="utf-8")
+    listed = index_names if index_names is not None else [n for n, _ in records]
+    body = "# ADRs\n\n" + "".join(f"- [x]({n})\n" for n in listed)
+    (adr / "README.md").write_text(body, encoding="utf-8")
+    return adr
+
+
+def test_check_adr_numbering_passes_on_a_clean_tree():
+    """Unique, contiguous, indexed ADRs whose headings match must pass."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_adrs(root, [("0001-first.md", "0001"), ("0002-second-one.md", "0002")])
+
+        ok, fail = _run_in_tmp(root, docs_check.check_adr_numbering)
+        assert fail == 0, f"expected zero failures, got {fail}"
+        assert ok == 1, f"expected 1 OK, got {ok}"
+
+
+def test_check_adr_numbering_detects_duplicate_number():
+    """Two ADRs sharing a number must fail — the defect that motivated this guard."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_adrs(root, [("0001-first.md", "0001"), ("0001-also-first.md", "0001")])
+
+        _, fail = _run_in_tmp(root, docs_check.check_adr_numbering)
+        assert fail == 1, f"expected 1 failure, got {fail}"
+
+
+def test_check_adr_numbering_detects_gap():
+    """A missing number in the sequence must fail."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_adrs(root, [("0001-first.md", "0001"), ("0003-third.md", "0003")])
+
+        _, fail = _run_in_tmp(root, docs_check.check_adr_numbering)
+        assert fail == 1, f"expected 1 failure, got {fail}"
+
+
+def test_check_adr_numbering_detects_heading_mismatch():
+    """A heading number that disagrees with the filename must fail."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_adrs(root, [("0001-first.md", "0007")])
+
+        _, fail = _run_in_tmp(root, docs_check.check_adr_numbering)
+        assert fail == 1, f"expected 1 failure, got {fail}"
+
+
+def test_check_adr_numbering_detects_unindexed_record():
+    """An ADR absent from the index must fail."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_adrs(
+            root,
+            [("0001-first.md", "0001"), ("0002-second.md", "0002")],
+            index_names=["0001-first.md"],
+        )
+
+        _, fail = _run_in_tmp(root, docs_check.check_adr_numbering)
+        assert fail == 1, f"expected 1 failure, got {fail}"
+
+
+def test_check_adr_numbering_detects_bad_filename():
+    """A filename that is not NNNN-kebab-case.md must fail."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_adrs(root, [("0001-first.md", "0001"), ("2-Bad_Name.md", "0002")])
+
+        _, fail = _run_in_tmp(root, docs_check.check_adr_numbering)
+        assert fail == 1, f"expected 1 failure, got {fail}"
+
+
+def test_check_adr_numbering_requires_an_index():
+    """A missing docs/adr/README.md must fail."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        adr = root / "docs" / "adr"
+        adr.mkdir(parents=True)
+        (adr / "0001-first.md").write_text("# ADR 0001 — Title\n", encoding="utf-8")
+
+        _, fail = _run_in_tmp(root, docs_check.check_adr_numbering)
+        assert fail == 1, f"expected 1 failure, got {fail}"
+
+
 def test_check_roadmap_active_ids_detects_duplicate():
     """Duplicate active roadmap IDs must be flagged."""
     with tempfile.TemporaryDirectory() as tmpdir:

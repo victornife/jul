@@ -41,3 +41,7 @@ coverage.txt
 # A root-level node_modules only appears if pnpm is run from the repo root
 # by mistake; never track it.
 /node_modules/
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc
