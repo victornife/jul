@@ -194,7 +194,7 @@ rejected configuration.
 | HTTP reverse proxy (named pools and literal `https://` targets, including WebSocket and streaming upgrades) | **enforced** |
 | Native gRPC passthrough | **enforced** |
 | gRPC-JSON transcoding, including the reflection fetch | **enforced** |
-| Active health probes | not yet |
+| Active health probes | **enforced** — see [Health checks and backend trust](#health-checks-and-backend-trust) |
 
 The HTTP proxy builds one `http.Transport` per handler generation from the
 resolved policy, so a policy change produces a new connection pool: a request
@@ -225,13 +225,18 @@ the raw error, host, certificate subject or file path becoming a label:
 
 ## Reload behaviour
 
-`backend_tls` is **restart-required**. The HTTP proxy now rebuilds its transport
-per handler generation and would support hot reload on its own, but the same
-configuration path also feeds native gRPC, transcoding and the health client,
-and those still hold their material for the process lifetime. A field is
-classified `hot_reload` only when **every** consumer demonstrably adopts the
-candidate value, so the class stays restart-required until the remaining
-integrations land.
+`backend_tls` is **hot reload**, and that classification was earned rather than
+assumed: every consumer demonstrably rebuilds from the candidate policy.
+
+- The HTTP proxy, native gRPC and the transcoder build their clients with the
+  handler generation that owns them.
+- The **resolved policy's fingerprint is part of the pool's identity**, so a
+  changed policy rebuilds the pool and with it the probe client. Because the
+  fingerprint digests file *contents*, rotating a certificate in place — with no
+  configuration edit at all — is detected and applied on the next reload.
+
+A malformed policy fails while the candidate is prepared, so the reload aborts
+before anything is published rather than leaving a backend unverifiable.
 
 The classification is conditional on the **backend set**, not on the listener
 set:
@@ -251,13 +256,21 @@ costs nothing. See [reload-semantics.md](reload-semantics.md).
 
 ## Health checks and backend trust
 
-An active HTTP probe inherits the pool's scheme: an `https://` pool is probed
-over TLS. Today probes verify against the **system roots only**, so a
-private-CA backend will be reported unhealthy unless its CA is in the platform
-store. `jul lint` warns about exactly that combination — an `https` pool with an
-enabled HTTP health check and no `backend_tls` block — so the gap is visible
-well before the probe path adopts the same resolved policy as live traffic.
+An active HTTP probe inherits the pool's scheme, and now also its trust: the
+probe client uses the **same resolved policy as live traffic**. A backend is
+never reported healthy under weaker verification than the requests Jul will send
+it — and, equally, a private-CA backend that live traffic verifies is no longer
+reported unhealthy because the probe could not.
 
-A TCP probe is a reachability check and never represents identity verification.
+The policy that governs probes is the **pool's**. A route-level `backend_tls`
+block applies to that route's traffic only; a pool may serve several routes with
+different overrides, so there is no single route policy a probe could adopt. Put
+the trust roots a probe needs on the pool.
+
+A TCP probe remains a reachability check and never represents identity
+verification.
+
+`jul lint` still warns when an `https` pool with an enabled HTTP probe has no
+policy at all, because such a pool is verified against the platform store alone.
 
 See [health.md](health.md).

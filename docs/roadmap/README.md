@@ -175,14 +175,16 @@ implemented as #137 → #138 and #139 (both required) → #140.
   certificates, SNI, minimum version, and peer identity constraints~~ —
   delivered by #137 as `backend_tls` plus `internal/backendtls`, with an
   explicit `ca_mode` enum and prefixed `peer_identities`.
-- Equivalent enforcement across HTTP proxy, native gRPC, transcoding, active
-  health checks, and discovery-backed targets — **not yet**: #137 ships the
-  schema, validation and resolver only. #138 wires the HTTP transports, #139
-  native gRPC and transcoding, and #140 the health flip, status surface and the
-  lifecycle reclassification the wiring earns.
+- ~~Equivalent enforcement across HTTP proxy, native gRPC, transcoding, active
+  health checks, and discovery-backed targets~~ — delivered by #138 (HTTP
+  transports), #139 (native gRPC and transcoding) and #140 (health probes, the
+  status surface and the `hot_reload` reclassification the wiring earned).
 - Named reusable TLS profiles remain a follow-up only if representative
   configurations demonstrate sufficient repetition. Every consumer accepts only
   the resolved policy type, so adding them changes resolution, not transports.
+
+Backend transport trust is complete. The capability ships as **Beta** (see
+[status.md](../status.md)): merged but not yet tagged, released or soaked.
 
 ### Generic resilience
 

@@ -195,6 +195,7 @@ therefore not yet through the post-GA soak gate. See
 | Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
 | Trusted client address (`client_address`) | CGC-IN | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [configuration.md](configuration.md) |
+| Backend TLS trust (`backend_tls`) | UT-BE | core · `grpc` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [upstreams.md](upstreams.md) |
 
 **Trusted client address.** One canonical client address per request, derived
 per listen address from an explicit `trusted_proxies` policy before the `Host`
@@ -210,6 +211,20 @@ benchmarks ([benchmarks.md](benchmarks.md)), the limitation list
 ([known-limitations.md](known-limitations.md)), lifecycle and value-contract
 entries, the ADR threat model, `FuzzDerive`/`FuzzParsePrefix`, and the Security
 panel listener editor with its status row.
+
+**Backend TLS trust.** One outbound policy — trust roots with an explicit
+`ca_mode`, a client certificate, a verified name that a discovery-returned
+address can never displace, a minimum version and explicit `peer_identities` —
+resolved once and enforced by **every** outbound consumer: the HTTP reverse
+proxy (including WebSocket and streaming upgrades), native gRPC passthrough,
+gRPC-JSON transcoding with its reflection fetch, and active health probes, which
+now verify a backend exactly as live traffic does
+([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). Criterion 5 is
+open for the same reason as above: merged, not released, not soaked. Criteria 2
+and 8 are **n/a** — the policy is resolved once per handler generation and adds
+no measurable per-request work beyond the TLS handshake already covered by the
+existing TLS benchmarks, and it has no custom parser, since PEM and certificate
+parsing are the standard library's.
 
 ## Changelog
 

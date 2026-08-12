@@ -5,6 +5,7 @@ package upstream
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"jul/internal/backendtls"
 	"jul/internal/config"
 )
 
@@ -38,6 +40,9 @@ type Registry struct {
 	// uses Pool.StartHealthChecks; tests replace it to observe activation
 	// directly instead of inferring worker creation from probe timing.
 	startHealthChecks func(*Pool, config.HealthCheckConfig, HealthHook, ProbeHook)
+	// startHealthChecksTLS is the policy-aware activation seam used in
+	// production. The plain seam above is kept for tests that replace it.
+	startHealthChecksTLS func(*Pool, config.HealthCheckConfig, *backendtls.Policy, HealthHook, ProbeHook)
 
 	mu     sync.Mutex
 	live   map[poolKey]*poolEntry // committed pools currently serving, keyed by (name, scheme)
@@ -79,8 +84,12 @@ type poolEntry struct {
 	// Activate after Commit promotes the pool to live (R9-07).
 	needsHealth bool
 	healthCfg   config.HealthCheckConfig
-	discoverer  Discoverer
-	discoCfg    config.DiscoveryConfig
+	// healthTLS is the pool's resolved backend trust policy, applied to the
+	// probe client so a backend is never called healthy under weaker
+	// verification than live traffic uses.
+	healthTLS  *backendtls.Policy
+	discoverer Discoverer
+	discoCfg   config.DiscoveryConfig
 }
 
 // upstreamMeta captures the fields that determine a pool's identity. When any of
@@ -96,6 +105,12 @@ type upstreamMeta struct {
 	// discoverySig captures the discovery config so a changed provider rebuilds
 	// the pool (and its refresher) rather than being reused in place.
 	discoverySig string
+	// backendTLSSig is the resolved backend trust policy's fingerprint. It is
+	// part of the pool's identity so a changed policy — including a certificate
+	// rotated in place, which changes the fingerprint without changing the
+	// configured paths — rebuilds the pool and with it the probe client. That
+	// is what makes the whole field hot-reloadable rather than restart-bound.
+	backendTLSSig string
 }
 
 // equal reports whether two metas describe the same pool shape. It cannot use
@@ -106,6 +121,7 @@ func (m upstreamMeta) equal(o upstreamMeta) bool {
 		m.maxFails == o.maxFails &&
 		m.failTimeout == o.failTimeout &&
 		m.discoverySig == o.discoverySig &&
+		m.backendTLSSig == o.backendTLSSig &&
 		healthConfigEqual(m.health, o.health)
 }
 
@@ -139,10 +155,14 @@ type poolKey struct {
 // NewRegistry creates an empty pool registry.
 func NewRegistry(opts RegistryOptions) *Registry {
 	return &Registry{
-		opts:              opts,
-		startHealthChecks: (*Pool).StartHealthChecks,
-		live:              make(map[poolKey]*poolEntry),
-		staged:            make(map[poolKey]*poolEntry),
+		opts: opts,
+		// Only the policy-aware seam is wired by default; startHealthChecks
+		// stays nil so a test that replaces it is still observed, while
+		// production always passes the pool's resolved trust policy to the
+		// probe client.
+		startHealthChecksTLS: (*Pool).StartHealthChecksWithTLS,
+		live:                 make(map[poolKey]*poolEntry),
+		staged:               make(map[poolKey]*poolEntry),
 	}
 }
 
@@ -187,6 +207,17 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		}
 		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco}
 		return e.pool, nil
+	}
+
+	// Resolved here so a malformed policy fails the staged build — and with it
+	// the reload — rather than surfacing as an unhealthy backend later.
+	var policy *backendtls.Policy
+	if up.BackendTLS != nil {
+		resolved, rerr := backendtls.Resolve(up.BackendTLS.Options(), up.Name)
+		if rerr != nil {
+			return nil, fmt.Errorf("upstream %q: %w", up.Name, rerr)
+		}
+		policy = resolved
 	}
 
 	pool, err := NewPool(up, scheme)
@@ -240,6 +271,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		discovery:   disco,
 		needsHealth: up.HealthCheck != nil && up.HealthCheck.Enabled,
 		healthCfg:   healthCfgOrZero(up.HealthCheck),
+		healthTLS:   policy,
 		discoverer:  d,
 		discoCfg:    discoveryCfgOrZero(up.Discovery),
 	}
@@ -308,12 +340,21 @@ func (r *Registry) Activate() {
 	if startHealthChecks == nil {
 		startHealthChecks = (*Pool).StartHealthChecks
 	}
+	startHealthChecksTLS := r.startHealthChecksTLS
+	if startHealthChecksTLS == nil {
+		startHealthChecksTLS = (*Pool).StartHealthChecksWithTLS
+	}
 	for _, e := range r.live {
 		if e.reused {
 			continue
 		}
 		if e.needsHealth {
-			startHealthChecks(e.pool, e.healthCfg, r.opts.OnHealth, r.opts.OnProbe)
+			if r.startHealthChecks != nil {
+				// A test replaced the plain seam; keep observing it.
+				startHealthChecks(e.pool, e.healthCfg, r.opts.OnHealth, r.opts.OnProbe)
+			} else {
+				startHealthChecksTLS(e.pool, e.healthCfg, e.healthTLS, r.opts.OnHealth, r.opts.OnProbe)
+			}
 		}
 		if e.discovery {
 			e.pool.StartDiscovery(e.discoverer, e.discoCfg.Refresh.Std(), DiscoveryHooks{
@@ -323,6 +364,7 @@ func (r *Registry) Activate() {
 		}
 		// Clear activation state now that it has been consumed.
 		e.needsHealth = false
+		e.healthTLS = nil
 		e.discoverer = nil
 	}
 }
@@ -458,16 +500,32 @@ func backendsToServers(backends []*Backend) []config.UpstreamServer {
 // metaOf extracts the identity fields of an upstream.
 func metaOf(up config.UpstreamConfig, scheme string) upstreamMeta {
 	m := upstreamMeta{
-		scheme:       scheme,
-		strategy:     up.Strategy,
-		maxFails:     up.MaxFails,
-		failTimeout:  up.FailTimeout.Std(),
-		discoverySig: discoverySignature(up.Discovery),
+		scheme:        scheme,
+		strategy:      up.Strategy,
+		maxFails:      up.MaxFails,
+		failTimeout:   up.FailTimeout.Std(),
+		discoverySig:  discoverySignature(up.Discovery),
+		backendTLSSig: backendTLSSignature(up),
 	}
 	if up.HealthCheck != nil {
 		m.health = *up.HealthCheck
 	}
 	return m
+}
+
+// backendTLSSignature returns the resolved policy's fingerprint, or "" when the
+// pool declares no policy. A resolution failure yields a distinct marker rather
+// than "" so a broken policy is never mistaken for an absent one; the same
+// resolution runs again (and reports the error) when the probe client is built.
+func backendTLSSignature(up config.UpstreamConfig) string {
+	if up.BackendTLS == nil {
+		return ""
+	}
+	policy, err := backendtls.Resolve(up.BackendTLS.Options(), up.Name)
+	if err != nil {
+		return "unresolvable:" + err.Error()
+	}
+	return policy.Fingerprint()
 }
 
 // discoverySignature builds a stable string identifying a discovery config, so a

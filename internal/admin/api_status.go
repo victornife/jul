@@ -98,24 +98,28 @@ func countUnit(n int, unit string) string {
 // and assert it in TestStatusAPI; do not ship the feature without it.
 func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	var (
-		tlsServers       int
-		mtlsServers      int
-		acmeServers      int
-		http3Servers     int
-		h2cServers       int
-		trustedListeners int
-		trustedRanges    int
-		openTrust        bool
-		staticLocs       int
-		proxyLocs        int
-		fastcgiLocs      int
-		grpcProxy        int
-		grpcTranscode    int
-		authLocs         int
-		requireCertLocs  int
-		cacheLocs        int
-		pluginLocs       int
-		totalLocs        int
+		tlsServers           int
+		mtlsServers          int
+		acmeServers          int
+		http3Servers         int
+		h2cServers           int
+		trustedListeners     int
+		trustedRanges        int
+		openTrust            bool
+		staticLocs           int
+		backendTLSPools      int
+		backendTLSRoutes     int
+		backendTLSInsecure   int
+		backendTLSIdentities int
+		proxyLocs            int
+		fastcgiLocs          int
+		grpcProxy            int
+		grpcTranscode        int
+		authLocs             int
+		requireCertLocs      int
+		cacheLocs            int
+		pluginLocs           int
+		totalLocs            int
 	)
 	trustedAddrs := map[string]bool{}
 	for i := range c.Servers {
@@ -175,6 +179,15 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 			if loc.Plugin != "" || len(loc.Plugins) > 0 {
 				pluginLocs++
 			}
+			if b := loc.BackendTLS; b != nil {
+				backendTLSRoutes++
+				if b.InsecureSkipVerify {
+					backendTLSInsecure++
+				}
+				if len(b.PeerIdentities) > 0 {
+					backendTLSIdentities++
+				}
+			}
 		}
 	}
 
@@ -182,6 +195,15 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	discoveryKinds := map[string]bool{}
 	for i := range c.Upstreams {
 		up := &c.Upstreams[i]
+		if b := up.BackendTLS; b != nil {
+			backendTLSPools++
+			if b.InsecureSkipVerify {
+				backendTLSInsecure++
+			}
+			if len(b.PeerIdentities) > 0 {
+				backendTLSIdentities++
+			}
+		}
 		if up.HealthCheck != nil && up.HealthCheck.Enabled {
 			healthPools++
 		}
@@ -324,6 +346,27 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 	}
 
+	// Bounded counts only: how many pools and routes declare a policy, how many
+	// pin an explicit peer identity, and how many disable verification. No
+	// upstream name, host, certificate subject or file path is ever projected.
+	backendTLSDetail := ""
+	if total := backendTLSPools + backendTLSRoutes; total > 0 {
+		parts := make([]string, 0, 3)
+		if backendTLSPools > 0 {
+			parts = append(parts, countUnit(backendTLSPools, "pool"))
+		}
+		if backendTLSRoutes > 0 {
+			parts = append(parts, countUnit(backendTLSRoutes, "route"))
+		}
+		backendTLSDetail = strings.Join(parts, ", ")
+		if backendTLSIdentities > 0 {
+			backendTLSDetail += fmt.Sprintf("; %d with pinned peer identities", backendTLSIdentities)
+		}
+		if backendTLSInsecure > 0 {
+			backendTLSDetail += fmt.Sprintf("; %d with verification disabled", backendTLSInsecure)
+		}
+	}
+
 	return []FeatureStatus{
 		{Group: "Traffic", Name: "Virtual hosts", Active: len(c.Servers) > 0, Detail: vhostDetail},
 		{Group: "Traffic", Name: "Static file serving", Active: staticLocs > 0, Detail: countDetailIf(staticLocs, "location")},
@@ -349,6 +392,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 
 		{Group: "Upstreams", Name: "Upstream pools", Active: len(c.Upstreams) > 0, Detail: countDetailIf(len(c.Upstreams), "pool")},
 		{Group: "Upstreams", Name: "Active health checks", Active: healthPools > 0, Detail: countDetailIf(healthPools, "pool")},
+		{Group: "Upstreams", Name: "Backend TLS trust", Active: backendTLSPools+backendTLSRoutes > 0, Detail: backendTLSDetail},
 		{Group: "Upstreams", Name: "Service discovery", Active: discoveryPools > 0, Detail: discDetail},
 
 		{Group: "Observability", Name: "Prometheus metrics", Active: s.deps.Metrics != nil, Detail: metricsDetail(s.deps.Metrics != nil)},
