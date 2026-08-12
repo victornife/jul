@@ -192,7 +192,8 @@ rejected configuration.
 | Consumer | Status |
 | --- | --- |
 | HTTP reverse proxy (named pools and literal `https://` targets, including WebSocket and streaming upgrades) | **enforced** |
-| Native gRPC passthrough and gRPC-JSON transcoding | not yet |
+| Native gRPC passthrough | **enforced** |
+| gRPC-JSON transcoding, including the reflection fetch | **enforced** |
 | Active health probes | not yet |
 
 The HTTP proxy builds one `http.Transport` per handler generation from the
@@ -202,9 +203,15 @@ established under the previous trust, and the retiring generation closes its
 idle connections when it retires. Requests already in flight finish on their own
 connection, which is the generation drain contract rather than an abrupt cut.
 
-A route configured for `https` never dials a plaintext backend. No retry,
-failover or discovery result may downgrade the connection; the request fails
-instead.
+A route configured for `https` never dials a plaintext backend, and a TLS gRPC
+route never falls back to cleartext h2c. No retry, failover or discovery result
+may downgrade the connection; the request fails instead.
+
+For gRPC the policy's TLS config advertises `h2` explicitly, because those
+transports speak HTTP/2 only — a backend that negotiated `http/1.1` would break
+gRPC framing. The transcoder's connection cache lives on the transcoder, which
+is rebuilt with its handler generation, so a policy change produces fresh
+connections rather than reusing ones established under the previous trust.
 
 ### Failure categories
 

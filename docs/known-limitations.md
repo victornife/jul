@@ -78,14 +78,14 @@ references.
 
 ## Backend TLS trust ([upstreams.md](upstreams.md#backend-tls))
 
-- **Only the HTTP proxy enforces the policy so far.** Native gRPC, gRPC-JSON
-  transcoding and active health probes still build their TLS with language
-  defaults until their integrations land, so a configured block changes what
-  those consumers report before it changes what their connections do.
-- **Changing a live backend's policy still requires a restart.** The HTTP proxy
-  rebuilds its transport per handler generation and would support hot reload on
-  its own, but the same configuration path feeds gRPC, transcoding and health,
-  which do not. A field is classified `hot_reload` only when *every* consumer
+- **Active health probes do not use the policy yet.** The HTTP proxy, native
+  gRPC and gRPC-JSON transcoding all enforce it; probes still verify against the
+  platform trust store, so a private-CA backend that live traffic reaches is
+  still reported unhealthy. `jul lint` warns about that combination.
+- **Changing a live backend's policy still requires a restart.** The HTTP proxy,
+  native gRPC and the transcoder all rebuild with their handler generation and
+  would support hot reload, but the same configuration path feeds the active
+  health client, which is built once. A field is classified `hot_reload` only when *every* consumer
   adopts the candidate value, so the class stays restart-required until the
   remaining integrations land. Adding or removing a backend applies on the
   reload; editing the policy of one that survives it does not.

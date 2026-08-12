@@ -220,7 +220,7 @@ func TestGRPCProxyServerStream(t *testing.T) {
 func TestNewGRPCTransportScheme(t *testing.T) {
 	loc := config.LocationConfig{}
 
-	h2cT := newGRPCTransport(loc, false)
+	h2cT := newGRPCTransport(loc, false, nil)
 	if !h2cT.AllowHTTP {
 		t.Error("h2c transport should set AllowHTTP for cleartext HTTP/2")
 	}
@@ -228,7 +228,7 @@ func TestNewGRPCTransportScheme(t *testing.T) {
 		t.Error("h2c transport should dial via DialTLSContext")
 	}
 
-	tlsT := newGRPCTransport(loc, true)
+	tlsT := newGRPCTransport(loc, true, nil)
 	if tlsT.AllowHTTP {
 		t.Error("TLS transport must not set AllowHTTP")
 	}

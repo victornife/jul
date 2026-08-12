@@ -216,3 +216,15 @@ All GA criteria are satisfied.
 - [examples/grpc-proxy](../examples/grpc-proxy) — runnable sample config
 - [testdata/grpc-proxy.toml](../testdata/grpc-proxy.toml) — `jul -check` sample
 - [examples/grpc-gateway](../examples/grpc-gateway) — the REST/JSON transcoding gateway
+
+## Backend TLS
+
+An `https://` gRPC backend uses the resolved
+[`backend_tls`](upstreams.md#backend-tls) policy — private roots, a client
+certificate, the verified name and explicit peer identities — exactly as the
+HTTP proxy does. The policy's ALPN advertises `h2` only, since this path speaks
+HTTP/2 exclusively.
+
+A TLS gRPC route never falls back to cleartext h2c: a backend whose scheme is
+not `https` is refused rather than dialled, so no failover or discovery result
+can downgrade a call.

@@ -7,7 +7,6 @@ package transcode
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -20,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"jul/internal/backendtls"
 	"jul/internal/config"
 	"jul/internal/upstream"
 
@@ -43,6 +43,11 @@ const maxBodyBytes = 4 << 20 // 4 MiB
 type Options struct {
 	Logger   *slog.Logger
 	OnResult func(method, code string)
+	// BackendTLS is the resolved outbound trust policy for the gRPC backend.
+	// nil keeps the language defaults, which is what a target with no
+	// backend_tls block gets. The transcoder never parses public
+	// configuration: it consumes only this resolved value.
+	BackendTLS *backendtls.Policy
 	// OnStreamMsg, when set, is called once per streamed message with the gRPC
 	// method full name and direction ("sent"/"recv").
 	OnStreamMsg func(method, direction string)
@@ -59,6 +64,7 @@ type Transcoder struct {
 	routes        []*route
 	pool          *upstream.Pool
 	useTLS        bool
+	tlsPolicy     *backendtls.Policy
 	conns         sync.Map // address -> *grpc.ClientConn
 	preserveNames bool
 	streaming     bool
@@ -129,7 +135,7 @@ func New(ctx context.Context, cfg config.GRPCTranscodeConfig, pool *upstream.Poo
 		}
 		defer b.Release()
 
-		conn, derr := dial(b.Address, cfg.TLS)
+		conn, derr := dial(b.Address, cfg.TLS, opts.BackendTLS)
 		if derr != nil {
 			return nil, fmt.Errorf("grpc_transcode %s: dial %s for reflection: %w", cfg.Target, b.Address, derr)
 		}
@@ -152,6 +158,7 @@ func New(ctx context.Context, cfg config.GRPCTranscodeConfig, pool *upstream.Poo
 		routes:        routes,
 		pool:          pool,
 		useTLS:        cfg.TLS,
+		tlsPolicy:     opts.BackendTLS,
 		preserveNames: cfg.PreserveNames,
 		streaming:     cfg.Streaming,
 		streamMode:    normalizeStreamMode(cfg.StreamMode),
@@ -305,7 +312,7 @@ func (t *Transcoder) connFor(addr string) (*grpc.ClientConn, error) {
 		_ = rc.conn.Close()
 		t.retired.Delete(addr)
 	}
-	conn, err := dial(addr, t.useTLS)
+	conn, err := dial(addr, t.useTLS, t.tlsPolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -332,10 +339,16 @@ func (t *Transcoder) firstConn() (*grpc.ClientConn, error) {
 // dial creates a lazy gRPC client connection to addr over TLS or plaintext
 // HTTP/2 (h2c). The passthrough scheme dials the address directly without name
 // resolution.
-func dial(addr string, useTLS bool) (*grpc.ClientConn, error) {
+//
+// When a backend TLS policy is resolved, its config decides the trust roots,
+// the client certificate, the verified name and any peer identities. A nil
+// policy yields exactly the previous behaviour — a TLS 1.2 floor and platform
+// roots — because that is what ClientConfig returns for no policy. The address
+// is only where to dial; the policy decides who must answer.
+func dial(addr string, useTLS bool, policy *backendtls.Policy) (*grpc.ClientConn, error) {
 	var creds credentials.TransportCredentials
 	if useTLS {
-		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+		creds = credentials.NewTLS(policy.ClientConfig())
 	} else {
 		creds = insecure.NewCredentials()
 	}

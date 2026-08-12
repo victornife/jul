@@ -637,13 +637,13 @@ new policy with the rest of the handler generation.
 ### Backend trust (`backend_tls`)
 
 The outbound TLS policy is **restart_required**, and that is a statement about
-the current code rather than caution. The HTTP reverse proxy *does* now rebuild
-its transport with each handler generation, so on its own it would support hot
-reload — but the same configuration path also feeds native gRPC, transcoding
-(which caches its gRPC connections for the process lifetime) and the active
-health client (built once). A field is classified `hot_reload` only when **every**
-consumer demonstrably adopts the candidate value, so the class stays
-restart-required until the remaining integrations land and can be shown to.
+the current code rather than caution. The HTTP reverse proxy, native gRPC and
+the gRPC-JSON transcoder now all rebuild with their handler generation, so on
+their own they would support hot reload — but the same configuration path also
+feeds the active health client, which is created once per pool. A field is
+classified `hot_reload` only when **every** consumer demonstrably adopts the
+candidate value, so the class stays restart-required until the health
+integration lands and can be shown to.
 
 The classification is **conditional on the backend set**, not on the listener
 set, because backend trust is not a property of an inbound socket:

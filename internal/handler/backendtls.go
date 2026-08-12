@@ -39,6 +39,13 @@ func resolveBackendTLS(loc config.LocationConfig, upstreams map[string]config.Up
 	if u, err := url.Parse(loc.ProxyPass); err == nil {
 		logicalHost = u.Host
 	}
+	return resolveBackendTLSFor(loc, upstreams, logicalHost)
+}
+
+// resolveBackendTLSFor is resolveBackendTLS with an explicit logical target,
+// for consumers whose target is not proxy_pass — gRPC-JSON transcoding names
+// its backend in grpc_transcode.target.
+func resolveBackendTLSFor(loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, logicalHost string) (*backendtls.Policy, error) {
 	block := loc.BackendTLS
 	if block == nil {
 		if up, ok := upstreams[logicalHost]; ok {
