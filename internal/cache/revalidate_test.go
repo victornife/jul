@@ -662,7 +662,7 @@ func TestRevalidationPropagatesAllowListedContextValues(t *testing.T) {
 
 	type seen struct {
 		snapshots  int
-		identity   *middleware.ClientIdentity
+		identity   *middleware.PeerCertIdentity
 		requestID  string
 		traceID    string
 		claims     map[string]any
@@ -674,7 +674,7 @@ func TestRevalidationPropagatesAllowListedContextValues(t *testing.T) {
 		_, hasDeadline := r.Context().Deadline()
 		got <- seen{
 			snapshots:  len(upstream.SnapshotsFrom(r.Context())),
-			identity:   middleware.ClientIdentityFrom(r.Context()),
+			identity:   middleware.PeerCertIdentityFrom(r.Context()),
 			requestID:  middleware.RequestIDFrom(r.Context()),
 			traceID:    middleware.TraceIDFrom(r.Context()),
 			claims:     middleware.ClaimsFrom(r.Context()),
@@ -689,7 +689,7 @@ func TestRevalidationPropagatesAllowListedContextValues(t *testing.T) {
 	ctx := upstream.WithSnapshot(clientCtx, upstream.SnapshotMap{
 		{Name: "api", Scheme: "http"}: nil,
 	})
-	ctx = middleware.WithClientIdentity(ctx, &middleware.ClientIdentity{Verified: true, CN: "client.example"})
+	ctx = middleware.WithPeerCertIdentity(ctx, &middleware.PeerCertIdentity{Verified: true, CN: "client.example"})
 	ctx = middleware.WithRequestID(ctx, "req-1")
 	ctx = middleware.WithTraceID(ctx, "trace-1")
 	ctx = middleware.WithClaims(ctx, map[string]any{"sub": "alice"})

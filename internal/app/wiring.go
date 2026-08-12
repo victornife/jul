@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 
 	"jul/internal/auth"
+	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/server"
@@ -75,6 +76,23 @@ func UniqueListenAddrs(servers []config.ServerConfig) []string {
 		addrs = append(addrs, srv.Listen)
 	}
 	return addrs
+}
+
+// ClientAddressPolicy compiles the trusted-proxy policy that applies to addr.
+//
+// The policy is listener scoped: configuration validation requires every server
+// block sharing a listen address to declare the same effective policy, so the
+// first matching block is authoritative. A block without a [client_address]
+// policy yields a policy that trusts no proxy, meaning the canonical client is
+// always the direct transport peer.
+func ClientAddressPolicy(servers []config.ServerConfig, addr string) (*clientaddr.Policy, error) {
+	for _, srv := range servers {
+		if srv.Listen != addr || srv.ClientAddress == nil {
+			continue
+		}
+		return clientaddr.NewPolicy(srv.ClientAddress.TrustedProxies, srv.ClientAddress.ForwardedHeaders, srv.ClientAddress.MaxHops)
+	}
+	return nil, nil
 }
 
 // AddrServesTLS reports whether any server block on addr enables TLS. It marks

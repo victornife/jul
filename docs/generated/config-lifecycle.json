@@ -51,6 +51,10 @@
       "description": "The two-tier response cache backend."
     },
     {
+      "name": "client_address",
+      "description": "The per-listener trusted-proxy policy that derives the canonical client address."
+    },
+    {
       "name": "compression",
       "description": "Negotiated response compression."
     },
@@ -236,12 +240,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 266,
-    "schema_leaves": 224,
-    "registry_entries": 224,
+    "schema_paths": 270,
+    "schema_leaves": 227,
+    "registry_entries": 227,
     "startup_consumed": 57,
     "by_class": {
-      "hot_reload": 153,
+      "hot_reload": 156,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
       "restart_required": 57,
@@ -1326,6 +1330,45 @@
       "conditional": false,
       "deprecated": true,
       "ignored": true,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.client_address.forwarded_headers",
+      "class": "hot_reload",
+      "subsystem": "client_address",
+      "reason": "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.client_address.max_hops",
+      "class": "hot_reload",
+      "subsystem": "client_address",
+      "reason": "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.client_address.trusted_proxies",
+      "class": "hot_reload",
+      "subsystem": "client_address",
+      "reason": "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
       "reserved": false,
       "secret_digested": false
     },

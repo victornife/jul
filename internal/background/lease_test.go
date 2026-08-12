@@ -188,7 +188,7 @@ func TestDetachCopiesOnlyTheAllowList(t *testing.T) {
 	src = upstream.WithSnapshot(src, upstream.SnapshotMap{
 		{Name: "api", Scheme: "http"}: nil,
 	})
-	src = middleware.WithClientIdentity(src, &middleware.ClientIdentity{Verified: true, CN: "client.example"})
+	src = middleware.WithPeerCertIdentity(src, &middleware.PeerCertIdentity{Verified: true, CN: "client.example"})
 	src = middleware.WithRequestID(src, "req-9")
 	src = middleware.WithTraceID(src, "trace-9")
 	src = middleware.WithClaims(src, map[string]any{"sub": "alice"})
@@ -200,7 +200,7 @@ func TestDetachCopiesOnlyTheAllowList(t *testing.T) {
 	if len(upstream.SnapshotsFrom(got)) != 1 {
 		t.Error("upstream snapshot was not carried over")
 	}
-	if id := middleware.ClientIdentityFrom(got); id == nil || id.CN != "client.example" {
+	if id := middleware.PeerCertIdentityFrom(got); id == nil || id.CN != "client.example" {
 		t.Errorf("client identity = %+v, want the source identity", id)
 	}
 	if got := middleware.RequestIDFrom(got); got != "req-9" {

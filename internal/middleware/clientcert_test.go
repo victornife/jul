@@ -62,7 +62,7 @@ func TestClientCertOptionalNoCertPasses(t *testing.T) {
 	var ran bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ran = true
-		if ClientIdentityFrom(r.Context()) != nil {
+		if PeerCertIdentityFrom(r.Context()) != nil {
 			t.Error("expected no identity when no certificate is presented")
 		}
 	})
@@ -78,9 +78,9 @@ func TestClientCertOptionalNoCertPasses(t *testing.T) {
 func TestClientCertPopulatesIdentity(t *testing.T) {
 	leaf := testLeaf(t, "alice", "alice.example.com")
 
-	var got *ClientIdentity
+	var got *PeerCertIdentity
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = ClientIdentityFrom(r.Context())
+		got = PeerCertIdentityFrom(r.Context())
 	})
 	h := ClientCert(true)(next)
 

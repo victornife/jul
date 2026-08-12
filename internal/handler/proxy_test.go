@@ -323,7 +323,7 @@ func TestProxyRetryStableIdentityAcrossUpdate(t *testing.T) {
 }
 
 func TestExpandProxyVarSSLClient(t *testing.T) {
-	id := &middleware.ClientIdentity{
+	id := &middleware.PeerCertIdentity{
 		Verified:    true,
 		SubjectDN:   "CN=alice,O=Jul",
 		IssuerDN:    "CN=Issuer",
@@ -333,7 +333,7 @@ func TestExpandProxyVarSSLClient(t *testing.T) {
 		SANs:        "alice.example.com",
 	}
 	req := httptest.NewRequest(http.MethodGet, "https://edge/", nil)
-	req = req.WithContext(middleware.WithClientIdentity(req.Context(), id))
+	req = req.WithContext(middleware.WithPeerCertIdentity(req.Context(), id))
 
 	if got := expandProxyVar("$ssl_client_cn", req); got != "alice" {
 		t.Errorf("$ssl_client_cn = %q, want alice", got)

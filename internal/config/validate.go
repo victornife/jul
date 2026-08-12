@@ -10,7 +10,10 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
+
+	"jul/internal/clientaddr"
 )
 
 // Validate checks a Config for correctness and rejects features reserved for
@@ -134,6 +137,7 @@ func Validate(c *Config) error {
 			errs = append(errs, fmt.Errorf("%s: tls.client_auth requires tls.enabled = true", where))
 		}
 		errs = append(errs, validateHTTP3(srv.HTTP3, srv.TLS, where)...)
+		errs = append(errs, validateClientAddress(srv.ClientAddress, where+".client_address")...)
 	}
 
 	for addr := range tlsByAddr {
@@ -146,6 +150,7 @@ func Validate(c *Config) error {
 	}
 
 	errs = append(errs, validateACMEConsistency(c.Servers)...)
+	errs = append(errs, validateClientAddressConsistency(c.Servers)...)
 
 	errs = append(errs, validateAdminValues(c.Admin)...)
 	errs = append(errs, validateCacheValues(c.Cache)...)
@@ -525,6 +530,111 @@ func validateACMEConsistency(servers []ServerConfig) []error {
 		}
 	}
 	return errs
+}
+
+// validateClientAddress checks one [servers.client_address] block. Entries are
+// validated with the same parser the runtime policy compiles with, so a
+// configuration that validates is a configuration that can be published.
+func validateClientAddress(ca *ClientAddressConfig, where string) []error {
+	if ca == nil {
+		return nil
+	}
+	var errs []error
+	for i, raw := range ca.TrustedProxies {
+		if _, err := clientaddr.ParsePrefix(raw); err != nil {
+			errs = append(errs, fmt.Errorf("%s.trusted_proxies[%d]: %v", where, i, err))
+		}
+	}
+	seen := map[string]bool{}
+	for i, name := range ca.ForwardedHeaders {
+		path := fmt.Sprintf("%s.forwarded_headers[%d]", where, i)
+		if name == "" {
+			errs = append(errs, fmt.Errorf("%s: invalid value %q; expected %s or %s", path, name, clientaddr.HeaderForwarded, clientaddr.HeaderXFF))
+			continue
+		}
+		if err := validateOptionalEnum(path, name, clientaddr.HeaderForwarded, clientaddr.HeaderXFF); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if seen[name] {
+			errs = append(errs, fmt.Errorf("%s: duplicate header %q; each forwarding header may be listed once", path, name))
+			continue
+		}
+		seen[name] = true
+	}
+	if err := validateNonNegativeInt(where+".max_hops", ca.MaxHops); err != nil {
+		errs = append(errs, err)
+	} else if ca.MaxHops > clientaddr.MaxHopsLimit {
+		errs = append(errs, fmt.Errorf("%s.max_hops: %d must be at most %d (0 selects the default of %d)", where, ca.MaxHops, clientaddr.MaxHopsLimit, clientaddr.DefaultMaxHops))
+	}
+	return errs
+}
+
+// validateClientAddressConsistency rejects divergent client_address policies
+// across server blocks that share a listen address. The canonical client is
+// derived per listen address, before the router reads the Host header, so a
+// listener has exactly one policy: allowing blocks to disagree would let the
+// configuration claim a stricter policy than the one actually applied. Blocks
+// are compared by effective policy, so omitting the block on one sibling while
+// another declares real trust is rejected, while spelling out a default that
+// the sibling omits is not.
+func validateClientAddressConsistency(servers []ServerConfig) []error {
+	type policyRef struct{ where, policy string }
+	first := map[string]policyRef{}
+	var errs []error
+	for i := range servers {
+		addr := strings.TrimSpace(servers[i].Listen)
+		if addr == "" {
+			continue
+		}
+		current := policyRef{
+			where:  fmt.Sprintf("servers[%d].client_address", i),
+			policy: canonicalClientAddress(servers[i].ClientAddress),
+		}
+		ref, ok := first[addr]
+		if !ok {
+			first[addr] = current
+			continue
+		}
+		if ref.policy != current.policy {
+			errs = append(errs, fmt.Errorf("%s: %s differs from %s %s; client identity is derived per listen address before the Host header selects a server block, so every block sharing listen %q must declare the same policy",
+				current.where, current.policy, ref.where, ref.policy, addr))
+		}
+	}
+	return errs
+}
+
+// canonicalClientAddress renders the effective policy of a client_address block
+// as a stable string: prefixes normalized, sorted and deduplicated, defaults
+// applied. Entries that fail their own validation are kept verbatim so the
+// consistency error stays readable while the entry error is reported too.
+func canonicalClientAddress(ca *ClientAddressConfig) string {
+	trusted := []string{}
+	headers := clientaddr.DefaultForwardedHeaders()
+	maxHops := clientaddr.DefaultMaxHops
+	if ca != nil {
+		seen := map[string]bool{}
+		for _, raw := range ca.TrustedProxies {
+			entry := strings.TrimSpace(raw)
+			if prefix, err := clientaddr.ParsePrefix(raw); err == nil {
+				entry = prefix.String()
+			}
+			if seen[entry] {
+				continue
+			}
+			seen[entry] = true
+			trusted = append(trusted, entry)
+		}
+		sort.Strings(trusted)
+		if ca.ForwardedHeaders != nil {
+			headers = append([]string{}, ca.ForwardedHeaders...)
+		}
+		if ca.MaxHops > 0 {
+			maxHops = ca.MaxHops
+		}
+	}
+	return fmt.Sprintf("{trusted_proxies=[%s] forwarded_headers=[%s] max_hops=%d}",
+		strings.Join(trusted, " "), strings.Join(headers, " "), maxHops)
 }
 
 // validateClientAuth checks a tls.client_auth block. The mode must be one of

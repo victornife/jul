@@ -23,6 +23,7 @@ subsystems:
   admin: "The admin/observability listener and its startup-owned resources."
   auth: "Per-location credential checks (CIDR, Basic, JWT, forward-auth)."
   cache: "The two-tier response cache backend."
+  client_address: "The per-listener trusted-proxy policy that derives the canonical client address."
   compression: "Negotiated response compression."
   discovery: "Dynamic backend discovery for an upstream pool."
   egress: "The outbound-destination allow-list applied to auxiliary fetches."
@@ -71,12 +72,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 266
-  schema_leaves: 224
-  registry_entries: 224
+  schema_paths: 270
+  schema_leaves: 227
+  registry_entries: 227
   startup_consumed: 57
   by_class:
-    hot_reload: 153
+    hot_reload: 156
     restart_required: 57
     new_listener_only: 8
     ignored_deprecated: 4
@@ -467,6 +468,18 @@ fields:
     reason: "superseded by observability.access_log; no runtime consumer reads it"
     deprecated: true
     ignored: true
+  - path: "servers.*.client_address.forwarded_headers"
+    class: hot_reload
+    subsystem: client_address
+    reason: "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
+  - path: "servers.*.client_address.max_hops"
+    class: hot_reload
+    subsystem: client_address
+    reason: "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
+  - path: "servers.*.client_address.trusted_proxies"
+    class: hot_reload
+    subsystem: client_address
+    reason: "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
   - path: "servers.*.client_max_body_size"
     class: hot_reload
     subsystem: server_limits

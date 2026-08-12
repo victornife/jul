@@ -52,8 +52,8 @@ func Detach(parent, src context.Context) context.Context {
 	if snaps := upstream.SnapshotsFrom(src); len(snaps) > 0 {
 		parent = upstream.WithSnapshot(parent, snaps)
 	}
-	if id := middleware.ClientIdentityFrom(src); id != nil {
-		parent = middleware.WithClientIdentity(parent, id)
+	if id := middleware.PeerCertIdentityFrom(src); id != nil {
+		parent = middleware.WithPeerCertIdentity(parent, id)
 	}
 	if id := middleware.RequestIDFrom(src); id != "" {
 		parent = middleware.WithRequestID(parent, id)

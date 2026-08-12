@@ -18,6 +18,7 @@ internal/
   auth/                # Authentication handlers (basic, JWT, forward-auth, CIDR)
   background/          # Generation-owned background-operation lease (context seam)
   cache/               # HTTP response cache (memory + disk backends)
+  clientaddr/          # Canonical client-address derivation and request-scoped identity
   config/              # TOML config schema, parser, validation, and defaults
   handler/             # HTTP request handlers (static files, proxy, gRPC, plugins)
   lifecycle/           # Machine authority for configuration reload behavior; generates the lifecycle mirrors

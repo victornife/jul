@@ -624,6 +624,16 @@ at runtime by `internal/auth`'s `TestReloadChurnNoLeak`, which drives sustained
 build/exercise/drop churn across every auth permutation and asserts the
 goroutine count and post-GC heap return to their pre-churn baseline.
 
+### Trusted-proxy policy (`[servers.client_address]`)
+
+The per-listener trusted-proxy policy is **hot_reload**, and truthfully so: the
+policy is compiled into an immutable value while the new handler tree is
+prepared, and the identity middleware that reads it is installed in that same
+tree. A malformed prefix therefore fails the build during Prepare and aborts the
+reload before Publish — no listener ever serves a half-applied policy. Nothing
+about the policy is captured at bind time, so a kept listen address adopts the
+new policy with the rest of the handler generation.
+
 ## Reload timeout and deadlines (`[global].reload_timeout`)
 
 A managed admin apply runs under **one absolute transaction deadline**. The

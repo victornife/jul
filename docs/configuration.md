@@ -226,6 +226,91 @@ write_timeout = "60s"
 | `error_pages` | table | Map of status code → file path or redirect URL |
 | `redirect_https` | int | On an HTTP server, redirect to HTTPS with this status (`301` or `308`) |
 | `h2c` | bool | On a plaintext listener, also accept cleartext HTTP/2 (h2c) for native gRPC clients without TLS; ignored on a TLS listener (HTTP/2 is negotiated via ALPN) |
+| `client_address` | table | Trusted-proxy policy for deriving the canonical client address (see [Client address and trusted proxies](#client-address-and-trusted-proxies)) |
+
+---
+
+## Client address and trusted proxies
+
+Jul answers every IP-based question — CIDR authentication, rate-limit keys, WAF
+source address, access logs, forwarding headers — with one canonical client
+address. By default that address is the immediate transport peer: no forwarding
+header is believed. This block is how an operator says which proxies may assert
+something different.
+
+```toml
+[[servers]]
+listen = ":443"
+
+[servers.client_address]
+trusted_proxies   = ["10.0.0.0/8", "2001:db8:100::/48"]
+forwarded_headers = ["forwarded", "x-forwarded-for"]
+max_hops          = 16
+```
+
+| Key | Type | Default | Description |
+| --- | ---- | ------- | ----------- |
+| `trusted_proxies` | []string | empty | CIDR prefixes, or bare addresses meaning a single host, whose forwarding headers are believed. Prefixes must be canonical (host bits clear): `10.0.0.0/8`, not `10.1.2.3/8`. |
+| `forwarded_headers` | []string | `["forwarded", "x-forwarded-for"]` | Ordered preference. The first header present on the request is the only one used. An explicitly empty list (`[]`) disables both, keeping peer-only identity even for a trusted peer. |
+| `max_hops` | int | `16` | Maximum asserted hops in a chain. A longer chain fails closed to the transport peer. Maximum 255. |
+
+**`trusted_proxies` is a security boundary.** Every address it covers may claim
+any client address, and that claim flows into authentication, rate limiting, the
+WAF and the audit trail. List the addresses of proxies you actually operate and
+nothing else. There are deliberately no shorthands (`private`, `rfc1918`, cloud
+provider lists): they encourage exactly the over-broad trust this policy exists
+to bound. `jul lint` warns when an entry covers the whole address space.
+
+### How the client address is derived
+
+1. The direct socket peer is parsed and always retained.
+2. If the peer is not in `trusted_proxies`, every asserted header is ignored and
+   the peer is the client.
+3. Otherwise the first configured header present on the request is selected.
+   `Forwarded` (RFC 7239) and `X-Forwarded-For` chains are never merged.
+4. The selected chain is walked right to left, discarding hops that are
+   themselves trusted proxies.
+5. The first untrusted valid address is the canonical client.
+6. If every asserted hop is trusted, the leftmost asserted address is used.
+7. Malformed, oversized, ambiguous or over-`max_hops` input fails **closed** to
+   the direct peer; a bounded, rate-limited warning is logged. Obfuscated
+   identifiers (`for=_hidden`), `unknown`, hostnames and invalid addresses are
+   never canonical clients, and no DNS lookup happens at any point.
+
+A spoofed left-hand entry therefore cannot win: with
+`X-Forwarded-For: 127.0.0.1, 198.51.100.9, 10.8.8.8` from a trusted `10.0.0.0/8`
+peer, the client is `198.51.100.9` — the first hop the trusted proxies did not
+vouch for. The attacker-supplied `127.0.0.1` is never reached.
+
+### One policy per listen address
+
+Server blocks are selected by the `Host` header, but the client address is
+derived **before** routing. A policy chosen after virtual-host selection would
+let an attacker pick the trust policy applied to their own request by choosing a
+`Host`. Therefore every `[[servers]]` block that shares a `listen` value must
+declare the same effective `client_address` policy; validation rejects the
+configuration otherwise:
+
+```
+servers[1].client_address: {trusted_proxies=[] ...} differs from
+servers[0].client_address: {trusted_proxies=[10.0.0.0/8] ...}; client identity is
+derived per listen address before the Host header selects a server block, so
+every block sharing listen ":443" must declare the same policy
+```
+
+Prefix listing order, duplicate entries and spelling out a default value do not
+count as a difference; anything that changes the trust actually applied does.
+
+### Scope
+
+The policy applies to HTTP/1.1, HTTP/2 and HTTP/3 on that listener — one
+middleware chain serves all three. It does **not** apply to the admin listener,
+which keeps peer-only identity by design, or to `[[stream]]` L4 proxying, which
+has its own PROXY-protocol contract. See
+[known limitations](known-limitations.md).
+
+`X-Real-IP` is not supported: it carries a single address with no chain, so it
+cannot be evaluated against a trust boundary.
 
 ---
 

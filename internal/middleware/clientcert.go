@@ -12,11 +12,11 @@ import (
 	"strings"
 )
 
-// ClientIdentity is the verified identity of a mutual-TLS client certificate,
+// PeerCertIdentity is the verified identity of a mutual-TLS client certificate,
 // extracted once per request and carried in the request context so downstream
 // handlers (notably the reverse proxy, via $ssl_client_* variables) can attach
 // it to upstream requests without re-parsing the certificate.
-type ClientIdentity struct {
+type PeerCertIdentity struct {
 	Verified    bool   // the certificate passed CA-chain verification at the handshake
 	SubjectDN   string // RFC 2253 subject distinguished name
 	IssuerDN    string // RFC 2253 issuer distinguished name
@@ -26,18 +26,20 @@ type ClientIdentity struct {
 	SANs        string // comma-joined subject alternative names (DNS, IP, URI, email)
 }
 
-// clientCertCtxKey is the unexported context key for a *ClientIdentity.
+// clientCertCtxKey is the unexported context key for a *PeerCertIdentity.
 type clientCertCtxKey struct{}
 
-// WithClientIdentity returns a copy of ctx carrying id.
-func WithClientIdentity(ctx context.Context, id *ClientIdentity) context.Context {
+// WithPeerCertIdentity returns a copy of ctx carrying id.
+func WithPeerCertIdentity(ctx context.Context, id *PeerCertIdentity) context.Context {
 	return context.WithValue(ctx, clientCertCtxKey{}, id)
 }
 
-// ClientIdentityFrom returns the client identity stored in ctx, or nil if the
-// request did not present a verified client certificate.
-func ClientIdentityFrom(ctx context.Context) *ClientIdentity {
-	id, _ := ctx.Value(clientCertCtxKey{}).(*ClientIdentity)
+// PeerCertIdentityFrom returns the peer certificate identity stored in ctx, or
+// nil if the request did not present a verified client certificate. It is
+// distinct from clientaddr.Identity, which answers "what address is the
+// client?" rather than "what certificate did the peer present?".
+func PeerCertIdentityFrom(ctx context.Context) *PeerCertIdentity {
+	id, _ := ctx.Value(clientCertCtxKey{}).(*PeerCertIdentity)
 	return id
 }
 
@@ -58,13 +60,13 @@ func ClientCert(require bool) Middleware {
 				return
 			}
 			id := identityFromCert(r.TLS.PeerCertificates[0])
-			next.ServeHTTP(w, r.WithContext(WithClientIdentity(r.Context(), id)))
+			next.ServeHTTP(w, r.WithContext(WithPeerCertIdentity(r.Context(), id)))
 		})
 	}
 }
 
-// identityFromCert builds a ClientIdentity from a verified leaf certificate.
-func identityFromCert(c *x509.Certificate) *ClientIdentity {
+// identityFromCert builds a PeerCertIdentity from a verified leaf certificate.
+func identityFromCert(c *x509.Certificate) *PeerCertIdentity {
 	sum := sha256.Sum256(c.Raw)
 	var sans []string
 	sans = append(sans, c.DNSNames...)
@@ -75,7 +77,7 @@ func identityFromCert(c *x509.Certificate) *ClientIdentity {
 		sans = append(sans, u.String())
 	}
 	sans = append(sans, c.EmailAddresses...)
-	return &ClientIdentity{
+	return &PeerCertIdentity{
 		Verified:    true,
 		SubjectDN:   c.Subject.String(),
 		IssuerDN:    c.Issuer.String(),

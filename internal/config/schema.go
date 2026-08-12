@@ -235,6 +235,36 @@ type ServerConfig struct {
 	// server, outermost first. Each name must appear in [plugins]. Requires the
 	// "wasmplugins" build tag.
 	Plugins []string `toml:"plugins"`
+
+	// ClientAddress is the trusted-proxy policy that decides how the canonical
+	// client address is derived for requests on this listener. It is a listener
+	// scoped policy: every server block sharing a listen address must declare
+	// the same one, because identity is derived before the Host header selects
+	// a block.
+	ClientAddress *ClientAddressConfig `toml:"client_address"`
+}
+
+// ClientAddressConfig is the per-listener policy for deriving the canonical
+// client address from forwarding headers. Omitting the block trusts no proxy,
+// so the canonical client is always the direct transport peer.
+//
+// TrustedProxies is a security boundary and should be as narrow as the
+// deployment allows: every address it covers may assert any client address.
+type ClientAddressConfig struct {
+	// TrustedProxies lists the CIDR prefixes (or bare addresses, meaning a
+	// single host) whose forwarding headers are believed. Prefixes must be in
+	// canonical form with host bits clear. Empty means no proxy is trusted and
+	// forwarding headers are never read.
+	TrustedProxies []string `toml:"trusted_proxies"`
+	// ForwardedHeaders is the ordered preference of forwarding headers:
+	// "forwarded" (RFC 7239) and "x-forwarded-for". Omitted defaults to
+	// ["forwarded", "x-forwarded-for"]; an explicitly empty list disables both,
+	// keeping peer-only identity even for a trusted peer. The first header
+	// present on the request is the only one used; chains are never merged.
+	ForwardedHeaders []string `toml:"forwarded_headers"`
+	// MaxHops bounds how many asserted hops a chain may carry. A longer chain
+	// fails closed to the direct peer. Zero or omitted defaults to 16.
+	MaxHops int `toml:"max_hops"`
 }
 
 // MatchConfig selects requests for a location.
