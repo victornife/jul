@@ -78,14 +78,17 @@ references.
 
 ## Backend TLS trust ([upstreams.md](upstreams.md#backend-tls))
 
-- **The policy is not yet enforced by any client.** `backend_tls` is validated,
-  resolved and fingerprinted, but the HTTP proxy, native gRPC, transcoding and
-  active health checks still build their TLS with language defaults until each
-  integration lands. A configured block therefore changes what `jul check`,
-  `jul lint` and the Console report before it changes what a connection does.
-- **Changing a live backend's policy requires a restart.** No outbound client
-  rebuilds its TLS material on reload. Adding or removing a backend applies on
-  the reload; editing the policy of one that survives it does not.
+- **Only the HTTP proxy enforces the policy so far.** Native gRPC, gRPC-JSON
+  transcoding and active health probes still build their TLS with language
+  defaults until their integrations land, so a configured block changes what
+  those consumers report before it changes what their connections do.
+- **Changing a live backend's policy still requires a restart.** The HTTP proxy
+  rebuilds its transport per handler generation and would support hot reload on
+  its own, but the same configuration path feeds gRPC, transcoding and health,
+  which do not. A field is classified `hot_reload` only when *every* consumer
+  adopts the candidate value, so the class stays restart-required until the
+  remaining integrations land. Adding or removing a backend applies on the
+  reload; editing the policy of one that survives it does not.
 - **No named, reusable TLS profiles.** Two pools that share a trust bundle
   repeat the block. Every consumer takes the resolved policy type, so named
   profiles remain an additive change to resolution rather than a transport

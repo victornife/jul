@@ -47,6 +47,11 @@ const (
 	MinVersion13 = "1.3"
 )
 
+// PeerIdentityErrorFragment is the fixed sentence a peer-identity failure
+// carries. Consumers match on it to classify a handshake failure into a bounded
+// category without parsing anything operator- or peer-controlled.
+const PeerIdentityErrorFragment = "matches none of the"
+
 // Peer-identity prefixes. Entries are prefixed from the first release so future
 // identity types are purely additive rather than ambiguous forever.
 const (
@@ -403,7 +408,7 @@ func verifyPeerIdentity(cs tls.ConnectionState, peers []Identity) error {
 			}
 		}
 	}
-	return fmt.Errorf("backend_tls: peer certificate matches none of the %d configured peer identities", len(peers))
+	return fmt.Errorf("backend_tls: peer certificate %s %d configured peer identities", PeerIdentityErrorFragment, len(peers))
 }
 
 // dedupeIdentities removes duplicates after normalization, keeping order.
