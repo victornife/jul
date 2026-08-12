@@ -138,18 +138,28 @@ GitHub Release is published as a prerelease; see the
 remains a later explicit decision. The response-cache correctness programme,
 closed-world lifecycle authority, and the full #77 → #82 structured-configuration
 programme have since completed on `main`. The next programme stage is the
-#115 → #116 → #117 → #118 architecture-decision sequence; no Stage 6
-implementation has started.
+#115 → #116 → #117 → #118 architecture-decision sequence. #115 is accepted as
+[ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) and its
+implementation has started: the inbound lane runs #135 → #136 → #259 and the
+backend lane #137 → #138 and #139 (both required) → #140.
 
 ## Core Gateway Completeness backlog
 
 ### Inbound identity
 
-- Per-server trusted proxy CIDRs.
-- Standards-aware `Forwarded` and X-Forwarded-For processing.
-- Right-to-left trusted-hop evaluation.
+Decided by [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md);
+implemented as #135 → #136 → #259.
+
+- ~~Per-listener trusted proxy CIDRs~~ — delivered by #135 as
+  `[servers.client_address].trusted_proxies`, scoped per listen address and
+  enforced identical across server blocks sharing a `listen`.
+- ~~Standards-aware `Forwarded` and X-Forwarded-For processing~~ — delivered by
+  #135, fail-closed and fuzz-tested, with no chain merging.
+- ~~Right-to-left trusted-hop evaluation~~ — delivered by #135.
 - One canonical effective client identity used by auth, rate limiting, WAF,
-  access logs, diagnostics, and upstream forwarding.
+  access logs, diagnostics, and upstream forwarding — derived and published in
+  the request context by #135; **consumer migration is #136**, and the typed
+  API, Console surface and importer coverage close in #259.
 
 ### Backend transport trust
 

@@ -9,6 +9,8 @@ import (
 	"net"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"jul/internal/clientaddr"
 )
 
 // Severity classifies a Diagnostic. Validate produces hard errors that block
@@ -120,6 +122,24 @@ func Lint(c *Config) []Diagnostic {
 				Message:  "tls.min_version is not set; the runtime default applies",
 				Hint:     `set min_version = "1.3" for the strongest protocol, or "1.2" for broader compatibility`,
 			})
+		}
+
+		// A trusted-proxy entry that covers the whole address space lets any
+		// client assert any address, which is the spoofing case the policy
+		// exists to prevent.
+		if srv.ClientAddress != nil {
+			for j, raw := range srv.ClientAddress.TrustedProxies {
+				prefix, err := clientaddr.ParsePrefix(raw)
+				if err != nil || prefix.Bits() != 0 {
+					continue
+				}
+				diags = append(diags, Diagnostic{
+					Severity: SeverityWarning,
+					Field:    fmt.Sprintf("servers[%d].client_address.trusted_proxies[%d]", i, j),
+					Message:  fmt.Sprintf("%q trusts every client, so any request may assert its own client address", raw),
+					Hint:     "list only the addresses of proxies you operate; trusted_proxies is a security boundary",
+				})
+			}
 		}
 	}
 

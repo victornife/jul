@@ -29,6 +29,7 @@ const (
 	SubAdmin          Subsystem = "admin"
 	SubAuth           Subsystem = "auth"
 	SubCache          Subsystem = "cache"
+	SubClientAddress  Subsystem = "client_address"
 	SubCompression    Subsystem = "compression"
 	SubDiscovery      Subsystem = "discovery"
 	SubEgress         Subsystem = "egress"
@@ -86,6 +87,7 @@ var subsystemDescriptions = map[Subsystem]string{
 	SubAdmin:          "The admin/observability listener and its startup-owned resources.",
 	SubAuth:           "Per-location credential checks (CIDR, Basic, JWT, forward-auth).",
 	SubCache:          "The two-tier response cache backend.",
+	SubClientAddress:  "The per-listener trusted-proxy policy that derives the canonical client address.",
 	SubCompression:    "Negotiated response compression.",
 	SubDiscovery:      "Dynamic backend discovery for an upstream pool.",
 	SubEgress:         "The outbound-destination allow-list applied to auxiliary fetches.",
@@ -144,19 +146,20 @@ func SubsystemDescription(s Subsystem) (string, bool) {
 // named constants makes it obvious when two paths are classified for the same
 // proven reason rather than by coincidence.
 const (
-	reasonHandlerRebuild  = "the handler tree is rebuilt from the effective config on each successful reload"
-	reasonPluginRebuild   = "the plugin set is rebuilt and re-instantiated on each successful reload"
-	reasonUpstreamStaged  = "the upstream registry stages and swaps pools on each successful reload"
-	reasonWAFRebuild      = "the WAF policy is rebuilt on each successful reload"
-	reasonRateLimitPolicy = "the rate-limiter store accepts a new policy on each successful reload"
-	reasonStreamRoute     = "the stream listener swaps its route pointer atomically on each successful reload"
-	reasonRBACSwap        = "the admin RBAC policy is rebuilt and atomically swapped after each successful reload"
-	reasonAdminStartup    = "the admin listener and its resources are created once at startup"
-	reasonCacheStartup    = "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
-	reasonAccessLogStart  = "access-log sinks are opened once at startup"
-	reasonTracingStartup  = "the tracer provider and exporter are created once at startup"
-	reasonBindFrozen      = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
-	reasonTLSBindFrozen   = "TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart"
+	reasonHandlerRebuild       = "the handler tree is rebuilt from the effective config on each successful reload"
+	reasonPluginRebuild        = "the plugin set is rebuilt and re-instantiated on each successful reload"
+	reasonUpstreamStaged       = "the upstream registry stages and swaps pools on each successful reload"
+	reasonWAFRebuild           = "the WAF policy is rebuilt on each successful reload"
+	reasonRateLimitPolicy      = "the rate-limiter store accepts a new policy on each successful reload"
+	reasonStreamRoute          = "the stream listener swaps its route pointer atomically on each successful reload"
+	reasonRBACSwap             = "the admin RBAC policy is rebuilt and atomically swapped after each successful reload"
+	reasonAdminStartup         = "the admin listener and its resources are created once at startup"
+	reasonCacheStartup         = "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
+	reasonAccessLogStart       = "access-log sinks are opened once at startup"
+	reasonTracingStartup       = "the tracer provider and exporter are created once at startup"
+	reasonBindFrozen           = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
+	reasonTLSBindFrozen        = "TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart"
+	reasonClientAddressRebuild = "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
 )
 
 // Registry is the authoritative disposition of every public configuration path,
@@ -408,6 +411,10 @@ func serverEntries() []Entry {
 		hot("servers.*.server_names", SubServerNames, "virtual-host routing uses the rebuilt handler tree; when the block terminates TLS the name set is also part of the listener's certificate identity and is compared by the bind-time gate"),
 		newListener("servers.*.listen", SubListener, "moving to a different address binds a new socket; the old address is drained"),
 	}
+	out = append(out, hotGroup(SubClientAddress, reasonClientAddressRebuild,
+		"servers.*.client_address.forwarded_headers",
+		"servers.*.client_address.max_hops",
+		"servers.*.client_address.trusted_proxies")...)
 	out = append(out, bindBoundGroup(SubH2C, "h2c is negotiated by the plaintext listener created at bind time",
 		"servers.*.h2c")...)
 	out = append(out, bindBoundGroup(SubHTTP3, "the QUIC listener and its Alt-Svc advertisement are created when the address binds",

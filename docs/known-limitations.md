@@ -44,6 +44,28 @@ references.
 
 ---
 
+## Client address derivation ([configuration.md](configuration.md#client-address-and-trusted-proxies))
+
+- **The admin listener keeps peer-only identity, by design.** Admin rate
+  limiting, SSE connection caps and audit `SourceIP` always describe the direct
+  transport peer. Making the highest-privilege surface's attribution depend on
+  an operator-editable CIDR list would be a downgrade, so `client_address` does
+  not apply there.
+- **`[[stream]]` L4 proxying has its own contract.** For a stream listener the
+  source address is the PROXY-protocol source when `proxy_protocol` is `in` or
+  `both`, otherwise the socket peer. It never feeds the HTTP canonical identity.
+- **The policy is per listen address, not per virtual host.** Every
+  `[[servers]]` block sharing a `listen` must declare the same effective policy.
+  This is deliberate: identity is derived before the `Host` header is read, so a
+  per-vhost policy could be selected by the attacker.
+- **No `X-Real-IP`, no CIDR shorthands, no PROXY protocol on HTTP listeners.**
+  A single-address header cannot be evaluated against a trust boundary, and
+  shorthands such as `private` or `rfc1918` encourage over-broad trust.
+- **No chain projection.** The identity carries the canonical client, the direct
+  peer, and bounded source/result enums — not the full asserted chain.
+
+---
+
 ## Authentication ([auth.md](auth.md))
 
 - **One credential method per location.** Basic, JWT, forward-auth, or CIDR —

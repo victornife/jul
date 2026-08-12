@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 266 |
-| Schema leaves (configurable values) | 224 |
-| Registry entries | 224 |
+| Schema paths (containers included) | 270 |
+| Schema leaves (configurable values) | 227 |
+| Registry entries | 227 |
 | Startup-consumed entries | 57 |
-| Class `hot_reload` | 153 |
+| Class `hot_reload` | 156 |
 | Class `restart_required` | 57 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -58,6 +58,7 @@ set, so preview and apply reach the same verdict.
 | `admin` | The admin/observability listener and its startup-owned resources. |
 | `auth` | Per-location credential checks (CIDR, Basic, JWT, forward-auth). |
 | `cache` | The two-tier response cache backend. |
+| `client_address` | The per-listener trusted-proxy policy that derives the canonical client address. |
 | `compression` | Negotiated response compression. |
 | `discovery` | Dynamic backend discovery for an upstream pool. |
 | `egress` | The outbound-destination allow-list applied to auxiliary fetches. |
@@ -195,6 +196,9 @@ value is compared as a digest so no secret material leaves the process.
 | `rate_limit.max_conns` | `new_listener_only` | `rate_limit` | cond. | the concurrent-connection cap is installed on each listener when it binds, so a kept address keeps the cap it bound with |
 | `rate_limit.rate` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `servers.*.access_log` | `ignored_deprecated` | `access_log` | deprecated, ignored | superseded by observability.access_log; no runtime consumer reads it |
+| `servers.*.client_address.forwarded_headers` | `hot_reload` | `client_address` | — | the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish |
+| `servers.*.client_address.max_hops` | `hot_reload` | `client_address` | — | the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish |
+| `servers.*.client_address.trusted_proxies` | `hot_reload` | `client_address` | — | the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish |
 | `servers.*.client_max_body_size` | `hot_reload` | `server_limits` | — | the handler reads the effective limit per request |
 | `servers.*.error_log` | `ignored_deprecated` | `error_log` | deprecated, ignored | structured process logs are written to stderr; no runtime consumer reads it |
 | `servers.*.error_pages.*` | `hot_reload` | `error_pages` | — | the handler tree is rebuilt from the effective config on each successful reload |

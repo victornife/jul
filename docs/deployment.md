@@ -14,6 +14,7 @@
 - [Docker](#docker)
 - [Windows service](#windows-service)
 - [Health checks](#health-checks)
+- [Behind a reverse proxy or load balancer](#behind-a-reverse-proxy-or-load-balancer)
 - [What writes where](#what-writes-where)
 
 ## The two shapes
@@ -187,6 +188,44 @@ It creates `C:\ProgramData\jul\{history,cache,logs}` and grants the service
 account **modify** there and **read** on the config; ordinary users get neither.
 Point `servers.tls.acme.cache_dir`, the disk cache, the access-log file sink, and
 `history_dir` at the matching subdirectories.
+
+## Behind a reverse proxy or load balancer
+
+When another proxy, a CDN or a cloud load balancer sits in front of Jul, every
+request arrives from *that* device. Jul does not believe forwarding headers by
+default, so without configuration the client address is the proxy's address —
+correct, but not what you want for logging or per-client policy.
+
+Declare the proxies you operate:
+
+```toml
+[[servers]]
+listen = ":443"
+
+[servers.client_address]
+trusted_proxies = ["10.0.0.0/8"]      # your load balancer subnet, nothing wider
+```
+
+Rules of thumb:
+
+- **List addresses you control.** `trusted_proxies` is a security boundary:
+  anything it covers may claim to be any client. Prefer the load balancer's
+  actual subnet over a whole RFC 1918 range, and never `0.0.0.0/0`.
+- **Every server block on the same `listen` must declare the same policy.**
+  Identity is derived before the `Host` header selects a block, so validation
+  rejects siblings that disagree.
+- **Terminate the chain at your edge.** Jul reads the first configured header
+  present (`Forwarded`, then `X-Forwarded-For`) and never merges the two. Make
+  sure your edge overwrites rather than appends attacker-supplied values.
+- **Check it.** `jul lint` warns about an over-broad entry; `jul check` rejects a
+  malformed prefix or a policy that disagrees with a sibling block.
+- **Direct deployments need nothing.** With no block the canonical client is the
+  transport peer, which is what a directly exposed server should use.
+
+The policy covers HTTP/1.1, HTTP/2 and HTTP/3 on that listener. It does not
+cover the admin listener or `[[stream]]` L4 proxying; see
+[known limitations](known-limitations.md). Full reference:
+[configuration.md](configuration.md#client-address-and-trusted-proxies).
 
 ## Health checks
 

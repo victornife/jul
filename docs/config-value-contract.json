@@ -180,6 +180,34 @@
       "active_when": "always"
     },
     {
+      "go_field": "ClientAddressConfig.ForwardedHeaders",
+      "path": "servers[].client_address.forwarded_headers",
+      "kind": "enum_list",
+      "constraint": "ordered list of exact lowercase enum values, each listed at most once",
+      "zero_semantics": "omitted defaults to [forwarded, x-forwarded-for]; an explicitly empty list disables every forwarding header",
+      "active_when": "the listener trusts at least one proxy",
+      "allowed": [
+        "forwarded",
+        "x-forwarded-for"
+      ]
+    },
+    {
+      "go_field": "ClientAddressConfig.MaxHops",
+      "path": "servers[].client_address.max_hops",
+      "kind": "integer",
+      "constraint": "non-negative, at most 255",
+      "zero_semantics": "0 selects the default of 16",
+      "active_when": "the listener trusts at least one proxy"
+    },
+    {
+      "go_field": "ClientAddressConfig.TrustedProxies",
+      "path": "servers[].client_address.trusted_proxies",
+      "kind": "grammar_list",
+      "constraint": "IP addresses or canonical CIDR prefixes with host bits clear; no hostnames and no shorthands",
+      "zero_semantics": "omitted or empty trusts no proxy, so forwarding headers are never read",
+      "active_when": "always"
+    },
+    {
       "go_field": "ClientAuthConfig.Mode",
       "path": "servers[].tls.client_auth.mode",
       "kind": "enum",

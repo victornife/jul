@@ -376,7 +376,7 @@ func expandProxyVar(tmpl string, in *http.Request) string {
 // value is empty except $ssl_client_verify, which is "NONE" (and "SUCCESS" when
 // an identity is present), mirroring NGINX semantics.
 func sslClientPairs(in *http.Request) []string {
-	id := middleware.ClientIdentityFrom(in.Context())
+	id := middleware.PeerCertIdentityFrom(in.Context())
 	if id == nil {
 		return []string{
 			"$ssl_client_s_dn", "",

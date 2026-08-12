@@ -17,6 +17,7 @@ import (
 
 	"jul/internal/auth"
 	"jul/internal/cache"
+	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/handler"
 	"jul/internal/middleware"
@@ -412,37 +413,13 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 
 	handlers := make(map[string]http.Handler)
 	for _, addr := range UniqueListenAddrs(c.Servers) {
-		// Global middleware chain, outermost to innermost:
-		//   RequestID  — assigns/propagates the request id first so every
-		//                inner layer (observers, Recover's panic log) sees it.
-		//   Tracing    — starts the server span and extracts W3C tracecontext
-		//                just inside RequestID, so the trace id is in context
-		//                before the observers record it. No-op unless built
-		//                with the "otel" tag and enabled.
-		//   metrics    — observer: counts requests + latency by final status.
-		//   AccessLog  — observer: builds one record per request and fans it
-		//                out to the configured sinks (stdout/file/syslog).
-		//   Recover    — converts a panic into a 500. It sits INSIDE the
-		//                observers on purpose: it returns normally after
-		//                recovering, so metrics and the access log still
-		//                record the request as a 500 instead of it vanishing.
-		//   Compression— innermost wrapper so the observers' recorder counts
-		//                the compressed (on-the-wire) byte count.
-		// Per-location concerns (rate limiting, body limit) are applied inside
-		// the router via LocationModifier, closer to the handler.
-		mws := []middleware.Middleware{
-			middleware.RequestID(),
-			f.RT.Tracer.Middleware,
-			f.Metrics.Middleware,
+		// The trusted-proxy policy is compiled here, during Prepare, so a
+		// malformed prefix aborts the reload before anything is published.
+		policy, err := ClientAddressPolicy(c.Servers, addr)
+		if err != nil {
+			return nil, fmt.Errorf("listen %s: client_address: %w", addr, err)
 		}
-		if len(f.AccessSinks) > 0 {
-			mws = append(mws, middleware.AccessLog(f.AccessSinks...))
-		}
-		mws = append(mws, middleware.Recover(f.Log))
-		if compress != nil {
-			mws = append(mws, compress)
-		}
-		h := middleware.Chain(rtr.For(addr), mws...)
+		h := middleware.Chain(rtr.For(addr), f.globalChain(policy, compress)...)
 		// On plain HTTP listeners, answer ACME HTTP-01 challenges outermost so
 		// certificate issuance/renewal works even when the listener otherwise
 		// redirects to HTTPS. Non-challenge requests fall through to h.
@@ -453,6 +430,50 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	}
 
 	return handlers, nil
+}
+
+// globalChain returns the per-listen-address middleware chain, outermost to
+// innermost:
+//
+//	RequestID  — assigns/propagates the request id first so every inner layer
+//	             (observers, Recover's panic log) sees it.
+//	ClientAddr — derives the canonical client address from the trusted-proxy
+//	             policy of THIS listen address. It sits at index 1: outside the
+//	             router, so derivation precedes every read of the Host header
+//	             and an attacker-chosen vhost cannot select its own trust
+//	             policy; and outside the observers, so metrics, access logging,
+//	             tracing and every per-location middleware read one identity.
+//	Tracing    — starts the server span and extracts W3C tracecontext just
+//	             inside RequestID, so the trace id is in context before the
+//	             observers record it. No-op unless built with the "otel" tag
+//	             and enabled.
+//	metrics    — observer: counts requests + latency by final status.
+//	AccessLog  — observer: builds one record per request and fans it out to the
+//	             configured sinks (stdout/file/syslog).
+//	Recover    — converts a panic into a 500. It sits INSIDE the observers on
+//	             purpose: it returns normally after recovering, so metrics and
+//	             the access log still record the request as a 500 instead of it
+//	             vanishing.
+//	Compression— innermost wrapper so the observers' recorder counts the
+//	             compressed (on-the-wire) byte count.
+//
+// Per-location concerns (rate limiting, body limit) are applied inside the
+// router via LocationModifier, closer to the handler.
+func (f *HandlerFactory) globalChain(policy *clientaddr.Policy, compress middleware.Middleware) []middleware.Middleware {
+	mws := []middleware.Middleware{
+		middleware.RequestID(),
+		middleware.ClientAddress(policy, f.Log),
+		f.RT.Tracer.Middleware,
+		f.Metrics.Middleware,
+	}
+	if len(f.AccessSinks) > 0 {
+		mws = append(mws, middleware.AccessLog(f.AccessSinks...))
+	}
+	mws = append(mws, middleware.Recover(f.Log))
+	if compress != nil {
+		mws = append(mws, compress)
+	}
+	return mws
 }
 
 // upstreamKeysUsed returns the distinct (name, scheme) pairs referenced by

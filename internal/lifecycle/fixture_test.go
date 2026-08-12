@@ -99,6 +99,11 @@ func fullConfig() *config.Config {
 				},
 			},
 			HTTP3: &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 86400},
+			ClientAddress: &config.ClientAddressConfig{
+				TrustedProxies:   []string{"10.0.0.0/8"},
+				ForwardedHeaders: []string{"forwarded", "x-forwarded-for"},
+				MaxHops:          8,
+			},
 			Locations: []config.LocationConfig{{
 				Match: config.MatchConfig{Type: "prefix", Path: "/"},
 

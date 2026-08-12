@@ -1,0 +1,69 @@
+# Canonical client address derivation behind trusted proxies.
+#
+# Run:  jul -check -config testdata/client-address.toml
+#
+# trusted_proxies is a security boundary: every address it covers may assert any
+# client address. Keep it as narrow as the deployment allows.
+
+[global]
+log_level = "info"
+log_format = "json"
+
+# 1. Direct listener. No [servers.client_address] block, so no proxy is trusted,
+#    forwarding headers are never read, and the canonical client is always the
+#    transport peer. This is the default and the secure baseline.
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["direct.example.com"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+
+# 2. One reverse proxy in front of Jul on a private network. Requests arriving
+#    from 10.0.0.0/8 may assert the original client; anything else keeps
+#    peer-only identity.
+[[servers]]
+listen = "127.0.0.1:8081"
+server_names = ["app.example.com"]
+
+  [servers.client_address]
+  trusted_proxies = ["10.0.0.0/8"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://backend"
+
+# 3. Two virtual hosts sharing one listener behind a CDN and an internal load
+#    balancer. Identity is derived per listen address, before the Host header
+#    selects a block, so both blocks must declare the same policy — the
+#    configuration cannot claim a stricter policy than the one applied.
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["public.example.com"]
+
+  [servers.client_address]
+  trusted_proxies   = ["10.10.0.0/16", "192.0.2.10", "2001:db8:100::/48"]
+  forwarded_headers = ["forwarded", "x-forwarded-for"]
+  max_hops          = 8
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://backend"
+
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["internal.example.com"]
+
+  [servers.client_address]
+  trusted_proxies   = ["10.10.0.0/16", "192.0.2.10", "2001:db8:100::/48"]
+  forwarded_headers = ["forwarded", "x-forwarded-for"]
+  max_hops          = 8
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://backend"
+
+[[upstreams]]
+name = "backend"
+servers = ["127.0.0.1:3000"]
