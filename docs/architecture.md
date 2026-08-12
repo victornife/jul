@@ -18,6 +18,7 @@ internal/
   auth/                # Authentication handlers (basic, JWT, forward-auth, CIDR)
   background/          # Generation-owned background-operation lease (context seam)
   cache/               # HTTP response cache (memory + disk backends)
+  backendtls/          # Resolved outbound (backend) TLS policy shared by every transport
   clientaddr/          # Canonical client-address derivation and request-scoped identity
   config/              # TOML config schema, parser, validation, and defaults
   handler/             # HTTP request handlers (static files, proxy, gRPC, plugins)
@@ -89,10 +90,14 @@ about who answered.
 
 **D and E — backend trust.** Routing and discovery choose an address; they never establish identity.
 A `backend_tls` policy — private roots, client certificate, SNI override, minimum version, explicit
-peer identities — proves the peer is the intended backend. One normalized resolved policy is shared by
-the HTTP proxy, native gRPC, transcoding and active health checks, and transports never parse public
-configuration themselves. A discovery-returned address is a dial destination only: the configured
-logical name remains the verified identity.
+peer identities — proves the peer is the intended backend. `internal/backendtls` resolves the public
+block into one immutable `Policy`; every consumer receives that type and never parses public
+configuration itself, which is what keeps a future named-profile feature a change to resolution
+rather than a transport rewrite. `Policy.ClientConfig()` returns a fresh `*tls.Config` per consumer,
+so a transport that sets `NextProtos` for HTTP/2 cannot affect another consumer of the same policy.
+Peer identities are checked through `VerifyConnection`, after Go's standard chain and hostname
+verification rather than instead of it. A discovery-returned address is a dial destination only: the
+configured logical name remains the verified identity.
 
 ## Composition-root helpers (`internal/app/`)
 

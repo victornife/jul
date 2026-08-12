@@ -109,6 +109,8 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 	// expected set explicit so a future edit cannot silently drop their metadata.
 	expectedStringConstraints := []string{
 		"ACMEConfig.CA", "ACMEConfig.Challenge", "AccessLogConfig.Format",
+		"BackendTLSConfig.CAMode", "BackendTLSConfig.MinVersion",
+		"BackendTLSConfig.PeerIdentities",
 		"AccessLogConfig.Sinks", "ClientAddressConfig.ForwardedHeaders",
 		"ClientAddressConfig.TrustedProxies", "ClientAuthConfig.Mode",
 		"CompressionConfig.Encoders",

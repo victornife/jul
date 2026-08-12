@@ -133,7 +133,19 @@ func cmdLint(args []string) int {
 	}
 
 	verrs := flattenErrors(config.Validate(cfg))
-	warns := config.Lint(cfg)
+	// Lint findings carry their own severity. An error-severity finding — today
+	// only insecure_skip_verify — fails the command without -strict, because a
+	// configuration that disables backend verification should not reach
+	// production by accident. -quiet suppresses warnings only, as its help says.
+	diags := config.Lint(cfg)
+	var lintErrs, warns []config.Diagnostic
+	for _, d := range diags {
+		if d.Severity == config.SeverityError {
+			lintErrs = append(lintErrs, d)
+			continue
+		}
+		warns = append(warns, d)
+	}
 	if *quiet {
 		warns = nil
 	}
@@ -143,21 +155,27 @@ func cmdLint(args []string) int {
 		for _, e := range verrs {
 			out.Errors = append(out.Errors, e.Error())
 		}
-		out.Warnings = warns
+		// Lint findings stay in warnings whatever their severity, so the JSON
+		// shape is unchanged; each carries its own "severity" field, and the
+		// exit code reflects the highest one.
+		out.Warnings = append(append([]config.Diagnostic(nil), lintErrs...), warns...)
 		_ = json.NewEncoder(stdout).Encode(out)
 	} else {
 		color := wantColor(stdout)
 		for _, e := range verrs {
 			printDiagnostic(stdout, config.Diagnostic{Severity: config.SeverityError, Message: e.Error()}, color)
 		}
+		for _, d := range lintErrs {
+			printDiagnostic(stdout, d, color)
+		}
 		for _, d := range warns {
 			printDiagnostic(stdout, d, color)
 		}
-		fmt.Fprintf(stdout, "\n%s: %d error(s), %d warning(s)\n", src.Name(), len(verrs), len(warns))
+		fmt.Fprintf(stdout, "\n%s: %d error(s), %d warning(s)\n", src.Name(), len(verrs)+len(lintErrs), len(warns))
 	}
 
 	switch {
-	case len(verrs) > 0:
+	case len(verrs) > 0 || len(lintErrs) > 0:
 		return 1
 	case *strict && len(warns) > 0:
 		return 2

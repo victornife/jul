@@ -76,6 +76,30 @@ references.
 
 ---
 
+## Backend TLS trust ([upstreams.md](upstreams.md#backend-tls))
+
+- **The policy is not yet enforced by any client.** `backend_tls` is validated,
+  resolved and fingerprinted, but the HTTP proxy, native gRPC, transcoding and
+  active health checks still build their TLS with language defaults until each
+  integration lands. A configured block therefore changes what `jul check`,
+  `jul lint` and the Console report before it changes what a connection does.
+- **Changing a live backend's policy requires a restart.** No outbound client
+  rebuilds its TLS material on reload. Adding or removing a backend applies on
+  the reload; editing the policy of one that survives it does not.
+- **No named, reusable TLS profiles.** Two pools that share a trust bundle
+  repeat the block. Every consumer takes the resolved policy type, so named
+  profiles remain an additive change to resolution rather than a transport
+  rewrite; the promotion triggers are recorded in ADR 0016.
+- **Health probes verify against the system roots only.** An `https` pool behind
+  a private CA is reported unhealthy until probes consume the resolved policy;
+  `jul lint` warns about the combination.
+- **`insecure_skip_verify` disables verification, not encryption.** It exists as
+  an emergency path: `jul lint` fails on it, the server warns once per backend
+  at startup, and it cannot be combined with `peer_identities` or a non-system
+  `ca_mode`.
+
+---
+
 ## Authentication ([auth.md](auth.md))
 
 - **One credential method per location.** Basic, JWT, forward-auth, or CIDR —

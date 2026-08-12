@@ -87,6 +87,12 @@ func diffStartup(a, b Fingerprint, addressAware bool) []string {
 			}
 			continue
 		}
+		if addressAware && e.CollectionKeyed {
+			if commonKeysDiffer(av, bv) {
+				out = append(out, e.Path)
+			}
+			continue
+		}
 		if !deepEqualValues(av, bv) {
 			out = append(out, e.Path)
 		}

@@ -634,6 +634,36 @@ reload before Publish — no listener ever serves a half-applied policy. Nothing
 about the policy is captured at bind time, so a kept listen address adopts the
 new policy with the rest of the handler generation.
 
+### Backend trust (`backend_tls`)
+
+The outbound TLS policy is **restart_required**, and that is a statement about
+the current code rather than caution: no outbound client rebuilds its TLS
+material on reload. `reloadCertificates` is a no-op, `internal/transcode` caches
+its gRPC connections for the process lifetime, and the active health client is
+built once. The class is upgraded per consumer only as each integration lands
+and can be demonstrated.
+
+The classification is **conditional on the backend set**, not on the listener
+set, because backend trust is not a property of an inbound socket:
+
+| Change | Verdict |
+| --- | --- |
+| A pool or route the reload **adds** carries a policy | applies on this reload — there is no running client to strand |
+| A pool or route the reload **removes** carried one | applies on this reload |
+| A pool or route that **survives** the reload changes its policy | restart required |
+
+This is expressed by a `CollectionKeyed` registry flag: the fingerprint value is
+a map keyed by the backend's identity (pool name, or listen address → host set →
+route match), and comparison considers only the keys present on both sides. It
+is deliberately distinct from `AddressKeyed`, which means "frozen when a socket
+binds" and feeds the listener rebind comparator.
+
+`ca_file`, `client_cert` and `client_key` are registered as secret-bearing from
+the first release, so the fingerprint digests their **contents**. Rotating a
+certificate in place, without editing the configuration, is detected as a change
+even though the action remains a restart — detection and action are separable,
+and getting detection right early costs nothing.
+
 ## Reload timeout and deadlines (`[global].reload_timeout`)
 
 A managed admin apply runs under **one absolute transaction deadline**. The

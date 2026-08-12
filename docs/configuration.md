@@ -497,6 +497,46 @@ servers = [
 | `servers` | array | Bare addresses (`"127.0.0.1:3000"`) or tables with `address` + `weight` |
 | `max_fails` | int | Failures before a backend is marked unhealthy |
 | `fail_timeout` | duration | How long a backend stays out of rotation |
+| `backend_tls` | table | Outbound TLS policy for this pool — see [`backend_tls`](#backend-tls) |
+
+### `backend_tls`
+
+The **outbound** TLS policy, used identically under `[[upstreams]]` and
+`[[servers.locations]]`. It is a different key from the inbound `[servers.tls]`
+block on purpose: `tls` under `[[servers]]` already means termination, and one
+key with opposite directions in two places invites mistakes.
+
+```toml
+[[upstreams]]
+name = "inventory"
+
+  [upstreams.backend_tls]
+  ca_file              = "/etc/jul/backend-ca.pem"
+  ca_mode              = "system_and_file"
+  client_cert          = "/etc/jul/client.pem"
+  client_key           = "/etc/jul/client.key"
+  server_name          = "inventory.internal"
+  min_version          = "1.2"
+  peer_identities      = ["dns:inventory.internal"]
+  insecure_skip_verify = false
+```
+
+| Key | Type | Default | Description |
+| --- | ---- | ------- | ----------- |
+| `ca_file` | string | — | PEM bundle of trust roots; consulted only when `ca_mode` selects it |
+| `ca_mode` | string | `system` | `system`, `system_and_file`, or `file_only`. **Never inferred** from the presence of `ca_file` |
+| `client_cert` / `client_key` | string | — | Client certificate for mutual TLS; both or neither |
+| `server_name` | string | derived from the target | The verified name and the SNI value. A discovery-returned address never becomes the identity |
+| `min_version` | string | `1.2` | `1.2` or `1.3` |
+| `peer_identities` | []string | — | Prefixed identities (`dns:`, `uri:`) ORed and matched **after** standard verification |
+| `insecure_skip_verify` | bool | `false` | Disables peer verification. `jul lint` reports it as an **error**; `Validate` accepts it so an emergency path exists |
+
+A block on a route whose backend is not reached over TLS is rejected rather than
+silently ignored. When both an upstream and a location declare a policy, the
+location's applies to that route and `jul lint` reports the override.
+
+The full reference, including the trust-root modes, the discovery interaction
+and the reload behaviour, is in [upstreams.md](upstreams.md).
 
 ### `[upstreams.health_check]`
 

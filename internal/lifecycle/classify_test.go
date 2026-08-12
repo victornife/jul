@@ -94,8 +94,20 @@ func TestClassifyNewListenerAdoptsBindTimeValues(t *testing.T) {
 		t.Fatalf("adding a listener must apply hot: restart-required = %v", res.RestartRequired)
 	}
 	for _, ch := range res.Changes {
-		if ch.Declared == RestartRequiredClass && ch.Effective != NewListenerOnlyClass {
-			t.Errorf("%s resolved to %s, want new_listener_only", ch.Path, ch.Effective)
+		if ch.Declared != RestartRequiredClass {
+			continue
+		}
+		// A bind-time value on a brand-new address is adopted when the socket
+		// binds. A backend-trust value is not a listener property at all: the
+		// new route's outbound client is built with the generation that owns
+		// it, so it applies on this reload. Both are "not restart-required";
+		// they differ in why, and the class says which.
+		want := NewListenerOnlyClass
+		if isBackendTLSPath(ch.Path) {
+			want = HotReloadClass
+		}
+		if ch.Effective != want {
+			t.Errorf("%s resolved to %s, want %s", ch.Path, ch.Effective, want)
 		}
 	}
 }
@@ -314,4 +326,75 @@ func TestClassifyStreamProtocolIsHot(t *testing.T) {
 	if !res.CanApplyHot {
 		t.Fatalf("switching the stream protocol must apply hot: %+v", res)
 	}
+}
+
+// TestClassifyBackendTLSIsConditionalOnTheBackendSet pins the resolution that
+// makes a restart-required backend policy usable: editing a pool that survives
+// the reload strands its clients, while adding a pool does not.
+func TestClassifyBackendTLSIsConditionalOnTheBackendSet(t *testing.T) {
+	base := func() *config.Config {
+		cfg := fullConfig()
+		cfg.Upstreams[0].BackendTLS = &config.BackendTLSConfig{
+			CAMode: "file_only", CAFile: "/etc/jul/ca.pem", ServerName: "app.internal",
+		}
+		return cfg
+	}
+
+	t.Run("adding a pool applies on this reload", func(t *testing.T) {
+		before := base()
+		after := base()
+		after.Upstreams = append(after.Upstreams, config.UpstreamConfig{
+			Name:    "second",
+			Servers: []config.UpstreamServer{{Address: "127.0.0.1:9443", Weight: 1}},
+			BackendTLS: &config.BackendTLSConfig{
+				CAMode: "file_only", CAFile: "/etc/jul/other-ca.pem", ServerName: "second.internal",
+			},
+		})
+		res, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.CanApplyHot {
+			t.Fatalf("adding a pool must apply hot: restart-required = %v", res.RestartRequired)
+		}
+	})
+
+	t.Run("editing a retained pool requires a restart", func(t *testing.T) {
+		before := base()
+		after := base()
+		after.Upstreams[0].BackendTLS.ServerName = "moved.internal"
+		res, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.CanApplyHot {
+			t.Fatal("changing a live pool's verified name must not be claimed as hot")
+		}
+		var found bool
+		for _, path := range res.RestartRequired {
+			if path == "upstreams.*.backend_tls.server_name" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("restart-required = %v, want the edited path", res.RestartRequired)
+		}
+	})
+
+	t.Run("removing a pool applies on this reload", func(t *testing.T) {
+		before := base()
+		after := base()
+		after.Upstreams[0].BackendTLS = nil
+		after.Upstreams = nil
+		after.Servers[0].Locations[0].ProxyPass = "http://127.0.0.1:3000"
+		res, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range res.RestartRequired {
+			if isBackendTLSPath(path) {
+				t.Fatalf("removing a pool reported %s as restart-required", path)
+			}
+		}
+	})
 }

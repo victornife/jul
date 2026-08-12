@@ -17,12 +17,12 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 270 |
-| Schema leaves (configurable values) | 227 |
-| Registry entries | 227 |
-| Startup-consumed entries | 57 |
+| Schema paths (containers included) | 288 |
+| Schema leaves (configurable values) | 243 |
+| Registry entries | 243 |
+| Startup-consumed entries | 73 |
 | Class `hot_reload` | 156 |
-| Class `restart_required` | 57 |
+| Class `restart_required` | 73 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 2 |
@@ -57,6 +57,7 @@ set, so preview and apply reach the same verdict.
 | `acme` | Automatic certificate management (ACME) for a TLS listener. |
 | `admin` | The admin/observability listener and its startup-owned resources. |
 | `auth` | Per-location credential checks (CIDR, Basic, JWT, forward-auth). |
+| `backend_tls` | Outbound TLS trust for backend connections: roots, client certificate, verified name and peer identities. |
 | `cache` | The two-tier response cache backend. |
 | `client_address` | The per-listener trusted-proxy policy that derives the canonical client address. |
 | `compression` | Negotiated response compression. |
@@ -218,6 +219,14 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.auth.jwt.audience` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.jwt.issuer` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.jwt.jwks_url` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
+| `servers.*.locations.*.backend_tls.ca_file` | `restart_required` | `backend_tls` | startup, cond., digest | the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh |
+| `servers.*.locations.*.backend_tls.ca_mode` | `restart_required` | `backend_tls` | startup, cond. | the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh |
+| `servers.*.locations.*.backend_tls.client_cert` | `restart_required` | `backend_tls` | startup, cond., digest | the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh |
+| `servers.*.locations.*.backend_tls.client_key` | `restart_required` | `backend_tls` | startup, cond., digest | the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh |
+| `servers.*.locations.*.backend_tls.insecure_skip_verify` | `restart_required` | `backend_tls` | startup, cond. | the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh |
+| `servers.*.locations.*.backend_tls.min_version` | `restart_required` | `backend_tls` | startup, cond. | the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh |
+| `servers.*.locations.*.backend_tls.peer_identities` | `restart_required` | `backend_tls` | startup, cond. | the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh |
+| `servers.*.locations.*.backend_tls.server_name` | `restart_required` | `backend_tls` | startup, cond. | the route's outbound client is built with the handler generation that owns it, so editing the policy on a route the reload keeps leaves the running client on its startup trust; a route the reload adds builds its client fresh |
 | `servers.*.locations.*.cache` | `hot_reload` | `cache` | — | whether a location may serve from the cache is decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.cache_control` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.client_max_body_size` | `hot_reload` | `server_limits` | — | the handler tree is rebuilt from the effective config on each successful reload |
@@ -301,6 +310,14 @@ value is compared as a digest so no secret material leaves the process.
 | `stream.*.proxy_protocol` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.sni_routes.*` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.tls_passthrough` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
+| `upstreams.*.backend_tls.ca_file` | `restart_required` | `backend_tls` | startup, cond., digest | backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts |
+| `upstreams.*.backend_tls.ca_mode` | `restart_required` | `backend_tls` | startup, cond. | backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts |
+| `upstreams.*.backend_tls.client_cert` | `restart_required` | `backend_tls` | startup, cond., digest | backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts |
+| `upstreams.*.backend_tls.client_key` | `restart_required` | `backend_tls` | startup, cond., digest | backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts |
+| `upstreams.*.backend_tls.insecure_skip_verify` | `restart_required` | `backend_tls` | startup, cond. | backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts |
+| `upstreams.*.backend_tls.min_version` | `restart_required` | `backend_tls` | startup, cond. | backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts |
+| `upstreams.*.backend_tls.peer_identities` | `restart_required` | `backend_tls` | startup, cond. | backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts |
+| `upstreams.*.backend_tls.server_name` | `restart_required` | `backend_tls` | startup, cond. | backend TLS material is consumed when the outbound clients are built: reloadCertificates is a no-op, the transcoder caches its gRPC connections for the process lifetime, and the health client is created once, so a change is detected and reported but the running process keeps its startup trust until it restarts |
 | `upstreams.*.discovery.consul.address` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.consul.datacenter` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.consul.passing_only` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |

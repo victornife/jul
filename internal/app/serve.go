@@ -109,6 +109,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Effective config alias for the rest of startup.
 	cfg = startupCand.Effective
 
+	// One warning per backend whose verification is disabled. It is a startup
+	// log rather than a metric on purpose: an upstream name is unbounded
+	// cardinality, so it may appear in a log line but never in a label.
+	warnInsecureBackends(log, cfg)
+
 	// The response cache persists across reloads so counters and LRU state
 	// survive config edits. Created once and captured by the handler factory.
 	responseCache, err := cache.New(cfg.Cache, log)
@@ -1096,4 +1101,32 @@ func pendingRestartCheck(startupCand *config.Candidate, startupFP lifecycle.Fing
 	}
 	sort.Strings(pending)
 	return pending
+}
+
+// warnInsecureBackends logs one warning per backend_tls block that disables
+// certificate verification. `jul lint` already fails on the same configuration;
+// this is the runtime restatement, so an operator who started the process
+// anyway sees it in the log they actually read.
+func warnInsecureBackends(log *slog.Logger, cfg *config.Config) {
+	if log == nil || cfg == nil {
+		return
+	}
+	for i := range cfg.Upstreams {
+		if b := cfg.Upstreams[i].BackendTLS; b != nil && b.InsecureSkipVerify {
+			log.Warn("backend certificate verification is disabled",
+				"upstream", cfg.Upstreams[i].Name,
+				"scope", "upstream")
+		}
+	}
+	for i := range cfg.Servers {
+		for j := range cfg.Servers[i].Locations {
+			loc := &cfg.Servers[i].Locations[j]
+			if b := loc.BackendTLS; b != nil && b.InsecureSkipVerify {
+				log.Warn("backend certificate verification is disabled",
+					"listen", cfg.Servers[i].Listen,
+					"path", loc.Match.Path,
+					"scope", "location")
+			}
+		}
+	}
 }
