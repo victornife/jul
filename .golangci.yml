@@ -33,6 +33,16 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
+      # SA5011 does not always recognize t.Fatal/t.Fatalf as terminating the
+      # goroutine (they call runtime.Goexit via (*testing.common).FailNow), so
+      # it repeatedly flags the "if x == nil { t.Fatal(...) }; x.Field" idiom
+      # used throughout the test suite (100+ sites) as a possible nil
+      # dereference. Scoped to test files only; production code still gets the
+      # full check.
+      - path: _test\.go
+        text: "SA5011"
+        linters:
+          - staticcheck
       # JWKS EC-key parsing needs the classic crypto/ecdsa coordinate API
       # (ecdsa.PublicKey{X,Y} + elliptic.IsOnCurve). A crypto/ecdh rewrite is a
       # separate change; suppress the Go 1.25/1.26 deprecation warnings here.

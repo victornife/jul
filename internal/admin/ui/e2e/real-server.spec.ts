@@ -98,6 +98,34 @@ function toggleLogLevel(raw: string): {
   return { modified, currentLevel, nextLevel, quote };
 }
 
+/**
+ * Posts to a config-mutating endpoint, retrying once per attempt (up to
+ * `attempts` total) on a 409 response. The admin API can legitimately answer
+ * a conflict when the live handler-generation or persisted version advanced
+ * between authorization and persistence — e.g. a reload the file watcher
+ * fired for its own echo of an immediately preceding write (#270) — and a
+ * real client is expected to retry rather than treat that as fatal. Fails
+ * with the last response's body if every attempt is exhausted, so a genuine
+ * failure is still diagnosable instead of just asserting a bare status code.
+ */
+async function postWithConflictRetry(
+  request: import("@playwright/test").APIRequestContext,
+  url: string,
+  options: Parameters<import("@playwright/test").APIRequestContext["post"]>[1],
+  attempts = 3,
+) {
+  let resp = await request.post(url, options);
+  for (let attempt = 1; resp.status() === 409 && attempt < attempts; attempt++) {
+    resp = await request.post(url, options);
+  }
+  if (resp.status() === 409) {
+    throw new Error(
+      `POST ${url} still returned 409 after ${String(attempts)} attempts: ${await resp.text()}`,
+    );
+  }
+  return resp;
+}
+
 // ── Overview ─────────────────────────────────────────────────────────────────
 
 test("GET /api/runtime/overview matches OverviewSchema", async ({ request }) => {
@@ -349,7 +377,16 @@ test(
     const latestId = history[0].id;
 
     // 5. Roll back to the snapshot that captured the original config.
-    const rollbackResp = await request.post("/api/config/rollback", {
+    //
+    // The rollback handler compares the server's live handler-generation ID
+    // against the one it observed when authorizing the request (#270), so it
+    // can legitimately return a transient 409 if an unrelated reload (e.g. the
+    // file watcher's own echo of step 2's write, suppressed on a best-effort
+    // basis) advances that generation in the narrow window between the two.
+    // A real Console client is expected to retry such a conflict rather than
+    // fail outright, so this test does the same instead of asserting success
+    // on the first attempt.
+    const rollbackResp = await postWithConflictRetry(request, "/api/config/rollback", {
       headers: { "Content-Type": "application/json" },
       data: JSON.stringify({ id: latestId }),
     });
