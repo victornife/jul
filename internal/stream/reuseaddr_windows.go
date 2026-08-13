@@ -19,11 +19,3 @@ package stream
 func setReuseAddr(fd uintptr) error {
 	return nil
 }
-
-// protocolSwitchNeedsRetire reports whether a protocol switch (e.g. TCP→UDP on
-// the same address) requires the old listener's socket to be closed before the
-// new one can bind. On Windows, TCP and UDP share the same port namespace under
-// Enhanced Socket Security (SO_EXCLUSIVEADDRUSE), so a TCP socket holding port
-// P prevents a UDP socket from binding to P. The old listener must therefore be
-// retired before the new socket can be bound.
-func protocolSwitchNeedsRetire() bool { return true }

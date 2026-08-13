@@ -114,11 +114,7 @@ func TestStreamProtocolSwitchTCPToUDP(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	// Use a UDP-reserved address so the same port is accessible to both TCP and
-	// UDP. On Windows the TCP ephemeral range may overlap with excluded UDP
-	// ports, so obtaining the port via UDP guarantees it is in the usable range
-	// for the subsequent UDP bind after the protocol switch.
-	addr := freeUDPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
@@ -146,7 +142,7 @@ func TestStreamProtocolSwitchUDPToTCP(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeUDPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 
 	mustReload(t, s, streamBlock(addr, "udp", udpBackend))
@@ -174,7 +170,7 @@ func TestStreamProtocolSwitchRepeated(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeUDPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 
 	for i := 0; i < 5; i++ {
@@ -196,7 +192,7 @@ func TestStreamProtocolSwitchRouteBuildFailureIsAtomic(t *testing.T) {
 	tcpBackend, stopTCP := tcpEcho(t)
 	defer stopTCP()
 
-	addr := freeTCPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
 
@@ -234,7 +230,7 @@ func TestStreamProtocolSwitchBindFailureIsAtomic(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeTCPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
 
@@ -262,11 +258,7 @@ func TestStreamProtocolSwitchPreflightProbesCandidateProtocol(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	// Use a UDP-reserved address: the preflight probes UDP, so the address must
-	// be in a range accessible to UDP. On Windows the TCP ephemeral range may
-	// overlap with excluded UDP ports, making any port from freeTCPAddr unusable
-	// for UDP probing even when no socket holds it.
-	addr := freeUDPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 
 	bound := map[string]struct{}{"tcp|" + addr: {}}
@@ -302,7 +294,7 @@ func TestStreamProtocolSwitchDrainsEstablishedTCP(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeUDPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
 
@@ -354,7 +346,7 @@ func TestStreamProtocolSwitchRetiresUDPSessions(t *testing.T) {
 	tcpBackend, stopTCP := tcpEcho(t)
 	defer stopTCP()
 
-	addr := freeUDPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "udp", udpBackend))
 	dialUDPAndEcho(t, addr, "session")
@@ -404,7 +396,7 @@ func TestStreamProtocolSwitchLeavesNoGoroutines(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeUDPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
 	dialTCPAndEcho(t, addr, "warm")
@@ -435,7 +427,7 @@ func TestStreamProtocolSwitchConcurrentTraffic(t *testing.T) {
 	udpBackend, stopUDP := udpEcho(t)
 	defer stopUDP()
 
-	addr := freeUDPAddr(t)
+	addr := reserveSwitchAddr(t)
 	s := newTestServer(t, Hooks{})
 	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
 
@@ -475,4 +467,34 @@ func settle() {
 		runtime.Gosched()
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// TestStreamSameAddressBothProtocolsCoexist proves a TCP and a UDP listener can
+// serve the same numeric address simultaneously, and that adding the second one
+// leaves the first serving. TCP and UDP occupy independent port namespaces on
+// every supported platform, so Reload must never retire a listener to free a
+// port for the other protocol: doing so both destroys a listener the candidate
+// configuration keeps and forfeits the atomic rollback guarantee.
+func TestStreamSameAddressBothProtocolsCoexist(t *testing.T) {
+	tcpBackend, stopTCP := tcpEcho(t)
+	defer stopTCP()
+	udpBackend, stopUDP := udpEcho(t)
+	defer stopUDP()
+
+	addr := reserveSwitchAddr(t)
+	s := newTestServer(t, Hooks{})
+
+	mustReload(t, s, streamBlock(addr, "tcp", tcpBackend))
+	dialTCPAndEcho(t, addr, "tcp-only")
+
+	mustReload(t, s,
+		streamBlock(addr, "tcp", tcpBackend),
+		streamBlock(addr, "udp", udpBackend),
+	)
+
+	if keys := s.BoundKeys(); len(keys) != 2 {
+		t.Fatalf("bound keys = %v, want both tcp|%s and udp|%s", keys, addr, addr)
+	}
+	dialTCPAndEcho(t, addr, "tcp-still-serving")
+	dialUDPAndEcho(t, addr, "udp-now-serving")
 }

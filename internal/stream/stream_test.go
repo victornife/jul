@@ -13,6 +13,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,9 +41,69 @@ func eventually(cond func() bool) bool {
 	return cond()
 }
 
+// switchPortLow and switchPortHigh bound a band that sits below the ephemeral
+// range of every supported platform (Linux allocates from 32768 by default,
+// Windows and macOS from 49152). The kernel never hands a port from this band
+// to an outbound connection as its source port, which is what makes such a
+// port safe to release and re-bind later.
+const (
+	switchPortLow  = 20000
+	switchPortHigh = 32000
+)
+
+var switchPortCursor = func() *atomic.Int32 {
+	c := new(atomic.Int32)
+	c.Store(int32(switchPortLow + os.Getpid()%(switchPortHigh-switchPortLow)))
+	return c
+}()
+
+// reserveSwitchAddr returns a loopback address that both TCP and UDP can bind.
+//
+// The protocol-switch tests bind one port under both protocols in turn, and
+// neither obvious alternative is sound:
+//
+//   - An ephemeral port obtained by binding :0 and closing can be taken as the
+//     source port of an outbound connection made by this same process before
+//     the re-bind. TCP and UDP have independent port tables, so holding the
+//     port under one protocol does not reserve it against a connect on the
+//     other. Linux then refuses the later bind with EADDRINUSE, because
+//     inet_bind_conflict only waives the conflict when both sockets set
+//     SO_REUSEADDR and Go does not set it on dialed sockets.
+//   - A port validated under one protocol only can still be unbindable under
+//     the other on Windows, where excluded port ranges are per-protocol and a
+//     bind inside one fails with WSAEACCES.
+//
+// Probing both protocols within a non-ephemeral band rules out both failures.
+func reserveSwitchAddr(t *testing.T) string {
+	t.Helper()
+	for attempt := 0; attempt < 400; attempt++ {
+		port := int(switchPortCursor.Add(1))
+		if port >= switchPortHigh {
+			switchPortCursor.Store(switchPortLow)
+			continue
+		}
+		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			continue
+		}
+		pc, err := net.ListenPacket("udp", addr)
+		if err != nil {
+			_ = ln.Close()
+			continue
+		}
+		_ = pc.Close()
+		_ = ln.Close()
+		return addr
+	}
+	t.Fatalf("no port in %d-%d was bindable by both tcp and udp", switchPortLow, switchPortHigh)
+	return ""
+}
+
 // freeTCPAddr reserves and releases an ephemeral TCP port, returning its
 // address for a listener to bind. There is a small reuse window, acceptable in
-// tests.
+// tests. Use reserveSwitchAddr instead when the same port is later re-bound,
+// under either protocol, after the test has generated traffic.
 func freeTCPAddr(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

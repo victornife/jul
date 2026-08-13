@@ -143,31 +143,16 @@ func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]conf
 
 	// Phase 1b: bind listeners that are newly added. Roll back on error.
 	//
-	// On platforms where TCP and UDP share a port namespace (see
-	// protocolSwitchNeedsRetire), a protocol switch (same address, different
-	// protocol) requires the old listener's socket to be released before the new
-	// one can bind. On such platforms the switch is not atomic: if the new bind
-	// fails the old listener has already been retired and cannot be restored. On
-	// platforms where TCP and UDP are independent (Unix), the bind is attempted
-	// while the old socket is still open so that a failed bind leaves the
-	// running configuration untouched.
+	// TCP and UDP occupy independent port namespaces on every supported platform
+	// (Linux hashes them in separate tables, and Windows likewise permits a UDP
+	// bind while TCP holds the same port), so a protocol switch can bind the new
+	// socket while the old one still serves. Binding before retiring anything is
+	// what makes the switch atomic: a failed bind leaves the running
+	// configuration untouched.
 	var newlyBound []*listener
 	for key, r := range want {
 		if _, exists := s.listeners[key]; exists {
 			continue
-		}
-		if protocolSwitchNeedsRetire() {
-			_, addr, _ := strings.Cut(key, "|")
-			for existingKey, existingListener := range s.listeners {
-				_, existingAddr, _ := strings.Cut(existingKey, "|")
-				if existingAddr == addr {
-					// Same address, different protocol (same-key case is skipped above).
-					// Retire the old socket so the new protocol can bind to the port.
-					existingListener.shutdown()
-					delete(s.listeners, existingKey)
-					break
-				}
-			}
 		}
 		l, err := s.bindListener(key, r)
 		if err != nil {
