@@ -13,6 +13,7 @@ references.
 - **Access-log lifecycle:** request records can be disabled explicitly, but enablement and sink changes remain restart-required until #98 introduces generation-safe sink replacement.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
+- **Upstream overload control:** the bounded model decided by [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is not yet implemented. Until #141–#144 land, the running binary has: no cap on concurrent upstream requests or on physical backend connections (`MaxConnsPerHost` is unset); no retry budget, overall retry deadline or backoff between attempts; no bound on how many requests probe a backend the instant its `fail_timeout` cooldown elapses; no load balancing, health checking or failure accounting for `fastcgi_pass` and `uwsgi_pass`, whose connection count is unbounded; no connection cap on L4 TCP routes (UDP already has `max_udp_sessions`); and no circuit breaker on the forward-auth and JWKS subrequests, which carry a fixed 10s timeout.
 
 ---
 

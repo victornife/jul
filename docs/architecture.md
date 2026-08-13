@@ -59,6 +59,11 @@ docs/adr/              # Architecture Decision Records
   defaulting to hot reload.
 - **Zero external runtime deps:** The shipped binary is statically linked and
   needs no interpreter or shared libraries (Go standard library + chosen deps).
+- **One resilience subsystem:** admission, retry and circuit state are owned by
+  `internal/upstream` and shared by every backend transport — HTTP, gRPC,
+  transcoding, FastCGI, uWSGI and the L4 stream proxy — rather than reimplemented
+  per protocol. Limits are per replica, not cluster-wide.
+  [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is the authority.
 
 ## Trust boundaries
 
