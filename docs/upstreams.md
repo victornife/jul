@@ -53,6 +53,13 @@ proxy_pass = "https://inventory"
 | `discovery` | table | Dynamic backends — see [service-discovery.md](service-discovery.md) |
 | `backend_tls` | table | Outbound TLS policy — below |
 
+> **Resilience.** `max_fails` and `fail_timeout` are Jul's circuit breaker: N consecutive failures
+> open the backend for the cooldown, after which the next request probes it and the next failure
+> re-trips it. [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) makes that model
+> explicit and decides the concurrency, pending, connection, retry-budget and half-open controls that
+> extend it. Those controls are an accepted decision under implementation (#141, #142, #143, #144);
+> the keys above are what the running binary reads today.
+
 ## backend_tls
 
 `backend_tls` is the **outbound** TLS policy. It is a different key from the
