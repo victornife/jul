@@ -142,6 +142,13 @@ func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]conf
 	}
 
 	// Phase 1b: bind listeners that are newly added. Roll back on error.
+	//
+	// TCP and UDP occupy independent port namespaces on every supported platform
+	// (Linux hashes them in separate tables, and Windows likewise permits a UDP
+	// bind while TCP holds the same port), so a protocol switch can bind the new
+	// socket while the old one still serves. Binding before retiring anything is
+	// what makes the switch atomic: a failed bind leaves the running
+	// configuration untouched.
 	var newlyBound []*listener
 	for key, r := range want {
 		if _, exists := s.listeners[key]; exists {
