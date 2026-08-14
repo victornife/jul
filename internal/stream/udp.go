@@ -113,7 +113,8 @@ func (l *listener) udpSessionFor(clientAddr *net.UDPAddr) *udpSession {
 	if err != nil {
 		l.udpMu.Unlock()
 		close(p.done) // p.sess stays nil: signal failure to any waiters
-		l.server.log.Warn("stream: dial udp backend failed", "addr", l.addr, "error", err)
+		// Counted and logged (throttled once known-down) inside dialBackend, so
+		// a broken backend plus ordinary client volume cannot flood the log.
 		return nil
 	}
 	sess := &udpSession{backend: backend, pool: r.defaultPool, b: b}

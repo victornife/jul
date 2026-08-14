@@ -107,7 +107,8 @@ func (l *listener) handleTCP(client net.Conn) {
 
 	backend, b, err := l.dialBackend(pool, "tcp", r.connectTimeout)
 	if err != nil {
-		s.log.Warn("stream: dial backend failed", "addr", l.addr, "error", err)
+		// Counted and logged (throttled once known-down) inside dialBackend, so
+		// a broken backend plus ordinary connection volume cannot flood the log.
 		return
 	}
 	defer pool.Release(b)

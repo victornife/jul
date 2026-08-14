@@ -635,6 +635,120 @@ func TestRouteMissLogIsThrottled(t *testing.T) {
 	}
 }
 
+// TestDialFailureLogIsThrottled pins that a broken backend plus ordinary
+// connection volume cannot flood the log the way TestRouteMissLogIsThrottled
+// pins for an unmatched route — no attacker is required, a backend outage is
+// enough. The counter must still record every failure so the throttle is not
+// also a blind spot during the outage (issue #275).
+func TestDialFailureLogIsThrottled(t *testing.T) {
+	addr := freeTCPAddr(t)
+
+	logs := &lockedBuffer{}
+	var failures atomic.Int64
+	var lastProto, lastReason atomic.Value
+	s := NewServer(Options{
+		Logger: slog.New(slog.NewTextHandler(logs, nil)),
+		Hooks: Hooks{OnDialFailure: func(proto, reason string) {
+			failures.Add(1)
+			lastProto.Store(proto)
+			lastReason.Store(reason)
+		}},
+	})
+	t.Cleanup(func() { _ = s.Close() })
+
+	// A high max_fails keeps the backend out of cooldown for the whole test, so
+	// every connection reaches the throttled heartbeat path (rather than the
+	// separate, unconditional cooldown-transition line).
+	ups := map[string]config.UpstreamConfig{
+		"flaky": {
+			Name:        "flaky",
+			Strategy:    "round_robin",
+			MaxFails:    1000,
+			FailTimeout: config.Duration(time.Minute),
+			Servers:     []config.UpstreamServer{{Address: "127.0.0.1:1", Weight: 1}},
+		},
+	}
+	if err := s.Reload([]config.StreamServer{{
+		Listen: addr, Protocol: "tcp", ProxyPass: "flaky",
+	}}, ups); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	const conns = 50
+	for range conns {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _ = io.Copy(io.Discard, c) // wait for the listener to drop the connection
+		_ = c.Close()
+	}
+
+	if got := logs.count("dial backend failed"); got > 1 {
+		t.Errorf("%d dial failures produced %d throttled log lines, want at most 1", conns, got)
+	}
+	if got := failures.Load(); got != conns {
+		t.Errorf("dial-failure counter = %d, want %d (must not undercount while the log is throttled)", got, conns)
+	}
+	if got := lastProto.Load(); got != "tcp" {
+		t.Errorf("proto = %v, want tcp", got)
+	}
+	if got := lastReason.Load(); got != "refused" {
+		t.Errorf("reason = %v, want refused", got)
+	}
+}
+
+// TestDialFailureLogsTransitionUnthrottled pins that a backend's cooldown
+// trip and recovery are logged unconditionally, since they are rare
+// (bounded by max_fails/fail_timeout, not by request volume) and are the
+// signal an operator needs even while the per-failure heartbeat is quiet.
+func TestDialFailureLogsTransitionUnthrottled(t *testing.T) {
+	addr := freeTCPAddr(t)
+
+	logs := &lockedBuffer{}
+	s := NewServer(Options{Logger: slog.New(slog.NewTextHandler(logs, nil))})
+	t.Cleanup(func() { _ = s.Close() })
+
+	ups := map[string]config.UpstreamConfig{
+		"flaky": {
+			Name:        "flaky",
+			Strategy:    "round_robin",
+			MaxFails:    1,
+			FailTimeout: config.Duration(10 * time.Second),
+			Servers:     []config.UpstreamServer{{Address: "127.0.0.1:1", Weight: 1}},
+		},
+	}
+	if err := s.Reload([]config.StreamServer{{
+		Listen: addr, Protocol: "tcp", ProxyPass: "flaky",
+	}}, ups); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	dial := func() {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _ = io.Copy(io.Discard, c)
+		_ = c.Close()
+	}
+
+	// Trip the cooldown (max_fails=1: the first failure trips it) and confirm
+	// several more connections while it is down do not add a second line —
+	// they are ErrNoAvailableBackend, already told once, and are counted only.
+	for range 5 {
+		dial()
+	}
+	if got := logs.count("backend marked down"); got != 1 {
+		t.Errorf("cooldown trip produced %d unthrottled lines, want 1", got)
+	}
+	if got := logs.count("dial backend failed"); got != 0 {
+		t.Errorf("already-down backend produced %d heartbeat lines, want 0 (should be pure repeats of the trip line)", got)
+	}
+}
+
 // TestRouteMissDoesNotMaskProxyDiagnostics pins that the two conditions are
 // throttled independently. A peer provoking a route miss must not be able to
 // suppress the PROXY-protocol refusal that a different peer would trigger,

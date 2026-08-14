@@ -79,6 +79,12 @@ func (s *Server) udpRejected() {
 	}
 }
 
+func (s *Server) dialFailure(proto, reason string) {
+	if s.hooks.OnDialFailure != nil {
+		s.hooks.OnDialFailure(proto, reason)
+	}
+}
+
 // route is the immutable forwarding decision for a listener: the default and
 // SNI-keyed backend pools plus the per-connection options. A reload publishes a
 // new route via the listener's atomic pointer; existing connections keep the
@@ -415,7 +421,12 @@ func (l *listener) shutdown() {
 }
 
 // dialBackend picks an available backend and dials it, retrying other backends
-// on dial failure. The returned backend must be released to the pool when the
+// on dial failure. Every failed pick/dial is counted via the server's
+// OnDialFailure hook; the accompanying log line is a rare, unthrottled
+// transition the moment a backend's cooldown trips or clears, plus a throttled
+// heartbeat for failures in between, so a backend outage cannot flood the log
+// regardless of connection volume while still being visible on the counter.
+// The returned backend must be released to the pool when the
 // connection/session ends.
 func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time.Duration) (net.Conn, *upstream.Backend, error) {
 	attempts := len(pool.Backends())
@@ -426,16 +437,27 @@ func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time
 	for i := 0; i < attempts; i++ {
 		b, err := pool.Pick()
 		if err != nil {
+			l.server.dialFailure(network, upstream.ClassifyDialError(err))
 			return nil, nil, err
 		}
 		conn, derr := net.DialTimeout(network, b.Address, timeout)
 		if derr != nil {
-			pool.MarkFailure(b)
+			reason := upstream.ClassifyDialError(derr)
+			tripped := pool.MarkFailure(b)
 			pool.Release(b)
+			l.server.dialFailure(network, reason)
+			switch {
+			case tripped:
+				l.server.log.Warn("stream: backend marked down", "addr", l.addr, "proto", network, "backend", b.Address, "reason", reason, "error", derr)
+			case pool.AllowDialFailureLog():
+				l.server.log.Warn("stream: dial backend failed", "addr", l.addr, "proto", network, "backend", b.Address, "reason", reason, "error", derr)
+			}
 			lastErr = derr
 			continue
 		}
-		pool.MarkSuccess(b)
+		if pool.MarkSuccess(b) {
+			l.server.log.Info("stream: backend recovered", "addr", l.addr, "proto", network, "backend", b.Address)
+		}
 		return conn, b, nil
 	}
 	if lastErr == nil {
