@@ -84,6 +84,12 @@ to run it. The check is performed once at startup by `waf.Check`.
    The substitution also bypasses Coraza's own address split, which leaves the
    brackets on an IPv6 peer, so IPv6 rules match the same normalized form as
    IPv4 ones.
+
+   The **connection port is reported as `0`**. An address asserted by a proxy
+   has no port on the connection Jul actually accepted, and reporting the
+   proxy's port beside the client's address would be a value a rule could match
+   on and be wrong about. A rule that inspects `REMOTE_PORT` will therefore see
+   `0` for every request on a listener with a trusted-proxy policy.
 5. Every matched rule that logs is reported to metrics and structured-log
    hooks. The metric keeps only bounded action/rule labels. The structured warning
    records `rule_id`, `mode`, `phase`, `severity`, a bounded/redacted `path`, and

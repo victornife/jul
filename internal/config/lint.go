@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 
 	"net/url"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"jul/internal/backendtls"
 	"jul/internal/clientaddr"
 )
 
@@ -131,19 +133,32 @@ func Lint(c *Config) []Diagnostic {
 
 		// A trusted-proxy entry that covers the whole address space lets any
 		// client assert any address, which is the spoofing case the policy
-		// exists to prevent.
+		// exists to prevent. A merely very broad one is the shape a mistyped
+		// mask takes: canonical-prefix validation catches 10.1.2.3/8, but not
+		// 10.0.0.0/4.
 		if srv.ClientAddress != nil {
 			for j, raw := range srv.ClientAddress.TrustedProxies {
 				prefix, err := clientaddr.ParsePrefix(raw)
-				if err != nil || prefix.Bits() != 0 {
+				if err != nil {
 					continue
 				}
-				diags = append(diags, Diagnostic{
-					Severity: SeverityWarning,
-					Field:    fmt.Sprintf("servers[%d].client_address.trusted_proxies[%d]", i, j),
-					Message:  fmt.Sprintf("%q trusts every client, so any request may assert its own client address", raw),
-					Hint:     "list only the addresses of proxies you operate; trusted_proxies is a security boundary",
-				})
+				field := fmt.Sprintf("servers[%d].client_address.trusted_proxies[%d]", i, j)
+				switch {
+				case prefix.Bits() == 0:
+					diags = append(diags, Diagnostic{
+						Severity: SeverityWarning,
+						Field:    field,
+						Message:  fmt.Sprintf("%q trusts every client, so any request may assert its own client address", raw),
+						Hint:     "list only the addresses of proxies you operate; trusted_proxies is a security boundary",
+					})
+				case overlyBroadPrefix(prefix):
+					diags = append(diags, Diagnostic{
+						Severity: SeverityWarning,
+						Field:    field,
+						Message:  fmt.Sprintf("%q trusts %s addresses, far more than a proxy fleet occupies; a mistyped mask looks exactly like this", raw, prefixSizeText(prefix)),
+						Hint:     "narrow it to the addresses your proxies actually use",
+					})
+				}
 			}
 			// Believing a header the proxy does not write is the same as believing
 			// the client: the proxy forwards whatever the client sent.
@@ -312,11 +327,31 @@ func lintBackendTLS(c *Config) []Diagnostic {
 		})
 	}
 
+	// system_and_file is a union, not a preference: the configured CA is added
+	// to the platform roots rather than replacing them, so every publicly
+	// trusted CA can still authenticate the backend. That is often not what
+	// "I gave it my private CA" was meant to express.
+	unionTrust := func(field string, cfg *BackendTLSConfig) {
+		if cfg == nil || cfg.InsecureSkipVerify || strings.TrimSpace(cfg.CAMode) != backendtls.CAModeSystemAndFile {
+			return
+		}
+		if len(cfg.PeerIdentities) > 0 {
+			return
+		}
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Field:    field,
+			Message:  "ca_mode is the union of the platform roots and ca_file, so any publicly trusted CA can still authenticate this backend",
+			Hint:     `use ca_mode = "file_only" to trust the configured CA alone, or add peer_identities to bind the peer to a name`,
+		})
+	}
+
 	tlsUpstreams := upstreamsReachedOverTLS(c)
 	for i := range c.Upstreams {
 		up := &c.Upstreams[i]
 		where := fmt.Sprintf("upstreams[%d].backend_tls", i)
 		insecure(where, up.BackendTLS)
+		unionTrust(where, up.BackendTLS)
 
 		// An active health probe inherits the pool's scheme, so an https pool
 		// is probed over TLS and verified against the system roots alone. A
@@ -340,6 +375,7 @@ func lintBackendTLS(c *Config) []Diagnostic {
 			loc := &c.Servers[i].Locations[j]
 			where := fmt.Sprintf("servers[%d].locations[%d].backend_tls", i, j)
 			insecure(where, loc.BackendTLS)
+			unionTrust(where, loc.BackendTLS)
 
 			// Both blocks may legitimately exist; the location's wins for this
 			// route. Say so, because a silent override of a security policy is
@@ -360,8 +396,32 @@ func lintBackendTLS(c *Config) []Diagnostic {
 	return diags
 }
 
-// lintDiscoveryTrust reports control-plane trust findings (Boundary F).
+// overlyBroadPrefix reports whether a trusted-proxy entry covers far more of the
+// address space than any proxy fleet occupies.
 //
+// The thresholds are deliberately loose. A /8 of IPv4 is 16 million addresses
+// and already covers all of RFC1918's largest block, and a /32 of IPv6 is an
+// entire ISP allocation, so anything broader is a mistyped mask rather than a
+// deployment. Keeping them loose matters: real fleets are wider than intuition
+// suggests — a CDN's published ranges reach /12 — and a lint that cries wolf on
+// a correct configuration is worse than no lint.
+func overlyBroadPrefix(p netip.Prefix) bool {
+	if p.Addr().Is4() {
+		return p.Bits() < 8
+	}
+	return p.Bits() < 32
+}
+
+// prefixSizeText renders how much space a prefix covers, in the terms an
+// operator reading the warning is checking against.
+func prefixSizeText(p netip.Prefix) string {
+	if p.Addr().Is4() {
+		return fmt.Sprintf("1/%d of IPv4", 1<<p.Bits())
+	}
+	return fmt.Sprintf("a /%d of IPv6", p.Bits())
+}
+
+// lintDiscoveryTrust reports control-plane trust findings (Boundary F).//
 // A discovery provider is the authority a backend address comes from, so the
 // safety of Boundary D rests on it: a poisoned registry answer is only harmless
 // because the address it supplies never becomes an identity. Disabling

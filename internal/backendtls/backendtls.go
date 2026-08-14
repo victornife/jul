@@ -283,9 +283,11 @@ func caMode(opts Options) string {
 }
 
 // defaultServerName derives the verified identity from the configured logical
-// target when server_name is absent. A host:port target contributes its host; an
-// IP literal contributes nothing, so Go verifies the address against the
-// certificate's IP SANs under its standard rules.
+// target when server_name is absent. A host:port target contributes its host.
+//
+// An IP literal is returned as-is: Go suppresses SNI for one (a literal is not
+// a legal SNI host) and verifies it against the certificate's IP SANs instead,
+// which is the intended behaviour for a directly addressed backend.
 func defaultServerName(logicalHost string) string {
 	host := strings.TrimSpace(logicalHost)
 	if host == "" {

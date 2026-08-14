@@ -280,6 +280,12 @@ func TestLintFlagsTrustedProxiesCoveringEveryClient(t *testing.T) {
 		{name: "ipv6 default route", entry: "::/0", want: true},
 		{name: "narrow range", entry: "10.0.0.0/8", want: false},
 		{name: "single host", entry: "192.0.2.10", want: false},
+		// Most mistyped masks are already rejected as non-canonical (10.0.0.0/4
+		// masks to 0.0.0.0/4); these are the ones that stay canonical.
+		{name: "a mistyped ipv4 mask", entry: "16.0.0.0/4", want: true},
+		{name: "a mistyped ipv6 mask", entry: "2001::/16", want: true},
+		{name: "a real cdn range is not flagged", entry: "104.16.0.0/13", want: false},
+		{name: "an ipv6 site allocation is not flagged", entry: "2001:db8:100::/48", want: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := clientAddressConfig(&ClientAddressConfig{TrustedProxies: []string{tt.entry}})
@@ -287,7 +293,7 @@ func TestLintFlagsTrustedProxiesCoveringEveryClient(t *testing.T) {
 			for _, d := range Lint(cfg) {
 				if strings.Contains(d.Field, "client_address.trusted_proxies") {
 					found = true
-					if !strings.Contains(d.Message, "trusts every client") {
+					if !strings.Contains(d.Message, "trusts every client") && !strings.Contains(d.Message, "far more than a proxy fleet") {
 						t.Errorf("diagnostic message = %q", d.Message)
 					}
 				}

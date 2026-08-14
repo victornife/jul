@@ -622,7 +622,7 @@ func validateProxyProtocolConsistency(servers []ServerConfig) []error {
 	first := map[string]ref{}
 	var errs []error
 	for i := range servers {
-		addr := strings.TrimSpace(servers[i].Listen)
+		addr := CanonicalListenAddr(servers[i].Listen)
 		if addr == "" {
 			continue
 		}
@@ -643,6 +643,21 @@ func validateProxyProtocolConsistency(servers []ServerConfig) []error {
 	return errs
 }
 
+// CanonicalListenAddr renders a listen address as the key that identifies the
+// socket it binds.
+//
+// It is the single definition of "these two blocks share a listener", used by
+// configuration validation, the handler factory and the server's own listener
+// set. Those three grouped listeners independently before, and disagreed about
+// whitespace — which matters because the listener-scoped security rules, above
+// all the identical-`client_address` requirement, are only as strong as the
+// grouping they are checked against (ADR 0016 §3).
+//
+// The address is otherwise left alone: resolving ":443" against "0.0.0.0:443"
+// would need the bind-time interface set, and two such blocks collide at bind()
+// rather than serving divergent policies.
+func CanonicalListenAddr(addr string) string { return strings.TrimSpace(addr) }
+
 // validateClientAddressConsistency rejects divergent client_address policies// across server blocks that share a listen address. The canonical client is
 // derived per listen address, before the router reads the Host header, so a
 // listener has exactly one policy: allowing blocks to disagree would let the
@@ -655,7 +670,7 @@ func validateClientAddressConsistency(servers []ServerConfig) []error {
 	first := map[string]policyRef{}
 	var errs []error
 	for i := range servers {
-		addr := strings.TrimSpace(servers[i].Listen)
+		addr := CanonicalListenAddr(servers[i].Listen)
 		if addr == "" {
 			continue
 		}

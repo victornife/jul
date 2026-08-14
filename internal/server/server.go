@@ -1418,14 +1418,15 @@ func uniqueListenAddrs(servers []config.ServerConfig) []string {
 	seen := map[string]struct{}{}
 	var addrs []string
 	for _, srv := range servers {
-		if srv.Listen == "" {
+		addr := config.CanonicalListenAddr(srv.Listen)
+		if addr == "" {
 			continue
 		}
-		if _, ok := seen[srv.Listen]; ok {
+		if _, ok := seen[addr]; ok {
 			continue
 		}
-		seen[srv.Listen] = struct{}{}
-		addrs = append(addrs, srv.Listen)
+		seen[addr] = struct{}{}
+		addrs = append(addrs, addr)
 	}
 	return addrs
 }

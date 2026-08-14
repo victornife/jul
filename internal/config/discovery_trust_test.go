@@ -24,6 +24,55 @@ func consulDiscovery(mutate func(*ConsulDiscovery)) *DiscoveryConfig {
 	return &DiscoveryConfig{Type: "consul", Consul: c}
 }
 
+func TestLintFlagsUnionTrustWithoutAPeerIdentity(t *testing.T) {
+	withPolicy := func(b *BackendTLSConfig) *Config {
+		cfg := validKnownValueConfig()
+		cfg.Upstreams = []UpstreamConfig{{Name: "app", Servers: []UpstreamServer{{Address: "127.0.0.1:3000"}}, BackendTLS: b}}
+		return cfg
+	}
+	for _, tt := range []struct {
+		name   string
+		policy *BackendTLSConfig
+		want   bool
+	}{
+		{
+			name:   "union without a peer identity",
+			policy: &BackendTLSConfig{CAMode: "system_and_file", CAFile: "/etc/ca.pem"},
+			want:   true,
+		},
+		{
+			name:   "union constrained by a peer identity",
+			policy: &BackendTLSConfig{CAMode: "system_and_file", CAFile: "/etc/ca.pem", PeerIdentities: []string{"dns:api.internal"}},
+			want:   false,
+		},
+		{
+			name:   "file_only trusts the configured CA alone",
+			policy: &BackendTLSConfig{CAMode: "file_only", CAFile: "/etc/ca.pem"},
+			want:   false,
+		},
+		{
+			name:   "the default system mode is not a union",
+			policy: &BackendTLSConfig{CAMode: "system"},
+			want:   false,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var found bool
+			for _, d := range Lint(withPolicy(tt.policy)) {
+				if strings.Contains(d.Message, "union of the platform roots") {
+					found = true
+					if d.Severity != SeverityWarning {
+						t.Errorf("severity = %v, want %v", d.Severity, SeverityWarning)
+					}
+				}
+			}
+			if found != tt.want {
+				t.Fatalf("union-trust diagnostic = %v, want %v", found, tt.want)
+			}
+		})
+	}
+}
+
 // TestLintFlagsDiscoveryVerificationBypass pins the Boundary F half of the
 // escape-hatch contract: disabling verification of the registry that supplies a
 // pool's addresses is an error, exactly as disabling it on the pool itself is.
