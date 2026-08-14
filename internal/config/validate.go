@@ -574,6 +574,13 @@ func validateClientAddress(ca *ClientAddressConfig, where string) []error {
 	} else if ca.MaxHops > clientaddr.MaxHopsLimit {
 		errs = append(errs, fmt.Errorf("%s.max_hops: %d must be at most %d (0 selects the default of %d)", where, ca.MaxHops, clientaddr.MaxHopsLimit, clientaddr.DefaultMaxHops))
 	}
+	// Whether a header can be believed depends on the proxy overwriting it, which
+	// Jul cannot observe. Trusting a proxy therefore requires naming the headers
+	// it authors rather than inheriting a default.
+	if len(ca.TrustedProxies) > 0 && ca.ForwardedHeaders == nil {
+		errs = append(errs, fmt.Errorf("%s.forwarded_headers: required when trusted_proxies is set; list the headers your proxy overwrites on every request (%q, %q), or [] to keep peer-only identity",
+			where, clientaddr.HeaderXFF, clientaddr.HeaderForwarded))
+	}
 	return errs
 }
 

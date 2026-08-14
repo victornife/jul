@@ -31,9 +31,16 @@ const (
 const maxHeaderBytes = 8 << 10
 
 // DefaultForwardedHeaders returns the header preference used when
-// forwarded_headers is omitted: RFC 7239 first, X-Forwarded-For second.
+// forwarded_headers is omitted.
+//
+// Only X-Forwarded-For is enabled. A forwarding header may be believed only if
+// the trusted proxy overwrites it on every request, and nearly every deployed
+// proxy writes X-Forwarded-For while passing RFC 7239 Forwarded through
+// untouched: defaulting to Forwarded would let a client behind such a proxy
+// assert its own address. Enabling it is an explicit operator assertion that
+// the proxy authors it.
 func DefaultForwardedHeaders() []string {
-	return []string{HeaderForwarded, HeaderXFF}
+	return []string{HeaderXFF}
 }
 
 // Policy is a compiled, immutable trusted-proxy policy for one listen address.

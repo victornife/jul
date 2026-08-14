@@ -28,7 +28,8 @@ listen = "127.0.0.1:8081"
 server_names = ["app.example.com"]
 
   [servers.client_address]
-  trusted_proxies = ["10.0.0.0/8"]
+  trusted_proxies   = ["10.0.0.0/8"]
+  forwarded_headers = ["x-forwarded-for"]
 
   [[servers.locations]]
   match = { type = "prefix", path = "/" }
@@ -44,7 +45,7 @@ server_names = ["public.example.com"]
 
   [servers.client_address]
   trusted_proxies   = ["10.10.0.0/16", "192.0.2.10", "2001:db8:100::/48"]
-  forwarded_headers = ["forwarded", "x-forwarded-for"]
+  forwarded_headers = ["x-forwarded-for"]
   max_hops          = 8
 
   [[servers.locations]]
@@ -57,7 +58,7 @@ server_names = ["internal.example.com"]
 
   [servers.client_address]
   trusted_proxies   = ["10.10.0.0/16", "192.0.2.10", "2001:db8:100::/48"]
-  forwarded_headers = ["forwarded", "x-forwarded-for"]
+  forwarded_headers = ["x-forwarded-for"]
   max_hops          = 8
 
   [[servers.locations]]

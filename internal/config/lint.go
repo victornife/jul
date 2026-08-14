@@ -145,6 +145,19 @@ func Lint(c *Config) []Diagnostic {
 					Hint:     "list only the addresses of proxies you operate; trusted_proxies is a security boundary",
 				})
 			}
+			// Believing a header the proxy does not write is the same as believing
+			// the client: the proxy forwards whatever the client sent.
+			for j, name := range srv.ClientAddress.ForwardedHeaders {
+				if name != clientaddr.HeaderForwarded || len(srv.ClientAddress.TrustedProxies) == 0 {
+					continue
+				}
+				diags = append(diags, Diagnostic{
+					Severity: SeverityWarning,
+					Field:    fmt.Sprintf("servers[%d].client_address.forwarded_headers[%d]", i, j),
+					Message:  "RFC 7239 Forwarded is believed, but most proxies never write it and pass a client-supplied value through unchanged",
+					Hint:     fmt.Sprintf("keep it only if your proxy overwrites Forwarded on every request; otherwise list %q alone", clientaddr.HeaderXFF),
+				})
+			}
 		}
 	}
 

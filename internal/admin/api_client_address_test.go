@@ -264,7 +264,7 @@ func TestListenerClientAddressProjection(t *testing.T) {
 	}{
 		{
 			name:            "no policy shows the defaults",
-			wantHeaders:     []string{"forwarded", "x-forwarded-for"},
+			wantHeaders:     []string{"x-forwarded-for"},
 			wantMaxHops:     16,
 			wantTrustedList: []string{},
 		},
@@ -272,7 +272,7 @@ func TestListenerClientAddressProjection(t *testing.T) {
 			name:            "omitted headers keep the default preference",
 			policy:          &config.ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}},
 			wantConfigured:  true,
-			wantHeaders:     []string{"forwarded", "x-forwarded-for"},
+			wantHeaders:     []string{"x-forwarded-for"},
 			wantMaxHops:     16,
 			wantTrustedList: []string{"10.0.0.0/8"},
 		},
@@ -289,7 +289,7 @@ func TestListenerClientAddressProjection(t *testing.T) {
 			name:            "a range covering everything is flagged",
 			policy:          &config.ClientAddressConfig{TrustedProxies: []string{"0.0.0.0/0"}, MaxHops: 3},
 			wantConfigured:  true,
-			wantHeaders:     []string{"forwarded", "x-forwarded-for"},
+			wantHeaders:     []string{"x-forwarded-for"},
 			wantMaxHops:     3,
 			wantOpenTrust:   true,
 			wantTrustedList: []string{"0.0.0.0/0"},

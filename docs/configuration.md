@@ -274,15 +274,25 @@ listen = ":443"
 
 [servers.client_address]
 trusted_proxies   = ["10.0.0.0/8", "2001:db8:100::/48"]
-forwarded_headers = ["forwarded", "x-forwarded-for"]
+forwarded_headers = ["x-forwarded-for"]
 max_hops          = 16
 ```
 
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
 | `trusted_proxies` | []string | empty | CIDR prefixes, or bare addresses meaning a single host, whose forwarding headers are believed. Prefixes must be canonical (host bits clear): `10.0.0.0/8`, not `10.1.2.3/8`. |
-| `forwarded_headers` | []string | `["forwarded", "x-forwarded-for"]` | Ordered preference. The first header present on the request is the only one used. An explicitly empty list (`[]`) disables both, keeping peer-only identity even for a trusted peer. |
+| `forwarded_headers` | []string | `["x-forwarded-for"]` | **Required when `trusted_proxies` is set.** Ordered preference; the first header present on the request is the only one used. An explicitly empty list (`[]`) disables both, keeping peer-only identity even for a trusted peer. |
 | `max_hops` | int | `16` | Maximum asserted hops in a chain. A longer chain fails closed to the transport peer. Maximum 255. |
+
+**List only headers your proxy overwrites.** Trusting a proxy means trusting what
+it *writes*, not everything it *forwards*. Almost every proxy — nginx, HAProxy,
+Cloudflare, CloudFront, ALB, ingress-nginx — writes `X-Forwarded-For` and passes
+RFC 7239 `Forwarded` through untouched, so a client behind one of them can send
+its own `Forwarded` header. If Jul believed that header it would believe the
+client, and the trust boundary would be gone. That is why `x-forwarded-for` is
+the default, why `forwarded_headers` must be stated explicitly once a proxy is
+trusted, and why `jul lint` warns when `forwarded` is enabled. Enable it only if
+you have confirmed your proxy overwrites `Forwarded` on every request.
 
 **`trusted_proxies` is a security boundary.** Every address it covers may claim
 any client address, and that claim flows into authentication, rate limiting, the

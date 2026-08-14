@@ -73,6 +73,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   ships today.
 
 ### Security
+- **A trusted proxy no longer implies a trusted `Forwarded` header (#136):** `forwarded_headers` defaulted to `["forwarded", "x-forwarded-for"]` and derivation selects the first header *present* on the request, so RFC 7239 `Forwarded` outranked `X-Forwarded-For`. Trusting a proxy means trusting what it *writes*, but nearly every deployed proxy — nginx, HAProxy, Cloudflare, CloudFront, ALB, ingress-nginx — writes `X-Forwarded-For` and passes `Forwarded` through untouched. A client behind such a proxy could therefore send its own `Forwarded: for=…` and choose the canonical client address, defeating the boundary for CIDR authentication, IP rate limiting, WAF source matching, access logs, the FastCGI environment and the chain emitted upstream. Three changes close it: the default is now `["x-forwarded-for"]` alone; `forwarded_headers` is a **required** field once `trusted_proxies` is non-empty, so the headers a proxy authors are stated rather than inherited (`[]` remains available to keep peer-only identity); and `jul lint` warns when `forwarded` is enabled behind a trusted proxy. Derivation itself is unchanged — the boundary was never in the algorithm, it was in the default.
+
 - **Go toolchain 1.26.5 → 1.26.6 (stdlib advisories):** bumped in the main module,
   example plugin module, and container build image to clear seven standard-library
   advisories `govulncheck` reports as *called* from Jul's own code — GO-2026-6218
