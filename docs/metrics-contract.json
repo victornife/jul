@@ -131,6 +131,15 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_http_backend_dial_failures_total",
+      "type": "counter",
+      "help": "HTTP reverse-proxy backend dial/connect failures, labeled by a bounded reason (timeout/refused/no_backend/other). Excludes client-cancelled requests and backend-TLS-identity failures, which are accounted separately. The accompanying log line is throttled once a backend is already known to be down; this counter is not.",
+      "labels": [
+        "reason"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_http_ratelimited_total",
       "type": "counter",
       "help": "Requests rejected by rate limiting, labeled by key kind (ip/header/jwt).",
@@ -321,6 +330,16 @@
         "proto"
       ],
       "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_stream_backend_dial_failures_total",
+      "type": "counter",
+      "help": "L4 stream backend dial/connect failures, labeled by protocol (tcp/udp) and a bounded reason (timeout/refused/no_backend/other). The accompanying log line is throttled once a backend is already known to be down; this counter is not.",
+      "labels": [
+        "proto",
+        "reason"
+      ],
+      "state": "merged_release_pending"
     },
     {
       "name": "jul_stream_bytes_total",

@@ -37,7 +37,10 @@ import (
 //
 // srv is part of the router.Builder signature but is not needed here. ctx
 // bounds the upstream registry lookup, including initial discovery resolution.
-func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
+// dialFailure, when non-nil, is called once per backend dial/connect failure
+// with a bounded reason from upstream.ClassifyDialError (excluding client
+// cancellation and backend-TLS-identity failures, which are not dial failures).
+func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger, dialFailure func(reason string)) (http.Handler, error) {
 	pool, basePath, scheme, err := resolvePool(ctx, loc, upstreams, reg)
 	if err != nil {
 		return nil, err
@@ -61,11 +64,12 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 
 	rp := &httputil.ReverseProxy{
 		Transport: &balancingTransport{
-			pool:       pool,
-			base:       transport,
-			log:        log,
-			maxRetries: loc.ProxyRetries,
-			tlsBackend: scheme == "https",
+			pool:        pool,
+			base:        transport,
+			log:         log,
+			maxRetries:  loc.ProxyRetries,
+			tlsBackend:  scheme == "https",
+			dialFailure: dialFailure,
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
@@ -77,19 +81,32 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			code := proxyErrorStatus(err)
 			if log != nil {
-				attrs := []any{
-					"upstream", pool.Name(),
-					"path", r.URL.Path,
-					"status", code,
-					"error", err,
-					"request_id", middleware.RequestIDFrom(r.Context()),
+				// A dial/connect-shaped failure was already counted (and, if new,
+				// logged once) per attempt inside RoundTrip. This request-level line
+				// adds request context (path, status, request_id) an operator greps
+				// for, but must not re-flood the log on its own, so it shares the
+				// same pool heartbeat rather than a second counter. Client
+				// cancellation and backend-TLS-identity failures are unrelated to
+				// backend health and keep today's unconditional line.
+				logLine := true
+				if !errors.Is(err, context.Canceled) && tlsFailureCategory(err) == "" {
+					logLine = pool.AllowDialFailureLog()
 				}
-				// A bounded category, so a backend-trust failure is greppable
-				// and countable without the raw error becoming a label.
-				if category := tlsFailureCategory(err); category != "" {
-					attrs = append(attrs, "tls_failure", category)
+				if logLine {
+					attrs := []any{
+						"upstream", pool.Name(),
+						"path", r.URL.Path,
+						"status", code,
+						"error", err,
+						"request_id", middleware.RequestIDFrom(r.Context()),
+					}
+					// A bounded category, so a backend-trust failure is greppable
+					// and countable without the raw error becoming a label.
+					if category := tlsFailureCategory(err); category != "" {
+						attrs = append(attrs, "tls_failure", category)
+					}
+					log.Error("proxy upstream error", attrs...)
 				}
-				log.Error("proxy upstream error", attrs...)
 			}
 			http.Error(w, fmt.Sprintf("%d %s", code, http.StatusText(code)), code)
 		},
@@ -149,6 +166,9 @@ type balancingTransport struct {
 	// scheme is not https is then refused rather than dialled: no retry,
 	// failover or discovery result may move a request from TLS to plaintext.
 	tlsBackend bool
+	// dialFailure, when non-nil, counts a backend dial/connect failure by a
+	// bounded reason. It may be nil (for example in tests).
+	dialFailure func(reason string)
 }
 
 func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -173,6 +193,12 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		if err != nil {
 			if lastErr != nil {
 				err = lastErr
+			} else if t.dialFailure != nil {
+				// Every backend was already in cooldown before this call made
+				// any attempt of its own: count it (bounded reason "no_backend"),
+				// same as a real dial failure, so the counter is not undercounted
+				// relative to what an operator would see logged.
+				t.dialFailure(upstream.ClassifyDialError(err))
 			}
 			span.RecordError(err)
 			return nil, err
@@ -218,7 +244,9 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 		resp, err := t.base.RoundTrip(out)
 		if err == nil {
-			t.pool.MarkSuccess(b)
+			if t.pool.MarkSuccess(b) && t.log != nil {
+				t.log.Info("proxy backend recovered", "upstream", t.pool.Name(), "backend", b.URL.Host)
+			}
 			aspan.SetStatus(resp.StatusCode)
 			aspan.End()
 			span.SetStatus(resp.StatusCode)
@@ -233,7 +261,28 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		aspan.RecordError(err)
 		aspan.End()
 
-		t.pool.MarkFailure(b)
+		tripped := t.pool.MarkFailure(b)
+		// Client cancellation and backend-TLS-identity failures are not backend
+		// dial failures: the former is client behavior, and the latter already has
+		// its own unthrottled, categorized line via tlsFailureCategory (ADR 0016
+		// territory). MarkFailure still runs for both, unchanged from before this
+		// counter existed: this is observability only, not a circuit-breaker change.
+		if !errors.Is(err, context.Canceled) && tlsFailureCategory(err) == "" {
+			reason := upstream.ClassifyDialError(err)
+			if t.dialFailure != nil {
+				t.dialFailure(reason)
+			}
+			switch {
+			case tripped:
+				if t.log != nil {
+					t.log.Warn("proxy backend marked down", "upstream", t.pool.Name(), "backend", b.URL.Host, "reason", reason, "error", err)
+				}
+			case t.pool.AllowDialFailureLog():
+				if t.log != nil {
+					t.log.Warn("proxy dial failed", "upstream", t.pool.Name(), "backend", b.URL.Host, "reason", reason, "error", err)
+				}
+			}
+		}
 		t.pool.Release(b)
 		lastErr = err
 		retried = true

@@ -4,12 +4,15 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +23,7 @@ import (
 
 func newProxy(t *testing.T, loc config.LocationConfig, ups map[string]config.UpstreamConfig) http.Handler {
 	t.Helper()
-	h, err := NewProxy(context.Background(), config.ServerConfig{}, loc, ups, nil, nil)
+	h, err := NewProxy(context.Background(), config.ServerConfig{}, loc, ups, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewProxy: %v", err)
 	}
@@ -277,6 +280,92 @@ func TestProxyRetryBoundedByProxyRetries(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+}
+
+// TestProxyDialFailureLogIsThrottled pins that a broken backend plus ordinary
+// request volume cannot flood the log — no attacker required, matching the
+// stream proxy's TestDialFailureLogIsThrottled (issue #275). The counter must
+// still record every failure so the throttle is not also a blind spot.
+func TestProxyDialFailureLogIsThrottled(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+
+	var failures atomic.Int64
+	ups := map[string]config.UpstreamConfig{
+		"flaky": {
+			Name:        "flaky",
+			Strategy:    "round_robin",
+			MaxFails:    1000,
+			FailTimeout: config.Duration(time.Minute),
+			Servers:     []config.UpstreamServer{{Address: "127.0.0.1:1", Weight: 1}},
+		},
+	}
+	loc2 := config.LocationConfig{ProxyPass: "http://flaky"}
+	h2, err := NewProxy(context.Background(), config.ServerConfig{}, loc2, ups, nil, log, func(string) { failures.Add(1) })
+	if err != nil {
+		t.Fatalf("NewProxy: %v", err)
+	}
+
+	const reqs = 50
+	for range reqs {
+		req := httptest.NewRequest(http.MethodGet, "http://edge/", nil)
+		rec := httptest.NewRecorder()
+		h2.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 502", rec.Code)
+		}
+	}
+
+	logs := buf.String()
+	if got := strings.Count(logs, "dial failed") + strings.Count(logs, "upstream error"); got > 1 {
+		t.Errorf("%d requests against a broken backend produced %d log lines, want at most 1", reqs, got)
+	}
+	if got := failures.Load(); got != reqs {
+		t.Errorf("dial-failure counter = %d, want %d (must not undercount while the log is throttled)", got, reqs)
+	}
+}
+
+// TestProxyDialFailureLogsTransitionUnthrottled pins that a backend's cooldown
+// trip is logged unconditionally, since it is rare (bounded by
+// max_fails/fail_timeout, not by request volume) and is the signal an operator
+// needs even while the per-failure heartbeat is quiet.
+func TestProxyDialFailureLogsTransitionUnthrottled(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+
+	ups := map[string]config.UpstreamConfig{
+		"flaky": {
+			Name:        "flaky",
+			Strategy:    "round_robin",
+			MaxFails:    1,
+			FailTimeout: config.Duration(10 * time.Second),
+			Servers:     []config.UpstreamServer{{Address: "127.0.0.1:1", Weight: 1}},
+		},
+	}
+	loc2 := config.LocationConfig{ProxyPass: "http://flaky"}
+	h2, err := NewProxy(context.Background(), config.ServerConfig{}, loc2, ups, nil, log, nil)
+	if err != nil {
+		t.Fatalf("NewProxy: %v", err)
+	}
+
+	for range 5 {
+		req := httptest.NewRequest(http.MethodGet, "http://edge/", nil)
+		rec := httptest.NewRecorder()
+		h2.ServeHTTP(rec, req)
+		// The first request hits the real dial failure (502); once that trips
+		// the cooldown, subsequent requests get ErrNoAvailableBackend (503).
+		if rec.Code != http.StatusBadGateway && rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 502 or 503", rec.Code)
+		}
+	}
+
+	logs := buf.String()
+	if got := strings.Count(logs, "backend marked down"); got != 1 {
+		t.Errorf("cooldown trip produced %d unthrottled lines, want 1", got)
+	}
+	if got := strings.Count(logs, "dial failed"); got != 0 {
+		t.Errorf("already-down backend produced %d heartbeat lines, want 0 (should be pure repeats of the trip line)", got)
 	}
 }
 

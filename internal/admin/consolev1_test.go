@@ -170,7 +170,7 @@ func TestStatusAPI(t *testing.T) {
 		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)",
 		"Access control (auth)", "Trusted client address", "HTTP/3 (QUIC)",
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
-		"Prometheus metrics", "Access log",
+		"Prometheus metrics", "Access log", "Backend dial-failure accounting",
 	}
 	for _, name := range wantActive {
 		if v, ok := active[name]; !ok {

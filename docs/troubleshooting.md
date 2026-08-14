@@ -173,6 +173,22 @@ Two behaviours are deliberate and are not bugs: a route configured for `https`
 that cannot be resolved (unreadable CA, mismatched certificate and key) fails
 the **reload** rather than the first request.
 
+## Backend dial failures
+
+A backend that is down or refusing connections no longer floods the log one
+line per connection/request. `jul_stream_backend_dial_failures_total{proto,reason}`
+(TCP/UDP) and `jul_http_backend_dial_failures_total{reason}` (reverse proxy)
+count every failure — `reason` is one of `timeout`, `refused`, `no_backend`
+(every backend already in cooldown), or `other` — regardless of whether the
+matching log line was emitted. The log itself is bounded: the moment a
+backend's passive-health cooldown trips or clears is logged unconditionally
+(`stream: backend marked down` / `proxy backend marked down` and their
+`recovered` counterparts), and failures in between are a 10-second throttled
+heartbeat per pool (`stream: dial backend failed` / `proxy dial failed`), so a
+sustained outage produces at most one line per pool per window instead of one
+per connection or request. Client-cancelled requests and backend-TLS-identity
+failures (see above) are not dial failures and are unaffected by this
+throttle.
 
 ## Service discovery
 

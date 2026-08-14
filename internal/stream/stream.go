@@ -40,6 +40,12 @@ type Hooks struct {
 	// OnUDPSessionRejected is invoked when a new UDP client is dropped because a
 	// listener's max_udp_sessions cap is reached and no session is reclaimable.
 	OnUDPSessionRejected func()
+	// OnDialFailure is invoked once per backend dial/connect failure, labeled by
+	// protocol ("tcp"/"udp") and a bounded reason from upstream.ClassifyDialError.
+	// It is always called, even when the accompanying log line is suppressed by
+	// the pool's dial-failure heartbeat throttle, so the counter never
+	// undercounts relative to what actually happened.
+	OnDialFailure func(proto, reason string)
 }
 
 // Options configures a stream Server.

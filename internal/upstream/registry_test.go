@@ -5,6 +5,7 @@ package upstream
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -252,6 +253,40 @@ func TestRegistryStartsHealthChecks(t *testing.T) {
 			t.Fatal("registry did not start the health checker for an enabled upstream")
 		}
 		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// TestRegistryWiresPassiveHealthHookWithoutActiveChecks pins that a pool built
+// with no [upstreams.health_check] still gets OnHealth, so a passive
+// (dial-triggered) cooldown transition reaches the same gauge/Console
+// health-history entry as an active checker's verdict (issue #275). It reuses
+// the registry's existing hook rather than requiring health checks to be
+// enabled.
+func TestRegistryWiresPassiveHealthHookWithoutActiveChecks(t *testing.T) {
+	var events []string
+	r := NewRegistry(RegistryOptions{
+		OnHealth: func(pool, backend string, healthy bool) {
+			events = append(events, fmt.Sprintf("%s/%s=%v", pool, backend, healthy))
+		},
+	})
+
+	up := upstreamCfg("api", "round_robin", "10.0.0.1:80")
+	up.MaxFails = 1
+
+	r.Begin()
+	pool, err := r.For(context.Background(), up, "http")
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	r.Commit()
+	defer r.CloseAll()
+
+	b := pool.Backends()[0]
+	if !pool.MarkFailure(b) {
+		t.Fatal("failure did not trip with maxFails=1")
+	}
+	if len(events) != 1 || events[0] != "api/10.0.0.1:80=false" {
+		t.Fatalf("events = %v, want one api/10.0.0.1:80=false event", events)
 	}
 }
 

@@ -193,6 +193,8 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveStreamBytes("tcp", "up", 100)
 	m.StreamUDPEvicted("idle")
 	m.StreamUDPRejected()
+	m.ObserveStreamDialFailure("tcp", "timeout")
+	m.ObserveHTTPDialFailure("timeout")
 	m.ObserveCertExpiry("example.com", time.Now().Add(24*time.Hour))
 	// Reload and staged-restart metrics (P2-05).
 	m.ReloadStarted()

@@ -49,7 +49,7 @@ func TestSoak(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h, err := NewProxy(context.Background(), config.ServerConfig{}, config.LocationConfig{ProxyPass: backend.URL}, nil, nil, nil)
+	h, err := NewProxy(context.Background(), config.ServerConfig{}, config.LocationConfig{ProxyPass: backend.URL}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewProxy: %v", err)
 	}

@@ -261,6 +261,15 @@ one; a successful dial clears the failure counter. (Active `[upstreams.health_ch
 probes are HTTP/TCP oriented; for L4 streams, passive health from dial outcomes
 is what gates backends.)
 
+Every dial failure increments `jul_stream_backend_dial_failures_total`,
+labeled by protocol and a bounded reason (`timeout`/`refused`/`no_backend`/
+`other`), regardless of whether the accompanying log line fires. The log itself
+is bounded so a backend outage plus ordinary connection volume cannot flood it
+without an attacker: the moment a backend's cooldown trips or clears is logged
+unconditionally (`stream: backend marked down` / `stream: backend recovered`),
+and failures in between are a 10-second throttled heartbeat
+(`stream: dial backend failed`) per pool.
+
 ## Hot reload
 
 `[[stream]]` participates in zero-downtime reload. On every successful config
@@ -303,6 +312,7 @@ and surfaces only in the Overview stream-status panel. See
 | ------ | ---- | ------ | ------- |
 | `jul_stream_active_conns` | gauge | `proto` | Currently open TCP connections / UDP sessions |
 | `jul_stream_bytes_total` | counter | `proto`, `direction` | Bytes relayed (`direction` is `up` to the backend or `down` to the client) |
+| `jul_stream_backend_dial_failures_total` | counter | `proto`, `reason` | Backend dial/connect failures, labeled by protocol and a bounded reason (`timeout`/`refused`/`no_backend`/`other`); incremented on every failure even when the accompanying log line is throttled |
 | `jul_stream_udp_sessions_evicted_total` | counter | `reason` | UDP sessions removed to enforce limits: `idle` (reaped after `idle_timeout`) or `lru` (reclaimed at the `max_udp_sessions` cap) |
 | `jul_stream_udp_sessions_rejected_total` | counter | — | New UDP clients dropped because a listener's `max_udp_sessions` cap was reached and no session was reclaimable |
 

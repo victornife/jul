@@ -153,7 +153,7 @@ func okBackend() http.Handler {
 // and body the client sees.
 func serveThrough(t *testing.T, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig) (int, string) {
 	t.Helper()
-	h, err := NewProxy(t.Context(), config.ServerConfig{}, loc, upstreams, nil, nil)
+	h, err := NewProxy(t.Context(), config.ServerConfig{}, loc, upstreams, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewProxy: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestProxyBackendTLSUnreadableMaterialFailsTheBuild(t *testing.T) {
 		ProxyPass:  "https://inventory.internal:8443",
 		BackendTLS: &config.BackendTLSConfig{CAMode: "file_only", CAFile: filepath.Join(t.TempDir(), "absent.pem")},
 	}
-	if _, err := NewProxy(t.Context(), config.ServerConfig{}, loc, nil, nil, nil); err == nil {
+	if _, err := NewProxy(t.Context(), config.ServerConfig{}, loc, nil, nil, nil, nil); err == nil {
 		t.Fatal("NewProxy accepted unreadable trust material")
 	}
 }
@@ -406,7 +406,7 @@ func TestProxyTransportIsolatedPerGeneration(t *testing.T) {
 	build := func(policy *config.BackendTLSConfig) http.Handler {
 		h, err := NewProxy(t.Context(), config.ServerConfig{}, config.LocationConfig{
 			ProxyPass: backend.URL, BackendTLS: policy,
-		}, nil, nil, nil)
+		}, nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("NewProxy: %v", err)
 		}
@@ -557,7 +557,7 @@ func TestProxyBackendTLSWebSocketUsesTheSamePolicy(t *testing.T) {
 	upgrade := func(policy *config.BackendTLSConfig) (int, string) {
 		h, err := NewProxy(t.Context(), config.ServerConfig{}, config.LocationConfig{
 			ProxyPass: backend.URL, BackendTLS: policy,
-		}, nil, nil, nil)
+		}, nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("NewProxy: %v", err)
 		}

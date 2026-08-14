@@ -151,7 +151,7 @@ func TestMultiProxyChainEndToEnd(t *testing.T) {
 	proxy, err := handler.NewProxy(t.Context(), config.ServerConfig{}, config.LocationConfig{
 		ProxyPass: backend.URL,
 		Headers:   map[string]string{"X-Test-Remote": "$remote_addr"},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewProxy: %v", err)
 	}

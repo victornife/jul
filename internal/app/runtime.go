@@ -143,6 +143,7 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 			OnBytes:              b.Metrics.ObserveStreamBytes,
 			OnUDPSessionEvicted:  b.Metrics.StreamUDPEvicted,
 			OnUDPSessionRejected: b.Metrics.StreamUDPRejected,
+			OnDialFailure:        b.Metrics.ObserveStreamDialFailure,
 		},
 	})
 	rt.Stream = streamSrv

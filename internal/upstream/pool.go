@@ -12,10 +12,15 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/logthrottle"
 )
 
 // ErrNoAvailableBackend is returned by Pick when every backend is in cooldown.
 var ErrNoAvailableBackend = errors.New("no available upstream backend")
+
+// dialFailureLogInterval bounds how often AllowDialFailureLog admits a
+// heartbeat for one pool, independent of request/connection volume.
+const dialFailureLogInterval = 10 * time.Second
 
 // Pool is a named set of backends fronted by a load-balancing strategy and
 // passive health checking.
@@ -26,6 +31,20 @@ type Pool struct {
 	balancer    Balancer
 	maxFails    int
 	failTimeout time.Duration
+
+	// healthHook, when set, is called on a passive-health transition (a dial or
+	// request failure tripping a backend's cooldown, or a success clearing it).
+	// It shares the active checker's HealthHook so a transition looks the same
+	// on the gauge and the Console health-history panel regardless of which
+	// mechanism caused it. It is set once by the registry and never by Pick's
+	// callers directly, so it survives UpdateBackends and reuse across reload.
+	healthHook HealthHook
+
+	// dialLog throttles the per-pool dial-failure log heartbeat (AllowDialFailureLog).
+	// It lives on the pool rather than a caller-local variable so stream and HTTP
+	// share one bounded signal per backend pool, and — for a named upstream, which
+	// the registry reuses across reload — a reload cannot reset it.
+	dialLog logthrottle.Limiter
 
 	// dynamic is true when the pool's backend set is owned by a discovery
 	// refresher rather than a static server list. Dynamic snapshots read from
@@ -138,20 +157,48 @@ func (p *Pool) Release(b *Backend) {
 	}
 }
 
-// MarkSuccess clears a backend's failure state.
-func (p *Pool) MarkSuccess(b *Backend) {
+// MarkSuccess clears a backend's failure state. It reports whether the backend
+// was in cooldown beforehand, so a caller can log the recovery transition
+// exactly once instead of on every subsequent success.
+func (p *Pool) MarkSuccess(b *Backend) bool {
+	wasDown := b.downUntil.Load() != 0
 	b.fails.Store(0)
 	b.downUntil.Store(0)
+	if wasDown && p.healthHook != nil {
+		p.healthHook(p.name, b.Address, true)
+	}
+	return wasDown
 }
 
 // MarkFailure records a backend failure; after maxFails consecutive failures
-// the backend is placed in cooldown for failTimeout.
-func (p *Pool) MarkFailure(b *Backend) {
+// the backend is placed in cooldown for failTimeout. It reports whether this
+// call is the one that tripped the cooldown, so a caller can log that
+// transition once instead of on every subsequent failure against an
+// already-down backend.
+func (p *Pool) MarkFailure(b *Backend) bool {
 	if int(b.fails.Add(1)) >= p.maxFails {
 		b.downUntil.Store(time.Now().Add(p.failTimeout).UnixNano())
 		b.fails.Store(0)
+		if p.healthHook != nil {
+			p.healthHook(p.name, b.Address, false)
+		}
+		return true
 	}
+	return false
 }
+
+// SetHealthHook wires the passive-health transition hook. It is called once by
+// the registry when a pool is built, using the same HealthHook as the active
+// checker (RegistryOptions.OnHealth), so passive and active transitions feed
+// one gauge and one Console health-history entry per backend.
+func (p *Pool) SetHealthHook(h HealthHook) { p.healthHook = h }
+
+// AllowDialFailureLog reports whether a throttled dial-failure heartbeat may be
+// logged now for this pool. Callers still count every failure regardless of
+// this result; it only bounds the log line, matching the counter-plus-throttle
+// shape used elsewhere in the codebase (internal/logthrottle) rather than
+// dropping the signal entirely.
+func (p *Pool) AllowDialFailureLog() bool { return p.dialLog.Allow(dialFailureLogInterval) }
 
 // UpdateBackends atomically replaces the pool's backend set, preserving the
 // runtime state (in-flight count, passive-failure cooldown) of any backend

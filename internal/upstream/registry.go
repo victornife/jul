@@ -224,6 +224,10 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	if err != nil {
 		return nil, err
 	}
+	// Wired unconditionally, not only when health_check is enabled: a passive
+	// (dial-triggered) transition deserves the same gauge/history entry as an
+	// active-checker one even on a pool with no active checks configured.
+	pool.SetHealthHook(r.opts.OnHealth)
 	disco := discoveryEnabled(up.Discovery)
 	var d Discoverer
 	if disco {
