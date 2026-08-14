@@ -107,6 +107,41 @@ func TestCIDRAuthUsesCanonicalClient(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
+			// The peer is a proxy, and an allow list naming the proxy network
+			// must not admit a request whose client could not be resolved.
+			name:       "malformed chain is not attributed to a trusted proxy inside the allow list",
+			allow:      []string{"10.0.0.0/8"},
+			trusted:    []string{"10.0.0.0/8"},
+			remoteAddr: "10.1.2.3:5555",
+			xff:        "not-an-address",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "over-hop chain is not attributed to a trusted proxy inside the allow list",
+			allow:      []string{"10.0.0.0/8"},
+			trusted:    []string{"10.0.0.0/8"},
+			remoteAddr: "10.1.2.3:5555",
+			xff:        strings.TrimSuffix(strings.Repeat("198.51.100.9, ", 20), ", "),
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "oversized chain is not attributed to a trusted proxy inside the allow list",
+			allow:      []string{"10.0.0.0/8"},
+			trusted:    []string{"10.0.0.0/8"},
+			remoteAddr: "10.1.2.3:5555",
+			xff:        strings.TrimSuffix(strings.Repeat("198.51.100.9, ", 700), ", "),
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			// An untrusted sender is the client, so its own address still
+			// decides: only a resolvable client is judged, not a proxy hop.
+			name:       "an untrusted peer is still judged on its own address",
+			allow:      []string{"203.0.113.0/24"},
+			remoteAddr: "203.0.113.7:5555",
+			xff:        "198.51.100.9",
+			wantStatus: http.StatusOK,
+		},
+		{
 			name:       "ipv6 client through an ipv6 proxy",
 			allow:      []string{"2001:db8:900::/48"},
 			trusted:    []string{"2001:db8:100::/48"},

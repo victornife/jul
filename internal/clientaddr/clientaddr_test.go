@@ -322,6 +322,28 @@ func TestDeriveUnparseablePeerFailsClosed(t *testing.T) {
 	}
 }
 
+// TestAttributedSeparatesClientsFromUnresolvedHops pins the predicate consumers
+// making an access decision rely on: a fallback to the peer of a *trusted*
+// proxy names a hop, not a client, while an ignored header from an untrusted
+// sender still leaves that sender as the client.
+func TestAttributedSeparatesClientsFromUnresolvedHops(t *testing.T) {
+	for _, tt := range []struct {
+		result Result
+		want   bool
+	}{
+		{result: ResultAccepted, want: true},
+		{result: ResultUntrustedPeer, want: true},
+		{result: ResultMalformed, want: false},
+		{result: ResultTooManyHops, want: false},
+	} {
+		t.Run(tt.result.String(), func(t *testing.T) {
+			if got := (Identity{Result: tt.result}).Attributed(); got != tt.want {
+				t.Fatalf("Attributed() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNilPolicyTrustsNothing(t *testing.T) {
 	var policy *Policy
 	id := policy.Derive(PeerFromRemoteAddr("10.1.2.3:80"), header("X-Forwarded-For", "198.51.100.9"))
