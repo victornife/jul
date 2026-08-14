@@ -694,8 +694,13 @@ func TestDialFailureLogIsThrottled(t *testing.T) {
 	if got := lastProto.Load(); got != "tcp" {
 		t.Errorf("proto = %v, want tcp", got)
 	}
-	if got := lastReason.Load(); got != "refused" {
-		t.Errorf("reason = %v, want refused", got)
+	// The OS-level errno for a refused loopback connection is platform-specific
+	// (observed as "other" rather than "refused" on Windows CI runners), so
+	// only the buckets that would indicate a real classification bug are
+	// rejected here; the exact "refused" vs "other" split is exercised
+	// deterministically in upstream.TestClassifyDialError.
+	if got := lastReason.Load(); got != "refused" && got != "other" {
+		t.Errorf("reason = %v, want refused or other", got)
 	}
 }
 

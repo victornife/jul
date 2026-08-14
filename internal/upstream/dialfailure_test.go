@@ -24,6 +24,7 @@ func TestClassifyDialError(t *testing.T) {
 		{"context deadline", context.DeadlineExceeded, "timeout"},
 		{"net timeout", &net.OpError{Op: "dial", Err: fakeTimeoutError{}}, "timeout"},
 		{"connection refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, "refused"},
+		{"connection refused, message-only (Windows)", errors.New("connectex: No connection could be made because the target machine actively refused it."), "refused"},
 		{"other", errors.New("boom"), "other"},
 	}
 	for _, tc := range cases {
