@@ -352,6 +352,40 @@ has its own PROXY-protocol contract. See
 `X-Real-IP` is not supported: it carries a single address with no chain, so it
 cannot be evaluated against a trust boundary.
 
+### PROXY protocol on an HTTP listener
+
+A TCP load balancer that preserves the client with the PROXY protocol rather
+than a forwarding header — AWS NLB, GCP TCP LB, HAProxy in TCP mode — sets
+`proxy_protocol` on the listener:
+
+```toml
+[[servers]]
+listen = ":443"
+proxy_protocol = "in"
+
+[servers.client_address]
+trusted_proxies   = ["10.0.0.0/8"]   # the balancers, required
+forwarded_headers = ["x-forwarded-for"]
+```
+
+The advertised address becomes the listener's transport peer, so everything
+above it — CIDR authentication, rate limiting, the WAF, logs, the chain sent
+upstream — behaves exactly as for a direct connection. A CDN in front of the
+balancer still works: the balancer reports the CDN as the peer, and if that
+address is in `trusted_proxies` the CDN's `X-Forwarded-For` is then read on top.
+The two mechanisms compose rather than compete.
+
+`trusted_proxies` is **required**: the header is an assertion, and a connection
+from an address outside the set is refused rather than served on its own
+address. Only ingest is offered; emitting a header to a backend is a different
+concern.
+
+**HTTP/3 cannot carry it.** QUIC is datagram-based and negotiates TLS inside the
+transport, so there is no plaintext framing to prepend a header to. Enabling
+both on one listener is a validation error rather than a silent asymmetry — a
+listener must not derive the client address two different ways depending on the
+protocol a client negotiated. Run HTTP/3 on a separate listener.
+
 ---
 
 ## `[[servers.locations]]`

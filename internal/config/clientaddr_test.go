@@ -299,6 +299,52 @@ func TestLintFlagsTrustedProxiesCoveringEveryClient(t *testing.T) {
 	}
 }
 
+func TestValidateProxyProtocolOnHTTPListeners(t *testing.T) {
+	withProxyProto := func(mode string, ca *ClientAddressConfig, http3 bool) *Config {
+		cfg := clientAddressConfig(ca)
+		cfg.Servers[0].ProxyProtocol = mode
+		if http3 {
+			cfg.Servers[0].TLS = &TLSConfig{Enabled: true, Cert: "c.pem", Key: "k.pem"}
+			cfg.Servers[0].HTTP3 = &HTTP3Config{Enabled: true}
+		}
+		return cfg
+	}
+	trusted := &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{"x-forwarded-for"}}
+
+	t.Run("a declared balancer is accepted", func(t *testing.T) {
+		if err := Validate(withProxyProto("in", trusted, false)); err != nil {
+			t.Fatalf("Validate rejected a declared balancer: %v", err)
+		}
+	})
+
+	t.Run("ingest requires a trusted proxy set", func(t *testing.T) {
+		requireValidationError(t, withProxyProto("in", nil, false), "requires client_address.trusted_proxies")
+	})
+
+	t.Run("an empty trusted proxy set is not enough", func(t *testing.T) {
+		requireValidationError(t, withProxyProto("in", &ClientAddressConfig{}, false), "requires client_address.trusted_proxies")
+	})
+
+	t.Run("emitting a header is rejected", func(t *testing.T) {
+		for _, mode := range []string{"out", "both"} {
+			requireValidationError(t, withProxyProto(mode, trusted, false), "only ingests a header")
+		}
+	})
+
+	t.Run("http3 on the same listener is rejected", func(t *testing.T) {
+		requireValidationError(t, withProxyProto("in", trusted, true), "cannot be combined with http3")
+	})
+
+	t.Run("blocks sharing a listener must agree", func(t *testing.T) {
+		cfg := withProxyProto("in", trusted, false)
+		sibling := cfg.Servers[0]
+		sibling.ServerNames = []string{"other.example.com"}
+		sibling.ProxyProtocol = ""
+		cfg.Servers = append(cfg.Servers, sibling)
+		requireValidationError(t, cfg, "must agree")
+	})
+}
+
 func TestLintFlagsForwardedHeaderOptIn(t *testing.T) {
 	for _, tt := range []struct {
 		name   string

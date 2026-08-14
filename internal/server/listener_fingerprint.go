@@ -76,6 +76,13 @@ func listenerBindFingerprint(cfg *config.Config, addr string) string {
 		s.readHeaderTimeout(addr), s.readTimeout(addr), s.writeTimeout(addr),
 		s.idleTimeout(addr), s.maxHeaderBytes(addr))
 
+	// The PROXY-protocol wrapper and the trust set it enforces are installed on
+	// the raw listener at bind time, so both belong here: changing either must
+	// rebind rather than leave the previous wrapper serving.
+	fmt.Fprintf(&b, "proxyproto=%s,trust=%s;",
+		strings.ToLower(strings.TrimSpace(s.proxyProtocolModeForAddr(addr))),
+		s.proxyProtocolTrustForAddr(addr))
+
 	bindings, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
 	fmt.Fprintf(&b, "tls=%t;", tlsOK)
 	if tlsOK {

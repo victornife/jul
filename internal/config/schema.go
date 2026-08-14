@@ -215,6 +215,14 @@ type ServerConfig struct {
 	// address over UDP and advertises it via Alt-Svc. It requires TLS on this
 	// server block and is compiled only into builds with the "http3" tag.
 	HTTP3 *HTTP3Config `toml:"http3"`
+	// ProxyProtocol enables ingesting a HAProxy PROXY-protocol header from a TCP
+	// load balancer: "" (off) or "in". The advertised address becomes this
+	// listener's transport peer, so the ordinary client_address derivation runs
+	// on top of it unchanged. It requires client_address.trusted_proxies, which
+	// names the balancers permitted to assert an address, and cannot be combined
+	// with HTTP/3 on the same listener because QUIC carries no such framing.
+	// Emitting a header outbound is a backend concern and is not offered here.
+	ProxyProtocol string `toml:"proxy_protocol"`
 
 	// H2C enables cleartext HTTP/2 (h2c) on this listener so native gRPC and
 	// other HTTP/2 clients can connect without TLS, in addition to HTTP/1.1. It

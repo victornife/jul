@@ -73,13 +73,13 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 289
-  schema_leaves: 244
-  registry_entries: 244
-  startup_consumed: 57
+  schema_paths: 290
+  schema_leaves: 245
+  registry_entries: 245
+  startup_consumed: 58
   by_class:
     hot_reload: 173
-    restart_required: 57
+    restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 2
@@ -819,6 +819,13 @@ fields:
     class: hot_reload
     subsystem: plugins
     reason: "the plugin set is rebuilt and re-instantiated on each successful reload"
+  - path: "servers.*.proxy_protocol"
+    class: restart_required
+    subsystem: client_address
+    reason: "the PROXY-protocol wrapper is installed when the address binds, ahead of the TLS wrap, so it is fixed for the listener's lifetime"
+    startup_consumed: true
+    address_keyed: true
+    conditional: true
   - path: "servers.*.read_header_timeout"
     class: new_listener_only
     subsystem: listener_timeouts

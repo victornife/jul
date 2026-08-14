@@ -644,6 +644,16 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		ln = netutil.LimitListener(ln, rl.MaxConns)
 	}
 
+	// The PROXY header is plaintext framing ahead of the ClientHello, so it is
+	// stripped before the TLS wrap. The advertised address becomes this
+	// listener's peer, which is what client_address then derives from.
+	if policy, perr := cv.proxyProtoPolicyForAddr(addr); perr != nil {
+		_ = ln.Close()
+		return nil, fmt.Errorf("proxy protocol for %s: %w", addr, perr)
+	} else if policy != nil {
+		ln = &proxyProtoListener{Listener: ln, trusted: policy, log: s.log}
+	}
+
 	entry := &listenerEntry{addr: addr}
 
 	// altSvc is the Alt-Svc header value advertising HTTP/3; empty unless an

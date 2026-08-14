@@ -421,6 +421,8 @@ func serverEntries() []Entry {
 		"servers.*.client_address.trusted_proxies")...)
 	out = append(out, bindBoundGroup(SubH2C, "h2c is negotiated by the plaintext listener created at bind time",
 		"servers.*.h2c")...)
+	out = append(out, bindBoundGroup(SubClientAddress, "the PROXY-protocol wrapper is installed when the address binds, ahead of the TLS wrap, so it is fixed for the listener's lifetime",
+		"servers.*.proxy_protocol")...)
 	out = append(out, bindBoundGroup(SubHTTP3, "the QUIC listener and its Alt-Svc advertisement are created when the address binds",
 		"servers.*.http3.alt_svc_max_age",
 		"servers.*.http3.enabled")...)

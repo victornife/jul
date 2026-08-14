@@ -244,15 +244,15 @@
     }
   ],
   "counts": {
-    "schema_paths": 289,
-    "schema_leaves": 244,
-    "registry_entries": 244,
-    "startup_consumed": 57,
+    "schema_paths": 290,
+    "schema_leaves": 245,
+    "registry_entries": 245,
+    "startup_consumed": 58,
     "by_class": {
       "hot_reload": 173,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
-      "restart_required": 57,
+      "restart_required": 58,
       "validation_rejected_reserved": 2
     }
   },
@@ -2411,6 +2411,19 @@
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.proxy_protocol",
+      "class": "restart_required",
+      "subsystem": "client_address",
+      "reason": "the PROXY-protocol wrapper is installed when the address binds, ahead of the TLS wrap, so it is fixed for the listener's lifetime",
+      "startup_consumed": true,
+      "address_keyed": true,
+      "conditional": true,
       "deprecated": false,
       "ignored": false,
       "reserved": false,

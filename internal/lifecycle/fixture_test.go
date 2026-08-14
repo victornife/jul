@@ -99,6 +99,9 @@ func fullConfig() *config.Config {
 				},
 			},
 			HTTP3: &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 86400},
+			// The fixture maximises field coverage, not validity: proxy_protocol
+			// and http3 are mutually exclusive in a real configuration.
+			ProxyProtocol: "in",
 			ClientAddress: &config.ClientAddressConfig{
 				TrustedProxies:   []string{"10.0.0.0/8"},
 				ForwardedHeaders: []string{"forwarded", "x-forwarded-for"},

@@ -145,6 +145,7 @@ func Validate(c *Config) error {
 		}
 		errs = append(errs, validateHTTP3(srv.HTTP3, srv.TLS, where)...)
 		errs = append(errs, validateClientAddress(srv.ClientAddress, where+".client_address")...)
+		errs = append(errs, validateProxyProtocol(srv, where)...)
 	}
 
 	for addr := range tlsByAddr {
@@ -158,6 +159,7 @@ func Validate(c *Config) error {
 
 	errs = append(errs, validateACMEConsistency(c.Servers)...)
 	errs = append(errs, validateClientAddressConsistency(c.Servers)...)
+	errs = append(errs, validateProxyProtocolConsistency(c.Servers)...)
 
 	errs = append(errs, validateAdminValues(c.Admin)...)
 	errs = append(errs, validateCacheValues(c.Cache)...)
@@ -584,8 +586,64 @@ func validateClientAddress(ca *ClientAddressConfig, where string) []error {
 	return errs
 }
 
-// validateClientAddressConsistency rejects divergent client_address policies
-// across server blocks that share a listen address. The canonical client is
+// validateProxyProtocol checks the [[servers]] PROXY-protocol setting.
+//
+// The header supplies Boundary A for the listener, so it is only meaningful
+// from a peer permitted to assert an address: the check reuses
+// client_address.trusted_proxies rather than introducing a second trust list
+// that could disagree with it. HTTP/3 is rejected on the same listener because
+// QUIC negotiates TLS inside the transport and carries no plaintext framing to
+// prepend a header to; making that a hard error keeps a listener from deriving
+// identity two different ways depending on the protocol a client negotiated.
+func validateProxyProtocol(srv ServerConfig, where string) []error {
+	mode := strings.ToLower(strings.TrimSpace(srv.ProxyProtocol))
+	if mode == "" {
+		return nil
+	}
+	var errs []error
+	if mode != "in" {
+		errs = append(errs, fmt.Errorf("%s.proxy_protocol: invalid value %q; an HTTP listener only ingests a header (%q), emitting one is a backend concern", where, srv.ProxyProtocol, "in"))
+		return errs
+	}
+	if srv.ClientAddress == nil || len(srv.ClientAddress.TrustedProxies) == 0 {
+		errs = append(errs, fmt.Errorf("%s.proxy_protocol: requires client_address.trusted_proxies; a PROXY header is an assertion, so the balancers permitted to make it must be named", where))
+	}
+	if srv.HTTP3 != nil && srv.HTTP3.Enabled {
+		errs = append(errs, fmt.Errorf("%s.proxy_protocol: cannot be combined with http3 on one listener; QUIC carries no PROXY framing, so the two protocols would derive the client address differently", where))
+	}
+	return errs
+}
+
+// validateProxyProtocolConsistency rejects divergent proxy_protocol settings
+// across server blocks sharing a listen address. The header is consumed by the
+// listener before any block is selected, so a listener has exactly one setting.
+func validateProxyProtocolConsistency(servers []ServerConfig) []error {
+	type ref struct{ where, mode string }
+	first := map[string]ref{}
+	var errs []error
+	for i := range servers {
+		addr := strings.TrimSpace(servers[i].Listen)
+		if addr == "" {
+			continue
+		}
+		current := ref{
+			where: fmt.Sprintf("servers[%d].proxy_protocol", i),
+			mode:  strings.ToLower(strings.TrimSpace(servers[i].ProxyProtocol)),
+		}
+		prev, ok := first[addr]
+		if !ok {
+			first[addr] = current
+			continue
+		}
+		if prev.mode != current.mode {
+			errs = append(errs, fmt.Errorf("%s: %q differs from %s %q; the PROXY header is consumed by the listener before the Host header selects a server block, so every block sharing listen %q must agree",
+				current.where, current.mode, prev.where, prev.mode, addr))
+		}
+	}
+	return errs
+}
+
+// validateClientAddressConsistency rejects divergent client_address policies// across server blocks that share a listen address. The canonical client is
 // derived per listen address, before the router reads the Host header, so a
 // listener has exactly one policy: allowing blocks to disagree would let the
 // configuration claim a stricter policy than the one actually applied. Blocks

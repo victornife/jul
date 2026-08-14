@@ -17,12 +17,12 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 289 |
-| Schema leaves (configurable values) | 244 |
-| Registry entries | 244 |
-| Startup-consumed entries | 57 |
+| Schema paths (containers included) | 290 |
+| Schema leaves (configurable values) | 245 |
+| Registry entries | 245 |
+| Startup-consumed entries | 58 |
 | Class `hot_reload` | 173 |
-| Class `restart_required` | 57 |
+| Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 2 |
@@ -280,6 +280,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.max_header_bytes` | `new_listener_only` | `listener_limits` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.name` | `hot_reload` | `server_identity` | — | the block label appears only in configuration projections, which are rebuilt from the effective config on each reload |
 | `servers.*.plugins` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
+| `servers.*.proxy_protocol` | `restart_required` | `client_address` | startup, per-address, cond. | the PROXY-protocol wrapper is installed when the address binds, ahead of the TLS wrap, so it is fixed for the listener's lifetime |
 | `servers.*.read_header_timeout` | `new_listener_only` | `listener_timeouts` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.read_timeout` | `new_listener_only` | `listener_timeouts` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.redirect_https` | `hot_reload` | `server_redirect` | — | the handler tree is rebuilt from the effective config on each successful reload |
