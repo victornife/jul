@@ -60,6 +60,8 @@ type Metrics struct {
 	streamBytes        *prometheus.CounterVec
 	streamUDPEvicted   *prometheus.CounterVec
 	streamUDPReject    prometheus.Counter
+	streamDialFailures *prometheus.CounterVec
+	httpDialFailures   *prometheus.CounterVec
 	certExpiry         *prometheus.GaugeVec
 	certRenewals       prometheus.Counter
 	mtlsHandshakes     *prometheus.CounterVec
@@ -281,6 +283,14 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_stream_udp_sessions_rejected_total",
 			Help: "New UDP clients dropped because a listener's max_udp_sessions cap was reached and no session was reclaimable.",
 		}),
+		streamDialFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_stream_backend_dial_failures_total",
+			Help: "L4 stream backend dial/connect failures, labeled by protocol (tcp/udp) and a bounded reason (timeout/refused/no_backend/other). The accompanying log line is throttled once a backend is already known to be down; this counter is not.",
+		}, []string{"proto", "reason"}),
+		httpDialFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_http_backend_dial_failures_total",
+			Help: "HTTP reverse-proxy backend dial/connect failures, labeled by a bounded reason (timeout/refused/no_backend/other). Excludes client-cancelled requests and backend-TLS-identity failures, which are accounted separately. The accompanying log line is throttled once a backend is already known to be down; this counter is not.",
+		}, []string{"reason"}),
 		certExpiry: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_tls_cert_expiry_seconds",
 			Help: "Leaf certificate expiry as a Unix timestamp, labeled by domain.",
@@ -381,6 +391,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.streamBytes,
 		m.streamUDPEvicted,
 		m.streamUDPReject,
+		m.streamDialFailures,
+		m.httpDialFailures,
 		m.certExpiry,
 		m.certRenewals,
 		m.mtlsHandshakes,
@@ -732,6 +744,22 @@ func (m *Metrics) StreamUDPEvicted(reason string) {
 // max_udp_sessions cap was reached and no session was reclaimable.
 func (m *Metrics) StreamUDPRejected() {
 	m.streamUDPReject.Inc()
+}
+
+// ObserveStreamDialFailure counts an L4 stream backend dial/connect failure,
+// labeled by protocol ("tcp"/"udp") and a bounded reason from
+// upstream.ClassifyDialError. It is supplied to the stream proxy so that
+// package stays decoupled from observability.
+func (m *Metrics) ObserveStreamDialFailure(proto, reason string) {
+	m.streamDialFailures.WithLabelValues(proto, reason).Inc()
+}
+
+// ObserveHTTPDialFailure counts an HTTP reverse-proxy backend dial/connect
+// failure, labeled by a bounded reason from upstream.ClassifyDialError. It is
+// supplied to the proxy handler so that package stays decoupled from
+// observability.
+func (m *Metrics) ObserveHTTPDialFailure(reason string) {
+	m.httpDialFailures.WithLabelValues(reason).Inc()
 }
 
 // ObserveReload records the outcome and duration of a completed hot reload
