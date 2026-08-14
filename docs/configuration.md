@@ -345,9 +345,13 @@ count as a difference; anything that changes the trust actually applied does.
 
 The policy applies to HTTP/1.1, HTTP/2 and HTTP/3 on that listener — one
 middleware chain serves all three. It does **not** apply to the admin listener,
-which keeps peer-only identity by design, or to `[[stream]]` L4 proxying, which
-has its own PROXY-protocol contract. See
-[known limitations](known-limitations.md).
+which keeps peer-only identity by design.
+
+`[[stream]]` L4 proxying derives identity under the same boundaries but with its
+own configuration: the socket peer is always the transport peer, and an inbound
+PROXY-protocol header is believed only from a declared
+[`trusted_proxies`](stream-proxy.md) entry on that stream block. It never feeds
+the HTTP canonical identity. See [known limitations](known-limitations.md).
 
 `X-Real-IP` is not supported: it carries a single address with no chain, so it
 cannot be evaluated against a trust boundary.

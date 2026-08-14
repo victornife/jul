@@ -12,7 +12,7 @@ references.
 - **Response cache:** #131/#132/#133 corrected the confirmed implementation defects and #134 completed the integrated source, protocol, race, benchmark and soak recertification. The cache remains GA. The limitations in the dedicated section below are explicit product, performance, conservative or lifecycle constraints; no residual cache correctness exception is being hidden as a limitation.
 - **Access-log lifecycle:** request records can be disabled explicitly, but enablement and sink changes remain restart-required until #98 introduces generation-safe sink replacement.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
-- **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust are selected Core Gateway Completeness work, not shipped capabilities.
+- **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust have shipped ([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). The remaining boundaries are documented as deferrals with explicit promotion triggers in that record, not as gaps: proxy-aware Admin identity, QUIC and UDP client preservation, and per-tenant policy.
 - **Upstream overload control:** the bounded model decided by [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is not yet implemented. Until #141–#144 land, the running binary has: no cap on concurrent upstream requests or on physical backend connections (`MaxConnsPerHost` is unset); no retry budget, overall retry deadline or backoff between attempts; no bound on how many requests probe a backend the instant its `fail_timeout` cooldown elapses; no load balancing, health checking or failure accounting for `fastcgi_pass` and `uwsgi_pass`, whose connection count is unbounded; no connection cap on L4 TCP routes (UDP already has `max_udp_sessions`); and no circuit breaker on the forward-auth and JWKS subrequests, which carry a fixed 10s timeout.
 
 ---
@@ -52,9 +52,13 @@ references.
   transport peer. Making the highest-privilege surface's attribution depend on
   an operator-editable CIDR list would be a downgrade, so `client_address` does
   not apply there.
-- **`[[stream]]` L4 proxying has its own contract.** For a stream listener the
-  source address is the PROXY-protocol source when `proxy_protocol` is `in` or
-  `both`, otherwise the socket peer. It never feeds the HTTP canonical identity.
+- **`[[stream]]` L4 proxying derives identity separately from HTTP.** A stream
+  listener's Boundary A is always the socket peer; an inbound PROXY-protocol
+  header is an assertion (Boundary B) and is believed only from a declared
+  `trusted_proxies` entry, with a connection from outside that set refused
+  rather than degraded. The result never feeds the HTTP canonical identity, and
+  a chain there is a single hop, so `max_hops` and header precedence do not
+  apply. See [ADR 0016 §6b](adr/0016-inbound-identity-and-backend-peer-trust.md).
 - **The policy is per listen address, not per virtual host.** Every
   `[[servers]]` block sharing a `listen` must declare the same effective policy.
   This is deliberate: identity is derived before the `Host` header is read, so a
@@ -86,10 +90,8 @@ references.
 - **A policy change rebuilds the pool.** Making the resolved policy part of the
   pool's identity is what lets the probe client adopt it, but it also means the
   pool's balancer and health state restart — the same behaviour a health-check
-  settings change has always had. A field is classified `hot_reload` only when *every* consumer
-  adopts the candidate value, so the class stays restart-required until the
-  remaining integrations land. Adding or removing a backend applies on the
-  reload; editing the policy of one that survives it does not.
+  settings change has always had. Adding or removing a backend applies on the
+  reload; editing the policy of one that survives it rebuilds the pool.
 - **No named, reusable TLS profiles.** Two pools that share a trust bundle
   repeat the block. Every consumer takes the resolved policy type, so named
   profiles remain an additive change to resolution rather than a transport

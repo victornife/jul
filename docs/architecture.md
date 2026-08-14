@@ -67,7 +67,7 @@ docs/adr/              # Architecture Decision Records
 
 ## Trust boundaries
 
-Jul distinguishes five trust boundaries. They are deliberately separate: each answers a different
+Jul distinguishes seven trust boundaries. They are deliberately separate: each answers a different
 question, is proved by a different mechanism, and fails in a different direction. Collapsing any pair
 into a generic "trusted" notion reintroduces a known vulnerability class, so no single configuration
 flag spans them. [ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md) is the authority.
