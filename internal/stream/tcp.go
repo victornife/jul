@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"jul/internal/clientaddr"
+	"jul/internal/proxyproto"
 )
 
 // proxyLogInterval is the shortest gap between two PROXY-protocol diagnostics
@@ -71,7 +72,7 @@ func (l *listener) handleTCP(client net.Conn) {
 			return
 		}
 		_ = client.SetReadDeadline(time.Now().Add(r.connectTimeout))
-		src, err := readProxyHeader(br)
+		src, err := proxyproto.ReadHeader(br)
 		if err != nil {
 			if l.proxyLog.Allow(proxyLogInterval) {
 				s.log.Warn("stream: proxy-protocol header rejected", "addr", l.addr, "error", err)
@@ -110,7 +111,7 @@ func (l *listener) handleTCP(client net.Conn) {
 	defer backend.Close()
 
 	if r.proxyOut {
-		if err := writeProxyV2(backend, clientAddr, client.LocalAddr()); err != nil {
+		if err := proxyproto.WriteV2(backend, clientAddr, client.LocalAddr()); err != nil {
 			s.log.Warn("stream: write proxy-protocol header", "addr", l.addr, "error", err)
 			return
 		}

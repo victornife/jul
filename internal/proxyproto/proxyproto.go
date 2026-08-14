@@ -1,9 +1,20 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-//go:build stream
-
-package stream
+// Package proxyproto parses and emits HAProxy PROXY-protocol headers.
+//
+// The header preserves the real client address across a proxy hop. It is an
+// assertion made by whoever opened the socket, never a kernel fact, so a caller
+// must establish that the peer is a declared proxy before believing the result
+// (ADR 0016 §6b). This package performs no trust decision of its own.
+//
+// It is shared by the L4 stream listeners and by HTTP listeners that ingest a
+// header from a TCP load balancer, so both boundaries parse identical bytes
+// identically. Only the TCP4/TCP6 transports are handled; LOCAL and UNKNOWN
+// connections yield a nil address, signalling the caller to keep the real peer.
+//
+// Reference: https://www.haproxy.org/download/2.8/doc/proxy-protocol.txt
+package proxyproto
 
 import (
 	"bufio"
@@ -16,39 +27,31 @@ import (
 	"strconv"
 )
 
-// The HAProxy PROXY protocol preserves the real client address across a proxy
-// hop. JUL parses an inbound header (proxy_protocol = "in"/"both") to recover
-// the client address, and emits a v2 binary header to the backend
-// (proxy_protocol = "out"/"both"). Only the TCP4/TCP6 transports are handled;
-// LOCAL/UNKNOWN connections fall back to the on-the-wire peer address.
-//
-// References: https://www.haproxy.org/download/2.8/doc/proxy-protocol.txt
-
 var v2Signature = []byte{0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A}
 
 const v1MaxLen = 108 // including trailing CRLF
 
-// readProxyHeader consumes a PROXY protocol header (v1 text or v2 binary) from
-// br and returns the advertised source address. For LOCAL/UNKNOWN headers it
+// ReadHeader consumes a PROXY protocol header (v1 text or v2 binary) from br
+// and returns the advertised source address. For LOCAL/UNKNOWN headers it
 // returns a nil address, signaling the caller to keep the real peer address.
-// It returns an error when no valid header is present, since the listener is
-// configured to require one.
-func readProxyHeader(br *bufio.Reader) (net.Addr, error) {
+// It returns an error when no valid header is present, since a listener that
+// calls this is configured to require one.
+func ReadHeader(br *bufio.Reader) (net.Addr, error) {
 	sig, err := br.Peek(12)
 	if err != nil {
 		return nil, fmt.Errorf("proxy protocol: read signature: %w", err)
 	}
 	if bytes.Equal(sig, v2Signature) {
-		return readProxyV2(br)
+		return readV2(br)
 	}
 	if bytes.HasPrefix(sig, []byte("PROXY ")) {
-		return readProxyV1(br)
+		return readV1(br)
 	}
 	return nil, errors.New("proxy protocol: missing or malformed header")
 }
 
-// readProxyV1 parses the text "PROXY TCP4 src dst sport dport\r\n" form.
-func readProxyV1(br *bufio.Reader) (net.Addr, error) {
+// readV1 parses the text "PROXY TCP4 src dst sport dport\r\n" form.
+func readV1(br *bufio.Reader) (net.Addr, error) {
 	line, err := br.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("proxy protocol v1: read line: %w", err)
@@ -85,8 +88,8 @@ func readProxyV1(br *bufio.Reader) (net.Addr, error) {
 	}
 }
 
-// readProxyV2 parses the binary v2 header.
-func readProxyV2(br *bufio.Reader) (net.Addr, error) {
+// readV2 parses the binary v2 header.
+func readV2(br *bufio.Reader) (net.Addr, error) {
 	hdr := make([]byte, 16)
 	if _, err := io.ReadFull(br, hdr); err != nil {
 		return nil, fmt.Errorf("proxy protocol v2: read header: %w", err)
@@ -125,10 +128,10 @@ func readProxyV2(br *bufio.Reader) (net.Addr, error) {
 	}
 }
 
-// writeProxyV2 emits a v2 binary PROXY header describing the src->dst TCP flow.
+// WriteV2 emits a v2 binary PROXY header describing the src->dst TCP flow.
 // When either address is not a TCP address it emits a LOCAL header so the
 // backend still sees a well-formed PROXY preamble.
-func writeProxyV2(w io.Writer, src, dst net.Addr) error {
+func WriteV2(w io.Writer, src, dst net.Addr) error {
 	srcTCP, sok := src.(*net.TCPAddr)
 	dstTCP, dok := dst.(*net.TCPAddr)
 	buf := make([]byte, 0, 52)

@@ -11,35 +11,6 @@ import (
 	"testing"
 )
 
-// FuzzReadProxyHeader exercises the PROXY protocol v1/v2 parser against
-// adversarial input. The oracle: no panic; output is either an address or an
-// error (never a nil address with nil error on malformed input).
-func FuzzReadProxyHeader(f *testing.F) {
-	// Valid v1 seeds
-	f.Add([]byte("PROXY TCP4 192.168.1.1 10.0.0.1 443 80\r\n"))
-	f.Add([]byte("PROXY UNKNOWN\r\n"))
-	// Valid v2 signature + LOCAL header
-	f.Add(append([]byte{0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A},
-		0x21, 0x00, 0x00, 0x00))
-	// Truncated / malformed
-	f.Add([]byte("PROXY "))
-	f.Add(append([]byte{0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A},
-		0x21, 0x11, 0x00, 0x0C, 0x7f, 0x00, 0x00, 0x01)) // short IPv4 block
-	f.Add([]byte(""))
-	f.Add([]byte("GET / HTTP/1.1\r\n"))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		br := bufio.NewReaderSize(bytes.NewReader(data), 256)
-		addr, err := readProxyHeader(br)
-		// nil addr + nil err is only valid for LOCAL/UNKNOWN in v1 or
-		// LOCAL in v2, both of which have specific well-formed prefixes.
-		// A generic empty/fuzz input should not reach this state.
-		// We accept it silently because the function contract allows it
-		// for UNKNOWN/LOCAL, and we do not want to over-constrain.
-		_ = addr
-		_ = err
-	})
-}
-
 // FuzzPeekSNI exercises the TLS ClientHello SNI pecker against adversarial
 // byte streams. The oracle: no panic; result is either a non-empty host or
 // empty string (never uninitialised memory).

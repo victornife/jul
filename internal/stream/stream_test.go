@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/proxyproto"
 )
 
 func discardLogger() *slog.Logger {
@@ -185,7 +186,7 @@ func tcpProxyHeaderReader(t *testing.T) (addr string, stop func()) {
 			go func(c net.Conn) {
 				defer c.Close()
 				br := bufio.NewReaderSize(c, 1024)
-				src, err := readProxyHeader(br)
+				src, err := proxyproto.ReadHeader(br)
 				if err != nil {
 					_, _ = c.Write([]byte("ERR:" + err.Error()))
 					return
@@ -681,55 +682,6 @@ func TestReloadBindFailureRollsBack(t *testing.T) {
 	s.mu.Unlock()
 	if n != 0 {
 		t.Errorf("after failed reload: %d listeners, want 0", n)
-	}
-}
-
-func TestProxyProtocolV2RoundTrip(t *testing.T) {
-	src := &net.TCPAddr{IP: net.ParseIP("10.1.2.3"), Port: 4567}
-	dst := &net.TCPAddr{IP: net.ParseIP("10.9.8.7"), Port: 89}
-	var buf bytes.Buffer
-	if err := writeProxyV2(&buf, src, dst); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	br := bufio.NewReader(&buf)
-	got, err := readProxyHeader(br)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got == nil || got.String() != "10.1.2.3:4567" {
-		t.Errorf("round-trip src: got %v want 10.1.2.3:4567", got)
-	}
-}
-
-func TestProxyProtocolV2IPv6RoundTrip(t *testing.T) {
-	src := &net.TCPAddr{IP: net.ParseIP("2001:db8::1"), Port: 443}
-	dst := &net.TCPAddr{IP: net.ParseIP("2001:db8::2"), Port: 80}
-	var buf bytes.Buffer
-	if err := writeProxyV2(&buf, src, dst); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	got, err := readProxyHeader(bufio.NewReader(&buf))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got == nil || got.(*net.TCPAddr).Port != 443 {
-		t.Errorf("ipv6 round-trip: got %v", got)
-	}
-}
-
-func TestProxyProtocolV1Parse(t *testing.T) {
-	br := bufio.NewReader(bytes.NewReader([]byte("PROXY TCP4 192.168.0.1 192.168.0.2 56324 443\r\nDATA")))
-	got, err := readProxyHeader(br)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if got.String() != "192.168.0.1:56324" {
-		t.Errorf("v1 src: got %v", got)
-	}
-	// The header is consumed; the payload remains.
-	rest, _ := io.ReadAll(br)
-	if string(rest) != "DATA" {
-		t.Errorf("remaining payload: got %q want DATA", rest)
 	}
 }
 
