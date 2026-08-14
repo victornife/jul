@@ -210,7 +210,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				}
 				return h, nil
 			}
-			h, err := handler.NewProxy(ctx, srv, loc, upstreams, f.PoolReg, f.Log)
+			h, err := handler.NewProxy(ctx, srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveHTTPDialFailure)
 			if err != nil {
 				return nil, err
 			}
