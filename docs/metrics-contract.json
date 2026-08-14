@@ -41,6 +41,16 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_client_addr_derivations_total",
+      "type": "counter",
+      "help": "Canonical client-address derivations, labeled by source (peer/forwarded/xff) and result (accepted/untrusted_peer/malformed/too_many_hops).",
+      "labels": [
+        "result",
+        "source"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_config_pending_restart",
       "type": "gauge",
       "help": "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",

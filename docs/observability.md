@@ -56,6 +56,7 @@ changing it requires a restart.
 | `jul_grpc_transcode_stream_msgs_total` | Counter | `direction`, `method` | Released `v1.32.0` | gRPC-JSON transcoding streamed messages, labeled by gRPC method full name and direction (sent to backend / received from backend). |
 | `jul_http3_connections` | Gauge | — | Released `v1.32.0` | Current open HTTP/3 (QUIC) connections across all listeners. |
 | `jul_http_ratelimited_total` | Counter | `key` | Released `v1.32.0` | Requests rejected by rate limiting, labeled by key kind (ip/header/jwt). |
+| `jul_client_addr_derivations_total` | Counter | `result`, `source` | Merged, release pending | Canonical client-address derivations. `source` is `peer`/`forwarded`/`xff`, `result` is `accepted`/`untrusted_peer`/`malformed`/`too_many_hops`. A sustained rate of `malformed` or `too_many_hops` from a trusted peer is a forwarding header being padded past its bounds — the condition access logs record per request but cannot be alerted on. At most twelve series. |
 | `jul_http_request_duration_seconds` | Histogram | `host`, `method` | Released `v1.32.0` | HTTP request latency in seconds. |
 | `jul_http_requests_in_flight` | Gauge | — | Released `v1.32.0` | Number of HTTP requests currently being served. |
 | `jul_http_requests_total` | Counter | `code`, `host`, `method` | Released `v1.32.0` | Total HTTP requests handled, labeled by method, host, and status code. |

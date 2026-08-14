@@ -312,6 +312,7 @@ Labels fall into three classes by what bounds them:
 | `jul_cache_revalidations_total` | `outcome` | fixed (`stored`/`not_modified`/`uncacheable`/`origin_error`/`canceled`/`panic`/`no_lease`/`deduplicated`) |
 | `jul_http_response_compressed_total` | `encoding` | fixed content codings |
 | `jul_http_ratelimited_total` | `key` | fixed (`ip`/`header`/`jwt`) |
+| `jul_client_addr_derivations_total` | `source`, `result` | fixed (3 × 4 enums, never an address) |
 | `jul_auth_decisions_total` | `method`, `result` | fixed gate × `allow`/`deny` |
 | `jul_waf_events_total` | `action`, `rule` | `block`/`detect` × loaded rule IDs |
 | `jul_egress_decisions_total` | `subsystem`, `result`, `reason` | fixed subsystem/result/reason enums |

@@ -46,7 +46,7 @@ func TestClientAddressParityAcrossProtocols(t *testing.T) {
 		w.Header().Set("X-Test-Result", id.Result.String())
 		w.Header().Set("X-Test-Remote-Addr", r.RemoteAddr)
 		w.WriteHeader(http.StatusNoContent)
-	}), middleware.RequestID(), middleware.ClientAddress(policy, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	}), middleware.RequestID(), middleware.ClientAddress(policy, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 
 	dir := t.TempDir()
 	certPath, keyPath := writeSelfSigned(t, dir, "clientaddr-parity", "localhost")
@@ -161,7 +161,7 @@ func TestMultiProxyChainEndToEnd(t *testing.T) {
 		t.Fatalf("NewPolicy: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	edge := middleware.Chain(proxy, middleware.RequestID(), middleware.ClientAddress(policy, logger))
+	edge := middleware.Chain(proxy, middleware.RequestID(), middleware.ClientAddress(policy, logger, nil))
 
 	dir := t.TempDir()
 	certPath, keyPath := writeSelfSigned(t, dir, "clientaddr-e2e", "localhost")

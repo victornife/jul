@@ -481,7 +481,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 func (f *HandlerFactory) globalChain(policy *clientaddr.Policy, compress middleware.Middleware) []middleware.Middleware {
 	mws := []middleware.Middleware{
 		middleware.RequestID(),
-		middleware.ClientAddress(policy, f.Log),
+		middleware.ClientAddress(policy, f.Log, f.Metrics.ObserveClientAddrDerivation),
 		f.RT.Tracer.Middleware,
 		f.Metrics.Middleware,
 	}

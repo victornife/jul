@@ -37,7 +37,7 @@ func TestClientAddressInstallsIdentity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got clientaddr.Identity
 			var remoteAddr string
-			h := ClientAddress(policy, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			h := ClientAddress(policy, nil, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 				got, _ = clientaddr.FromContext(r.Context())
 				remoteAddr = r.RemoteAddr
 			}))
@@ -65,7 +65,7 @@ func TestClientAddressInstallsIdentity(t *testing.T) {
 func TestClientAddressNilPolicyStillInstallsPeerIdentity(t *testing.T) {
 	var got clientaddr.Identity
 	var ok bool
-	h := ClientAddress(nil, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := ClientAddress(nil, nil, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got, ok = clientaddr.FromContext(r.Context())
 	}))
 
@@ -89,7 +89,7 @@ func TestClientAddressLogsAreBoundedAndRateLimited(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, nil))
-	h := ClientAddress(policy, log)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	h := ClientAddress(policy, log, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 	const requests = 20
 	for range requests {
@@ -117,7 +117,7 @@ func TestClientAddressAcceptedRequestsAreNotLogged(t *testing.T) {
 		t.Fatalf("NewPolicy: %v", err)
 	}
 	var buf bytes.Buffer
-	h := ClientAddress(policy, slog.New(slog.NewTextHandler(&buf, nil)))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	h := ClientAddress(policy, slog.New(slog.NewTextHandler(&buf, nil)), nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	req.RemoteAddr = "10.1.2.3:5555"
@@ -134,7 +134,7 @@ func TestClientAddressIsRaceFree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
 	}
-	h := ClientAddress(policy, slog.New(slog.NewTextHandler(&syncWriter{}, nil)))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := ClientAddress(policy, slog.New(slog.NewTextHandler(&syncWriter{}, nil)), nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		if _, ok := clientaddr.FromContext(r.Context()); !ok {
 			t.Error("identity missing under concurrency")
 		}
