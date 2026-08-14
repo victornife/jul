@@ -82,10 +82,11 @@ func fullConfig() *config.Config {
 				Key:        "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----",
 				MinVersion: "1.3",
 				ClientAuth: &config.ClientAuthConfig{
-					Mode:      "require",
-					CAFile:    "/etc/ca.pem",
-					VerifySAN: []string{"example.com"},
-					CRLFile:   "/etc/crl.pem",
+					Mode:               "require",
+					CAFile:             "/etc/ca.pem",
+					VerifySAN:          []string{"example.com"},
+					CRLFile:            "/etc/crl.pem",
+					ForwardCertificate: "chain",
 				},
 				ACME: &config.ACMEConfig{
 					Enabled:      true,
@@ -99,6 +100,9 @@ func fullConfig() *config.Config {
 				},
 			},
 			HTTP3: &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 86400},
+			// The fixture maximises field coverage, not validity: proxy_protocol
+			// and http3 are mutually exclusive in a real configuration.
+			ProxyProtocol: "in",
 			ClientAddress: &config.ClientAddressConfig{
 				TrustedProxies:   []string{"10.0.0.0/8"},
 				ForwardedHeaders: []string{"forwarded", "x-forwarded-for"},
@@ -230,6 +234,16 @@ func fullConfig() *config.Config {
 					Datacenter:  "dc1",
 					Token:       "consul-token",
 					PassingOnly: config.Bool(true),
+					TLS: &config.BackendTLSConfig{
+						CAFile:             "/etc/jul/consul-ca.pem",
+						CAMode:             "file_only",
+						ClientCert:         "/etc/jul/consul-client.pem",
+						ClientKey:          "/etc/jul/consul-client.key",
+						ServerName:         "consul.service.consul",
+						MinVersion:         "1.3",
+						PeerIdentities:     []string{"dns:consul.service.consul"},
+						InsecureSkipVerify: true,
+					},
 				},
 				Kubernetes: &config.KubernetesDiscovery{
 					Namespace:             "default",
@@ -326,6 +340,7 @@ func fullConfig() *config.Config {
 			SNIRoutes:      map[string]string{"db.example.com": "tcp://db"},
 			TLSPassthrough: true,
 			ProxyProtocol:  "both",
+			TrustedProxies: []string{"10.0.0.0/8"},
 			ConnectTimeout: config.Duration(10 * time.Second),
 			IdleTimeout:    config.Duration(300 * time.Second),
 			MaxUDPSessions: 10000,

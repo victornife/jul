@@ -191,6 +191,12 @@ jobs:
           FLOOR_SERVER: "78"
           FLOOR_AUTH:   "87"
           FLOOR_ADMIN:  "77"
+          # The trust-derivation and backend-peer-authentication packages (ADR
+          # 0016). Baselines 2026-08-14: clientaddr 93.3%, backendtls 92.9%,
+          # proxyproto 87.7%.
+          FLOOR_CLIENTADDR: "90"
+          FLOOR_BACKENDTLS: "89"
+          FLOOR_PROXYPROTO: "84"
         run: |
           set -euo pipefail
           failed=0
@@ -220,6 +226,9 @@ jobs:
           check_pkg "internal/server" "jul/internal/server" "$FLOOR_SERVER" || failed=1
           check_pkg "internal/auth"   "jul/internal/auth"   "$FLOOR_AUTH"   || failed=1
           check_pkg "internal/admin"  "jul/internal/admin"  "$FLOOR_ADMIN"  || failed=1
+          check_pkg "internal/clientaddr" "jul/internal/clientaddr" "$FLOOR_CLIENTADDR" || failed=1
+          check_pkg "internal/backendtls" "jul/internal/backendtls" "$FLOOR_BACKENDTLS" || failed=1
+          check_pkg "internal/proxyproto" "jul/internal/proxyproto" "$FLOOR_PROXYPROTO" || failed=1
 
           if [ "$failed" -ne 0 ]; then
             echo ""

@@ -274,15 +274,25 @@ listen = ":443"
 
 [servers.client_address]
 trusted_proxies   = ["10.0.0.0/8", "2001:db8:100::/48"]
-forwarded_headers = ["forwarded", "x-forwarded-for"]
+forwarded_headers = ["x-forwarded-for"]
 max_hops          = 16
 ```
 
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
 | `trusted_proxies` | []string | empty | CIDR prefixes, or bare addresses meaning a single host, whose forwarding headers are believed. Prefixes must be canonical (host bits clear): `10.0.0.0/8`, not `10.1.2.3/8`. |
-| `forwarded_headers` | []string | `["forwarded", "x-forwarded-for"]` | Ordered preference. The first header present on the request is the only one used. An explicitly empty list (`[]`) disables both, keeping peer-only identity even for a trusted peer. |
+| `forwarded_headers` | []string | `["x-forwarded-for"]` | **Required when `trusted_proxies` is set.** Ordered preference; the first header present on the request is the only one used. An explicitly empty list (`[]`) disables both, keeping peer-only identity even for a trusted peer. |
 | `max_hops` | int | `16` | Maximum asserted hops in a chain. A longer chain fails closed to the transport peer. Maximum 255. |
+
+**List only headers your proxy overwrites.** Trusting a proxy means trusting what
+it *writes*, not everything it *forwards*. Almost every proxy — nginx, HAProxy,
+Cloudflare, CloudFront, ALB, ingress-nginx — writes `X-Forwarded-For` and passes
+RFC 7239 `Forwarded` through untouched, so a client behind one of them can send
+its own `Forwarded` header. If Jul believed that header it would believe the
+client, and the trust boundary would be gone. That is why `x-forwarded-for` is
+the default, why `forwarded_headers` must be stated explicitly once a proxy is
+trusted, and why `jul lint` warns when `forwarded` is enabled. Enable it only if
+you have confirmed your proxy overwrites `Forwarded` on every request.
 
 **`trusted_proxies` is a security boundary.** Every address it covers may claim
 any client address, and that claim flows into authentication, rate limiting, the
@@ -335,12 +345,50 @@ count as a difference; anything that changes the trust actually applied does.
 
 The policy applies to HTTP/1.1, HTTP/2 and HTTP/3 on that listener — one
 middleware chain serves all three. It does **not** apply to the admin listener,
-which keeps peer-only identity by design, or to `[[stream]]` L4 proxying, which
-has its own PROXY-protocol contract. See
-[known limitations](known-limitations.md).
+which keeps peer-only identity by design.
+
+`[[stream]]` L4 proxying derives identity under the same boundaries but with its
+own configuration: the socket peer is always the transport peer, and an inbound
+PROXY-protocol header is believed only from a declared
+[`trusted_proxies`](stream-proxy.md) entry on that stream block. It never feeds
+the HTTP canonical identity. See [known limitations](known-limitations.md).
 
 `X-Real-IP` is not supported: it carries a single address with no chain, so it
 cannot be evaluated against a trust boundary.
+
+### PROXY protocol on an HTTP listener
+
+A TCP load balancer that preserves the client with the PROXY protocol rather
+than a forwarding header — AWS NLB, GCP TCP LB, HAProxy in TCP mode — sets
+`proxy_protocol` on the listener:
+
+```toml
+[[servers]]
+listen = ":443"
+proxy_protocol = "in"
+
+[servers.client_address]
+trusted_proxies   = ["10.0.0.0/8"]   # the balancers, required
+forwarded_headers = ["x-forwarded-for"]
+```
+
+The advertised address becomes the listener's transport peer, so everything
+above it — CIDR authentication, rate limiting, the WAF, logs, the chain sent
+upstream — behaves exactly as for a direct connection. A CDN in front of the
+balancer still works: the balancer reports the CDN as the peer, and if that
+address is in `trusted_proxies` the CDN's `X-Forwarded-For` is then read on top.
+The two mechanisms compose rather than compete.
+
+`trusted_proxies` is **required**: the header is an assertion, and a connection
+from an address outside the set is refused rather than served on its own
+address. Only ingest is offered; emitting a header to a backend is a different
+concern.
+
+**HTTP/3 cannot carry it.** QUIC is datagram-based and negotiates TLS inside the
+transport, so there is no plaintext framing to prepend a header to. Enabling
+both on one listener is a validation error rather than a silent asymmetry — a
+listener must not derive the client address two different ways depending on the
+protocol a client negotiated. Run HTTP/3 on a separate listener.
 
 ---
 
@@ -1257,6 +1305,7 @@ proxy_pass = "dns_pool"
 | `sni_routes` | table | TLS server-name → backend map; routes by SNI **without terminating TLS** |
 | `tls_passthrough` | bool | Informational; implied whenever `sni_routes` is set |
 | `proxy_protocol` | string | HAProxy PROXY-protocol handling: `""`, `"in"`, `"out"`, or `"both"` |
+| `trusted_proxies` | []string | Peers permitted to assert a client address with an inbound PROXY header. Required when `proxy_protocol` is `"in"` or `"both"`, rejected otherwise; a connection from outside the set is refused |
 | `connect_timeout` | duration | Backend dial timeout (default `10s`) |
 | `idle_timeout` | duration | Close relayed connection / UDP session after this idle (default `5m`) |
 | `max_udp_sessions` | int | Cap concurrent UDP sessions (default `10000`) |

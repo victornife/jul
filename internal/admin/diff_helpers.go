@@ -23,7 +23,9 @@ func serverIndex(servers []config.ServerConfig) map[string]serverWrapper {
 		srv := &servers[i]
 		key := srv.Listen
 		if len(srv.ServerNames) > 0 {
-			key = srv.ServerNames[0] + ":" + srv.Listen
+			// Separated by a space rather than a colon: an IPv6 listen address
+			// already contains colons, so "host:[::1]:8080" reads as garbage.
+			key = srv.ServerNames[0] + " " + srv.Listen
 		}
 		m[key] = serverWrapper{Name: key, ServerConfig: srv}
 	}

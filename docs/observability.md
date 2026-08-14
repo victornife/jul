@@ -56,6 +56,7 @@ changing it requires a restart.
 | `jul_grpc_transcode_stream_msgs_total` | Counter | `direction`, `method` | Released `v1.32.0` | gRPC-JSON transcoding streamed messages, labeled by gRPC method full name and direction (sent to backend / received from backend). |
 | `jul_http3_connections` | Gauge | — | Released `v1.32.0` | Current open HTTP/3 (QUIC) connections across all listeners. |
 | `jul_http_ratelimited_total` | Counter | `key` | Released `v1.32.0` | Requests rejected by rate limiting, labeled by key kind (ip/header/jwt). |
+| `jul_client_addr_derivations_total` | Counter | `result`, `source` | Merged, release pending | Canonical client-address derivations. `source` is `peer`/`forwarded`/`xff`, `result` is `accepted`/`untrusted_peer`/`malformed`/`too_many_hops`. A sustained rate of `malformed` or `too_many_hops` from a trusted peer is a forwarding header being padded past its bounds — the condition access logs record per request but cannot be alerted on. At most twelve series. |
 | `jul_http_request_duration_seconds` | Histogram | `host`, `method` | Released `v1.32.0` | HTTP request latency in seconds. |
 | `jul_http_requests_in_flight` | Gauge | — | Released `v1.32.0` | Number of HTTP requests currently being served. |
 | `jul_http_requests_total` | Counter | `code`, `host`, `method` | Released `v1.32.0` | Total HTTP requests handled, labeled by method, host, and status code. |
@@ -192,8 +193,22 @@ Each access record carries:
 - `peer_ip` — the **direct transport peer**, emitted only when it differs from
   `client_ip` (that is, only when a trusted proxy asserted a client address),
   following the same "omit what adds nothing" rule as `trace_id`
+- `client_addr_source` — `forwarded` or `xff`, emitted when a forwarding header
+  supplied the answer (omitted for the `peer` case, which says nothing)
+- `client_addr_result` — `untrusted_peer`, `malformed` or `too_many_hops`,
+  emitted whenever derivation did **not** simply accept the chain (omitted for
+  `accepted`)
 - `request_id`, `user_agent`
 - `trace_id` — when tracing is active
+
+**Why the two derivation fields matter.** When a trusted proxy asserts a chain
+Jul cannot use — malformed, oversized, or longer than `max_hops` — `client_ip`
+falls back to that proxy's address, and because `peer_ip` is omitted when it
+equals `client_ip`, the record would otherwise be byte-identical to a request
+that genuinely originated at the proxy. `client_addr_result` is what tells the
+two apart, so a run of `malformed` from one peer is visible as the padding
+attempt it is rather than as ordinary proxy traffic. Both fields are bounded
+enums, safe to index or alert on.
 
 There is no `remote` field: it was ambiguous about which of the two addresses it
 meant, and the two are now named explicitly. A direct deployment emits

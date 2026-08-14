@@ -252,6 +252,7 @@ func TestListenerScopedLintCoversEveryServerLevelField(t *testing.T) {
 		"servers.*.http3.enabled":              "linted",
 		"servers.*.http3.alt_svc_max_age":      "linted",
 		"servers.*.listen":                     "exempt: it is the address itself, not a property of one",
+		"servers.*.proxy_protocol":             "exempt: validateProxyProtocolConsistency already rejects divergence",
 		"servers.*.tls.enabled":                "exempt: validation already rejects TLS mixed with plaintext on one address",
 		"servers.*.tls.min_version":            "exempt: covered by the TLS/plaintext and ACME consistency rules",
 		"servers.*.tls.cert":                   "exempt: certificate selection is by SNI, so blocks legitimately differ",

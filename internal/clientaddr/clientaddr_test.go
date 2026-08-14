@@ -105,12 +105,24 @@ func TestDerive(t *testing.T) {
 			wantResult: ResultAccepted,
 		},
 		{
-			name:       "forwarded is preferred over xff",
+			name:       "forwarded wins over xff only when explicitly enabled",
 			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
 			peer:       "10.1.2.3:5555",
 			reqHeaders: header("Forwarded", "for=198.51.100.9", "X-Forwarded-For", "1.2.3.4"),
 			wantClient: "198.51.100.9",
 			wantSource: SourceForwarded,
+			wantResult: ResultAccepted,
+		},
+		{
+			// The default list omits Forwarded, so a client-supplied Forwarded
+			// cannot displace the value the proxy actually wrote.
+			name:       "default policy ignores a client-supplied forwarded header",
+			trusted:    privateProxies,
+			peer:       "10.1.2.3:5555",
+			reqHeaders: header("Forwarded", "for=203.0.113.1", "X-Forwarded-For", "198.51.100.9"),
+			wantClient: "198.51.100.9",
+			wantSource: SourceXFF,
 			wantResult: ResultAccepted,
 		},
 		{
@@ -126,6 +138,7 @@ func TestDerive(t *testing.T) {
 		{
 			name:       "malformed selected header never falls through to the other",
 			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
 			peer:       "10.1.2.3:5555",
 			reqHeaders: header("Forwarded", `for="unterminated`, "X-Forwarded-For", "198.51.100.9"),
 			wantClient: "10.1.2.3",
@@ -135,6 +148,7 @@ func TestDerive(t *testing.T) {
 		{
 			name:       "absent forwarded falls through to xff",
 			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
 			peer:       "10.1.2.3:5555",
 			reqHeaders: header("Forwarded", "   ", "X-Forwarded-For", "198.51.100.9"),
 			wantClient: "198.51.100.9",
@@ -144,6 +158,7 @@ func TestDerive(t *testing.T) {
 		{
 			name:       "obfuscated hop reached by the walk fails closed",
 			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
 			peer:       "10.1.2.3:5555",
 			reqHeaders: header("Forwarded", "for=_hidden;proto=https, for=10.5.5.5"),
 			wantClient: "10.1.2.3",
@@ -153,6 +168,7 @@ func TestDerive(t *testing.T) {
 		{
 			name:       "unknown hop left of an untrusted address is never reached",
 			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
 			peer:       "10.1.2.3:5555",
 			reqHeaders: header("Forwarded", "for=unknown, for=198.51.100.9, for=10.5.5.5"),
 			wantClient: "198.51.100.9",
@@ -171,6 +187,7 @@ func TestDerive(t *testing.T) {
 		{
 			name:       "ipv6 client through an ipv6 proxy",
 			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
 			peer:       "[2001:db8:100::5]:443",
 			reqHeaders: header("Forwarded", `for="[2001:db8:900::1]:4711"`),
 			wantClient: "2001:db8:900::1",
@@ -225,6 +242,19 @@ func TestDerive(t *testing.T) {
 			wantResult: ResultAccepted,
 		},
 		{
+			// The same RFC 9110 rule applies to Forwarded, and a chain split
+			// across field lines must not let a spoofed leftmost line escape
+			// the right-to-left walk by looking like a separate assertion.
+			name:       "repeated forwarded lines form one chain",
+			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
+			peer:       "10.1.2.3:5555",
+			reqHeaders: header("Forwarded", "for=127.0.0.1", "Forwarded", "for=198.51.100.9, for=10.8.8.8"),
+			wantClient: "198.51.100.9",
+			wantSource: SourceForwarded,
+			wantResult: ResultAccepted,
+		},
+		{
 			name:       "empty header list keeps peer identity for a trusted peer",
 			trusted:    privateProxies,
 			headers:    []string{},
@@ -237,6 +267,7 @@ func TestDerive(t *testing.T) {
 		{
 			name:       "two for parameters in one element are ambiguous",
 			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
 			peer:       "10.1.2.3:5555",
 			reqHeaders: header("Forwarded", "for=198.51.100.9;for=203.0.113.1"),
 			wantClient: "10.1.2.3",
@@ -301,6 +332,28 @@ func TestDeriveUnparseablePeerFailsClosed(t *testing.T) {
 	}
 	if id.Result != ResultMalformed || id.Source != SourcePeer {
 		t.Fatalf("result = %s, source = %s, want malformed/peer", id.Result, id.Source)
+	}
+}
+
+// TestAttributedSeparatesClientsFromUnresolvedHops pins the predicate consumers
+// making an access decision rely on: a fallback to the peer of a *trusted*
+// proxy names a hop, not a client, while an ignored header from an untrusted
+// sender still leaves that sender as the client.
+func TestAttributedSeparatesClientsFromUnresolvedHops(t *testing.T) {
+	for _, tt := range []struct {
+		result Result
+		want   bool
+	}{
+		{result: ResultAccepted, want: true},
+		{result: ResultUntrustedPeer, want: true},
+		{result: ResultMalformed, want: false},
+		{result: ResultTooManyHops, want: false},
+	} {
+		t.Run(tt.result.String(), func(t *testing.T) {
+			if got := (Identity{Result: tt.result}).Attributed(); got != tt.want {
+				t.Fatalf("Attributed() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

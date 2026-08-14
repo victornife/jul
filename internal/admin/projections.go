@@ -405,6 +405,19 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 	}
 	for i := range c.Upstreams {
 		countBackendTLS(c.Upstreams[i].BackendTLS)
+		// Boundary F bypasses are counted alongside backend ones: both turn a
+		// verified connection into an unverified one. The count is bounded and
+		// carries no provider or upstream name.
+		d := c.Upstreams[i].Discovery
+		if d == nil {
+			continue
+		}
+		if k := d.Kubernetes; k != nil && k.InsecureSkipTLSVerify {
+			sp.DiscoveryInsecure++
+		}
+		if cs := d.Consul; cs != nil && cs.TLS != nil && cs.TLS.InsecureSkipVerify {
+			sp.DiscoveryInsecure++
+		}
 	}
 	for i := range c.Servers {
 		srv := &c.Servers[i]

@@ -249,9 +249,25 @@ func RateKeyFunc(spec string) KeyFunc {
 // was written on the wire. An unidentifiable client falls back to the raw
 // transport address rather than sharing one bucket with every other such
 // request.
+//
+// An unattributed identity is keyed in its own namespace. The address in that
+// state belongs to a trusted proxy rather than to a client, so keying it with
+// that proxy's real traffic would let one padded forwarding header exhaust the
+// bucket every legitimate client behind it shares. The namespace is per peer,
+// so the blast radius of a degraded chain is the degraded traffic itself.
 func clientKey(r *http.Request) string {
+	if id, ok := clientaddr.FromContext(r.Context()); ok && !id.Attributed() {
+		if id.Peer.IsValid() {
+			return unattributedKeyPrefix + id.Peer.String()
+		}
+		return unattributedKeyPrefix + r.RemoteAddr
+	}
 	if addr := clientaddr.Client(r); addr.IsValid() {
 		return addr.String()
 	}
 	return r.RemoteAddr
 }
+
+// unattributedKeyPrefix cannot collide with an address key: netip renders only
+// hex digits, dots and colons, never a leading letter.
+const unattributedKeyPrefix = "unattributed:"

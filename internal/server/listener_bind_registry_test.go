@@ -44,6 +44,9 @@ var bindFingerprintPaths = []struct {
 	{"servers.*.max_header_bytes", func(c *config.Config) {
 		c.Servers[0].MaxHeaderBytes = config.Size(4096)
 	}},
+	{"servers.*.proxy_protocol", func(c *config.Config) {
+		c.Servers[0].ProxyProtocol = "in"
+	}},
 	{"servers.*.tls.enabled", func(c *config.Config) {
 		c.Servers[0].TLS.Enabled = false
 	}},

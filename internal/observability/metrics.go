@@ -41,6 +41,7 @@ type Metrics struct {
 	cacheRevalidations *prometheus.CounterVec
 	compressed         *prometheus.CounterVec
 	ratelimited        *prometheus.CounterVec
+	clientAddrDerived  *prometheus.CounterVec
 	authDecisions      *prometheus.CounterVec
 	upstreamUp         *prometheus.GaugeVec
 	upstreamBackends   *prometheus.GaugeVec
@@ -190,6 +191,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_http_ratelimited_total",
 			Help: "Requests rejected by rate limiting, labeled by key kind (ip/header/jwt).",
 		}, []string{"key"}),
+		clientAddrDerived: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_client_addr_derivations_total",
+			Help: "Canonical client-address derivations, labeled by source (peer/forwarded/xff) and result (accepted/untrusted_peer/malformed/too_many_hops).",
+		}, []string{"source", "result"}),
 		authDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_auth_decisions_total",
 			Help: "Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny).",
@@ -357,6 +362,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.cacheRevalidations,
 		m.compressed,
 		m.ratelimited,
+		m.clientAddrDerived,
 		m.authDecisions,
 		m.upstreamUp,
 		m.upstreamBackends,
@@ -514,6 +520,17 @@ func (m *Metrics) ObserveCacheRevalidation(outcome string) {
 // onLimited hook (the middleware package cannot import observability directly).
 func (m *Metrics) ObserveRateLimited(kind string) {
 	m.ratelimited.WithLabelValues(kind).Inc()
+}
+
+// ObserveClientAddrDerivation records how one request's canonical client address
+// was derived. Both labels are the bounded enums from internal/clientaddr, never
+// an address, so cardinality is at most twelve series.
+//
+// It is what makes a degraded derivation alertable: a run of malformed or
+// too_many_hops from a trusted peer is an attempt to pad a forwarding header
+// past its bounds, which per-request logs record but cannot be alerted on.
+func (m *Metrics) ObserveClientAddrDerivation(source, result string) {
+	m.clientAddrDerived.WithLabelValues(source, result).Inc()
 }
 
 // ObserveAuthDecision records an access-control decision. method is the gate

@@ -375,6 +375,7 @@ func TestServerLevelListenerScopedPathsAreKnownToTheLinter(t *testing.T) {
 		"servers.*.max_header_bytes": true, "servers.*.h2c": true,
 		"servers.*.http3.enabled": true, "servers.*.http3.alt_svc_max_age": true,
 		"servers.*.listen": true, "servers.*.tls.enabled": true,
+		"servers.*.proxy_protocol":  true,
 		"servers.*.tls.min_version": true, "servers.*.tls.cert": true,
 		"servers.*.tls.key": true, "servers.*.tls.client_auth.mode": true,
 		"servers.*.tls.client_auth.ca_file": true, "servers.*.tls.client_auth.crl_file": true,

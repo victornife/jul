@@ -94,7 +94,7 @@ func New(ctx context.Context, cfg config.AuthConfig, opts Options) (*Authenticat
 // forward-auth response headers merged into the request headers.
 func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !a.cidr.empty() && !a.cidr.allowed(clientAddr(r)) {
+		if !a.cidr.empty() && !cidrAllows(a.cidr, r) {
 			a.decide("cidr", "deny")
 			http.Error(w, "403 Forbidden", http.StatusForbidden)
 			return

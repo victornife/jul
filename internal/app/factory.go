@@ -358,7 +358,11 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		// upstream.
 		var cc middleware.Middleware
 		if (srv.TLS != nil && srv.TLS.ClientAuth.Active()) || loc.RequireClientCert {
-			cc = middleware.ClientCert(loc.RequireClientCert)
+			forward := middleware.ForwardCertNone
+			if srv.TLS != nil && srv.TLS.ClientAuth != nil {
+				forward = strings.ToLower(strings.TrimSpace(srv.TLS.ClientAuth.ForwardCertificate))
+			}
+			cc = middleware.ClientCert(loc.RequireClientCert, forward)
 		}
 		var pluginMW []middleware.Middleware
 		for _, name := range srv.Plugins {
@@ -477,7 +481,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 func (f *HandlerFactory) globalChain(policy *clientaddr.Policy, compress middleware.Middleware) []middleware.Middleware {
 	mws := []middleware.Middleware{
 		middleware.RequestID(),
-		middleware.ClientAddress(policy, f.Log),
+		middleware.ClientAddress(policy, f.Log, f.Metrics.ObserveClientAddrDerivation),
 		f.RT.Tracer.Middleware,
 		f.Metrics.Middleware,
 	}

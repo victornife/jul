@@ -421,6 +421,8 @@ func serverEntries() []Entry {
 		"servers.*.client_address.trusted_proxies")...)
 	out = append(out, bindBoundGroup(SubH2C, "h2c is negotiated by the plaintext listener created at bind time",
 		"servers.*.h2c")...)
+	out = append(out, bindBoundGroup(SubClientAddress, "the PROXY-protocol wrapper is installed when the address binds, ahead of the TLS wrap, so it is fixed for the listener's lifetime",
+		"servers.*.proxy_protocol")...)
 	out = append(out, bindBoundGroup(SubHTTP3, "the QUIC listener and its Alt-Svc advertisement are created when the address binds",
 		"servers.*.http3.alt_svc_max_age",
 		"servers.*.http3.enabled")...)
@@ -444,6 +446,9 @@ func tlsEntries() []Entry {
 		secretDigest(bindBound("servers.*.tls.client_auth.ca_file", SubMTLS, "the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected")),
 		secretDigest(bindBound("servers.*.tls.client_auth.crl_file", SubMTLS, "the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected")),
 		bindBound("servers.*.tls.client_auth.verify_san", SubMTLS, "the SAN allow-list is captured by the listener's verify callback at bind time"),
+		// Unlike the rest of the block this is a handler concern: what Jul sends
+		// to a backend, not how the handshake is verified.
+		hot("servers.*.tls.client_auth.forward_certificate", SubMTLS, "the client-certificate forwarding mode is read when the handler tree is rebuilt"),
 	}
 	out = append(out, bindBoundGroup(SubACME, "the ACME manager, its account and its certificate cache are created for the listener at bind time",
 		"servers.*.tls.acme.ca",
@@ -548,6 +553,7 @@ func streamEntries() []Entry {
 		"stream.*.proxy_protocol",
 		"stream.*.sni_routes.*",
 		"stream.*.tls_passthrough",
+		"stream.*.trusted_proxies",
 	)
 	out = append(out,
 		newListener("stream.*.listen", SubStream, "an L4 listener is keyed by protocol and address; moving to a different address binds a new socket and retires the old one"),
@@ -583,6 +589,8 @@ func upstreamEntries() []Entry {
 		"upstreams.*.health_check.unhealthy_threshold",
 	)...)
 	out = append(out, backendTLSEntries("upstreams.*.backend_tls.", false)...)
+	// The Consul agent's trust is resolved with the pool, like a backend's.
+	out = append(out, backendTLSEntries("upstreams.*.discovery.consul.tls.", false)...)
 	out = append(out, hotGroup(SubDiscovery, "the per-pool discovery refresher is restarted with the pool on each successful reload",
 		"upstreams.*.discovery.consul.address",
 		"upstreams.*.discovery.consul.datacenter",

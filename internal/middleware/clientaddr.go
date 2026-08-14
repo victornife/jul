@@ -6,10 +6,10 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
-	"sync/atomic"
 	"time"
 
 	"jul/internal/clientaddr"
+	"jul/internal/logthrottle"
 )
 
 // clientAddrLogInterval is the shortest gap between two forwarding-header
@@ -30,12 +30,19 @@ const clientAddrLogInterval = 10 * time.Second
 //
 // A nil policy still installs an identity, so consumers see the peer-derived
 // value through the same accessor instead of falling back per consumer.
-func ClientAddress(policy *clientaddr.Policy, log *slog.Logger) Middleware {
-	limiter := &logLimiter{}
+//
+// observe, when non-nil, receives the bounded source and result enums for every
+// request. The package cannot import internal/observability, so the collector is
+// wired in as a hook the way the rate-limit and auth gates are.
+func ClientAddress(policy *clientaddr.Policy, log *slog.Logger, observe func(source, result string)) Middleware {
+	limiter := &logthrottle.Limiter{}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id := policy.Derive(clientaddr.PeerFromRemoteAddr(r.RemoteAddr), r.Header)
-			if log != nil && id.Result != clientaddr.ResultAccepted && limiter.allow(clientAddrLogInterval) {
+			if observe != nil {
+				observe(id.Source.String(), id.Result.String())
+			}
+			if log != nil && id.Result != clientaddr.ResultAccepted && limiter.Allow(clientAddrLogInterval) {
 				// Bounded fields only: the enums and the transport peer. The
 				// asserted header is untrusted input and is never logged.
 				log.Warn("forwarding header not used",
@@ -46,16 +53,4 @@ func ClientAddress(policy *clientaddr.Policy, log *slog.Logger) Middleware {
 			next.ServeHTTP(w, r.WithContext(clientaddr.NewContext(r.Context(), id)))
 		})
 	}
-}
-
-// logLimiter admits one event per interval without allocating or locking.
-type logLimiter struct{ last atomic.Int64 }
-
-func (l *logLimiter) allow(interval time.Duration) bool {
-	now := time.Now().UnixNano()
-	prev := l.last.Load()
-	if now-prev < int64(interval) {
-		return false
-	}
-	return l.last.CompareAndSwap(prev, now)
 }

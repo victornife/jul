@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"jul/internal/backendtls"
 	"jul/internal/config"
 )
 
@@ -60,11 +61,23 @@ func newConsulDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer,
 	base.RawQuery = q.Encode()
 
 	client := &http.Client{Timeout: 10 * time.Second}
+	t := http.DefaultTransport.(*http.Transport).Clone()
 	if dial != nil {
-		t := http.DefaultTransport.(*http.Transport).Clone()
 		t.DialContext = dial
-		client.Transport = t
 	}
+	// Boundary F: the agent that supplies this pool's addresses is authenticated
+	// by the same resolved policy a backend would be. Without a block an https
+	// address still verifies, against the platform roots.
+	if c.TLS != nil {
+		policy, perr := backendtls.Resolve(c.TLS.Options(), base.Hostname())
+		if perr != nil {
+			return nil, fmt.Errorf("consul discovery: %w", perr)
+		}
+		if policy != nil {
+			t.TLSClientConfig = policy.ClientConfig()
+		}
+	}
+	client.Transport = t
 
 	return &consulDiscoverer{
 		client:   client,

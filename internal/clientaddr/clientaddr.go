@@ -102,6 +102,20 @@ type Identity struct {
 // ordinary direct request from an attempted header injection.
 func (i Identity) Spoofed() bool { return i.Result == ResultUntrustedPeer }
 
+// Attributed reports whether Client names a client rather than a hop that could
+// not be resolved to one.
+//
+// It is false exactly when a trusted peer asserted a chain Jul could not use —
+// malformed, oversized or over the hop limit — and Client therefore fell back
+// to the proxy's own address. That fallback keeps the request servable and
+// loggable, but the address is a transport fact rather than an authenticated
+// client, so a consumer making an access decision must not treat it as one.
+// An untrusted peer is attributed: it asserted a header Jul ignored, and the
+// peer really is the client.
+func (i Identity) Attributed() bool {
+	return i.Result == ResultAccepted || i.Result == ResultUntrustedPeer
+}
+
 // ctxKey is the unexported context key for a *Identity.
 type ctxKey struct{}
 

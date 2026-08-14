@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"jul/internal/backendtls"
+	"jul/internal/clientaddr"
 )
 
 // This file holds the backend-facing validators — L4 stream listeners, active
@@ -77,6 +78,7 @@ func validateStreams(streams []StreamServer, upstreamNames map[string]int) []err
 		default:
 			errs = append(errs, fmt.Errorf("%s: invalid proxy_protocol %q (want in, out, or both)", where, st.ProxyProtocol))
 		}
+		errs = append(errs, validateStreamTrustedProxies(st, where)...)
 		if st.ConnectTimeout < 0 {
 			errs = append(errs, fmt.Errorf("%s: 'connect_timeout' must not be negative", where))
 		}
@@ -86,6 +88,36 @@ func validateStreams(streams []StreamServer, upstreamNames map[string]int) []err
 		if st.MaxUDPSessions < 0 {
 			errs = append(errs, fmt.Errorf("%s: 'max_udp_sessions' must not be negative", where))
 		}
+	}
+	return errs
+}
+
+// validateStreamTrustedProxies checks the trusted-proxy set that governs an
+// inbound PROXY header.
+//
+// A PROXY header is an assertion, not a kernel fact: whoever may send one
+// chooses the address the listener reports and re-emits to the backend. Since
+// L4 backends commonly authorise by source address, believing it from any peer
+// would hand that decision to the client. The set is therefore required
+// whenever a header is ingested, and rejected when none is, so the
+// configuration cannot imply a boundary that is never enforced.
+func validateStreamTrustedProxies(st StreamServer, where string) []error {
+	var errs []error
+	ingests := false
+	switch strings.ToLower(strings.TrimSpace(st.ProxyProtocol)) {
+	case "in", "both":
+		ingests = true
+	}
+	for i, raw := range st.TrustedProxies {
+		if _, err := clientaddr.ParsePrefix(raw); err != nil {
+			errs = append(errs, fmt.Errorf("%s.trusted_proxies[%d]: %v", where, i, err))
+		}
+	}
+	switch {
+	case ingests && len(st.TrustedProxies) == 0:
+		errs = append(errs, fmt.Errorf("%s: 'trusted_proxies' is required when proxy_protocol ingests a header (%q or %q); list the proxies permitted to assert a client address", where, "in", "both"))
+	case !ingests && len(st.TrustedProxies) > 0:
+		errs = append(errs, fmt.Errorf("%s: 'trusted_proxies' applies only when proxy_protocol is %q or %q; remove it or set proxy_protocol", where, "in", "both"))
 	}
 	return errs
 }
@@ -194,6 +226,11 @@ func validateDiscovery(d *DiscoveryConfig, where string) []error {
 		if d.Consul != nil && strings.TrimSpace(d.Consul.Address) != "" {
 			if u, err := url.Parse(d.Consul.Address); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				errs = append(errs, fmt.Errorf("%s: consul address %q must be an http(s) URL", where, d.Consul.Address))
+			}
+		}
+		if d.Consul != nil && d.Consul.TLS != nil {
+			for _, err := range backendtls.Validate(d.Consul.TLS.Options()) {
+				errs = append(errs, fmt.Errorf("%s.consul.tls: %w", where, err))
 			}
 		}
 	case "kubernetes":

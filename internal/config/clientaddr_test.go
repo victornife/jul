@@ -21,10 +21,12 @@ func TestValidateAcceptsClientAddressPolicies(t *testing.T) {
 	}{
 		{name: "omitted", policy: nil},
 		{name: "empty block", policy: &ClientAddressConfig{}},
-		{name: "ipv4 and ipv6 prefixes", policy: &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8", "2001:db8:100::/48"}}},
-		{name: "single host", policy: &ClientAddressConfig{TrustedProxies: []string{"192.0.2.10"}}},
+		{name: "ipv4 and ipv6 prefixes", policy: &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8", "2001:db8:100::/48"}, ForwardedHeaders: []string{"x-forwarded-for"}}},
+		{name: "single host", policy: &ClientAddressConfig{TrustedProxies: []string{"192.0.2.10"}, ForwardedHeaders: []string{"x-forwarded-for"}}},
 		{name: "explicit header order", policy: &ClientAddressConfig{ForwardedHeaders: []string{"x-forwarded-for", "forwarded"}}},
 		{name: "headers disabled", policy: &ClientAddressConfig{ForwardedHeaders: []string{}}},
+		{name: "trusted proxies with headers explicitly disabled", policy: &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{}}},
+		{name: "trusted proxies opting into forwarded", policy: &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{"forwarded"}}},
 		{name: "max hops at the limit", policy: &ClientAddressConfig{MaxHops: 255}},
 	}
 	for _, tt := range tests {
@@ -87,6 +89,11 @@ func TestValidateRejectsInvalidClientAddressValues(t *testing.T) {
 			policy: &ClientAddressConfig{MaxHops: 256},
 			want:   "must be at most 255",
 		},
+		{
+			name:   "trusted proxies without forwarded headers",
+			policy: &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}},
+			want:   "forwarded_headers: required when trusted_proxies is set",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,7 +116,7 @@ func TestValidateRequiresOneClientAddressPolicyPerListenAddress(t *testing.T) {
 		return cfg
 	}
 
-	trusted := &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}}
+	trusted := &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{"x-forwarded-for"}}
 
 	t.Run("identical policies are accepted", func(t *testing.T) {
 		if err := Validate(base(trusted, trusted)); err != nil {
@@ -119,8 +126,8 @@ func TestValidateRequiresOneClientAddressPolicyPerListenAddress(t *testing.T) {
 
 	t.Run("reordered and duplicated prefixes are the same policy", func(t *testing.T) {
 		cfg := base(
-			&ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8", "192.0.2.0/24"}},
-			&ClientAddressConfig{TrustedProxies: []string{"192.0.2.0/24", "10.0.0.0/8", "10.0.0.0/8"}},
+			&ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8", "192.0.2.0/24"}, ForwardedHeaders: []string{"x-forwarded-for"}},
+			&ClientAddressConfig{TrustedProxies: []string{"192.0.2.0/24", "10.0.0.0/8", "10.0.0.0/8"}, ForwardedHeaders: []string{"x-forwarded-for"}},
 		)
 		if err := Validate(cfg); err != nil {
 			t.Fatalf("Validate rejected an equivalent sibling policy: %v", err)
@@ -128,7 +135,7 @@ func TestValidateRequiresOneClientAddressPolicyPerListenAddress(t *testing.T) {
 	})
 
 	t.Run("spelled-out defaults match an omitted block", func(t *testing.T) {
-		cfg := base(nil, &ClientAddressConfig{ForwardedHeaders: []string{"forwarded", "x-forwarded-for"}, MaxHops: 16})
+		cfg := base(nil, &ClientAddressConfig{ForwardedHeaders: []string{"x-forwarded-for"}, MaxHops: 16})
 		if err := Validate(cfg); err != nil {
 			t.Fatalf("Validate rejected a spelled-out default policy: %v", err)
 		}
@@ -139,7 +146,7 @@ func TestValidateRequiresOneClientAddressPolicyPerListenAddress(t *testing.T) {
 	})
 
 	t.Run("divergent trusted proxies are rejected", func(t *testing.T) {
-		cfg := base(trusted, &ClientAddressConfig{TrustedProxies: []string{"192.168.0.0/16"}})
+		cfg := base(trusted, &ClientAddressConfig{TrustedProxies: []string{"192.168.0.0/16"}, ForwardedHeaders: []string{"x-forwarded-for"}})
 		requireValidationError(t, cfg, "client identity is derived per listen address")
 	})
 
@@ -152,7 +159,7 @@ func TestValidateRequiresOneClientAddressPolicyPerListenAddress(t *testing.T) {
 	})
 
 	t.Run("divergent max hops is rejected", func(t *testing.T) {
-		cfg := base(trusted, &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, MaxHops: 4})
+		cfg := base(trusted, &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{"x-forwarded-for"}, MaxHops: 4})
 		requireValidationError(t, cfg, "must declare the same policy")
 	})
 
@@ -273,6 +280,12 @@ func TestLintFlagsTrustedProxiesCoveringEveryClient(t *testing.T) {
 		{name: "ipv6 default route", entry: "::/0", want: true},
 		{name: "narrow range", entry: "10.0.0.0/8", want: false},
 		{name: "single host", entry: "192.0.2.10", want: false},
+		// Most mistyped masks are already rejected as non-canonical (10.0.0.0/4
+		// masks to 0.0.0.0/4); these are the ones that stay canonical.
+		{name: "a mistyped ipv4 mask", entry: "16.0.0.0/4", want: true},
+		{name: "a mistyped ipv6 mask", entry: "2001::/16", want: true},
+		{name: "a real cdn range is not flagged", entry: "104.16.0.0/13", want: false},
+		{name: "an ipv6 site allocation is not flagged", entry: "2001:db8:100::/48", want: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := clientAddressConfig(&ClientAddressConfig{TrustedProxies: []string{tt.entry}})
@@ -280,13 +293,107 @@ func TestLintFlagsTrustedProxiesCoveringEveryClient(t *testing.T) {
 			for _, d := range Lint(cfg) {
 				if strings.Contains(d.Field, "client_address.trusted_proxies") {
 					found = true
-					if !strings.Contains(d.Message, "trusts every client") {
+					if !strings.Contains(d.Message, "trusts every client") && !strings.Contains(d.Message, "far more than a proxy fleet") {
 						t.Errorf("diagnostic message = %q", d.Message)
 					}
 				}
 			}
 			if found != tt.want {
 				t.Fatalf("lint diagnostic for %q = %v, want %v", tt.entry, found, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateProxyProtocolOnHTTPListeners(t *testing.T) {
+	withProxyProto := func(mode string, ca *ClientAddressConfig, http3 bool) *Config {
+		cfg := clientAddressConfig(ca)
+		cfg.Servers[0].ProxyProtocol = mode
+		if http3 {
+			cfg.Servers[0].TLS = &TLSConfig{Enabled: true, Cert: "c.pem", Key: "k.pem"}
+			cfg.Servers[0].HTTP3 = &HTTP3Config{Enabled: true}
+		}
+		return cfg
+	}
+	trusted := &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{"x-forwarded-for"}}
+
+	t.Run("a declared balancer is accepted", func(t *testing.T) {
+		if err := Validate(withProxyProto("in", trusted, false)); err != nil {
+			t.Fatalf("Validate rejected a declared balancer: %v", err)
+		}
+	})
+
+	t.Run("ingest requires a trusted proxy set", func(t *testing.T) {
+		requireValidationError(t, withProxyProto("in", nil, false), "requires client_address.trusted_proxies")
+	})
+
+	t.Run("an empty trusted proxy set is not enough", func(t *testing.T) {
+		requireValidationError(t, withProxyProto("in", &ClientAddressConfig{}, false), "requires client_address.trusted_proxies")
+	})
+
+	t.Run("emitting a header is rejected", func(t *testing.T) {
+		for _, mode := range []string{"out", "both"} {
+			requireValidationError(t, withProxyProto(mode, trusted, false), "only ingests a header")
+		}
+	})
+
+	t.Run("http3 on the same listener is rejected", func(t *testing.T) {
+		requireValidationError(t, withProxyProto("in", trusted, true), "cannot be combined with http3")
+	})
+
+	t.Run("blocks sharing a listener must agree", func(t *testing.T) {
+		cfg := withProxyProto("in", trusted, false)
+		sibling := cfg.Servers[0]
+		sibling.ServerNames = []string{"other.example.com"}
+		sibling.ProxyProtocol = ""
+		cfg.Servers = append(cfg.Servers, sibling)
+		requireValidationError(t, cfg, "must agree")
+	})
+}
+
+func TestLintFlagsForwardedHeaderOptIn(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		policy *ClientAddressConfig
+		want   bool
+	}{
+		{
+			name:   "forwarded alone behind a trusted proxy",
+			policy: &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{"forwarded"}},
+			want:   true,
+		},
+		{
+			name:   "forwarded alongside xff is still flagged",
+			policy: &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{"forwarded", "x-forwarded-for"}},
+			want:   true,
+		},
+		{
+			name:   "xff alone is clean",
+			policy: &ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}, ForwardedHeaders: []string{"x-forwarded-for"}},
+			want:   false,
+		},
+		{
+			name:   "without a trusted proxy no header is believed",
+			policy: &ClientAddressConfig{ForwardedHeaders: []string{"forwarded"}},
+			want:   false,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var found bool
+			for _, d := range Lint(clientAddressConfig(tt.policy)) {
+				if !strings.Contains(d.Field, "client_address.forwarded_headers") {
+					continue
+				}
+				found = true
+				if d.Severity != SeverityWarning {
+					t.Errorf("severity = %v, want %v", d.Severity, SeverityWarning)
+				}
+				if !strings.Contains(d.Message, "most proxies never write it") {
+					t.Errorf("diagnostic message = %q", d.Message)
+				}
+			}
+			if found != tt.want {
+				t.Fatalf("forwarded lint diagnostic = %v, want %v", found, tt.want)
 			}
 		})
 	}

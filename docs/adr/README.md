@@ -33,7 +33,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0013](0013-project-operating-model-and-completeness.md) | Project operating model, core completeness, and technical experiments | Accepted | 2026-08-03 |
 | [0014](0014-operability-surfaces.md) | Appropriate operability surfaces for Console, API, CLI, and raw configuration | Accepted | 2026-08-03 |
 | [0015](0015-managed-apply-terminal-ledger.md) | Managed-apply terminal ledger, exactly-once finalization, and audit-closure defaults | Accepted — amended by #226 | 2026-07-24 |
-| [0016](0016-inbound-identity-and-backend-peer-trust.md) | Inbound client identity and backend peer-trust boundaries | Accepted | 2026-08-12 |
+| [0016](0016-inbound-identity-and-backend-peer-trust.md) | Identity and trust boundaries | Accepted | 2026-08-12 |
 | [0017](0017-upstream-resilience-and-overload-control.md) | Upstream resilience and overload control | Accepted | 2026-08-13 |
 
 ## Reading order

@@ -107,6 +107,41 @@ func TestCIDRAuthUsesCanonicalClient(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
+			// The peer is a proxy, and an allow list naming the proxy network
+			// must not admit a request whose client could not be resolved.
+			name:       "malformed chain is not attributed to a trusted proxy inside the allow list",
+			allow:      []string{"10.0.0.0/8"},
+			trusted:    []string{"10.0.0.0/8"},
+			remoteAddr: "10.1.2.3:5555",
+			xff:        "not-an-address",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "over-hop chain is not attributed to a trusted proxy inside the allow list",
+			allow:      []string{"10.0.0.0/8"},
+			trusted:    []string{"10.0.0.0/8"},
+			remoteAddr: "10.1.2.3:5555",
+			xff:        strings.TrimSuffix(strings.Repeat("198.51.100.9, ", 20), ", "),
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "oversized chain is not attributed to a trusted proxy inside the allow list",
+			allow:      []string{"10.0.0.0/8"},
+			trusted:    []string{"10.0.0.0/8"},
+			remoteAddr: "10.1.2.3:5555",
+			xff:        strings.TrimSuffix(strings.Repeat("198.51.100.9, ", 700), ", "),
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			// An untrusted sender is the client, so its own address still
+			// decides: only a resolvable client is judged, not a proxy hop.
+			name:       "an untrusted peer is still judged on its own address",
+			allow:      []string{"203.0.113.0/24"},
+			remoteAddr: "203.0.113.7:5555",
+			xff:        "198.51.100.9",
+			wantStatus: http.StatusOK,
+		},
+		{
 			name:       "ipv6 client through an ipv6 proxy",
 			allow:      []string{"2001:db8:900::/48"},
 			trusted:    []string{"2001:db8:100::/48"},
@@ -172,6 +207,26 @@ func TestRateLimitKeyUsesCanonicalClient(t *testing.T) {
 	if got := keyOf(nil, "[2001:db8::1]:443", ""); got != "2001:db8::1" {
 		t.Errorf("ipv6 key = %q, want the bare address", got)
 	}
+
+	// A degraded chain from a trusted proxy names no client, so it must not land
+	// in the bucket the proxy's correctly attributed traffic uses.
+	attributed := keyOf(trusted, "10.1.2.3:5555", "198.51.100.9")
+	for _, xff := range []string{
+		"not-an-address",
+		strings.TrimSuffix(strings.Repeat("198.51.100.9, ", 20), ", "),
+		strings.TrimSuffix(strings.Repeat("198.51.100.9, ", 700), ", "),
+	} {
+		degraded := keyOf(trusted, "10.1.2.3:5555", xff)
+		if degraded == attributed {
+			t.Errorf("degraded key = %q, want a bucket separate from the attributed client", degraded)
+		}
+		if degraded == "10.1.2.3" {
+			t.Errorf("degraded key = %q, want it separate from the proxy's own address too", degraded)
+		}
+		if !strings.HasPrefix(degraded, "unattributed:") {
+			t.Errorf("degraded key = %q, want the unattributed namespace", degraded)
+		}
+	}
 }
 
 // TestRateLimitHeaderAndJWTKeysFallBackToCanonicalClient checks the fallbacks:
@@ -208,11 +263,15 @@ func TestAccessLogRecordsClientAndPeer(t *testing.T) {
 		xff        string
 		wantClient string
 		wantPeer   string
+		wantSource string
+		wantResult string
 	}{
 		{
 			name:       "direct client omits peer_ip",
 			remoteAddr: "203.0.113.7:5555",
 			wantClient: "203.0.113.7",
+			wantSource: "peer",
+			wantResult: "accepted",
 		},
 		{
 			name:       "proxied client records both",
@@ -221,6 +280,8 @@ func TestAccessLogRecordsClientAndPeer(t *testing.T) {
 			xff:        "198.51.100.9",
 			wantClient: "198.51.100.9",
 			wantPeer:   "10.1.2.3",
+			wantSource: "xff",
+			wantResult: "accepted",
 		},
 		{
 			name:       "untrusted sender records only its own address",
@@ -228,6 +289,20 @@ func TestAccessLogRecordsClientAndPeer(t *testing.T) {
 			remoteAddr: "203.0.113.7:5555",
 			xff:        "198.51.100.9",
 			wantClient: "203.0.113.7",
+			wantSource: "peer",
+			wantResult: "untrusted_peer",
+		},
+		{
+			// Without the result field this record is byte-identical to a
+			// request that genuinely originated at the proxy, because peer_ip
+			// is omitted when it equals client_ip.
+			name:       "degraded chain is distinguishable from proxy-originated traffic",
+			trusted:    []string{"10.0.0.0/8"},
+			remoteAddr: "10.1.2.3:5555",
+			xff:        "not-an-address",
+			wantClient: "10.1.2.3",
+			wantSource: "peer",
+			wantResult: "malformed",
 		},
 	}
 
@@ -253,6 +328,12 @@ func TestAccessLogRecordsClientAndPeer(t *testing.T) {
 			}
 			if rec.Peer != wantPeer {
 				t.Errorf("peer = %q, want %q", rec.Peer, wantPeer)
+			}
+			if rec.ClientSource != tt.wantSource {
+				t.Errorf("client_addr_source = %q, want %q", rec.ClientSource, tt.wantSource)
+			}
+			if rec.ClientResult != tt.wantResult {
+				t.Errorf("client_addr_result = %q, want %q", rec.ClientResult, tt.wantResult)
 			}
 		})
 	}

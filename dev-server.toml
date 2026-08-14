@@ -385,4 +385,5 @@ listen = "127.0.0.1:10199"
 # listen = "0.0.0.0:6379"
 # proxy_pass = "redis_pool"
 # proxy_protocol = "out"             # "" (off), "in", "out", or "both" (TCP only)
+# trusted_proxies = ["10.0.0.0/8"]   # required when proxy_protocol ingests a header
 

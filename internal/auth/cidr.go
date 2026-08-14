@@ -75,3 +75,17 @@ func (g cidrGate) allowed(addr netip.Addr) bool {
 // can never move a client into or out of an allow/deny range. This package
 // never parses a forwarding header itself.
 func clientAddr(r *http.Request) netip.Addr { return clientaddr.Client(r) }
+
+// cidrAllows evaluates the gate for one request.
+//
+// A degraded identity names a proxy hop rather than a client, so neither list
+// can be evaluated against it: an allow list covering the proxy network would
+// admit the request, and a deny list would let the real client slip past its
+// own rule. Both are decided by attacker-supplied header content, so the gate
+// fails closed rather than judging the proxy's address as if it were a client.
+func cidrAllows(g cidrGate, r *http.Request) bool {
+	if id, ok := clientaddr.FromContext(r.Context()); ok && !id.Attributed() {
+		return false
+	}
+	return g.allowed(clientAddr(r))
+}

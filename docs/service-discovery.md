@@ -156,8 +156,32 @@ address+port. Requires the `consul` build tag.
 | `datacenter` | string | — | Query a specific datacenter |
 | `token` | string | — | ACL token, sent as `X-Consul-Token` |
 | `passing_only` | bool | `true` | Only instances whose health checks pass |
+| `tls` | table | — | Trust used to authenticate the agent over `https`; the same block as [`backend_tls`](upstreams.md) |
 
 The instance service weight (`Weights.Passing`) maps to the backend weight.
+
+### Authenticating the agent
+
+The agent decides which addresses this pool dials, so it is authenticated on the
+same terms as a backend (ADR 0016 §14 — Boundary F). Use an `https` address, and
+add `[upstreams.discovery.consul.tls]` when the agent presents a private CA:
+
+```toml
+  [upstreams.discovery.consul]
+  address = "https://consul.service.consul:8501"
+  service = "web"
+  token = "${file:/run/secrets/consul-token}"
+
+    [upstreams.discovery.consul.tls]
+    ca_file         = "/etc/jul/consul-ca.pem"
+    ca_mode         = "file_only"
+    peer_identities = ["dns:consul.service.consul"]
+```
+
+An `https` address without a `tls` block still verifies, against the platform
+roots. **An ACL token over a plaintext `http://` address is readable and
+replayable by anything on the network path**, so `jul lint` warns about it, and
+`insecure_skip_verify` here is a lint **error** exactly as it is for a backend.
 
 ## Kubernetes
 

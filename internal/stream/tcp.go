@@ -12,7 +12,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"jul/internal/clientaddr"
+	"jul/internal/proxyproto"
 )
+
+// diagLogInterval is the shortest gap between two diagnostics of one kind from
+// one listener. A refused connection, a rejected header and an unmatched route
+// are all triggered by whoever connects, so each line is a heartbeat rather
+// than a per-connection record. It matches the interval the HTTP boundary uses
+// for the same reason.
+const diagLogInterval = 10 * time.Second
 
 // serveTCP accepts connections until the listener is closed and relays each to
 // a backend in its own goroutine.
@@ -51,10 +61,23 @@ func (l *listener) handleTCP(client net.Conn) {
 
 	clientAddr := client.RemoteAddr()
 	if r.proxyIn {
+		// The header is an assertion, so only a declared proxy may make it. A
+		// listener in "in" mode states that all traffic arrives via that proxy,
+		// so an untrusted peer is refused rather than degraded to its own
+		// address: degrading would let a direct client bypass the requirement
+		// simply by sending no header.
+		if !r.trustedProxies.Trusts(clientaddr.PeerFromRemoteAddr(clientAddr.String())) {
+			if l.proxyLog.Allow(diagLogInterval) {
+				s.log.Warn("stream: proxy-protocol connection refused from an untrusted peer", "addr", l.addr)
+			}
+			return
+		}
 		_ = client.SetReadDeadline(time.Now().Add(r.connectTimeout))
-		src, err := readProxyHeader(br)
+		src, err := proxyproto.ReadHeader(br)
 		if err != nil {
-			s.log.Warn("stream: proxy-protocol header rejected", "addr", l.addr, "error", err)
+			if l.proxyLog.Allow(diagLogInterval) {
+				s.log.Warn("stream: proxy-protocol header rejected", "addr", l.addr, "error", err)
+			}
 			return
 		}
 		if src != nil {
@@ -76,7 +99,9 @@ func (l *listener) handleTCP(client net.Conn) {
 		}
 	}
 	if pool == nil {
-		s.log.Warn("stream: no backend route for connection", "addr", l.addr)
+		if l.routeLog.Allow(diagLogInterval) {
+			s.log.Warn("stream: no backend route for connection", "addr", l.addr)
+		}
 		return
 	}
 
@@ -89,7 +114,7 @@ func (l *listener) handleTCP(client net.Conn) {
 	defer backend.Close()
 
 	if r.proxyOut {
-		if err := writeProxyV2(backend, clientAddr, client.LocalAddr()); err != nil {
+		if err := proxyproto.WriteV2(backend, clientAddr, client.LocalAddr()); err != nil {
 			s.log.Warn("stream: write proxy-protocol header", "addr", l.addr, "error", err)
 			return
 		}

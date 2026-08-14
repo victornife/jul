@@ -162,6 +162,90 @@ func TestProbeUsesTheSameTrustAsLiveTraffic(t *testing.T) {
 	})
 }
 
+// TestProbeAndLiveTrafficFailIdentically closes the direction the other parity
+// tests leave open.
+//
+// Proving that both succeed against a good certificate does not prove they
+// share trust: two independently built configurations would also both succeed.
+// The *failing* case is what distinguishes them, because that is where a
+// divergence shows up first — and it is the case that matters, since a probe
+// which accepts what live traffic rejects is exactly the "healthy under weaker
+// verification" state ADR 0016 §9 forbids.
+func TestProbeAndLiveTrafficFailIdentically(t *testing.T) {
+	ca := newProbePKI(t)
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	backend.TLS = &tls.Config{Certificates: []tls.Certificate{ca.issue(t, []string{"probe.internal"})}, MinVersion: tls.VersionTLS12}
+	backend.StartTLS()
+	defer backend.Close()
+	addr := backend.Listener.Addr().String()
+
+	probeAccepts := func(policy *backendtls.Policy) bool {
+		pool, err := NewPool(config.UpstreamConfig{
+			Name:     "probed",
+			Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
+			MaxFails: 1,
+		}, "https")
+		if err != nil {
+			t.Fatalf("NewPool: %v", err)
+		}
+		defer pool.Close()
+		hc := &healthChecker{
+			pool:   pool,
+			params: healthParamsFrom(config.HealthCheckConfig{Enabled: true, Type: "http", Path: "/healthz"}),
+			states: map[*Backend]*probeState{},
+			client: &http.Client{Timeout: 2 * time.Second, Transport: probeTransport(2*time.Second, policy)},
+		}
+		return hc.probeHTTP(t.Context(), pool.Backends()[0])
+	}
+
+	// The same resolved policy a route's transport would carry.
+	liveAccepts := func(policy *backendtls.Policy) bool {
+		client := &http.Client{
+			Timeout:   2 * time.Second,
+			Transport: &http.Transport{TLSClientConfig: policy.ClientConfig()},
+		}
+		resp, err := client.Get("https://" + addr + "/")
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		return true
+	}
+
+	resolve := func(serverName string) *backendtls.Policy {
+		t.Helper()
+		p, err := backendtls.Resolve(backendtls.Options{
+			CAMode: backendtls.CAModeFileOnly, CAFile: ca.caPath, ServerName: serverName,
+		}, "probed")
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		return p
+	}
+
+	for _, tt := range []struct {
+		name       string
+		serverName string
+		want       bool
+	}{
+		{name: "the identity the certificate carries", serverName: "probe.internal", want: true},
+		{name: "an identity it does not carry", serverName: "wrong.internal", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := resolve(tt.serverName)
+			probe, live := probeAccepts(policy), liveAccepts(policy)
+			if probe != live {
+				t.Fatalf("probe accepted = %v but live traffic accepted = %v; health and live traffic disagree about trust", probe, live)
+			}
+			if probe != tt.want {
+				t.Fatalf("both accepted = %v, want %v", probe, tt.want)
+			}
+		})
+	}
+}
+
 // TestPoolIdentityIncludesTheBackendTLSPolicy proves the mechanism that makes
 // the field hot-reloadable: a changed policy — including a certificate rotated
 // in place — changes the pool's identity, so the pool and its probe client are

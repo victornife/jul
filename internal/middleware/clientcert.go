@@ -24,6 +24,12 @@ type PeerCertIdentity struct {
 	Serial      string // certificate serial number (decimal)
 	Fingerprint string // SHA-256 of the DER certificate, lowercase hex
 	SANs        string // comma-joined subject alternative names (DNS, IP, URI, email)
+	// Raw and Chain carry the DER of the leaf and of the rest of the chain for
+	// RFC 9440 forwarding. They are populated only when a listener asks for it,
+	// so a deployment that does not forward certificates retains none, and they
+	// alias the handshake's buffers rather than copying them.
+	Raw   []byte
+	Chain [][]byte
 }
 
 // clientCertCtxKey is the unexported context key for a *PeerCertIdentity.
@@ -48,7 +54,10 @@ func PeerCertIdentityFrom(ctx context.Context) *PeerCertIdentity {
 // without a verified client certificate is rejected with 403; otherwise the
 // request proceeds with no identity attached. CA-chain verification has already
 // happened at the TLS handshake, so any certificate present here is trusted.
-func ClientCert(require bool) Middleware {
+//
+// forward selects how much of the certificate is retained for RFC 9440
+// forwarding: "leaf", "chain", or anything else for none.
+func ClientCert(require bool, forward string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
@@ -60,10 +69,26 @@ func ClientCert(require bool) Middleware {
 				return
 			}
 			id := identityFromCert(r.TLS.PeerCertificates[0])
+			switch forward {
+			case ForwardCertChain:
+				id.Raw = r.TLS.PeerCertificates[0].Raw
+				for _, c := range r.TLS.PeerCertificates[1:] {
+					id.Chain = append(id.Chain, c.Raw)
+				}
+			case ForwardCertLeaf:
+				id.Raw = r.TLS.PeerCertificates[0].Raw
+			}
 			next.ServeHTTP(w, r.WithContext(WithPeerCertIdentity(r.Context(), id)))
 		})
 	}
 }
+
+// Accepted values for the forward argument of ClientCert.
+const (
+	ForwardCertNone  = "none"
+	ForwardCertLeaf  = "leaf"
+	ForwardCertChain = "chain"
+)
 
 // identityFromCert builds a PeerCertIdentity from a verified leaf certificate.
 func identityFromCert(c *x509.Certificate) *PeerCertIdentity {

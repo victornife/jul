@@ -226,6 +226,42 @@ func TestValidateStreams(t *testing.T) {
 		}
 	})
 
+	t.Run("ingesting a PROXY header requires trusted_proxies", func(t *testing.T) {
+		for _, mode := range []string{"in", "both"} {
+			c := base()
+			c.Streams = []StreamServer{{Listen: "0.0.0.0:6432", ProxyPass: "db", ProxyProtocol: mode}}
+			if err := Validate(c); err == nil || !strings.Contains(err.Error(), "'trusted_proxies' is required") {
+				t.Errorf("proxy_protocol %q: err = %v, want a trusted_proxies requirement", mode, err)
+			}
+		}
+	})
+
+	t.Run("trusted_proxies without ingestion is rejected", func(t *testing.T) {
+		for _, mode := range []string{"", "out"} {
+			c := base()
+			c.Streams = []StreamServer{{Listen: "0.0.0.0:6432", ProxyPass: "db", ProxyProtocol: mode, TrustedProxies: []string{"10.0.0.0/8"}}}
+			if err := Validate(c); err == nil || !strings.Contains(err.Error(), "applies only when proxy_protocol") {
+				t.Errorf("proxy_protocol %q: err = %v, want a trusted_proxies rejection", mode, err)
+			}
+		}
+	})
+
+	t.Run("stream trusted_proxies use the shared prefix parser", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{Listen: "0.0.0.0:6432", ProxyPass: "db", ProxyProtocol: "in", TrustedProxies: []string{"10.1.2.3/8"}}}
+		if err := Validate(c); err == nil || !strings.Contains(err.Error(), "host bits set") {
+			t.Errorf("err = %v, want the canonical-prefix rejection", err)
+		}
+	})
+
+	t.Run("a declared proxy is accepted", func(t *testing.T) {
+		c := base()
+		c.Streams = []StreamServer{{Listen: "0.0.0.0:6432", ProxyPass: "db", ProxyProtocol: "both", TrustedProxies: []string{"10.0.0.0/8"}}}
+		if err := Validate(c); err != nil {
+			t.Errorf("Validate rejected a declared stream proxy: %v", err)
+		}
+	})
+
 	t.Run("udp rejects tcp-only features", func(t *testing.T) {
 		c := base()
 		c.Streams = []StreamServer{{

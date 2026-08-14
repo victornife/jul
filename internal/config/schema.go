@@ -78,6 +78,13 @@ type StreamServer struct {
 	// to the backend), or "both". It preserves the real client address across
 	// the proxy hop.
 	ProxyProtocol string `toml:"proxy_protocol"`
+	// TrustedProxies lists the CIDR prefixes, or bare addresses meaning a single
+	// host, permitted to assert a client address with an inbound PROXY header.
+	// It is required whenever ProxyProtocol ingests one ("in" or "both"): a
+	// PROXY header is an assertion, not a kernel fact, so believing it from any
+	// peer would let a direct connection choose the address the backend sees.
+	// A connection from an address outside this set is refused.
+	TrustedProxies []string `toml:"trusted_proxies"`
 	// ConnectTimeout bounds dialing the backend. Zero applies a 10s default.
 	ConnectTimeout Duration `toml:"connect_timeout"`
 	// IdleTimeout closes a relayed connection/UDP session after this period with
@@ -208,6 +215,14 @@ type ServerConfig struct {
 	// address over UDP and advertises it via Alt-Svc. It requires TLS on this
 	// server block and is compiled only into builds with the "http3" tag.
 	HTTP3 *HTTP3Config `toml:"http3"`
+	// ProxyProtocol enables ingesting a HAProxy PROXY-protocol header from a TCP
+	// load balancer: "" (off) or "in". The advertised address becomes this
+	// listener's transport peer, so the ordinary client_address derivation runs
+	// on top of it unchanged. It requires client_address.trusted_proxies, which
+	// names the balancers permitted to assert an address, and cannot be combined
+	// with HTTP/3 on the same listener because QUIC carries no such framing.
+	// Emitting a header outbound is a backend concern and is not offered here.
+	ProxyProtocol string `toml:"proxy_protocol"`
 
 	// H2C enables cleartext HTTP/2 (h2c) on this listener so native gRPC and
 	// other HTTP/2 clients can connect without TLS, in addition to HTTP/1.1. It
@@ -551,6 +566,12 @@ type ConsulDiscovery struct {
 	Datacenter string `toml:"datacenter"`
 	// Token is an optional ACL token sent as X-Consul-Token.
 	Token string `toml:"token"`
+	// TLS configures the trust used to authenticate the Consul agent when
+	// Address is https. It is the same block as [upstreams.backend_tls]: a
+	// control-plane peer is authenticated by the same proof as a data-plane one
+	// (ADR 0016 §14), and one normalized type keeps them from drifting apart.
+	// Without it an https address verifies against the platform roots.
+	TLS *BackendTLSConfig `toml:"tls"`
 	// PassingOnly restricts results to instances whose health checks are passing
 	// (default true).
 	PassingOnly *bool `toml:"passing_only"`
@@ -664,6 +685,12 @@ type ClientAuthConfig struct {
 	// A client certificate whose serial number appears in it is rejected. The
 	// CRL's signature is verified against ca_file.
 	CRLFile string `toml:"crl_file"`
+	// ForwardCertificate conveys the verified client certificate to backends
+	// with the RFC 9440 Client-Cert header: "none" (default), "leaf", or
+	// "chain" (which adds Client-Cert-Chain). Those headers are stripped from
+	// every inbound request regardless of this setting, so a client can never
+	// assert one; this only controls whether Jul emits its own.
+	ForwardCertificate string `toml:"forward_certificate"`
 }
 
 // Active reports whether client-certificate authentication is enabled (a

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/proxyproto"
 )
 
 func discardLogger() *slog.Logger {
@@ -185,7 +186,7 @@ func tcpProxyHeaderReader(t *testing.T) (addr string, stop func()) {
 			go func(c net.Conn) {
 				defer c.Close()
 				br := bufio.NewReaderSize(c, 1024)
-				src, err := readProxyHeader(br)
+				src, err := proxyproto.ReadHeader(br)
 				if err != nil {
 					_, _ = c.Write([]byte("ERR:" + err.Error()))
 					return
@@ -524,6 +525,7 @@ func TestProxyProtocolInAndOut(t *testing.T) {
 	s := newTestServer(t, Hooks{})
 	if err := s.Reload([]config.StreamServer{{
 		Listen: addr, Protocol: "tcp", ProxyPass: backend, ProxyProtocol: "both",
+		TrustedProxies: []string{"127.0.0.1", "::1"},
 	}}, nil); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -544,6 +546,109 @@ func TestProxyProtocolInAndOut(t *testing.T) {
 	got := string(buf[:n])
 	if !bytes.Contains(buf[:n], []byte("1.2.3.4:1111")) {
 		t.Errorf("backend saw source %q, want 1.2.3.4:1111", got)
+	}
+}
+
+// TestProxyProtocolRefusesAnUntrustedPeer pins the L4 trust boundary: a PROXY
+// header is an assertion, and only a declared proxy may make it. The listener
+// refuses rather than degrading to the socket peer, because "in" declares that
+// all traffic arrives via the proxy — degrading would let a direct client
+// bypass the requirement by sending no header at all.
+func TestProxyProtocolRefusesAnUntrustedPeer(t *testing.T) {
+	backend, stop := tcpProxyHeaderReader(t)
+	defer stop()
+	addr := freeTCPAddr(t)
+
+	s := newTestServer(t, Hooks{})
+	if err := s.Reload([]config.StreamServer{{
+		Listen: addr, Protocol: "tcp", ProxyPass: backend, ProxyProtocol: "both",
+		TrustedProxies: []string{"10.0.0.0/8"}, // the dialling peer is loopback
+	}}, nil); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	_, _ = c.Write([]byte("PROXY TCP4 1.2.3.4 5.6.7.8 1111 2222\r\n"))
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 256)
+	if n, err := c.Read(buf); err == nil {
+		t.Fatalf("untrusted peer was served %q, want the connection refused", buf[:n])
+	}
+}
+
+// lockedBuffer collects log output from the listener goroutines.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) count(sub string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return bytes.Count(b.buf.Bytes(), []byte(sub))
+}
+
+// TestRouteMissLogIsThrottled pins that an unmatched route cannot be used to set
+// the server's log volume. The SNI that misses is chosen by whoever connects, so
+// the line is a heartbeat rather than a per-connection record, and the hundredth
+// copy tells an operator nothing the first did not.
+func TestRouteMissLogIsThrottled(t *testing.T) {
+	known, stop := tcpAnnounce(t, "OK!")
+	defer stop()
+	addr := freeTCPAddr(t)
+
+	logs := &lockedBuffer{}
+	s := NewServer(Options{Logger: slog.New(slog.NewTextHandler(logs, nil))})
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.Reload([]config.StreamServer{{
+		Listen:    addr,
+		Protocol:  "tcp",
+		SNIRoutes: map[string]string{"known.example.com": known}, // no "*" fallback
+	}}, nil); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	const conns = 50
+	for range conns {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		_, _ = c.Write(clientHelloBytes(t, "unmatched.example.com"))
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _ = io.Copy(io.Discard, c) // wait for the listener to drop the connection
+		_ = c.Close()
+	}
+
+	if got := logs.count("no backend route"); got != 1 {
+		t.Errorf("%d unmatched connections produced %d route-miss lines, want 1", conns, got)
+	}
+}
+
+// TestRouteMissDoesNotMaskProxyDiagnostics pins that the two conditions are
+// throttled independently. A peer provoking a route miss must not be able to
+// suppress the PROXY-protocol refusal that a different peer would trigger,
+// which is why they hold separate limiters rather than sharing one.
+func TestRouteMissDoesNotMaskProxyDiagnostics(t *testing.T) {
+	l := &listener{}
+	if !l.routeLog.Allow(diagLogInterval) {
+		t.Fatal("first route-miss line was suppressed")
+	}
+	if !l.proxyLog.Allow(diagLogInterval) {
+		t.Error("a route miss suppressed the first PROXY-protocol diagnostic")
+	}
+	if l.routeLog.Allow(diagLogInterval) {
+		t.Error("second route-miss line inside the interval was admitted")
 	}
 }
 
@@ -649,55 +754,6 @@ func TestReloadBindFailureRollsBack(t *testing.T) {
 	s.mu.Unlock()
 	if n != 0 {
 		t.Errorf("after failed reload: %d listeners, want 0", n)
-	}
-}
-
-func TestProxyProtocolV2RoundTrip(t *testing.T) {
-	src := &net.TCPAddr{IP: net.ParseIP("10.1.2.3"), Port: 4567}
-	dst := &net.TCPAddr{IP: net.ParseIP("10.9.8.7"), Port: 89}
-	var buf bytes.Buffer
-	if err := writeProxyV2(&buf, src, dst); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	br := bufio.NewReader(&buf)
-	got, err := readProxyHeader(br)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got == nil || got.String() != "10.1.2.3:4567" {
-		t.Errorf("round-trip src: got %v want 10.1.2.3:4567", got)
-	}
-}
-
-func TestProxyProtocolV2IPv6RoundTrip(t *testing.T) {
-	src := &net.TCPAddr{IP: net.ParseIP("2001:db8::1"), Port: 443}
-	dst := &net.TCPAddr{IP: net.ParseIP("2001:db8::2"), Port: 80}
-	var buf bytes.Buffer
-	if err := writeProxyV2(&buf, src, dst); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	got, err := readProxyHeader(bufio.NewReader(&buf))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if got == nil || got.(*net.TCPAddr).Port != 443 {
-		t.Errorf("ipv6 round-trip: got %v", got)
-	}
-}
-
-func TestProxyProtocolV1Parse(t *testing.T) {
-	br := bufio.NewReader(bytes.NewReader([]byte("PROXY TCP4 192.168.0.1 192.168.0.2 56324 443\r\nDATA")))
-	got, err := readProxyHeader(br)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if got.String() != "192.168.0.1:56324" {
-		t.Errorf("v1 src: got %v", got)
-	}
-	// The header is consumed; the payload remains.
-	rest, _ := io.ReadAll(br)
-	if string(rest) != "DATA" {
-		t.Errorf("remaining payload: got %q want DATA", rest)
 	}
 }
 

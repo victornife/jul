@@ -1117,6 +1117,24 @@ func warnInsecureBackends(log *slog.Logger, cfg *config.Config) {
 				"upstream", cfg.Upstreams[i].Name,
 				"scope", "upstream")
 		}
+		// Boundary F: the authority a pool's addresses come from is warned about
+		// on the same terms as the pool itself.
+		d := cfg.Upstreams[i].Discovery
+		if d == nil {
+			continue
+		}
+		if k := d.Kubernetes; k != nil && k.InsecureSkipTLSVerify {
+			log.Warn("discovery certificate verification is disabled",
+				"upstream", cfg.Upstreams[i].Name,
+				"scope", "discovery",
+				"provider", "kubernetes")
+		}
+		if cs := d.Consul; cs != nil && cs.TLS != nil && cs.TLS.InsecureSkipVerify {
+			log.Warn("discovery certificate verification is disabled",
+				"upstream", cfg.Upstreams[i].Name,
+				"scope", "discovery",
+				"provider", "consul")
+		}
 	}
 	for i := range cfg.Servers {
 		for j := range cfg.Servers[i].Locations {

@@ -17,12 +17,12 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 288 |
-| Schema leaves (configurable values) | 243 |
-| Registry entries | 243 |
-| Startup-consumed entries | 57 |
-| Class `hot_reload` | 172 |
-| Class `restart_required` | 57 |
+| Schema paths (containers included) | 300 |
+| Schema leaves (configurable values) | 254 |
+| Registry entries | 254 |
+| Startup-consumed entries | 58 |
+| Class `hot_reload` | 182 |
+| Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 2 |
@@ -280,6 +280,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.max_header_bytes` | `new_listener_only` | `listener_limits` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.name` | `hot_reload` | `server_identity` | — | the block label appears only in configuration projections, which are rebuilt from the effective config on each reload |
 | `servers.*.plugins` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
+| `servers.*.proxy_protocol` | `restart_required` | `client_address` | startup, per-address, cond. | the PROXY-protocol wrapper is installed when the address binds, ahead of the TLS wrap, so it is fixed for the listener's lifetime |
 | `servers.*.read_header_timeout` | `new_listener_only` | `listener_timeouts` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.read_timeout` | `new_listener_only` | `listener_timeouts` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.redirect_https` | `hot_reload` | `server_redirect` | — | the handler tree is rebuilt from the effective config on each successful reload |
@@ -295,6 +296,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.tls.cert` | `restart_required` | `tls` | startup, per-address, cond., digest | TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart |
 | `servers.*.tls.client_auth.ca_file` | `restart_required` | `mtls` | startup, per-address, cond., digest | the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
 | `servers.*.tls.client_auth.crl_file` | `restart_required` | `mtls` | startup, per-address, cond., digest | the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
+| `servers.*.tls.client_auth.forward_certificate` | `hot_reload` | `mtls` | — | the client-certificate forwarding mode is read when the handler tree is rebuilt |
 | `servers.*.tls.client_auth.mode` | `restart_required` | `mtls` | startup, per-address, cond. | the client-certificate policy is written into the listener's tls.Config at bind time |
 | `servers.*.tls.client_auth.verify_san` | `restart_required` | `mtls` | startup, per-address, cond. | the SAN allow-list is captured by the listener's verify callback at bind time |
 | `servers.*.tls.enabled` | `restart_required` | `tls` | startup, per-address, cond. | whether the listener terminates TLS is decided when the address binds |
@@ -310,6 +312,7 @@ value is compared as a digest so no secret material leaves the process.
 | `stream.*.proxy_protocol` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.sni_routes.*` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.tls_passthrough` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
+| `stream.*.trusted_proxies` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `upstreams.*.backend_tls.ca_file` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
 | `upstreams.*.backend_tls.ca_mode` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
 | `upstreams.*.backend_tls.client_cert` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
@@ -323,6 +326,14 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.discovery.consul.passing_only` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.consul.service` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.consul.tag` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
+| `upstreams.*.discovery.consul.tls.ca_file` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.ca_mode` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.client_cert` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.client_key` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.insecure_skip_verify` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.min_version` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.peer_identities` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.server_name` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
 | `upstreams.*.discovery.consul.token` | `hot_reload` | `discovery` | digest | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.kubernetes.api_server` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.kubernetes.ca_file` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
