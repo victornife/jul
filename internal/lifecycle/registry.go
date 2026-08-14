@@ -586,6 +586,8 @@ func upstreamEntries() []Entry {
 		"upstreams.*.health_check.unhealthy_threshold",
 	)...)
 	out = append(out, backendTLSEntries("upstreams.*.backend_tls.", false)...)
+	// The Consul agent's trust is resolved with the pool, like a backend's.
+	out = append(out, backendTLSEntries("upstreams.*.discovery.consul.tls.", false)...)
 	out = append(out, hotGroup(SubDiscovery, "the per-pool discovery refresher is restarted with the pool on each successful reload",
 		"upstreams.*.discovery.consul.address",
 		"upstreams.*.discovery.consul.datacenter",

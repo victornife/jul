@@ -233,6 +233,16 @@ func fullConfig() *config.Config {
 					Datacenter:  "dc1",
 					Token:       "consul-token",
 					PassingOnly: config.Bool(true),
+					TLS: &config.BackendTLSConfig{
+						CAFile:             "/etc/jul/consul-ca.pem",
+						CAMode:             "file_only",
+						ClientCert:         "/etc/jul/consul-client.pem",
+						ClientKey:          "/etc/jul/consul-client.key",
+						ServerName:         "consul.service.consul",
+						MinVersion:         "1.3",
+						PeerIdentities:     []string{"dns:consul.service.consul"},
+						InsecureSkipVerify: true,
+					},
 				},
 				Kubernetes: &config.KubernetesDiscovery{
 					Namespace:             "default",

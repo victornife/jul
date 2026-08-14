@@ -248,6 +248,10 @@ type SecurityProjection struct {
 	// without becoming an inventory of who trusts whom.
 	BackendTLSPolicies int `json:"backend_tls_policies"`
 	BackendTLSInsecure int `json:"backend_tls_insecure"`
+	// DiscoveryInsecure counts service-discovery providers that disable
+	// verification of the registry itself (Boundary F). It is bounded on the
+	// same terms: no provider or upstream name is projected.
+	DiscoveryInsecure int `json:"discovery_insecure"`
 	// RBAC summarises the admin RBAC posture as both the SERVING (installed,
 	// actively-enforced) and PERSISTED (on-disk) state, with a pending flag when
 	// they differ, so the Security panel never presents a staged-but-not-live

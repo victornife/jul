@@ -228,6 +228,11 @@ func validateDiscovery(d *DiscoveryConfig, where string) []error {
 				errs = append(errs, fmt.Errorf("%s: consul address %q must be an http(s) URL", where, d.Consul.Address))
 			}
 		}
+		if d.Consul != nil && d.Consul.TLS != nil {
+			for _, err := range backendtls.Validate(d.Consul.TLS.Options()) {
+				errs = append(errs, fmt.Errorf("%s.consul.tls: %w", where, err))
+			}
+		}
 	case "kubernetes":
 		if d.Kubernetes == nil || strings.TrimSpace(d.Kubernetes.Service) == "" || strings.TrimSpace(d.Kubernetes.Namespace) == "" {
 			errs = append(errs, fmt.Errorf("%s: kubernetes discovery requires [kubernetes] with 'namespace' and 'service'", where))

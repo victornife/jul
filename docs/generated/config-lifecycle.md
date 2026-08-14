@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 290 |
-| Schema leaves (configurable values) | 245 |
-| Registry entries | 245 |
+| Schema paths (containers included) | 299 |
+| Schema leaves (configurable values) | 253 |
+| Registry entries | 253 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 173 |
+| Class `hot_reload` | 181 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -325,6 +325,14 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.discovery.consul.passing_only` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.consul.service` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.consul.tag` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
+| `upstreams.*.discovery.consul.tls.ca_file` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.ca_mode` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.client_cert` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.client_key` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.insecure_skip_verify` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.min_version` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.peer_identities` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| `upstreams.*.discovery.consul.tls.server_name` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
 | `upstreams.*.discovery.consul.token` | `hot_reload` | `discovery` | digest | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.kubernetes.api_server` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.kubernetes.ca_file` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |

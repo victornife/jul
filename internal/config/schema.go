@@ -566,6 +566,12 @@ type ConsulDiscovery struct {
 	Datacenter string `toml:"datacenter"`
 	// Token is an optional ACL token sent as X-Consul-Token.
 	Token string `toml:"token"`
+	// TLS configures the trust used to authenticate the Consul agent when
+	// Address is https. It is the same block as [upstreams.backend_tls]: a
+	// control-plane peer is authenticated by the same proof as a data-plane one
+	// (ADR 0016 §14), and one normalized type keeps them from drifting apart.
+	// Without it an https address verifies against the platform roots.
+	TLS *BackendTLSConfig `toml:"tls"`
 	// PassingOnly restricts results to instances whose health checks are passing
 	// (default true).
 	PassingOnly *bool `toml:"passing_only"`

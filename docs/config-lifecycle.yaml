@@ -73,12 +73,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 290
-  schema_leaves: 245
-  registry_entries: 245
+  schema_paths: 299
+  schema_leaves: 253
+  registry_entries: 253
   startup_consumed: 58
   by_class:
-    hot_reload: 173
+    hot_reload: 181
     restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
@@ -1059,6 +1059,41 @@ fields:
     class: hot_reload
     subsystem: discovery
     reason: "the per-pool discovery refresher is restarted with the pool on each successful reload"
+  - path: "upstreams.*.discovery.consul.tls.ca_file"
+    class: hot_reload
+    subsystem: backend_tls
+    reason: "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+    secret_digested: true
+  - path: "upstreams.*.discovery.consul.tls.ca_mode"
+    class: hot_reload
+    subsystem: backend_tls
+    reason: "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+  - path: "upstreams.*.discovery.consul.tls.client_cert"
+    class: hot_reload
+    subsystem: backend_tls
+    reason: "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+    secret_digested: true
+  - path: "upstreams.*.discovery.consul.tls.client_key"
+    class: hot_reload
+    subsystem: backend_tls
+    reason: "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+    secret_digested: true
+  - path: "upstreams.*.discovery.consul.tls.insecure_skip_verify"
+    class: hot_reload
+    subsystem: backend_tls
+    reason: "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+  - path: "upstreams.*.discovery.consul.tls.min_version"
+    class: hot_reload
+    subsystem: backend_tls
+    reason: "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+  - path: "upstreams.*.discovery.consul.tls.peer_identities"
+    class: hot_reload
+    subsystem: backend_tls
+    reason: "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+  - path: "upstreams.*.discovery.consul.tls.server_name"
+    class: hot_reload
+    subsystem: backend_tls
+    reason: "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
   - path: "upstreams.*.discovery.consul.token"
     class: hot_reload
     subsystem: discovery

@@ -162,6 +162,7 @@ func Lint(c *Config) []Diagnostic {
 	}
 
 	diags = append(diags, lintBackendTLS(c)...)
+	diags = append(diags, lintDiscoveryTrust(c)...)
 	diags = append(diags, listenerScopedDiagnostics(c)...)
 
 	// An admin listener reachable off-loopback without a token is unauthenticated
@@ -354,6 +355,57 @@ func lintBackendTLS(c *Config) []Diagnostic {
 					Hint:     "remove one of the two blocks unless the override is intended",
 				})
 			}
+		}
+	}
+	return diags
+}
+
+// lintDiscoveryTrust reports control-plane trust findings (Boundary F).
+//
+// A discovery provider is the authority a backend address comes from, so the
+// safety of Boundary D rests on it: a poisoned registry answer is only harmless
+// because the address it supplies never becomes an identity. Disabling
+// verification on that channel therefore gets the same SeverityError treatment
+// as disabling it on a backend (ADR 0016 §14), rather than the silence it had
+// while it lived outside the model.
+func lintDiscoveryTrust(c *Config) []Diagnostic {
+	var diags []Diagnostic
+	for i := range c.Upstreams {
+		d := c.Upstreams[i].Discovery
+		if d == nil {
+			continue
+		}
+		where := fmt.Sprintf("upstreams[%d].discovery", i)
+		if k := d.Kubernetes; k != nil && k.InsecureSkipTLSVerify {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Field:    where + ".kubernetes.insecure_skip_tls_verify",
+				Message:  "API server certificate verification is disabled; any host that can answer as the API server can choose this pool's backend addresses",
+				Hint:     "remove it and set ca_file, or rely on the mounted service-account CA when running in-cluster",
+			})
+		}
+		cs := d.Consul
+		if cs == nil {
+			continue
+		}
+		if cs.TLS != nil && cs.TLS.InsecureSkipVerify {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Field:    where + ".consul.tls.insecure_skip_verify",
+				Message:  "Consul agent certificate verification is disabled; any host that can answer as the agent can choose this pool's backend addresses",
+				Hint:     "remove it and set ca_file with ca_mode, or set server_name to the name the certificate actually carries",
+			})
+		}
+		// The ACL token is a bearer credential: over plaintext it is readable by
+		// anything on the path, and replayable against the agent.
+		addr := strings.TrimSpace(cs.Address)
+		if strings.TrimSpace(cs.Token) != "" && (addr == "" || strings.HasPrefix(strings.ToLower(addr), "http://")) {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    where + ".consul.token",
+				Message:  "an ACL token is sent over plaintext HTTP, so it is readable and replayable by anything on the network path",
+				Hint:     "use an https address for consul.address, with [upstreams.discovery.consul.tls] if the agent uses a private CA",
+			})
 		}
 	}
 	return diags
