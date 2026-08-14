@@ -312,6 +312,7 @@ Labels fall into three classes by what bounds them:
 | `jul_cache_revalidations_total` | `outcome` | fixed (`stored`/`not_modified`/`uncacheable`/`origin_error`/`canceled`/`panic`/`no_lease`/`deduplicated`) |
 | `jul_http_response_compressed_total` | `encoding` | fixed content codings |
 | `jul_http_ratelimited_total` | `key` | fixed (`ip`/`header`/`jwt`) |
+| `jul_http_backend_dial_failures_total` | `reason` | fixed (`timeout`/`refused`/`no_backend`/`other`) |
 | `jul_client_addr_derivations_total` | `source`, `result` | fixed (3 × 4 enums, never an address) |
 | `jul_auth_decisions_total` | `method`, `result` | fixed gate × `allow`/`deny` |
 | `jul_waf_events_total` | `action`, `rule` | `block`/`detect` × loaded rule IDs |
@@ -331,6 +332,7 @@ Labels fall into three classes by what bounds them:
 | `jul_listener_conns` | — | single series |
 | `jul_http3_connections` | — | single series |
 | `jul_stream_active_conns` | `proto` | `tcp`/`udp` |
+| `jul_stream_backend_dial_failures_total` | `proto`, `reason` | `tcp`/`udp` × fixed (`timeout`/`refused`/`no_backend`/`other`) |
 | `jul_stream_bytes_total` | `proto`, `direction` | `tcp`/`udp` × `up`/`down` |
 | `jul_stream_udp_sessions_evicted_total` | `reason` | `idle`/`lru` |
 | `jul_stream_udp_sessions_rejected_total` | — | single series |

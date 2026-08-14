@@ -137,6 +137,7 @@ L4 traffic.
 | SNI routing leak | Attacker probes SNI routes to map internal backends | SNI routes are config-only; no introspection API exposes them; backends should not be directly reachable | Insider with config read access |
 | Listener bind hijack | Attacker binds the stream listen port before Jul.IA starts | Preflight bind probe rejects in-use addresses; OS-level port binding is first-come-first-served | Race on startup between Jul.IA and a malicious process with same privileges |
 | Backend pool exhaustion | Many concurrent TCP connections exhaust backend capacity | `connect_timeout` prevents indefinite hangs; upstream `max_fails` / `fail_timeout` eject unhealthy backends; idle timeout reclaims stale TCP connections | Flash crowd larger than pool capacity |
+| Backend dial-failure log flood | A backend outage plus ordinary connection/client volume, no attacker required | Every dial failure is counted (`jul_stream_backend_dial_failures_total`); the log is a 10-second throttled heartbeat once a backend is already known down, plus one unthrottled line on the cooldown transition itself | One line per pool per 10-second window for the duration of the outage |
 | UDP amplification | Attacker sends small UDP request triggering large backend response | Jul.IA relays backend replies only to the original source address (no open reflection); session-bound replies limit amplification | Attacker spoofs a victim's source address — victim receives backend replies (standard UDP reflection risk) |
 
 ## Fuzz coverage

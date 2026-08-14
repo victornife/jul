@@ -398,6 +398,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Observability", Name: "Prometheus metrics", Active: s.deps.Metrics != nil, Detail: metricsDetail(s.deps.Metrics != nil)},
 		{Group: "Observability", Name: "Distributed tracing", Active: c.Observability.Tracing.Enabled, Detail: trDetail},
 		{Group: "Observability", Name: "Access log", Active: accessLogEnabled, Detail: accessLogDetail},
+		{Group: "Observability", Name: "Backend dial-failure accounting", Active: s.deps.Metrics != nil, Detail: "counted and rate-limited per backend pool; see jul_stream_backend_dial_failures_total / jul_http_backend_dial_failures_total"},
 
 		{Group: "Extensibility", Name: "WASM plugins", Active: len(c.Plugins) > 0, Detail: pluginDetail(len(c.Plugins), pluginLocs)},
 	}
