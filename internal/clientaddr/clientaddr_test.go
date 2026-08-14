@@ -242,6 +242,19 @@ func TestDerive(t *testing.T) {
 			wantResult: ResultAccepted,
 		},
 		{
+			// The same RFC 9110 rule applies to Forwarded, and a chain split
+			// across field lines must not let a spoofed leftmost line escape
+			// the right-to-left walk by looking like a separate assertion.
+			name:       "repeated forwarded lines form one chain",
+			trusted:    privateProxies,
+			headers:    []string{HeaderForwarded, HeaderXFF},
+			peer:       "10.1.2.3:5555",
+			reqHeaders: header("Forwarded", "for=127.0.0.1", "Forwarded", "for=198.51.100.9, for=10.8.8.8"),
+			wantClient: "198.51.100.9",
+			wantSource: SourceForwarded,
+			wantResult: ResultAccepted,
+		},
+		{
 			name:       "empty header list keeps peer identity for a trusted peer",
 			trusted:    privateProxies,
 			headers:    []string{},

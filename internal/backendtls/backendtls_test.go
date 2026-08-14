@@ -190,6 +190,38 @@ func TestResolveTrustRoots(t *testing.T) {
 		}
 	})
 
+	// The union is the property operators most often misread as a preference,
+	// so it is asserted directly rather than inferred from "a pool exists":
+	// file_only trusts the configured CA alone, while system_and_file also
+	// keeps every platform root. Compared by subject set, because a CertPool
+	// exposes nothing else.
+	t.Run("system_and_file is a union, file_only is a replacement", func(t *testing.T) {
+		system, err := x509.SystemCertPool()
+		if err != nil {
+			t.Skipf("platform roots unavailable: %v", err)
+		}
+		if len(system.Subjects()) == 0 { //nolint:staticcheck // Subjects is the only pool introspection available
+			t.Skip("platform root store is empty in this environment")
+		}
+		fileOnly, err := Resolve(Options{CAMode: CAModeFileOnly, CAFile: caPath}, "svc.internal")
+		if err != nil {
+			t.Fatal(err)
+		}
+		union, err := Resolve(Options{CAMode: CAModeSystemAndFile, CAFile: caPath}, "svc.internal")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fileSubjects := len(fileOnly.ClientConfig().RootCAs.Subjects()) //nolint:staticcheck // as above
+		unionSubjects := len(union.ClientConfig().RootCAs.Subjects())   //nolint:staticcheck // as above
+		if fileSubjects != 1 {
+			t.Errorf("file_only trusts %d roots, want only the configured one", fileSubjects)
+		}
+		if unionSubjects != len(system.Subjects())+1 { //nolint:staticcheck // as above
+			t.Errorf("system_and_file trusts %d roots, want the platform %d plus the configured one",
+				unionSubjects, len(system.Subjects())) //nolint:staticcheck // as above
+		}
+	})
+
 	for _, tt := range []struct {
 		name, path, want string
 	}{
