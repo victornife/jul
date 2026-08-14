@@ -116,6 +116,10 @@ type listener struct {
 	// to reset it.
 	proxyLog logthrottle.Limiter
 
+	// routeLog throttles the unmatched-route diagnostic. It is separate from
+	// proxyLog so a peer provoking one condition cannot mask the other.
+	routeLog logthrottle.Limiter
+
 	udpMu       sync.Mutex
 	udpSessions map[string]*udpSession
 	udpPending  map[string]*udpPending

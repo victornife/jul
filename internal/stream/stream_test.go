@@ -580,6 +580,78 @@ func TestProxyProtocolRefusesAnUntrustedPeer(t *testing.T) {
 	}
 }
 
+// lockedBuffer collects log output from the listener goroutines.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) count(sub string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return bytes.Count(b.buf.Bytes(), []byte(sub))
+}
+
+// TestRouteMissLogIsThrottled pins that an unmatched route cannot be used to set
+// the server's log volume. The SNI that misses is chosen by whoever connects, so
+// the line is a heartbeat rather than a per-connection record, and the hundredth
+// copy tells an operator nothing the first did not.
+func TestRouteMissLogIsThrottled(t *testing.T) {
+	known, stop := tcpAnnounce(t, "OK!")
+	defer stop()
+	addr := freeTCPAddr(t)
+
+	logs := &lockedBuffer{}
+	s := NewServer(Options{Logger: slog.New(slog.NewTextHandler(logs, nil))})
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.Reload([]config.StreamServer{{
+		Listen:    addr,
+		Protocol:  "tcp",
+		SNIRoutes: map[string]string{"known.example.com": known}, // no "*" fallback
+	}}, nil); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	const conns = 50
+	for range conns {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		_, _ = c.Write(clientHelloBytes(t, "unmatched.example.com"))
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _ = io.Copy(io.Discard, c) // wait for the listener to drop the connection
+		_ = c.Close()
+	}
+
+	if got := logs.count("no backend route"); got != 1 {
+		t.Errorf("%d unmatched connections produced %d route-miss lines, want 1", conns, got)
+	}
+}
+
+// TestRouteMissDoesNotMaskProxyDiagnostics pins that the two conditions are
+// throttled independently. A peer provoking a route miss must not be able to
+// suppress the PROXY-protocol refusal that a different peer would trigger,
+// which is why they hold separate limiters rather than sharing one.
+func TestRouteMissDoesNotMaskProxyDiagnostics(t *testing.T) {
+	l := &listener{}
+	if !l.routeLog.Allow(diagLogInterval) {
+		t.Fatal("first route-miss line was suppressed")
+	}
+	if !l.proxyLog.Allow(diagLogInterval) {
+		t.Error("a route miss suppressed the first PROXY-protocol diagnostic")
+	}
+	if l.routeLog.Allow(diagLogInterval) {
+		t.Error("second route-miss line inside the interval was admitted")
+	}
+}
+
 func TestUDPProxyRelay(t *testing.T) {
 	backend, stop := udpEcho(t)
 	defer stop()

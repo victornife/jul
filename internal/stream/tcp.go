@@ -17,11 +17,12 @@ import (
 	"jul/internal/proxyproto"
 )
 
-// proxyLogInterval is the shortest gap between two PROXY-protocol diagnostics
-// from one listener. Both a refusal and a rejected header are triggered by
-// whoever connects, so the line is a heartbeat rather than a per-connection
-// record. It matches the interval the HTTP boundary uses for the same reason.
-const proxyLogInterval = 10 * time.Second
+// diagLogInterval is the shortest gap between two diagnostics of one kind from
+// one listener. A refused connection, a rejected header and an unmatched route
+// are all triggered by whoever connects, so each line is a heartbeat rather
+// than a per-connection record. It matches the interval the HTTP boundary uses
+// for the same reason.
+const diagLogInterval = 10 * time.Second
 
 // serveTCP accepts connections until the listener is closed and relays each to
 // a backend in its own goroutine.
@@ -66,7 +67,7 @@ func (l *listener) handleTCP(client net.Conn) {
 		// address: degrading would let a direct client bypass the requirement
 		// simply by sending no header.
 		if !r.trustedProxies.Trusts(clientaddr.PeerFromRemoteAddr(clientAddr.String())) {
-			if l.proxyLog.Allow(proxyLogInterval) {
+			if l.proxyLog.Allow(diagLogInterval) {
 				s.log.Warn("stream: proxy-protocol connection refused from an untrusted peer", "addr", l.addr)
 			}
 			return
@@ -74,7 +75,7 @@ func (l *listener) handleTCP(client net.Conn) {
 		_ = client.SetReadDeadline(time.Now().Add(r.connectTimeout))
 		src, err := proxyproto.ReadHeader(br)
 		if err != nil {
-			if l.proxyLog.Allow(proxyLogInterval) {
+			if l.proxyLog.Allow(diagLogInterval) {
 				s.log.Warn("stream: proxy-protocol header rejected", "addr", l.addr, "error", err)
 			}
 			return
@@ -98,7 +99,9 @@ func (l *listener) handleTCP(client net.Conn) {
 		}
 	}
 	if pool == nil {
-		s.log.Warn("stream: no backend route for connection", "addr", l.addr)
+		if l.routeLog.Allow(diagLogInterval) {
+			s.log.Warn("stream: no backend route for connection", "addr", l.addr)
+		}
 		return
 	}
 
