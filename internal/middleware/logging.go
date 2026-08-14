@@ -33,11 +33,17 @@ type AccessRecord struct {
 	Client string
 	// Peer is the direct transport peer. It equals Client for a direct client
 	// and differs only when a trusted proxy asserted the client address.
-	Peer      string
-	RequestID string
-	TraceID   string
-	UserAgent string
-	Proto     string
+	Peer string
+	// ClientSource and ClientResult are the bounded enums describing how Client
+	// was derived. Without them a request whose chain failed is byte-identical
+	// in the log to one that genuinely originated at the proxy, because Peer is
+	// omitted when it equals Client.
+	ClientSource string
+	ClientResult string
+	RequestID    string
+	TraceID      string
+	UserAgent    string
+	Proto        string
 }
 
 // AccessSink consumes completed access-log records. The access-log middleware
@@ -78,6 +84,15 @@ func (s *SlogSink) Log(rec AccessRecord) {
 	if rec.Peer != "" && rec.Peer != rec.Client {
 		attrs = append(attrs, "peer_ip", rec.Peer)
 	}
+	// Same rule: the direct-deployment answer (peer/accepted) says nothing, but
+	// anything else is what an operator needs to tell a genuine proxy-originated
+	// request from one whose asserted chain was unusable.
+	if rec.ClientSource != "" && rec.ClientSource != clientaddr.SourcePeer.String() {
+		attrs = append(attrs, "client_addr_source", rec.ClientSource)
+	}
+	if rec.ClientResult != "" && rec.ClientResult != clientaddr.ResultAccepted.String() {
+		attrs = append(attrs, "client_addr_result", rec.ClientResult)
+	}
 	if rec.TraceID != "" {
 		attrs = append(attrs, "trace_id", rec.TraceID)
 	}
@@ -114,6 +129,9 @@ func AccessLog(sinks ...AccessSink) Middleware {
 				TraceID:   TraceIDFrom(r.Context()),
 				UserAgent: r.UserAgent(),
 				Proto:     r.Proto,
+			}
+			if id, ok := clientaddr.FromContext(r.Context()); ok {
+				record.ClientSource, record.ClientResult = id.Source.String(), id.Result.String()
 			}
 			for _, s := range sinks {
 				s.Log(record)
