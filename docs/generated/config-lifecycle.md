@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 288 |
-| Schema leaves (configurable values) | 243 |
-| Registry entries | 243 |
+| Schema paths (containers included) | 289 |
+| Schema leaves (configurable values) | 244 |
+| Registry entries | 244 |
 | Startup-consumed entries | 57 |
-| Class `hot_reload` | 172 |
+| Class `hot_reload` | 173 |
 | Class `restart_required` | 57 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -310,6 +310,7 @@ value is compared as a digest so no secret material leaves the process.
 | `stream.*.proxy_protocol` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.sni_routes.*` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.tls_passthrough` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
+| `stream.*.trusted_proxies` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `upstreams.*.backend_tls.ca_file` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
 | `upstreams.*.backend_tls.ca_mode` | `hot_reload` | `backend_tls` | — | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
 | `upstreams.*.backend_tls.client_cert` | `hot_reload` | `backend_tls` | digest | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |

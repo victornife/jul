@@ -55,6 +55,7 @@ Each `[[stream]]` block is one listener.
 | `sni_routes` | table | — | TLS server-name → backend map (TCP only); enables SNI inspection |
 | `tls_passthrough` | bool | `false` | Informational; implied when `sni_routes` is set |
 | `proxy_protocol` | string | `""` | PROXY-protocol mode (TCP only): `""`, `in`, `out`, `both` |
+| `trusted_proxies` | []string | empty | CIDR prefixes, or bare addresses, permitted to assert a client address with an inbound PROXY header. Required when `proxy_protocol` is `in` or `both`; rejected otherwise |
 | `connect_timeout` | duration | `10s` | Backend dial timeout |
 | `idle_timeout` | duration | `5m` | Close a relayed connection / UDP session after this idle period |
 | `max_udp_sessions` | int | `10000` | Cap on concurrent UDP sessions per listener (UDP only); see [UDP proxying](#udp-proxying) |
@@ -136,6 +137,7 @@ destination addresses across the hop. Jul.IA implements both v1 (text) and v2
 listen = "0.0.0.0:5432"
 proxy_pass = "postgres_pool"
 proxy_protocol = "both"
+trusted_proxies = ["10.0.0.0/8"]
 ```
 
 | Mode | Behaviour |
@@ -145,10 +147,23 @@ proxy_protocol = "both"
 | `out` | Prepend a PROXY v2 header (with the real client address) to the backend connection |
 | `both` | Parse inbound **and** emit outbound |
 
-Enable `in` only when the client is a trusted proxy that always prepends a
-header — a raw client that does not will fail to parse. Enable `out` only when
-the backend understands the PROXY protocol (e.g. NGINX `proxy_protocol`,
-PostgreSQL behind a PROXY-aware pooler, etc.).
+**`trusted_proxies` is required whenever a header is ingested** (`in` or
+`both`), and rejected when none is. A PROXY header is an *assertion*, not a
+kernel fact: whoever may send one chooses the address this listener reports and
+re-emits to the backend, and L4 backends commonly authorise by source address
+(`pg_hba.conf`, Redis, MySQL host grants). Believing it from any peer would hand
+that decision to the client.
+
+A connection from an address outside the set is **refused**, not degraded to its
+own socket address. This differs from the HTTP boundary on purpose: an HTTP
+listener legitimately serves proxied and direct traffic side by side, so it
+falls back to the peer, whereas a stream listener in `in` mode declares that
+*all* traffic arrives via the proxy — degrading would let a direct client bypass
+the requirement simply by sending no header. The set uses the same parser and
+canonical-prefix rule as [`client_address`](configuration.md#client-address-and-trusted-proxies).
+
+Enable `out` only when the backend understands the PROXY protocol (e.g. NGINX
+`proxy_protocol`, PostgreSQL behind a PROXY-aware pooler, etc.).
 
 ## UDP proxying
 

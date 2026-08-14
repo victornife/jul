@@ -73,12 +73,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 288
-  schema_leaves: 243
-  registry_entries: 243
+  schema_paths: 289
+  schema_leaves: 244
+  registry_entries: 244
   startup_consumed: 57
   by_class:
-    hot_reload: 172
+    hot_reload: 173
     restart_required: 57
     new_listener_only: 8
     ignored_deprecated: 4
@@ -990,6 +990,10 @@ fields:
     subsystem: stream
     reason: "the stream listener swaps its route pointer atomically on each successful reload"
   - path: "stream.*.tls_passthrough"
+    class: hot_reload
+    subsystem: stream
+    reason: "the stream listener swaps its route pointer atomically on each successful reload"
+  - path: "stream.*.trusted_proxies"
     class: hot_reload
     subsystem: stream
     reason: "the stream listener swaps its route pointer atomically on each successful reload"

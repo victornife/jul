@@ -548,6 +548,7 @@ func streamEntries() []Entry {
 		"stream.*.proxy_protocol",
 		"stream.*.sni_routes.*",
 		"stream.*.tls_passthrough",
+		"stream.*.trusted_proxies",
 	)
 	out = append(out,
 		newListener("stream.*.listen", SubStream, "an L4 listener is keyed by protocol and address; moving to a different address binds a new socket and retires the old one"),

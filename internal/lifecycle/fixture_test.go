@@ -326,6 +326,7 @@ func fullConfig() *config.Config {
 			SNIRoutes:      map[string]string{"db.example.com": "tcp://db"},
 			TLSPassthrough: true,
 			ProxyProtocol:  "both",
+			TrustedProxies: []string{"10.0.0.0/8"},
 			ConnectTimeout: config.Duration(10 * time.Second),
 			IdleTimeout:    config.Duration(300 * time.Second),
 			MaxUDPSessions: 10000,

@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/upstream"
 )
@@ -87,6 +88,7 @@ type route struct {
 	sniPools       map[string]*upstream.Pool // SNI host -> pool, incl "*" catch-all
 	proxyIn        bool
 	proxyOut       bool
+	trustedProxies *clientaddr.Policy // peers permitted to assert an inbound PROXY source
 	connectTimeout time.Duration
 	idleTimeout    time.Duration
 	maxUDPSessions int
@@ -311,6 +313,15 @@ func (s *Server) buildRoute(st config.StreamServer, upstreams map[string]config.
 		r.proxyOut = true
 	case "both":
 		r.proxyIn, r.proxyOut = true, true
+	}
+	if r.proxyIn {
+		// Empty, non-nil header list: L4 shares the trust set and its parser with
+		// the HTTP boundary, but never reads an HTTP forwarding header.
+		policy, err := clientaddr.NewPolicy(st.TrustedProxies, []string{}, 0)
+		if err != nil {
+			return nil, err
+		}
+		r.trustedProxies = policy
 	}
 
 	if strings.TrimSpace(st.ProxyPass) != "" {

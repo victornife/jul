@@ -1267,6 +1267,7 @@ proxy_pass = "dns_pool"
 | `sni_routes` | table | TLS server-name → backend map; routes by SNI **without terminating TLS** |
 | `tls_passthrough` | bool | Informational; implied whenever `sni_routes` is set |
 | `proxy_protocol` | string | HAProxy PROXY-protocol handling: `""`, `"in"`, `"out"`, or `"both"` |
+| `trusted_proxies` | []string | Peers permitted to assert a client address with an inbound PROXY header. Required when `proxy_protocol` is `"in"` or `"both"`, rejected otherwise; a connection from outside the set is refused |
 | `connect_timeout` | duration | Backend dial timeout (default `10s`) |
 | `idle_timeout` | duration | Close relayed connection / UDP session after this idle (default `5m`) |
 | `max_udp_sessions` | int | Cap concurrent UDP sessions (default `10000`) |

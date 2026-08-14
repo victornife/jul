@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"jul/internal/clientaddr"
 )
 
 // serveTCP accepts connections until the listener is closed and relays each to
@@ -51,6 +53,15 @@ func (l *listener) handleTCP(client net.Conn) {
 
 	clientAddr := client.RemoteAddr()
 	if r.proxyIn {
+		// The header is an assertion, so only a declared proxy may make it. A
+		// listener in "in" mode states that all traffic arrives via that proxy,
+		// so an untrusted peer is refused rather than degraded to its own
+		// address: degrading would let a direct client bypass the requirement
+		// simply by sending no header.
+		if !r.trustedProxies.Trusts(clientaddr.PeerFromRemoteAddr(clientAddr.String())) {
+			s.log.Warn("stream: proxy-protocol connection refused from an untrusted peer", "addr", l.addr)
+			return
+		}
 		_ = client.SetReadDeadline(time.Now().Add(r.connectTimeout))
 		src, err := readProxyHeader(br)
 		if err != nil {

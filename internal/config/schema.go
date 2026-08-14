@@ -78,6 +78,13 @@ type StreamServer struct {
 	// to the backend), or "both". It preserves the real client address across
 	// the proxy hop.
 	ProxyProtocol string `toml:"proxy_protocol"`
+	// TrustedProxies lists the CIDR prefixes, or bare addresses meaning a single
+	// host, permitted to assert a client address with an inbound PROXY header.
+	// It is required whenever ProxyProtocol ingests one ("in" or "both"): a
+	// PROXY header is an assertion, not a kernel fact, so believing it from any
+	// peer would let a direct connection choose the address the backend sees.
+	// A connection from an address outside this set is refused.
+	TrustedProxies []string `toml:"trusted_proxies"`
 	// ConnectTimeout bounds dialing the backend. Zero applies a 10s default.
 	ConnectTimeout Duration `toml:"connect_timeout"`
 	// IdleTimeout closes a relayed connection/UDP session after this period with

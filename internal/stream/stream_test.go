@@ -524,6 +524,7 @@ func TestProxyProtocolInAndOut(t *testing.T) {
 	s := newTestServer(t, Hooks{})
 	if err := s.Reload([]config.StreamServer{{
 		Listen: addr, Protocol: "tcp", ProxyPass: backend, ProxyProtocol: "both",
+		TrustedProxies: []string{"127.0.0.1", "::1"},
 	}}, nil); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -544,6 +545,37 @@ func TestProxyProtocolInAndOut(t *testing.T) {
 	got := string(buf[:n])
 	if !bytes.Contains(buf[:n], []byte("1.2.3.4:1111")) {
 		t.Errorf("backend saw source %q, want 1.2.3.4:1111", got)
+	}
+}
+
+// TestProxyProtocolRefusesAnUntrustedPeer pins the L4 trust boundary: a PROXY
+// header is an assertion, and only a declared proxy may make it. The listener
+// refuses rather than degrading to the socket peer, because "in" declares that
+// all traffic arrives via the proxy — degrading would let a direct client
+// bypass the requirement by sending no header at all.
+func TestProxyProtocolRefusesAnUntrustedPeer(t *testing.T) {
+	backend, stop := tcpProxyHeaderReader(t)
+	defer stop()
+	addr := freeTCPAddr(t)
+
+	s := newTestServer(t, Hooks{})
+	if err := s.Reload([]config.StreamServer{{
+		Listen: addr, Protocol: "tcp", ProxyPass: backend, ProxyProtocol: "both",
+		TrustedProxies: []string{"10.0.0.0/8"}, // the dialling peer is loopback
+	}}, nil); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	_, _ = c.Write([]byte("PROXY TCP4 1.2.3.4 5.6.7.8 1111 2222\r\n"))
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 256)
+	if n, err := c.Read(buf); err == nil {
+		t.Fatalf("untrusted peer was served %q, want the connection refused", buf[:n])
 	}
 }
 
