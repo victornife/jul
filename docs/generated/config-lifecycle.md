@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 299 |
-| Schema leaves (configurable values) | 253 |
-| Registry entries | 253 |
+| Schema paths (containers included) | 300 |
+| Schema leaves (configurable values) | 254 |
+| Registry entries | 254 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 181 |
+| Class `hot_reload` | 182 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -296,6 +296,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.tls.cert` | `restart_required` | `tls` | startup, per-address, cond., digest | TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart |
 | `servers.*.tls.client_auth.ca_file` | `restart_required` | `mtls` | startup, per-address, cond., digest | the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
 | `servers.*.tls.client_auth.crl_file` | `restart_required` | `mtls` | startup, per-address, cond., digest | the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
+| `servers.*.tls.client_auth.forward_certificate` | `hot_reload` | `mtls` | — | the client-certificate forwarding mode is read when the handler tree is rebuilt |
 | `servers.*.tls.client_auth.mode` | `restart_required` | `mtls` | startup, per-address, cond. | the client-certificate policy is written into the listener's tls.Config at bind time |
 | `servers.*.tls.client_auth.verify_san` | `restart_required` | `mtls` | startup, per-address, cond. | the SAN allow-list is captured by the listener's verify callback at bind time |
 | `servers.*.tls.enabled` | `restart_required` | `tls` | startup, per-address, cond. | whether the listener terminates TLS is decided when the address binds |

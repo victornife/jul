@@ -5,6 +5,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -485,6 +486,46 @@ func setCanonicalXForwarded(pr *httputil.ProxyRequest) {
 	if chain := forwardedChain(client, peer); chain != "" {
 		pr.Out.Header.Set("X-Forwarded-For", chain)
 	}
+	setClientCertHeaders(pr)
+}
+
+// certAssertionHeaders are the channels that convey a client certificate to a
+// backend. RFC 9440 §2.4 requires a terminating proxy to remove or overwrite
+// them on every request it forwards, *including* requests where no client
+// certificate was negotiated: a backend that trusts the header cannot tell an
+// assertion Jul made from one the client made. X-Forwarded-Client-Cert is the
+// widely deployed pre-standard spelling and is stripped on the same terms.
+var certAssertionHeaders = []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"}
+
+// setClientCertHeaders sanitizes the certificate-assertion channel and, when the
+// listener asks for it, emits Jul's own assertion.
+//
+// Sanitizing is unconditional, mirroring how X-Forwarded-* is cleared and
+// rebuilt on every request: the guarantee must be a property of the code, not of
+// the operator having remembered to list a header.
+func setClientCertHeaders(pr *httputil.ProxyRequest) {
+	for _, h := range certAssertionHeaders {
+		pr.Out.Header.Del(h)
+	}
+	id := middleware.PeerCertIdentityFrom(pr.In.Context())
+	if id == nil || len(id.Raw) == 0 {
+		return
+	}
+	pr.Out.Header.Set("Client-Cert", certItem(id.Raw))
+	if len(id.Chain) == 0 {
+		return
+	}
+	items := make([]string, 0, len(id.Chain))
+	for _, der := range id.Chain {
+		items = append(items, certItem(der))
+	}
+	pr.Out.Header.Set("Client-Cert-Chain", strings.Join(items, ", "))
+}
+
+// certItem renders DER as an RFC 8941 Byte Sequence: base64 delimited by colons
+// (RFC 9440 §2.1).
+func certItem(der []byte) string {
+	return ":" + base64.StdEncoding.EncodeToString(der) + ":"
 }
 
 // forwardedAddrs returns the canonical client and direct peer as text.

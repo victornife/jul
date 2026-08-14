@@ -168,6 +168,45 @@ upstream can tell verified and anonymous traffic apart.
 > overwrites the listed headers from the verified certificate (it does not pass a
 > client-supplied `X-Client-*` through), but the upstream should still be
 > reachable only via the proxy.
+>
+> Note the qualifier: **the listed headers**. Jul can only overwrite a header it
+> has been told about, so a backend that trusts a name the `headers` block does
+> not mention will receive whatever the client sent. Prefer the standard channel
+> below, which is sanitized unconditionally.
+
+## Standard forwarding: RFC 9440 `Client-Cert`
+
+[RFC 9440](https://www.rfc-editor.org/rfc/rfc9440.html) defines the standard way
+for a TLS-terminating proxy to convey a client certificate to an origin server:
+
+```toml
+[servers.tls.client_auth]
+mode                = "require"
+ca_file             = "/etc/jul/client-ca.pem"
+forward_certificate = "leaf"        # "none" (default), "leaf", or "chain"
+```
+
+`leaf` emits `Client-Cert` carrying the end-entity certificate; `chain` adds
+`Client-Cert-Chain` with the rest of the validation chain. Both are RFC 8941
+Byte Sequences — the DER, base64-encoded, delimited by colons.
+
+**`Client-Cert`, `Client-Cert-Chain` and the pre-standard
+`X-Forwarded-Client-Cert` are stripped from every proxied request**, whatever
+`forward_certificate` is set to, and including requests where no client
+certificate was negotiated — the RFC requires exactly this, because a backend
+that trusts the header otherwise cannot tell Jul's assertion from the client's.
+This is the same unconditional treatment `X-Forwarded-*` gets.
+
+Prefer this over `$ssl_client_*` for new deployments. The RFC deliberately
+carries the whole certificate rather than cherry-picking fields, because
+per-deployment field names make independent implementations hard to interoperate
+— which is the problem the NGINX-style variables have. They remain supported as
+the migration path.
+
+Two deployment notes: a base64 DER certificate is typically 1–2 KB, so a backend
+may need a larger maximum header size; and where Jul multiplexes many clients
+onto one HTTP/2 or HTTP/3 connection to the backend, the varying value reduces
+header-compression efficiency.
 
 ## Certificate revocation (CRL)
 

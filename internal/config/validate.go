@@ -740,6 +740,13 @@ func validateClientAuth(ca *ClientAuthConfig, where string) []error {
 			errs = append(errs, fmt.Errorf("%s: crl_file %q is a directory, want a PEM/DER file", where, f))
 		}
 	}
+	if fc := strings.ToLower(strings.TrimSpace(ca.ForwardCertificate)); fc != "" && fc != "none" {
+		if fc != "leaf" && fc != "chain" {
+			errs = append(errs, fmt.Errorf("%s: invalid forward_certificate %q (want none, leaf or chain)", where, ca.ForwardCertificate))
+		} else if !ca.Active() {
+			errs = append(errs, fmt.Errorf("%s: forward_certificate needs a client certificate to forward; set mode to request or require", where))
+		}
+	}
 	return errs
 }
 

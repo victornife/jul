@@ -446,6 +446,9 @@ func tlsEntries() []Entry {
 		secretDigest(bindBound("servers.*.tls.client_auth.ca_file", SubMTLS, "the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected")),
 		secretDigest(bindBound("servers.*.tls.client_auth.crl_file", SubMTLS, "the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected")),
 		bindBound("servers.*.tls.client_auth.verify_san", SubMTLS, "the SAN allow-list is captured by the listener's verify callback at bind time"),
+		// Unlike the rest of the block this is a handler concern: what Jul sends
+		// to a backend, not how the handshake is verified.
+		hot("servers.*.tls.client_auth.forward_certificate", SubMTLS, "the client-certificate forwarding mode is read when the handler tree is rebuilt"),
 	}
 	out = append(out, bindBoundGroup(SubACME, "the ACME manager, its account and its certificate cache are created for the listener at bind time",
 		"servers.*.tls.acme.ca",

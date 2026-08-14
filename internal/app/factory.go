@@ -358,7 +358,11 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		// upstream.
 		var cc middleware.Middleware
 		if (srv.TLS != nil && srv.TLS.ClientAuth.Active()) || loc.RequireClientCert {
-			cc = middleware.ClientCert(loc.RequireClientCert)
+			forward := middleware.ForwardCertNone
+			if srv.TLS != nil && srv.TLS.ClientAuth != nil {
+				forward = strings.ToLower(strings.TrimSpace(srv.TLS.ClientAuth.ForwardCertificate))
+			}
+			cc = middleware.ClientCert(loc.RequireClientCert, forward)
 		}
 		var pluginMW []middleware.Middleware
 		for _, name := range srv.Plugins {

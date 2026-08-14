@@ -685,6 +685,12 @@ type ClientAuthConfig struct {
 	// A client certificate whose serial number appears in it is rejected. The
 	// CRL's signature is verified against ca_file.
 	CRLFile string `toml:"crl_file"`
+	// ForwardCertificate conveys the verified client certificate to backends
+	// with the RFC 9440 Client-Cert header: "none" (default), "leaf", or
+	// "chain" (which adds Client-Cert-Chain). Those headers are stripped from
+	// every inbound request regardless of this setting, so a client can never
+	// assert one; this only controls whether Jul emits its own.
+	ForwardCertificate string `toml:"forward_certificate"`
 }
 
 // Active reports whether client-certificate authentication is enabled (a

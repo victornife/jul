@@ -82,10 +82,11 @@ func fullConfig() *config.Config {
 				Key:        "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----",
 				MinVersion: "1.3",
 				ClientAuth: &config.ClientAuthConfig{
-					Mode:      "require",
-					CAFile:    "/etc/ca.pem",
-					VerifySAN: []string{"example.com"},
-					CRLFile:   "/etc/crl.pem",
+					Mode:               "require",
+					CAFile:             "/etc/ca.pem",
+					VerifySAN:          []string{"example.com"},
+					CRLFile:            "/etc/crl.pem",
+					ForwardCertificate: "chain",
 				},
 				ACME: &config.ACMEConfig{
 					Enabled:      true,

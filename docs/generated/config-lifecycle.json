@@ -244,12 +244,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 299,
-    "schema_leaves": 253,
-    "registry_entries": 253,
+    "schema_paths": 300,
+    "schema_leaves": 254,
+    "registry_entries": 254,
     "startup_consumed": 58,
     "by_class": {
-      "hot_reload": 181,
+      "hot_reload": 182,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
       "restart_required": 58,
@@ -2623,6 +2623,19 @@
       "ignored": false,
       "reserved": false,
       "secret_digested": true
+    },
+    {
+      "path": "servers.*.tls.client_auth.forward_certificate",
+      "class": "hot_reload",
+      "subsystem": "mtls",
+      "reason": "the client-certificate forwarding mode is read when the handler tree is rebuilt",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
     },
     {
       "path": "servers.*.tls.client_auth.mode",

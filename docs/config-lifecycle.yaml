@@ -73,12 +73,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 299
-  schema_leaves: 253
-  registry_entries: 253
+  schema_paths: 300
+  schema_leaves: 254
+  registry_entries: 254
   startup_consumed: 58
   by_class:
-    hot_reload: 181
+    hot_reload: 182
     restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
@@ -922,6 +922,10 @@ fields:
     address_keyed: true
     conditional: true
     secret_digested: true
+  - path: "servers.*.tls.client_auth.forward_certificate"
+    class: hot_reload
+    subsystem: mtls
+    reason: "the client-certificate forwarding mode is read when the handler tree is rebuilt"
   - path: "servers.*.tls.client_auth.mode"
     class: restart_required
     subsystem: mtls

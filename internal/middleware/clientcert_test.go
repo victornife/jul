@@ -48,7 +48,7 @@ func TestClientCertRequireNoCert(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler should not run without a required client certificate")
 	})
-	h := ClientCert(true)(next)
+	h := ClientCert(true, ForwardCertNone)(next)
 
 	// No TLS state at all.
 	rec := httptest.NewRecorder()
@@ -66,7 +66,7 @@ func TestClientCertOptionalNoCertPasses(t *testing.T) {
 			t.Error("expected no identity when no certificate is presented")
 		}
 	})
-	h := ClientCert(false)(next)
+	h := ClientCert(false, ForwardCertNone)(next)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://x/", nil))
@@ -82,7 +82,7 @@ func TestClientCertPopulatesIdentity(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = PeerCertIdentityFrom(r.Context())
 	})
-	h := ClientCert(true)(next)
+	h := ClientCert(true, ForwardCertNone)(next)
 
 	req := httptest.NewRequest(http.MethodGet, "https://x/", nil)
 	req.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}}
