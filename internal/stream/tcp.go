@@ -16,6 +16,12 @@ import (
 	"jul/internal/clientaddr"
 )
 
+// proxyLogInterval is the shortest gap between two PROXY-protocol diagnostics
+// from one listener. Both a refusal and a rejected header are triggered by
+// whoever connects, so the line is a heartbeat rather than a per-connection
+// record. It matches the interval the HTTP boundary uses for the same reason.
+const proxyLogInterval = 10 * time.Second
+
 // serveTCP accepts connections until the listener is closed and relays each to
 // a backend in its own goroutine.
 func (l *listener) serveTCP() {
@@ -59,13 +65,17 @@ func (l *listener) handleTCP(client net.Conn) {
 		// address: degrading would let a direct client bypass the requirement
 		// simply by sending no header.
 		if !r.trustedProxies.Trusts(clientaddr.PeerFromRemoteAddr(clientAddr.String())) {
-			s.log.Warn("stream: proxy-protocol connection refused from an untrusted peer", "addr", l.addr)
+			if l.proxyLog.Allow(proxyLogInterval) {
+				s.log.Warn("stream: proxy-protocol connection refused from an untrusted peer", "addr", l.addr)
+			}
 			return
 		}
 		_ = client.SetReadDeadline(time.Now().Add(r.connectTimeout))
 		src, err := readProxyHeader(br)
 		if err != nil {
-			s.log.Warn("stream: proxy-protocol header rejected", "addr", l.addr, "error", err)
+			if l.proxyLog.Allow(proxyLogInterval) {
+				s.log.Warn("stream: proxy-protocol header rejected", "addr", l.addr, "error", err)
+			}
 			return
 		}
 		if src != nil {

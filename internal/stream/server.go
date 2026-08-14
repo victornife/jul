@@ -19,6 +19,7 @@ import (
 
 	"jul/internal/clientaddr"
 	"jul/internal/config"
+	"jul/internal/logthrottle"
 	"jul/internal/upstream"
 )
 
@@ -109,6 +110,11 @@ type listener struct {
 	udpLn  *net.UDPConn
 	route  atomic.Pointer[route]
 	wg     sync.WaitGroup
+
+	// proxyLog throttles the PROXY-protocol diagnostics, whose rate is chosen
+	// by whoever connects. It outlives a route swap, so a reload cannot be used
+	// to reset it.
+	proxyLog logthrottle.Limiter
 
 	udpMu       sync.Mutex
 	udpSessions map[string]*udpSession
