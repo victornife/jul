@@ -231,56 +231,82 @@ names — they are NGINX-familiar and the importer depends on that familiarity �
 `circuit_failures`/`circuit_open_for` aliases are introduced. One name per concept. They move into
 `[upstreams.resilience]` so the block is the whole surface.
 
-What is added is what the existing mechanism lacks: **the expiry check and the probe claim must be
-atomic together**, so that at most `circuit_half_open_probes` goroutines are admitted when the cooldown
-elapses. Today every concurrent request sees `available() == true` the instant `downUntil` elapses, so a
+What is added is what the existing mechanism lacks: a real **HALF_OPEN** state with a bounded probe
+allowance. Today every concurrent request sees `available() == true` the instant `downUntil` elapses, so a
 recovering backend takes the full production load.
 
-The normative requirement is the **semantics**, not a representation: exactly one goroutine may win the
-expiry transition; the remaining probe budget is published such that a concurrent reader can only
-under-admit, never over-admit; a probe failure re-opens immediately, ignoring `max_fails`; and a hung
-probe cannot wedge the backend, because the extended window expires and re-arms.
-
-The representation that satisfies it is **two atomics on `Backend` — the existing `downUntil` plus a new
-`probeSlots atomic.Int32`**:
+The circuit is an explicit three-state machine — `CLOSED`, `OPEN`, `HALF_OPEN` — whose transitions are
+guarded by a per-backend mutex. Transitions only execute when the backend is already failing, so the lock
+is never on the healthy path:
 
 ```go
-// Exactly one goroutine wins the window CAS and takes the first probe; it then
-// publishes the remaining budget. Losers claim a published slot, or are rejected.
-if b.downUntil.CompareAndSwap(du, now+openFor) {
-    b.probeSlots.Store(maxProbes - 1)
-    return true, true
-}
-for {
-    n := b.probeSlots.Load()
-    if n <= 0 {
-        return false, false
-    }
-    if b.probeSlots.CompareAndSwap(n, n-1) {
-        return true, true
-    }
+type circuit struct {
+    closed atomic.Bool          // fast-path hint: true iff state == CLOSED
+
+    mu             sync.Mutex
+    state          state        // closed | open | halfOpen
+    fails          int
+    openUntil      time.Time
+    halfOpenUntil  time.Time    // bounds HALF_OPEN itself
+    probesInFlight int
+    epoch          int64        // incremented on every transition
 }
 ```
 
-`probeSlots` is zero while the circuit is closed or open, so a goroutine arriving in the window between
-the CAS and the `Store` sees `0` and is rejected. The race resolves in the **safe direction**: it can
-under-admit a probe, never over-admit one.
+Admission, under `mu` and only when `closed.Load()` is false:
 
-The common path also gets cheaper than today, independently of the representation: `MarkSuccess`
-currently performs two unconditional stores on *every* successful request, and can instead load and skip
-the writes when the state is already clean.
+| State | Condition | Result |
+| --- | --- | --- |
+| `CLOSED` | — | admit normally |
+| `OPEN` | `now < openUntil` | reject `circuit_open` |
+| `OPEN` | `now >= openUntil` | → `HALF_OPEN`, `probesInFlight = 1`, set `halfOpenUntil`, admit as probe |
+| `HALF_OPEN` | `now >= halfOpenUntil` | → `OPEN` with a fresh window, reject |
+| `HALF_OPEN` | `maxProbes > 0 && probesInFlight >= maxProbes` | reject `circuit_open` |
+| `HALF_OPEN` | otherwise | `probesInFlight++`, admit as probe |
 
-> **Amendment, 2026-08-17.** This section originally specified that `fails`, `downUntil`, the open flag
-> and the probe count be *packed into one `atomic.Int64` per backend*, with an illustrative layout of
-> `1 / 31 / 32` bits. That specification was **arithmetically impossible**: the three named fields
-> consume all 64 bits, leaving nothing for `downUntil`, which the same pseudocode then read. A packed
-> word is only achievable by also re-representing the deadline as a process-relative coarse monotonic
-> value — a second design decision that was never made, that introduces a bespoke clock source, and that
-> must interoperate with the injected-clock test seam. Its only residual benefit over two atomics is one
-> CAS instead of two atomic operations, on a path that already takes a mutex inside the balancer. The
-> requirement was therefore restated as semantics plus the two-atomic design above, and packing is
-> recorded under Alternatives considered. Correct transition semantics outrank a single-word
-> optimisation.
+Two elements are load-bearing and easy to omit:
+
+- **`halfOpenUntil` bounds HALF_OPEN itself.** A probe may legitimately be a multi-hour gRPC stream or a
+  WebSocket. Without it, one outstanding probe pins the state indefinitely — never closing, never
+  re-opening. On expiry the circuit returns to `OPEN` regardless of probes still in flight.
+- **`epoch` invalidates stale results.** Admission returns the epoch; a result whose epoch no longer
+  matches is ignored, so a late probe cannot close a circuit that has since re-opened.
+
+`circuit_half_open_probes` is a genuine allowance: **any** request arriving during the half-open window
+may take a free slot, not merely those that happened to be racing at the instant of expiry. `0` means
+unbounded, consistent with `0 = unlimited` elsewhere in the block.
+
+The healthy path stays cheap and is still better than today. `MarkSuccess` currently performs two
+unconditional stores on *every* successful request; the fast-path hint reduces the common case to two
+atomic loads and no store:
+
+```go
+if ok && !isProbe && c.closed.Load() && c.fails.Load() == 0 {
+    return // closed, healthy, nothing to record
+}
+```
+
+> **Amendment 1, 2026-08-17.** This section originally specified packing `fails`, `downUntil`, the open
+> flag and the probe count into one `atomic.Int64`, with a `1 / 31 / 32` bit layout. That was
+> **arithmetically impossible**: the three named fields consume all 64 bits, leaving nothing for
+> `downUntil`, which the same pseudocode then read.
+>
+> **Amendment 2, 2026-08-17.** The two-atomic replacement (`downUntil` CAS plus a published
+> `probeSlots`) was *also* wrong, in a subtler way. Because the winner of the CAS re-armed `downUntil`
+> to a future deadline, every request arriving afterwards took the `now <= downUntil` branch and was
+> rejected as `OPEN` — so the published slots were reachable only by goroutines that had loaded the
+> stale deadline *before* the CAS landed. `circuit_half_open_probes > 1` therefore degenerated into
+> "however many goroutines happened to race at the instant of expiry", which is scheduler-dependent
+> rather than an allowance. The same defect made `= 0` yield exactly one probe rather than the
+> documented unbounded behaviour, and it forced the ADR to permit under-admission while the validation
+> section demanded a test asserting *exactly* N.
+>
+> The root cause of both amendments was the same: reaching for a lock-free representation on a path that
+> is, by definition, only executed when a backend is already failing. The record now specifies an
+> explicit state machine under a mutex, and the "may under-admit" allowance is withdrawn — with an
+> explicit `HALF_OPEN` state there is no publication race, so **exactly N** is both the contract and the
+> assertion. Packing and the two-atomic variant are recorded under Alternatives considered.
+> **Correct transition semantics outrank atomic cleverness.**
 
 `circuit_half_open_probes` **defaults to 1**, not to today's unbounded behavior. An unbounded recovery
 burst is bug-shaped rather than a feature, and there is no adoption to preserve it for.
@@ -480,7 +506,7 @@ gRPC streams, and function-scoped `defer` in transcoding.
 | Pending waiter FIFO | same | Pool; entries are request-lifetime | yes, waiters keep waiting | yes | `sync.Mutex` + `chan struct{}` cap 1 | pool close, or forced generation retirement |
 | Admission release closure | request | request | not applicable | not applicable | `sync.Once` | request end |
 | `Backend.inflight` | `Target.ID` if present, else address | backend identity | yes | yes if the key matches | `atomic.Int64` | backend replaced |
-| Circuit state (`fails`, `downUntil`, `probeSlots`) | same | backend identity | yes | yes if the key matches | `atomic.Int32` / `atomic.Int64`, CAS on the expiry transition | backend replaced, success, probe success |
+| Circuit state (state, `fails`, `openUntil`, `halfOpenUntil`, `probesInFlight`, `epoch`) | same | backend identity | yes | yes if the key matches | `sync.Mutex` on transitions; `atomic.Bool` closed-hint on the healthy path | backend replaced, success, probe success |
 | `Backend.activeHealthy` | same | backend identity | yes | yes if the key matches | `atomic.Bool` | backend replaced, probe threshold |
 | Retry-budget window | pool key | Pool | **yes, deliberately** | yes | two `atomic.Int64` pairs plus an epoch; mutex only on rotation | pool rebuild, window expiry |
 | Active health checker | pool key | Pool | yes if `upstreamMeta` is equal | not applicable | goroutine plus `pool.done` | pool rebuild |
@@ -647,7 +673,8 @@ configuration migration, which only holds if they are findable.
 | Jitter algorithm | full jitter | Best fleet de-synchronization with no tuning parameter | fleet-scale herd evidence |
 | Retry-budget window | 10s | Long enough to smooth bursts, short enough to react | soak data |
 | `min_free_retries` | 3 | Lets small pools fail over; governs low-traffic behavior entirely | **soak on two- and three-backend pools** |
-| Circuit state representation | `downUntil` + `probeSlots`, two atomics | Satisfies the atomicity requirement without a bespoke clock; races resolve toward under-admitting | a benchmark shows the second atomic is material |
+| Circuit state representation | explicit three-state machine under a per-backend mutex, with an `atomic.Bool` closed-hint | Transitions only run when the backend is already failing; obviously correct beats clever | a benchmark shows the closed-hint fast path is insufficient |
+| HALF_OPEN lifetime (`halfOpenUntil`) | `fail_timeout` | Bounds the state so one hung probe cannot pin it | streaming probes prove a different bound is needed |
 | Queue container | mutex plus FIFO of single-slot channels | See the admission decision | `BenchmarkAdmit_Contended` |
 | Timer strategy | one `time.Timer` per queued request | Bounded by `max_pending_requests` | allocation profile |
 | `retiredConnGrace` | 30s | Transcoding reconciler grace | pre-existing |
@@ -792,6 +819,7 @@ a single subsystem that AI and provider routing must reuse.
 
 | Alternative | Rejected because |
 | --- | --- |
+| Two atomics (`downUntil` CAS + published `probeSlots`) | The CAS winner re-armed `downUntil`, so every later arrival took the `now <= downUntil` branch and was rejected as OPEN. The published slots were reachable only by goroutines that loaded the stale deadline before the CAS landed, making `circuit_half_open_probes > 1` scheduler-dependent rather than an allowance, and `= 0` yield one probe rather than unbounded |
 | Packing circuit state into one `atomic.Int64` | The open flag, probe count and failure count consume all 64 bits, leaving none for `downUntil`. It fits only by re-representing the deadline as a process-relative coarse monotonic value — a bespoke clock source that must also interoperate with the injected-clock test seam — to save one atomic operation on a path that already takes a mutex in the balancer |
 | Adaptive rolling-window breaker (#116 Option B) | Three extra knobs and ambiguous low-traffic behavior, with no evidence of need |
 | Health checks plus retries only (#116 Option C) | Leaves overload and retry amplification unbounded |
