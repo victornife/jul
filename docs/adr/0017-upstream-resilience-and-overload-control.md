@@ -565,7 +565,7 @@ gRPC streams, and function-scoped `defer` in transcoding.
 | Pending waiter FIFO | same | Pool; entries are request-lifetime | yes, waiters keep waiting | yes | `sync.Mutex` + `chan struct{}` cap 1 | pool close, or forced generation retirement |
 | Admission release closure | request | request | not applicable | not applicable | `sync.Once` | request end |
 | `Backend.inflight` | `Target.ID` if present, else address | backend identity | yes | yes if the key matches | `atomic.Int64` | backend replaced |
-| Circuit state (state, `fails`, `openUntil`, `halfOpenUntil`, `probesInFlight`, `epoch`) | same | backend identity | yes | yes if the key matches | `sync.Mutex` on transitions; `atomic.Bool` closed-hint on the healthy path | backend replaced, success, probe success |
+| Circuit state (state, `fails`, `openUntil`, `halfOpenUntil`, `probesInFlight`, `epoch`) | same | backend identity | yes | yes if the key matches | `sync.Mutex` on transitions; `atomic.Bool` closed gate on the healthy path | backend replaced, success, probe success |
 | `Backend.activeHealthy` | same | backend identity | yes | yes if the key matches | `atomic.Bool` | backend replaced, probe threshold |
 | Retry-budget window | pool key | Pool | **yes, deliberately** | yes | two `atomic.Int64` pairs plus an epoch; mutex only on rotation | pool rebuild, window expiry |
 | Active health checker | pool key | Pool | yes if `upstreamMeta` is equal | not applicable | goroutine plus `pool.done` | pool rebuild |
@@ -732,7 +732,7 @@ configuration migration, which only holds if they are findable.
 | Jitter algorithm | full jitter | Best fleet de-synchronization with no tuning parameter | fleet-scale herd evidence |
 | Retry-budget window | 10s | Long enough to smooth bursts, short enough to react | soak data |
 | `min_free_retries` | 3 | Lets small pools fail over; governs low-traffic behavior entirely | **soak on two- and three-backend pools** |
-| Circuit state representation | explicit three-state machine under a per-backend mutex, with an `atomic.Bool` closed-hint | Transitions only run when the backend is already failing; obviously correct beats clever | a benchmark shows the closed-hint fast path is insufficient |
+| Circuit state representation | explicit three-state machine under a per-backend mutex, with an `atomic.Bool` closed gate | Transitions only run when the backend is already failing; obviously correct beats clever | a benchmark shows the closed gate fast path is insufficient |
 | HALF_OPEN lifetime (`halfOpenUntil`) | `fail_timeout` | Bounds the state so one hung probe cannot pin it | streaming probes prove a different bound is needed |
 | Queue container | mutex plus FIFO of single-slot channels | See the admission decision | `BenchmarkAdmit_Contended` |
 | Timer strategy | one `time.Timer` per queued request | Bounded by `max_pending_requests` | allocation profile |
