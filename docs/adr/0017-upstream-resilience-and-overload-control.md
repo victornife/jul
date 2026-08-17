@@ -241,21 +241,22 @@ is never on the healthy path:
 
 ```go
 type circuit struct {
-    // Read without mu on the healthy path.
-    closed atomic.Bool          // fast-path admission gate; see publication order below
-    fails  atomic.Int32         // consecutive failures while CLOSED
+    // Read without mu on the healthy path. 0 = slow path required;
+    // non-zero = CLOSED, and the value is this admission's epoch.
+    closedEpoch atomic.Uint64
+    fails       atomic.Int32    // consecutive failures while CLOSED; written under mu
 
     // Compound state; every transition is serialized by mu.
     mu             sync.Mutex
     state          state        // closed | open | halfOpen
+    epoch          uint64       // starts at 1, incremented on every transition
     openUntil      time.Time
     halfOpenUntil  time.Time    // bounds HALF_OPEN itself
     probesInFlight int
-    epoch          int64        // incremented on every transition
 }
 ```
 
-Admission, under `mu` and only when `closed.Load()` is false:
+Admission, under `mu` and only when `closedEpoch.Load()` is zero:
 
 | State | Condition | Result |
 | --- | --- | --- |
@@ -272,7 +273,10 @@ Two elements are load-bearing and easy to omit:
   WebSocket. Without it, one outstanding probe pins the state indefinitely — never closing, never
   re-opening. On expiry the circuit returns to `OPEN` regardless of probes still in flight.
 - **`epoch` invalidates stale results.** Admission returns the epoch; a result whose epoch no longer
-  matches is ignored, so a late probe cannot close a circuit that has since re-opened.
+  matches is ignored, so a late probe cannot close a circuit that has since re-opened. This is not only a
+  probe concern: an ordinary request admitted while CLOSED may complete after the circuit has opened,
+  recovered and closed again, and without a generation token its stale success would clear live failures or
+  its stale failure would contribute to a fresh sequence.
 
 `circuit_half_open_probes` is a genuine allowance. Normatively: **given at least N eligible contenders
 during a HALF_OPEN window, exactly `circuit_half_open_probes = N` probes are admitted concurrently; further
@@ -283,56 +287,83 @@ Crucially, **any** request arriving during the window may take a free slot; a re
 been racing at the instant of expiry. `0` means unbounded, consistent with `0 = unlimited` elsewhere in the
 block.
 
-**`fails` is atomic; the compound state is not.** CLOSED-state failure accounting and the success fast path
-read and write `fails` without `mu`, while every state *transition* is serialized by `mu`. When a failure
-count reaches the threshold, the failing goroutine takes `mu`, **re-checks the state and the threshold under
-the lock**, and only then transitions — the count alone never authorises a transition. This matches the
-representation the runtime already uses: `Backend.fails` is `atomic.Int32` today.
+**Failures take `mu`; only the healthy success path is lock-free.** A failure is by definition exceptional,
+and a backend failing often enough to contend on its own mutex is a backend that is about to be taken out of
+rotation anyway, so there is nothing to win by making failure accounting lock-free — and, as the amendments
+below record, three attempts to do so were wrong. Under `mu` the failure path compares the request's
+admission epoch with `c.epoch`, discards stale outcomes, and otherwise increments `fails` and transitions if
+the threshold is met. Because the increment and the threshold test happen in the same critical section, the
+"count alone never authorises a transition" rule is satisfied by construction rather than by a re-check.
+
+`fails` is nonetheless `atomic.Int32` — written under `mu`, but **read without it** by the success fast
+path. This matches the representation the runtime already uses: `Backend.fails` is `atomic.Int32` today.
 
 The healthy path stays cheap and is still better than today. `MarkSuccess` currently performs two
 unconditional stores on *every* successful request; the two atomic reads below reduce the common case to
-**`closed.Load()` and `fails.Load()`, and no store**:
+**`closedEpoch.Load()` and `fails.Load()`, and no store**:
 
 ```go
-if ok && !isProbe && c.closed.Load() && c.fails.Load() == 0 {
-    return // closed, healthy, nothing to record
+if ok && !isProbe && c.closedEpoch.Load() == admissionEpoch && c.fails.Load() == 0 {
+    return // same generation, closed, healthy — nothing to record
 }
 ```
 
-**`closed` is a publication gate, not a duplicate of `state`.** It answers exactly one question — may this
-request take the fast path? — and the transitions publish it in the order that makes a `true` reading safe:
+Comparing against `admissionEpoch` rather than merely testing for non-zero is what makes the fast path
+*sound* as well as cheap: a request whose generation has since changed falls through to the slow path and is
+discarded there.
+
+**`closedEpoch` is a publication gate that carries its own generation token.** It answers two questions in a
+single load — may this request take the fast path, and if so, which generation is it admitted into?
+Admission stays one atomic load:
+
+```go
+if epoch := c.closedEpoch.Load(); epoch != 0 {
+    return admission{epoch: epoch} // CLOSED; fast path, no mutex
+}
+// zero: fall through to the table above, under mu
+```
+
+The gate and the token must be **one word**. A separate `atomic.Uint64` epoch would reintroduce a multi-load
+consistency problem — the circuit can transition between the two loads — and a plain `int64` read outside
+`mu` is simply a data race. Combining them is what makes "admission returns the epoch" implementable on a
+path that does not take the lock.
+
+The transitions publish it in the order that makes a non-zero reading safe:
 
 ```go
 // CLOSED -> OPEN, mu held: close the gate first, then mutate state.
-c.closed.Store(false)
+c.closedEpoch.Store(0)
 c.state, c.openUntil = open, now.Add(fail_timeout)
 c.epoch++
 
-// -> CLOSED, mu held: establish the state first, then open the gate last.
+// -> CLOSED, mu held: establish the state first, then publish the generation last.
 c.state, c.probesInFlight = closed, 0
 c.fails.Store(0)
 c.epoch++
-c.closed.Store(true)
+c.closedEpoch.Store(c.epoch)
 ```
 
-The OPEN <-> HALF_OPEN transitions leave the gate closed throughout.
+The circuit is constructed CLOSED with `epoch = 1` and `closedEpoch = 1`; because `epoch` only ever
+increments, zero is never a live generation and is therefore unambiguous as the closed-gate sentinel. The
+OPEN <-> HALF_OPEN transitions leave the gate at zero throughout.
 
-The resulting invariant is deliberately one-directional: **`closed == true` means the fast path is
-permitted; `closed == false` only forces the slow path, and may do so conservatively.** There is therefore a
-short interval during the close transition where `state == CLOSED` while `closed == false`; requests in it
-take `mu` and are admitted by the `CLOSED` row above. That is correct and merely slower. It is also why the
-field must not be documented as "true iff `state == CLOSED`" — that reading invites someone to "re-sync" the
+The resulting invariant is deliberately one-directional: **a non-zero `closedEpoch` permits the fast path
+and names the generation; zero only forces the slow path, and may do so conservatively.** There is therefore
+a short interval during the close transition where `state == CLOSED` while the gate is still zero; requests
+in it take `mu` and are admitted by the `CLOSED` row above. That is correct and merely slower. It is also
+why the field must not be documented as a mirror of `state` — that reading invites someone to "re-sync" the
 two and reopen the window this ordering closes.
 
-An earlier draft of this section claimed a stale `true` admits "at most one" additional ordinary request.
-**That bound was unfounded.** Nothing serializes the fast-path loads, so any number of goroutines may read
-`true` in the window before the store; the bound is the concurrency in that window, not one. The correct
-statement is not a count but a linearization: every request that read `closed == true` did so **before** the
-gate closed, so it linearizes before the trip. These are pre-trip admissions, not post-trip ones, and their
-results are already handled — each carries its admission `epoch` and is ignored if the circuit has since
+An earlier draft of this section claimed a stale open gate admits "at most one" additional ordinary request.
+**That bound was unfounded.** Nothing serializes the fast-path loads, so any number of goroutines may read a
+non-zero gate in the window before the store; the bound is the concurrency in that window, not one. The
+correct statement is not a count but a linearization: every request that read a non-zero gate did so
+**before** the gate closed, so it linearizes before the trip. These are pre-trip admissions, not post-trip
+ones — and they are genuinely handled, because the load that admitted them is the same load that gave them
+their epoch. Their results are compared against `c.epoch` under `mu` and discarded if the circuit has since
 moved on.
 
-None of this weakens the probe guarantee. The fast path is unreachable once the gate is closed, and probe
+None of this weakens the probe guarantee. The fast path is unreachable once the gate is zero, and probe
 admission is decided under `mu`, so the half-open allowance remains exact.
 
 > **Amendment 1, 2026-08-17.** This section originally specified packing `fails`, `downUntil`, the open
@@ -366,6 +397,21 @@ admission is decided under `mu`, so the half-open allowance remains exact.
 > safe by construction and turns the population from "post-trip admissions" into requests that linearize
 > before the trip. This is the third correction to the same struct, all in the same direction: **do not
 > assert bounds on lock-free paths that the structure does not actually enforce.**
+>
+> **Amendment 4, 2026-08-18.** Amendment 3 was correct about ordering but left the gate unimplementable as
+> written. It kept `closed` as an `atomic.Bool` and `epoch` as a plain `int64` under `mu`, while also
+> requiring that admission return the epoch and that pre-trip ordinary requests carry it. A fast path that
+> does not take `mu` cannot read a mutex-guarded `int64` without a data race; taking `mu` would delete the
+> fast path; and a *separate* atomic epoch reintroduces a multi-load race, because the circuit can transition
+> between the gate load and the epoch load. The gate and the generation token are therefore **one word**,
+> `closedEpoch atomic.Uint64`, with zero as the closed-gate sentinel. Ordinary failure accounting moves under
+> `mu`, where it belongs — failures are exceptional, and the same critical section that increments `fails`
+> tests the threshold, so the transition rule holds by construction. `fails` stays atomic only because the
+> success fast path reads it without the lock.
+>
+> This is the fourth correction to the same struct. The first three tried to make the *failing* path
+> lock-free and were wrong three different ways; this one restores the single genuine lock-free requirement —
+> a cheap, sound healthy path — and pays for everything else with a mutex.
 
 `circuit_half_open_probes` **defaults to 1**, not to today's unbounded behavior. An unbounded recovery
 burst is bug-shaped rather than a feature, and there is no adoption to preserve it for.
@@ -565,7 +611,7 @@ gRPC streams, and function-scoped `defer` in transcoding.
 | Pending waiter FIFO | same | Pool; entries are request-lifetime | yes, waiters keep waiting | yes | `sync.Mutex` + `chan struct{}` cap 1 | pool close, or forced generation retirement |
 | Admission release closure | request | request | not applicable | not applicable | `sync.Once` | request end |
 | `Backend.inflight` | `Target.ID` if present, else address | backend identity | yes | yes if the key matches | `atomic.Int64` | backend replaced |
-| Circuit state (state, `fails`, `openUntil`, `halfOpenUntil`, `probesInFlight`, `epoch`) | same | backend identity | yes | yes if the key matches | `sync.Mutex` on transitions; `atomic.Bool` closed gate on the healthy path | backend replaced, success, probe success |
+| Circuit state (state, `closedEpoch`, `fails`, `epoch`, `openUntil`, `halfOpenUntil`, `probesInFlight`) | same | backend identity | yes | yes if the key matches | `sync.Mutex` on transitions and failures; `atomic.Uint64` closed-gate/epoch word on the healthy path | backend replaced, success, probe success |
 | `Backend.activeHealthy` | same | backend identity | yes | yes if the key matches | `atomic.Bool` | backend replaced, probe threshold |
 | Retry-budget window | pool key | Pool | **yes, deliberately** | yes | two `atomic.Int64` pairs plus an epoch; mutex only on rotation | pool rebuild, window expiry |
 | Active health checker | pool key | Pool | yes if `upstreamMeta` is equal | not applicable | goroutine plus `pool.done` | pool rebuild |
@@ -732,7 +778,7 @@ configuration migration, which only holds if they are findable.
 | Jitter algorithm | full jitter | Best fleet de-synchronization with no tuning parameter | fleet-scale herd evidence |
 | Retry-budget window | 10s | Long enough to smooth bursts, short enough to react | soak data |
 | `min_free_retries` | 3 | Lets small pools fail over; governs low-traffic behavior entirely | **soak on two- and three-backend pools** |
-| Circuit state representation | explicit three-state machine under a per-backend mutex, with an `atomic.Bool` closed gate | Transitions only run when the backend is already failing; obviously correct beats clever | a benchmark shows the closed gate fast path is insufficient |
+| Circuit state representation | explicit three-state machine under a per-backend mutex, with an `atomic.Uint64` closed-gate/epoch word | Transitions only run when the backend is already failing; obviously correct beats clever | a benchmark shows the closed-gate fast path is insufficient |
 | HALF_OPEN lifetime (`halfOpenUntil`) | `fail_timeout` | Bounds the state so one hung probe cannot pin it | streaming probes prove a different bound is needed |
 | Queue container | mutex plus FIFO of single-slot channels | See the admission decision | `BenchmarkAdmit_Contended` |
 | Timer strategy | one `time.Timer` per queued request | Bounded by `max_pending_requests` | allocation profile |
