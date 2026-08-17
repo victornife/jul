@@ -1,6 +1,6 @@
 # ADR 0017 — Upstream resilience and overload control
 
-- **Status:** Accepted — amended 2026-08-17 (circuit-state representation)
+- **Status:** Accepted — amended 2026-08-17 (explicit circuit state machine)
 - **Date:** 2026-08-13
 - **Deciders:** Jul.IA maintainer
 - **Applies to:** upstream pools and backends, HTTP reverse proxy, native gRPC passthrough, gRPC
@@ -241,11 +241,13 @@ is never on the healthy path:
 
 ```go
 type circuit struct {
-    closed atomic.Bool          // fast-path hint: true iff state == CLOSED
+    // Read without mu on the healthy path.
+    closed atomic.Bool          // true iff state == CLOSED
+    fails  atomic.Int32         // consecutive failures while CLOSED
 
+    // Compound state; every transition is serialized by mu.
     mu             sync.Mutex
     state          state        // closed | open | halfOpen
-    fails          int
     openUntil      time.Time
     halfOpenUntil  time.Time    // bounds HALF_OPEN itself
     probesInFlight int
@@ -272,19 +274,36 @@ Two elements are load-bearing and easy to omit:
 - **`epoch` invalidates stale results.** Admission returns the epoch; a result whose epoch no longer
   matches is ignored, so a late probe cannot close a circuit that has since re-opened.
 
-`circuit_half_open_probes` is a genuine allowance: **any** request arriving during the half-open window
-may take a free slot, not merely those that happened to be racing at the instant of expiry. `0` means
-unbounded, consistent with `0 = unlimited` elsewhere in the block.
+`circuit_half_open_probes` is a genuine allowance. Normatively: **given at least N eligible contenders
+during a HALF_OPEN window, exactly `circuit_half_open_probes = N` probes are admitted concurrently; further
+requests are rejected until a probe completes or the state changes.** "Exactly N" is conditioned on there
+being N contenders — with fewer, fewer are admitted, which is not under-admission but absence of demand.
+
+Crucially, **any** request arriving during the window may take a free slot; a request does not have to have
+been racing at the instant of expiry. `0` means unbounded, consistent with `0 = unlimited` elsewhere in the
+block.
+
+**`fails` is atomic; the compound state is not.** CLOSED-state failure accounting and the success fast path
+read and write `fails` without `mu`, while every state *transition* is serialized by `mu`. When a failure
+count reaches the threshold, the failing goroutine takes `mu`, **re-checks the state and the threshold under
+the lock**, and only then transitions — the count alone never authorises a transition. This matches the
+representation the runtime already uses: `Backend.fails` is `atomic.Int32` today.
 
 The healthy path stays cheap and is still better than today. `MarkSuccess` currently performs two
-unconditional stores on *every* successful request; the fast-path hint reduces the common case to two
-atomic loads and no store:
+unconditional stores on *every* successful request; the two atomic reads below reduce the common case to
+**`closed.Load()` and `fails.Load()`, and no store**:
 
 ```go
 if ok && !isProbe && c.closed.Load() && c.fails.Load() == 0 {
     return // closed, healthy, nothing to record
 }
 ```
+
+One consequence worth stating so it is not "fixed" later: `closed` is a hint published under `mu`, so a
+reader can observe a stale `true` for the instant between a trip and the store. At most one additional
+ordinary request may therefore be admitted to a backend that has just tripped. That is benign and
+self-correcting, and it **does not weaken the probe guarantee** — probe admission is decided under `mu`, so
+the half-open allowance remains exact.
 
 > **Amendment 1, 2026-08-17.** This section originally specified packing `fails`, `downUntil`, the open
 > flag and the probe count into one `atomic.Int64`, with a `1 / 31 / 32` bit layout. That was
@@ -901,7 +920,7 @@ memory, bounded goroutine count and correct multi-hour stream accounting.
 | --- | --- |
 | `upstreams.*.max_fails` | `upstreams.*.resilience.max_fails`, same meaning, now named as the circuit threshold |
 | `upstreams.*.fail_timeout` | `upstreams.*.resilience.fail_timeout`, same meaning |
-| `servers.*.locations.*.proxy_retries` | `retry_attempts`, valid at both pool and location level |
+| `servers.*.locations.*.proxy_retries` | **`retry_attempts` is the canonical spelling, valid at pool and location level. `proxy_retries` remains accepted as a deprecated alias through the current major; supplying both is a validation error; it is removed at the next major.** |
 | Passive cooldown | The same state, surfaced as `circuit_open` |
 | Tuning `max_fails` | No longer rebuilds the pool; state preserved, checkers not restarted |
 | `BackendProjection.healthy` | `BackendProjection.state` |
@@ -909,7 +928,11 @@ memory, bounded goroutine count and correct multi-hour stream accounting.
 | `fastcgi_pass = "name"` | Resolves as a named upstream instead of silently dialling TCP host `name` |
 | uWSGI dial timeout | Honors `proxy_connect_timeout` instead of a hardcoded 10s |
 
-Jul has no external adoption, so these renames are taken now rather than carried as aliases. The NGINX
+Jul has no external adoption, so most of these renames are taken now rather than carried as aliases. The
+one exception is `proxy_retries`, which is a live, consumed public field: because Jul rejects unknown TOML
+fields strictly, deleting the spelling would turn working configurations into startup and reload failures.
+Defaults preserve runtime behaviour, but a field rename does not preserve configuration compatibility, so it
+is carried as a deprecated alias with an explicit removal milestone rather than deleted. The NGINX
 importer maps the NGINX `max_fails` and `fail_timeout` directives onto the new paths, preserving the
 migration story.
 
