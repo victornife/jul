@@ -242,7 +242,7 @@ is never on the healthy path:
 ```go
 type circuit struct {
     // Read without mu on the healthy path.
-    closed atomic.Bool          // true iff state == CLOSED
+    closed atomic.Bool          // fast-path admission gate; see publication order below
     fails  atomic.Int32         // consecutive failures while CLOSED
 
     // Compound state; every transition is serialized by mu.
@@ -299,11 +299,41 @@ if ok && !isProbe && c.closed.Load() && c.fails.Load() == 0 {
 }
 ```
 
-One consequence worth stating so it is not "fixed" later: `closed` is a hint published under `mu`, so a
-reader can observe a stale `true` for the instant between a trip and the store. At most one additional
-ordinary request may therefore be admitted to a backend that has just tripped. That is benign and
-self-correcting, and it **does not weaken the probe guarantee** — probe admission is decided under `mu`, so
-the half-open allowance remains exact.
+**`closed` is a publication gate, not a duplicate of `state`.** It answers exactly one question — may this
+request take the fast path? — and the transitions publish it in the order that makes a `true` reading safe:
+
+```go
+// CLOSED -> OPEN, mu held: close the gate first, then mutate state.
+c.closed.Store(false)
+c.state, c.openUntil = open, now.Add(fail_timeout)
+c.epoch++
+
+// -> CLOSED, mu held: establish the state first, then open the gate last.
+c.state, c.probesInFlight = closed, 0
+c.fails.Store(0)
+c.epoch++
+c.closed.Store(true)
+```
+
+The OPEN <-> HALF_OPEN transitions leave the gate closed throughout.
+
+The resulting invariant is deliberately one-directional: **`closed == true` means the fast path is
+permitted; `closed == false` only forces the slow path, and may do so conservatively.** There is therefore a
+short interval during the close transition where `state == CLOSED` while `closed == false`; requests in it
+take `mu` and are admitted by the `CLOSED` row above. That is correct and merely slower. It is also why the
+field must not be documented as "true iff `state == CLOSED`" — that reading invites someone to "re-sync" the
+two and reopen the window this ordering closes.
+
+An earlier draft of this section claimed a stale `true` admits "at most one" additional ordinary request.
+**That bound was unfounded.** Nothing serializes the fast-path loads, so any number of goroutines may read
+`true` in the window before the store; the bound is the concurrency in that window, not one. The correct
+statement is not a count but a linearization: every request that read `closed == true` did so **before** the
+gate closed, so it linearizes before the trip. These are pre-trip admissions, not post-trip ones, and their
+results are already handled — each carries its admission `epoch` and is ignored if the circuit has since
+moved on.
+
+None of this weakens the probe guarantee. The fast path is unreachable once the gate is closed, and probe
+admission is decided under `mu`, so the half-open allowance remains exact.
 
 > **Amendment 1, 2026-08-17.** This section originally specified packing `fails`, `downUntil`, the open
 > flag and the probe count into one `atomic.Int64`, with a `1 / 31 / 32` bit layout. That was
@@ -326,6 +356,16 @@ the half-open allowance remains exact.
 > explicit `HALF_OPEN` state there is no publication race, so **exactly N** is both the contract and the
 > assertion. Packing and the two-atomic variant are recorded under Alternatives considered.
 > **Correct transition semantics outrank atomic cleverness.**
+>
+> **Amendment 3, 2026-08-17.** Amendment 2 described `closed` as a hint that is "true iff
+> `state == CLOSED`" and asserted that a stale reading admits **at most one** additional ordinary request.
+> The bound was unfounded — the fast-path loads are unsynchronised, so the number of goroutines that can
+> observe the stale `true` is whatever concurrency exists in that window. Rather than weaken the sentence to
+> "some", the design was fixed: `closed` is now a **publication gate** with a defined store order — closed
+> before the state mutates on a trip, opened last when the circuit closes — which makes a `true` reading
+> safe by construction and turns the population from "post-trip admissions" into requests that linearize
+> before the trip. This is the third correction to the same struct, all in the same direction: **do not
+> assert bounds on lock-free paths that the structure does not actually enforce.**
 
 `circuit_half_open_probes` **defaults to 1**, not to today's unbounded behavior. An unbounded recovery
 burst is bug-shaped rather than a feature, and there is no adoption to preserve it for.
@@ -525,7 +565,7 @@ gRPC streams, and function-scoped `defer` in transcoding.
 | Pending waiter FIFO | same | Pool; entries are request-lifetime | yes, waiters keep waiting | yes | `sync.Mutex` + `chan struct{}` cap 1 | pool close, or forced generation retirement |
 | Admission release closure | request | request | not applicable | not applicable | `sync.Once` | request end |
 | `Backend.inflight` | `Target.ID` if present, else address | backend identity | yes | yes if the key matches | `atomic.Int64` | backend replaced |
-| Circuit state (state, `fails`, `openUntil`, `halfOpenUntil`, `probesInFlight`, `epoch`) | same | backend identity | yes | yes if the key matches | `sync.Mutex` on transitions; `atomic.Bool` closed-hint on the healthy path | backend replaced, success, probe success |
+| Circuit state (state, `fails`, `openUntil`, `halfOpenUntil`, `probesInFlight`, `epoch`) | same | backend identity | yes | yes if the key matches | `sync.Mutex` on transitions; `atomic.Bool` closed gate on the healthy path | backend replaced, success, probe success |
 | `Backend.activeHealthy` | same | backend identity | yes | yes if the key matches | `atomic.Bool` | backend replaced, probe threshold |
 | Retry-budget window | pool key | Pool | **yes, deliberately** | yes | two `atomic.Int64` pairs plus an epoch; mutex only on rotation | pool rebuild, window expiry |
 | Active health checker | pool key | Pool | yes if `upstreamMeta` is equal | not applicable | goroutine plus `pool.done` | pool rebuild |
@@ -692,7 +732,7 @@ configuration migration, which only holds if they are findable.
 | Jitter algorithm | full jitter | Best fleet de-synchronization with no tuning parameter | fleet-scale herd evidence |
 | Retry-budget window | 10s | Long enough to smooth bursts, short enough to react | soak data |
 | `min_free_retries` | 3 | Lets small pools fail over; governs low-traffic behavior entirely | **soak on two- and three-backend pools** |
-| Circuit state representation | explicit three-state machine under a per-backend mutex, with an `atomic.Bool` closed-hint | Transitions only run when the backend is already failing; obviously correct beats clever | a benchmark shows the closed-hint fast path is insufficient |
+| Circuit state representation | explicit three-state machine under a per-backend mutex, with an `atomic.Bool` closed gate | Transitions only run when the backend is already failing; obviously correct beats clever | a benchmark shows the closed gate fast path is insufficient |
 | HALF_OPEN lifetime (`halfOpenUntil`) | `fail_timeout` | Bounds the state so one hung probe cannot pin it | streaming probes prove a different bound is needed |
 | Queue container | mutex plus FIFO of single-slot channels | See the admission decision | `BenchmarkAdmit_Contended` |
 | Timer strategy | one `time.Timer` per queued request | Bounded by `max_pending_requests` | allocation profile |
