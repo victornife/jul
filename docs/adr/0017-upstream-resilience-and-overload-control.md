@@ -1,6 +1,6 @@
 # ADR 0017 — Upstream resilience and overload control
 
-- **Status:** Accepted
+- **Status:** Accepted — amended 2026-08-17 (circuit-state representation)
 - **Date:** 2026-08-13
 - **Deciders:** Jul.IA maintainer
 - **Applies to:** upstream pools and backends, HTTP reverse proxy, native gRPC passthrough, gRPC
@@ -231,12 +231,56 @@ names — they are NGINX-familiar and the importer depends on that familiarity �
 `circuit_failures`/`circuit_open_for` aliases are introduced. One name per concept. They move into
 `[upstreams.resilience]` so the block is the whole surface.
 
-What is added is what the existing mechanism lacks. `fails`, `downUntil`, the open flag and a half-open
-probe count are packed into **one `atomic.Int64` per backend**, so a transition is a single CAS and **at
-most `circuit_half_open_probes` goroutines are admitted at expiry**. Today every concurrent request is
-admitted the instant `downUntil` elapses, so a recovering backend takes the full load. The packing also
-makes the common path cheaper than today: a successful request performs a load and skips the write when
-the word is already clean, instead of two unconditional stores.
+What is added is what the existing mechanism lacks: **the expiry check and the probe claim must be
+atomic together**, so that at most `circuit_half_open_probes` goroutines are admitted when the cooldown
+elapses. Today every concurrent request sees `available() == true` the instant `downUntil` elapses, so a
+recovering backend takes the full production load.
+
+The normative requirement is the **semantics**, not a representation: exactly one goroutine may win the
+expiry transition; the remaining probe budget is published such that a concurrent reader can only
+under-admit, never over-admit; a probe failure re-opens immediately, ignoring `max_fails`; and a hung
+probe cannot wedge the backend, because the extended window expires and re-arms.
+
+The representation that satisfies it is **two atomics on `Backend` — the existing `downUntil` plus a new
+`probeSlots atomic.Int32`**:
+
+```go
+// Exactly one goroutine wins the window CAS and takes the first probe; it then
+// publishes the remaining budget. Losers claim a published slot, or are rejected.
+if b.downUntil.CompareAndSwap(du, now+openFor) {
+    b.probeSlots.Store(maxProbes - 1)
+    return true, true
+}
+for {
+    n := b.probeSlots.Load()
+    if n <= 0 {
+        return false, false
+    }
+    if b.probeSlots.CompareAndSwap(n, n-1) {
+        return true, true
+    }
+}
+```
+
+`probeSlots` is zero while the circuit is closed or open, so a goroutine arriving in the window between
+the CAS and the `Store` sees `0` and is rejected. The race resolves in the **safe direction**: it can
+under-admit a probe, never over-admit one.
+
+The common path also gets cheaper than today, independently of the representation: `MarkSuccess`
+currently performs two unconditional stores on *every* successful request, and can instead load and skip
+the writes when the state is already clean.
+
+> **Amendment, 2026-08-17.** This section originally specified that `fails`, `downUntil`, the open flag
+> and the probe count be *packed into one `atomic.Int64` per backend*, with an illustrative layout of
+> `1 / 31 / 32` bits. That specification was **arithmetically impossible**: the three named fields
+> consume all 64 bits, leaving nothing for `downUntil`, which the same pseudocode then read. A packed
+> word is only achievable by also re-representing the deadline as a process-relative coarse monotonic
+> value — a second design decision that was never made, that introduces a bespoke clock source, and that
+> must interoperate with the injected-clock test seam. Its only residual benefit over two atomics is one
+> CAS instead of two atomic operations, on a path that already takes a mutex inside the balancer. The
+> requirement was therefore restated as semantics plus the two-atomic design above, and packing is
+> recorded under Alternatives considered. Correct transition semantics outrank a single-word
+> optimisation.
 
 `circuit_half_open_probes` **defaults to 1**, not to today's unbounded behavior. An unbounded recovery
 burst is bug-shaped rather than a feature, and there is no adoption to preserve it for.
@@ -436,7 +480,7 @@ gRPC streams, and function-scoped `defer` in transcoding.
 | Pending waiter FIFO | same | Pool; entries are request-lifetime | yes, waiters keep waiting | yes | `sync.Mutex` + `chan struct{}` cap 1 | pool close, or forced generation retirement |
 | Admission release closure | request | request | not applicable | not applicable | `sync.Once` | request end |
 | `Backend.inflight` | `Target.ID` if present, else address | backend identity | yes | yes if the key matches | `atomic.Int64` | backend replaced |
-| Circuit word (open, until, probes, fails) | same | backend identity | yes | yes if the key matches | `atomic.Int64` + CAS | backend replaced, success, probe success |
+| Circuit state (`fails`, `downUntil`, `probeSlots`) | same | backend identity | yes | yes if the key matches | `atomic.Int32` / `atomic.Int64`, CAS on the expiry transition | backend replaced, success, probe success |
 | `Backend.activeHealthy` | same | backend identity | yes | yes if the key matches | `atomic.Bool` | backend replaced, probe threshold |
 | Retry-budget window | pool key | Pool | **yes, deliberately** | yes | two `atomic.Int64` pairs plus an epoch; mutex only on rotation | pool rebuild, window expiry |
 | Active health checker | pool key | Pool | yes if `upstreamMeta` is equal | not applicable | goroutine plus `pool.done` | pool rebuild |
@@ -603,7 +647,7 @@ configuration migration, which only holds if they are findable.
 | Jitter algorithm | full jitter | Best fleet de-synchronization with no tuning parameter | fleet-scale herd evidence |
 | Retry-budget window | 10s | Long enough to smooth bursts, short enough to react | soak data |
 | `min_free_retries` | 3 | Lets small pools fail over; governs low-traffic behavior entirely | **soak on two- and three-backend pools** |
-| Circuit word bit layout | 1 / 31 / 32 | Fits one `atomic.Int64` | not expected |
+| Circuit state representation | `downUntil` + `probeSlots`, two atomics | Satisfies the atomicity requirement without a bespoke clock; races resolve toward under-admitting | a benchmark shows the second atomic is material |
 | Queue container | mutex plus FIFO of single-slot channels | See the admission decision | `BenchmarkAdmit_Contended` |
 | Timer strategy | one `time.Timer` per queued request | Bounded by `max_pending_requests` | allocation profile |
 | `retiredConnGrace` | 30s | Transcoding reconciler grace | pre-existing |
@@ -748,6 +792,7 @@ a single subsystem that AI and provider routing must reuse.
 
 | Alternative | Rejected because |
 | --- | --- |
+| Packing circuit state into one `atomic.Int64` | The open flag, probe count and failure count consume all 64 bits, leaving none for `downUntil`. It fits only by re-representing the deadline as a process-relative coarse monotonic value — a bespoke clock source that must also interoperate with the injected-clock test seam — to save one atomic operation on a path that already takes a mutex in the balancer |
 | Adaptive rolling-window breaker (#116 Option B) | Three extra knobs and ambiguous low-traffic behavior, with no evidence of need |
 | Health checks plus retries only (#116 Option C) | Leaves overload and retry amplification unbounded |
 | AI or provider-specific resilience (#116 Option D) | Duplicates transport policy; inconsistent behavior and observability |
@@ -803,8 +848,8 @@ defaulting, and configuration validation. Deterministic state-machine tests for 
 the existing injected-clock seam, never wall-clock sleeps. Race-detector tests for concurrent admission
 storms asserting non-negative counters and a non-increasing over-limit delta. A dedicated test for the
 queue handoff-versus-cancel race, run repeatedly. A test proving forced generation retirement wakes and
-rejects parked waiters. A property test round-tripping the packed circuit word across the full
-transition space, and a concurrent-expiry test asserting that **exactly** `circuit_half_open_probes`
+rejects parked waiters. A state-machine property test driving the full transition space against a model,
+and a concurrent-expiry test asserting that **exactly** `circuit_half_open_probes`
 goroutines are admitted. A stream-proxy test proving TCP dial failures drive the same state machine as
 HTTP failures. Fuzz tests for retry-budget window rotation under adversarial timestamps and for policy
 resolution against arbitrary TOML.
