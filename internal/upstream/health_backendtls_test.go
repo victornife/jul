@@ -370,13 +370,18 @@ func TestPrivateCABackendIsBothReachableAndHealthy(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	// The health path must reach the same verdict.
-	select {
-	case ok := <-probes:
-		if !ok {
-			t.Fatal("a private-CA backend that live traffic verifies failed its health probe")
+	// The health path must reach the same verdict. Jitter means the first probe
+	// can be a transient failure, so we keep waiting until we observe a
+	// successful probe or time out.
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ok := <-probes:
+			if ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("no successful health probe was observed for a private-CA backend that live traffic verifies")
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("no health probe was observed")
 	}
 }
