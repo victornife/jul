@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.5 · Updated 2026-08-09
+> Version 2.6 · Updated 2026-08-17
 >
 > This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
 > with a portfolio model. Delivered feature maturity remains authoritative in the
@@ -38,7 +38,7 @@ portfolio has parallel lanes.
 | **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ✅ complete: #89 |
 | **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ✅ complete: #77 → #78 → #79 → #80 → #81 → #82 |
 | **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ▶ in progress: #115 accepted (ADR 0016) and #116 accepted (ADR 0017); #117 → #118 remain |
-| **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ⬜ planned; gated by governing ADRs |
+| **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ▶ in progress: canonical client identity (#135 → #136 → #259) and backend trust (#137 → #138 → #139 → #140) complete; generic resilience (#141-#144) unblocked and next; routing/automation gated by #117/#118 |
 | **7 — Selected runtime dynamics** | Value-ranked certificate, credential, logging, sink, cache-policy, and Alt-Svc transitions | Selected settings are safely dynamic; structural settings retain planned restart | ⬜ planned |
 | **8 — Migration and diagnostics** | NGINX assessment, provenance, compatibility corpus, support bundle, `jul doctor` | Operator-safe evidence and recovery workflows | ⬜ planned |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | Promote, continue experimental, freeze, extract, remove, or defer | 🔒 gated |
@@ -53,7 +53,7 @@ The roadmap deliberately consolidates the more granular numbering in #62:
 - roadmap Stage 2 = #62 Stage 3 cache correctness and recertification (complete);
 - roadmap Stage 3 = #62 lifecycle authority (#89), complete;
 - roadmap Stage 4 = #62 structured configuration Phase 5 (#77 → #78 → #79 → #80 → #81 → #82), complete;
-- roadmap Stage 5 = the next #62 core architecture-decision stage, ordered #115 → #116 → #117 → #118 and not yet started.
+- roadmap Stage 5 = the #62 core architecture-decision stage, ordered #115 → #116 → #117 → #118; #115 and #116 are accepted and closed, #117 is next.
 
 This avoids two competing execution models. #62 owns issue-level status;
 this roadmap owns the durable portfolio sequence.
@@ -73,9 +73,9 @@ v1.32.1-rc.1 — independently verified published prerelease (complete; not stab
     ↓
 #77 → #78 → #79 → #80 → #81 → #82 — structured configuration Phase 5 (complete)
     ↓
-#115 → #116 → #117 → #118 — core architecture decisions (next; #115 READY / NEXT, not started)
+#115 → #116 → #117 → #118 — core architecture decisions (#115/#116 accepted and closed; #117 READY / NEXT, not started)
     ↓
-selected core implementations, each gated by its governing ADR
+selected core implementations: inbound identity and backend trust already complete under #115; generic resilience (#141 → #142 → #143 → #144) unblocked under #116; routing/automation gated by #117/#118
 ```
 
 The selected correction tranche and its published `v1.32.1-rc.1`
@@ -85,10 +85,13 @@ GA on the strength of the 2026-08-07 recertification. Closed-world lifecycle
 authority (#89), the shared atomic patch assessment (#77), typed Route workflows
 (#78), typed App/upstream workflows (#79), sparse global operations (#80), the
 Global and Traffic Controls Console migration (#81), and the Phase 5 closure
-work (#82) are complete. The next stage is the architecture-decision sequence
-#115 → #116 → #117 → #118; #115 is READY / NEXT, but implementation has not
-started. Shared edits to configuration authority, trust, resilience, routing,
-or downstream implementation remain gated by those decisions.
+work (#82) are complete. #115 and #116 are accepted and closed: their
+implementation lanes — inbound identity (#135 → #136 → #259) and backend trust
+(#137 → #138 → #139 → #140) — are complete, and generic resilience
+(#141 → #142 → #143 → #144) is unblocked. The architecture-decision sequence's
+remaining stage is #117 → #118; #117 is READY / NEXT, but implementation has not
+started. Shared edits to routing policy, configuration authority or automation
+remain gated by those decisions.
 
 Phase 5 closure does not authorize universal hot reload, does not imply dynamic
 cache backend replacement, and does not automatically continue into an AI
@@ -115,10 +118,10 @@ Gateway. Correctness or security findings may still interrupt later work.
 ### Remaining immediate correctness
 
 No Phase 5 correctness item remains open. Preserve the certified cache,
-lifecycle, and structured-configuration baseline while #115 → #116 → #117 →
-#118 proceeds through architecture decisions. Any newly discovered correctness
-or security defect may pre-empt that sequence and must be handled on its own
-focused correction path.
+lifecycle, and structured-configuration baseline while #117 → #118 proceed
+through their remaining architecture decisions. Any newly discovered
+correctness or security defect may pre-empt that sequence and must be handled
+on its own focused correction path.
 
 ### Required quality foundation
 
@@ -137,11 +140,13 @@ GitHub Release is published as a prerelease; see the
 [candidate evidence](../release-candidates/v1.32.1-rc.1.md). Stable publication
 remains a later explicit decision. The response-cache correctness programme,
 closed-world lifecycle authority, and the full #77 → #82 structured-configuration
-programme have since completed on `main`. The next programme stage is the
-#115 → #116 → #117 → #118 architecture-decision sequence. #115 is accepted as
-[ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) and its
-implementation has started: the inbound lane runs #135 → #136 → #259 and the
-backend lane #137 → #138 and #139 (both required) → #140.
+programme have since completed on `main`. #115 is accepted as
+[ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) and #116 is
+accepted as [ADR 0017](../adr/0017-upstream-resilience-and-overload-control.md).
+The two implementation lanes #115 unblocked are complete: the inbound lane
+#135 → #136 → #259 and the backend lane #137 → #138 → #139 → #140. The next
+programme stage is #117 → #118, plus the now-unblocked generic-resilience
+implementation lane (#141 → #142 → #143 → #144) under #116.
 
 ## Core Gateway Completeness backlog
 
@@ -188,15 +193,23 @@ Backend transport trust is complete. The capability ships as **Beta** (see
 
 ### Generic resilience
 
-Implement in this order:
+Decided by [ADR 0017](../adr/0017-upstream-resilience-and-overload-control.md);
+implemented as #141 → #142 → #143 → #144, in this order:
 
-1. active-request, pending-request, connection, and concurrency limits;
-2. retry budget, attempt deadline, backoff, jitter, and replayability rules;
-3. a simple closed/open/half-open circuit breaker;
-4. outlier ejection only after evidence justifies additional state.
+1. active-request, pending-request, connection, and concurrency limits (#141);
+2. retry budget, attempt deadline, backoff, jitter, and replayability rules (#142);
+3. a simple closed/open/half-open circuit breaker, reusing the existing
+   `max_fails`/`fail_timeout` passive-health mechanism rather than introducing
+   parallel `circuit_failures`/`circuit_open_for` names (#143);
+4. outlier ejection only after evidence justifies additional state (deferred
+   from #143's initial scope);
+5. bounded metrics, API/Console surfaces, deterministic fault injection, E2E,
+   benchmarks and soak (#144).
 
-These primitives must be reused by future AI/provider routing rather than
-reimplemented in a category-specific subsystem.
+`[DRAFT]` was removed from all four issues once #116 was accepted; they are
+now **READY**, unblocked, and not yet started. These primitives must be reused
+by future AI/provider routing rather than reimplemented in a category-specific
+subsystem.
 
 ### Routing and response policy
 
