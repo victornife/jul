@@ -305,3 +305,57 @@ func saturatedPool(t *testing.T, addr string) *upstream.Pool {
 	}
 	return pool
 }
+
+// TestForwardAuthFailsClosedWhenEveryReplicaIsUnreachable pins the fail-closed
+// rule for the case a pool adds: the retry sequence runs out of backends. It is
+// a different code path from a single transport error, and it is the one an
+// operator meets during a real auth-service outage.
+func TestForwardAuthFailsClosedWhenEveryReplicaIsUnreachable(t *testing.T) {
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:     "authpool",
+		Strategy: "round_robin",
+		Servers: []config.UpstreamServer{
+			{Address: "127.0.0.1:1", Weight: 1},
+			{Address: "127.0.0.1:2", Weight: 1},
+		},
+		MaxFails:    1000,
+		FailTimeout: config.Duration(time.Minute),
+	}, "http")
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	a, err := New(context.Background(), config.AuthConfig{
+		ForwardAuth: &config.ForwardAuthConfig{URL: "http://auth.example/verify"},
+	}, Options{ForwardPool: pool})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var served atomic.Int64
+	h := a.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { served.Add(1) }))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://app.example/secret", nil))
+
+	if served.Load() != 0 {
+		t.Fatal("the request was allowed through with every auth replica unreachable")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+// TestAuthDependencyDefaultClients pins that omitting a client still yields a
+// bounded one, so a caller cannot accidentally build a dependency with no
+// timeout at all.
+func TestAuthDependencyDefaultClients(t *testing.T) {
+	fa := newForwardAuth("http://auth.example", nil, nil, nil)
+	if fa.dep.client == nil || fa.dep.client.Timeout != DefaultDependencyTimeout {
+		t.Fatalf("forward-auth default client = %+v, want a %s timeout", fa.dep.client, DefaultDependencyTimeout)
+	}
+	c := newJWKSCache("https://issuer.example/jwks.json", nil, nil)
+	if c.dep.client == nil || c.dep.client.Timeout != DefaultDependencyTimeout {
+		t.Fatalf("JWKS default client = %+v, want a %s timeout", c.dep.client, DefaultDependencyTimeout)
+	}
+}

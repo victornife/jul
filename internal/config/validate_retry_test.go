@@ -97,3 +97,47 @@ func TestRetryDefaultsAreAccepted(t *testing.T) {
 		t.Fatalf("an empty location resilience block was rejected: %v", errs)
 	}
 }
+
+// TestAuthDependencyTimeoutIsBounded pins that an auth timeout is finite. An
+// unbounded auth call is a request that never resolves either way, which is
+// worse than a denial because nothing reports it.
+func TestAuthDependencyTimeoutIsBounded(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		auth    AuthConfig
+		wantErr bool
+	}{
+		{
+			name: "an unset forward-auth timeout is valid",
+			auth: AuthConfig{ForwardAuth: &ForwardAuthConfig{URL: "https://auth.example"}},
+		},
+		{
+			name:    "a forward-auth timeout past the ceiling is rejected",
+			auth:    AuthConfig{ForwardAuth: &ForwardAuthConfig{URL: "https://auth.example", Timeout: Duration(61 * time.Second)}},
+			wantErr: true,
+		},
+		{
+			name:    "a negative forward-auth timeout is rejected",
+			auth:    AuthConfig{ForwardAuth: &ForwardAuthConfig{URL: "https://auth.example", Timeout: Duration(-time.Second)}},
+			wantErr: true,
+		},
+		{
+			name:    "a jwt timeout past the ceiling is rejected",
+			auth:    AuthConfig{JWT: &JWTAuthConfig{JWKSURL: "https://issuer.example/jwks.json", Timeout: Duration(2 * time.Minute)}},
+			wantErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validateAuth(&tc.auth, "servers[0].locations[0].auth")
+			var timeoutErr bool
+			for _, e := range errs {
+				if strings.Contains(e.Error(), "timeout must be between") {
+					timeoutErr = true
+				}
+			}
+			if timeoutErr != tc.wantErr {
+				t.Fatalf("timeout rejected = %v, want %v (errors: %v)", timeoutErr, tc.wantErr, errs)
+			}
+		})
+	}
+}
