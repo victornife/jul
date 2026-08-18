@@ -55,26 +55,10 @@ func (s *PoolSnapshot) pickExcluding(excluded map[BackendIdentity]struct{}) (*Ba
 	if s.dynamic {
 		return s.pool.pickExcluding(excluded)
 	}
-	now := time.Now().UnixNano()
-	avail := make([]*Backend, 0, len(s.backends))
-	for _, b := range s.backends {
-		if !b.available(now) {
-			continue
-		}
-		if _, ok := excluded[b.Identity()]; ok {
-			continue
-		}
-		avail = append(avail, b)
-	}
-	if len(avail) == 0 {
-		return nil, ErrNoAvailableBackend
-	}
-	b := s.balancer.pick(avail)
-	if b == nil {
-		return nil, ErrNoAvailableBackend
-	}
-	b.acquire()
-	return b, nil
+	// The live pool owns the policy even for a frozen snapshot: a resilience
+	// reload swaps a pointer without rebuilding the pool, so a per-backend limit
+	// takes effect on in-flight generations too.
+	return selectBackend(s.backends, s.balancer, s.pool.Policy().MaxActivePerBackend(), excluded)
 }
 
 // Backends returns the snapshot's backend set. The returned slice must not be
@@ -143,9 +127,22 @@ func (p *Pool) PickExcluding(ctx context.Context, excluded map[BackendIdentity]s
 // pickExcluding selects an available backend from the live pool, skipping any
 // backend whose stable identity is in excluded.
 func (p *Pool) pickExcluding(excluded map[BackendIdentity]struct{}) (*Backend, error) {
+	return selectBackend(*p.backends.Load(), p.balancer, p.Policy().MaxActivePerBackend(), excluded)
+}
+
+// selectBackend filters a candidate set down to the eligible backends and asks
+// the balancer to choose one.
+//
+// perBackend is applied here, as a filter, and never as a second queue. Nesting
+// a wait inside backend selection is a deadlock generator and blocks one
+// backend's traffic behind another's, so a saturated backend is simply not a
+// candidate. When every otherwise-usable backend is saturated the caller learns
+// that specifically, because "all backends are at capacity" and "no backend is
+// healthy" call for opposite operator responses.
+func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded map[BackendIdentity]struct{}) (*Backend, error) {
 	now := time.Now().UnixNano()
-	backends := *p.backends.Load()
 	avail := make([]*Backend, 0, len(backends))
+	saturated := false
 	for _, b := range backends {
 		if !b.available(now) {
 			continue
@@ -153,12 +150,19 @@ func (p *Pool) pickExcluding(excluded map[BackendIdentity]struct{}) (*Backend, e
 		if _, ok := excluded[b.Identity()]; ok {
 			continue
 		}
+		if perBackend > 0 && b.inflight.Load() >= perBackend {
+			saturated = true
+			continue
+		}
 		avail = append(avail, b)
 	}
 	if len(avail) == 0 {
+		if saturated {
+			return nil, ErrBackendAtCapacity
+		}
 		return nil, ErrNoAvailableBackend
 	}
-	b := p.balancer.pick(avail)
+	b := bal.pick(avail)
 	if b == nil {
 		return nil, ErrNoAvailableBackend
 	}
