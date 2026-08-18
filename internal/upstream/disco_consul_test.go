@@ -142,3 +142,40 @@ func TestConsulDiscovererEgressAllowed(t *testing.T) {
 		t.Errorf("targets = %+v, want one 10.0.0.1:8080", targets)
 	}
 }
+
+// TestConsulDiscovererReadsServiceID pins that Consul's ServiceID becomes the
+// backend's logical identity, so a re-registered service resets its state
+// rather than inheriting the previous registration's failures.
+func TestConsulDiscovererReadsServiceID(t *testing.T) {
+	const payload = `[
+	  {"Node":{"Address":"10.0.0.9"},"Service":{"ID":"web-1","Address":"10.0.0.1","Port":8080,"Weights":{"Passing":1}}},
+	  {"Node":{"Address":"10.0.0.10"},"Service":{"Address":"10.0.0.2","Port":8081,"Weights":{"Passing":1}}}
+	]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	d, err := newConsulDiscoverer(config.DiscoveryConfig{
+		Type:   "consul",
+		Consul: &config.ConsulDiscovery{Address: srv.URL, Service: "web"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("newConsulDiscoverer: %v", err)
+	}
+	targets, err := d.Resolve(context.Background())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	got := map[string]string{}
+	for _, tg := range targets {
+		got[tg.Address] = tg.ID
+	}
+	if got["10.0.0.1:8080"] != "web-1" {
+		t.Fatalf("ServiceID = %q, want web-1", got["10.0.0.1:8080"])
+	}
+	if got["10.0.0.2:8081"] != "" {
+		t.Fatalf("a registration without an ID reported %q, want empty", got["10.0.0.2:8081"])
+	}
+}

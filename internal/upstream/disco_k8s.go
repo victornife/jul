@@ -119,6 +119,12 @@ type k8sEndpoint struct {
 	Conditions struct {
 		Ready *bool `json:"ready"`
 	} `json:"conditions"`
+	// TargetRef names the object behind the endpoint. Its UID is the only
+	// identity Kubernetes offers that survives a pod IP being recycled, which
+	// it does within seconds.
+	TargetRef *struct {
+		UID string `json:"uid"`
+	} `json:"targetRef"`
 }
 
 // k8sEndpointSliceList is the subset of the EndpointSlice list response read.
@@ -179,7 +185,11 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 				if strings.TrimSpace(addr) == "" {
 					continue
 				}
-				out = append(out, Target{Address: net.JoinHostPort(addr, strconv.Itoa(port))})
+				var id string
+				if ep.TargetRef != nil {
+					id = strings.TrimSpace(ep.TargetRef.UID)
+				}
+				out = append(out, Target{Address: net.JoinHostPort(addr, strconv.Itoa(port)), ID: id})
 			}
 		}
 	}

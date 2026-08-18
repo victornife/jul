@@ -530,7 +530,7 @@ func TestTranscoderEvictsStaleConnections(t *testing.T) {
 		t.Fatalf("warmup request: status = %d, body = %s", res.StatusCode, body)
 	}
 
-	conn, err := tr.connFor(addr)
+	conn, err := tr.connFor(upstream.BackendIdentity{Scheme: "http", Network: "tcp", Address: addr}, "")
 	if err != nil {
 		t.Fatalf("connFor after warmup: %v", err)
 	}
@@ -558,7 +558,7 @@ func TestTranscoderEvictsStaleConnections(t *testing.T) {
 
 	// The cached entry should also be gone: a subsequent connFor dials a new
 	// connection (the backend server is still running, so dial succeeds).
-	conn2, err := tr.connFor(addr)
+	conn2, err := tr.connFor(upstream.BackendIdentity{Scheme: "http", Network: "tcp", Address: addr}, "")
 	if err != nil {
 		t.Fatalf("connFor after eviction: %v", err)
 	}
@@ -900,7 +900,7 @@ func TestTranscoderRetiredConnectionReappearsUsable(t *testing.T) {
 		t.Fatalf("warmup request: status = %d, body = %s", res.StatusCode, body)
 	}
 
-	conn, err := tr.connFor(addr)
+	conn, err := tr.connFor(upstream.BackendIdentity{Scheme: "http", Network: "tcp", Address: addr}, "")
 	if err != nil {
 		t.Fatalf("connFor after warmup: %v", err)
 	}
@@ -989,7 +989,7 @@ func TestTranscoderRetiredConnectionConcurrentReappearance(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("warmup request: status = %d, body = %s", res.StatusCode, body)
 	}
-	conn, err := tr.connFor(addr)
+	conn, err := tr.connFor(upstream.BackendIdentity{Scheme: "http", Network: "tcp", Address: addr}, "")
 	if err != nil {
 		t.Fatalf("connFor after warmup: %v", err)
 	}

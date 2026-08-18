@@ -29,6 +29,15 @@ const discoveryTimeout = 5 * time.Second
 type Target struct {
 	Address string
 	Weight  int
+	// ID is the provider's own identity for this backend — a Kubernetes pod
+	// UID or a Consul ServiceID. It is empty for DNS, DNS SRV and static
+	// servers, which have nothing to offer beyond the address.
+	//
+	// It exists because an address is not an identity. Kubernetes reuses pod IPs
+	// within seconds, so without it a replacement pod inherits the dead one's
+	// failure history and arrives already partway to being taken out of
+	// rotation — for failures it never caused.
+	ID string
 }
 
 // Discoverer resolves the current backend set for a pool from an external
@@ -161,10 +170,9 @@ func (p *Pool) refreshOnce(d Discoverer, hooks DiscoveryHooks, log *slog.Logger)
 		return
 	}
 
-	servers := targetsToServers(targets)
-	p.UpdateBackends(servers)
+	p.UpdateTargets(targets)
 	if hooks.OnBackends != nil {
-		hooks.OnBackends(p.name, len(servers))
+		hooks.OnBackends(p.name, len(targets))
 	}
 }
 

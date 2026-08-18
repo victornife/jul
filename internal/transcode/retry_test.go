@@ -19,6 +19,7 @@ import (
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -454,4 +455,96 @@ func streamTranscoderOver(t *testing.T, addrs ...string) *Transcoder {
 	}
 	t.Cleanup(func() { _ = tr.Close() })
 	return tr
+}
+
+// TestConnCacheDropsAReplacedWorkload pins why the cache carries a logical
+// identity alongside its dial key. A replacement pod at a recycled address is a
+// different process; reusing the connection established to its predecessor
+// would hand a stream to something that no longer exists.
+func TestConnCacheDropsAReplacedWorkload(t *testing.T) {
+	addr, _ := startEchoBackend(t, codes.OK)
+	tr := transcoderOver(t, retryEchoDescriptor(t, "GET", descriptorpb.MethodOptions_IDEMPOTENCY_UNKNOWN), addr)
+
+	key := upstream.BackendIdentity{Scheme: "http", Network: "tcp", Address: addr}
+
+	first, err := tr.connFor(key, "pod-a")
+	if err != nil {
+		t.Fatalf("connFor: %v", err)
+	}
+	again, err := tr.connFor(key, "pod-a")
+	if err != nil {
+		t.Fatalf("connFor: %v", err)
+	}
+	if again != first {
+		t.Fatal("the same workload at the same address got a second connection")
+	}
+
+	replaced, err := tr.connFor(key, "pod-b")
+	if err != nil {
+		t.Fatalf("connFor: %v", err)
+	}
+	if replaced == first {
+		t.Fatal("a replacement workload reused the connection dialled to its predecessor")
+	}
+
+	// The predecessor's connection is retired rather than closed: a stream
+	// started against it may still be draining.
+	if _, ok := tr.retired.Load(key); !ok {
+		t.Fatal("the replaced connection was dropped instead of retired; an in-flight stream would have been cut")
+	}
+	if state := first.GetState(); state == connectivity.Shutdown {
+		t.Fatal("the replaced connection was closed while it may still have been draining")
+	}
+}
+
+// TestConnCacheEvictsAReplacedWorkloadOnReconcile pins the same rule on the
+// level-triggered path, which is what actually runs in production: discovery
+// churn inside one handler generation is noticed by the reconciler, not by a
+// removal callback.
+func TestConnCacheEvictsAReplacedWorkloadOnReconcile(t *testing.T) {
+	addr, _ := startEchoBackend(t, codes.OK)
+	tr := transcoderOver(t, retryEchoDescriptor(t, "GET", descriptorpb.MethodOptions_IDEMPOTENCY_UNKNOWN), addr)
+	tr.pool.UpdateTargets([]upstream.Target{{Address: addr, ID: "pod-a"}})
+
+	key := upstream.BackendIdentity{Scheme: "http", Network: "tcp", Address: addr}
+	if _, err := tr.connFor(key, "pod-a"); err != nil {
+		t.Fatalf("connFor: %v", err)
+	}
+	if _, ok := tr.conns.Load(key); !ok {
+		t.Fatal("precondition: the connection should be cached")
+	}
+
+	// The pod is replaced at the same address.
+	tr.pool.UpdateTargets([]upstream.Target{{Address: addr, ID: "pod-b"}})
+	tr.evictStaleConns()
+
+	if _, ok := tr.conns.Load(key); ok {
+		t.Fatal("the reconciler kept a connection to a workload that no longer exists")
+	}
+	if _, ok := tr.retired.Load(key); !ok {
+		t.Fatal("the stale connection was not retired")
+	}
+}
+
+// TestConnCacheKeepsAStableWorkload pins the other half: a reconcile pass must
+// not churn connections for a backend that has not changed.
+func TestConnCacheKeepsAStableWorkload(t *testing.T) {
+	addr, _ := startEchoBackend(t, codes.OK)
+	tr := transcoderOver(t, retryEchoDescriptor(t, "GET", descriptorpb.MethodOptions_IDEMPOTENCY_UNKNOWN), addr)
+	tr.pool.UpdateTargets([]upstream.Target{{Address: addr, ID: "pod-a"}})
+
+	key := upstream.BackendIdentity{Scheme: "http", Network: "tcp", Address: addr}
+	conn, err := tr.connFor(key, "pod-a")
+	if err != nil {
+		t.Fatalf("connFor: %v", err)
+	}
+	tr.evictStaleConns()
+
+	v, ok := tr.conns.Load(key)
+	if !ok {
+		t.Fatal("a reconcile pass evicted a live backend's connection")
+	}
+	if v.(*cachedConn).conn != conn {
+		t.Fatal("a reconcile pass replaced a live backend's connection")
+	}
 }

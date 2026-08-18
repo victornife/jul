@@ -132,15 +132,21 @@ func buildBackends(servers []config.UpstreamServer, scheme string) []*Backend {
 // unix-socket address produces a backend with no URL: there is nothing
 // meaningful to put in one, and consumers read Network and Address instead.
 func newBackend(s config.UpstreamServer, scheme string) *Backend {
-	weight := s.Weight
+	return newBackendFor(s.Address, s.Weight, "", scheme)
+}
+
+// newBackendFor builds one backend from its resolved parts. id is the
+// provider's logical identity, empty when there is none.
+func newBackendFor(rawAddress string, weight int, id, scheme string) *Backend {
 	if weight < 1 {
 		weight = 1
 	}
-	network, address := ParseSocketAddress(s.Address)
+	network, address := ParseSocketAddress(rawAddress)
 	b := &Backend{
 		Address: address,
 		Network: network,
 		scheme:  scheme,
+		id:      id,
 	}
 	if network == NetworkTCP {
 		b.URL = &url.URL{Scheme: scheme, Host: address}
@@ -243,26 +249,65 @@ func (p *Pool) AllowDialFailureLog() bool { return p.dialLog.Allow(dialFailureLo
 // because Backend.weight is atomic and the only hot-path reader holds
 // weightedRR's own mutex.
 func (p *Pool) UpdateBackends(servers []config.UpstreamServer) {
+	next := make([]*Backend, 0, len(servers))
+	for _, s := range servers {
+		next = append(next, newBackend(s, p.scheme))
+	}
+	p.replaceBackends(next)
+}
+
+// UpdateTargets applies a discovered target set, preserving state by the
+// provider's logical identity where it offers one.
+//
+// It exists so discovery does not have to launder its results through the
+// public server config, which has no place to put an identity and no reason to
+// grow one: a pod UID is not something an operator writes in a TOML file.
+func (p *Pool) UpdateTargets(targets []Target) {
+	next := make([]*Backend, 0, len(targets))
+	for _, t := range targets {
+		next = append(next, newBackendFor(t.Address, t.Weight, t.ID, p.scheme))
+	}
+	p.replaceBackends(next)
+}
+
+// reuseKey is what decides whether an incoming backend is the same backend as
+// one already in the pool.
+//
+// A provider identity narrows the address rather than replacing it: a new pod
+// at a recycled address is a different workload and starts with clean state,
+// which is the whole point. It deliberately does not let a backend survive an
+// address change — Address is read without a lock by the dial path, so
+// rewriting it in place would be a data race, and a moved workload is a
+// different place to connect regardless of what it calls itself.
+type reuseKey struct {
+	id      string
+	network string
+	address string
+}
+
+func keyFor(b *Backend) reuseKey {
+	return reuseKey{id: b.id, network: b.Network, address: b.Address}
+}
+
+func (p *Pool) replaceBackends(next []*Backend) {
 	p.updateMu.Lock()
 	defer p.updateMu.Unlock()
 
 	current := p.Backends()
-	type key struct{ network, address string }
-	prev := make(map[key]*Backend, len(current))
+	prev := make(map[reuseKey]*Backend, len(current))
 	for _, b := range current {
-		prev[key{b.Network, b.Address}] = b
+		prev[keyFor(b)] = b
 	}
 
-	next := make([]*Backend, 0, len(servers))
-	for _, s := range servers {
-		b := newBackend(s, p.scheme)
-		k := key{b.Network, b.Address}
-		if existing, ok := prev[k]; ok {
-			existing.setWeight(b.Weight())
-			b = existing
-			delete(prev, k) // reuse each surviving backend at most once
+	for i, b := range next {
+		k := keyFor(b)
+		existing, ok := prev[k]
+		if !ok {
+			continue
 		}
-		next = append(next, b)
+		existing.setWeight(b.Weight())
+		next[i] = existing
+		delete(prev, k) // reuse each surviving backend at most once
 	}
 	p.backends.Store(&next)
 	p.balancer.updateBackends(next)

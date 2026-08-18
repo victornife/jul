@@ -196,7 +196,12 @@ is a correctness bug; each is a bounded scope decision.
   HTTP/1.1+; there is no gRPC-Web or WebSocket bridge.
 - **RPCs may be cut at the retired-connection grace boundary.**
   When the upstream pool changes (e.g. service discovery), removed backend
-  connections are kept for 30 seconds so in-flight RPCs can drain. RPCs that
+  connections are kept for 30 seconds so in-flight RPCs can drain. The
+  reconciler runs on a 30-second timer, so the worst-case lag between a backend
+  leaving and its connection closing is **60 seconds**. A backend replaced at
+  the same address — a recycled pod IP — counts as removed: the connection was
+  dialled to a process that no longer exists, so it is retired and a fresh one
+  is dialled for the replacement. RPCs that
   outlast that grace period may be interrupted when the retired connection is
   closed; this primarily affects long-lived streams and unusually long unary
   calls. Clients should be prepared to reconnect.

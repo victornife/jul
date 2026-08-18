@@ -67,6 +67,12 @@ type Backend struct {
 	// has no URL to read it from.
 	scheme string
 
+	// id is the provider's logical identity (Kubernetes pod UID, Consul
+	// ServiceID), empty when the provider has none. It is the reuse key across
+	// a discovery refresh, so per-backend state follows the workload rather than
+	// the address it happens to hold.
+	id string
+
 	// weight is atomic so a discovery weight change is applied in place. Reusing
 	// the backend across that change is the point: the reuse key is the address
 	// alone, so retuning a weight no longer resets in-flight accounting or
@@ -94,6 +100,15 @@ func (b *Backend) Weight() int { return int(b.weight.Load()) }
 
 // setWeight applies a new weight in place.
 func (b *Backend) setWeight(w int) { b.weight.Store(int64(w)) }
+
+// LogicalID returns the provider's identity for this backend, or "" when the
+// provider has none.
+//
+// It is deliberately not part of BackendIdentity: that identity answers "where
+// do I dial", and two workloads at one address are still one place to connect.
+// This one answers "whose state is this", which is a different question with a
+// different answer.
+func (b *Backend) LogicalID() string { return b.id }
 
 // Identity returns the stable (scheme, network, address) identity of this
 // backend.

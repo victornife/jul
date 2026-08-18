@@ -94,6 +94,7 @@ type consulServiceEntry struct {
 		Address string `json:"Address"`
 	} `json:"Node"`
 	Service struct {
+		ID      string `json:"ID"`
 		Address string `json:"Address"`
 		Port    int    `json:"Port"`
 		Weights struct {
@@ -134,6 +135,7 @@ func (d *consulDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 		out = append(out, Target{
 			Address: net.JoinHostPort(addr, strconv.Itoa(e.Service.Port)),
 			Weight:  e.Service.Weights.Passing,
+			ID:      strings.TrimSpace(e.Service.ID),
 		})
 	}
 	return out, nil

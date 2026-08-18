@@ -228,6 +228,36 @@ Discovery pools take part in the normal atomic reload:
   the old pool is drained and closed.
 - Switching an upstream **to or from** discovery rebuilds it as well.
 
+## Backend identity
+
+A backend's per-request state — in-flight count, failure history, health verdict — follows the
+**workload**, not the address it happens to hold.
+
+| Provider | Identity | Source |
+| --- | --- | --- |
+| Kubernetes | pod UID | `targetRef.uid` on the `EndpointSlice` endpoint |
+| Consul | service ID | `Service.ID` |
+| DNS, DNS SRV, static | none | the address is all there is |
+
+This matters because an address is not an identity. Kubernetes recycles pod IPs within seconds, so
+without it a replacement pod inherits the failure history of the one it replaced and arrives partway
+to being taken out of rotation — for failures it never caused. With it, a refresh that reports the
+same address under a **new** identity produces a **fresh backend with clean state**, and a refresh
+that reports the same identity keeps everything it had.
+
+A provider that offers no identity is unchanged: the address remains the reuse key, which is correct
+for a DNS record or a static server list, where there is nothing else to go on.
+
+> [!NOTE]
+> **Consul re-registration now resets state.** A service that re-registers with a different
+> `ServiceID` is treated as a logically replaced workload and starts clean. That is the intended
+> semantic, and it is a behaviour change: previously the address alone decided.
+
+The **dial** identity is deliberately separate and remains address-based. It answers "where do I
+connect", which is why two workloads at one address are still one place to connect — retry exclusion
+within a request must not re-try an address it has already tried just because the pod behind it
+changed mid-request. Two keys, two questions.
+
 ## Metrics
 
 | Metric | Type | Labels | Meaning |

@@ -70,7 +70,7 @@ type Transcoder struct {
 	pool          *upstream.Pool
 	useTLS        bool
 	tlsPolicy     *backendtls.Policy
-	conns         sync.Map // address -> *grpc.ClientConn
+	conns         sync.Map // upstream.BackendIdentity -> *cachedConn
 	retry         upstream.RetryOverride
 	preserveNames bool
 	streaming     bool
@@ -86,16 +86,27 @@ type Transcoder struct {
 	// evictOnce ensures evictStop is closed at most once.
 	evictOnce sync.Once
 
-	// retired holds connections whose backend address has left the pool but
-	// which are kept alive for a grace period so in-flight requests and
-	// streams can finish (R11-05).
-	retired sync.Map // address -> retiredConn
+	// retired holds connections whose backend has left the pool but which are
+	// kept alive for a grace period so in-flight requests and streams can
+	// finish (R11-05).
+	retired sync.Map // upstream.BackendIdentity -> retiredConn
+}
+
+// cachedConn is a live connection plus the logical identity of the workload it
+// was dialled to. The identity is carried because the key is the dial address,
+// and an address can outlive the process behind it: a replacement pod at a
+// recycled IP is a different peer and must not inherit a connection
+// established to its predecessor.
+type cachedConn struct {
+	conn *grpc.ClientConn
+	id   string
 }
 
 // retiredConn is a connection that has left the active pool but is still
 // usable until its grace period expires.
 type retiredConn struct {
 	conn      *grpc.ClientConn
+	id        string
 	retiredAt time.Time
 }
 
@@ -205,21 +216,25 @@ func (t *Transcoder) evictStaleConns() {
 	if t.pool == nil {
 		return
 	}
-	valid := make(map[string]struct{}, 16)
+	valid := make(map[upstream.BackendIdentity]string, 16)
 	for _, b := range t.pool.Backends() {
-		valid[b.Address] = struct{}{}
+		valid[b.Identity()] = b.LogicalID()
 	}
 
-	// Move newly stale connections from active cache to retired.
+	// A backend still at the same address but with a different logical identity
+	// counts as stale: the peer was replaced, so the connection points at a
+	// process that no longer exists.
 	t.conns.Range(func(key, value any) bool {
-		addr := key.(string)
-		if _, ok := valid[addr]; ok {
+		id := key.(upstream.BackendIdentity)
+		cc, ok := value.(*cachedConn)
+		if !ok {
+			t.conns.Delete(id)
 			return true
 		}
-		if c, ok := value.(*grpc.ClientConn); ok {
-			t.retired.Store(addr, retiredConn{conn: c, retiredAt: time.Now()})
+		if liveID, live := valid[id]; live && liveID == cc.id {
+			return true
 		}
-		t.conns.Delete(addr)
+		t.retireConn(id, cc)
 		return true
 	})
 
@@ -227,16 +242,15 @@ func (t *Transcoder) evictStaleConns() {
 	// those whose grace period has expired.
 	now := time.Now()
 	t.retired.Range(func(key, value any) bool {
-		addr := key.(string)
+		id := key.(upstream.BackendIdentity)
 		rc := value.(retiredConn)
 		expired := now.Sub(rc.retiredAt) >= retiredConnGrace
-		if _, ok := valid[addr]; ok && !expired {
-			// Backend reappeared: atomically promote. If another connection
-			// won the race, close the retired one (R13-01).
+		if liveID, live := valid[id]; live && liveID == rc.id && !expired {
+			// The same workload reappeared: atomically promote. If another
+			// connection won the race, close the retired one (R13-01).
 			t.retired.Delete(key)
-			if actual, loaded := t.conns.LoadOrStore(addr, rc.conn); loaded {
-				actualConn := actual.(*grpc.ClientConn)
-				if actualConn != rc.conn {
+			if actual, loaded := t.conns.LoadOrStore(id, &cachedConn{conn: rc.conn, id: rc.id}); loaded {
+				if actual.(*cachedConn).conn != rc.conn {
 					_ = rc.conn.Close()
 				}
 			}
@@ -248,6 +262,18 @@ func (t *Transcoder) evictStaleConns() {
 		}
 		return true
 	})
+}
+
+// retireConn moves a connection out of the active cache into the grace map. A
+// connection already retired under the same identity is from an even older
+// workload and is closed rather than leaked.
+func (t *Transcoder) retireConn(id upstream.BackendIdentity, cc *cachedConn) {
+	if prev, loaded := t.retired.Swap(id, retiredConn{conn: cc.conn, id: cc.id, retiredAt: time.Now()}); loaded {
+		if rc, ok := prev.(retiredConn); ok && rc.conn != cc.conn {
+			_ = rc.conn.Close()
+		}
+	}
+	t.conns.Delete(id)
 }
 
 // normalizeStreamMode lower-cases the configured stream mode and defaults a
@@ -277,8 +303,8 @@ func (t *Transcoder) Close() error {
 		}
 	})
 	t.conns.Range(func(_, v any) bool {
-		if c, ok := v.(*grpc.ClientConn); ok {
-			_ = c.Close()
+		if c, ok := v.(*cachedConn); ok {
+			_ = c.conn.Close()
 		}
 		return true
 	})
@@ -291,42 +317,56 @@ func (t *Transcoder) Close() error {
 	return nil
 }
 
-// connFor returns a cached gRPC connection for addr, creating and caching one
-// if absent. Connections survive across requests to the same backend. During
-// the retired grace period, a connection for a removed backend is re-promoted
-// to the active cache so in-flight streams can continue (R11-05).
-func (t *Transcoder) connFor(addr string) (*grpc.ClientConn, error) {
-	if v, ok := t.conns.Load(addr); ok {
-		return v.(*grpc.ClientConn), nil
+// connFor returns a cached gRPC connection for a backend, creating and caching
+// one if absent. Connections survive across requests to the same backend, and
+// during the retired grace period a connection for a removed backend is
+// re-promoted so in-flight streams can continue (R11-05).
+//
+// The cache is keyed by dial identity, but an entry is reused only while the
+// workload behind that address is still the same one: a recycled pod IP gets a
+// fresh connection rather than one established to its predecessor.
+func (t *Transcoder) connFor(key upstream.BackendIdentity, id string) (*grpc.ClientConn, error) {
+	if v, ok := t.conns.Load(key); ok {
+		cc := v.(*cachedConn)
+		if cc.id == id {
+			return cc.conn, nil
+		}
+		// The peer was replaced. Retire rather than close: a stream started
+		// against the previous workload may still be draining.
+		t.retireConn(key, cc)
 	}
-	if v, ok := t.retired.Load(addr); ok {
+	if v, ok := t.retired.Load(key); ok {
 		rc := v.(retiredConn)
-		if time.Since(rc.retiredAt) < retiredConnGrace {
+		switch {
+		case rc.id != id:
+			// Belongs to a different workload; leave it for the grace period.
+		case time.Since(rc.retiredAt) < retiredConnGrace:
 			// Atomically promote back to active. Only close the retired
-			// connection if another goroutine stored a different connection
-			// for the same address in the meantime (R12-02, R13-01).
-			t.retired.Delete(addr)
-			if actual, loaded := t.conns.LoadOrStore(addr, rc.conn); loaded {
-				actualConn := actual.(*grpc.ClientConn)
+			// connection if another goroutine stored a different one for the
+			// same backend in the meantime (R12-02, R13-01).
+			t.retired.Delete(key)
+			if actual, loaded := t.conns.LoadOrStore(key, &cachedConn{conn: rc.conn, id: rc.id}); loaded {
+				actualConn := actual.(*cachedConn).conn
 				if actualConn != rc.conn {
 					_ = rc.conn.Close()
 				}
 				return actualConn, nil
 			}
 			return rc.conn, nil
+		default:
+			// Expired; close it lazily here and dial anew.
+			_ = rc.conn.Close()
+			t.retired.Delete(key)
 		}
-		// Expired; close it lazily here and dial anew.
-		_ = rc.conn.Close()
-		t.retired.Delete(addr)
 	}
-	conn, err := dial(addr, t.useTLS, t.tlsPolicy)
+	conn, err := dial(key.Address, t.useTLS, t.tlsPolicy)
 	if err != nil {
 		return nil, err
 	}
-	actual, loaded := t.conns.LoadOrStore(addr, conn)
+	actual, loaded := t.conns.LoadOrStore(key, &cachedConn{conn: conn, id: id})
 	if loaded {
 		_ = conn.Close() // lost the race; use the winner's connection
-		return actual.(*grpc.ClientConn), nil
+		return actual.(*cachedConn).conn, nil
 	}
 	return conn, nil
 }
@@ -340,7 +380,7 @@ func (t *Transcoder) firstConn() (*grpc.ClientConn, error) {
 		return nil, err
 	}
 	defer t.pool.Release(b)
-	return t.connFor(b.Address)
+	return t.connFor(b.Identity(), b.LogicalID())
 }
 
 // dial creates a lazy gRPC client connection to addr over TLS or plaintext
@@ -404,7 +444,7 @@ func (t *Transcoder) serveStreamingRoute(w http.ResponseWriter, r *http.Request,
 	}
 	defer t.pool.Release(backend)
 
-	conn, err := t.connFor(backend.Address)
+	conn, err := t.connFor(backend.Identity(), backend.LogicalID())
 	if err != nil {
 		code := http.StatusBadGateway
 		t.writeError(w, code, "grpc backend unreachable: "+err.Error())
@@ -434,7 +474,7 @@ func (t *Transcoder) serveUnary(w http.ResponseWriter, r *http.Request, rt *rout
 	var resp *dynamicpb.Message
 	_, err := t.pool.Do(r.Context(), t.pool.RetryRequestFor(t.retry, retryableRoute(rt)),
 		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
-			conn, cerr := t.connFor(b.Address)
+			conn, cerr := t.connFor(b.Identity(), b.LogicalID())
 			if cerr != nil {
 				t.pool.MarkFailure(b)
 				return upstream.AttemptResult{Err: &backendDialError{err: cerr}}
