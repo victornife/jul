@@ -95,9 +95,10 @@ func newFastCGIHandler(ctx context.Context, loc config.LocationConfig, upstreams
 	}
 
 	h := &fastcgiHandler{
-		pool:   pool,
-		dialer: cgiDialer(loc),
-		log:    log,
+		pool:          pool,
+		dialer:        cgiDialer(loc),
+		log:           log,
+		retryOverride: newLocationRetry(loc),
 		session: gofast.Chain(
 			gofast.BasicParamsMap, // CONTENT_*, REQUEST_*, SERVER_*, REMOTE_* ...
 			gofast.MapHeader,      // HTTP_* request headers
@@ -116,46 +117,104 @@ func newFastCGIHandler(ctx context.Context, loc config.LocationConfig, upstreams
 // of the process. Because the pool was created with scale 0 it never actually
 // reused a connection either, so dialling per request costs nothing that was
 // previously being saved.
+//
+// It also does not use gofast.NewHandler. That handler hardcodes 502 for a dial
+// failure and 500 for a session failure, and reports both with log.Printf to
+// the *global* logger — its own SetLogger is not consulted on those paths. Jul
+// owns the status mapping and the bounded reason taxonomy, so it drives the
+// three exported steps itself: newClient, sessionHandler, WriteTo.
 type fastcgiHandler struct {
-	pool    *upstream.Pool
-	dialer  *net.Dialer
-	session gofast.SessionHandler
-	log     *slog.Logger
+	pool          *upstream.Pool
+	dialer        *net.Dialer
+	session       gofast.SessionHandler
+	log           *slog.Logger
+	retryOverride locationRetry
 }
 
 func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	b, err := h.pool.PickCtx(r.Context())
+	// The retry boundary is WriteTo: everything before it is recoverable
+	// because nothing has reached the client, and everything after it is not.
+	// Driving gofast's three exported steps directly is what makes that
+	// boundary expressible at all.
+	replayable := isIdempotent(r.Method) && replayableBody(r)
+
+	var (
+		pipe   *gofast.ResponsePipe
+		client gofast.Client
+		chosen *upstream.Backend
+	)
+	_, err := h.pool.Do(r.Context(), resolveRetry(h.pool, h.retryOverride, replayable),
+		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
+			req := r
+			if n > 1 && r.GetBody != nil {
+				body, berr := r.GetBody()
+				if berr != nil {
+					return upstream.AttemptResult{Err: berr, Terminal: true}
+				}
+				req = r.Clone(ctx)
+				req.Body = body
+			}
+
+			c, derr := gofast.SimpleClientFactory(func() (net.Conn, error) {
+				return h.dialer.DialContext(ctx, b.Network, b.Address)
+			})()
+			if derr != nil {
+				h.noteFailure(b, derr, "fastcgi dial failed")
+				return upstream.AttemptResult{Err: derr}
+			}
+
+			p, serr := h.session(c, gofast.NewRequest(req))
+			if serr != nil {
+				_ = c.Close()
+				h.noteFailure(b, serr, "fastcgi session failed")
+				return upstream.AttemptResult{Err: serr}
+			}
+
+			h.pool.MarkSuccess(b)
+			pipe, client, chosen = p, c, b
+			// The connection and the backend slot must outlive the attempt:
+			// the response has not been read yet.
+			return upstream.AttemptResult{Retain: true}
+		})
 	if err != nil {
 		h.fail(w, r, upstreamErrorStatus(err), err)
 		return
 	}
-	defer h.pool.Release(b)
-
-	// The connection is dialled inside the request, so the client's context
-	// cancels a hung connect, and gofast closes it when the request ends.
-	var dialErr error
-	connFactory := func() (net.Conn, error) {
-		conn, derr := h.dialer.DialContext(r.Context(), b.Network, b.Address)
-		if derr != nil {
-			dialErr = derr
+	defer h.pool.Release(chosen)
+	defer func() {
+		if cerr := client.Close(); cerr != nil && h.log != nil {
+			h.log.Warn("fastcgi client close failed", "upstream", h.pool.Name(), "backend", chosen.Address, "error", cerr)
 		}
-		return conn, derr
-	}
+	}()
 
-	gh := gofast.NewHandler(h.session, gofast.SimpleClientFactory(connFactory))
-	if h.log != nil {
-		gh.SetLogger(slog.NewLogLogger(h.log.Handler(), slog.LevelError))
+	// Past this point a byte may reach the client, so nothing here is retried.
+	errBuffer := new(bytes.Buffer)
+	if werr := pipe.WriteTo(w, errBuffer); werr != nil && h.log != nil {
+		h.log.Warn("fastcgi response write failed", "upstream", h.pool.Name(), "backend", chosen.Address, "error", werr)
 	}
-	gh.ServeHTTP(w, r)
+	if errBuffer.Len() > 0 && h.log != nil {
+		h.log.Error("fastcgi application error stream",
+			"upstream", h.pool.Name(),
+			"backend", chosen.Address,
+			"path", r.URL.Path,
+			"request_id", middleware.RequestIDFrom(r.Context()),
+			"stderr", errBuffer.String(),
+		)
+	}
+}
 
-	if dialErr != nil {
-		h.pool.MarkFailure(b)
-		if h.log != nil && h.pool.AllowDialFailureLog() {
-			h.log.Warn("fastcgi dial failed", "upstream", h.pool.Name(), "backend", b.Address, "network", b.Network, "error", dialErr)
-		}
+// noteFailure records a failed attempt against passive health and logs it on
+// the pool's shared throttle, so a backend outage cannot flood the log through
+// the CGI path any more than through the HTTP one.
+func (h *fastcgiHandler) noteFailure(b *upstream.Backend, err error, msg string) {
+	tripped := h.pool.MarkFailure(b)
+	if h.log == nil {
 		return
 	}
-	h.pool.MarkSuccess(b)
+	if tripped || h.pool.AllowDialFailureLog() {
+		h.log.Warn(msg, "upstream", h.pool.Name(), "backend", b.Address, "network", b.Network,
+			"reason", upstream.ClassifyDialError(err), "error", err)
+	}
 }
 
 func (h *fastcgiHandler) fail(w http.ResponseWriter, r *http.Request, code int, err error) {
@@ -221,10 +280,11 @@ func scriptNameFor(urlPath string, index []string) string {
 // uwsgiHandler speaks the uWSGI packet protocol (modifier1 = 0, the WSGI
 // variant) and forwards the CGI-style response back to the client.
 type uwsgiHandler struct {
-	pool   *upstream.Pool
-	dialer *net.Dialer
-	loc    config.LocationConfig
-	log    *slog.Logger
+	pool          *upstream.Pool
+	dialer        *net.Dialer
+	loc           config.LocationConfig
+	log           *slog.Logger
+	retryOverride locationRetry
 }
 
 func newUWSGIHandler(ctx context.Context, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
@@ -235,68 +295,117 @@ func newUWSGIHandler(ctx context.Context, loc config.LocationConfig, upstreams m
 	if err != nil {
 		return nil, err
 	}
-	h := &uwsgiHandler{pool: pool, dialer: cgiDialer(loc), loc: loc, log: log}
+	h := &uwsgiHandler{pool: pool, dialer: cgiDialer(loc), loc: loc, log: log, retryOverride: newLocationRetry(loc)}
 	return newAdmittedHandler(h, pool.Admission(), nil), nil
 }
 
 func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	b, err := h.pool.PickCtx(r.Context())
+	// Everything up to writeCGIResponse is recoverable, because nothing has
+	// reached the client yet. That is the same boundary the HTTP and FastCGI
+	// adapters use, expressed in this protocol's terms.
+	replayable := isIdempotent(r.Method) && replayableBody(r)
+
+	var (
+		conn   net.Conn
+		chosen *upstream.Backend
+	)
+	_, err := h.pool.Do(r.Context(), resolveRetry(h.pool, h.retryOverride, replayable),
+		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
+			body := r.Body
+			if n > 1 {
+				// A body-less request needs no rewind; its body is already at
+				// EOF, which is what "no body" means on a server request.
+				body = http.NoBody
+				if r.GetBody != nil {
+					rewound, berr := r.GetBody()
+					if berr != nil {
+						return upstream.AttemptResult{Err: berr, Terminal: true}
+					}
+					body = rewound
+				}
+			}
+
+			// The connect timeout comes from the location's proxy_connect_timeout
+			// like every other transport, rather than a hardcoded ten seconds.
+			c, derr := h.dialer.DialContext(ctx, b.Network, b.Address)
+			if derr != nil {
+				h.noteFailure(b, derr, "uwsgi dial failed")
+				return upstream.AttemptResult{Err: derr}
+			}
+			if dl, ok := ctx.Deadline(); ok {
+				_ = c.SetDeadline(dl)
+			}
+			if serr := h.sendRequest(c, r, body); serr != nil {
+				_ = c.Close()
+				h.noteFailure(b, serr, "uwsgi request send failed")
+				return upstream.AttemptResult{Err: serr}
+			}
+
+			h.pool.MarkSuccess(b)
+			conn, chosen = c, b
+			// The connection and the backend slot must outlive the attempt: the
+			// response has not been read yet.
+			return upstream.AttemptResult{Retain: true}
+		})
 	if err != nil {
 		h.fail(w, r, upstreamErrorStatus(err), err)
 		return
 	}
-	defer h.pool.Release(b)
-
-	// The connect timeout comes from the location's proxy_connect_timeout like
-	// every other transport, rather than a hardcoded ten seconds.
-	conn, err := h.dialer.DialContext(r.Context(), b.Network, b.Address)
-	if err != nil {
-		h.pool.MarkFailure(b)
-		h.fail(w, r, http.StatusBadGateway, err)
-		return
-	}
+	defer h.pool.Release(chosen)
 	defer conn.Close()
-	h.pool.MarkSuccess(b)
-	if dl, ok := r.Context().Deadline(); ok {
-		_ = conn.SetDeadline(dl)
-	}
 
-	params := buildCGIParams(h.loc, r)
-	var vars bytes.Buffer
-	for k, v := range params {
-		writeUWSGIVar(&vars, k, v)
-	}
-	if vars.Len() > 0xffff {
-		h.fail(w, r, http.StatusBadGateway, fmt.Errorf("uwsgi var block too large (%d bytes)", vars.Len()))
-		return
-	}
-
-	// Packet header: modifier1=0, datasize uint16 little-endian, modifier2=0.
-	header := [4]byte{0, byte(vars.Len()), byte(vars.Len() >> 8), 0}
-	if _, err := conn.Write(header[:]); err != nil {
-		h.fail(w, r, http.StatusBadGateway, err)
-		return
-	}
-	if _, err := conn.Write(vars.Bytes()); err != nil {
-		h.fail(w, r, http.StatusBadGateway, err)
-		return
-	}
-	// For server requests r.Body is always non-nil; it returns EOF when empty.
-	if _, err := io.Copy(conn, r.Body); err != nil {
-		h.fail(w, r, http.StatusBadGateway, err)
-		return
-	}
-	// Signal end-of-request so the app server stops reading the body.
-	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
-		_ = cw.CloseWrite()
-	}
-
+	// Past this point a byte may reach the client, so nothing here is retried.
 	if err := writeCGIResponse(bufio.NewReader(conn), w); err != nil && !errors.Is(err, io.EOF) {
 		// Headers may already be written; just log.
 		if h.log != nil {
 			h.log.Error("uwsgi response error", "path", r.URL.Path, "error", err,
 				"request_id", middleware.RequestIDFrom(r.Context()))
 		}
+	}
+}
+
+// sendRequest writes the uWSGI var block and the body. It is the whole of one
+// attempt's send side, so a failure anywhere in it is retryable against another
+// backend: nothing has been read back, let alone written to the client.
+func (h *uwsgiHandler) sendRequest(conn net.Conn, r *http.Request, body io.ReadCloser) error {
+	params := buildCGIParams(h.loc, r)
+	var vars bytes.Buffer
+	for k, v := range params {
+		writeUWSGIVar(&vars, k, v)
+	}
+	if vars.Len() > 0xffff {
+		return fmt.Errorf("uwsgi var block too large (%d bytes)", vars.Len())
+	}
+
+	// Packet header: modifier1=0, datasize uint16 little-endian, modifier2=0.
+	header := [4]byte{0, byte(vars.Len()), byte(vars.Len() >> 8), 0}
+	if _, err := conn.Write(header[:]); err != nil {
+		return err
+	}
+	if _, err := conn.Write(vars.Bytes()); err != nil {
+		return err
+	}
+	// For server requests r.Body is always non-nil; it returns EOF when empty.
+	if _, err := io.Copy(conn, body); err != nil {
+		return err
+	}
+	// Signal end-of-request so the app server stops reading the body.
+	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+		_ = cw.CloseWrite()
+	}
+	return nil
+}
+
+// noteFailure records a failed attempt against passive health and logs it on
+// the pool's shared throttle.
+func (h *uwsgiHandler) noteFailure(b *upstream.Backend, err error, msg string) {
+	tripped := h.pool.MarkFailure(b)
+	if h.log == nil {
+		return
+	}
+	if tripped || h.pool.AllowDialFailureLog() {
+		h.log.Warn(msg, "upstream", h.pool.Name(), "backend", b.Address, "network", b.Network,
+			"reason", upstream.ClassifyDialError(err), "error", err)
 	}
 }
 
