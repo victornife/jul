@@ -50,6 +50,47 @@ max_udp_sessions = 1024
 | `sni_routes` | `{}` | TLS SNI → backend map (`"*"` = catch-all) |
 | `max_udp_sessions` | `1024` | Per-listener UDP session cap |
 
+### Bounding concurrency
+
+TCP and UDP are bounded by two different controls, and the asymmetry is
+deliberate rather than an oversight.
+
+| | Control | Scope | Over the limit |
+| --- | --- | --- | --- |
+| TCP | `[upstreams.resilience] max_active_requests` | **per pool** | The connection is closed |
+| UDP | `max_udp_sessions` on the `[[stream]]` block | **per listener** | The least recently used idle session is evicted |
+
+At layer 4 a TCP connection is the unit of work, so `max_active_requests` counts
+**concurrent connections** and behaves exactly as it does for a request on any
+other protocol: it is pool-scoped, so several routes pointing at one upstream
+share the budget. A connection over the limit is closed without a response,
+because a raw socket has no status code to send.
+
+UDP sessions are listener-owned state, created on the first datagram from a
+client address and reaped on idle. Dropping a *new* client in favour of an idle
+one is the protocol-appropriate answer there — UDP has no client to park and no
+way to signal a rejection — so the cap stays where the state is. Setting
+`max_active_requests` on an upstream reached by a UDP route is a **validation
+error**: two overlapping admission mechanisms would disagree about what a
+session is.
+
+### Active health checks on stream routes
+
+A stream route may use an upstream that declares `health_check`, and the probe
+type is then **forced to `tcp`** regardless of what the block says. A UDP-only
+route gets no checker at all.
+
+This is a correctness requirement. The checker defaults to `http` and an HTTP
+probe issues a `GET` to a path — so a stream route fronting Postgres, Redis,
+MQTT or SMTP that shares an upstream with `health_check.enabled = true` would
+fail every probe, mark every backend unhealthy, and take the whole route down. A
+raw connect is the only honest probe for a protocol-agnostic proxy, and a
+UDP-only backend does not answer a TCP dial at all.
+
+The upstream's own `type` still governs its HTTP pool, so nothing changes for
+the HTTP side and no configuration edit is forced. The visible consequence is
+that an upstream used by both surfaces is probed twice, once per pool.
+
 ## Conformance matrix
 
 | Scenario | Protocol | Input | Expected | Covered by |

@@ -37,6 +37,22 @@ type Server struct {
 	log   *slog.Logger
 	hooks Hooks
 
+	// reg owns L4 pool lifecycle: reuse across reload, discovery refresh and
+	// retirement. It is a second Registry instance, not the HTTP one, on purpose.
+	// Registry.Begin/Commit is a single global staging transaction driven by the
+	// handler factory under one mutex, while stream reload is a separate fan-in,
+	// so sharing it would mean restructuring the apply transaction — the most
+	// safety-critical code in the repository — for no gain in fidelity: an
+	// upstream referenced by both an HTTP location and a stream route already had
+	// two independent pools.
+	reg *upstream.Registry
+
+	// ctx is cancelled by Close. It bounds registry lookups and, because a TCP
+	// connection has no request context, the admission wait of a connection
+	// parked behind a full pool.
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	mu        sync.Mutex
 	listeners map[string]*listener // keyed by "proto|addr"
 }
@@ -48,9 +64,13 @@ func NewServer(opts Options) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		log:       log,
 		hooks:     opts.Hooks,
+		ctx:       ctx,
+		cancel:    cancel,
+		reg:       upstream.NewRegistry(upstream.RegistryOptions{Logger: log}),
 		listeners: map[string]*listener{},
 	}
 }
@@ -99,10 +119,6 @@ type route struct {
 	connectTimeout time.Duration
 	idleTimeout    time.Duration
 	maxUDPSessions int
-
-	// pools owns every pool referenced above so a replaced route can be torn
-	// down. Pool.Close is idempotent.
-	pools []*upstream.Pool
 }
 
 // listener owns one bound socket and serves it until closed. Its route is
@@ -138,6 +154,18 @@ type listener struct {
 func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]config.UpstreamConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// The registry stages every pool this reload wants and only promotes them at
+	// Commit, so an aborted build leaves the running pools — and their in-flight
+	// accounting — untouched. This is its own transaction, disjoint from the HTTP
+	// apply path.
+	s.reg.Begin()
+	committed := false
+	defer func() {
+		if !committed {
+			s.reg.Abort()
+		}
+	}()
 
 	// Phase 1: build every route. On any error, close all pools built so far.
 	want := make(map[string]*route, len(streams))
@@ -183,13 +211,14 @@ func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]conf
 		newlyBound = append(newlyBound, l)
 	}
 
-	// Phase 2: commit. Swap routes on surviving listeners, start newly bound
-	// ones, and stop listeners no longer desired.
+	// Phase 2: commit. Promote the staged pools — which retires the ones no
+	// route still wants — then swap routes on surviving listeners, start newly
+	// bound ones, and stop listeners no longer desired.
+	s.reg.Commit()
+	committed = true
 	for key, r := range want {
 		if l, exists := s.listeners[key]; exists {
-			if old := l.route.Swap(r); old != nil {
-				closeRoutes([]*route{old})
-			}
+			l.route.Store(r)
 		}
 	}
 	for _, l := range newlyBound {
@@ -204,6 +233,9 @@ func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]conf
 			s.log.Info("stream: stopped listener", "proto", l.proto, "addr", l.addr)
 		}
 	}
+	// Health checkers and discovery refreshers for freshly built pools start
+	// only after the routes that use them are live.
+	s.reg.Activate()
 	return nil
 }
 
@@ -216,25 +248,28 @@ func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]conf
 // the live set until it succeeds. PreflightBuild does not take s.mu because it
 // neither reads nor writes the live listener set.
 func (s *Server) PreflightBuild(_ context.Context, streams []config.StreamServer, upstreams map[string]config.UpstreamConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Building a route now stages pools, so preflight runs inside a transaction
+	// it always aborts: it must answer "could this be built?" without touching a
+	// live pool or its in-flight accounting.
+	s.reg.Begin()
+	defer s.reg.Abort()
+
 	seen := make(map[string]struct{}, len(streams))
-	var built []*route
 	for i := range streams {
 		st := streams[i]
 		proto := normProto(st.Protocol)
 		key := proto + "|" + st.Listen
 		if _, dup := seen[key]; dup {
-			closeRoutes(built)
 			return fmt.Errorf("stream: duplicate %s listener %q", proto, st.Listen)
 		}
 		seen[key] = struct{}{}
-		r, err := s.buildRoute(st, upstreams)
-		if err != nil {
-			closeRoutes(built)
+		if _, err := s.buildRoute(st, upstreams); err != nil {
 			return err
 		}
-		built = append(built, r)
 	}
-	closeRoutes(built)
 	return nil
 }
 
@@ -302,6 +337,10 @@ func (s *Server) Close() error {
 	for _, l := range ls {
 		l.shutdown()
 	}
+	// After the listeners are down, stop the pools' own workers and wake anything
+	// still parked on admission.
+	s.reg.CloseAll()
+	s.cancel()
 	return nil
 }
 
@@ -341,23 +380,20 @@ func (s *Server) buildRoute(st config.StreamServer, upstreams map[string]config.
 	}
 
 	if strings.TrimSpace(st.ProxyPass) != "" {
-		p, err := buildPool(st.ProxyPass, upstreams)
+		p, err := s.pool(st.ProxyPass, r.proto, upstreams)
 		if err != nil {
 			return nil, err
 		}
 		r.defaultPool = p
-		r.pools = append(r.pools, p)
 	}
 	if len(st.SNIRoutes) > 0 {
 		r.sniPools = make(map[string]*upstream.Pool, len(st.SNIRoutes))
 		for host, target := range st.SNIRoutes {
-			p, err := buildPool(target, upstreams)
+			p, err := s.pool(target, r.proto, upstreams)
 			if err != nil {
-				closeRoutes([]*route{r})
 				return nil, err
 			}
 			r.sniPools[strings.ToLower(host)] = p
-			r.pools = append(r.pools, p)
 		}
 	}
 	return r, nil
@@ -466,32 +502,47 @@ func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time
 	return nil, nil, lastErr
 }
 
-// buildPool resolves a target (named upstream or literal host:port) to a pool.
-func buildPool(target string, upstreams map[string]config.UpstreamConfig) (*upstream.Pool, error) {
-	if up, ok := upstreams[target]; ok {
-		return upstream.NewPool(up, "tcp")
+// pool stages a target (named upstream or literal host:port) through the
+// stream registry, so it is reused across reloads instead of rebuilt.
+//
+// The active probe type is forced to tcp, and dropped entirely for a UDP-only
+// route. This is correctness, not preference: the checker defaults to http and
+// probeHTTP issues a GET, so a stream route fronting Postgres, Redis, MQTT or
+// SMTP that shares an [[upstreams]] block with health_check.enabled would fail
+// every probe, flip every backend to unhealthy — which available() honours — and
+// take the whole route down. A raw connect is the only honest probe for a
+// protocol-agnostic proxy, and a UDP-only backend does not answer a TCP dial at
+// all. The shared upstream's own type still governs the HTTP registry's pool,
+// which is a different object, so nothing is forced on the operator.
+func (s *Server) pool(target, proto string, upstreams map[string]config.UpstreamConfig) (*upstream.Pool, error) {
+	up, ok := upstreams[target]
+	if !ok {
+		up = config.UpstreamConfig{
+			Name:        "_stream:" + target,
+			Strategy:    "round_robin",
+			Servers:     []config.UpstreamServer{{Address: target, Weight: 1}},
+			MaxFails:    1,
+			FailTimeout: config.Duration(10 * time.Second),
+		}
 	}
-	return upstream.NewPool(config.UpstreamConfig{
-		Name:        "_stream:" + target,
-		Strategy:    "round_robin",
-		Servers:     []config.UpstreamServer{{Address: target, Weight: 1}},
-		MaxFails:    1,
-		FailTimeout: config.Duration(10 * time.Second),
-	}, "tcp")
+	up.HealthCheck = streamHealthCheck(up.HealthCheck, proto)
+	return s.reg.For(s.ctx, up, "tcp")
 }
 
-func closeRoutes(routes []*route) {
-	for _, r := range routes {
-		if r == nil {
-			continue
-		}
-		for _, p := range r.pools {
-			if p != nil {
-				p.Close()
-			}
-		}
+// streamHealthCheck returns the probe configuration a stream route may use.
+func streamHealthCheck(hc *config.HealthCheckConfig, proto string) *config.HealthCheckConfig {
+	if hc == nil || !hc.Enabled || proto == "udp" {
+		return nil
 	}
+	forced := *hc
+	forced.Type = "tcp"
+	forced.Path = ""
+	forced.ExpectStatus = nil
+	forced.ExpectBody = ""
+	return &forced
 }
+
+func closeRoutes(routes []*route) {}
 
 func normProto(p string) string {
 	p = strings.ToLower(strings.TrimSpace(p))

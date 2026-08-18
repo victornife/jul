@@ -15,6 +15,7 @@ import (
 
 	"jul/internal/clientaddr"
 	"jul/internal/proxyproto"
+	"jul/internal/upstream"
 )
 
 // diagLogInterval is the shortest gap between two diagnostics of one kind from
@@ -104,6 +105,25 @@ func (l *listener) handleTCP(client net.Conn) {
 		}
 		return
 	}
+
+	// Admission is taken once the pool is known and held for the connection's
+	// whole life: at L4 the connection *is* the unit of work, so
+	// max_active_requests means concurrent connections here.
+	//
+	// The wait is bounded by the server context and by pending_timeout, not by a
+	// request context — a TCP client has no way to signal that it gave up short
+	// of closing, and a closed socket is only observed once we try to read it.
+	release, err := pool.Admission().Admit(s.ctx, nil)
+	if err != nil {
+		// There is no status code to send on a raw socket; closing is the only
+		// signal L4 has. The rejection is still counted.
+		s.dialFailure("tcp", upstream.ClassifyAdmissionError(err))
+		if l.routeLog.Allow(diagLogInterval) {
+			s.log.Warn("stream: connection rejected", "addr", l.addr, "upstream", pool.Name(), "error", err)
+		}
+		return
+	}
+	defer release()
 
 	backend, b, err := l.dialBackend(pool, "tcp", r.connectTimeout)
 	if err != nil {

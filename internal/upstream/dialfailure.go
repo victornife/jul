@@ -40,3 +40,18 @@ func ClassifyDialError(err error) string {
 	}
 	return "other"
 }
+
+// ClassifyAdmissionError buckets an admission rejection into the same bounded
+// reason set. Overload and forced retirement are distinct from a dial failure:
+// nothing was dialled, so counting them as "other" would hide a capacity
+// problem inside a connectivity bucket.
+func ClassifyAdmissionError(err error) string {
+	switch {
+	case errors.Is(err, ErrOverloaded):
+		return "overloaded"
+	case errors.Is(err, ErrRetired), errors.Is(err, context.Canceled):
+		return "shutdown"
+	default:
+		return ClassifyDialError(err)
+	}
+}
