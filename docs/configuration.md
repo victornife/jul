@@ -456,7 +456,7 @@ proxy_read_timeout = "30s"
 | `proxy_connect_timeout` | duration | Connection establishment timeout (default 10s) |
 | `proxy_read_timeout` | duration | Per-read inactivity bound on the upstream response — the maximum gap between successive reads, covering both the headers (time-to-first-byte) and a slow-trickle body. `0` (default) leaves it unbounded. A steadily streaming response is never interrupted while data keeps flowing |
 | `proxy_send_timeout` | duration | Per-write inactivity bound on sending the request to the upstream — the maximum gap between successive writes. `0` (default) leaves it unbounded |
-| `proxy_retries` | int | Maximum retry attempts for idempotent requests on connection failure. `0` (default) tries every distinct backend at most once. A positive value caps attempts to the configured count |
+| `proxy_retries` | int | **Deprecated** — use `resilience.retry_attempts`, which is the same control under the name the pool block already uses. Still valid and unchanged; setting both is a validation error; removal in the next major |
 | `grpc` | bool | Proxy `proxy_pass` as **native gRPC** over end-to-end HTTP/2 (trailers preserved, no buffering); `http://` dials the backend over cleartext HTTP/2 (h2c), `https://` over HTTP/2 with TLS — requires the `grpc` build tag |
 | `headers` | table | Upstream request headers; values support `$host`, `$scheme`, `$remote_addr` (canonical client), `$realip_remote_addr` (direct transport peer), `$proxy_add_x_forwarded_for` (Jul's trusted chain) and `$ssl_client_*`. Applied **after** the `X-Forwarded-*` headers are constructed, so an explicit value wins — see [forwarded headers](core-http.md#forwarded-headers-to-the-backend) |
 
@@ -628,6 +628,12 @@ max_pending_requests   = 100
 pending_timeout        = "2s"
 
 max_connections_per_backend = 256
+
+retry_attempts        = 2
+retry_deadline        = "3s"
+retry_backoff_initial = "20ms"
+retry_backoff_max     = "500ms"
+retry_budget_percent  = 10
 ```
 
 | Key | Type | Default | Description |
@@ -637,14 +643,30 @@ max_connections_per_backend = 256
 | `max_pending_requests` | int | `0` (**no queue**) | How many requests may wait for a slot; zero rejects immediately |
 | `pending_timeout` | duration | `0` | How long a request may wait; zero leaves the request context as the only bound |
 | `max_connections_per_backend` | int | `0` (unlimited) | Physical sockets per backend host, per transport; settable per location, which wins |
+| `retry_attempts` | int | `0` | Total attempts for one retryable request; zero tries every distinct backend once. Settable per location, which wins |
+| `retry_deadline` | duration | `0` | Bounds the whole retry sequence, attempts and backoff alike; zero leaves the request context as the only bound. Settable per location |
+| `retry_backoff_initial` | duration | `0` (immediate failover) | First backoff interval, doubling per attempt with full jitter. Settable per location |
+| `retry_backoff_max` | duration | `500ms` when backoff is on | Clamps the doubling; requires `retry_backoff_initial`. Settable per location |
+| `retry_budget_percent` | int | `0` (unbudgeted) | Retries permitted as a percentage of primary attempts over a trailing window. **Pool-scoped only** |
 
 `max_pending_requests = 0` means *no queue*, not an unlimited one — an unbounded pending queue is the
 failure this control prevents. `max_pending_requests` requires `max_active_requests`, and
 `pending_timeout` may not exceed `global.shutdown_timeout`.
 
-The first four keys are stateful and therefore pool-scoped: a `[servers.locations.resilience]` block
-accepts only `max_connections_per_backend`, and a stateful key written there is rejected. A rejected
-request is `503` with `Retry-After`, never `429`.
+The admission keys are stateful and therefore pool-scoped, and so is `retry_budget_percent`, which
+owns a window. A `[servers.locations.resilience]` block accepts `max_connections_per_backend` and the
+four stateless retry keys; anything else written there is rejected. A rejected request is `503` with
+`Retry-After`, never `429`.
+
+Retries are for **transport errors only** — a 5xx is an answer, not a failure to reach a backend, and
+retrying one would double load on a backend that is deliberately shedding. `POST` and `PATCH` are
+never retried: a connection error does not prove the backend did not accept, commit and then die.
+Full reference: [upstreams.md](upstreams.md#retry).
+
+> [!NOTE]
+> `proxy_retries` under `[[servers.locations]]` is the **deprecated spelling** of
+> `retry_attempts`. It remains valid and behaves identically; setting both on one location is a
+> validation error. It is scheduled for removal in the next major release.
 
 ### `backend_tls`
 

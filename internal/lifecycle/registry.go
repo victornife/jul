@@ -150,24 +150,26 @@ func SubsystemDescription(s Subsystem) (string, bool) {
 // named constants makes it obvious when two paths are classified for the same
 // proven reason rather than by coincidence.
 const (
-	reasonHandlerRebuild       = "the handler tree is rebuilt from the effective config on each successful reload"
-	reasonPluginRebuild        = "the plugin set is rebuilt and re-instantiated on each successful reload"
-	reasonUpstreamStaged       = "the upstream registry stages and swaps pools on each successful reload"
-	reasonWAFRebuild           = "the WAF policy is rebuilt on each successful reload"
-	reasonRateLimitPolicy      = "the rate-limiter store accepts a new policy on each successful reload"
-	reasonStreamRoute          = "the stream listener swaps its route pointer atomically on each successful reload"
-	reasonRBACSwap             = "the admin RBAC policy is rebuilt and atomically swapped after each successful reload"
-	reasonAdminStartup         = "the admin listener and its resources are created once at startup"
-	reasonCacheStartup         = "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
-	reasonAccessLogStart       = "access-log sinks are opened once at startup"
-	reasonTracingStartup       = "the tracer provider and exporter are created once at startup"
-	reasonBindFrozen           = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
-	reasonTLSBindFrozen        = "TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart"
-	reasonClientAddressRebuild = "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
-	reasonBackendTLSPool       = "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
-	reasonBackendTLSRoute      = "the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload"
-	reasonResiliencePolicy     = "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
-	reasonResilienceTransport  = "the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary"
+	reasonHandlerRebuild        = "the handler tree is rebuilt from the effective config on each successful reload"
+	reasonPluginRebuild         = "the plugin set is rebuilt and re-instantiated on each successful reload"
+	reasonUpstreamStaged        = "the upstream registry stages and swaps pools on each successful reload"
+	reasonWAFRebuild            = "the WAF policy is rebuilt on each successful reload"
+	reasonRateLimitPolicy       = "the rate-limiter store accepts a new policy on each successful reload"
+	reasonStreamRoute           = "the stream listener swaps its route pointer atomically on each successful reload"
+	reasonRBACSwap              = "the admin RBAC policy is rebuilt and atomically swapped after each successful reload"
+	reasonAdminStartup          = "the admin listener and its resources are created once at startup"
+	reasonCacheStartup          = "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
+	reasonAccessLogStart        = "access-log sinks are opened once at startup"
+	reasonTracingStartup        = "the tracer provider and exporter are created once at startup"
+	reasonBindFrozen            = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
+	reasonTLSBindFrozen         = "TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart"
+	reasonClientAddressRebuild  = "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
+	reasonBackendTLSPool        = "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
+	reasonBackendTLSRoute       = "the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload"
+	reasonResiliencePolicy      = "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
+	reasonResilienceTransport   = "the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary"
+	reasonResilienceRetry       = "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
+	reasonResilienceRetryBudget = "the percentage is swapped into the live budget while its accumulated window is deliberately preserved: resetting the window on reload would hand out a fresh burst of retries, and a reload during an incident is the least appropriate moment to forgive the retry load that helped cause it"
 )
 
 // Registry is the authoritative disposition of every public configuration path,
@@ -546,6 +548,12 @@ func locationEntries() []Entry {
 		hot(loc+"uwsgi_pass", SubUWSGI, reasonHandlerRebuild),
 	)
 	out = append(out, hot(loc+"resilience.max_connections_per_backend", SubResilience, reasonResilienceTransport))
+	out = append(out, hotGroup(SubResilience, reasonResilienceRetry,
+		loc+"resilience.retry_attempts",
+		loc+"resilience.retry_backoff_initial",
+		loc+"resilience.retry_backoff_max",
+		loc+"resilience.retry_deadline",
+	)...)
 	return out
 }
 
@@ -589,6 +597,13 @@ func upstreamEntries() []Entry {
 		"upstreams.*.resilience.pending_timeout",
 	)...)
 	out = append(out, hot("upstreams.*.resilience.max_connections_per_backend", SubResilience, reasonResilienceTransport))
+	out = append(out, hotGroup(SubResilience, reasonResilienceRetry,
+		"upstreams.*.resilience.retry_attempts",
+		"upstreams.*.resilience.retry_backoff_initial",
+		"upstreams.*.resilience.retry_backoff_max",
+		"upstreams.*.resilience.retry_deadline",
+	)...)
+	out = append(out, hot("upstreams.*.resilience.retry_budget_percent", SubResilience, reasonResilienceRetryBudget))
 	out = append(out, hotGroup(SubHealthCheck, "active probes are restarted with the pool on each successful reload",
 		"upstreams.*.health_check.enabled",
 		"upstreams.*.health_check.expect_body",

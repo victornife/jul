@@ -130,6 +130,17 @@ func (p *Pool) pickExcluding(excluded map[BackendIdentity]struct{}) (*Backend, e
 	return selectBackend(*p.backends.Load(), p.balancer, p.Policy().MaxActivePerBackend(), excluded)
 }
 
+// candidates returns the backend set the next selection would draw from, taking
+// the generation-scoped snapshot when ctx carries one. It exists so the retry
+// driver can ask whether an untried backend remains without claiming a slot it
+// may not use.
+func (p *Pool) candidates(ctx context.Context) []*Backend {
+	if snap := snapshotFrom(ctx, p.name, p.scheme); snap != nil {
+		return snap.Backends()
+	}
+	return *p.backends.Load()
+}
+
 // selectBackend filters a candidate set down to the eligible backends and asks
 // the balancer to choose one.
 //

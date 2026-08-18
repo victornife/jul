@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 308 |
-| Schema leaves (configurable values) | 260 |
-| Registry entries | 260 |
+| Schema paths (containers included) | 317 |
+| Schema leaves (configurable values) | 269 |
+| Registry entries | 269 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 188 |
+| Class `hot_reload` | 197 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -263,6 +263,10 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.redirect` | `hot_reload` | `redirect` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.require_client_cert` | `hot_reload` | `mtls` | — | the per-request certificate requirement is enforced by the rebuilt handler tree; the handshake policy itself is listener-bound |
 | `servers.*.locations.*.resilience.max_connections_per_backend` | `hot_reload` | `resilience` | — | the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary |
+| `servers.*.locations.*.resilience.retry_attempts` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
+| `servers.*.locations.*.resilience.retry_backoff_initial` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
+| `servers.*.locations.*.resilience.retry_backoff_max` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
+| `servers.*.locations.*.resilience.retry_deadline` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
 | `servers.*.locations.*.return` | `hot_reload` | `return` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.rewrites.*.flag` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.rewrites.*.pattern` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |
@@ -364,6 +368,11 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.resilience.max_connections_per_backend` | `hot_reload` | `resilience` | — | the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary |
 | `upstreams.*.resilience.max_pending_requests` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
 | `upstreams.*.resilience.pending_timeout` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
+| `upstreams.*.resilience.retry_attempts` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
+| `upstreams.*.resilience.retry_backoff_initial` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
+| `upstreams.*.resilience.retry_backoff_max` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
+| `upstreams.*.resilience.retry_budget_percent` | `hot_reload` | `resilience` | — | the percentage is swapped into the live budget while its accumulated window is deliberately preserved: resetting the window on reload would hand out a fresh burst of retries, and a reload during an incident is the least appropriate moment to forgive the retry load that helped cause it |
+| `upstreams.*.resilience.retry_deadline` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
 | `upstreams.*.servers.*.address` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.servers.*.weight` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.strategy` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |

@@ -34,6 +34,7 @@ proxy_pass = "https://inventory"
 - [Admission and overload control](#admission-and-overload-control)
 - [Sizing the limits](#sizing-the-limits)
 - [The accounting model in one place](#the-accounting-model-in-one-place)
+- [Retry](#retry)
 - [`backend_tls`](#backend-tls)
 - [Trust roots](#trust-roots)
 - [Client certificates (mutual TLS)](#client-certificates-mutual-tls)
@@ -281,7 +282,6 @@ because UDP sessions are listener-owned state reclaimed by idle eviction. Detail
 [stream.md](stream.md#bounding-concurrency).
 
 ### Why two in-flight numbers disagree
-
 `jul_http_requests_in_flight` and the pool's active count measure different things and will not match:
 
 - the first counts **inbound requests** being served, including static files, redirects, cache hits
@@ -291,6 +291,107 @@ because UDP sessions are listener-owned state reclaimed by idle eviction. Detail
 A cache hit raises the first and never the second. Sustained overload raises the first while the
 second sits pinned at its limit. Neither is wrong, and forcing them to agree would mean either
 counting work that never happened or losing the ability to see it.
+
+## Retry
+
+Retry exists to route around one unlucky backend. Without a bound it does the opposite: with
+`retry_attempts` unset Jul tries every distinct backend once, so a **total** outage multiplies
+upstream load by the backend count at exactly the moment the upstream can least afford it. These
+controls put a ceiling on that.
+
+```toml
+[upstreams.resilience]
+retry_attempts        = 2
+retry_deadline        = "3s"
+retry_backoff_initial = "20ms"
+retry_backoff_max     = "500ms"
+retry_budget_percent  = 10
+```
+
+Every default reproduces today's behaviour: no cap beyond the backend count, no deadline beyond the
+request context, immediate failover and no budget.
+
+### What is retried, and what is not
+
+A retry needs **all** of these to hold. The first one that does not is the reason the sequence
+stopped:
+
+| Condition | Why |
+| --- | --- |
+| The failure is a transport error | A status code is an answer. Jul does not retry 5xx |
+| No response byte has reached the client | Otherwise the request would be executed twice |
+| The method is retry-safe | `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, `DELETE` |
+| The body is replayable | Absent, or rewindable via `GetBody` |
+| The failure is not deterministic | A TLS identity mismatch is the same mismatch everywhere |
+| The client has not cancelled | Nobody is waiting for the answer |
+| Attempts remain | `retry_attempts` |
+| Deadline remains | Enough for an attempt, not merely for the sleep |
+| An untried eligible backend exists | Retrying the backend that just failed is not failover |
+| The budget allows it | `retry_budget_percent` |
+
+**`POST` and `PATCH` are never retried**, even with a replayable body. `GetBody != nil` proves the
+request *can* be sent again; it does not prove that doing so is safe. A connection-level error does
+not prove the backend did not accept the request, commit it and die before answering.
+
+**Failover never downgrades.** A backend whose scheme does not match an `https` route is refused
+rather than dialled, and the refusal is terminal — retrying into the next plaintext backend would be
+the same downgrade one hop later.
+
+### The deadline dominates
+
+`retry_deadline` bounds the **whole sequence**, not each attempt: the effective deadline is
+`min(request deadline, start + retry_deadline)`, and every attempt and every backoff sleep runs under
+it. Three attempts against a three-second deadline take at most three seconds, not nine.
+
+Backoff doubles from `retry_backoff_initial`, clamps at `retry_backoff_max`, and applies **full
+jitter** — the delay is drawn uniformly from `[0, interval)`. Half-jitter would halve the spread for
+no benefit, and spread is the entire point: every client of a backend that just died otherwise
+computes the same interval and returns together, turning failover into a synchronised second wave.
+
+If the remaining deadline leaves no room to sleep *and* attempt, the sequence stops instead of
+sleeping. Waking up at the deadline only converts a failure into a slower failure.
+
+### The budget is what actually bounds amplification
+
+`retry_attempts` caps one request. It does nothing about a thousand requests all retrying at once,
+which is the case that takes an upstream down. `retry_budget_percent` bounds the aggregate: over a
+trailing window, retries are permitted while
+
+```text
+retries < floor(primaries * retry_budget_percent / 100) + 3
+```
+
+so upstream load is bounded at `(1 + p/100) ×` client load plus a small floor — **1.1× at `p = 10`**,
+against up to `3×` for an unbudgeted `retry_attempts = 3`. Primary attempts accrue automatically, so
+nothing needs to report success.
+
+The floor of three free retries exists so a pool with almost no traffic can still fail over. Without
+it the first request after an idle period would be unretryable, which is precisely when a stale
+pooled connection is most likely.
+
+Two properties worth knowing before tuning it:
+
+- **The window is not reset by a reload.** The counters live on the pool and a policy change swaps
+  only the percentage. Resetting would hand out a fresh burst of retries, and a reload during an
+  incident is the least appropriate moment to forgive the retry load that helped cause it.
+- **Two locations sharing a pool share one budget window.** `retry_attempts` is location-overridable
+  while the budget is not, so a location configured to retry aggressively can consume the allowance
+  of a conservative one. This is correct — the budget protects the shared backend, not the route —
+  and it is stated here because it is surprising.
+
+### Scope and the deprecated spelling
+
+`retry_attempts`, `retry_deadline`, `retry_backoff_initial` and `retry_backoff_max` own no shared
+state, so a location may override them and a location value of `0` **inherits** rather than meaning
+"unlimited" — the same rule `max_connections_per_backend` follows. `retry_budget_percent` owns a
+window, so it is pool-scoped and a location may not set it.
+
+`proxy_retries` is the deprecated spelling of `retry_attempts` under `[[servers.locations]]`. It
+remains valid, because Jul rejects unknown TOML fields strictly and deleting a live spelling would
+turn working configurations into startup and reload failures. Setting both on one location is a
+validation error rather than a precedence rule: two names for one control that quietly disagree is
+how a configuration comes to mean something its author did not intend. Removal is scheduled for the
+next major release.
 
 ## backend_tls
 

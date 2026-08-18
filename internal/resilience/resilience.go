@@ -31,7 +31,16 @@ const (
 	MaxPendingRequestsCeiling  = 100_000
 	MaxConnectionsCeiling      = 100_000
 	PendingTimeoutCeiling      = 60 * time.Second
+	RetryAttemptsCeiling       = 100
+	RetryDeadlineCeiling       = 5 * time.Minute
+	RetryBackoffCeiling        = 60 * time.Second
+	RetryBudgetPercentCeiling  = 1000
 )
+
+// DefaultRetryBackoffMax caps exponential growth when backoff is enabled and no
+// ceiling was given. Backoff exists to spread failover, not to become a second
+// timeout, so an unstated maximum is a small one.
+const DefaultRetryBackoffMax = 500 * time.Millisecond
 
 // Options is the public [upstreams.resilience] block in the shape this package
 // consumes. config converts to it, so this package never imports config.
@@ -56,6 +65,22 @@ type Options struct {
 	// one transport. 0 is unlimited. It is stateless — a transport is built per
 	// location — so a location may override it.
 	MaxConnectionsPerBackend int
+	// RetryAttempts caps total attempts for one retryable request. 0 means try
+	// every distinct backend once, which is what Jul does today.
+	RetryAttempts int
+	// RetryDeadline bounds the whole retry sequence, attempts and backoff sleeps
+	// alike. 0 leaves the request context as the only bound.
+	RetryDeadline time.Duration
+	// RetryBackoffInitial is the first backoff interval, doubling per attempt
+	// with full jitter. 0 means immediate failover, which is what Jul does today.
+	RetryBackoffInitial time.Duration
+	// RetryBackoffMax clamps the doubling. It is only consulted when backoff is
+	// enabled; 0 then means DefaultRetryBackoffMax.
+	RetryBackoffMax time.Duration
+	// RetryBudgetPercent bounds retries as a percentage of primary attempts over
+	// a trailing window. 0 is unbudgeted. It owns a window, so unlike the other
+	// retry controls it is pool-scoped and a location may not override it.
+	RetryBudgetPercent int
 }
 
 // Policy is the resolved, immutable resilience policy. Consumers receive only
@@ -67,6 +92,11 @@ type Policy struct {
 	maxPendingRequests       int
 	pendingTimeout           time.Duration
 	maxConnectionsPerBackend int
+	retryAttempts            int
+	retryDeadline            time.Duration
+	retryBackoffInitial      time.Duration
+	retryBackoffMax          time.Duration
+	retryBudgetPercent       int
 }
 
 // Default is the policy every zero-valued configuration resolves to: no
@@ -84,12 +114,21 @@ func Resolve(o Options) (*Policy, error) {
 	if err := check(o); err != nil {
 		return nil, err
 	}
+	backoffMax := o.RetryBackoffMax
+	if o.RetryBackoffInitial > 0 && backoffMax == 0 {
+		backoffMax = DefaultRetryBackoffMax
+	}
 	return &Policy{
 		maxActiveRequests:        int64(o.MaxActiveRequests),
 		maxActivePerBackend:      int64(o.MaxActivePerBackend),
 		maxPendingRequests:       o.MaxPendingRequests,
 		pendingTimeout:           o.PendingTimeout,
 		maxConnectionsPerBackend: o.MaxConnectionsPerBackend,
+		retryAttempts:            o.RetryAttempts,
+		retryDeadline:            o.RetryDeadline,
+		retryBackoffInitial:      o.RetryBackoffInitial,
+		retryBackoffMax:          backoffMax,
+		retryBudgetPercent:       o.RetryBudgetPercent,
 	}, nil
 }
 
@@ -107,6 +146,22 @@ func check(o Options) error {
 		return fmt.Errorf("max_connections_per_backend must be between 0 and %d", MaxConnectionsCeiling)
 	case o.MaxPendingRequests > 0 && o.MaxActiveRequests == 0:
 		return fmt.Errorf("max_pending_requests requires max_active_requests: with no admission limit nothing ever queues")
+	case o.RetryAttempts < 0 || o.RetryAttempts > RetryAttemptsCeiling:
+		return fmt.Errorf("retry_attempts must be between 0 and %d", RetryAttemptsCeiling)
+	case o.RetryDeadline < 0 || o.RetryDeadline > RetryDeadlineCeiling:
+		return fmt.Errorf("retry_deadline must be between 0s and %s", RetryDeadlineCeiling)
+	case o.RetryBackoffInitial < 0 || o.RetryBackoffInitial > RetryBackoffCeiling:
+		return fmt.Errorf("retry_backoff_initial must be between 0s and %s", RetryBackoffCeiling)
+	case o.RetryBackoffMax < 0 || o.RetryBackoffMax > RetryBackoffCeiling:
+		return fmt.Errorf("retry_backoff_max must be between 0s and %s", RetryBackoffCeiling)
+	case o.RetryBudgetPercent < 0 || o.RetryBudgetPercent > RetryBudgetPercentCeiling:
+		return fmt.Errorf("retry_budget_percent must be between 0 and %d", RetryBudgetPercentCeiling)
+	case o.RetryBackoffMax > 0 && o.RetryBackoffInitial > o.RetryBackoffMax:
+		return fmt.Errorf("retry_backoff_initial (%s) must not exceed retry_backoff_max (%s)", o.RetryBackoffInitial, o.RetryBackoffMax)
+	case o.RetryBackoffMax > 0 && o.RetryBackoffInitial == 0:
+		return fmt.Errorf("retry_backoff_max requires retry_backoff_initial: with no initial interval there is no backoff to clamp")
+	case o.RetryDeadline > 0 && o.RetryBackoffInitial > o.RetryDeadline:
+		return fmt.Errorf("retry_backoff_initial (%s) must not exceed retry_deadline (%s), which would leave no room for a second attempt", o.RetryBackoffInitial, o.RetryDeadline)
 	}
 	return nil
 }
@@ -126,6 +181,25 @@ func (p *Policy) PendingTimeout() time.Duration { return p.pendingTimeout }
 // MaxConnectionsPerBackend returns the physical socket bound per backend host
 // on one transport; 0 is unlimited.
 func (p *Policy) MaxConnectionsPerBackend() int { return p.maxConnectionsPerBackend }
+
+// RetryAttempts returns the attempt cap; 0 means every distinct backend once.
+func (p *Policy) RetryAttempts() int { return p.retryAttempts }
+
+// RetryDeadline returns the bound on the whole retry sequence; 0 means the
+// request context is the only bound.
+func (p *Policy) RetryDeadline() time.Duration { return p.retryDeadline }
+
+// RetryBackoffInitial returns the first backoff interval; 0 means immediate
+// failover.
+func (p *Policy) RetryBackoffInitial() time.Duration { return p.retryBackoffInitial }
+
+// RetryBackoffMax returns the clamp on exponential growth. It is meaningful
+// only when RetryBackoffInitial is non-zero.
+func (p *Policy) RetryBackoffMax() time.Duration { return p.retryBackoffMax }
+
+// RetryBudgetPercent returns the retry allowance as a percentage of primary
+// attempts over a trailing window; 0 is unbudgeted.
+func (p *Policy) RetryBudgetPercent() int { return p.retryBudgetPercent }
 
 // Bounded reports whether the policy constrains anything at all. Consumers use
 // it to keep the completely-unconfigured path free of even a counter update.
