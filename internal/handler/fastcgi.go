@@ -141,10 +141,10 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var (
 		pipe   *gofast.ResponsePipe
 		client gofast.Client
-		chosen *upstream.Backend
+		chosen upstream.Attempt
 	)
 	_, err := h.pool.Do(r.Context(), h.pool.RetryRequestFor(h.retryOverride, replayable),
-		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
+		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			req := r
 			if n > 1 && r.GetBody != nil {
 				body, berr := r.GetBody()
@@ -180,7 +180,7 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, upstreamErrorStatus(err), err)
 		return
 	}
-	defer h.pool.Release(chosen)
+	defer h.pool.Release(chosen.Backend)
 	defer func() {
 		if cerr := client.Close(); cerr != nil && h.log != nil {
 			h.log.Warn("fastcgi client close failed", "upstream", h.pool.Name(), "backend", chosen.Address, "error", cerr)
@@ -206,7 +206,7 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // noteFailure records a failed attempt against passive health and logs it on
 // the pool's shared throttle, so a backend outage cannot flood the log through
 // the CGI path any more than through the HTTP one.
-func (h *fastcgiHandler) noteFailure(b *upstream.Backend, err error, msg string) {
+func (h *fastcgiHandler) noteFailure(b upstream.Attempt, err error, msg string) {
 	tripped := h.pool.MarkFailure(b)
 	if h.log == nil {
 		return
@@ -307,10 +307,10 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		conn   net.Conn
-		chosen *upstream.Backend
+		chosen upstream.Attempt
 	)
 	_, err := h.pool.Do(r.Context(), h.pool.RetryRequestFor(h.retryOverride, replayable),
-		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
+		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			body := r.Body
 			if n > 1 {
 				// A body-less request needs no rewind; its body is already at
@@ -351,7 +351,7 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, upstreamErrorStatus(err), err)
 		return
 	}
-	defer h.pool.Release(chosen)
+	defer h.pool.Release(chosen.Backend)
 	defer conn.Close()
 
 	// Past this point a byte may reach the client, so nothing here is retried.
@@ -398,7 +398,7 @@ func (h *uwsgiHandler) sendRequest(conn net.Conn, r *http.Request, body io.ReadC
 
 // noteFailure records a failed attempt against passive health and logs it on
 // the pool's shared throttle.
-func (h *uwsgiHandler) noteFailure(b *upstream.Backend, err error, msg string) {
+func (h *uwsgiHandler) noteFailure(b upstream.Attempt, err error, msg string) {
 	tripped := h.pool.MarkFailure(b)
 	if h.log == nil {
 		return

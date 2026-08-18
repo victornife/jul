@@ -661,6 +661,14 @@
       "active_when": "rate limit enabled"
     },
     {
+      "go_field": "ResilienceConfig.CircuitHalfOpenProbes",
+      "path": "upstreams[].resilience.circuit_half_open_probes",
+      "kind": "integer",
+      "constraint": "0 or greater",
+      "zero_semantics": "omitted means 1; an explicit zero means unbounded probing",
+      "active_when": "always"
+    },
+    {
       "go_field": "ResilienceConfig.MaxActivePerBackend",
       "path": "upstreams[].resilience.max_active_per_backend",
       "kind": "integer",

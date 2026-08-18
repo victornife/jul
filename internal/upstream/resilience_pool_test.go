@@ -60,7 +60,7 @@ func TestPerBackendLimitIsSelectionFilter(t *testing.T) {
 	p := resiliencePool(t, []string{"127.0.0.1:1", "127.0.0.1:2"},
 		&config.ResilienceConfig{MaxActivePerBackend: 2})
 
-	picked := make([]*Backend, 0, 4)
+	picked := make([]Attempt, 0, 4)
 	for i := 0; i < 4; i++ {
 		b, err := p.Pick()
 		if err != nil {
@@ -201,7 +201,7 @@ func TestParseSocketAddressForms(t *testing.T) {
 // carries its network, keeps its scheme without a URL to read it from, and is
 // distinguishable by identity from a TCP backend that happens to share a string.
 func TestNewBackendDerivesNetworkAndScheme(t *testing.T) {
-	unix := newBackend(config.UpstreamServer{Address: "unix:/run/fpm.sock", Weight: 2}, "")
+	unix := newBackend(config.UpstreamServer{Address: "unix:/run/fpm.sock", Weight: 2}, "", circuitParams{maxFails: 1, failTimeout: time.Second, halfOpenProbes: 1})
 	if unix.Network != NetworkUnix {
 		t.Fatalf("unix backend network = %q, want %q", unix.Network, NetworkUnix)
 	}
@@ -215,7 +215,7 @@ func TestNewBackendDerivesNetworkAndScheme(t *testing.T) {
 		t.Fatalf("weight = %d, want 2", unix.Weight())
 	}
 
-	tcp := newBackend(config.UpstreamServer{Address: "10.0.0.1:80", Weight: 1}, "https")
+	tcp := newBackend(config.UpstreamServer{Address: "10.0.0.1:80", Weight: 1}, "https", circuitParams{maxFails: 1, failTimeout: time.Second, halfOpenProbes: 1})
 	if tcp.Network != NetworkTCP {
 		t.Fatalf("tcp backend network = %q, want %q", tcp.Network, NetworkTCP)
 	}
@@ -228,7 +228,7 @@ func TestNewBackendDerivesNetworkAndScheme(t *testing.T) {
 
 	// Identity carries the network, so two backends whose addresses collide as
 	// strings are still two different places to dial.
-	same := newBackend(config.UpstreamServer{Address: "/run/fpm.sock", Weight: 1}, "")
+	same := newBackend(config.UpstreamServer{Address: "/run/fpm.sock", Weight: 1}, "", circuitParams{maxFails: 1, failTimeout: time.Second, halfOpenProbes: 1})
 	if same.Identity() == unix.Identity() {
 		t.Fatal("a tcp and a unix backend sharing an address string share an identity")
 	}

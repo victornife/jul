@@ -634,6 +634,8 @@ retry_deadline        = "3s"
 retry_backoff_initial = "20ms"
 retry_backoff_max     = "500ms"
 retry_budget_percent  = 10
+
+circuit_half_open_probes = 1
 ```
 
 | Key | Type | Default | Description |
@@ -648,6 +650,7 @@ retry_budget_percent  = 10
 | `retry_backoff_initial` | duration | `0` (immediate failover) | First backoff interval, doubling per attempt with full jitter. Settable per location |
 | `retry_backoff_max` | duration | `500ms` when backoff is on | Clamps the doubling; requires `retry_backoff_initial`. Settable per location |
 | `retry_budget_percent` | int | `0` (unbudgeted) | Retries permitted as a percentage of primary attempts over a trailing window. **Pool-scoped only** |
+| `circuit_half_open_probes` | int | `1` | How many requests may test a recovering backend at once. Omit for the default; an explicit `0` means unbounded. **Pool-scoped only** |
 
 `max_pending_requests = 0` means *no queue*, not an unlimited one — an unbounded pending queue is the
 failure this control prevents. `max_pending_requests` requires `max_active_requests`, and
@@ -657,6 +660,18 @@ The admission keys are stateful and therefore pool-scoped, and so is `retry_budg
 owns a window. A `[servers.locations.resilience]` block accepts `max_connections_per_backend` and the
 four stateless retry keys; anything else written there is rejected. A rejected request is `503` with
 `Retry-After`, never `429`.
+
+`circuit_half_open_probes` is the one key here where omitting it and writing `0` mean different
+things. `max_fails` consecutive failures take a backend out of rotation for `fail_timeout`; when that
+elapses the backend does not simply return, it is *probed* by at most this many requests. Setting `0`
+asks for the older behaviour, where every request waiting on the cooldown became eligible at the same
+instant and a backend that had just come back took the full production load. It is pool-scoped
+because two locations sharing an upstream would otherwise disagree about how many probes one
+recovering backend may take.
+
+`max_fails` and `fail_timeout` are retuned in place on reload: the failure counts and open circuits
+survive, so raising a threshold during an incident does not put every ejected backend back under full
+load at once.
 
 Retries are for **transport errors only** — a 5xx is an answer, not a failure to reach a backend, and
 retrying one would double load on a backend that is deliberately shedding. `POST` and `PATCH` are

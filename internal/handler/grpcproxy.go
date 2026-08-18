@@ -121,7 +121,7 @@ func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, e
 		return nil, err
 	}
 	if t.tlsBackend && b.URL.Scheme != "https" {
-		t.pool.Release(b)
+		t.pool.Release(b.Backend)
 		return nil, fmt.Errorf("grpc backend %s is not https but the route is: refusing to downgrade to h2c", b.URL.Host)
 	}
 	req.URL.Scheme = b.URL.Scheme
@@ -130,7 +130,7 @@ func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, e
 	resp, err := t.base.RoundTrip(req)
 	if err != nil {
 		t.pool.MarkFailure(b)
-		t.pool.Release(b)
+		t.pool.Release(b.Backend)
 		return nil, err
 	}
 	t.pool.MarkSuccess(b)
@@ -139,7 +139,7 @@ func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, e
 	}
 	// Hold the in-flight slot until the response body is closed so least-conn
 	// balancing reflects the full call (including a long-lived stream).
-	resp.Body = &releaseBody{ReadCloser: resp.Body, release: func() { t.pool.Release(b) }}
+	resp.Body = &releaseBody{ReadCloser: resp.Body, release: func() { t.pool.Release(b.Backend) }}
 	return resp, nil
 }
 

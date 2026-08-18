@@ -4,6 +4,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -446,4 +447,79 @@ func TestValidateRejectsMaxActiveRequestsOnUDPRoute(t *testing.T) {
 			t.Fatal("Validate accepted a bounded upstream reached through sni_routes on a UDP route")
 		}
 	})
+}
+
+// TestHalfOpenProbesDistinguishesAbsentFromZero pins the one place this setting
+// can go quietly wrong. An absent key and an explicit 0 are different answers:
+// the default bounds probing to one request, while 0 asks for the unbounded
+// behaviour that predates the breaker. A plain int would collapse them and
+// silently restore the very behaviour the setting exists to fix.
+func TestHalfOpenProbesDistinguishesAbsentFromZero(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *ResilienceConfig
+		want int
+	}{
+		{name: "nil block", cfg: nil, want: DefaultCircuitHalfOpenProbes},
+		{name: "absent key", cfg: &ResilienceConfig{}, want: DefaultCircuitHalfOpenProbes},
+		{name: "explicit zero means unbounded", cfg: &ResilienceConfig{CircuitHalfOpenProbes: Int(0)}, want: 0},
+		{name: "explicit bound", cfg: &ResilienceConfig{CircuitHalfOpenProbes: Int(5)}, want: 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.HalfOpenProbes(); got != tc.want {
+				t.Fatalf("HalfOpenProbes() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsNegativeHalfOpenProbes(t *testing.T) {
+	err := Validate(resilienceConfig(t, &ResilienceConfig{CircuitHalfOpenProbes: Int(-1)}))
+	if err == nil {
+		t.Fatal("Validate accepted a negative circuit_half_open_probes")
+	}
+	if !strings.Contains(err.Error(), "circuit_half_open_probes") {
+		t.Fatalf("error = %v, want it to name the offending key", err)
+	}
+	// The message has to distinguish the two zeros, or an operator who wanted
+	// unbounded probing cannot tell which value to write.
+	if !strings.Contains(err.Error(), "unbounded") {
+		t.Fatalf("error = %v, want it to explain what 0 means", err)
+	}
+}
+
+// TestHalfOpenProbesIsPoolScoped pins that the bound cannot be set per
+// location. Two locations sharing one upstream would otherwise disagree about
+// how many probes that backend may take, and the backend is what is recovering.
+func TestHalfOpenProbesIsPoolScoped(t *testing.T) {
+	tmpl := `
+[[servers]]
+listen = ":8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://api"
+
+    [servers.locations.resilience]
+    %s
+
+[[upstreams]]
+name = "api"
+servers = [{ address = "127.0.0.1:3000" }]
+`
+	// A control, so a failure below cannot be blamed on the surrounding
+	// configuration: the same shape with a key that *is* location-scoped has to
+	// parse.
+	if _, err := Parse([]byte(fmt.Sprintf(tmpl, "max_connections_per_backend = 3"))); err != nil {
+		t.Fatalf("control config did not parse, so this test proves nothing: %v", err)
+	}
+
+	_, err := Parse([]byte(fmt.Sprintf(tmpl, "circuit_half_open_probes = 3")))
+	if err == nil {
+		t.Fatal("a location-level circuit_half_open_probes was accepted")
+	}
+	if !strings.Contains(err.Error(), "circuit_half_open_probes") {
+		t.Fatalf("error = %v, want it to name the rejected key", err)
+	}
 }

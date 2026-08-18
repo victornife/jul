@@ -29,6 +29,9 @@ func validateResilience(r *ResilienceConfig, where string, grace time.Duration) 
 	if pt := r.PendingTimeout.Std(); pt > 0 && grace > 0 && pt > grace {
 		errs = append(errs, fmt.Errorf("%s: pending_timeout (%s) must not exceed global.shutdown_timeout (%s), which bounds handler-generation retirement: a request parked longer than the grace outlives the transport it is queued for", where, pt, grace))
 	}
+	if n := r.CircuitHalfOpenProbes; n != nil && *n < 0 {
+		errs = append(errs, fmt.Errorf("%s: circuit_half_open_probes (%d) must not be negative; omit the key for the default of %d, or set 0 for unbounded probing", where, *n, DefaultCircuitHalfOpenProbes))
+	}
 	return errs
 }
 

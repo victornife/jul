@@ -63,6 +63,6 @@ func BenchmarkPoolPick(b *testing.B) {
 		if err != nil {
 			b.Fatalf("Pick: %v", err)
 		}
-		p.Release(backend)
+		p.Release(backend.Backend)
 	}
 }

@@ -30,8 +30,8 @@ func TestUpdateBackendsPreservesState(t *testing.T) {
 	b := findBackend(p, "b:80")
 
 	// Trip a's passive cooldown (maxFails=2) and put an in-flight request on b.
-	p.MarkFailure(a)
-	p.MarkFailure(a)
+	p.MarkFailure(admitOn(t, a))
+	p.MarkFailure(admitOn(t, a))
 	b.acquire()
 
 	now := time.Now().UnixNano()
@@ -101,7 +101,7 @@ func TestWeightedRRPrunesRemovedBackends(t *testing.T) {
 		if err != nil {
 			t.Fatalf("pick %d: %v", i, err)
 		}
-		p.Release(b)
+		p.Release(b.Backend)
 	}
 
 	if len(p.balancer.(*weightedRR).weights) != 2 {
@@ -120,7 +120,7 @@ func TestWeightedRRPrunesRemovedBackends(t *testing.T) {
 	}
 
 	b, _ := p.Pick()
-	p.Release(b)
+	p.Release(b.Backend)
 	if _, ok := p.balancer.(*weightedRR).weights[findBackend(p, "a:80")]; ok {
 		t.Fatal("removed backend a still present in weights map")
 	}
@@ -136,7 +136,7 @@ func TestWeightedRRPrunesAfterChurn(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		b, _ := p.Pick()
-		p.Release(b)
+		p.Release(b.Backend)
 	}
 
 	// Remove a, then add it back — UpdateBackends creates a fresh Backend pointer
@@ -150,7 +150,7 @@ func TestWeightedRRPrunesAfterChurn(t *testing.T) {
 
 	// After the next pick the fresh backend pointer is the only entry.
 	b, _ := p.Pick()
-	p.Release(b)
+	p.Release(b.Backend)
 	if len(p.balancer.(*weightedRR).weights) != 1 {
 		t.Fatalf("weights after post-churn pick = %d, want 1", len(p.balancer.(*weightedRR).weights))
 	}
@@ -166,7 +166,7 @@ func TestUpdateBackendsWeightChangePreservesState(t *testing.T) {
 	)
 	a := findBackend(p, "a:80")
 	a.acquire()
-	a.fails.Store(2)
+	a.circuit.fails.Store(2)
 
 	p.UpdateBackends([]config.UpstreamServer{{Address: "a:80", Weight: 5}})
 
@@ -198,7 +198,7 @@ func TestWeightedRRReconvergesAfterWeightChange(t *testing.T) {
 	// Let b accumulate a large lead under the original weights.
 	for i := 0; i < 50; i++ {
 		b, _ := p.Pick()
-		p.Release(b)
+		p.Release(b.Backend)
 	}
 
 	// Swap the weights around.
@@ -214,7 +214,7 @@ func TestWeightedRRReconvergesAfterWeightChange(t *testing.T) {
 			t.Fatalf("pick %d: %v", i, err)
 		}
 		counts[b.Address]++
-		p.Release(b)
+		p.Release(b.Backend)
 	}
 	// 9:1 over 100 picks is 90/10. Allow slack for the smoothing, but the new
 	// weights must clearly dominate rather than the old lead.
@@ -255,7 +255,7 @@ func TestUpdateBackendsConcurrentWithPick(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 2000; i++ {
 			if b, err := p.Pick(); err == nil {
-				p.Release(b)
+				p.Release(b.Backend)
 			}
 		}
 	}()

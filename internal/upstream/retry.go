@@ -321,7 +321,7 @@ type AttemptResult struct {
 }
 
 // AttemptFunc performs one attempt against a chosen backend. n is 1-based.
-type AttemptFunc func(ctx context.Context, b *Backend, n int) AttemptResult
+type AttemptFunc func(ctx context.Context, b Attempt, n int) AttemptResult
 
 // Do drives attempts against the pool's backends until one succeeds or the
 // retry rule stops the sequence, and returns why it stopped.
@@ -363,11 +363,11 @@ func (p *Pool) Do(ctx context.Context, rr RetryRequest, fn AttemptFunc) (StopRea
 		res := fn(deadline, b, n)
 		if res.Err == nil {
 			if !res.Retain {
-				p.Release(b)
+				p.Release(b.Backend)
 			}
 			return StopSuccess, nil
 		}
-		p.Release(b)
+		p.Release(b.Backend)
 		lastErr = res.Err
 
 		remaining := remainingFor(deadline)

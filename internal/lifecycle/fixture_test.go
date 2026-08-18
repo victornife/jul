@@ -137,7 +137,6 @@ func fullConfig() *config.Config {
 				Resilience: &config.LocationResilienceConfig{
 					MaxConnectionsPerBackend: 64,
 				},
-
 				FastCGIPass:   "127.0.0.1:9000",
 				FastCGIParams: map[string]string{"SCRIPT_FILENAME": "/srv/index.php"},
 				UWSGIPass:     "127.0.0.1:3031",
@@ -212,6 +211,8 @@ func fullConfig() *config.Config {
 				PendingTimeout:      config.Duration(2 * time.Second),
 
 				MaxConnectionsPerBackend: 128,
+
+				CircuitHalfOpenProbes: config.Int(2),
 			},
 			BackendTLS: &config.BackendTLSConfig{
 				CAFile:             "/etc/jul/backend-ca.pem",

@@ -9,6 +9,7 @@ import (
 	"net"
 	"syscall"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
@@ -48,16 +49,16 @@ func (fakeTimeoutError) Temporary() bool { return true }
 // regardless of maxFails (issue #275).
 func TestMarkFailureReportsTripOnlyOnce(t *testing.T) {
 	p := pool(t, "round_robin", config.UpstreamServer{Address: "a:80", Weight: 1})
-	p.maxFails = 3
+	p.setCircuitLimits(circuitParams{maxFails: 3, failTimeout: time.Second, halfOpenProbes: 1})
 	b := p.Backends()[0]
 
-	if p.MarkFailure(b) {
+	if p.MarkFailure(admitOn(t, b)) {
 		t.Error("failure 1/3 reported a trip")
 	}
-	if p.MarkFailure(b) {
+	if p.MarkFailure(admitOn(t, b)) {
 		t.Error("failure 2/3 reported a trip")
 	}
-	if !p.MarkFailure(b) {
+	if !p.MarkFailure(admitOn(t, b)) {
 		t.Error("failure 3/3 did not report a trip")
 	}
 	if b.Available() {
@@ -65,24 +66,33 @@ func TestMarkFailureReportsTripOnlyOnce(t *testing.T) {
 	}
 }
 
-// TestMarkSuccessReportsRecoveryOnlyWhenDown pins that MarkSuccess only
-// reports true when clearing an actual cooldown, so ordinary successes on a
-// healthy backend do not produce a "recovered" line.
+// TestMarkSuccessReportsRecoveryOnlyWhenDown pins that MarkSuccess only reports
+// true when it is the call that returns the backend to rotation, so ordinary
+// successes on a healthy backend do not produce a "recovered" line.
+//
+// An open circuit refuses admission, so the recovery cannot come from ordinary
+// traffic any more: it has to come from a probe, which is the whole point.
 func TestMarkSuccessReportsRecoveryOnlyWhenDown(t *testing.T) {
 	p := pool(t, "round_robin", config.UpstreamServer{Address: "a:80", Weight: 1})
-	p.maxFails = 1
+	p.setCircuitLimits(circuitParams{maxFails: 1, failTimeout: time.Second, halfOpenProbes: 1})
 	b := p.Backends()[0]
+	clk := fakeBackendClock(b)
 
-	if p.MarkSuccess(b) {
+	if p.MarkSuccess(admitOn(t, b)) {
 		t.Error("success on a never-failed backend reported a recovery")
 	}
-	if !p.MarkFailure(b) {
+	if !p.MarkFailure(admitOn(t, b)) {
 		t.Fatal("failure did not trip with maxFails=1")
 	}
-	if !p.MarkSuccess(b) {
-		t.Error("success clearing a tripped backend did not report a recovery")
+	if _, ok := b.admit(); ok {
+		t.Fatal("a tripped backend still admitted traffic")
 	}
-	if p.MarkSuccess(b) {
+
+	clk.advance(time.Second)
+	if !p.MarkSuccess(admitOn(t, b)) {
+		t.Error("the successful probe did not report a recovery")
+	}
+	if p.MarkSuccess(admitOn(t, b)) {
 		t.Error("second success in a row reported a recovery again")
 	}
 }
@@ -92,11 +102,12 @@ func TestMarkSuccessReportsRecoveryOnlyWhenDown(t *testing.T) {
 // trip or recovery, not on every failure/success, and is a no-op when unset.
 func TestHealthHookFiresOnlyOnPassiveTransition(t *testing.T) {
 	p := pool(t, "round_robin", config.UpstreamServer{Address: "a:80", Weight: 1})
-	p.maxFails = 2
+	p.setCircuitLimits(circuitParams{maxFails: 2, failTimeout: time.Second, halfOpenProbes: 1})
 	b := p.Backends()[0]
+	clk := fakeBackendClock(b)
 
 	// Unset hook must not panic.
-	p.MarkFailure(b)
+	p.MarkFailure(admitOn(t, b))
 
 	type event struct {
 		pool, backend string
@@ -107,18 +118,19 @@ func TestHealthHookFiresOnlyOnPassiveTransition(t *testing.T) {
 		events = append(events, event{pool, backend, healthy})
 	})
 
-	p.MarkFailure(b) // 2nd consecutive failure: trips
+	p.MarkFailure(admitOn(t, b)) // 2nd consecutive failure: trips
 	if len(events) != 1 || events[0].healthy {
 		t.Fatalf("events after trip = %+v, want one down event", events)
 	}
-	p.MarkSuccess(b) // clears the cooldown: recovers
+	clk.advance(time.Second)
+	p.MarkSuccess(admitOn(t, b)) // probe closes the circuit: recovers
 	if len(events) != 2 || !events[1].healthy {
 		t.Fatalf("events after recovery = %+v, want a second, up event", events)
 	}
 	if events[0].pool != "test" || events[0].backend != "a:80" {
 		t.Errorf("event identity = %+v, want pool=test backend=a:80", events[0])
 	}
-	p.MarkSuccess(b) // already healthy: no further event
+	p.MarkSuccess(admitOn(t, b)) // already healthy: no further event
 	if len(events) != 2 {
 		t.Fatalf("events after redundant success = %+v, want still 2", events)
 	}

@@ -282,7 +282,7 @@ func TestRegistryWiresPassiveHealthHookWithoutActiveChecks(t *testing.T) {
 	defer r.CloseAll()
 
 	b := pool.Backends()[0]
-	if !pool.MarkFailure(b) {
+	if !pool.MarkFailure(admitOn(t, b)) {
 		t.Fatal("failure did not trip with maxFails=1")
 	}
 	if len(events) != 1 || events[0] != "api/10.0.0.1:80=false" {
@@ -445,5 +445,59 @@ func TestRegistryActivateSkipsReusedPools(t *testing.T) {
 
 	if got := starts.Load(); got != 1 {
 		t.Fatalf("health-check starts after reused Activate = %d, want 1", got)
+	}
+}
+
+// TestReloadRetunesTheBreakerWithoutForgettingIt pins that max_fails and
+// fail_timeout are applied in place.
+//
+// They used to be part of the pool's identity, so changing either rebuilt the
+// pool — and a rebuild forgets which backends are currently out of rotation,
+// putting all of them back under full load at the moment the operator was
+// reaching for the knob precisely because they were failing.
+func TestReloadRetunesTheBreakerWithoutForgettingIt(t *testing.T) {
+	r := NewRegistry(RegistryOptions{})
+
+	up := upstreamCfg("api", "round_robin", "10.0.0.1:80")
+	up.MaxFails = 3
+
+	r.Begin()
+	pool, err := r.For(context.Background(), up, "http")
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	r.Commit()
+	defer r.CloseAll()
+
+	b := pool.Backends()[0]
+	pool.MarkFailure(admitOn(t, b))
+	pool.MarkFailure(admitOn(t, b))
+	if got := b.FailCount(); got != 2 {
+		t.Fatalf("fail count = %d, want 2 before the reload", got)
+	}
+
+	up.MaxFails = 5
+	r.Begin()
+	reloaded, err := r.For(context.Background(), up, "http")
+	if err != nil {
+		t.Fatalf("For after reload: %v", err)
+	}
+	r.Commit()
+
+	if reloaded != pool {
+		t.Fatal("retuning max_fails rebuilt the pool instead of updating it in place")
+	}
+	if got := reloaded.Backends()[0].FailCount(); got != 2 {
+		t.Fatalf("fail count = %d after reload, want the accumulated 2 preserved", got)
+	}
+	// The new threshold has to be the one in force, not the old one.
+	nb := reloaded.Backends()[0]
+	for i := 3; i < 5; i++ {
+		if reloaded.MarkFailure(admitOn(t, nb)) {
+			t.Fatalf("failure %d tripped under the old threshold of 3", i)
+		}
+	}
+	if !reloaded.MarkFailure(admitOn(t, nb)) {
+		t.Fatal("failure 5 did not trip under the new threshold of 5")
 	}
 }

@@ -170,6 +170,7 @@ const (
 	reasonResilienceTransport   = "the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary"
 	reasonResilienceRetry       = "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
 	reasonResilienceRetryBudget = "the percentage is swapped into the live budget while its accumulated window is deliberately preserved: resetting the window on reload would hand out a fresh burst of retries, and a reload during an incident is the least appropriate moment to forgive the retry load that helped cause it"
+	reasonResilienceCircuit     = "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once"
 )
 
 // Registry is the authoritative disposition of every public configuration path,
@@ -585,13 +586,15 @@ func streamEntries() []Entry {
 
 func upstreamEntries() []Entry {
 	out := hotGroup(SubUpstream, reasonUpstreamStaged,
-		"upstreams.*.fail_timeout",
-		"upstreams.*.max_fails",
 		"upstreams.*.name",
 		"upstreams.*.servers.*.address",
 		"upstreams.*.servers.*.weight",
 		"upstreams.*.strategy",
 	)
+	out = append(out, hotGroup(SubResilience, reasonResilienceCircuit,
+		"upstreams.*.fail_timeout",
+		"upstreams.*.max_fails",
+	)...)
 	out = append(out, hotGroup(SubResilience, reasonResiliencePolicy,
 		"upstreams.*.resilience.max_active_per_backend",
 		"upstreams.*.resilience.max_active_requests",
@@ -606,6 +609,7 @@ func upstreamEntries() []Entry {
 		"upstreams.*.resilience.retry_deadline",
 	)...)
 	out = append(out, hot("upstreams.*.resilience.retry_budget_percent", SubResilience, reasonResilienceRetryBudget))
+	out = append(out, hot("upstreams.*.resilience.circuit_half_open_probes", SubResilience, reasonResilienceCircuit))
 	out = append(out, hotGroup(SubHealthCheck, "active probes are restarted with the pool on each successful reload",
 		"upstreams.*.health_check.enabled",
 		"upstreams.*.health_check.expect_body",

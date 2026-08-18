@@ -150,13 +150,13 @@ func TestHealthCheckClearsPassiveCooldown(t *testing.T) {
 	// once unhealthy then back so the recovery path runs MarkSuccess).
 	hc.states[b] = &probeState{healthy: false}
 	b.setActiveHealthy(false)
-	// Simulate leftover passive cooldown from live traffic.
-	b.downUntil.Store(time.Now().Add(time.Hour).UnixNano())
+	// Simulate a circuit left open by live traffic.
+	forceOpen(b)
 
-	hc.probeOne(b) // success with healthyThreshold 1 -> recover + MarkSuccess
+	hc.probeOne(b) // success with healthyThreshold 1 -> recover + close the circuit
 	now := time.Now().UnixNano()
 	if !b.available(now) {
-		t.Fatal("recovered backend should clear passive cooldown and be available")
+		t.Fatal("a recovered backend should close its circuit and be available")
 	}
 }
 

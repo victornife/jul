@@ -464,7 +464,7 @@ func (l *listener) shutdown() {
 // regardless of connection volume while still being visible on the counter.
 // The returned backend must be released to the pool when the
 // connection/session ends.
-func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time.Duration) (net.Conn, *upstream.Backend, error) {
+func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time.Duration) (net.Conn, upstream.Attempt, error) {
 	attempts := len(pool.Backends())
 	if attempts < 1 {
 		attempts = 1
@@ -474,13 +474,13 @@ func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time
 		b, err := pool.Pick()
 		if err != nil {
 			l.server.dialFailure(network, upstream.ClassifyDialError(err))
-			return nil, nil, err
+			return nil, upstream.Attempt{}, err
 		}
 		conn, derr := net.DialTimeout(network, b.Address, timeout)
 		if derr != nil {
 			reason := upstream.ClassifyDialError(derr)
 			tripped := pool.MarkFailure(b)
-			pool.Release(b)
+			pool.Release(b.Backend)
 			l.server.dialFailure(network, reason)
 			switch {
 			case tripped:
@@ -499,7 +499,7 @@ func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time
 	if lastErr == nil {
 		lastErr = errors.New("stream: no backend available")
 	}
-	return nil, nil, lastErr
+	return nil, upstream.Attempt{}, lastErr
 }
 
 // pool stages a target (named upstream or literal host:port) through the

@@ -85,6 +85,13 @@ type poolEntry struct {
 	// at Commit. A freshly built pool resolves its own in NewPool.
 	policy *resilience.Policy
 
+	// circuit is the staged breaker configuration, applied to a reused pool at
+	// Commit. It is deliberately not part of upstreamMeta: retuning a threshold
+	// used to rebuild the pool, which discarded the record of which backends
+	// were currently out of rotation and put all of them back under full load
+	// at once — during a reload, which is when that record matters most.
+	circuit circuitParams
+
 	// activation state is set on freshly built staged pools and consumed by
 	// Activate after Commit promotes the pool to live (R9-07).
 	needsHealth bool
@@ -102,11 +109,9 @@ type poolEntry struct {
 // fixed at construction (balancer strategy, scheme) or define the checker
 // (health-check settings).
 type upstreamMeta struct {
-	scheme      string
-	strategy    string
-	maxFails    int
-	failTimeout time.Duration
-	health      config.HealthCheckConfig
+	scheme   string
+	strategy string
+	health   config.HealthCheckConfig
 	// discoverySig captures the discovery config so a changed provider rebuilds
 	// the pool (and its refresher) rather than being reused in place.
 	discoverySig string
@@ -123,8 +128,6 @@ type upstreamMeta struct {
 func (m upstreamMeta) equal(o upstreamMeta) bool {
 	return m.scheme == o.scheme &&
 		m.strategy == o.strategy &&
-		m.maxFails == o.maxFails &&
-		m.failTimeout == o.failTimeout &&
 		m.discoverySig == o.discoverySig &&
 		m.backendTLSSig == o.backendTLSSig &&
 		healthConfigEqual(m.health, o.health)
@@ -219,7 +222,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		if disco {
 			pending = backendsToServers(e.pool.Backends())
 		}
-		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco, policy: resPolicy}
+		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco, policy: resPolicy, circuit: circuitParamsOf(up)}
 		return e.pool, nil
 	}
 
@@ -322,6 +325,11 @@ func (r *Registry) Commit() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.staged {
+		// Retuned before the backend set is replaced, so a backend built by this
+		// same reload starts on the new thresholds rather than the old ones.
+		if e.reused {
+			e.pool.setCircuitLimits(e.circuit)
+		}
 		// A discovery pool's backends are owned by its refresher; do not overwrite
 		// them with the (possibly empty) static seed on reuse.
 		if e.reused && !e.discovery {
@@ -528,13 +536,29 @@ func backendsToServers(backends []*Backend) []config.UpstreamServer {
 	return servers
 }
 
+// circuitParamsOf resolves an upstream's breaker thresholds, applying the same
+// defaults NewPool does.
+func circuitParamsOf(up config.UpstreamConfig) circuitParams {
+	maxFails := up.MaxFails
+	if maxFails < 1 {
+		maxFails = 1
+	}
+	failTimeout := up.FailTimeout.Std()
+	if failTimeout <= 0 {
+		failTimeout = 10 * time.Second
+	}
+	return circuitParams{
+		maxFails:       maxFails,
+		failTimeout:    failTimeout,
+		halfOpenProbes: up.Resilience.HalfOpenProbes(),
+	}
+}
+
 // metaOf extracts the identity fields of an upstream.
 func metaOf(up config.UpstreamConfig, scheme string) upstreamMeta {
 	m := upstreamMeta{
 		scheme:        scheme,
 		strategy:      up.Strategy,
-		maxFails:      up.MaxFails,
-		failTimeout:   up.FailTimeout.Std(),
 		discoverySig:  discoverySignature(up.Discovery),
 		backendTLSSig: backendTLSSignature(up),
 	}
