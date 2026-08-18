@@ -176,3 +176,102 @@ func TestHealthProbeTransportIsExemptFromConnectionBound(t *testing.T) {
 		t.Fatalf("probe transport MaxConnsPerHost = %d, want 0: health checks must not compete with live traffic for sockets", got)
 	}
 }
+
+// TestParseSocketAddressForms pins the three accepted address forms and the
+// network each derives. One parser answers for upstream servers, FastCGI and
+// uWSGI targets and health probes alike; a second would be a second answer.
+func TestParseSocketAddressForms(t *testing.T) {
+	cases := []struct{ in, network, address string }{
+		{"unix:/run/php/php-fpm.sock", NetworkUnix, "/run/php/php-fpm.sock"},
+		{"tcp://127.0.0.1:9000", NetworkTCP, "127.0.0.1:9000"},
+		{"127.0.0.1:9000", NetworkTCP, "127.0.0.1:9000"},
+		{"[::1]:9000", NetworkTCP, "[::1]:9000"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			network, address := ParseSocketAddress(c.in)
+			if network != c.network || address != c.address {
+				t.Fatalf("ParseSocketAddress(%q) = (%q, %q), want (%q, %q)", c.in, network, address, c.network, c.address)
+			}
+		})
+	}
+}
+
+// TestNewBackendDerivesNetworkAndScheme pins the backend model: a unix backend
+// carries its network, keeps its scheme without a URL to read it from, and is
+// distinguishable by identity from a TCP backend that happens to share a string.
+func TestNewBackendDerivesNetworkAndScheme(t *testing.T) {
+	unix := newBackend(config.UpstreamServer{Address: "unix:/run/fpm.sock", Weight: 2}, "")
+	if unix.Network != NetworkUnix {
+		t.Fatalf("unix backend network = %q, want %q", unix.Network, NetworkUnix)
+	}
+	if unix.Address != "/run/fpm.sock" {
+		t.Fatalf("unix backend address = %q, want the socket path", unix.Address)
+	}
+	if unix.URL != nil {
+		t.Fatal("a unix backend must not carry a URL; there is nothing meaningful to put in one")
+	}
+	if unix.Weight() != 2 {
+		t.Fatalf("weight = %d, want 2", unix.Weight())
+	}
+
+	tcp := newBackend(config.UpstreamServer{Address: "10.0.0.1:80", Weight: 1}, "https")
+	if tcp.Network != NetworkTCP {
+		t.Fatalf("tcp backend network = %q, want %q", tcp.Network, NetworkTCP)
+	}
+	if tcp.Scheme() != "https" {
+		t.Fatalf("scheme = %q, want https", tcp.Scheme())
+	}
+	if tcp.URL == nil || tcp.URL.Host != "10.0.0.1:80" {
+		t.Fatalf("tcp backend URL = %v, want host 10.0.0.1:80", tcp.URL)
+	}
+
+	// Identity carries the network, so two backends whose addresses collide as
+	// strings are still two different places to dial.
+	same := newBackend(config.UpstreamServer{Address: "/run/fpm.sock", Weight: 1}, "")
+	if same.Identity() == unix.Identity() {
+		t.Fatal("a tcp and a unix backend sharing an address string share an identity")
+	}
+}
+
+// TestUnixBackendIsSelectable proves a unix backend is a first-class pool
+// member: it can be picked, counted and released like any other.
+func TestUnixBackendIsSelectable(t *testing.T) {
+	p := resiliencePool(t, []string{"unix:/run/a.sock", "unix:/run/b.sock"}, nil)
+
+	seen := map[string]int{}
+	for i := 0; i < 4; i++ {
+		b, err := p.Pick()
+		if err != nil {
+			t.Fatalf("pick %d: %v", i, err)
+		}
+		if b.Network != NetworkUnix {
+			t.Fatalf("picked backend network = %q, want unix", b.Network)
+		}
+		seen[b.Address]++
+		b.Release()
+	}
+	if len(seen) != 2 {
+		t.Fatalf("round robin visited %d of 2 unix backends: %v", len(seen), seen)
+	}
+}
+
+// TestUnixBackendSurvivesDiscoveryRoundTrip pins that a reused discovery pool
+// restages a unix backend as the same identity: backendsToServers must re-prefix
+// the address, or the next newBackend would derive tcp and reset its state.
+func TestUnixBackendSurvivesDiscoveryRoundTrip(t *testing.T) {
+	p := resiliencePool(t, []string{"unix:/run/a.sock"}, nil)
+	before := p.Backends()[0]
+	before.acquire()
+
+	p.UpdateBackends(backendsToServers(p.Backends()))
+
+	after := p.Backends()[0]
+	if after != before {
+		t.Fatal("a unix backend was replaced by a round trip through backendsToServers; its accounting was discarded")
+	}
+	if after.Network != NetworkUnix {
+		t.Fatalf("network after round trip = %q, want unix", after.Network)
+	}
+	after.Release()
+}

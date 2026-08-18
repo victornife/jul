@@ -6,6 +6,7 @@ package handler
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -314,5 +315,226 @@ func TestUWSGIHonoursConnectTimeout(t *testing.T) {
 	}
 	if elapsed > 3*time.Second {
 		t.Fatalf("dial took %s; proxy_connect_timeout of 150ms was ignored", elapsed)
+	}
+}
+
+// TestFastCGIPoolAcrossStrategies proves an FPM pool is balanced by whichever
+// strategy the upstream declares.
+//
+// least_conn is checked differently on purpose. It is not round robin: with
+// sequential traffic every backend is idle at selection time, ties resolve to
+// the first candidate, and sending everything to one backend is the correct
+// answer to "who has the fewest in-flight requests". It is exercised under real
+// concurrency below, where the question has a meaningful answer.
+func TestFastCGIPoolAcrossStrategies(t *testing.T) {
+	for _, strategy := range []string{"round_robin", "weighted_round_robin"} {
+		t.Run(strategy, func(t *testing.T) {
+			addrA, hitsA := fakeFPM(t, "tcp", "127.0.0.1:0")
+			addrB, hitsB := fakeFPM(t, "tcp", "127.0.0.1:0")
+			ups := map[string]config.UpstreamConfig{
+				"php": {
+					Name:     "php",
+					Strategy: strategy,
+					Servers: []config.UpstreamServer{
+						{Address: addrA, Weight: 1},
+						{Address: addrB, Weight: 1},
+					},
+					MaxFails: 3,
+				},
+			}
+			h, adm := fastcgiFor(t, config.LocationConfig{FastCGIPass: "php", Root: "/srv"}, ups)
+
+			for i := 0; i < 8; i++ {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/index.php", nil))
+				if rec.Code != http.StatusOK {
+					t.Fatalf("request %d: status = %d (%q)", i, rec.Code, rec.Body.String())
+				}
+			}
+			if hitsA.Load()+hitsB.Load() != 8 {
+				t.Fatalf("backend hits = %d + %d, want 8 in total", hitsA.Load(), hitsB.Load())
+			}
+			if hitsA.Load() == 0 || hitsB.Load() == 0 {
+				t.Fatalf("%s never used one of the backends: a=%d b=%d", strategy, hitsA.Load(), hitsB.Load())
+			}
+			if adm.Active() != 0 {
+				t.Fatalf("active at quiesce = %d, want 0", adm.Active())
+			}
+		})
+	}
+
+	t.Run("least_conn under concurrency", func(t *testing.T) {
+		addrA, hitsA := fakeFPM(t, "tcp", "127.0.0.1:0")
+		addrB, hitsB := fakeFPM(t, "tcp", "127.0.0.1:0")
+		ups := map[string]config.UpstreamConfig{
+			"php": {
+				Name:     "php",
+				Strategy: "least_conn",
+				Servers: []config.UpstreamServer{
+					{Address: addrA, Weight: 1},
+					{Address: addrB, Weight: 1},
+				},
+				MaxFails: 3,
+			},
+		}
+		h, adm := fastcgiFor(t, config.LocationConfig{FastCGIPass: "php", Root: "/srv"}, ups)
+
+		var wg sync.WaitGroup
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/index.php", nil))
+			}()
+		}
+		wg.Wait()
+
+		if hitsA.Load()+hitsB.Load() != 8 {
+			t.Fatalf("backend hits = %d + %d, want 8 in total", hitsA.Load(), hitsB.Load())
+		}
+		if adm.Active() != 0 {
+			t.Fatalf("active at quiesce = %d, want 0", adm.Active())
+		}
+	})
+}
+
+// TestCGIHandlerRejectsUnusableTargets pins the construction-time errors. A
+// handler that cannot name its backend must fail the reload rather than build.
+func TestCGIHandlerRejectsUnusableTargets(t *testing.T) {
+	t.Run("empty fastcgi_pass", func(t *testing.T) {
+		if _, err := NewFastCGI(context.Background(), config.ServerConfig{}, config.LocationConfig{}, nil, nil, nil); err == nil {
+			t.Fatal("NewFastCGI accepted an empty fastcgi_pass")
+		}
+	})
+	t.Run("empty uwsgi_pass", func(t *testing.T) {
+		loc := config.LocationConfig{UWSGIPass: "   "}
+		if _, err := NewFastCGI(context.Background(), config.ServerConfig{}, loc, nil, nil, nil); err == nil {
+			t.Fatal("NewFastCGI accepted a blank uwsgi_pass")
+		}
+	})
+}
+
+// TestUpstreamErrorStatus pins the two backend-selection failures apart. Both
+// are 503 to a client, but they are distinct errors so an operator is never told
+// "no healthy backend" when the answer is "every backend is at capacity".
+func TestUpstreamErrorStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"no healthy backend", upstream.ErrNoAvailableBackend, http.StatusServiceUnavailable},
+		{"all backends at capacity", upstream.ErrBackendAtCapacity, http.StatusServiceUnavailable},
+		{"anything else", io.ErrUnexpectedEOF, http.StatusBadGateway},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := upstreamErrorStatus(tc.err); got != tc.want {
+				t.Fatalf("status = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestUWSGIReleasesAdmissionOnBackendFailure mirrors the FastCGI case for the
+// other CGI-family handler, and pins a behaviour uWSGI did not have before this
+// slice: passive health. The first failures are 502s from the dial, and once
+// max_fails consecutive failures trip the backend's cooldown the pool has no
+// eligible backend left and answers 503. Either way the slot is returned.
+func TestUWSGIReleasesAdmissionOnBackendFailure(t *testing.T) {
+	loc := config.LocationConfig{UWSGIPass: "tcp://127.0.0.1:1", Root: "/srv"}
+	h, err := NewFastCGI(context.Background(), config.ServerConfig{}, loc, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewFastCGI: %v", err)
+	}
+	ah := h.(*admittedHandler)
+	t.Cleanup(func() { _ = ah.Close() })
+
+	var sawDialFailure, sawCooldown bool
+	for i := 0; i < 10; i++ {
+		rec := httptest.NewRecorder()
+		ah.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app.py", nil))
+		switch rec.Code {
+		case http.StatusBadGateway:
+			sawDialFailure = true
+		case http.StatusServiceUnavailable:
+			sawCooldown = true
+		default:
+			t.Fatalf("request %d: status = %d, want 502 or 503", i, rec.Code)
+		}
+	}
+	if !sawDialFailure {
+		t.Fatal("no request reported a dial failure")
+	}
+	if !sawCooldown {
+		t.Fatal("the backend never tripped into passive cooldown; uWSGI is not accounting failures against its pool")
+	}
+	if ah.admission.Active() != 0 {
+		t.Fatalf("active after 10 failures = %d, want 0", ah.admission.Active())
+	}
+}
+
+// TestCGIHandlersResolveThroughRegistry pins that a named upstream goes through
+// the registry, which owns the pool's lifecycle across reloads and runs its
+// health checker — the whole point of pool membership. It also exercises the
+// logging paths, which are silent in the other tests.
+func TestCGIHandlersResolveThroughRegistry(t *testing.T) {
+	reg := upstream.NewRegistry(upstream.RegistryOptions{})
+	t.Cleanup(reg.CloseAll)
+	reg.Begin()
+
+	addr, _ := fakeFPM(t, "tcp", "127.0.0.1:0")
+	ups := map[string]config.UpstreamConfig{
+		"php": {
+			Name:     "php",
+			Strategy: "round_robin",
+			Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
+			MaxFails: 3,
+		},
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	fcgi, err := NewFastCGI(context.Background(), config.ServerConfig{},
+		config.LocationConfig{FastCGIPass: "php", Root: "/srv"}, ups, reg, log)
+	if err != nil {
+		t.Fatalf("NewFastCGI: %v", err)
+	}
+	t.Cleanup(func() { _ = fcgi.(*admittedHandler).Close() })
+
+	uwsgi, err := NewFastCGI(context.Background(), config.ServerConfig{},
+		config.LocationConfig{UWSGIPass: "php", Root: "/srv"}, ups, reg, log)
+	if err != nil {
+		t.Fatalf("NewFastCGI (uwsgi): %v", err)
+	}
+	t.Cleanup(func() { _ = uwsgi.(*admittedHandler).Close() })
+
+	// Both routes named the same upstream, so the registry handed them one pool.
+	if fcgi.(*admittedHandler).admission != uwsgi.(*admittedHandler).admission {
+		t.Fatal("two routes naming the same upstream did not share its pool")
+	}
+
+	rec := httptest.NewRecorder()
+	fcgi.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/index.php", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%q)", rec.Code, rec.Body.String())
+	}
+
+	// Exercise the error path with a logger attached: no eligible backend once
+	// the pool is emptied.
+	pool, err := reg.For(context.Background(), ups["php"], "")
+	if err != nil {
+		t.Fatalf("reg.For: %v", err)
+	}
+	pool.UpdateBackends(nil)
+
+	rec = httptest.NewRecorder()
+	fcgi.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/index.php", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status with no backends = %d, want 503", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	uwsgi.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app.py", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("uwsgi status with no backends = %d, want 503", rec.Code)
 	}
 }
