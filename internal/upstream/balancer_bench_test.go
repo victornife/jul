@@ -15,7 +15,8 @@ import (
 func benchBackends(n int) []*Backend {
 	bs := make([]*Backend, n)
 	for i := range bs {
-		bs[i] = &Backend{Weight: i%4 + 1}
+		bs[i] = &Backend{}
+		bs[i].setWeight(i%4 + 1)
 		bs[i].inflight.Store(int64(i % 7))
 	}
 	return bs

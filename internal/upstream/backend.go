@@ -7,16 +7,48 @@ package upstream
 
 import (
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 )
+
+// Backend networks. A backend is reached over TCP or over a unix domain socket;
+// the network is part of its identity because the same string can name either.
+const (
+	NetworkTCP  = "tcp"
+	NetworkUnix = "unix"
+)
+
+// ParseSocketAddress interprets a backend target that may name a unix socket:
+//
+//	unix:/run/php/php-fpm.sock   -> ("unix", "/run/php/php-fpm.sock")
+//	tcp://127.0.0.1:9000         -> ("tcp",  "127.0.0.1:9000")
+//	127.0.0.1:9000               -> ("tcp",  "127.0.0.1:9000")
+//
+// It is exported because FastCGI and uWSGI targets, upstream server addresses
+// and health probes must all agree on what an address means; a second parser
+// would be a second answer.
+func ParseSocketAddress(pass string) (network, address string) {
+	switch {
+	case strings.HasPrefix(pass, "unix:"):
+		return NetworkUnix, strings.TrimPrefix(pass, "unix:")
+	case strings.HasPrefix(pass, "tcp://"):
+		return NetworkTCP, strings.TrimPrefix(pass, "tcp://")
+	default:
+		return NetworkTCP, pass
+	}
+}
 
 // BackendIdentity is a stable identity for a backend that survives discovery
 // churn and config reloads. It is used by the proxy retry loop to exclude
 // already-attempted backends without depending on *Backend pointer identity
 // (R9-08).
+//
+// It carries Network because this identity concerns *dialing*: two entries that
+// differ only by network are two different places to connect.
 type BackendIdentity struct {
 	Scheme  string
+	Network string
 	Address string
 }
 
@@ -24,8 +56,23 @@ type BackendIdentity struct {
 // runtime state (in-flight requests and passive health).
 type Backend struct {
 	Address string
-	Weight  int
-	URL     *url.URL
+	// Network is "tcp" or "unix", derived from the address form.
+	Network string
+	// URL is the dial target for HTTP-shaped backends. It is nil for a unix
+	// socket, which has no meaningful URL, so consumers use Scheme(), Network
+	// and Address rather than reaching through it.
+	URL *url.URL
+
+	// scheme is stored rather than read back from URL, because a unix backend
+	// has no URL to read it from.
+	scheme string
+
+	// weight is atomic so a discovery weight change is applied in place. Reusing
+	// the backend across that change is the point: the reuse key is the address
+	// alone, so retuning a weight no longer resets in-flight accounting or
+	// (from #143) the breaker, which is the moment an operator is most likely to
+	// be watching them.
+	weight atomic.Int64
 
 	inflight  atomic.Int64
 	fails     atomic.Int32
@@ -38,9 +85,20 @@ type Backend struct {
 	activeHealthy atomic.Bool
 }
 
-// Identity returns the stable (scheme, address) identity of this backend.
+// Scheme returns the backend's scheme: "http", "https", or empty for a non-HTTP
+// backend such as a FastCGI or uWSGI socket.
+func (b *Backend) Scheme() string { return b.scheme }
+
+// Weight returns the backend's load-balancing weight.
+func (b *Backend) Weight() int { return int(b.weight.Load()) }
+
+// setWeight applies a new weight in place.
+func (b *Backend) setWeight(w int) { b.weight.Store(int64(w)) }
+
+// Identity returns the stable (scheme, network, address) identity of this
+// backend.
 func (b *Backend) Identity() BackendIdentity {
-	return BackendIdentity{Scheme: b.URL.Scheme, Address: b.Address}
+	return BackendIdentity{Scheme: b.scheme, Network: b.Network, Address: b.Address}
 }
 
 // available reports whether the backend may receive traffic now. It combines

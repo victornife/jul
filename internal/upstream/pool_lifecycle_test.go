@@ -112,9 +112,15 @@ func TestWeightedRRPrunesRemovedBackends(t *testing.T) {
 		{Address: "b:80", Weight: 1},
 	})
 
-	if len(p.balancer.(*weightedRR).weights) != 1 {
-		t.Fatalf("weights after removal = %d, want 1", len(p.balancer.(*weightedRR).weights))
+	// The accumulator is cleared wholesale rather than pruned, so a departed
+	// backend cannot linger and a surviving one starts from zero — which is what
+	// makes a weight change converge immediately.
+	if len(p.balancer.(*weightedRR).weights) != 0 {
+		t.Fatalf("weights after removal = %d, want 0", len(p.balancer.(*weightedRR).weights))
 	}
+
+	b, _ := p.Pick()
+	p.Release(b)
 	if _, ok := p.balancer.(*weightedRR).weights[findBackend(p, "a:80")]; ok {
 		t.Fatal("removed backend a still present in weights map")
 	}
@@ -133,14 +139,13 @@ func TestWeightedRRPrunesAfterChurn(t *testing.T) {
 		p.Release(b)
 	}
 
-	// Remove a, then add it back (same address/weight) — UpdateBackends creates
-	// a fresh Backend pointer for the re-added address. The old pointer must be
-	// pruned so the map does not accumulate stale entries.
+	// Remove a, then add it back — UpdateBackends creates a fresh Backend pointer
+	// for the re-added address. The map must not accumulate stale entries.
 	p.UpdateBackends([]config.UpstreamServer{})
 	p.UpdateBackends([]config.UpstreamServer{{Address: "a:80", Weight: 1}})
 
-	if len(p.balancer.(*weightedRR).weights) > 1 {
-		t.Fatalf("weights after churn = %d, want at most 1", len(p.balancer.(*weightedRR).weights))
+	if len(p.balancer.(*weightedRR).weights) != 0 {
+		t.Fatalf("weights after churn = %d, want 0", len(p.balancer.(*weightedRR).weights))
 	}
 
 	// After the next pick the fresh backend pointer is the only entry.
@@ -151,20 +156,70 @@ func TestWeightedRRPrunesAfterChurn(t *testing.T) {
 	}
 }
 
-func TestUpdateBackendsWeightChangeReplaces(t *testing.T) {
+// TestUpdateBackendsWeightChangePreservesState pins the regression that
+// motivated dropping the weight from the reuse key: a Consul or DNS-SRV weight
+// flap used to replace the backend, silently discarding its in-flight
+// accounting and failure history — exactly when an operator is watching them.
+func TestUpdateBackendsWeightChangePreservesState(t *testing.T) {
 	p := pool(t, "weighted_round_robin",
 		config.UpstreamServer{Address: "a:80", Weight: 1},
 	)
 	a := findBackend(p, "a:80")
+	a.acquire()
+	a.fails.Store(2)
 
 	p.UpdateBackends([]config.UpstreamServer{{Address: "a:80", Weight: 5}})
 
 	got := findBackend(p, "a:80")
-	if got == a {
-		t.Fatal("weight change should replace the backend, not reuse it")
+	if got != a {
+		t.Fatal("a weight change replaced the backend; in-flight accounting and failure history were discarded")
 	}
-	if got.Weight != 5 {
-		t.Fatalf("updated backend weight = %d, want 5", got.Weight)
+	if got.Weight() != 5 {
+		t.Fatalf("updated backend weight = %d, want 5", got.Weight())
+	}
+	if got.Inflight() != 1 {
+		t.Fatalf("in-flight after weight change = %d, want 1", got.Inflight())
+	}
+	if got.FailCount() != 2 {
+		t.Fatalf("failure count after weight change = %d, want 2", got.FailCount())
+	}
+	got.Release()
+}
+
+// TestWeightedRRReconvergesAfterWeightChange proves the accumulator is not
+// carried across a weight change. Without clearing it, a backend promoted from
+// weight 1 to weight 9 would keep losing picks for as long as its stale current
+// weight lasted.
+func TestWeightedRRReconvergesAfterWeightChange(t *testing.T) {
+	p := pool(t, "weighted_round_robin",
+		config.UpstreamServer{Address: "a:80", Weight: 1},
+		config.UpstreamServer{Address: "b:80", Weight: 9},
+	)
+	// Let b accumulate a large lead under the original weights.
+	for i := 0; i < 50; i++ {
+		b, _ := p.Pick()
+		p.Release(b)
+	}
+
+	// Swap the weights around.
+	p.UpdateBackends([]config.UpstreamServer{
+		{Address: "a:80", Weight: 9},
+		{Address: "b:80", Weight: 1},
+	})
+
+	counts := map[string]int{}
+	for i := 0; i < 100; i++ {
+		b, err := p.Pick()
+		if err != nil {
+			t.Fatalf("pick %d: %v", i, err)
+		}
+		counts[b.Address]++
+		p.Release(b)
+	}
+	// 9:1 over 100 picks is 90/10. Allow slack for the smoothing, but the new
+	// weights must clearly dominate rather than the old lead.
+	if counts["a:80"] < 80 {
+		t.Fatalf("a received %d of 100 picks after being promoted to weight 9; the stale accumulator was carried across the change (b got %d)", counts["a:80"], counts["b:80"])
 	}
 }
 

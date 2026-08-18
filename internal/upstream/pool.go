@@ -122,17 +122,24 @@ func buildBackends(servers []config.UpstreamServer, scheme string) []*Backend {
 	return backends
 }
 
-// newBackend builds a single backend with a normalized weight (minimum 1).
+// newBackend builds a single backend with a normalized weight (minimum 1). A
+// unix-socket address produces a backend with no URL: there is nothing
+// meaningful to put in one, and consumers read Network and Address instead.
 func newBackend(s config.UpstreamServer, scheme string) *Backend {
 	weight := s.Weight
 	if weight < 1 {
 		weight = 1
 	}
+	network, address := ParseSocketAddress(s.Address)
 	b := &Backend{
-		Address: s.Address,
-		Weight:  weight,
-		URL:     &url.URL{Scheme: scheme, Host: s.Address},
+		Address: address,
+		Network: network,
+		scheme:  scheme,
 	}
+	if network == NetworkTCP {
+		b.URL = &url.URL{Scheme: scheme, Host: address}
+	}
+	b.setWeight(weight)
 	// A backend is healthy until an active checker (if any) proves otherwise.
 	b.activeHealthy.Store(true)
 	return b
@@ -215,33 +222,34 @@ func (p *Pool) AllowDialFailureLog() bool { return p.dialLog.Allow(dialFailureLo
 
 // UpdateBackends atomically replaces the pool's backend set, preserving the
 // runtime state (in-flight count, passive-failure cooldown) of any backend
-// whose address and weight are unchanged. New addresses get fresh backends;
-// removed addresses are dropped (in-flight requests already holding a pointer
-// keep working until they Release). This is the seam used by config reload and
+// whose address is unchanged. New addresses get fresh backends; removed
+// addresses are dropped (in-flight requests already holding a pointer keep
+// working until they Release). This is the seam used by config reload and
 // dynamic service discovery to update upstreams without a restart.
 //
-// A backend is reused only when both address and weight match, which keeps
-// Backend.Weight effectively immutable for a backend's lifetime, so the
-// weighted balancer can read it without synchronizing against updates.
+// The reuse key is the address alone. Including the weight, as it once did,
+// meant a Consul or DNS-SRV weight flap silently discarded that backend's
+// in-flight accounting and failure history — exactly when an operator is
+// watching them. A changed weight is now applied in place, which is safe
+// because Backend.weight is atomic and the only hot-path reader holds
+// weightedRR's own mutex.
 func (p *Pool) UpdateBackends(servers []config.UpstreamServer) {
 	p.updateMu.Lock()
 	defer p.updateMu.Unlock()
 
-	type key struct {
-		addr   string
-		weight int
-	}
 	current := p.Backends()
+	type key struct{ network, address string }
 	prev := make(map[key]*Backend, len(current))
 	for _, b := range current {
-		prev[key{b.Address, b.Weight}] = b
+		prev[key{b.Network, b.Address}] = b
 	}
 
 	next := make([]*Backend, 0, len(servers))
 	for _, s := range servers {
 		b := newBackend(s, p.scheme)
-		k := key{b.Address, b.Weight}
+		k := key{b.Network, b.Address}
 		if existing, ok := prev[k]; ok {
+			existing.setWeight(b.Weight())
 			b = existing
 			delete(prev, k) // reuse each surviving backend at most once
 		}

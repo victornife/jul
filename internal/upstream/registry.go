@@ -499,7 +499,7 @@ func (r *Registry) Snapshot() []PoolStatus {
 		for _, b := range e.pool.Backends() {
 			ps.Backends = append(ps.Backends, BackendStatus{
 				Address:  b.Address,
-				Weight:   b.Weight,
+				Weight:   b.Weight(),
 				Healthy:  b.Available(),
 				Inflight: b.Inflight(),
 			})
@@ -517,7 +517,13 @@ func (r *Registry) Snapshot() []PoolStatus {
 func backendsToServers(backends []*Backend) []config.UpstreamServer {
 	servers := make([]config.UpstreamServer, 0, len(backends))
 	for _, b := range backends {
-		servers = append(servers, config.UpstreamServer{Address: b.Address, Weight: b.Weight})
+		// Re-prefix a unix backend so the round trip through newBackend derives
+		// the same network again.
+		addr := b.Address
+		if b.Network == NetworkUnix {
+			addr = "unix:" + addr
+		}
+		servers = append(servers, config.UpstreamServer{Address: addr, Weight: b.Weight()})
 	}
 	return servers
 }

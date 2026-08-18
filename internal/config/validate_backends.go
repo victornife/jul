@@ -305,3 +305,22 @@ func locationUsesTLSBackend(loc LocationConfig) bool {
 	}
 	return u.Scheme == "https"
 }
+
+// validateUnixBackends rejects the combinations a unix-socket backend cannot
+// satisfy.
+//
+// An HTTP probe needs a URL, and a unix socket has no host to put in one, so an
+// http health check over a unix-socket backend could never run. Accepting it
+// would leave the operator with a pool whose probes silently never succeed.
+func validateUnixBackends(up UpstreamConfig, where string) []error {
+	if up.HealthCheck == nil || !up.HealthCheck.Enabled || up.HealthCheck.Type != "http" {
+		return nil
+	}
+	var errs []error
+	for i, s := range up.Servers {
+		if strings.HasPrefix(s.Address, "unix:") {
+			errs = append(errs, fmt.Errorf("%s.servers[%d]: health_check.type = \"http\" cannot probe the unix socket %q; use type = \"tcp\"", where, i, s.Address))
+		}
+	}
+	return errs
+}

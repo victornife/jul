@@ -302,3 +302,91 @@ func TestLintWarnsConnectionBoundOnMultiplexedRoute(t *testing.T) {
 		}
 	})
 }
+
+// TestValidateCGIPass pins the latent bug this slice fixes: a bare name that
+// matches no upstream used to be accepted and then dialled as the TCP host
+// "name", failing at runtime with no configuration error anywhere.
+func TestValidateCGIPass(t *testing.T) {
+	withPass := func(fastcgi, uwsgi string, ups []UpstreamConfig) *Config {
+		cfg := validKnownValueConfig()
+		cfg.Servers[0].Locations[0].ProxyPass = ""
+		cfg.Servers[0].Locations[0].FastCGIPass = fastcgi
+		cfg.Servers[0].Locations[0].UWSGIPass = uwsgi
+		cfg.Upstreams = ups
+		return cfg
+	}
+	phpPool := []UpstreamConfig{{
+		Name:     "php",
+		Strategy: "round_robin",
+		Servers:  []UpstreamServer{{Address: "127.0.0.1:9000", Weight: 1}},
+	}}
+
+	t.Run("named upstream", func(t *testing.T) {
+		if err := Validate(withPass("php", "", phpPool)); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	t.Run("host:port literal", func(t *testing.T) {
+		if err := Validate(withPass("127.0.0.1:9000", "", nil)); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	t.Run("tcp:// literal", func(t *testing.T) {
+		if err := Validate(withPass("tcp://127.0.0.1:9000", "", nil)); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	t.Run("unix socket", func(t *testing.T) {
+		if err := Validate(withPass("unix:/run/php-fpm.sock", "", nil)); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	t.Run("bare name matching no upstream is rejected", func(t *testing.T) {
+		err := Validate(withPass("php", "", nil))
+		if err == nil {
+			t.Fatal("Validate accepted a fastcgi_pass naming no upstream; it would be dialled as the TCP host \"php\"")
+		}
+		if !strings.Contains(err.Error(), "neither a configured upstream name") {
+			t.Fatalf("error = %v, want it to explain the target is unresolvable", err)
+		}
+	})
+	t.Run("empty unix path is rejected", func(t *testing.T) {
+		if err := Validate(withPass("unix:", "", nil)); err == nil {
+			t.Fatal("Validate accepted an empty unix socket path")
+		}
+	})
+	t.Run("uwsgi_pass is checked the same way", func(t *testing.T) {
+		if err := Validate(withPass("", "wsgiapp", nil)); err == nil {
+			t.Fatal("Validate accepted a uwsgi_pass naming no upstream")
+		}
+	})
+}
+
+// TestValidateRejectsHTTPHealthCheckOnUnixBackend pins that a probe which could
+// never succeed is a configuration error rather than a pool that is silently
+// always unhealthy.
+func TestValidateRejectsHTTPHealthCheckOnUnixBackend(t *testing.T) {
+	cfg := validKnownValueConfig()
+	cfg.Upstreams = []UpstreamConfig{{
+		Name:     "php",
+		Strategy: "round_robin",
+		Servers:  []UpstreamServer{{Address: "unix:/run/php-fpm.sock", Weight: 1}},
+		HealthCheck: &HealthCheckConfig{
+			Enabled: true, Type: "http", Path: "/ping",
+			Interval: Duration(2 * time.Second), Timeout: Duration(time.Second),
+			HealthyThreshold: 1, UnhealthyThreshold: 1,
+		},
+	}}
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("Validate accepted an http health check against a unix-socket backend")
+	}
+	if !strings.Contains(err.Error(), "unix socket") {
+		t.Fatalf("error = %v, want it to name the unix socket", err)
+	}
+
+	cfg.Upstreams[0].HealthCheck.Type = "tcp"
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("Validate with a tcp probe: %v", err)
+	}
+}
