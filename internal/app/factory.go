@@ -225,9 +225,14 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			return withCache(loc, h), nil
 		},
 		router.ActionFastCGI: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
-			h, err := handler.NewFastCGI(srv, loc, f.Log)
+			h, err := handler.NewFastCGI(ctx, srv, loc, upstreams, f.PoolReg, f.Log)
 			if err != nil {
 				return nil, err
+			}
+			// The handler wakes its own generation's queued requests when the
+			// generation retires, so it is staged like the proxy's transport.
+			if c, ok := h.(io.Closer); ok {
+				gen.Stage(c)
 			}
 			return withCache(loc, h), nil
 		},

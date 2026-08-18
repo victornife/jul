@@ -5,6 +5,7 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"io"
 	"net"
@@ -162,7 +163,7 @@ func TestUWSGIHandlerRoundTrip(t *testing.T) {
 	}()
 
 	loc := config.LocationConfig{UWSGIPass: "tcp://" + ln.Addr().String(), Root: "/srv"}
-	h, err := NewFastCGI(config.ServerConfig{}, loc, nil)
+	h, err := NewFastCGI(context.Background(), config.ServerConfig{}, loc, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

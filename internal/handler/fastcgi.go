@@ -6,6 +6,7 @@ package handler
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -23,59 +24,161 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/upstream"
 )
 
 // NewFastCGI builds a handler that forwards requests to a FastCGI (e.g.
 // PHP-FPM) or uWSGI application server. The handler is selected by which of
 // fastcgi_pass / uwsgi_pass is configured.
 //
-// The extra log parameter is bound via a closure in main so the resulting
-// function still satisfies router.Builder. srv is part of that signature but
-// is not needed here.
-func NewFastCGI(_ config.ServerConfig, loc config.LocationConfig, log *slog.Logger) (http.Handler, error) {
-	if loc.UWSGIPass != "" {
-		return newUWSGIHandler(loc, log)
-	}
-	return newFastCGIHandler(loc, log)
-}
-
-// parseSocketAddress interprets a fastcgi/uwsgi target. Accepted forms:
+// Both targets are full upstream-pool members: they accept a named upstream or
+// a literal socket, and therefore get load balancing, active health checking,
+// failure accounting and admission on the same terms as proxy_pass. PHP-FPM's
+// fixed pm.max_children makes bounding concurrency more valuable here than for
+// a typical HTTP backend, not less.
 //
-//	unix:/run/php/php-fpm.sock   -> ("unix", "/run/php/php-fpm.sock")
-//	tcp://127.0.0.1:9000         -> ("tcp",  "127.0.0.1:9000")
-//	127.0.0.1:9000               -> ("tcp",  "127.0.0.1:9000")
-func parseSocketAddress(pass string) (network, address string) {
-	switch {
-	case strings.HasPrefix(pass, "unix:"):
-		return "unix", strings.TrimPrefix(pass, "unix:")
-	case strings.HasPrefix(pass, "tcp://"):
-		return "tcp", strings.TrimPrefix(pass, "tcp://")
-	default:
-		return "tcp", pass
+// ctx bounds the registry lookup. srv is part of the router.Builder signature
+// but is not needed here.
+func NewFastCGI(ctx context.Context, _ config.ServerConfig, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
+	if loc.UWSGIPass != "" {
+		return newUWSGIHandler(ctx, loc, upstreams, reg, log)
 	}
+	return newFastCGIHandler(ctx, loc, upstreams, reg, log)
 }
 
-// newFastCGIHandler wires a gofast handler with a small client pool.
-func newFastCGIHandler(loc config.LocationConfig, log *slog.Logger) (http.Handler, error) {
-	network, address := parseSocketAddress(loc.FastCGIPass)
-	if address == "" {
+// parseSocketAddress interprets a fastcgi/uwsgi target. It delegates to
+// upstream.ParseSocketAddress so a target, an upstream server address and a
+// health probe cannot disagree about what an address means.
+func parseSocketAddress(pass string) (network, address string) {
+	return upstream.ParseSocketAddress(pass)
+}
+
+// resolveCGIPool turns a fastcgi_pass or uwsgi_pass value into a backend pool.
+// A name matching a configured upstream resolves through the registry, which
+// owns the pool's lifecycle across reloads and runs its health checker; a
+// literal socket builds an anonymous pool of one, exactly as a literal
+// proxy_pass does.
+func resolveCGIPool(ctx context.Context, pass string, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, error) {
+	if up, ok := upstreams[pass]; ok {
+		if reg != nil {
+			return reg.For(ctx, up, "")
+		}
+		return upstream.NewPool(up, "")
+	}
+	single := config.UpstreamConfig{
+		Name:     pass,
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: pass, Weight: 1}},
+		MaxFails: 3,
+	}
+	return upstream.NewPool(single, "")
+}
+
+// cgiDialer builds the dialer for a CGI-family backend, honouring the
+// location's proxy_connect_timeout.
+func cgiDialer(loc config.LocationConfig) *net.Dialer {
+	timeout := loc.ProxyConnectTimeout.Std()
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return &net.Dialer{Timeout: timeout}
+}
+
+// newFastCGIHandler wires a gofast handler onto a pool-selected backend.
+func newFastCGIHandler(ctx context.Context, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
+	if strings.TrimSpace(loc.FastCGIPass) == "" {
 		return nil, fmt.Errorf("fastcgi_pass is empty")
 	}
-
-	connFactory := gofast.SimpleConnFactory(network, address)
-	pool := gofast.NewClientPool(gofast.SimpleClientFactory(connFactory), 0, 30*time.Second)
-
-	session := gofast.Chain(
-		gofast.BasicParamsMap, // CONTENT_*, REQUEST_*, SERVER_*, REMOTE_* ...
-		gofast.MapHeader,      // HTTP_* request headers
-		fcgiScriptParams(loc), // SCRIPT_FILENAME/NAME + config overrides (last = wins)
-	)(gofast.BasicSession)
-
-	h := gofast.NewHandler(session, pool.CreateClient)
-	if log != nil {
-		h.SetLogger(slog.NewLogLogger(log.Handler(), slog.LevelError))
+	pool, err := resolveCGIPool(ctx, loc.FastCGIPass, upstreams, reg)
+	if err != nil {
+		return nil, err
 	}
-	return h, nil
+
+	h := &fastcgiHandler{
+		pool:   pool,
+		dialer: cgiDialer(loc),
+		log:    log,
+		session: gofast.Chain(
+			gofast.BasicParamsMap, // CONTENT_*, REQUEST_*, SERVER_*, REMOTE_* ...
+			gofast.MapHeader,      // HTTP_* request headers
+			fcgiScriptParams(loc), // SCRIPT_FILENAME/NAME + config overrides (last = wins)
+		)(gofast.BasicSession),
+	}
+	return newAdmittedHandler(h, pool.Admission(), nil), nil
+}
+
+// fastcgiHandler selects a backend per request and speaks FastCGI to it.
+//
+// It deliberately does not use gofast.ClientPool. That pool spawns an endless
+// producer goroutine over an unbuffered channel with an eagerly dialled client
+// blocked on the handoff, and offers no Close: every handler generation leaked
+// one goroutine and one open backend connection, on every reload, for the life
+// of the process. Because the pool was created with scale 0 it never actually
+// reused a connection either, so dialling per request costs nothing that was
+// previously being saved.
+type fastcgiHandler struct {
+	pool    *upstream.Pool
+	dialer  *net.Dialer
+	session gofast.SessionHandler
+	log     *slog.Logger
+}
+
+func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	b, err := h.pool.PickCtx(r.Context())
+	if err != nil {
+		h.fail(w, r, upstreamErrorStatus(err), err)
+		return
+	}
+	defer h.pool.Release(b)
+
+	// The connection is dialled inside the request, so the client's context
+	// cancels a hung connect, and gofast closes it when the request ends.
+	var dialErr error
+	connFactory := func() (net.Conn, error) {
+		conn, derr := h.dialer.DialContext(r.Context(), b.Network, b.Address)
+		if derr != nil {
+			dialErr = derr
+		}
+		return conn, derr
+	}
+
+	gh := gofast.NewHandler(h.session, gofast.SimpleClientFactory(connFactory))
+	if h.log != nil {
+		gh.SetLogger(slog.NewLogLogger(h.log.Handler(), slog.LevelError))
+	}
+	gh.ServeHTTP(w, r)
+
+	if dialErr != nil {
+		h.pool.MarkFailure(b)
+		if h.log != nil && h.pool.AllowDialFailureLog() {
+			h.log.Warn("fastcgi dial failed", "upstream", h.pool.Name(), "backend", b.Address, "network", b.Network, "error", dialErr)
+		}
+		return
+	}
+	h.pool.MarkSuccess(b)
+}
+
+func (h *fastcgiHandler) fail(w http.ResponseWriter, r *http.Request, code int, err error) {
+	if h.log != nil {
+		h.log.Error("fastcgi upstream error",
+			"upstream", h.pool.Name(),
+			"path", r.URL.Path,
+			"status", code,
+			"error", err,
+			"request_id", middleware.RequestIDFrom(r.Context()),
+		)
+	}
+	http.Error(w, fmt.Sprintf("%d %s", code, http.StatusText(code)), code)
+}
+
+// upstreamErrorStatus maps a backend-selection failure to a client status. Both
+// causes are 503, but they are distinct errors so an operator is never told
+// "no healthy backend" when the real answer is "every backend is at capacity".
+func upstreamErrorStatus(err error) int {
+	if errors.Is(err, upstream.ErrNoAvailableBackend) || errors.Is(err, upstream.ErrBackendAtCapacity) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusBadGateway
 }
 
 // fcgiScriptParams sets DOCUMENT_ROOT / SCRIPT_FILENAME / SCRIPT_NAME and then
@@ -118,27 +221,42 @@ func scriptNameFor(urlPath string, index []string) string {
 // uwsgiHandler speaks the uWSGI packet protocol (modifier1 = 0, the WSGI
 // variant) and forwards the CGI-style response back to the client.
 type uwsgiHandler struct {
-	network string
-	address string
-	loc     config.LocationConfig
-	log     *slog.Logger
+	pool   *upstream.Pool
+	dialer *net.Dialer
+	loc    config.LocationConfig
+	log    *slog.Logger
 }
 
-func newUWSGIHandler(loc config.LocationConfig, log *slog.Logger) (http.Handler, error) {
-	network, address := parseSocketAddress(loc.UWSGIPass)
-	if address == "" {
+func newUWSGIHandler(ctx context.Context, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
+	if strings.TrimSpace(loc.UWSGIPass) == "" {
 		return nil, fmt.Errorf("uwsgi_pass is empty")
 	}
-	return &uwsgiHandler{network: network, address: address, loc: loc, log: log}, nil
+	pool, err := resolveCGIPool(ctx, loc.UWSGIPass, upstreams, reg)
+	if err != nil {
+		return nil, err
+	}
+	h := &uwsgiHandler{pool: pool, dialer: cgiDialer(loc), loc: loc, log: log}
+	return newAdmittedHandler(h, pool.Admission(), nil), nil
 }
 
 func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	conn, err := net.DialTimeout(h.network, h.address, 10*time.Second)
+	b, err := h.pool.PickCtx(r.Context())
 	if err != nil {
+		h.fail(w, r, upstreamErrorStatus(err), err)
+		return
+	}
+	defer h.pool.Release(b)
+
+	// The connect timeout comes from the location's proxy_connect_timeout like
+	// every other transport, rather than a hardcoded ten seconds.
+	conn, err := h.dialer.DialContext(r.Context(), b.Network, b.Address)
+	if err != nil {
+		h.pool.MarkFailure(b)
 		h.fail(w, r, http.StatusBadGateway, err)
 		return
 	}
 	defer conn.Close()
+	h.pool.MarkSuccess(b)
 	if dl, ok := r.Context().Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}
@@ -184,7 +302,7 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *uwsgiHandler) fail(w http.ResponseWriter, r *http.Request, code int, err error) {
 	if h.log != nil {
-		h.log.Error("uwsgi upstream error", "address", h.address, "path", r.URL.Path,
+		h.log.Error("uwsgi upstream error", "upstream", h.pool.Name(), "path", r.URL.Path,
 			"status", code, "error", err, "request_id", middleware.RequestIDFrom(r.Context()))
 	}
 	http.Error(w, fmt.Sprintf("%d %s", code, http.StatusText(code)), code)
