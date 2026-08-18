@@ -65,7 +65,7 @@ func TestProxyTransportWrapsConnWhenTimeoutSet(t *testing.T) {
 		}
 	}()
 
-	withTimeout := newProxyTransport(config.LocationConfig{ProxyReadTimeout: config.Duration(time.Second)}, nil)
+	withTimeout := newProxyTransport(config.LocationConfig{ProxyReadTimeout: config.Duration(time.Second)}, nil, 0)
 	c, err := withTimeout.DialContext(context.Background(), "tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatalf("dial (timeout set): %v", err)
@@ -75,7 +75,7 @@ func TestProxyTransportWrapsConnWhenTimeoutSet(t *testing.T) {
 		t.Fatalf("conn = %T, want *timeoutConn when proxy_read_timeout is set", c)
 	}
 
-	bare := newProxyTransport(config.LocationConfig{}, nil)
+	bare := newProxyTransport(config.LocationConfig{}, nil, 0)
 	c2, err := bare.DialContext(context.Background(), "tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatalf("dial (no timeout): %v", err)

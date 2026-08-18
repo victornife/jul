@@ -210,3 +210,95 @@ func requireDiagnostic(t *testing.T, diags []Diagnostic, sev Severity, field, me
 	}
 	t.Fatalf("no %v diagnostic on %q mentioning %q; got %+v", sev, field, message, diags)
 }
+
+func TestValidateMaxConnectionsPerBackend(t *testing.T) {
+	t.Run("accepted at pool level", func(t *testing.T) {
+		if err := Validate(resilienceConfig(t, &ResilienceConfig{MaxConnectionsPerBackend: 256})); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	t.Run("rejected above the ceiling", func(t *testing.T) {
+		err := Validate(resilienceConfig(t, &ResilienceConfig{MaxConnectionsPerBackend: 100_001}))
+		if err == nil || !strings.Contains(err.Error(), "max_connections_per_backend must be between") {
+			t.Fatalf("err = %v, want a range error", err)
+		}
+	})
+	t.Run("accepted at location level", func(t *testing.T) {
+		cfg := validKnownValueConfig()
+		cfg.Servers[0].Locations[0].Resilience = &LocationResilienceConfig{MaxConnectionsPerBackend: 32}
+		if err := Validate(cfg); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	t.Run("rejected above the ceiling at location level", func(t *testing.T) {
+		cfg := validKnownValueConfig()
+		cfg.Servers[0].Locations[0].Resilience = &LocationResilienceConfig{MaxConnectionsPerBackend: -1}
+		if err := Validate(cfg); err == nil {
+			t.Fatal("Validate accepted a negative location-level bound")
+		}
+	})
+}
+
+// TestParseRejectsStatefulControlsInLocation pins the scope rule at the type
+// level: the location block is a different, smaller surface, so a stateful key
+// written there is rejected by strict decoding rather than by a rule that could
+// drift from the scope decision it implements.
+func TestParseRejectsStatefulControlsInLocation(t *testing.T) {
+	for _, key := range []string{"max_active_requests = 10", "max_pending_requests = 5", `pending_timeout = "1s"`, "max_active_per_backend = 2"} {
+		t.Run(key, func(t *testing.T) {
+			doc := `
+[global]
+[[servers]]
+listen = "127.0.0.1:8080"
+[[servers.locations]]
+path = "/"
+proxy_pass = "http://api"
+[servers.locations.resilience]
+` + key + `
+
+[[upstreams]]
+name = "api"
+servers = [{ address = "127.0.0.1:3000", weight = 1 }]
+`
+			if _, err := Parse([]byte(doc)); err == nil {
+				t.Fatalf("parser accepted a stateful control in a location: %s", key)
+			}
+		})
+	}
+}
+
+// TestLintWarnsConnectionBoundOnMultiplexedRoute pins that a socket bound set
+// where one HTTP/2 connection carries every stream is reported. Silence would
+// leave an operator believing a limit is in force when it bounds nothing.
+func TestLintWarnsConnectionBoundOnMultiplexedRoute(t *testing.T) {
+	t.Run("pool used by a native gRPC route", func(t *testing.T) {
+		cfg := validKnownValueConfig()
+		cfg.Servers[0].Locations[0].ProxyPass = "http://api"
+		cfg.Servers[0].Locations[0].GRPC = true
+		cfg.Upstreams = []UpstreamConfig{{
+			Name:       "api",
+			Strategy:   "round_robin",
+			Servers:    []UpstreamServer{{Address: "127.0.0.1:3000", Weight: 1}},
+			Resilience: &ResilienceConfig{MaxConnectionsPerBackend: 64},
+		}}
+		requireDiagnostic(t, Lint(cfg), SeverityWarning, "max_connections_per_backend", "does not limit concurrency")
+	})
+
+	t.Run("location-level on a transcoding route", func(t *testing.T) {
+		cfg := validKnownValueConfig()
+		cfg.Servers[0].Locations[0].ProxyPass = ""
+		cfg.Servers[0].Locations[0].GRPCTranscode = &GRPCTranscodeConfig{Target: "api"}
+		cfg.Servers[0].Locations[0].Resilience = &LocationResilienceConfig{MaxConnectionsPerBackend: 16}
+		requireDiagnostic(t, Lint(cfg), SeverityWarning, "max_connections_per_backend", "does not limit its concurrency")
+	})
+
+	t.Run("plain HTTP route is silent", func(t *testing.T) {
+		cfg := validKnownValueConfig()
+		cfg.Servers[0].Locations[0].Resilience = &LocationResilienceConfig{MaxConnectionsPerBackend: 16}
+		for _, d := range Lint(cfg) {
+			if strings.Contains(d.Field, "max_connections_per_backend") {
+				t.Fatalf("unexpected diagnostic on an HTTP/1.1 route: %+v", d)
+			}
+		}
+	})
+}

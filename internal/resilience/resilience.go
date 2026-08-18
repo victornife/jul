@@ -29,6 +29,7 @@ const (
 	MaxActiveRequestsCeiling   = 10_000_000
 	MaxActivePerBackendCeiling = 10_000_000
 	MaxPendingRequestsCeiling  = 100_000
+	MaxConnectionsCeiling      = 100_000
 	PendingTimeoutCeiling      = 60 * time.Second
 )
 
@@ -51,16 +52,21 @@ type Options struct {
 	// PendingTimeout bounds how long a request may stay parked. 0 means the
 	// request context is the only bound.
 	PendingTimeout time.Duration
+	// MaxConnectionsPerBackend bounds physical sockets to one backend host on
+	// one transport. 0 is unlimited. It is stateless — a transport is built per
+	// location — so a location may override it.
+	MaxConnectionsPerBackend int
 }
 
 // Policy is the resolved, immutable resilience policy. Consumers receive only
 // this type and never the public configuration, which is what keeps a future
 // control additive rather than a per-protocol rewrite.
 type Policy struct {
-	maxActiveRequests   int64
-	maxActivePerBackend int64
-	maxPendingRequests  int
-	pendingTimeout      time.Duration
+	maxActiveRequests        int64
+	maxActivePerBackend      int64
+	maxPendingRequests       int
+	pendingTimeout           time.Duration
+	maxConnectionsPerBackend int
 }
 
 // Default is the policy every zero-valued configuration resolves to: no
@@ -79,10 +85,11 @@ func Resolve(o Options) (*Policy, error) {
 		return nil, err
 	}
 	return &Policy{
-		maxActiveRequests:   int64(o.MaxActiveRequests),
-		maxActivePerBackend: int64(o.MaxActivePerBackend),
-		maxPendingRequests:  o.MaxPendingRequests,
-		pendingTimeout:      o.PendingTimeout,
+		maxActiveRequests:        int64(o.MaxActiveRequests),
+		maxActivePerBackend:      int64(o.MaxActivePerBackend),
+		maxPendingRequests:       o.MaxPendingRequests,
+		pendingTimeout:           o.PendingTimeout,
+		maxConnectionsPerBackend: o.MaxConnectionsPerBackend,
 	}, nil
 }
 
@@ -96,6 +103,8 @@ func check(o Options) error {
 		return fmt.Errorf("max_pending_requests must be between 0 and %d", MaxPendingRequestsCeiling)
 	case o.PendingTimeout < 0 || o.PendingTimeout > PendingTimeoutCeiling:
 		return fmt.Errorf("pending_timeout must be between 0s and %s", PendingTimeoutCeiling)
+	case o.MaxConnectionsPerBackend < 0 || o.MaxConnectionsPerBackend > MaxConnectionsCeiling:
+		return fmt.Errorf("max_connections_per_backend must be between 0 and %d", MaxConnectionsCeiling)
 	case o.MaxPendingRequests > 0 && o.MaxActiveRequests == 0:
 		return fmt.Errorf("max_pending_requests requires max_active_requests: with no admission limit nothing ever queues")
 	}
@@ -113,6 +122,10 @@ func (p *Policy) MaxPendingRequests() int { return p.maxPendingRequests }
 
 // PendingTimeout returns the parked-request bound; 0 means context-bounded.
 func (p *Policy) PendingTimeout() time.Duration { return p.pendingTimeout }
+
+// MaxConnectionsPerBackend returns the physical socket bound per backend host
+// on one transport; 0 is unlimited.
+func (p *Policy) MaxConnectionsPerBackend() int { return p.maxConnectionsPerBackend }
 
 // Bounded reports whether the policy constrains anything at all. Consumers use
 // it to keep the completely-unconfigured path free of even a counter update.

@@ -46,12 +46,19 @@ func NewGRPCTranscode(ctx context.Context, _ config.ServerConfig, loc config.Loc
 		return nil, err
 	}
 
-	return transcode.New(ctx, *cfg, pool, reflectSnap, transcode.Options{
+	tc, err := transcode.New(ctx, *cfg, pool, reflectSnap, transcode.Options{
 		Logger:      log,
 		OnResult:    onResult,
 		OnStreamMsg: onStreamMsg,
 		BackendTLS:  policy,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Admission wraps the transcoder rather than living inside it: a transcoded
+	// call holds its slot for the whole call, and for a streaming method that is
+	// the stream's lifetime, which is exactly ServeHTTP's duration.
+	return newAdmittedHandler(tc, pool.Admission(), tc.Close), nil
 }
 
 // resolveGRPCTranscodePool maps a grpc_transcode target to an upstream.Pool.

@@ -111,6 +111,7 @@ func Validate(c *Config) error {
 				// harmless extra: the operator believes the backend is verified.
 				errs = append(errs, fmt.Errorf("%s.backend_tls: the backend is not reached over TLS; use an https:// proxy_pass, or grpc_transcode.tls = true", locWhere))
 			}
+			errs = append(errs, validateLocationResilience(loc.Resilience, locWhere+".resilience")...)
 			errs = append(errs, validateLocation(loc, locWhere, upstreamNames, c.Plugins)...)
 		}
 

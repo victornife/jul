@@ -53,7 +53,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 	if err != nil {
 		return nil, err
 	}
-	transport := newProxyTransport(loc, policy)
+	transport := newProxyTransport(loc, policy, maxConnsPerBackend(loc, pool))
 
 	// The target supplies the scheme and base path for path joining; the
 	// balancing transport overrides the scheme and host per selected backend on
@@ -424,7 +424,13 @@ func isIdempotent(method string) bool {
 
 // newProxyTransport returns a connection-reusing transport tuned by the
 // location's proxy timeouts.
-func newProxyTransport(loc config.LocationConfig, policy *backendtls.Policy) *http.Transport {
+//
+// maxConns is max_connections_per_backend. It maps to MaxConnsPerHost, which is
+// the only lever Go offers that bounds sockets without defeating connection
+// pooling and that honours the request context while a request queues for a
+// dial. Idle connections count toward it until IdleConnTimeout, so under
+// HTTP/1.1 keep-alive it can bind while the pool's active count is low.
+func newProxyTransport(loc config.LocationConfig, policy *backendtls.Policy, maxConns int) *http.Transport {
 	connectTimeout := loc.ProxyConnectTimeout.Std()
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
@@ -455,6 +461,7 @@ func newProxyTransport(loc config.LocationConfig, policy *backendtls.Policy) *ht
 	t := &http.Transport{
 		DialContext:           dial,
 		ForceAttemptHTTP2:     true,
+		MaxConnsPerHost:       maxConns,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   32,
 		IdleConnTimeout:       90 * time.Second,

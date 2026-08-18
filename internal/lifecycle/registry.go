@@ -167,6 +167,7 @@ const (
 	reasonBackendTLSPool       = "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
 	reasonBackendTLSRoute      = "the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload"
 	reasonResiliencePolicy     = "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
+	reasonResilienceTransport  = "the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary"
 )
 
 // Registry is the authoritative disposition of every public configuration path,
@@ -544,6 +545,7 @@ func locationEntries() []Entry {
 		hot(loc+"try_files", SubTryFiles, reasonHandlerRebuild),
 		hot(loc+"uwsgi_pass", SubUWSGI, reasonHandlerRebuild),
 	)
+	out = append(out, hot(loc+"resilience.max_connections_per_backend", SubResilience, reasonResilienceTransport))
 	return out
 }
 
@@ -586,6 +588,7 @@ func upstreamEntries() []Entry {
 		"upstreams.*.resilience.max_pending_requests",
 		"upstreams.*.resilience.pending_timeout",
 	)...)
+	out = append(out, hot("upstreams.*.resilience.max_connections_per_backend", SubResilience, reasonResilienceTransport))
 	out = append(out, hotGroup(SubHealthCheck, "active probes are restarted with the pool on each successful reload",
 		"upstreams.*.health_check.enabled",
 		"upstreams.*.health_check.expect_body",

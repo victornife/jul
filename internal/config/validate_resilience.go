@@ -30,3 +30,14 @@ func validateResilience(r *ResilienceConfig, where string, grace time.Duration) 
 	}
 	return errs
 }
+
+// validateLocationResilience checks a location's stateless resilience block.
+func validateLocationResilience(r *LocationResilienceConfig, where string) []error {
+	if r == nil {
+		return nil
+	}
+	if _, err := resilience.Resolve(r.Options()); err != nil {
+		return []error{fmt.Errorf("%s: %w", where, err)}
+	}
+	return nil
+}

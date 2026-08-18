@@ -53,6 +53,63 @@ func lintResilience(c *Config) []Diagnostic {
 				Hint:     "set pending_timeout to the longest wait that is still useful to a client, typically well under global.shutdown_timeout",
 			})
 		}
+
+		// A socket bound cannot bound concurrency where one HTTP/2 connection
+		// carries every stream, so on a gRPC or transcoding route the setting
+		// does nothing at all. Silence would leave an operator believing a limit
+		// is in force.
+		if r.MaxConnectionsPerBackend > 0 && multiplexedConsumers(c, up.Name) {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    where + ".max_connections_per_backend",
+				Message:  fmt.Sprintf("upstream %q is used by a native gRPC or gRPC-transcoding route, where one HTTP/2 connection carries every stream, so a socket bound does not limit concurrency there", up.Name),
+				Hint:     "use max_active_requests to bound concurrency on multiplexed routes; keep max_connections_per_backend for HTTP/1.1 traffic",
+			})
+		}
+	}
+
+	for i, srv := range c.Servers {
+		for j, loc := range srv.Locations {
+			if loc.Resilience == nil || loc.Resilience.MaxConnectionsPerBackend == 0 {
+				continue
+			}
+			if !multiplexedLocation(loc) {
+				continue
+			}
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    fmt.Sprintf("servers[%d].locations[%d].resilience.max_connections_per_backend", i, j),
+				Message:  "this route is native gRPC or gRPC transcoding, where one HTTP/2 connection carries every stream, so a socket bound does not limit its concurrency",
+				Hint:     "use the pool's max_active_requests to bound concurrency on a multiplexed route",
+			})
+		}
 	}
 	return diags
+}
+
+// multiplexedLocation reports whether a route reaches its backend over a single
+// multiplexed HTTP/2 connection.
+func multiplexedLocation(loc LocationConfig) bool {
+	return loc.GRPC || loc.GRPCTranscode != nil
+}
+
+// multiplexedConsumers reports whether any multiplexed route targets the named
+// upstream.
+func multiplexedConsumers(c *Config, name string) bool {
+	for _, srv := range c.Servers {
+		for _, loc := range srv.Locations {
+			if !multiplexedLocation(loc) {
+				continue
+			}
+			if loc.GRPCTranscode != nil && loc.GRPCTranscode.Target == name {
+				return true
+			}
+			if loc.GRPC {
+				if ref, ok := upstreamRefOf(loc.ProxyPass); ok && ref == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

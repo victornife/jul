@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 305 |
-| Schema leaves (configurable values) | 258 |
-| Registry entries | 258 |
+| Schema paths (containers included) | 308 |
+| Schema leaves (configurable values) | 260 |
+| Registry entries | 260 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 186 |
+| Class `hot_reload` | 188 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -262,6 +262,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.rate_limit.rate` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `servers.*.locations.*.redirect` | `hot_reload` | `redirect` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.require_client_cert` | `hot_reload` | `mtls` | — | the per-request certificate requirement is enforced by the rebuilt handler tree; the handshake policy itself is listener-bound |
+| `servers.*.locations.*.resilience.max_connections_per_backend` | `hot_reload` | `resilience` | — | the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary |
 | `servers.*.locations.*.return` | `hot_reload` | `return` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.rewrites.*.flag` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.rewrites.*.pattern` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |
@@ -360,6 +361,7 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.name` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.resilience.max_active_per_backend` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
 | `upstreams.*.resilience.max_active_requests` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
+| `upstreams.*.resilience.max_connections_per_backend` | `hot_reload` | `resilience` | — | the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary |
 | `upstreams.*.resilience.max_pending_requests` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
 | `upstreams.*.resilience.pending_timeout` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
 | `upstreams.*.servers.*.address` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |

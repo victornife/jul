@@ -484,6 +484,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "LocationResilienceConfig.MaxConnectionsPerBackend",
+      "path": "servers[].locations[].resilience.max_connections_per_backend",
+      "kind": "integer",
+      "constraint": "0 to 100000",
+      "zero_semantics": "omitted/zero inherits the pool value",
+      "active_when": "HTTP proxy routes; not applicable to native gRPC or transcoding"
+    },
+    {
       "go_field": "MatchConfig.Type",
       "path": "servers[].locations[].match.type",
       "kind": "enum",
@@ -619,6 +627,14 @@
       "constraint": "0 to 10000000",
       "zero_semantics": "omitted/zero means unlimited",
       "active_when": "always"
+    },
+    {
+      "go_field": "ResilienceConfig.MaxConnectionsPerBackend",
+      "path": "upstreams[].resilience.max_connections_per_backend",
+      "kind": "integer",
+      "constraint": "0 to 100000",
+      "zero_semantics": "omitted/zero means unlimited",
+      "active_when": "HTTP proxy routes; not applicable to native gRPC or transcoding"
     },
     {
       "go_field": "ResilienceConfig.MaxPendingRequests",

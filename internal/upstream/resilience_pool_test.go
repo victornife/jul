@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 	"jul/internal/resilience"
@@ -153,5 +154,25 @@ func TestNewPoolRejectsIncoherentPolicy(t *testing.T) {
 	}, "http")
 	if err == nil {
 		t.Fatal("NewPool accepted max_pending_requests without max_active_requests")
+	}
+}
+
+// TestHealthProbeTransportIsExemptFromConnectionBound pins that a saturated
+// pool can still observe recovery.
+//
+// max_connections_per_backend binds the data-plane transport. The probe client
+// is built by probeTransport, which never consults the resilience policy, so a
+// pool whose sockets are all busy serving traffic can still dial a probe and
+// notice a backend coming back. If probes ever shared the bound, a pool at its
+// limit could never leave it.
+func TestHealthProbeTransportIsExemptFromConnectionBound(t *testing.T) {
+	p := resiliencePool(t, []string{"127.0.0.1:1"},
+		&config.ResilienceConfig{MaxConnectionsPerBackend: 1})
+
+	if got := p.Policy().MaxConnectionsPerBackend(); got != 1 {
+		t.Fatalf("policy MaxConnectionsPerBackend = %d, want 1", got)
+	}
+	if got := probeTransport(time.Second, nil).MaxConnsPerHost; got != 0 {
+		t.Fatalf("probe transport MaxConnsPerHost = %d, want 0: health checks must not compete with live traffic for sockets", got)
 	}
 }

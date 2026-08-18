@@ -53,6 +53,12 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 		return nil, err
 	}
 
+	// max_connections_per_backend is deliberately not applied here. One HTTP/2
+	// connection carries every stream to a backend, so a socket bound would not
+	// bound concurrency; the request limit is what binds on this path, and
+	// setting the field on a gRPC route is a lint warning.
+	transport := newGRPCTransport(loc, tlsBackend, policy)
+
 	rp := &httputil.ReverseProxy{
 		// FlushInterval -1 flushes every write immediately: gRPC streaming
 		// frames (and unary trailers) must not be buffered, or a server-stream
@@ -60,7 +66,7 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 		FlushInterval: -1,
 		Transport: &grpcBalancingTransport{
 			pool:       pool,
-			base:       newGRPCTransport(loc, tlsBackend, policy),
+			base:       transport,
 			log:        log,
 			onStream:   onStream,
 			tlsBackend: tlsBackend,
@@ -84,7 +90,14 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 			http.Error(w, fmt.Sprintf("%d %s", code, http.StatusText(code)), code)
 		},
 	}
-	return rp, nil
+	// A gRPC call holds its slot for the whole call, which for a server, client
+	// or bidirectional stream is the stream's real lifetime. Closing the handler
+	// also drops the transport's idle HTTP/2 connections, so a retired
+	// generation stops holding sockets open.
+	return newAdmittedHandler(rp, pool.Admission(), func() error {
+		transport.CloseIdleConnections()
+		return nil
+	}), nil
 }
 
 // grpcBalancingTransport selects a backend per call and forwards it over an
