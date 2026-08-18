@@ -43,7 +43,7 @@ func FuzzValidateToken(f *testing.F) {
 		f.Fatalf("rsa key: %v", err)
 	}
 	j := newJWTAuth("https://issuer.example/jwks.json",
-		"https://issuer.example", "my-api", defaultAlgs(), nil)
+		"https://issuer.example", "my-api", defaultAlgs(), nil, nil)
 	j.jwks.keys = map[string]crypto.PublicKey{"rsa-1": &key.PublicKey}
 	j.jwks.fetchedAt = time.Now()
 	// Block any network refresh on an unknown kid so the fuzz stays hermetic.

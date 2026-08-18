@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 317 |
-| Schema leaves (configurable values) | 269 |
-| Registry entries | 269 |
+| Schema paths (containers included) | 319 |
+| Schema leaves (configurable values) | 271 |
+| Registry entries | 271 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 197 |
+| Class `hot_reload` | 199 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -215,11 +215,13 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.auth.basic.realm` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.deny` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.forward_auth.auth_response_headers` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
+| `servers.*.locations.*.auth.forward_auth.timeout` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.forward_auth.url` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.jwt.algorithms` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.jwt.audience` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.jwt.issuer` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.jwt.jwks_url` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
+| `servers.*.locations.*.auth.jwt.timeout` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.backend_tls.ca_file` | `hot_reload` | `backend_tls` | digest | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
 | `servers.*.locations.*.backend_tls.ca_mode` | `hot_reload` | `backend_tls` | — | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
 | `servers.*.locations.*.backend_tls.client_cert` | `hot_reload` | `backend_tls` | digest | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |

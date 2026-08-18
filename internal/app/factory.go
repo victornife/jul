@@ -290,10 +290,27 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				continue
 			}
 			key := AuthScope(c.Servers[i], loc)
+			var forwardURL, jwksURL string
+			if loc.Auth.ForwardAuth != nil {
+				forwardURL = loc.Auth.ForwardAuth.URL
+			}
+			if loc.Auth.JWT != nil {
+				jwksURL = loc.Auth.JWT.JWKSURL
+			}
+			forwardPool, err := f.authDependencyPool(ctx, forwardURL, upstreams)
+			if err != nil {
+				return nil, fmt.Errorf("location %s: forward_auth.url: %w", key, err)
+			}
+			jwksPool, err := f.authDependencyPool(ctx, jwksURL, upstreams)
+			if err != nil {
+				return nil, fmt.Errorf("location %s: jwt.jwks_url: %w", key, err)
+			}
 			a, err := auth.New(ctx, *loc.Auth, auth.Options{
 				Logger:      f.Log,
 				OnDecision:  f.Metrics.ObserveAuthDecision,
 				DialContext: f.EgressDial,
+				ForwardPool: forwardPool,
+				JWKSPool:    jwksPool,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("location %s: %w", key, err)
@@ -536,4 +553,49 @@ func upstreamKeysUsed(c *config.Config, upstreams map[string]config.UpstreamConf
 		}
 	}
 	return keys
+}
+
+// authDependencyPool resolves a forward-auth or JWKS URL to the pool that
+// bounds and balances calls to it.
+//
+// A host naming a configured upstream resolves to that pool, so an auth service
+// can be replicated and load-balanced like any other backend; anything else
+// becomes a pool of one, which changes no behaviour but does bring the
+// dependency under the same admission, passive health and retry accounting.
+//
+// An empty URL yields a nil pool: the dependency is not configured.
+func (f *HandlerFactory) authDependencyPool(ctx context.Context, rawURL string, upstreams map[string]config.UpstreamConfig) (*upstream.Pool, error) {
+	if strings.TrimSpace(rawURL) == "" {
+		return nil, nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if u.Host == "" {
+		return nil, fmt.Errorf("%q has no host", rawURL)
+	}
+	if up, ok := upstreams[u.Hostname()]; ok {
+		if f.PoolReg != nil {
+			return f.PoolReg.For(ctx, up, u.Scheme)
+		}
+		return upstream.NewPool(up, u.Scheme)
+	}
+
+	addr := u.Host
+	if u.Port() == "" {
+		// The pool addresses a backend, which always carries a port; the URL
+		// need not, so the scheme supplies the default it implies.
+		if u.Scheme == "https" {
+			addr = net.JoinHostPort(u.Hostname(), "443")
+		} else {
+			addr = net.JoinHostPort(u.Hostname(), "80")
+		}
+	}
+	return upstream.NewPool(config.UpstreamConfig{
+		Name:     u.Hostname(),
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
+		MaxFails: 3,
+	}, u.Scheme)
 }

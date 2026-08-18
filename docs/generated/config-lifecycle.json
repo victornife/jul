@@ -248,12 +248,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 317,
-    "schema_leaves": 269,
-    "registry_entries": 269,
+    "schema_paths": 319,
+    "schema_leaves": 271,
+    "registry_entries": 271,
     "startup_consumed": 58,
     "by_class": {
-      "hot_reload": 197,
+      "hot_reload": 199,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
       "restart_required": 58,
@@ -1563,6 +1563,19 @@
       "secret_digested": false
     },
     {
+      "path": "servers.*.locations.*.auth.forward_auth.timeout",
+      "class": "hot_reload",
+      "subsystem": "auth",
+      "reason": "auth modifiers are rebuilt around each location action on every successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
       "path": "servers.*.locations.*.auth.forward_auth.url",
       "class": "hot_reload",
       "subsystem": "auth",
@@ -1616,6 +1629,19 @@
     },
     {
       "path": "servers.*.locations.*.auth.jwt.jwks_url",
+      "class": "hot_reload",
+      "subsystem": "auth",
+      "reason": "auth modifiers are rebuilt around each location action on every successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.locations.*.auth.jwt.timeout",
       "class": "hot_reload",
       "subsystem": "auth",
       "reason": "auth modifiers are rebuilt around each location action on every successful reload",

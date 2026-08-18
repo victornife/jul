@@ -41,7 +41,7 @@ func BenchmarkJWTValidate(b *testing.B) {
 		b.Fatalf("rsa key: %v", err)
 	}
 	j := newJWTAuth("https://issuer.example/jwks.json",
-		"https://issuer.example", "my-api", defaultAlgs(), nil)
+		"https://issuer.example", "my-api", defaultAlgs(), nil, nil)
 	j.jwks.keys = map[string]crypto.PublicKey{"rsa-1": &key.PublicKey}
 	j.jwks.fetchedAt = time.Now()
 	req := bearerReq(signRS256(b, key, "rsa-1", validClaims()))

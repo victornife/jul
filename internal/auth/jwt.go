@@ -16,6 +16,8 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+
+	"jul/internal/upstream"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +41,7 @@ type jwtAuth struct {
 
 // newJWTAuth builds a JWT validator. The algorithm list is the allow-list used
 // for signature verification; the symmetric "none" method is never accepted.
-func newJWTAuth(jwksURL, issuer, audience string, algorithms []string, client *http.Client) *jwtAuth {
+func newJWTAuth(jwksURL, issuer, audience string, algorithms []string, client *http.Client, pool *upstream.Pool) *jwtAuth {
 	opts := []jwt.ParserOption{
 		jwt.WithValidMethods(algorithms),
 		jwt.WithLeeway(jwtClaimLeeway),
@@ -56,7 +58,7 @@ func newJWTAuth(jwksURL, issuer, audience string, algorithms []string, client *h
 		audience:   audience,
 		algorithms: algorithms,
 		parser:     jwt.NewParser(opts...),
-		jwks:       newJWKSCache(jwksURL, client),
+		jwks:       newJWKSCache(jwksURL, client, pool),
 	}
 }
 
@@ -111,8 +113,8 @@ func bearerToken(r *http.Request) (string, bool) {
 // jwksCache fetches and caches the JWKS document, refreshing it periodically and
 // serving stale keys within a grace window when the endpoint is unreachable.
 type jwksCache struct {
-	url    string
-	client *http.Client
+	url string
+	dep dependency
 
 	refreshAfter time.Duration
 	staleGrace   time.Duration
@@ -129,13 +131,13 @@ type jwksCache struct {
 	lastAttempt time.Time
 }
 
-func newJWKSCache(url string, client *http.Client) *jwksCache {
+func newJWKSCache(url string, client *http.Client, pool *upstream.Pool) *jwksCache {
 	if client == nil {
-		client = jwksHTTPClient(nil)
+		client = jwksHTTPClient(nil, 0)
 	}
 	return &jwksCache{
 		url:          url,
-		client:       client,
+		dep:          dependency{pool: pool, client: client},
 		refreshAfter: 15 * time.Minute,
 		staleGrace:   1 * time.Hour,
 		minRefresh:   30 * time.Second,
@@ -144,8 +146,11 @@ func newJWKSCache(url string, client *http.Client) *jwksCache {
 
 // jwksHTTPClient builds the default JWKS HTTP client. When dial is non-nil its
 // transport enforces the egress allow-list at connect time.
-func jwksHTTPClient(dial DialFunc) *http.Client {
-	c := &http.Client{Timeout: 10 * time.Second}
+func jwksHTTPClient(dial DialFunc, timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = DefaultDependencyTimeout
+	}
+	c := &http.Client{Timeout: timeout}
 	if dial != nil {
 		c.Transport = guardedTransport(dial)
 	}
@@ -205,7 +210,7 @@ func (c *jwksCache) refresh() error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.client.Do(req)
+	resp, err := c.dep.do(req)
 	if err != nil {
 		return err
 	}

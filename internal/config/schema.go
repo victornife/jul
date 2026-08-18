@@ -985,6 +985,9 @@ type JWTAuthConfig struct {
 	// insecure "none" algorithm is always rejected. Pinning algorithms prevents
 	// algorithm-confusion attacks.
 	Algorithms []string `toml:"algorithms"`
+	// Timeout bounds one JWKS fetch. 0 keeps the 10s default this was hardcoded
+	// to before it was configurable.
+	Timeout Duration `toml:"timeout"`
 }
 
 // ForwardAuthConfig delegates the authentication decision to an external HTTP
@@ -997,6 +1000,13 @@ type ForwardAuthConfig struct {
 	// AuthResponseHeaders lists response headers copied from the auth endpoint
 	// onto the upstream request when the decision is allow.
 	AuthResponseHeaders []string `toml:"auth_response_headers"`
+	// Timeout bounds one forward-auth subrequest. 0 keeps the 10s default this
+	// was hardcoded to before it was configurable.
+	//
+	// It is a ceiling on how long an unreachable auth service can hold a client
+	// request open before it is denied — never a window in which the request is
+	// let through.
+	Timeout Duration `toml:"timeout"`
 }
 
 // CacheConfig configures the two-tier response cache.
