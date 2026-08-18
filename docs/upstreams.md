@@ -32,6 +32,8 @@ proxy_pass = "https://inventory"
 
 - [Pool basics](#pool-basics)
 - [Admission and overload control](#admission-and-overload-control)
+- [Sizing the limits](#sizing-the-limits)
+- [The accounting model in one place](#the-accounting-model-in-one-place)
 - [`backend_tls`](#backend-tls)
 - [Trust roots](#trust-roots)
 - [Client certificates (mutual TLS)](#client-certificates-mutual-tls)
@@ -219,6 +221,76 @@ proxy_pass = "http://api"
 A literal `proxy_pass = "http://10.0.0.5:8080"` target builds an unregistered pool of one that is
 rebuilt on every reload, so **its admission counters reset on reload**. Name the upstream if you need
 that state to survive.
+
+### Sizing the limits
+
+Every limit is **per replica**. Ten replicas with `max_active_requests = 100` admit up to a thousand
+requests between them, so size from what one process should carry, not from the fleet total.
+
+Start from what the backend can actually absorb. For PHP-FPM that is `pm.max_children`; for a
+connection-pooled database it is the pool size. Admitting past that number does not add throughput —
+it moves the queue somewhere Jul cannot see, bound or report.
+
+`max_active_per_backend` multiplied by the backend count must reach `max_active_requests`, or the pool
+limit is unreachable and requests are rejected with a backend-capacity error while the pending queue
+sits empty. `jul lint` warns about this for static server lists. Under discovery it cannot: the
+backend count is a runtime property, so the check is necessarily soft and the metric, not the
+configuration, is the authority.
+
+**`max_pending_requests` costs request-sized memory, not waiter-sized.** This is the number most
+likely to be sized wrongly. Because admission is innermost, a parked request already holds a parsed
+`*http.Request`, its header maps, any authentication claims and WAF context — the waiter structure
+itself is a rounding error beside it. Measured on Jul's own test harness with a realistic request
+(four headers including a bearer token):
+
+| Parked requests | Heap | Per request |
+| --- | --- | --- |
+| 200 | ~1.5 MB | **~7.5 KB** |
+
+So a queue of 200 is single-digit megabytes, and a queue of 10 000 is tens of megabytes of live heap
+that cannot be reclaimed while the queue is full. Size it as a burst absorber, not a buffer.
+
+### The accounting model in one place
+
+Five quantities, never conflated:
+
+| Symbol | Meaning | Bounded by |
+| --- | --- | --- |
+| `A_p` | Admitted logical requests, streams and connections per pool | `max_active_requests` |
+| `A_b` | Admitted logical requests per backend | `max_active_per_backend`, as a selection filter |
+| `Q_p` | Parked requests per pool | `max_pending_requests` |
+| `C_b` | Physical sockets per backend host, per transport | `max_connections_per_backend` |
+| UDP sessions | Per-listener UDP session table | `max_udp_sessions` |
+
+Every protocol contributes to `A_p` the same way, for the whole life of its unit of work:
+
+| Surface | One unit of work is | Held for |
+| --- | --- | --- |
+| HTTP/1.1, HTTP/2, HTTP/3 | one request or stream | the request |
+| WebSocket (101) | the upgraded connection | until both directions close |
+| Server-sent events | the streaming response | the whole response |
+| gRPC unary and streaming | the call or stream | the stream's lifetime |
+| gRPC transcoding | the call or stream | the call |
+| FastCGI, uWSGI | the request | the request |
+| L4 TCP stream | the **connection** | the connection |
+| L4 UDP stream | *not admitted here* — see `max_udp_sessions` | — |
+
+The last two rows are the asymmetry worth remembering: the **TCP cap is per pool** because TCP
+connections map onto pool backends like any other request, while the **UDP cap is per listener**
+because UDP sessions are listener-owned state reclaimed by idle eviction. Details in
+[stream.md](stream.md#bounding-concurrency).
+
+### Why two in-flight numbers disagree
+
+`jul_http_requests_in_flight` and the pool's active count measure different things and will not match:
+
+- the first counts **inbound requests** being served, including static files, redirects, cache hits
+  and requests rejected by the WAF or by authentication;
+- the second counts **admitted upstream work**, which is only the subset that reaches a backend.
+
+A cache hit raises the first and never the second. Sustained overload raises the first while the
+second sits pinned at its limit. Neither is wrong, and forcing them to agree would mean either
+counting work that never happened or losing the ability to see it.
 
 ## backend_tls
 

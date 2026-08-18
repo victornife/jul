@@ -64,6 +64,48 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-08-18 — Upstream resilience / admission soak — **NOT RUN, acceptance item open**
+
+Recorded here because the absence of a run is itself evidence, and because the
+reproducible command is more useful than a claim.
+
+| | |
+| --- | --- |
+| Scope | Upstream admission and overload control (ADR 0017, #287) |
+| Required | **24 hours**, per #287's acceptance criteria |
+| Status | **Not run.** This acceptance item of #287 is open. |
+| Profile | [`burn-in-resilience.toml`](../burn-in-resilience.toml) — added and configuration-validated |
+| Blocker | No host available to this implementation session for a 24-hour wall-clock run. The profile, the load commands and the pass criteria are all in place; only the elapsed time is missing. |
+
+**Reproduction:**
+
+```sh
+go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul
+go run scripts/burn-in-backend.go            # HTTP backends :8081/:8082
+go run scripts/stream-echo-backend.go        # TCP echo :55432
+./jul -config burn-in-resilience.toml
+go run scripts/burn-in-load.go -duration 24h -workers 64
+go run scripts/burn-in-load.go -duration 24h -workers 16 -stream-tcp
+```
+
+**Pass criteria, all falsifiable:**
+
+| Property | Signal | What failure looks like |
+| --- | --- | --- |
+| No leaked admission slot | `jul_upstream_active_requests` returns to 0 when load pauses | a floor that creeps upward over hours |
+| Queue stays bounded | `jul_upstream_pending_requests` never exceeds `max_pending_requests` | any excursion above the configured value |
+| No goroutine per waiter | `go_goroutines` flat across hours | growth tracking queue depth |
+| Bounded memory | `process_resident_memory_bytes` plateaus | growth tracking requests served |
+| Long-stream accounting | one slot per stream, released once | drift between stream count and active count |
+| Compatibility path unaffected | zero admission rejections on the `unlimited` pool | any rejection at all |
+
+What *is* proven at this SHA, and is not a substitute for the above: the
+cross-protocol race and quiesce tests, a 70 000-execution fuzz run over
+acquire/release/cancel/reload/backend-update interleavings, goroutine flatness
+under a 256-deep saturated queue, and the measured ~7.5 KB per parked request.
+Those establish the properties hold; only elapsed time can establish they keep
+holding.
+
 ### 2026-08-07 — Cache recertification correctness soak (Linux, 30 seconds, 16 workers)
 
 - **SHA/workflow:** `3a4c982ed42cabaf608de771492402897f2dffac`, workflow `31163489042`, artifact `cache-recertification-measurements` (`8988058136`).
