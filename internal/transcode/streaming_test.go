@@ -395,12 +395,26 @@ func replyMessageField(t *testing.T, body, field string) string {
 	return s
 }
 
+// markFailures records n failures against the pool through the real admission
+// path. Results now have to be attributed to the generation that authorised
+// them, so a test cannot report one without first being admitted.
+func markFailures(t *testing.T, p *upstream.Pool, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		at, err := p.Pick()
+		if err != nil {
+			t.Fatalf("pick %d of %d: %v", i+1, n, err)
+		}
+		p.MarkFailure(at)
+		p.Release(at.Backend)
+	}
+}
+
 func TestStreamClientDecodeErrorDoesNotClearFailures(t *testing.T) {
 	tr := newStreamTranscoder(t, true, "ndjson")
 	backend := tr.pool.Backends()[0]
 	// Pre-mark the backend with passive failures.
-	tr.pool.MarkFailure(backend)
-	tr.pool.MarkFailure(backend)
+	markFailures(t, tr.pool, 2)
 	wantFails := backend.FailCount()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/down", strings.NewReader(`not json`))
@@ -419,8 +433,7 @@ func TestStreamHappyPathClearsFailures(t *testing.T) {
 	tr := newStreamTranscoder(t, true, "ndjson")
 	backend := tr.pool.Backends()[0]
 	// Pre-mark the backend with passive failures.
-	tr.pool.MarkFailure(backend)
-	tr.pool.MarkFailure(backend)
+	markFailures(t, tr.pool, 2)
 
 	res, _ := doRequest(t, tr, http.MethodPost, "/v1/down", `{"value":"a,b"}`, nil)
 	if res.StatusCode != http.StatusOK {
@@ -434,8 +447,7 @@ func TestStreamHappyPathClearsFailures(t *testing.T) {
 func TestStreamClientStreamDecodeErrorNeutralHealth(t *testing.T) {
 	tr := newStreamTranscoder(t, true, "ndjson")
 	backend := tr.pool.Backends()[0]
-	tr.pool.MarkFailure(backend)
-	tr.pool.MarkFailure(backend)
+	markFailures(t, tr.pool, 2)
 	wantFails := backend.FailCount()
 
 	// Send malformed NDJSON body to a client-streaming endpoint.

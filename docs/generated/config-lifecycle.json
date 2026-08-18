@@ -248,12 +248,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 319,
-    "schema_leaves": 271,
-    "registry_entries": 271,
+    "schema_paths": 320,
+    "schema_leaves": 272,
+    "registry_entries": 272,
     "startup_consumed": 58,
     "by_class": {
-      "hot_reload": 199,
+      "hot_reload": 200,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
       "restart_required": 58,
@@ -3359,8 +3359,8 @@
     {
       "path": "upstreams.*.fail_timeout",
       "class": "hot_reload",
-      "subsystem": "upstream",
-      "reason": "the upstream registry stages and swaps pools on each successful reload",
+      "subsystem": "resilience",
+      "reason": "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
@@ -3489,8 +3489,8 @@
     {
       "path": "upstreams.*.max_fails",
       "class": "hot_reload",
-      "subsystem": "upstream",
-      "reason": "the upstream registry stages and swaps pools on each successful reload",
+      "subsystem": "resilience",
+      "reason": "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
@@ -3504,6 +3504,19 @@
       "class": "hot_reload",
       "subsystem": "upstream",
       "reason": "the upstream registry stages and swaps pools on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.resilience.circuit_half_open_probes",
+      "class": "hot_reload",
+      "subsystem": "resilience",
+      "reason": "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,

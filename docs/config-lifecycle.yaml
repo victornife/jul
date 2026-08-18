@@ -74,12 +74,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 319
-  schema_leaves: 271
-  registry_entries: 271
+  schema_paths: 320
+  schema_leaves: 272
+  registry_entries: 272
   startup_consumed: 58
   by_class:
-    hot_reload: 199
+    hot_reload: 200
     restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
@@ -1175,8 +1175,8 @@ fields:
     reason: "the per-pool discovery refresher is restarted with the pool on each successful reload"
   - path: "upstreams.*.fail_timeout"
     class: hot_reload
-    subsystem: upstream
-    reason: "the upstream registry stages and swaps pools on each successful reload"
+    subsystem: resilience
+    reason: "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once"
   - path: "upstreams.*.health_check.enabled"
     class: hot_reload
     subsystem: health_check
@@ -1215,12 +1215,16 @@ fields:
     reason: "active probes are restarted with the pool on each successful reload"
   - path: "upstreams.*.max_fails"
     class: hot_reload
-    subsystem: upstream
-    reason: "the upstream registry stages and swaps pools on each successful reload"
+    subsystem: resilience
+    reason: "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once"
   - path: "upstreams.*.name"
     class: hot_reload
     subsystem: upstream
     reason: "the upstream registry stages and swaps pools on each successful reload"
+  - path: "upstreams.*.resilience.circuit_half_open_probes"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once"
   - path: "upstreams.*.resilience.max_active_per_backend"
     class: hot_reload
     subsystem: resilience

@@ -20,8 +20,8 @@ func TestBackendStateFollowsTheWorkloadNotTheAddress(t *testing.T) {
 	p.UpdateTargets([]Target{{Address: "10.0.0.1:80", ID: "pod-a"}})
 	first := p.Backends()[0]
 	// Give it a failure history worth inheriting.
-	p.MarkFailure(first)
-	if first.fails.Load() == 0 {
+	p.MarkFailure(admitOn(t, first))
+	if first.circuit.fails.Load() == 0 {
 		t.Fatal("precondition: the first backend should carry a failure")
 	}
 
@@ -31,7 +31,7 @@ func TestBackendStateFollowsTheWorkloadNotTheAddress(t *testing.T) {
 		if got != first {
 			t.Fatal("a refresh with an unchanged identity replaced the backend")
 		}
-		if got.fails.Load() == 0 {
+		if got.circuit.fails.Load() == 0 {
 			t.Fatal("the surviving backend lost its failure history")
 		}
 	})
@@ -42,8 +42,8 @@ func TestBackendStateFollowsTheWorkloadNotTheAddress(t *testing.T) {
 		if got == first {
 			t.Fatal("a new pod at a recycled address reused the dead pod's backend")
 		}
-		if got.fails.Load() != 0 {
-			t.Fatalf("the replacement inherited %d failures it never caused", got.fails.Load())
+		if got.circuit.fails.Load() != 0 {
+			t.Fatalf("the replacement inherited %d failures it never caused", got.circuit.fails.Load())
 		}
 		if !got.Available() {
 			t.Fatal("the replacement arrived already out of rotation")
@@ -59,13 +59,13 @@ func TestBackendReuseWithoutProviderIdentity(t *testing.T) {
 
 	p.UpdateTargets([]Target{{Address: "10.0.0.1:80"}})
 	first := p.Backends()[0]
-	p.MarkFailure(first)
+	p.MarkFailure(admitOn(t, first))
 
 	p.UpdateTargets([]Target{{Address: "10.0.0.1:80"}})
 	if got := p.Backends()[0]; got != first {
 		t.Fatal("an address-only refresh replaced the backend")
 	}
-	if got := p.Backends()[0].fails.Load(); got == 0 {
+	if got := p.Backends()[0].circuit.fails.Load(); got == 0 {
 		t.Fatal("an address-only refresh discarded the failure history")
 	}
 }
@@ -77,8 +77,8 @@ func TestBackendReuseWithoutProviderIdentity(t *testing.T) {
 // re-try an address it has already tried just because the pod behind it
 // changed mid-request.
 func TestBackendIdentityRemainsAddressBased(t *testing.T) {
-	a := newBackendFor("10.0.0.1:80", 1, "pod-a", "http")
-	b := newBackendFor("10.0.0.1:80", 1, "pod-b", "http")
+	a := newBackendFor("10.0.0.1:80", 1, "pod-a", "http", circuitParams{maxFails: 1, failTimeout: time.Second, halfOpenProbes: 1})
+	b := newBackendFor("10.0.0.1:80", 1, "pod-b", "http", circuitParams{maxFails: 1, failTimeout: time.Second, halfOpenProbes: 1})
 
 	if a.Identity() != b.Identity() {
 		t.Fatalf("dial identities differ (%v vs %v); retry exclusion would stop excluding a tried address", a.Identity(), b.Identity())
@@ -105,7 +105,7 @@ func TestDiscoveryChurnMatrix(t *testing.T) {
 		return m
 	}
 	before := byID()
-	p.MarkFailure(before["pod-b"])
+	p.MarkFailure(admitOn(t, before["pod-b"]))
 
 	// Remove pod-a: pod-b survives untouched.
 	p.UpdateTargets([]Target{{Address: "10.0.0.2:80", ID: "pod-b"}})
@@ -128,7 +128,7 @@ func TestDiscoveryChurnMatrix(t *testing.T) {
 	if after["pod-b"] != before["pod-b"] {
 		t.Fatal("re-adding one backend replaced another")
 	}
-	if after["pod-b"].fails.Load() == 0 {
+	if after["pod-b"].circuit.fails.Load() == 0 {
 		t.Fatal("the surviving backend lost its failure history across churn")
 	}
 }
@@ -139,7 +139,7 @@ func TestWeightChangeStillAppliedInPlace(t *testing.T) {
 	p := identityPool(t)
 	p.UpdateTargets([]Target{{Address: "10.0.0.1:80", ID: "pod-a", Weight: 1}})
 	first := p.Backends()[0]
-	p.MarkFailure(first)
+	p.MarkFailure(admitOn(t, first))
 
 	p.UpdateTargets([]Target{{Address: "10.0.0.1:80", ID: "pod-a", Weight: 7}})
 	got := p.Backends()[0]
@@ -149,7 +149,7 @@ func TestWeightChangeStillAppliedInPlace(t *testing.T) {
 	if got.Weight() != 7 {
 		t.Fatalf("weight = %d, want 7 applied in place", got.Weight())
 	}
-	if got.fails.Load() == 0 {
+	if got.circuit.fails.Load() == 0 {
 		t.Fatal("a weight change discarded the failure history")
 	}
 }

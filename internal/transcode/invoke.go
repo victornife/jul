@@ -379,7 +379,7 @@ func (t *Transcoder) firstConn() (*grpc.ClientConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer t.pool.Release(b)
+	defer t.pool.Release(b.Backend)
 	return t.connFor(b.Identity(), b.LogicalID())
 }
 
@@ -442,7 +442,7 @@ func (t *Transcoder) serveStreamingRoute(w http.ResponseWriter, r *http.Request,
 		t.report(method, code)
 		return
 	}
-	defer t.pool.Release(backend)
+	defer t.pool.Release(backend.Backend)
 
 	conn, err := t.connFor(backend.Identity(), backend.LogicalID())
 	if err != nil {
@@ -473,7 +473,7 @@ func (t *Transcoder) serveUnary(w http.ResponseWriter, r *http.Request, rt *rout
 
 	var resp *dynamicpb.Message
 	_, err := t.pool.Do(r.Context(), t.pool.RetryRequestFor(t.retry, retryableRoute(rt)),
-		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
+		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			conn, cerr := t.connFor(b.Identity(), b.LogicalID())
 			if cerr != nil {
 				t.pool.MarkFailure(b)

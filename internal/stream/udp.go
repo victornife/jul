@@ -23,7 +23,7 @@ import (
 type udpSession struct {
 	backend  net.Conn
 	pool     *upstream.Pool
-	b        *upstream.Backend
+	b        upstream.Attempt
 	lastSeen atomic.Int64 // unix nano
 }
 
@@ -100,7 +100,7 @@ func (l *listener) udpSessionFor(clientAddr *net.UDPAddr) *udpSession {
 
 	if victim != nil {
 		_ = victim.backend.Close()
-		victim.pool.Release(victim.b)
+		victim.pool.Release(victim.b.Backend)
 		l.server.connDelta("udp", -1)
 		l.server.udpEvicted("lru")
 		l.server.log.Debug("stream: udp session evicted at cap", "addr", l.addr, "client", victimKey)
@@ -224,7 +224,7 @@ func (l *listener) closeUDPSession(key string, sess *udpSession) {
 	l.udpMu.Unlock()
 
 	_ = sess.backend.Close()
-	sess.pool.Release(sess.b)
+	sess.pool.Release(sess.b.Backend)
 	l.server.connDelta("udp", -1)
 }
 

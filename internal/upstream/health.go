@@ -199,10 +199,15 @@ func (hc *healthChecker) probeOne(b *Backend) {
 		if !st.healthy && st.consecutiveOK >= hc.params.healthyThreshold {
 			st.healthy = true
 			b.setActiveHealthy(true)
-			// A recovered backend should re-enter rotation immediately, so also
-			// clear any passive cooldown left over from earlier live-traffic
-			// failures.
-			hc.pool.MarkSuccess(b)
+			// An active probe that proves liveness outranks failures
+			// recorded from live traffic, so a recovered backend re-enters
+			// rotation at full strength rather than being rate-limited by a
+			// circuit that is still open. Only the transition does this:
+			// steady-state probe successes must not keep papering over
+			// failures that live traffic is still hitting.
+			if hc.pool.ForceClose(b) && hc.pool.healthHook != nil {
+				hc.pool.healthHook(hc.pool.name, b.Address, true)
+			}
 			if hc.onHealth != nil {
 				hc.onHealth(hc.pool.name, b.Address, true)
 			}

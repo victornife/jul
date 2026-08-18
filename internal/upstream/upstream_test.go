@@ -37,7 +37,7 @@ func TestRoundRobinDistribution(t *testing.T) {
 			t.Fatal(err)
 		}
 		counts[b.Address]++
-		p.Release(b)
+		p.Release(b.Backend)
 	}
 	if counts["10.0.0.1:80"] != 5 || counts["10.0.0.2:80"] != 5 {
 		t.Fatalf("round-robin distribution = %v, want 5/5", counts)
@@ -53,7 +53,7 @@ func TestWeightedDistribution(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		b, _ := p.Pick()
 		counts[b.Address]++
-		p.Release(b)
+		p.Release(b.Backend)
 	}
 	if counts["a:80"] != 6 || counts["b:80"] != 2 {
 		t.Fatalf("weighted distribution = %v, want a=6 b=2", counts)
@@ -71,8 +71,8 @@ func TestLeastConn(t *testing.T) {
 	if first.Address == second.Address {
 		t.Fatalf("least_conn picked same backend twice: %s", first.Address)
 	}
-	p.Release(first)
-	p.Release(second)
+	p.Release(first.Backend)
+	p.Release(second.Backend)
 }
 
 func TestPassiveHealthAndRecovery(t *testing.T) {
@@ -84,8 +84,8 @@ func TestPassiveHealthAndRecovery(t *testing.T) {
 	// Trip backend "a" by recording maxFails (2) failures.
 	for _, b := range p.Backends() {
 		if b.Address == "a:80" {
-			p.MarkFailure(b)
-			p.MarkFailure(b)
+			p.MarkFailure(admitOn(t, b))
+			p.MarkFailure(admitOn(t, b))
 		}
 	}
 
@@ -98,7 +98,7 @@ func TestPassiveHealthAndRecovery(t *testing.T) {
 		if b.Address != "b:80" {
 			t.Fatalf("expected only b while a is down, got %s", b.Address)
 		}
-		p.Release(b)
+		p.Release(b.Backend)
 	}
 
 	// After the cooldown elapses, "a" becomes available again (half-open).
@@ -109,7 +109,7 @@ func TestPassiveHealthAndRecovery(t *testing.T) {
 		if b.Address == "a:80" {
 			seenA = true
 		}
-		p.Release(b)
+		p.Release(b.Backend)
 	}
 	if !seenA {
 		t.Fatal("backend a did not recover after cooldown")
@@ -119,8 +119,8 @@ func TestPassiveHealthAndRecovery(t *testing.T) {
 func TestAllDownReturnsError(t *testing.T) {
 	p := pool(t, "round_robin", config.UpstreamServer{Address: "a:80", Weight: 1})
 	for _, b := range p.Backends() {
-		p.MarkFailure(b)
-		p.MarkFailure(b)
+		p.MarkFailure(admitOn(t, b))
+		p.MarkFailure(admitOn(t, b))
 	}
 	if _, err := p.Pick(); err != ErrNoAvailableBackend {
 		t.Fatalf("expected ErrNoAvailableBackend, got %v", err)
@@ -136,11 +136,11 @@ func TestBackendFailCountAndAvailable(t *testing.T) {
 	if !b.Available() {
 		t.Error("expected available initially")
 	}
-	p.MarkFailure(b)
+	p.MarkFailure(admitOn(t, b))
 	if b.FailCount() != 1 {
 		t.Errorf("fail count = %d", b.FailCount())
 	}
-	p.MarkSuccess(b)
+	p.MarkSuccess(admitOn(t, b))
 	if b.FailCount() != 0 {
 		t.Errorf("fail count after success = %d", b.FailCount())
 	}

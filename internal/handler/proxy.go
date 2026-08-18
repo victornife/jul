@@ -293,7 +293,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	var resp *http.Response
 	attempts := 0
-	_, err := t.pool.Do(req.Context(), t.retryRequest(replayable), func(actx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
+	_, err := t.pool.Do(req.Context(), t.retryRequest(replayable), func(actx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 		attempts++
 		out := req
 		if n > 1 && req.GetBody != nil {
@@ -342,7 +342,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			// protocol upgrade (101) the body is also writable and ReverseProxy
 			// splices it bidirectionally, so the wrapper preserves
 			// io.ReadWriteCloser (WebSocket / raw stream passthrough).
-			r.Body = wrapReleaseBody(r.Body, func() { t.pool.Release(b) })
+			r.Body = wrapReleaseBody(r.Body, func() { t.pool.Release(b.Backend) })
 			resp = r
 			return upstream.AttemptResult{Retain: true}
 		}
@@ -371,7 +371,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 // noteFailure records a failed attempt against passive health and the bounded
 // dial-failure counter, logging a transition unconditionally and an ordinary
 // failure only on the pool's throttle.
-func (t *balancingTransport) noteFailure(b *upstream.Backend, err error) {
+func (t *balancingTransport) noteFailure(b upstream.Attempt, err error) {
 	tripped := t.pool.MarkFailure(b)
 	// Client cancellation and backend-TLS-identity failures are not backend
 	// dial failures: the former is client behavior, and the latter already has

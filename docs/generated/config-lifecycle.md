@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 319 |
-| Schema leaves (configurable values) | 271 |
-| Registry entries | 271 |
+| Schema paths (containers included) | 320 |
+| Schema leaves (configurable values) | 272 |
+| Registry entries | 272 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 199 |
+| Class `hot_reload` | 200 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -353,7 +353,7 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.discovery.refresh` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.target` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.type` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
-| `upstreams.*.fail_timeout` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.fail_timeout` | `hot_reload` | `resilience` | — | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
 | `upstreams.*.health_check.enabled` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.expect_body` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.expect_status` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
@@ -363,8 +363,9 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.health_check.timeout` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.type` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.unhealthy_threshold` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
-| `upstreams.*.max_fails` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.max_fails` | `hot_reload` | `resilience` | — | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
 | `upstreams.*.name` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.resilience.circuit_half_open_probes` | `hot_reload` | `resilience` | — | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
 | `upstreams.*.resilience.max_active_per_backend` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
 | `upstreams.*.resilience.max_active_requests` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
 | `upstreams.*.resilience.max_connections_per_backend` | `hot_reload` | `resilience` | — | the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary |

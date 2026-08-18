@@ -377,3 +377,71 @@ func TestPreflightBuildDoesNotDisturbLivePools(t *testing.T) {
 		t.Fatalf("active after preflight = %d, want 1: preflight disturbed a live pool", activeOf(s))
 	}
 }
+
+// TestTCPCircuitBoundsProbesOnRecovery pins that the breaker governs layer 4
+// too. dialBackend already drives MarkFailure/MarkSuccess, so a stream route
+// goes through the same state machine as HTTP — but it is behind a build tag,
+// which is exactly how a path stops being covered without anyone noticing.
+func TestTCPCircuitBoundsProbesOnRecovery(t *testing.T) {
+	live, stop := tcpEcho(t)
+	defer stop()
+	deadAddr := freeTCPAddr(t)
+
+	s := newTestServer(t, Hooks{})
+	// The dead backend is listed first so round-robin reaches it on the first
+	// dial: the point of the test is what happens after it fails, not whether
+	// the balancer happens to choose it.
+	pool, err := s.pool("l4", "tcp", map[string]config.UpstreamConfig{
+		"l4": {
+			Name:     "l4",
+			Strategy: "round_robin",
+			Servers: []config.UpstreamServer{
+				{Address: deadAddr, Weight: 1},
+				{Address: live, Weight: 1},
+			},
+			MaxFails:    1,
+			FailTimeout: config.Duration(time.Hour),
+		},
+	})
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+
+	var dead *upstream.Backend
+	for _, b := range pool.Backends() {
+		if b.Address == deadAddr {
+			dead = b
+		}
+	}
+	if dead == nil {
+		t.Fatal("dead backend not found in the pool")
+	}
+
+	l := &listener{addr: "test", server: s}
+
+	// One dial: it fails against the dead backend, which opens its circuit, and
+	// falls through to the live one.
+	conn, at, derr := l.dialBackend(pool, "tcp", time.Second)
+	if derr != nil {
+		t.Fatalf("dialBackend: %v", derr)
+	}
+	_ = conn.Close()
+	pool.Release(at.Backend)
+
+	if dead.Available() {
+		t.Fatal("a failed L4 dial did not take the backend out of rotation")
+	}
+
+	// The cooldown is an hour, so nothing may reach it until it elapses.
+	for i := 0; i < 20; i++ {
+		conn, at, derr := l.dialBackend(pool, "tcp", time.Second)
+		if derr != nil {
+			t.Fatalf("dial %d: %v", i, derr)
+		}
+		if at.Address == deadAddr {
+			t.Fatalf("dial %d reached a backend whose circuit is open", i)
+		}
+		_ = conn.Close()
+		pool.Release(at.Backend)
+	}
+}

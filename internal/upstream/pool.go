@@ -32,12 +32,15 @@ const dialFailureLogInterval = 10 * time.Second
 // Pool is a named set of backends fronted by a load-balancing strategy and
 // passive health checking.
 type Pool struct {
-	name        string
-	scheme      string
-	strategy    string
-	balancer    Balancer
-	maxFails    int
-	failTimeout time.Duration
+	name     string
+	scheme   string
+	strategy string
+	balancer Balancer
+
+	// circuit is the pool's breaker configuration. It is an atomic pointer
+	// because a reload retunes it in place while the discovery refresher may be
+	// building backends from it on another goroutine.
+	circuit atomic.Pointer[circuitParams]
 
 	// healthHook, when set, is called on a passive-health transition (a dial or
 	// request failure tripping a backend's cooldown, or a success clearing it).
@@ -103,27 +106,30 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 		return nil, fmt.Errorf("upstream %q: %w", cfg.Name, err)
 	}
 	p := &Pool{
-		name:        cfg.Name,
-		scheme:      scheme,
-		strategy:    cfg.Strategy,
-		balancer:    newBalancer(cfg.Strategy),
-		maxFails:    maxFails,
-		failTimeout: failTimeout,
-		dynamic:     discoveryEnabled(cfg.Discovery),
-		done:        make(chan struct{}),
-		admission:   NewAdmission(policy),
-		budget:      NewBudget(policy.RetryBudgetPercent()),
+		name:      cfg.Name,
+		scheme:    scheme,
+		strategy:  cfg.Strategy,
+		balancer:  newBalancer(cfg.Strategy),
+		dynamic:   discoveryEnabled(cfg.Discovery),
+		done:      make(chan struct{}),
+		admission: NewAdmission(policy),
+		budget:    NewBudget(policy.RetryBudgetPercent()),
 	}
-	bs := buildBackends(cfg.Servers, scheme)
+	p.circuit.Store(&circuitParams{
+		maxFails:       maxFails,
+		failTimeout:    failTimeout,
+		halfOpenProbes: cfg.Resilience.HalfOpenProbes(),
+	})
+	bs := buildBackends(cfg.Servers, scheme, p.circuitParams())
 	p.backends.Store(&bs)
 	return p, nil
 }
 
 // buildBackends constructs backend instances from server configs.
-func buildBackends(servers []config.UpstreamServer, scheme string) []*Backend {
+func buildBackends(servers []config.UpstreamServer, scheme string, cp circuitParams) []*Backend {
 	backends := make([]*Backend, 0, len(servers))
 	for _, s := range servers {
-		backends = append(backends, newBackend(s, scheme))
+		backends = append(backends, newBackend(s, scheme, cp))
 	}
 	return backends
 }
@@ -131,13 +137,13 @@ func buildBackends(servers []config.UpstreamServer, scheme string) []*Backend {
 // newBackend builds a single backend with a normalized weight (minimum 1). A
 // unix-socket address produces a backend with no URL: there is nothing
 // meaningful to put in one, and consumers read Network and Address instead.
-func newBackend(s config.UpstreamServer, scheme string) *Backend {
-	return newBackendFor(s.Address, s.Weight, "", scheme)
+func newBackend(s config.UpstreamServer, scheme string, cp circuitParams) *Backend {
+	return newBackendFor(s.Address, s.Weight, "", scheme, cp)
 }
 
 // newBackendFor builds one backend from its resolved parts. id is the
 // provider's logical identity, empty when there is none.
-func newBackendFor(rawAddress string, weight int, id, scheme string) *Backend {
+func newBackendFor(rawAddress string, weight int, id, scheme string, cp circuitParams) *Backend {
 	if weight < 1 {
 		weight = 1
 	}
@@ -154,8 +160,34 @@ func newBackendFor(rawAddress string, weight int, id, scheme string) *Backend {
 	b.setWeight(weight)
 	// A backend is healthy until an active checker (if any) proves otherwise.
 	b.activeHealthy.Store(true)
+	b.circuit = newCircuit(cp.maxFails, cp.failTimeout, cp.halfOpenProbes)
 	return b
 }
+
+// circuitParams is the pool's breaker configuration, snapshotted for the
+// backends it is about to build.
+type circuitParams struct {
+	maxFails       int
+	failTimeout    time.Duration
+	halfOpenProbes int
+}
+
+func (p *Pool) circuitParams() circuitParams { return *p.circuit.Load() }
+
+// setCircuitLimits retunes every backend's breaker in place, so a reload of
+// these thresholds does not discard accumulated failure state — which is the
+// moment an operator is most likely to be watching it.
+func (p *Pool) setCircuitLimits(cp circuitParams) {
+	p.circuit.Store(&cp)
+	for _, b := range p.Backends() {
+		b.circuit.setLimits(cp.maxFails, cp.failTimeout, cp.halfOpenProbes)
+	}
+}
+
+// ForceClose closes a backend's circuit from outside the request path,
+// reporting whether it changed anything. It exists for the active health
+// checker, which has evidence no in-band result can provide.
+func (p *Pool) ForceClose(b *Backend) bool { return b.circuit.forceClose() }
 
 // Name returns the pool name.
 func (p *Pool) Name() string { return p.name }
@@ -181,7 +213,7 @@ func (p *Pool) Backends() []*Backend { return *p.backends.Load() }
 
 // Pick selects an available backend and increments its in-flight counter. The
 // caller must call Release exactly once when the request completes.
-func (p *Pool) Pick() (*Backend, error) {
+func (p *Pool) Pick() (Attempt, error) {
 	return p.pickExcluding(nil)
 }
 
@@ -192,34 +224,48 @@ func (p *Pool) Release(b *Backend) {
 	}
 }
 
-// MarkSuccess clears a backend's failure state. It reports whether the backend
-// was in cooldown beforehand, so a caller can log the recovery transition
-// exactly once instead of on every subsequent success.
-func (p *Pool) MarkSuccess(b *Backend) bool {
-	wasDown := b.downUntil.Load() != 0
-	b.fails.Store(0)
-	b.downUntil.Store(0)
-	if wasDown && p.healthHook != nil {
-		p.healthHook(p.name, b.Address, true)
+// MarkSuccess records a successful request. It reports whether this call is the
+// one that returned the backend to rotation, so a caller can log the recovery
+// transition exactly once instead of on every subsequent success.
+//
+// It takes the Attempt rather than the Backend because the result has to be
+// attributed to the generation that authorised it. A request admitted before
+// the circuit opened can complete long after it recovered, and crediting that
+// success to the current generation would clear failures it knows nothing
+// about.
+func (p *Pool) MarkSuccess(at Attempt) bool {
+	if !at.Valid() {
+		return false
 	}
-	return wasDown
+	recovered := at.circuit.success(at.adm)
+	if recovered && p.healthHook != nil {
+		p.healthHook(p.name, at.Address, true)
+	}
+	return recovered
 }
 
-// MarkFailure records a backend failure; after maxFails consecutive failures
-// the backend is placed in cooldown for failTimeout. It reports whether this
-// call is the one that tripped the cooldown, so a caller can log that
-// transition once instead of on every subsequent failure against an
-// already-down backend.
-func (p *Pool) MarkFailure(b *Backend) bool {
-	if int(b.fails.Add(1)) >= p.maxFails {
-		b.downUntil.Store(time.Now().Add(p.failTimeout).UnixNano())
-		b.fails.Store(0)
-		if p.healthHook != nil {
-			p.healthHook(p.name, b.Address, false)
-		}
-		return true
+// MarkFailure records a failed request. It reports whether this call is the one
+// that took the backend out of rotation, so a caller can log that transition
+// once instead of on every subsequent failure against an already-open circuit.
+func (p *Pool) MarkFailure(at Attempt) bool {
+	if !at.Valid() {
+		return false
 	}
-	return false
+	tripped := at.circuit.failure(at.adm)
+	if tripped && p.healthHook != nil {
+		p.healthHook(p.name, at.Address, false)
+	}
+	return tripped
+}
+
+// ReleaseProbe returns a half-open probe allowance without recording a verdict,
+// for an attempt that was admitted but never reached the backend. Without it a
+// request abandoned between selection and dial would hold a probe slot until
+// the half-open window expired.
+func (p *Pool) ReleaseProbe(at Attempt) {
+	if at.Valid() {
+		at.circuit.releaseProbe(at.adm)
+	}
 }
 
 // SetHealthHook wires the passive-health transition hook. It is called once by
@@ -249,9 +295,10 @@ func (p *Pool) AllowDialFailureLog() bool { return p.dialLog.Allow(dialFailureLo
 // because Backend.weight is atomic and the only hot-path reader holds
 // weightedRR's own mutex.
 func (p *Pool) UpdateBackends(servers []config.UpstreamServer) {
+	cp := p.circuitParams()
 	next := make([]*Backend, 0, len(servers))
 	for _, s := range servers {
-		next = append(next, newBackend(s, p.scheme))
+		next = append(next, newBackend(s, p.scheme, cp))
 	}
 	p.replaceBackends(next)
 }
@@ -263,9 +310,10 @@ func (p *Pool) UpdateBackends(servers []config.UpstreamServer) {
 // public server config, which has no place to put an identity and no reason to
 // grow one: a pod UID is not something an operator writes in a TOML file.
 func (p *Pool) UpdateTargets(targets []Target) {
+	cp := p.circuitParams()
 	next := make([]*Backend, 0, len(targets))
 	for _, t := range targets {
-		next = append(next, newBackendFor(t.Address, t.Weight, t.ID, p.scheme))
+		next = append(next, newBackendFor(t.Address, t.Weight, t.ID, p.scheme, cp))
 	}
 	p.replaceBackends(next)
 }

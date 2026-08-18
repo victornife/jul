@@ -131,7 +131,7 @@ func (l *listener) handleTCP(client net.Conn) {
 		// a broken backend plus ordinary connection volume cannot flood the log.
 		return
 	}
-	defer pool.Release(b)
+	defer pool.Release(b.Backend)
 	defer backend.Close()
 
 	if r.proxyOut {

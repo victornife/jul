@@ -22,12 +22,10 @@ import (
 // selection to the live pool at request time. This keeps in-flight requests
 // on the converged backend view instead of freezing them to a stale seed.
 type PoolSnapshot struct {
-	key         PoolSnapshotKey
-	strategy    string
-	backends    []*Backend
-	maxFails    int
-	failTimeout time.Duration
-	balancer    Balancer
+	key      PoolSnapshotKey
+	strategy string
+	backends []*Backend
+	balancer Balancer
 
 	// pool is the live pool this snapshot was captured from. For dynamic pools
 	// it is used to serve request-time backend views.
@@ -37,12 +35,12 @@ type PoolSnapshot struct {
 }
 
 // Pick selects an available backend from the snapshot, mirroring Pool.Pick.
-func (s *PoolSnapshot) Pick() (*Backend, error) {
+func (s *PoolSnapshot) Pick() (Attempt, error) {
 	return s.pickExcluding(nil)
 }
 
 // pick selects an available backend from the snapshot, mirroring Pool.Pick.
-func (s *PoolSnapshot) pick() (*Backend, error) {
+func (s *PoolSnapshot) pick() (Attempt, error) {
 	return s.pickExcluding(nil)
 }
 
@@ -51,7 +49,7 @@ func (s *PoolSnapshot) pick() (*Backend, error) {
 // ErrNoAvailableBackend when every available backend is excluded. For dynamic
 // pools it delegates to the live pool so discovery convergence is visible to
 // each request.
-func (s *PoolSnapshot) pickExcluding(excluded map[BackendIdentity]struct{}) (*Backend, error) {
+func (s *PoolSnapshot) pickExcluding(excluded map[BackendIdentity]struct{}) (Attempt, error) {
 	if s.dynamic {
 		return s.pool.pickExcluding(excluded)
 	}
@@ -80,14 +78,12 @@ func (s *PoolSnapshot) Key() PoolSnapshotKey { return s.key }
 // on shared backend state.
 func (p *Pool) Snapshot() *PoolSnapshot {
 	return &PoolSnapshot{
-		key:         PoolSnapshotKey{Name: p.name, Scheme: p.scheme},
-		strategy:    p.strategy,
-		backends:    p.Backends(),
-		maxFails:    p.maxFails,
-		failTimeout: p.failTimeout,
-		balancer:    newBalancer(p.strategy),
-		pool:        p,
-		dynamic:     p.dynamic,
+		key:      PoolSnapshotKey{Name: p.name, Scheme: p.scheme},
+		strategy: p.strategy,
+		backends: p.Backends(),
+		balancer: newBalancer(p.strategy),
+		pool:     p,
+		dynamic:  p.dynamic,
 	}
 }
 
@@ -96,20 +92,18 @@ func (p *Pool) Snapshot() *PoolSnapshot {
 // need the candidate backend set rather than the live pool view (R9-06).
 func (p *Pool) staticSnapshot(servers []config.UpstreamServer) *PoolSnapshot {
 	return &PoolSnapshot{
-		key:         PoolSnapshotKey{Name: p.name, Scheme: p.scheme},
-		strategy:    p.strategy,
-		backends:    buildBackends(servers, p.scheme),
-		maxFails:    p.maxFails,
-		failTimeout: p.failTimeout,
-		balancer:    newBalancer(p.strategy),
-		pool:        p,
-		dynamic:     false,
+		key:      PoolSnapshotKey{Name: p.name, Scheme: p.scheme},
+		strategy: p.strategy,
+		backends: buildBackends(servers, p.scheme, p.circuitParams()),
+		balancer: newBalancer(p.strategy),
+		pool:     p,
+		dynamic:  false,
 	}
 }
 
 // PickCtx returns a backend from the generation-scoped snapshot in ctx when
 // one exists for this pool, otherwise falls back to the live pool.
-func (p *Pool) PickCtx(ctx context.Context) (*Backend, error) {
+func (p *Pool) PickCtx(ctx context.Context) (Attempt, error) {
 	return p.PickExcluding(ctx, nil)
 }
 
@@ -117,7 +111,7 @@ func (p *Pool) PickCtx(ctx context.Context) (*Backend, error) {
 // pool, skipping any backend whose stable identity is in excluded. It is used
 // by the proxy retry loop so a failed backend does not consume an attempt while
 // an untried backend remains.
-func (p *Pool) PickExcluding(ctx context.Context, excluded map[BackendIdentity]struct{}) (*Backend, error) {
+func (p *Pool) PickExcluding(ctx context.Context, excluded map[BackendIdentity]struct{}) (Attempt, error) {
 	if snap := snapshotFrom(ctx, p.name, p.scheme); snap != nil {
 		return snap.pickExcluding(excluded)
 	}
@@ -126,7 +120,7 @@ func (p *Pool) PickExcluding(ctx context.Context, excluded map[BackendIdentity]s
 
 // pickExcluding selects an available backend from the live pool, skipping any
 // backend whose stable identity is in excluded.
-func (p *Pool) pickExcluding(excluded map[BackendIdentity]struct{}) (*Backend, error) {
+func (p *Pool) pickExcluding(excluded map[BackendIdentity]struct{}) (Attempt, error) {
 	return selectBackend(*p.backends.Load(), p.balancer, p.Policy().MaxActivePerBackend(), excluded)
 }
 
@@ -150,7 +144,22 @@ func (p *Pool) candidates(ctx context.Context) []*Backend {
 // candidate. When every otherwise-usable backend is saturated the caller learns
 // that specifically, because "all backends are at capacity" and "no backend is
 // healthy" call for opposite operator responses.
-func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded map[BackendIdentity]struct{}) (*Backend, error) {
+// The circuit gate runs in two steps, and the split is forced by two
+// requirements that pull against each other.
+//
+// It has to run before the balancer, because a backend that just recovered has
+// inflight == 0, so least_conn would hand it every request the moment it became
+// eligible — the opposite of a cautious probe. But admitting a probe has a side
+// effect (it consumes the half-open allowance), and running it inside the
+// filter would spend that allowance on backends the balancer then discards.
+//
+// So: a non-consuming eligibility filter narrows the candidates, the balancer
+// picks among them, and only the chosen backend is asked to admit. The claim
+// can lose a race — another goroutine may take the last probe slot in between —
+// so a lost claim retries with that backend removed rather than failing the
+// request. That is what keeps "exactly N probes" true under contention instead
+// of merely likely.
+func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded map[BackendIdentity]struct{}) (Attempt, error) {
 	now := time.Now().UnixNano()
 	avail := make([]*Backend, 0, len(backends))
 	saturated := false
@@ -167,18 +176,35 @@ func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded
 		}
 		avail = append(avail, b)
 	}
-	if len(avail) == 0 {
-		if saturated {
-			return nil, ErrBackendAtCapacity
+
+	for len(avail) > 0 {
+		b := bal.pick(avail)
+		if b == nil {
+			break
 		}
-		return nil, ErrNoAvailableBackend
+		if at, ok := b.admit(); ok {
+			b.acquire()
+			return at, nil
+		}
+		// The claim lost the race. Drop this backend and let the balancer
+		// choose again from what is left; bounded by len(avail) because each
+		// iteration removes one candidate.
+		avail = removeBackend(avail, b)
 	}
-	b := bal.pick(avail)
-	if b == nil {
-		return nil, ErrNoAvailableBackend
+
+	if saturated {
+		return Attempt{}, ErrBackendAtCapacity
 	}
-	b.acquire()
-	return b, nil
+	return Attempt{}, ErrNoAvailableBackend
+}
+
+func removeBackend(s []*Backend, b *Backend) []*Backend {
+	for i, c := range s {
+		if c == b {
+			return append(s[:i:i], s[i+1:]...)
+		}
+	}
+	return s
 }
 
 // BackendsCtx returns the backend set from the generation-scoped snapshot in

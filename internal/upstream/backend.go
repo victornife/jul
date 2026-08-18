@@ -80,9 +80,14 @@ type Backend struct {
 	// be watching them.
 	weight atomic.Int64
 
-	inflight  atomic.Int64
-	fails     atomic.Int32
-	downUntil atomic.Int64 // unix nano; 0 means healthy
+	inflight atomic.Int64
+
+	// circuit owns every reason this backend might be out of rotation for
+	// failure. It replaces the fails/downUntil pair: those two words could be
+	// read independently, so "cooldown elapsed" was a property each concurrent
+	// request evaluated for itself and every one of them answered yes at the
+	// same instant, sending a recovering backend the full production load.
+	circuit *circuit
 
 	// activeHealthy is the verdict of the active health checker (Y1-05). It is
 	// true unless an active checker has taken the backend out of rotation after
@@ -116,17 +121,46 @@ func (b *Backend) Identity() BackendIdentity {
 	return BackendIdentity{Scheme: b.scheme, Network: b.Network, Address: b.Address}
 }
 
-// available reports whether the backend may receive traffic now. It combines
-// the active health verdict with passive cooldown: a backend ejected by active
-// checks is unavailable regardless of passive state, and a passively
-// cooled-down backend becomes available again once the cooldown elapses
-// (half-open): the next failure re-trips it.
-func (b *Backend) available(nowNano int64) bool {
+// available reports whether the backend could receive traffic now, without
+// claiming anything.
+//
+// It is deliberately non-consuming. Selection filters candidates and then the
+// balancer chooses one; claiming a half-open probe slot here would spend the
+// allowance on backends the balancer then discards, so the bound would be met
+// on paper while the backend received nothing.
+//
+// Active health outranks circuit state in both directions: a backend the active
+// checker has ejected is unavailable whatever the circuit thinks, because an
+// out-of-band prover of liveness saying "no" is more authoritative than traffic
+// that has not been tried yet. It also suppresses probing, which is the point —
+// otherwise Jul would probe with real user requests a backend it already knows
+// is down.
+func (b *Backend) available(int64) bool {
+	return b.activeHealthy.Load() && b.circuit.eligible()
+}
+
+// admit claims the right to send one request to this backend, returning the
+// generation that authorised it. An invalid Attempt means the circuit refused,
+// which happens when the probe allowance was taken between the filter and here.
+func (b *Backend) admit() (Attempt, bool) {
 	if !b.activeHealthy.Load() {
-		return false
+		return Attempt{}, false
 	}
-	du := b.downUntil.Load()
-	return du == 0 || nowNano > du
+	adm := b.circuit.admit()
+	if !adm.ok() {
+		return Attempt{}, false
+	}
+	return Attempt{Backend: b, adm: adm}, true
+}
+
+// State reports why this backend can or cannot take traffic. Active health
+// outranks circuit state, and capacity is evaluated by the caller that knows
+// the per-backend limit.
+func (b *Backend) State() BackendState {
+	if !b.activeHealthy.Load() {
+		return StateHealthUnhealthy
+	}
+	return b.circuit.state()
 }
 
 // setActiveHealthy records the active health checker's verdict for this backend.
@@ -142,9 +176,10 @@ func (b *Backend) Release() { b.inflight.Add(-1) }
 // Inflight returns the current number of in-flight requests.
 func (b *Backend) Inflight() int64 { return b.inflight.Load() }
 
-// FailCount returns the current number of consecutive passive failures recorded
-// for this backend. It resets to zero when MarkSuccess is called.
-func (b *Backend) FailCount() int32 { return b.fails.Load() }
+// FailCount returns the current number of consecutive failures recorded for
+// this backend. It resets to zero when the circuit records a success or
+// changes state.
+func (b *Backend) FailCount() int32 { return b.circuit.fails.Load() }
 
 // Available reports whether the backend may currently receive traffic,
 // combining the active health verdict with passive cooldown. It is exported for

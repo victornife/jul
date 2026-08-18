@@ -401,9 +401,12 @@ func TestTranscodedStreamingUnreachableBackend(t *testing.T) {
 func TestTranscodedStreamingNoAvailableBackend(t *testing.T) {
 	tr := streamTranscoderOver(t, "127.0.0.1:1")
 	// One failure trips the only backend, so selection itself fails.
-	for _, b := range tr.pool.Backends() {
-		tr.pool.MarkFailure(b)
+	at, err := tr.pool.Pick()
+	if err != nil {
+		t.Fatalf("pick: %v", err)
 	}
+	tr.pool.MarkFailure(at)
+	tr.pool.Release(at.Backend)
 	res, body := doRequest(t, tr, http.MethodPost, "/v1/down", `{"value":"a"}`, nil)
 	if res.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503: %s", res.StatusCode, body)

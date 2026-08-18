@@ -41,7 +41,7 @@ const (
 // the method's streaming kind: server-streaming and bidirectional responses are
 // framed (NDJSON or SSE, per the location's stream_mode) and flushed per
 // message; a client-streaming response is a single JSON object.
-func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, conn *grpc.ClientConn, backend *upstream.Backend) {
+func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, conn *grpc.ClientConn, backend upstream.Attempt) {
 	method := string(rt.method.FullName())
 	clientStream := rt.method.IsStreamingClient()
 	serverStream := rt.method.IsStreamingServer()
@@ -82,7 +82,7 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 
 // serveServerStream sends a single request built from the body, path variables,
 // and query, then streams each reply message to the client as a framed event.
-func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, method string, backend *upstream.Backend) streamHealth {
+func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, method string, backend upstream.Attempt) streamHealth {
 	req := dynamicpb.NewMessage(rt.method.Input())
 	if err := t.buildRequest(req, rt, vars, r); err != nil {
 		code := requestErrorStatus(err)
@@ -105,7 +105,7 @@ func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, r
 // serveClientStream reads a sequence of JSON request frames (a JSON array or
 // newline/whitespace-delimited objects), forwards each as a gRPC message, then
 // returns the single reply as one JSON object.
-func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend *upstream.Backend) streamHealth {
+func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
 	if err := t.sendRequestFrames(r, rt, vars, cs); err != nil {
 		cancel()
 		var de *decodeError
@@ -146,7 +146,7 @@ func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, r
 
 // serveBidiStream pumps request frames to the backend while concurrently
 // streaming reply frames back to the client over the same HTTP/2 request.
-func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend *upstream.Backend) streamHealth {
+func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
 	var (
 		mu      sync.Mutex
 		sendErr error
@@ -219,7 +219,7 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 // pumpReplies streams every reply message from cs to the client, mapping a
 // terminal gRPC error to an HTTP error (before the first frame) or an error
 // frame (after streaming has started).
-func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt *route, method string, backend *upstream.Backend) streamHealth {
+func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt *route, method string, backend upstream.Attempt) streamHealth {
 	for {
 		out := dynamicpb.NewMessage(rt.method.Output())
 		if err := cs.RecvMsg(out); err != nil {

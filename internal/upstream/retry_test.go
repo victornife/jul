@@ -403,7 +403,7 @@ func TestDoDeadlineDominatesEveryAttempt(t *testing.T) {
 	start := time.Now()
 	attempts := 0
 	reason, err := p.Do(context.Background(), RetryRequest{Deadline: 120 * time.Millisecond, Replayable: true},
-		func(ctx context.Context, b *Backend, n int) AttemptResult {
+		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			attempts++
 			select {
 			case <-ctx.Done():
@@ -432,7 +432,7 @@ func TestDoStopsAtAttemptCap(t *testing.T) {
 	p := testPool(t, "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3", "127.0.0.1:4")
 	attempts := 0
 	reason, _ := p.Do(context.Background(), RetryRequest{MaxAttempts: 2, Replayable: true},
-		func(ctx context.Context, b *Backend, n int) AttemptResult {
+		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			attempts++
 			return AttemptResult{Err: errAttempt}
 		})
@@ -450,7 +450,7 @@ func TestDoTriesEveryDistinctBackendOnceByDefault(t *testing.T) {
 	p := testPool(t, "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3")
 	seen := map[BackendIdentity]int{}
 	reason, _ := p.Do(context.Background(), RetryRequest{Replayable: true},
-		func(ctx context.Context, b *Backend, n int) AttemptResult {
+		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			seen[b.Identity()]++
 			return AttemptResult{Err: errAttempt}
 		})
@@ -473,7 +473,7 @@ func TestDoDoesNotRetryUnreplayableRequests(t *testing.T) {
 	p := testPool(t, "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3")
 	attempts := 0
 	reason, _ := p.Do(context.Background(), RetryRequest{Replayable: false},
-		func(ctx context.Context, b *Backend, n int) AttemptResult {
+		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			attempts++
 			return AttemptResult{Err: errAttempt}
 		})
@@ -491,7 +491,7 @@ func TestDoDoesNotRetryUnreplayableRequests(t *testing.T) {
 func TestDoReleasesEveryFailedAttempt(t *testing.T) {
 	p := testPool(t, "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3")
 	_, _ = p.Do(context.Background(), RetryRequest{Replayable: true},
-		func(ctx context.Context, b *Backend, n int) AttemptResult {
+		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			if got := b.inflight.Load(); got != 1 {
 				t.Errorf("attempt %d: backend in-flight is %d during the attempt, want 1", n, got)
 			}
@@ -509,9 +509,9 @@ func TestDoReleasesEveryFailedAttempt(t *testing.T) {
 // response body outlives the round trip that produced it.
 func TestDoRetainsTheSuccessfulBackend(t *testing.T) {
 	p := testPool(t, "127.0.0.1:1")
-	var kept *Backend
+	var kept Attempt
 	reason, err := p.Do(context.Background(), RetryRequest{Replayable: true},
-		func(ctx context.Context, b *Backend, n int) AttemptResult {
+		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			kept = b
 			return AttemptResult{Retain: true}
 		})
@@ -521,7 +521,7 @@ func TestDoRetainsTheSuccessfulBackend(t *testing.T) {
 	if got := kept.inflight.Load(); got != 1 {
 		t.Fatalf("retained backend in-flight is %d, want the caller to still own 1", got)
 	}
-	p.Release(kept)
+	p.Release(kept.Backend)
 	if got := kept.inflight.Load(); got != 0 {
 		t.Fatalf("after the caller released, in-flight is %d, want 0", got)
 	}
@@ -538,7 +538,7 @@ func TestDoBudgetStopsAmplification(t *testing.T) {
 	}
 	attempts := 0
 	reason, _ := p.Do(context.Background(), RetryRequest{Replayable: true},
-		func(ctx context.Context, b *Backend, n int) AttemptResult {
+		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			attempts++
 			return AttemptResult{Err: errAttempt}
 		})

@@ -38,7 +38,7 @@ func TestPoolSnapshotPickUsesSnapshotBackends(t *testing.T) {
 	if b.Address != "10.0.0.1:80" {
 		t.Errorf("snapshot pick used backend %q, want 10.0.0.1:80", b.Address)
 	}
-	pool.Release(b)
+	pool.Release(b.Backend)
 }
 
 func TestPoolSnapshotPickFallsBackToLivePool(t *testing.T) {
@@ -60,7 +60,7 @@ func TestPoolSnapshotPickFallsBackToLivePool(t *testing.T) {
 	if b.Address != "10.0.0.1:80" {
 		t.Errorf("live pick used backend %q, want 10.0.0.1:80", b.Address)
 	}
-	pool.Release(b)
+	pool.Release(b.Backend)
 }
 
 type snapshotFakeDiscoverer struct {
@@ -122,7 +122,7 @@ func TestDiscoveryConvergenceUpdatesPerRequestSnapshot(t *testing.T) {
 	if b.Address != "10.0.0.1:80" {
 		t.Errorf("old snapshot pick used backend %q, want 10.0.0.1:80", b.Address)
 	}
-	pool.Release(b)
+	pool.Release(b.Backend)
 }
 
 func TestPoolSnapshotBackendsCtxUsesSnapshot(t *testing.T) {
@@ -375,7 +375,7 @@ func TestWeightedRoundRobinStateIsLocalToBalancer(t *testing.T) {
 				return
 			}
 			time.Sleep(time.Microsecond)
-			pool.Release(b)
+			pool.Release(b.Backend)
 		}
 	}()
 	wg.Wait()

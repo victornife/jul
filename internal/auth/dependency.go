@@ -53,7 +53,7 @@ func (d *dependency) do(req *http.Request) (*http.Response, error) {
 	var resp *http.Response
 	_, err = d.pool.Do(req.Context(),
 		d.pool.RetryRequestFor(upstream.RetryOverride{}, upstream.RetrySafeMethod(req.Method)),
-		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
+		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			out := req.Clone(ctx)
 			out.URL.Host = b.Address
 			r, aerr := d.client.Do(out)

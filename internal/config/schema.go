@@ -530,6 +530,21 @@ type ResilienceConfig struct {
 	// a trailing window. 0 is unbudgeted. It owns a window, so unlike the other
 	// retry controls it is pool-scoped and no location may override it.
 	RetryBudgetPercent int `toml:"retry_budget_percent"`
+
+	// CircuitHalfOpenProbes bounds how many requests may test a recovering
+	// backend at once. It defaults to 1; an explicit 0 means unbounded, which
+	// is the pre-#294 behaviour: when a cooldown elapsed every concurrent
+	// request saw the backend as available simultaneously and a backend that
+	// had just come back took the full production load.
+	//
+	// It is a pointer because those two cases are different answers to the same
+	// question and a plain int cannot tell them apart — an absent key would
+	// read as 0 and silently restore the behaviour this setting exists to fix.
+	//
+	// Pool-scoped only. A per-location override would let two locations
+	// disagree about how many probes one shared backend may take, and the
+	// backend is what is recovering.
+	CircuitHalfOpenProbes *int `toml:"circuit_half_open_probes"`
 }
 
 // LocationResilienceConfig is the public [servers.locations.resilience] block.
@@ -593,6 +608,18 @@ func (r *ResilienceConfig) Options() resilience.Options {
 		RetryBackoffMax:     r.RetryBackoffMax.Std(),
 		RetryBudgetPercent:  r.RetryBudgetPercent,
 	}
+}
+
+// DefaultCircuitHalfOpenProbes is the bound applied when the key is absent.
+const DefaultCircuitHalfOpenProbes = 1
+
+// HalfOpenProbes resolves the half-open probe bound, distinguishing an absent
+// key (default) from an explicit 0 (unbounded).
+func (r *ResilienceConfig) HalfOpenProbes() int {
+	if r == nil || r.CircuitHalfOpenProbes == nil {
+		return DefaultCircuitHalfOpenProbes
+	}
+	return *r.CircuitHalfOpenProbes
 }
 
 // BackendTLSConfig is the outbound (backend) TLS policy. It is deliberately a
@@ -921,6 +948,10 @@ func (c CompressionConfig) IsEnabled() bool { return c.Enabled != nil && *c.Enab
 // Bool returns a pointer to b. It is a convenience helper for constructing
 // *bool config fields in struct literals and tests.
 func Bool(b bool) *bool { return &b }
+
+// Int returns a pointer to i, for the config fields where an absent key and an
+// explicit zero are different answers.
+func Int(i int) *int { return &i }
 
 // RateLimitConfig configures request rate limiting (token bucket) plus a
 // per-listener concurrent-connection cap. It applies globally and can be
