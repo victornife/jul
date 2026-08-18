@@ -484,11 +484,13 @@ func locationEntries() []Entry {
 		loc+"auth.basic.realm",
 		loc+"auth.deny",
 		loc+"auth.forward_auth.auth_response_headers",
+		loc+"auth.forward_auth.timeout",
 		loc+"auth.forward_auth.url",
 		loc+"auth.jwt.algorithms",
 		loc+"auth.jwt.audience",
 		loc+"auth.jwt.issuer",
 		loc+"auth.jwt.jwks_url",
+		loc+"auth.jwt.timeout",
 	)...)
 	out = append(out, hotGroup(SubGRPCTranscode, reasonHandlerRebuild,
 		loc+"grpc_transcode.descriptor_set",

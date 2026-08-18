@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"jul/internal/clientaddr"
 )
@@ -446,13 +447,29 @@ func validateAuth(a *AuthConfig, where string) []error {
 				errs = append(errs, fmt.Errorf("%s.jwt: unsupported or insecure algorithm %q", where, alg))
 			}
 		}
+		errs = append(errs, validateAuthTimeout(a.JWT.Timeout, where+".jwt")...)
 	}
 	if a.ForwardAuth != nil {
 		if u, err := url.Parse(a.ForwardAuth.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			errs = append(errs, fmt.Errorf("%s.forward_auth: url %q must be an http(s) URL", where, a.ForwardAuth.URL))
 		}
+		errs = append(errs, validateAuthTimeout(a.ForwardAuth.Timeout, where+".forward_auth")...)
 	}
 	return errs
+}
+
+// authDependencyTimeoutCeiling bounds how long an auth dependency may hold a
+// client request open before the request is denied. It is generous, because its
+// job is to catch a typo rather than to express an opinion, but it is finite:
+// an unbounded auth call is a request that never resolves either way.
+const authDependencyTimeoutCeiling = 60 * time.Second
+
+func validateAuthTimeout(d Duration, where string) []error {
+	v := d.Std()
+	if v < 0 || v > authDependencyTimeoutCeiling {
+		return []error{fmt.Errorf("%s: timeout must be between 0s and %s", where, authDependencyTimeoutCeiling)}
+	}
+	return nil
 }
 
 // validJWTAlg reports whether alg is an accepted asymmetric signing algorithm.

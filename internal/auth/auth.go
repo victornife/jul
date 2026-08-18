@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 
+	"jul/internal/upstream"
+
 	"jul/internal/config"
 	"jul/internal/middleware"
 )
@@ -36,6 +38,10 @@ type Options struct {
 	// OnDecision, when non-nil, is invoked for each access-control decision with
 	// the method ("cidr"/"basic"/"jwt"/"forward") and result ("allow"/"deny").
 	OnDecision func(method, result string)
+	// ForwardPool and JWKSPool bound and balance the outbound auth dependency.
+	// nil keeps the bare client, which is exactly the previous behaviour.
+	ForwardPool *upstream.Pool
+	JWKSPool    *upstream.Pool
 }
 
 // Authenticator enforces a location's access-control policy: a CIDR allow/deny
@@ -75,15 +81,15 @@ func New(ctx context.Context, cfg config.AuthConfig, opts Options) (*Authenticat
 	case cfg.JWT != nil:
 		client := opts.HTTPClient
 		if client == nil {
-			client = jwksHTTPClient(opts.DialContext)
+			client = jwksHTTPClient(opts.DialContext, cfg.JWT.Timeout.Std())
 		}
-		a.jwt = newJWTAuth(cfg.JWT.JWKSURL, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.Algorithms, client)
+		a.jwt = newJWTAuth(cfg.JWT.JWKSURL, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.Algorithms, client, opts.JWKSPool)
 	case cfg.ForwardAuth != nil:
 		client := opts.HTTPClient
 		if client == nil {
-			client = forwardHTTPClient(opts.DialContext)
+			client = forwardHTTPClient(opts.DialContext, cfg.ForwardAuth.Timeout.Std())
 		}
-		a.forward = newForwardAuth(cfg.ForwardAuth.URL, cfg.ForwardAuth.AuthResponseHeaders, client)
+		a.forward = newForwardAuth(cfg.ForwardAuth.URL, cfg.ForwardAuth.AuthResponseHeaders, client, opts.ForwardPool)
 	}
 	return a, nil
 }

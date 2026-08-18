@@ -33,7 +33,7 @@ func TestForwardAuthDecide(t *testing.T) {
 	defer auth.Close()
 
 	t.Run("allow copies response headers", func(t *testing.T) {
-		fa := newForwardAuth(auth.URL+"?decision=allow", []string{"X-Auth-User", "X-Auth-Role"}, auth.Client())
+		fa := newForwardAuth(auth.URL+"?decision=allow", []string{"X-Auth-User", "X-Auth-Role"}, auth.Client(), nil)
 		orig := httptest.NewRequest(http.MethodPost, "http://app.example/orders?q=1", nil)
 		orig.Header.Set("Connection", "keep-alive")
 		orig.Header.Set("X-Custom", "abc")
@@ -65,7 +65,7 @@ func TestForwardAuthDecide(t *testing.T) {
 	})
 
 	t.Run("deny propagates status and body", func(t *testing.T) {
-		fa := newForwardAuth(auth.URL+"?decision=deny", nil, auth.Client())
+		fa := newForwardAuth(auth.URL+"?decision=deny", nil, auth.Client(), nil)
 		orig := httptest.NewRequest(http.MethodGet, "http://app.example/secret", nil)
 		res, err := fa.decide(context.Background(), orig)
 		if err != nil {
@@ -107,7 +107,7 @@ func TestForwardAuthBodyReadError(t *testing.T) {
 				Request:    req,
 			}, nil
 		}),
-	})
+	}, nil)
 	orig := httptest.NewRequest(http.MethodGet, "http://app.example/secret", nil)
 	res, err := fa.decide(context.Background(), orig)
 	if err != nil {

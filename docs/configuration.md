@@ -1000,7 +1000,8 @@ A location may then set **one** of the following sub-tables:
 
 | Key | Type | Description |
 | --- | ---- | ----------- |
-| `jwks_url` | string | **HTTPS** URL of the issuer's JWKS document (required); keys are cached and refreshed |
+| `jwks_url` | string | **HTTPS** URL of the issuer's JWKS document (required); keys are cached and refreshed. A host naming a configured upstream is load-balanced |
+| `timeout` | duration | Bounds one JWKS fetch; `0` (default) means 10s. Max 60s |
 | `issuer` | string | When set, the token's `iss` claim must match |
 | `audience` | string | When set, the token's `aud` claim must contain this value |
 | `algorithms` | []string | Allowed signing algorithms (default `RS256/384/512`, `ES256/384/512`, `PS256/384/512`). Symmetric (`HS*`) and `none` are always rejected |
@@ -1011,6 +1012,7 @@ A location may then set **one** of the following sub-tables:
 | --- | ---- | ----------- |
 | `url` | string | `http(s)` URL of the auth service. The request is mirrored with `X-Forwarded-Method/Uri/Host` |
 | `auth_response_headers` | []string | Response headers copied onto the upstream request on a 2xx decision |
+| `timeout` | duration | Bounds one forward-auth subrequest; `0` (default) means 10s. Max 60s. A dependency that cannot be reached **denies**, never allows |
 
 ---
 

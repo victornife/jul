@@ -127,7 +127,7 @@ func TestJWTValidate(t *testing.T) {
 		t.Fatalf("rsa key: %v", err)
 	}
 	srv := newJWKSServer(t, rsaJWK("rsa-1", &rsaKey.PublicKey))
-	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client())
+	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client(), nil)
 
 	t.Run("valid token", func(t *testing.T) {
 		token := signRS256(t, rsaKey, "rsa-1", validClaims())
@@ -210,7 +210,7 @@ func TestJWTValidateEC(t *testing.T) {
 		t.Fatalf("ec key: %v", err)
 	}
 	srv := newJWKSServer(t, ecJWK("ec-1", &ecKey.PublicKey))
-	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client())
+	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client(), nil)
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, validClaims())
 	tok.Header["kid"] = "ec-1"
@@ -231,7 +231,7 @@ func TestJWTAlgorithmNotAllowed(t *testing.T) {
 	srv := newJWKSServer(t, ecJWK("ec-1", &ecKey.PublicKey))
 	// Allow only RSA algorithms; an ES256 token must be rejected by the method
 	// allow-list even though the key resolves.
-	j := newJWTAuth(srv.URL, "", "", []string{"RS256"}, srv.Client())
+	j := newJWTAuth(srv.URL, "", "", []string{"RS256"}, srv.Client(), nil)
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, validClaims())
 	tok.Header["kid"] = "ec-1"
@@ -248,7 +248,7 @@ func TestJWKSRotation(t *testing.T) {
 	key1, _ := rsa.GenerateKey(rand.Reader, 2048)
 	key2, _ := rsa.GenerateKey(rand.Reader, 2048)
 	srv := newJWKSServer(t, rsaJWK("rsa-1", &key1.PublicKey))
-	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client())
+	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client(), nil)
 	// Disable refresh throttling so the immediate rotation below is picked up
 	// without waiting out the miss-fetch interval.
 	j.jwks.minRefresh = 0
@@ -269,7 +269,7 @@ func TestJWKSRotation(t *testing.T) {
 func TestJWKSRefreshThrottle(t *testing.T) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	srv := newJWKSServer(t, rsaJWK("rsa-1", &key.PublicKey))
-	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client())
+	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client(), nil)
 
 	// Prime the cache with one fetch.
 	if _, err := j.validate(bearerReq(signRS256(t, key, "rsa-1", validClaims()))); err != nil {
@@ -292,7 +292,7 @@ func TestJWKSRefreshThrottle(t *testing.T) {
 func TestJWKSStaleGrace(t *testing.T) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	srv := newJWKSServer(t, rsaJWK("rsa-1", &key.PublicKey))
-	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client())
+	j := newJWTAuth(srv.URL, "https://issuer.example", "my-api", defaultAlgs(), srv.Client(), nil)
 	// Force a refresh on every lookup so the outage path is exercised, but keep a
 	// long stale-grace window and disable throttling so the failing fetch is
 	// actually attempted.

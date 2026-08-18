@@ -306,6 +306,14 @@
       ]
     },
     {
+      "go_field": "ForwardAuthConfig.Timeout",
+      "path": "servers[].locations[].auth.forward_auth.timeout",
+      "kind": "duration",
+      "constraint": "0s to 60s",
+      "zero_semantics": "omitted/zero means 10s",
+      "active_when": "forward_auth configured"
+    },
+    {
       "go_field": "GRPCTranscodeConfig.MaxMessageSize",
       "path": "servers[].locations[].grpc_transcode.max_message_size",
       "kind": "size",
@@ -434,6 +442,14 @@
       "constraint": "at least 1 effective",
       "zero_semantics": "omitted/zero defaults to 3",
       "active_when": "health check enabled"
+    },
+    {
+      "go_field": "JWTAuthConfig.Timeout",
+      "path": "servers[].locations[].auth.jwt.timeout",
+      "kind": "duration",
+      "constraint": "0s to 60s",
+      "zero_semantics": "omitted/zero means 10s",
+      "active_when": "jwt configured"
     },
     {
       "go_field": "LocationConfig.ClientMaxBodySize",

@@ -132,7 +132,7 @@ changes for a directly exposed server.
   - Network fetches are throttled to **at most one per 30s**, so a flood of
     tokens bearing unknown key ids cannot amplify into a storm of JWKS requests.
   - On fetch failure, cached keys are served for a **1h stale grace** window.
-  - Response body capped at **1 MiB**; client timeout 10s.
+  - Response body capped at **1 MiB**; client timeout `timeout` (default **10s**).
 
 ### Forward-auth
 
@@ -141,7 +141,58 @@ stripped) plus `X-Forwarded-Method`, `X-Forwarded-Uri`, and `X-Forwarded-Host`.
 A **2xx** authorizes the request; the listed `auth_response_headers` are copied
 onto the upstream request (client-supplied copies are stripped first). Any other
 status is relayed to the client (non-error statuses normalized to 403; body
-capped at 64 KiB); redirects from the auth service are passed through.
+capped at 64 KiB); redirects from the auth service are passed through. One
+subrequest is bounded by `timeout` (default **10s**).
+
+### Dependency resilience
+
+Both `forward_auth.url` and `jwt.jwks_url` are on the request path of every
+authenticated request, so an unbounded number of subrequests to a struggling
+auth service is the same amplification Jul bounds everywhere else. Both now
+resolve through the shared upstream primitives:
+
+- if the URL's host **names a configured `[[upstreams]]`**, that pool is used, so
+  an auth service can be replicated and load-balanced like any other backend;
+- otherwise the host becomes a **pool of one**, which changes no behaviour but
+  brings the dependency under the same admission, passive health and retry
+  accounting;
+- `timeout` replaces what used to be a hardcoded 10 seconds.
+
+> [!IMPORTANT]
+> **Every failure denies.** An admission rejection, an exhausted retry budget, a
+> pool with no available backend and — when the circuit breaker lands — an open
+> circuit all deny the request with `503`. A request is **never** allowed through
+> unauthenticated because a resilience control fired.
+>
+> "Fail open on dependency failure" is a defensible-sounding default in other
+> systems and is a critical vulnerability here, so it is asserted by test rather
+> than assumed. The shape helps: every one of those conditions reaches the caller
+> as an error, and the caller denies on error, so the property is a consequence
+> of the structure rather than a rule each call site has to remember.
+
+#### Scope: transport only
+
+Resilience here covers **transport and TLS failures only**. An HTTP response is
+an answer, whatever its status:
+
+| Outcome | Retried? | Trips passive health? | Client sees |
+| --- | --- | --- | --- |
+| Connection refused, reset, timeout | yes | yes | `503` if no replica answers |
+| `2xx` | no | no | request allowed |
+| `401` / `403` | no | no | the auth service's own response |
+| `500` forever | **no** | **no** | the auth service's own `500` |
+
+An auth service returning `500` forever is a received response, so it neither
+fails over nor removes a healthy replica from rotation. The two dependencies do
+not even agree on what failure means — JWKS treats any non-`200` as a refresh
+failure, while forward-auth treats a non-2xx as a legitimate application result,
+since `401` and `403` *are* the answer. Making `5xx` or `429` trip a breaker
+needs a generic outcome-classification seam, which is one deferred extension
+with two consumers rather than an auth special case.
+
+A named upstream with several backends means the subrequest is sent to a
+selected backend's address. For an `https` auth service that is the address TLS
+verifies against, exactly as for a proxied backend.
 
 ## Reload & resource lifecycle
 

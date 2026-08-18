@@ -157,7 +157,7 @@ func TestWrapJWTClaimsInContext(t *testing.T) {
 		},
 	}, nil)
 	// Point the validator's HTTP client at the test server.
-	a.jwt.jwks.client = srv.Client()
+	a.jwt.jwks.dep.client = srv.Client()
 
 	next := &okHandler{}
 	h := a.Wrap(next)
@@ -206,7 +206,7 @@ func TestWrapForwardAuth(t *testing.T) {
 			AuthResponseHeaders: []string{"X-Auth-User"},
 		},
 	}, nil)
-	a.forward.client = authSrv.Client()
+	a.forward.dep.client = authSrv.Client()
 
 	next := &okHandler{}
 	h := a.Wrap(next)

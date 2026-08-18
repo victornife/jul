@@ -6,6 +6,8 @@ package auth
 import (
 	"context"
 	"net/http"
+
+	"jul/internal/upstream"
 	"time"
 )
 
@@ -17,23 +19,26 @@ import (
 type forwardAuth struct {
 	url     string
 	headers []string // response headers to copy on success
-	client  *http.Client
+	dep     dependency
 }
 
-func newForwardAuth(url string, responseHeaders []string, client *http.Client) *forwardAuth {
+func newForwardAuth(url string, responseHeaders []string, client *http.Client, pool *upstream.Pool) *forwardAuth {
 	if client == nil {
-		client = forwardHTTPClient(nil)
+		client = forwardHTTPClient(nil, 0)
 	}
-	return &forwardAuth{url: url, headers: responseHeaders, client: client}
+	return &forwardAuth{url: url, headers: responseHeaders, dep: dependency{pool: pool, client: client}}
 }
 
 // forwardHTTPClient builds the default forward-auth HTTP client. It does not
 // follow redirects (the auth service's redirect response is relayed to the
 // client). When dial is non-nil its transport enforces the egress allow-list at
-// connect time.
-func forwardHTTPClient(dial DialFunc) *http.Client {
+// connect time. A zero timeout keeps the historical 10s bound.
+func forwardHTTPClient(dial DialFunc, timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = DefaultDependencyTimeout
+	}
 	c := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -69,7 +74,7 @@ func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResul
 	}
 	copyForwardHeaders(req.Header, r.Header)
 
-	resp, err := f.client.Do(req)
+	resp, err := f.dep.do(req)
 	if err != nil {
 		return forwardResult{}, err
 	}
