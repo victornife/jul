@@ -474,9 +474,45 @@ fastcgi_pass = "unix:/run/php/php-fpm.sock"
 
 | Key | Type | Description |
 | --- | ---- | ----------- |
-| `fastcgi_pass` | string | `unix:/path.sock`, `tcp://host:port`, or `host:port` |
+| `fastcgi_pass` | string | A named upstream, or `unix:/path.sock`, `tcp://host:port`, `host:port` |
 | `fastcgi_params` | table | Explicit CGI parameter overrides |
-| `uwsgi_pass` | string | uWSGI socket address (same address forms as above) |
+| `uwsgi_pass` | string | Same forms as `fastcgi_pass` |
+
+**Both are full upstream pools.** Point either at a named `[[upstreams]]` and the
+route gets load balancing, active health checking, failure accounting and
+admission control on the same terms as `proxy_pass`:
+
+```toml
+[[upstreams]]
+name = "php"
+strategy = "least_conn"
+servers = [
+  { address = "unix:/run/php/php-fpm-1.sock" },
+  { address = "unix:/run/php/php-fpm-2.sock" },
+]
+
+  [upstreams.resilience]
+  max_active_requests = 64
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+fastcgi_pass = "php"
+```
+
+Bounding concurrency matters more here than for a typical HTTP backend, not
+less: PHP-FPM's `pm.max_children` is a hard ceiling, so admitting past it only
+builds a queue inside the application server where Jul cannot see or bound it.
+
+Two notes on backends reached over a unix socket:
+
+- `health_check.type = "http"` cannot probe one — there is no host to put in a
+  URL — so that combination is a validation error. Use `type = "tcp"`, which
+  connects to the socket itself.
+- A `fastcgi_pass` or `uwsgi_pass` value that is neither a configured upstream
+  name nor a recognisable address is rejected at validation. It previously
+  parsed as the TCP host of that name and failed only at runtime.
+
+`uwsgi_pass` honours the location's `proxy_connect_timeout`.
 
 ### gRPC transcoding (`[servers.locations.grpc_transcode]`, `grpc` build tag)
 

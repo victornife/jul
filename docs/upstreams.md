@@ -47,7 +47,7 @@ proxy_pass = "https://inventory"
 | Key | Type | Description |
 | --- | ---- | ----------- |
 | `name` | string | The pool's name, referenced as `proxy_pass = "https://name"` |
-| `servers` | []string \| []table | Backends, as `"host:port"` or `{ address, weight }` |
+| `servers` | []string \| []table | Backends, as `"host:port"`, `"unix:/path.sock"`, or `{ address, weight }` |
 | `strategy` | string | `round_robin` (default), `weighted_round_robin`, `least_conn` |
 | `max_fails` / `fail_timeout` | int / duration | Passive health: park a backend after N consecutive failures |
 | `health_check` | table | Active probes — see [health.md](health.md) |
@@ -61,6 +61,12 @@ proxy_pass = "https://inventory"
 > explicit and decides the concurrency, pending, connection, retry-budget and half-open controls that
 > extend it. The admission controls below are implemented; the retry-budget and half-open controls
 > remain an accepted decision under implementation (#142, #143, #144).
+
+> **Who can use a pool.** `proxy_pass`, `grpc_transcode.target`, `fastcgi_pass` and `uwsgi_pass` all
+> accept a named upstream, so FastCGI and uWSGI routes are pool members with the same load balancing,
+> health checking, failure accounting and admission as an HTTP route. A backend address may be a unix
+> socket (`unix:/run/php/php-fpm.sock`); such a backend has no URL, so `health_check.type = "http"`
+> cannot probe it and that combination is a validation error — use `type = "tcp"`.
 
 ## Admission and overload control
 

@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -32,9 +33,11 @@ func validateLocation(loc LocationConfig, where string, upstreamNames map[string
 	}
 	if loc.FastCGIPass != "" {
 		actions = append(actions, "fastcgi_pass")
+		errs = append(errs, validateCGIPass("fastcgi_pass", loc.FastCGIPass, where, upstreamNames)...)
 	}
 	if loc.UWSGIPass != "" {
 		actions = append(actions, "uwsgi_pass")
+		errs = append(errs, validateCGIPass("uwsgi_pass", loc.UWSGIPass, where, upstreamNames)...)
 	}
 	// redirect and return combine into a single redirect action: when both are
 	// set, return is the redirect's status code (see router.redirectHandler), so
@@ -267,6 +270,34 @@ func validateMatch(m MatchConfig, where string) error {
 		if _, err := regexp.Compile(m.Path); err != nil {
 			return fmt.Errorf("%s: invalid match regex %q: %v", where, m.Path, err)
 		}
+	}
+	return nil
+}
+
+// validateCGIPass checks a fastcgi_pass or uwsgi_pass target.
+//
+// A bare name that matches no upstream used to be accepted and then dialled as
+// the TCP host "name", because the address parser's default branch treats
+// anything without a recognised prefix as a TCP address. The result was a
+// runtime failure with no configuration error anywhere. A target must now be a
+// known upstream or an address that is unambiguously one.
+func validateCGIPass(field, pass, where string, upstreamNames map[string]int) []error {
+	pass = strings.TrimSpace(pass)
+	if pass == "" {
+		return []error{fmt.Errorf("%s.%s: must not be empty", where, field)}
+	}
+	if _, ok := upstreamNames[pass]; ok {
+		return nil
+	}
+	if strings.HasPrefix(pass, "unix:") {
+		if strings.TrimPrefix(pass, "unix:") == "" {
+			return []error{fmt.Errorf("%s.%s: unix socket path is empty", where, field)}
+		}
+		return nil
+	}
+	addr := strings.TrimPrefix(pass, "tcp://")
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return []error{fmt.Errorf("%s.%s: %q is neither a configured upstream name nor a host:port, unix: or tcp:// address", where, field, pass)}
 	}
 	return nil
 }
