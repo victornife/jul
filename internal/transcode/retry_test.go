@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -346,4 +347,111 @@ func TestTranscodedStreamingIsNotRetried(t *testing.T) {
 	if res.StatusCode == http.StatusOK {
 		t.Fatal("a streaming call failed over to a second backend; framing has already been written, so it must not be retried")
 	}
+}
+
+// TestTranscodedUnaryRetriesConnectionFailure pins the other retryable case.
+// A backend Jul cannot even build a connection to has taken nothing, so the
+// call is still recoverable — and the failure must not be decoded as whatever
+// status an absent response would produce.
+func TestTranscodedUnaryRetriesConnectionFailure(t *testing.T) {
+	goodAddr, goodHits := startEchoBackend(t, codes.OK)
+
+	// "%%%" is rejected when the gRPC client is built, so connFor fails before
+	// anything is invoked.
+	tr := transcoderOver(t, retryEchoDescriptor(t, "GET", descriptorpb.MethodOptions_IDEMPOTENCY_UNKNOWN), "%%%", goodAddr)
+
+	res, body := doRequest(t, tr, http.MethodGet, "/v1/echo/abc", "", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 after retrying past the unreachable backend: %s", res.StatusCode, body)
+	}
+	if got := goodHits.Load(); got != 1 {
+		t.Fatalf("healthy backend was called %d times, want 1", got)
+	}
+}
+
+// TestTranscodedUnreachableBackendIsNotAGRPCStatus pins that a failure to build
+// the connection keeps its own 502. Falling through to the gRPC status mapping
+// would decode an absent response as Unknown and report 500, telling an
+// operator the application failed when in fact it was never reached.
+func TestTranscodedUnreachableBackendIsNotAGRPCStatus(t *testing.T) {
+	tr := transcoderOver(t, retryEchoDescriptor(t, "GET", descriptorpb.MethodOptions_IDEMPOTENCY_UNKNOWN), "%%%")
+
+	res, body := doRequest(t, tr, http.MethodGet, "/v1/echo/abc", "", nil)
+	if res.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 for an unreachable backend", res.StatusCode)
+	}
+	if !strings.Contains(body, "grpc backend unreachable") {
+		t.Fatalf("body = %q, want it to name the connection failure", body)
+	}
+}
+
+// TestTranscodedStreamingUnreachableBackend covers the streaming path's own
+// error mapping, which is deliberately not shared with the retrying unary path.
+func TestTranscodedStreamingUnreachableBackend(t *testing.T) {
+	tr := streamTranscoderOver(t, "%%%")
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/down", `{"value":"a"}`, nil)
+	if res.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502: %s", res.StatusCode, body)
+	}
+}
+
+// TestTranscodedStreamingNoAvailableBackend pins that an exhausted pool is
+// reported as 503, distinct from a backend that exists but cannot be reached.
+func TestTranscodedStreamingNoAvailableBackend(t *testing.T) {
+	tr := streamTranscoderOver(t, "127.0.0.1:1")
+	// One failure trips the only backend, so selection itself fails.
+	for _, b := range tr.pool.Backends() {
+		tr.pool.MarkFailure(b)
+	}
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/down", `{"value":"a"}`, nil)
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", res.StatusCode, body)
+	}
+	if !strings.Contains(body, "no available gRPC backend") {
+		t.Fatalf("body = %q, want it to name backend supply rather than reachability", body)
+	}
+}
+
+// streamTranscoderOver builds a streaming transcoder over a pool of the given
+// addresses.
+func streamTranscoderOver(t *testing.T, addrs ...string) *Transcoder {
+	t.Helper()
+	fdp := streamingFileDescriptorProto(t)
+	set := &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fdp}}
+	raw, err := proto.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal set: %v", err)
+	}
+	descFile := filepath.Join(t.TempDir(), "streamecho.pb")
+	if err := os.WriteFile(descFile, raw, 0o600); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+
+	servers := make([]config.UpstreamServer, 0, len(addrs))
+	for _, a := range addrs {
+		servers = append(servers, config.UpstreamServer{Address: a, Weight: 1})
+	}
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:        "stream-errors",
+		Strategy:    "round_robin",
+		Servers:     servers,
+		MaxFails:    1,
+		FailTimeout: config.Duration(time.Minute),
+	}, "http")
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	tr, err := New(context.Background(), config.GRPCTranscodeConfig{
+		Target:        addrs[0],
+		DescriptorSet: descFile,
+		Streaming:     true,
+		StreamMode:    "ndjson",
+	}, pool, nil, Options{})
+	if err != nil {
+		t.Fatalf("New transcoder: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+	return tr
 }
