@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"jul/internal/resilience"
@@ -40,4 +41,56 @@ func validateLocationResilience(r *LocationResilienceConfig, where string) []err
 		return []error{fmt.Errorf("%s: %w", where, err)}
 	}
 	return nil
+}
+
+// validateStreamResilience rejects max_active_requests on a UDP-only stream
+// route.
+//
+// UDP session admission already exists and is different in kind:
+// max_udp_sessions is a per-listener cap with LRU eviction of an idle victim,
+// because UDP has no client to park and no way to signal a rejection. Adding a
+// pool-scoped concurrency limit on top would be the overlapping mechanism this
+// programme rejects elsewhere, and the two would disagree about what a "session"
+// is. The asymmetry is deliberate: the UDP cap is per listener, the TCP cap is
+// per pool.
+func validateStreamResilience(c *Config) []error {
+	bounded := map[string]bool{}
+	for _, up := range c.Upstreams {
+		if up.Resilience != nil && up.Resilience.MaxActiveRequests > 0 {
+			bounded[up.Name] = true
+		}
+	}
+	if len(bounded) == 0 {
+		return nil
+	}
+
+	// An upstream is UDP-only when every stream route naming it is UDP and no
+	// HTTP location uses it: a pool shared with TCP or HTTP traffic keeps its
+	// limit, which is what makes the rule about the route rather than the pool.
+	var errs []error
+	for i, st := range c.Streams {
+		if strings.ToLower(strings.TrimSpace(st.Protocol)) != "udp" {
+			continue
+		}
+		for _, target := range streamTargets(st) {
+			if bounded[target] {
+				errs = append(errs, fmt.Errorf("stream[%d]: upstream %q sets resilience.max_active_requests, which does not apply to a UDP route; use max_udp_sessions on the stream block, which bounds per-listener sessions with idle eviction", i, target))
+			}
+		}
+	}
+	return errs
+}
+
+// streamTargets lists the upstream references a stream block makes.
+func streamTargets(st StreamServer) []string {
+	targets := make([]string, 0, 1+len(st.SNIRoutes))
+	if t := strings.TrimSpace(st.ProxyPass); t != "" {
+		targets = append(targets, t)
+	}
+	for _, t := range st.SNIRoutes {
+		if t = strings.TrimSpace(t); t != "" {
+			targets = append(targets, t)
+		}
+	}
+	return targets
 }

@@ -185,6 +185,7 @@ func Validate(c *Config) error {
 	errs = append(errs, validateTracing(c.Observability.Tracing)...)
 	errs = append(errs, validateAccessLog(c.Observability.AccessLog)...)
 	errs = append(errs, validateStreams(c.Streams, upstreamNames)...)
+	errs = append(errs, validateStreamResilience(c)...)
 
 	return errors.Join(errs...)
 }

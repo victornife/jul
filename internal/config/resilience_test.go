@@ -390,3 +390,60 @@ func TestValidateRejectsHTTPHealthCheckOnUnixBackend(t *testing.T) {
 		t.Fatalf("Validate with a tcp probe: %v", err)
 	}
 }
+
+// TestValidateRejectsMaxActiveRequestsOnUDPRoute pins the deliberate asymmetry:
+// the UDP cap is per listener with idle eviction, the TCP cap is per pool.
+// Layering a pool-scoped concurrency limit on UDP would be the overlapping
+// mechanism this programme rejects, and the two would disagree about what a
+// session is.
+func TestValidateRejectsMaxActiveRequestsOnUDPRoute(t *testing.T) {
+	base := func(proto string) *Config {
+		cfg := validKnownValueConfig()
+		cfg.Upstreams = []UpstreamConfig{{
+			Name:       "l4",
+			Strategy:   "round_robin",
+			Servers:    []UpstreamServer{{Address: "127.0.0.1:5432", Weight: 1}},
+			Resilience: &ResilienceConfig{MaxActiveRequests: 100},
+		}}
+		cfg.Streams = []StreamServer{{
+			Listen:    "127.0.0.1:15432",
+			Protocol:  proto,
+			ProxyPass: "l4",
+		}}
+		return cfg
+	}
+
+	t.Run("udp route is rejected", func(t *testing.T) {
+		err := Validate(base("udp"))
+		if err == nil {
+			t.Fatal("Validate accepted max_active_requests on a UDP stream route")
+		}
+		if !strings.Contains(err.Error(), "max_udp_sessions") {
+			t.Fatalf("error = %v, want it to point at max_udp_sessions", err)
+		}
+	})
+
+	t.Run("tcp route is accepted", func(t *testing.T) {
+		if err := Validate(base("tcp")); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+
+	t.Run("max_udp_sessions is untouched", func(t *testing.T) {
+		cfg := base("udp")
+		cfg.Upstreams[0].Resilience = nil
+		cfg.Streams[0].MaxUDPSessions = 2048
+		if err := Validate(cfg); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+
+	t.Run("udp route via sni_routes is rejected", func(t *testing.T) {
+		cfg := base("udp")
+		cfg.Streams[0].ProxyPass = "127.0.0.1:5432"
+		cfg.Streams[0].SNIRoutes = map[string]string{"db.example.com": "l4"}
+		if err := Validate(cfg); err == nil {
+			t.Fatal("Validate accepted a bounded upstream reached through sni_routes on a UDP route")
+		}
+	})
+}
