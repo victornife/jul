@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
@@ -51,6 +52,10 @@ type Options struct {
 	// OnStreamMsg, when set, is called once per streamed message with the gRPC
 	// method full name and direction ("sent"/"recv").
 	OnStreamMsg func(method, direction string)
+	// Retry carries the location's retry overrides. A zero field inherits the
+	// pool policy, which is read per request so a reload takes effect without
+	// rebuilding the transcoder.
+	Retry upstream.RetryOverride
 	// reflectTimeout bounds the reflection fetch at construction (default 10s).
 	// It is unexported and used only by tests.
 	reflectTimeout time.Duration
@@ -66,6 +71,7 @@ type Transcoder struct {
 	useTLS        bool
 	tlsPolicy     *backendtls.Policy
 	conns         sync.Map // address -> *grpc.ClientConn
+	retry         upstream.RetryOverride
 	preserveNames bool
 	streaming     bool
 	streamMode    string
@@ -159,6 +165,7 @@ func New(ctx context.Context, cfg config.GRPCTranscodeConfig, pool *upstream.Poo
 		pool:          pool,
 		useTLS:        cfg.TLS,
 		tlsPolicy:     opts.BackendTLS,
+		retry:         opts.Retry,
 		preserveNames: cfg.PreserveNames,
 		streaming:     cfg.Streaming,
 		streamMode:    normalizeStreamMode(cfg.StreamMode),
@@ -368,10 +375,26 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	method := string(rt.method.FullName())
 
-	// Pick a backend per request so load-balancing and passive health checking
-	// apply to gRPC transcoding the same way they do for HTTP proxy. Prefer the
-	// generation-scoped snapshot when present so reloads cannot shift an
-	// in-flight request to a newer backend set.
+	if rt.streaming {
+		t.serveStreamingRoute(w, r, rt, vars, method)
+		return
+	}
+	t.serveUnary(w, r, rt, vars, method)
+}
+
+// serveStreamingRoute selects one backend and serves a streaming method on it.
+//
+// Streaming is never retried: by the time a stream can fail, framing has
+// already been written, and re-running the call would replay it into a client
+// that has begun consuming the first one.
+func (t *Transcoder) serveStreamingRoute(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, method string) {
+	if !t.streaming {
+		t.writeError(w, http.StatusNotImplemented, "streaming methods require streaming = true on this grpc_transcode location")
+		t.report(method, http.StatusNotImplemented)
+		return
+	}
+	// Prefer the generation-scoped snapshot when present so reloads cannot
+	// shift an in-flight request to a newer backend set.
 	backend, err := t.pool.PickCtx(r.Context())
 	if err != nil {
 		code := http.StatusServiceUnavailable
@@ -389,17 +412,17 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.pool.MarkFailure(backend)
 		return
 	}
+	t.serveStreaming(w, r, rt, vars, conn, backend)
+}
 
-	if rt.streaming {
-		if !t.streaming {
-			t.writeError(w, http.StatusNotImplemented, "streaming methods require streaming = true on this grpc_transcode location")
-			t.report(method, http.StatusNotImplemented)
-			return
-		}
-		t.serveStreaming(w, r, rt, vars, conn, backend)
-		return
-	}
-
+// serveUnary performs a transcoded unary call, retrying it when the route is
+// idempotent and the failure was a failure to reach a backend.
+//
+// Unary transcoding is the one gRPC surface Jul can retry honestly. The request
+// is an in-memory dynamicpb.Message, so replay costs nothing and cannot fail;
+// the response is fully unmarshalled before a byte is written, so the retry
+// boundary is the whole call rather than a point inside a stream.
+func (t *Transcoder) serveUnary(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, method string) {
 	req := dynamicpb.NewMessage(rt.method.Input())
 	if err := t.buildRequest(req, rt, vars, r); err != nil {
 		code := requestErrorStatus(err)
@@ -408,18 +431,40 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := dynamicpb.NewMessage(rt.method.Output())
-	if err := conn.Invoke(outgoingContext(r), grpcMethodPath(rt.method), req, resp); err != nil {
-		code := httpStatusFromCode(status.Code(err))
-		t.writeError(w, code, status.Convert(err).Message())
+	var resp *dynamicpb.Message
+	_, err := t.pool.Do(r.Context(), t.pool.RetryRequestFor(t.retry, retryableRoute(rt)),
+		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
+			conn, cerr := t.connFor(b.Address)
+			if cerr != nil {
+				t.pool.MarkFailure(b)
+				return upstream.AttemptResult{Err: &backendDialError{err: cerr}}
+			}
+			// A fresh output message per attempt: reusing one would let a
+			// partially unmarshalled failed response merge into the next.
+			out := dynamicpb.NewMessage(rt.method.Output())
+			if ierr := conn.Invoke(outgoingContext(r), grpcMethodPath(rt.method), req, out); ierr != nil {
+				code := status.Code(ierr)
+				if isBackendFailure(code) {
+					t.pool.MarkFailure(b)
+				}
+				// Only Unavailable means "this backend could not take the
+				// call". Every other code is the application's answer, and
+				// asking a different backend the same question would just get
+				// the same answer more expensively.
+				return upstream.AttemptResult{Err: ierr, Terminal: code != codes.Unavailable}
+			}
+			t.pool.MarkSuccess(b)
+			resp = out
+			return upstream.AttemptResult{}
+		})
+	if err != nil {
+		code, msg := unaryErrorResponse(err)
+		t.writeError(w, code, msg)
 		t.report(method, code)
-		if isBackendFailure(status.Code(err)) {
-			t.pool.MarkFailure(backend)
-		}
 		return
 	}
 
-	out, err := protojson.MarshalOptions{
+	body, err := protojson.MarshalOptions{
 		UseProtoNames:   t.preserveNames,
 		EmitUnpopulated: true,
 	}.Marshal(resp)
@@ -430,9 +475,53 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(out)
+	_, _ = w.Write(body)
 	t.report(method, http.StatusOK)
-	t.pool.MarkSuccess(backend)
+}
+
+// retryableRoute applies ADR 0017's idempotency gate for transcoded unary
+// calls: the HTTP method is retry-safe, or the method itself declares that
+// repeating it is harmless.
+//
+// The proto annotation is consulted because the HTTP binding alone is too
+// coarse. A method mapped to POST purely because it takes a request body may
+// still be declared NO_SIDE_EFFECTS, and refusing to retry it would waste the
+// author's explicit statement. The default, IDEMPOTENCY_UNKNOWN, is never
+// retried: silence is not a promise.
+func retryableRoute(rt *route) bool {
+	if upstream.RetrySafeMethod(rt.httpMethod) {
+		return true
+	}
+	opts, _ := rt.method.Options().(*descriptorpb.MethodOptions)
+	switch opts.GetIdempotencyLevel() {
+	case descriptorpb.MethodOptions_NO_SIDE_EFFECTS, descriptorpb.MethodOptions_IDEMPOTENT:
+		return true
+	default:
+		return false
+	}
+}
+
+// backendDialError marks a failure to establish a connection, which is distinct
+// from a gRPC status: nothing was invoked, so it maps to 502 rather than to
+// whatever code an absent response would decode as.
+type backendDialError struct{ err error }
+
+func (e *backendDialError) Error() string { return e.err.Error() }
+func (e *backendDialError) Unwrap() error { return e.err }
+
+// unaryErrorResponse maps a failed call to a client status. Backend supply,
+// connection establishment and application errors are three different answers
+// and are not collapsed into one.
+func unaryErrorResponse(err error) (int, string) {
+	var dial *backendDialError
+	switch {
+	case errors.Is(err, upstream.ErrNoAvailableBackend), errors.Is(err, upstream.ErrBackendAtCapacity):
+		return http.StatusServiceUnavailable, "no available gRPC backend: " + err.Error()
+	case errors.As(err, &dial):
+		return http.StatusBadGateway, "grpc backend unreachable: " + err.Error()
+	default:
+		return httpStatusFromCode(status.Code(err)), status.Convert(err).Message()
+	}
 }
 
 // match returns the first route whose HTTP method and path template match the

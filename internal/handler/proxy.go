@@ -23,7 +23,6 @@ import (
 	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/middleware"
-	"jul/internal/resilience"
 	"jul/internal/tracing"
 	"jul/internal/upstream"
 )
@@ -247,7 +246,7 @@ type balancingTransport struct {
 	// retryOverride holds the location's retry settings. A zero field inherits
 	// the pool policy, which is read per request so a reload takes effect
 	// without rebuilding the transport.
-	retryOverride locationRetry
+	retryOverride upstream.RetryOverride
 	// tlsBackend records that the configured target is https. A backend whose
 	// scheme is not https is then refused rather than dialled: no retry,
 	// failover or discovery result may move a request from TLS to plaintext.
@@ -257,69 +256,27 @@ type balancingTransport struct {
 	dialFailure func(reason string)
 }
 
-// locationRetry is the location-scoped half of the retry configuration, fixed
-// when the handler generation is built.
-type locationRetry struct {
-	attempts       int
-	deadline       time.Duration
-	backoffInitial time.Duration
-	backoffMax     time.Duration
-}
-
 // newLocationRetry reads the location's retry overrides, accepting the
 // deprecated proxy_retries spelling. Validation has already rejected setting
 // both, so preferring either here cannot mask a conflict.
-func newLocationRetry(loc config.LocationConfig) locationRetry {
-	lr := locationRetry{attempts: loc.ProxyRetries}
+func newLocationRetry(loc config.LocationConfig) upstream.RetryOverride {
+	lr := upstream.RetryOverride{Attempts: loc.ProxyRetries}
 	if loc.Resilience == nil {
 		return lr
 	}
 	if loc.Resilience.RetryAttempts > 0 {
-		lr.attempts = loc.Resilience.RetryAttempts
+		lr.Attempts = loc.Resilience.RetryAttempts
 	}
-	lr.deadline = loc.Resilience.RetryDeadline.Std()
-	lr.backoffInitial = loc.Resilience.RetryBackoffInitial.Std()
-	lr.backoffMax = loc.Resilience.RetryBackoffMax.Std()
+	lr.Deadline = loc.Resilience.RetryDeadline.Std()
+	lr.BackoffInitial = loc.Resilience.RetryBackoffInitial.Std()
+	lr.BackoffMax = loc.Resilience.RetryBackoffMax.Std()
 	return lr
 }
 
 // retryRequest resolves the effective retry settings for one request: the
-// location wins where it set a value, the pool policy supplies the rest. A zero
-// location value inherits rather than meaning "unlimited", matching every other
-// override in this block.
+// location wins where it set a value, the pool policy supplies the rest.
 func (t *balancingTransport) retryRequest(replayable bool) upstream.RetryRequest {
-	return resolveRetry(t.pool, t.retryOverride, replayable)
-}
-
-// resolveRetry merges a location's overrides with the pool's live policy. It is
-// shared by every adapter so the override rule is one implementation rather
-// than one per protocol, and the policy is read per request so a reload takes
-// effect without rebuilding anything.
-func resolveRetry(pool *upstream.Pool, lr locationRetry, replayable bool) upstream.RetryRequest {
-	rr := upstream.RetryRequest{
-		MaxAttempts:    lr.attempts,
-		Deadline:       lr.deadline,
-		BackoffInitial: lr.backoffInitial,
-		BackoffMax:     lr.backoffMax,
-		Replayable:     replayable,
-	}
-	if pool == nil {
-		return rr
-	}
-	p := pool.Policy()
-	if rr.MaxAttempts == 0 {
-		rr.MaxAttempts = p.RetryAttempts()
-	}
-	if rr.Deadline == 0 {
-		rr.Deadline = p.RetryDeadline()
-	}
-	if rr.BackoffInitial == 0 {
-		rr.BackoffInitial = p.RetryBackoffInitial()
-		rr.BackoffMax = p.RetryBackoffMax()
-	} else if rr.BackoffMax == 0 {
-		rr.BackoffMax = resilience.DefaultRetryBackoffMax
-	}
-	return rr
+	return t.pool.RetryRequestFor(t.retryOverride, replayable)
 }
 
 func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -477,14 +434,7 @@ type releaseRWBody struct {
 
 func (r *releaseRWBody) Write(p []byte) (int, error) { return r.w.Write(p) }
 
-func isIdempotent(method string) bool {
-	switch method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
-		return true
-	default:
-		return false
-	}
-}
+func isIdempotent(method string) bool { return upstream.RetrySafeMethod(method) }
 
 // replayableBody reports whether a request's body can be sent a second time.
 //

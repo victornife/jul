@@ -7,8 +7,11 @@ import (
 	"context"
 	"errors"
 	"math/rand/v2"
+	"net/http"
 	"sync/atomic"
 	"time"
+
+	"jul/internal/resilience"
 )
 
 // StopReason is the bounded set of reasons a retry sequence stopped. It is
@@ -436,4 +439,62 @@ func (p *Pool) hasUntried(ctx context.Context, excluded map[BackendIdentity]stru
 		}
 	}
 	return false
+}
+
+// RetryOverride is the location-scoped half of the retry configuration. A zero
+// field inherits the pool policy rather than meaning "unlimited", matching every
+// other override in the resilience block.
+type RetryOverride struct {
+	Attempts       int
+	Deadline       time.Duration
+	BackoffInitial time.Duration
+	BackoffMax     time.Duration
+}
+
+// RetryRequestFor merges a location's overrides with the pool's live policy.
+//
+// It lives here so every adapter resolves the override rule the same way, and
+// so the policy is read per request: a resilience reload swaps a pointer, and
+// nothing needs rebuilding for it to take effect.
+func (p *Pool) RetryRequestFor(o RetryOverride, replayable bool) RetryRequest {
+	rr := RetryRequest{
+		MaxAttempts:    o.Attempts,
+		Deadline:       o.Deadline,
+		BackoffInitial: o.BackoffInitial,
+		BackoffMax:     o.BackoffMax,
+		Replayable:     replayable,
+	}
+	if p == nil {
+		return rr
+	}
+	policy := p.Policy()
+	if rr.MaxAttempts == 0 {
+		rr.MaxAttempts = policy.RetryAttempts()
+	}
+	if rr.Deadline == 0 {
+		rr.Deadline = policy.RetryDeadline()
+	}
+	if rr.BackoffInitial == 0 {
+		rr.BackoffInitial = policy.RetryBackoffInitial()
+		rr.BackoffMax = policy.RetryBackoffMax()
+	} else if rr.BackoffMax == 0 {
+		rr.BackoffMax = resilience.DefaultRetryBackoffMax
+	}
+	return rr
+}
+
+// RetrySafeMethod reports whether an HTTP method may be retried after a
+// transport failure.
+//
+// It is deliberately one definition rather than one per adapter: the HTTP
+// proxy, the CGI adapters and the transcoder all gate on it, and a list that
+// drifted between them would mean a method retried on one route and not on
+// another for no reason anybody could state.
+func RetrySafeMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }

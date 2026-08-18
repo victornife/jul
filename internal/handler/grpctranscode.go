@@ -51,6 +51,7 @@ func NewGRPCTranscode(ctx context.Context, _ config.ServerConfig, loc config.Loc
 		OnResult:    onResult,
 		OnStreamMsg: onStreamMsg,
 		BackendTLS:  policy,
+		Retry:       newLocationRetry(loc),
 	})
 	if err != nil {
 		return nil, err
