@@ -288,14 +288,25 @@ func newLocationRetry(loc config.LocationConfig) locationRetry {
 // location value inherits rather than meaning "unlimited", matching every other
 // override in this block.
 func (t *balancingTransport) retryRequest(replayable bool) upstream.RetryRequest {
-	p := t.pool.Policy()
+	return resolveRetry(t.pool, t.retryOverride, replayable)
+}
+
+// resolveRetry merges a location's overrides with the pool's live policy. It is
+// shared by every adapter so the override rule is one implementation rather
+// than one per protocol, and the policy is read per request so a reload takes
+// effect without rebuilding anything.
+func resolveRetry(pool *upstream.Pool, lr locationRetry, replayable bool) upstream.RetryRequest {
 	rr := upstream.RetryRequest{
-		MaxAttempts:    t.retryOverride.attempts,
-		Deadline:       t.retryOverride.deadline,
-		BackoffInitial: t.retryOverride.backoffInitial,
-		BackoffMax:     t.retryOverride.backoffMax,
+		MaxAttempts:    lr.attempts,
+		Deadline:       lr.deadline,
+		BackoffInitial: lr.backoffInitial,
+		BackoffMax:     lr.backoffMax,
 		Replayable:     replayable,
 	}
+	if pool == nil {
+		return rr
+	}
+	p := pool.Policy()
 	if rr.MaxAttempts == 0 {
 		rr.MaxAttempts = p.RetryAttempts()
 	}
@@ -473,6 +484,27 @@ func isIdempotent(method string) bool {
 	default:
 		return false
 	}
+}
+
+// replayableBody reports whether a request's body can be sent a second time.
+//
+// The obvious test, `Body == nil || GetBody != nil`, is right for the outbound
+// request `httputil.ReverseProxy` builds — it nils the body when there is none
+// — and silently wrong for a *server* request, where `Body` is always non-nil
+// and merely returns EOF immediately. Applied there it reports "not replayable"
+// for every request, which would disable retry entirely for the CGI adapters
+// while looking correct. A body-less request is trivially replayable, so that
+// case is recognised explicitly.
+//
+// A server request never carries GetBody, because net/http does not set one, so
+// a CGI request that really has a body is not retried. Buffering it to make it
+// replayable is exactly the unbounded-memory failure this programme exists to
+// prevent, so the limit is deliberate rather than pending.
+func replayableBody(r *http.Request) bool {
+	if r.GetBody != nil {
+		return true
+	}
+	return r.Body == nil || r.Body == http.NoBody || r.ContentLength == 0
 }
 
 // newProxyTransport returns a connection-reusing transport tuned by the
