@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/resilience"
 )
 
 var errAttempt = errors.New("attempt failed")
@@ -570,4 +571,100 @@ func testPool(t *testing.T, addrs ...string) *Pool {
 	}
 	t.Cleanup(func() { p.Close() })
 	return p
+}
+
+// TestRetrySafeMethod pins the one list every adapter gates on. PUT and DELETE
+// are here and POST and PATCH are not, which is the line between "repeating
+// this is defined to be harmless" and "repeating this may charge a card twice".
+func TestRetrySafeMethod(t *testing.T) {
+	for _, m := range []string{"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"} {
+		if !RetrySafeMethod(m) {
+			t.Errorf("%s should be retry-safe", m)
+		}
+	}
+	for _, m := range []string{"POST", "PATCH", "CONNECT", "", "get", "PROPFIND"} {
+		if RetrySafeMethod(m) {
+			t.Errorf("%q must not be retry-safe", m)
+		}
+	}
+}
+
+// TestRetryRequestForMergesLocationOverPool pins the override rule that every
+// adapter now shares: a set location value wins, and a zero one inherits rather
+// than meaning "unlimited". One field reading its zero the other way would be a
+// trap, so the rule is pinned here rather than in each adapter.
+func TestRetryRequestForMergesLocationOverPool(t *testing.T) {
+	p := testPool(t, "127.0.0.1:1")
+	policy, err := resilience.Resolve(resilience.Options{
+		RetryAttempts:       7,
+		RetryDeadline:       9 * time.Second,
+		RetryBackoffInitial: 30 * time.Millisecond,
+		RetryBackoffMax:     900 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	p.SetPolicy(policy)
+
+	for _, tc := range []struct {
+		name string
+		over RetryOverride
+		want RetryRequest
+	}{
+		{
+			name: "an empty override inherits every pool value",
+			want: RetryRequest{MaxAttempts: 7, Deadline: 9 * time.Second, BackoffInitial: 30 * time.Millisecond, BackoffMax: 900 * time.Millisecond},
+		},
+		{
+			name: "set values win field by field",
+			over: RetryOverride{Attempts: 2, Deadline: time.Second},
+			want: RetryRequest{MaxAttempts: 2, Deadline: time.Second, BackoffInitial: 30 * time.Millisecond, BackoffMax: 900 * time.Millisecond},
+		},
+		{
+			name: "a location backoff replaces the pool's pair, not half of it",
+			over: RetryOverride{BackoffInitial: 5 * time.Millisecond, BackoffMax: 50 * time.Millisecond},
+			want: RetryRequest{MaxAttempts: 7, Deadline: 9 * time.Second, BackoffInitial: 5 * time.Millisecond, BackoffMax: 50 * time.Millisecond},
+		},
+		{
+			name: "a location backoff with no ceiling takes the default, not the pool's",
+			over: RetryOverride{BackoffInitial: 5 * time.Millisecond},
+			want: RetryRequest{MaxAttempts: 7, Deadline: 9 * time.Second, BackoffInitial: 5 * time.Millisecond, BackoffMax: resilience.DefaultRetryBackoffMax},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := p.RetryRequestFor(tc.over, true)
+			tc.want.Replayable = true
+			if got != tc.want {
+				t.Fatalf("RetryRequestFor = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRetryRequestForReadsThePolicyPerCall pins that a resilience reload takes
+// effect without rebuilding anything: the adapters hold the override, never a
+// resolved request.
+func TestRetryRequestForReadsThePolicyPerCall(t *testing.T) {
+	p := testPool(t, "127.0.0.1:1")
+	if got := p.RetryRequestFor(RetryOverride{}, false).MaxAttempts; got != 0 {
+		t.Fatalf("MaxAttempts = %d, want the unconfigured default 0", got)
+	}
+	policy, err := resilience.Resolve(resilience.Options{RetryAttempts: 4})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	p.SetPolicy(policy)
+	if got := p.RetryRequestFor(RetryOverride{}, false).MaxAttempts; got != 4 {
+		t.Fatalf("MaxAttempts = %d after the swap, want 4", got)
+	}
+}
+
+// TestRetryRequestForNilPool keeps the helper usable by an adapter built before
+// its pool exists, which is how a literal proxy_pass target is handled.
+func TestRetryRequestForNilPool(t *testing.T) {
+	var p *Pool
+	got := p.RetryRequestFor(RetryOverride{Attempts: 3}, true)
+	if got.MaxAttempts != 3 || !got.Replayable {
+		t.Fatalf("RetryRequestFor on a nil pool = %+v, want the override verbatim", got)
+	}
 }
