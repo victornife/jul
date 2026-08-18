@@ -78,6 +78,9 @@ servers = [{ address = "10.0.0.11:8080" }, { address = "10.0.0.12:8080" }]
   max_active_per_backend = 600
   max_pending_requests   = 100
   pending_timeout        = "2s"
+
+  # Stateless: a location may override it.
+  max_connections_per_backend = 256
 ```
 
 | Key | Type | Default | Description |
@@ -86,6 +89,7 @@ servers = [{ address = "10.0.0.11:8080" }, { address = "10.0.0.12:8080" }]
 | `max_active_per_backend` | int | `0` (unlimited) | Admitted logical requests per backend, applied as a **selection filter** |
 | `max_pending_requests` | int | `0` (**no queue**) | How many requests may wait for a slot |
 | `pending_timeout` | duration | `0` (context-bounded) | How long a request may wait before it is rejected |
+| `max_connections_per_backend` | int | `0` (unlimited) | Physical sockets to one backend host, per transport |
 
 Every default reproduces Jul's behaviour before these keys existed, so adding an empty block changes
 nothing.
@@ -104,6 +108,53 @@ because the two call for opposite responses.
 Size the two limits together. If `max_active_per_backend` multiplied by the number of backends is
 less than `max_active_requests`, the pool limit can never be reached: requests are rejected while the
 pending queue sits empty. `jul lint` warns about exactly that, for static server lists.
+
+### Requests versus sockets
+
+`max_active_requests` counts **requests and streams**. `max_connections_per_backend` counts
+**sockets**. Under HTTP/2, HTTP/3 and gRPC one socket carries many streams, so the request limit
+normally binds first; under HTTP/1.1 and WebSocket the two move together.
+
+| Client protocol | Counts against the request limit | Backend sockets | Which limit binds |
+| --- | --- | --- | --- |
+| HTTP/1.1, no keep-alive | +1 per request | +1 per request | both, in lockstep |
+| HTTP/1.1 keep-alive | +1 per request | connections reused; idle ones count until they time out | either — sockets can bind while active requests are few |
+| HTTP/2 | +1 per **stream** | typically 1 | request limit |
+| HTTP/3 | +1 per **stream** | unaffected: the backend leg is still HTTP/1.1 or HTTP/2 | request limit |
+| WebSocket (101) | +1 until the upgraded connection closes | +1 dedicated, hijacked, never pooled | both |
+| Server-sent events | +1 for the response's lifetime | as HTTP/1.1 | request limit |
+| gRPC unary | +1 per call | shared HTTP/2 connection | request limit |
+| gRPC server, client or bidirectional streaming | +1 for the **whole stream lifetime** | shared | request limit |
+| gRPC transcoding, unary and streaming | +1 per call or stream | shared | request limit |
+
+A long-lived stream — a WebSocket, an SSE response, a gRPC stream open for hours — holds its slot for
+its entire life. That is the point: a gateway with a thousand idle WebSockets is a thousand requests
+busy, and a limit that released them at handshake time would report it as idle.
+
+One detail that looks like a leak and is not: an upgraded connection ends when **both** directions
+end. A backend that closes its half while the client's half is still open has not ended the tunnel,
+so the slot is still held. It is released when the connection actually closes, or on error.
+
+### `max_connections_per_backend`
+
+The bound maps to Go's `MaxConnsPerHost`, the only lever that limits sockets without defeating
+connection pooling and that honours the request context while a request waits for a dial. Idle
+connections count toward it until they time out, so under keep-alive it can bind while the pool's
+active request count is low.
+
+It is **stateless** — a transport is built per route — so it may be set on the pool or on a location,
+and the location wins. A location value of `0` inherits the pool's rather than meaning "unlimited":
+every other zero in this configuration means "not set", and one field reading its zero the other way
+would be a trap.
+
+Two exceptions are worth knowing:
+
+- **It does not apply to native gRPC or gRPC transcoding.** One HTTP/2 connection carries every
+  stream there, so a socket bound would not bound concurrency. `jul lint` warns when it is set on
+  such a route; use `max_active_requests` instead.
+- **Health checks are exempt.** Probes are built on their own client, so a pool whose sockets are all
+  busy serving traffic can still dial a probe and notice a backend recovering. Without the exemption
+  a pool at its limit could never observe its way out of it.
 
 ### What a rejected request looks like
 
@@ -143,9 +194,21 @@ than admitted onto a closed transport.
 
 ### Scope
 
-These four keys are **pool-scoped only**. They are stateful — the counters and the queue have exactly
-one owner — and a control is location-overridable only if it owns no shared state. A
-`[servers.locations.resilience]` block is rejected at parse time rather than silently ignored.
+The four admission keys are **pool-scoped only**. They are stateful — the counters and the queue have
+exactly one owner — and a control is location-overridable only if it owns no shared state. A
+`[servers.locations.resilience]` block accepts only the stateless controls, so a stateful key written
+there is rejected at parse time rather than silently ignored.
+
+`max_connections_per_backend` is the stateless one, and may appear in either place:
+
+```toml
+[[servers.locations]]
+match = { type = "prefix", path = "/bulk/" }
+proxy_pass = "http://api"
+
+  [servers.locations.resilience]
+  max_connections_per_backend = 32
+```
 
 A literal `proxy_pass = "http://10.0.0.5:8080"` target builds an unregistered pool of one that is
 rebuilt on every reload, so **its admission counters reset on reload**. Name the upstream if you need

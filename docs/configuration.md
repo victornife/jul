@@ -590,6 +590,8 @@ max_active_requests    = 1000
 max_active_per_backend = 600
 max_pending_requests   = 100
 pending_timeout        = "2s"
+
+max_connections_per_backend = 256
 ```
 
 | Key | Type | Default | Description |
@@ -598,13 +600,15 @@ pending_timeout        = "2s"
 | `max_active_per_backend` | int | `0` (unlimited) | Per-backend limit, applied as a selection filter rather than a queue |
 | `max_pending_requests` | int | `0` (**no queue**) | How many requests may wait for a slot; zero rejects immediately |
 | `pending_timeout` | duration | `0` | How long a request may wait; zero leaves the request context as the only bound |
+| `max_connections_per_backend` | int | `0` (unlimited) | Physical sockets per backend host, per transport; settable per location, which wins |
 
 `max_pending_requests = 0` means *no queue*, not an unlimited one — an unbounded pending queue is the
 failure this control prevents. `max_pending_requests` requires `max_active_requests`, and
 `pending_timeout` may not exceed `global.shutdown_timeout`.
 
-These four keys are stateful and therefore pool-scoped: a `[servers.locations.resilience]` block is
-rejected rather than ignored. A rejected request is `503` with `Retry-After`, never `429`.
+The first four keys are stateful and therefore pool-scoped: a `[servers.locations.resilience]` block
+accepts only `max_connections_per_backend`, and a stateful key written there is rejected. A rejected
+request is `503` with `Retry-After`, never `429`.
 
 ### `backend_tls`
 

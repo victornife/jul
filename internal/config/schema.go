@@ -326,6 +326,11 @@ type LocationConfig struct {
 	// overrides the pool's for this route.
 	BackendTLS *BackendTLSConfig `toml:"backend_tls"`
 
+	// Resilience carries the stateless resilience controls this route may
+	// override. The stateful admission controls are not part of this type: they
+	// belong under [[upstreams]], where the pool owns their state.
+	Resilience *LocationResilienceConfig `toml:"resilience"`
+
 	// GRPC turns the proxy_pass into a native gRPC / HTTP-2 passthrough: the
 	// request is forwarded end-to-end over HTTP/2 (preserving trailers such as
 	// grpc-status) with response buffering disabled so streaming frames flush
@@ -500,6 +505,33 @@ type ResilienceConfig struct {
 	// PendingTimeout bounds how long a request may wait for a slot. 0 leaves the
 	// request context as the only bound.
 	PendingTimeout Duration `toml:"pending_timeout"`
+	// MaxConnectionsPerBackend bounds physical sockets to one backend host on
+	// one transport. It is stateless — transports are built per location — so a
+	// location may override it. 0 is unlimited.
+	MaxConnectionsPerBackend int `toml:"max_connections_per_backend"`
+}
+
+// LocationResilienceConfig is the public [servers.locations.resilience] block.
+//
+// It is a different, smaller type from ResilienceConfig on purpose. A control is
+// location-overridable if and only if it owns no shared state, and the admission
+// counters and the pending queue have exactly one owner — the pool. Encoding
+// that in the type means a stateful key written under a location is rejected by
+// strict decoding, instead of needing a validation rule that could drift from
+// the scope rule it implements.
+type LocationResilienceConfig struct {
+	// MaxConnectionsPerBackend overrides the pool's socket bound for this
+	// route's transport. 0 inherits the pool's value.
+	MaxConnectionsPerBackend int `toml:"max_connections_per_backend"`
+}
+
+// Options converts the location block into the shape internal/resilience
+// consumes for the stateless controls it owns.
+func (r *LocationResilienceConfig) Options() resilience.Options {
+	if r == nil {
+		return resilience.Options{}
+	}
+	return resilience.Options{MaxConnectionsPerBackend: r.MaxConnectionsPerBackend}
 }
 
 // Options converts the public block into the shape internal/resilience
@@ -513,6 +545,8 @@ func (r *ResilienceConfig) Options() resilience.Options {
 		MaxActivePerBackend: r.MaxActivePerBackend,
 		MaxPendingRequests:  r.MaxPendingRequests,
 		PendingTimeout:      r.PendingTimeout.Std(),
+
+		MaxConnectionsPerBackend: r.MaxConnectionsPerBackend,
 	}
 }
 

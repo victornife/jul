@@ -248,12 +248,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 305,
-    "schema_leaves": 258,
-    "registry_entries": 258,
+    "schema_paths": 308,
+    "schema_leaves": 260,
+    "registry_entries": 260,
     "startup_consumed": 58,
     "by_class": {
-      "hot_reload": 186,
+      "hot_reload": 188,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
       "restart_required": 58,
@@ -2174,6 +2174,19 @@
       "secret_digested": false
     },
     {
+      "path": "servers.*.locations.*.resilience.max_connections_per_backend",
+      "class": "hot_reload",
+      "subsystem": "resilience",
+      "reason": "the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
       "path": "servers.*.locations.*.return",
       "class": "hot_reload",
       "subsystem": "return",
@@ -3439,6 +3452,19 @@
       "class": "hot_reload",
       "subsystem": "resilience",
       "reason": "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.resilience.max_connections_per_backend",
+      "class": "hot_reload",
+      "subsystem": "resilience",
+      "reason": "the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,

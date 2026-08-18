@@ -231,7 +231,7 @@ func TestProxyRetryRewindSurfacesUpstreamError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	tr := &balancingTransport{pool: pool, base: newProxyTransport(config.LocationConfig{}, nil)}
+	tr := &balancingTransport{pool: pool, base: newProxyTransport(config.LocationConfig{}, nil, 0)}
 
 	rewindErr := errors.New("rewind boom")
 	req := httptest.NewRequest(http.MethodGet, "http://edge/", strings.NewReader("body"))

@@ -134,6 +134,9 @@ func fullConfig() *config.Config {
 					PeerIdentities:     []string{"uri:spiffe://example/route"},
 					InsecureSkipVerify: false,
 				},
+				Resilience: &config.LocationResilienceConfig{
+					MaxConnectionsPerBackend: 64,
+				},
 
 				FastCGIPass:   "127.0.0.1:9000",
 				FastCGIParams: map[string]string{"SCRIPT_FILENAME": "/srv/index.php"},
@@ -207,6 +210,8 @@ func fullConfig() *config.Config {
 				MaxActivePerBackend: 250,
 				MaxPendingRequests:  100,
 				PendingTimeout:      config.Duration(2 * time.Second),
+
+				MaxConnectionsPerBackend: 128,
 			},
 			BackendTLS: &config.BackendTLSConfig{
 				CAFile:             "/etc/jul/backend-ca.pem",
