@@ -138,6 +138,43 @@ response frame is delivered as an in-band error frame (`{"error":…}` for NDJSO
 | Error body | RFC 7807 `application/problem+json` (`status`, `title`, `detail`) |
 | Response encoding | `protojson` with unpopulated fields emitted; field-name casing per `preserve_proto_field_names` |
 
+### Retry
+
+Transcoded **unary** calls are retried; **streaming is not**, and neither is native gRPC passthrough.
+
+The asymmetry is not an omission. A unary call's request is an in-memory message, so replaying it
+costs nothing and cannot fail, and its response is fully decoded before a byte is written — the whole
+call is inside the retry boundary. A streaming call has already written framing by the time it can
+fail, and replaying it would deliver a second stream into a client consuming the first. Native gRPC
+is proxied as opaque HTTP/2, where Jul cannot frame messages or even tell unary from streaming.
+
+A retry needs **both** halves to agree:
+
+| Half | Rule |
+| --- | --- |
+| Is the call safe to repeat? | `GET`/`HEAD`/`OPTIONS`/`TRACE`/`PUT`/`DELETE`, **or** the method declares `idempotency_level = NO_SIDE_EFFECTS` or `IDEMPOTENT` |
+| Did the backend fail to take it? | `UNAVAILABLE`, or a failure to establish the connection |
+
+The proto annotation is consulted because the HTTP binding alone is too coarse: a method mapped to
+`POST` purely because it takes a request body may still be declared `NO_SIDE_EFFECTS`, and ignoring
+that would waste an explicit statement by the API's author.
+
+```proto
+rpc GetItem(GetItemRequest) returns (Item) {
+  option idempotency_level = NO_SIDE_EFFECTS;
+  option (google.api.http) = { post: "/v1/items:get" body: "*" };
+}
+```
+
+**The default, `IDEMPOTENCY_UNKNOWN`, is never retried** — silence is not a promise, and the method
+most likely to be silent about it is the one that charges a card.
+
+Every other status code is terminal. An `InvalidArgument` is the application's answer, not a failure
+to reach it; asking a second backend the same question returns the same answer more expensively while
+doubling load on a service already saying no. The failed backend is excluded from re-selection, and
+the attempt cap, deadline, backoff and budget are the same
+[`[upstreams.resilience]` controls](upstreams.md#retry) the HTTP proxy uses, settable per location.
+
 ## Known limitations
 
 Documented gaps (ADR [0003](adr/0003-maturity-and-ga.md) GA criterion 3). None

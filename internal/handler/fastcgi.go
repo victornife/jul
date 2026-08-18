@@ -128,7 +128,7 @@ type fastcgiHandler struct {
 	dialer        *net.Dialer
 	session       gofast.SessionHandler
 	log           *slog.Logger
-	retryOverride locationRetry
+	retryOverride upstream.RetryOverride
 }
 
 func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +143,7 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		client gofast.Client
 		chosen *upstream.Backend
 	)
-	_, err := h.pool.Do(r.Context(), resolveRetry(h.pool, h.retryOverride, replayable),
+	_, err := h.pool.Do(r.Context(), h.pool.RetryRequestFor(h.retryOverride, replayable),
 		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
 			req := r
 			if n > 1 && r.GetBody != nil {
@@ -284,7 +284,7 @@ type uwsgiHandler struct {
 	dialer        *net.Dialer
 	loc           config.LocationConfig
 	log           *slog.Logger
-	retryOverride locationRetry
+	retryOverride upstream.RetryOverride
 }
 
 func newUWSGIHandler(ctx context.Context, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry, log *slog.Logger) (http.Handler, error) {
@@ -309,7 +309,7 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		conn   net.Conn
 		chosen *upstream.Backend
 	)
-	_, err := h.pool.Do(r.Context(), resolveRetry(h.pool, h.retryOverride, replayable),
+	_, err := h.pool.Do(r.Context(), h.pool.RetryRequestFor(h.retryOverride, replayable),
 		func(ctx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
 			body := r.Body
 			if n > 1 {

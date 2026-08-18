@@ -88,14 +88,15 @@ func FuzzAdmissionInterleavings(f *testing.F) {
 					backendSum += in
 				}
 			}
-			// k = 1: a request holds pool admission for its whole life but a
-			// backend slot only during an attempt, so the sum can trail but
-			// never lead.
-			if backendSum > active {
-				if violations.Add(1) == 1 {
-					firstViolation.Store(where + ": sum(A_b) exceeded A_p")
-				}
-			}
+			// sum(A_b) <= A_p is deliberately NOT asserted here. It relates two
+			// independent lock-free counters, and this reader samples them one
+			// after the other: a request that admits and picks between the two
+			// reads makes the sum exceed an already-stale active count, without
+			// any instant ever having violated the invariant. Asserting it
+			// concurrently tests the sampling, not the primitive. It is
+			// asserted at quiescence instead, where it is exact.
+			_ = backendSum
+			_ = active
 		}
 
 		rng := rand.New(rand.NewSource(int64(len(seed))))
@@ -200,6 +201,17 @@ func FuzzAdmissionInterleavings(f *testing.F) {
 				t.Fatalf("did not quiesce: active=%d pending=%d", adm.Active(), adm.Pending())
 			}
 			time.Sleep(time.Millisecond)
+		}
+
+		// Quiesced: nothing holds admission or a backend, so the two counter
+		// families can finally be compared without sampling skew. A slot leaked
+		// by any interleaving shows up here.
+		var backendSum int64
+		for _, b := range p.Backends() {
+			backendSum += b.Inflight()
+		}
+		if backendSum > adm.Active() {
+			t.Fatalf("at quiesce sum(A_b)=%d exceeds A_p=%d: a backend slot outlived the admission that authorised it", backendSum, adm.Active())
 		}
 
 		if n := violations.Load(); n != 0 {
