@@ -74,12 +74,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 308
-  schema_leaves: 260
-  registry_entries: 260
+  schema_paths: 317
+  schema_leaves: 269
+  registry_entries: 269
   startup_consumed: 58
   by_class:
-    hot_reload: 188
+    hot_reload: 197
     restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
@@ -747,6 +747,22 @@ fields:
     class: hot_reload
     subsystem: resilience
     reason: "the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary"
+  - path: "servers.*.locations.*.resilience.retry_attempts"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
+  - path: "servers.*.locations.*.resilience.retry_backoff_initial"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
+  - path: "servers.*.locations.*.resilience.retry_backoff_max"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
+  - path: "servers.*.locations.*.resilience.retry_deadline"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
   - path: "servers.*.locations.*.return"
     class: hot_reload
     subsystem: return
@@ -1217,6 +1233,26 @@ fields:
     class: hot_reload
     subsystem: resilience
     reason: "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
+  - path: "upstreams.*.resilience.retry_attempts"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
+  - path: "upstreams.*.resilience.retry_backoff_initial"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
+  - path: "upstreams.*.resilience.retry_backoff_max"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
+  - path: "upstreams.*.resilience.retry_budget_percent"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the percentage is swapped into the live budget while its accumulated window is deliberately preserved: resetting the window on reload would hand out a fresh burst of retries, and a reload during an incident is the least appropriate moment to forgive the retry load that helped cause it"
+  - path: "upstreams.*.resilience.retry_deadline"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
   - path: "upstreams.*.servers.*.address"
     class: hot_reload
     subsystem: upstream

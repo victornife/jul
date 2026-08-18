@@ -77,6 +77,11 @@ type Pool struct {
 	// resilience policy. It is created with the pool and never replaced, which is
 	// what preserves counters and parked waiters across a policy swap.
 	admission *Admission
+
+	// budget is the pool-scoped retry allowance. Like admission it is created
+	// once and never replaced: a policy swap changes the percentage and leaves
+	// the accumulated window alone, so a reload cannot grant a fresh retry burst.
+	budget *Budget
 }
 
 // NewPool builds a Pool from an upstream config. scheme is the proxy scheme
@@ -107,6 +112,7 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 		dynamic:     discoveryEnabled(cfg.Discovery),
 		done:        make(chan struct{}),
 		admission:   NewAdmission(policy),
+		budget:      NewBudget(policy.RetryBudgetPercent()),
 	}
 	bs := buildBackends(cfg.Servers, scheme)
 	p.backends.Store(&bs)
@@ -158,7 +164,10 @@ func (p *Pool) Policy() *resilience.Policy { return p.admission.Policy() }
 // SetPolicy swaps the pool's resolved resilience policy. This is the whole of a
 // resilience reload: no pool is rebuilt, so admission counters, parked waiters
 // and backend state all survive.
-func (p *Pool) SetPolicy(policy *resilience.Policy) { p.admission.SetPolicy(policy) }
+func (p *Pool) SetPolicy(policy *resilience.Policy) {
+	p.admission.SetPolicy(policy)
+	p.budget.SetPercent(policy.RetryBudgetPercent())
+}
 
 // Backends returns the current backend set (for inspection/representative URL).
 // The returned slice is shared and must not be modified by callers.

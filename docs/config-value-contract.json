@@ -492,6 +492,38 @@
       "active_when": "HTTP proxy routes; not applicable to native gRPC or transcoding"
     },
     {
+      "go_field": "LocationResilienceConfig.RetryAttempts",
+      "path": "servers[].locations[].resilience.retry_attempts",
+      "kind": "integer",
+      "constraint": "0 to 100; must not be set together with the deprecated proxy_retries",
+      "zero_semantics": "omitted/zero inherits the pool value",
+      "active_when": "always"
+    },
+    {
+      "go_field": "LocationResilienceConfig.RetryBackoffInitial",
+      "path": "servers[].locations[].resilience.retry_backoff_initial",
+      "kind": "duration",
+      "constraint": "0s to 60s; must not exceed retry_backoff_max or retry_deadline",
+      "zero_semantics": "omitted/zero inherits the pool value",
+      "active_when": "always"
+    },
+    {
+      "go_field": "LocationResilienceConfig.RetryBackoffMax",
+      "path": "servers[].locations[].resilience.retry_backoff_max",
+      "kind": "duration",
+      "constraint": "0s to 60s; requires retry_backoff_initial",
+      "zero_semantics": "omitted/zero inherits the pool value",
+      "active_when": "retry_backoff_initial > 0"
+    },
+    {
+      "go_field": "LocationResilienceConfig.RetryDeadline",
+      "path": "servers[].locations[].resilience.retry_deadline",
+      "kind": "duration",
+      "constraint": "0s to 5m",
+      "zero_semantics": "omitted/zero inherits the pool value",
+      "active_when": "always"
+    },
+    {
       "go_field": "MatchConfig.Type",
       "path": "servers[].locations[].match.type",
       "kind": "enum",
@@ -651,6 +683,46 @@
       "constraint": "0s to 60s; must not exceed global.shutdown_timeout",
       "zero_semantics": "omitted/zero leaves the request context as the only bound",
       "active_when": "max_pending_requests > 0"
+    },
+    {
+      "go_field": "ResilienceConfig.RetryAttempts",
+      "path": "upstreams[].resilience.retry_attempts",
+      "kind": "integer",
+      "constraint": "0 to 100",
+      "zero_semantics": "omitted/zero means try every distinct backend once",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ResilienceConfig.RetryBackoffInitial",
+      "path": "upstreams[].resilience.retry_backoff_initial",
+      "kind": "duration",
+      "constraint": "0s to 60s; must not exceed retry_backoff_max or retry_deadline",
+      "zero_semantics": "omitted/zero means immediate failover",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ResilienceConfig.RetryBackoffMax",
+      "path": "upstreams[].resilience.retry_backoff_max",
+      "kind": "duration",
+      "constraint": "0s to 60s; requires retry_backoff_initial",
+      "zero_semantics": "omitted/zero means 500ms when backoff is enabled",
+      "active_when": "retry_backoff_initial > 0"
+    },
+    {
+      "go_field": "ResilienceConfig.RetryBudgetPercent",
+      "path": "upstreams[].resilience.retry_budget_percent",
+      "kind": "integer",
+      "constraint": "0 to 1000",
+      "zero_semantics": "omitted/zero means unbudgeted",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ResilienceConfig.RetryDeadline",
+      "path": "upstreams[].resilience.retry_deadline",
+      "kind": "duration",
+      "constraint": "0s to 5m",
+      "zero_semantics": "omitted/zero means the request context is the only bound",
+      "active_when": "always"
     },
     {
       "go_field": "RewriteConfig.Flag",

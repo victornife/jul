@@ -33,14 +33,23 @@ func validateResilience(r *ResilienceConfig, where string, grace time.Duration) 
 }
 
 // validateLocationResilience checks a location's stateless resilience block.
-func validateLocationResilience(r *LocationResilienceConfig, where string) []error {
+//
+// proxyRetries is the location's deprecated proxy_retries value. Setting both
+// spellings is an error rather than a precedence rule: two names for one
+// control that quietly disagree is how a configuration comes to mean something
+// its author did not intend, and the migration is one line.
+func validateLocationResilience(r *LocationResilienceConfig, proxyRetries int, where string) []error {
 	if r == nil {
 		return nil
 	}
+	var errs []error
 	if _, err := resilience.Resolve(r.Options()); err != nil {
-		return []error{fmt.Errorf("%s: %w", where, err)}
+		errs = append(errs, fmt.Errorf("%s: %w", where, err))
 	}
-	return nil
+	if r.RetryAttempts > 0 && proxyRetries > 0 {
+		errs = append(errs, fmt.Errorf("%s: retry_attempts and the deprecated proxy_retries are the same control and must not both be set; keep retry_attempts", where))
+	}
+	return errs
 }
 
 // validateStreamResilience rejects max_active_requests on a UDP-only stream

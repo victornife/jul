@@ -317,6 +317,12 @@ type LocationConfig struct {
 	// against other backends on connection failure. 0 (default) means try every
 	// distinct backend at most once. A positive value limits attempts to the
 	// configured count.
+	//
+	// Deprecated: use [servers.locations.resilience] retry_attempts, which is
+	// the same control under the name the pool-level block already uses, so the
+	// override rule reads as one word overriding the same word. This spelling
+	// stays valid and is scheduled for removal in the next major; setting both
+	// is a validation error rather than a silent precedence rule.
 	ProxyRetries int `toml:"proxy_retries"`
 
 	// BackendTLS is the outbound TLS policy for this location's backend,
@@ -509,6 +515,21 @@ type ResilienceConfig struct {
 	// one transport. It is stateless — transports are built per location — so a
 	// location may override it. 0 is unlimited.
 	MaxConnectionsPerBackend int `toml:"max_connections_per_backend"`
+	// RetryAttempts caps total attempts for one retryable request. 0 means try
+	// every distinct backend once, which is what Jul does today.
+	RetryAttempts int `toml:"retry_attempts"`
+	// RetryDeadline bounds the whole retry sequence, attempts and backoff sleeps
+	// alike. 0 leaves the request context as the only bound.
+	RetryDeadline Duration `toml:"retry_deadline"`
+	// RetryBackoffInitial is the first backoff interval, doubling per attempt
+	// with full jitter. 0 means immediate failover, which is today's behaviour.
+	RetryBackoffInitial Duration `toml:"retry_backoff_initial"`
+	// RetryBackoffMax clamps the doubling. It requires retry_backoff_initial.
+	RetryBackoffMax Duration `toml:"retry_backoff_max"`
+	// RetryBudgetPercent bounds retries as a percentage of primary attempts over
+	// a trailing window. 0 is unbudgeted. It owns a window, so unlike the other
+	// retry controls it is pool-scoped and no location may override it.
+	RetryBudgetPercent int `toml:"retry_budget_percent"`
 }
 
 // LocationResilienceConfig is the public [servers.locations.resilience] block.
@@ -523,6 +544,18 @@ type LocationResilienceConfig struct {
 	// MaxConnectionsPerBackend overrides the pool's socket bound for this
 	// route's transport. 0 inherits the pool's value.
 	MaxConnectionsPerBackend int `toml:"max_connections_per_backend"`
+	// RetryAttempts overrides the pool's attempt cap for this route. 0 inherits.
+	// It is the canonical spelling of the older proxy_retries; setting both is a
+	// validation error.
+	RetryAttempts int `toml:"retry_attempts"`
+	// RetryDeadline overrides the pool's bound on the whole retry sequence.
+	// 0 inherits.
+	RetryDeadline Duration `toml:"retry_deadline"`
+	// RetryBackoffInitial overrides the pool's first backoff interval.
+	// 0 inherits.
+	RetryBackoffInitial Duration `toml:"retry_backoff_initial"`
+	// RetryBackoffMax overrides the pool's clamp on backoff growth. 0 inherits.
+	RetryBackoffMax Duration `toml:"retry_backoff_max"`
 }
 
 // Options converts the location block into the shape internal/resilience
@@ -531,7 +564,13 @@ func (r *LocationResilienceConfig) Options() resilience.Options {
 	if r == nil {
 		return resilience.Options{}
 	}
-	return resilience.Options{MaxConnectionsPerBackend: r.MaxConnectionsPerBackend}
+	return resilience.Options{
+		MaxConnectionsPerBackend: r.MaxConnectionsPerBackend,
+		RetryAttempts:            r.RetryAttempts,
+		RetryDeadline:            r.RetryDeadline.Std(),
+		RetryBackoffInitial:      r.RetryBackoffInitial.Std(),
+		RetryBackoffMax:          r.RetryBackoffMax.Std(),
+	}
 }
 
 // Options converts the public block into the shape internal/resilience
@@ -547,6 +586,12 @@ func (r *ResilienceConfig) Options() resilience.Options {
 		PendingTimeout:      r.PendingTimeout.Std(),
 
 		MaxConnectionsPerBackend: r.MaxConnectionsPerBackend,
+
+		RetryAttempts:       r.RetryAttempts,
+		RetryDeadline:       r.RetryDeadline.Std(),
+		RetryBackoffInitial: r.RetryBackoffInitial.Std(),
+		RetryBackoffMax:     r.RetryBackoffMax.Std(),
+		RetryBudgetPercent:  r.RetryBudgetPercent,
 	}
 }
 

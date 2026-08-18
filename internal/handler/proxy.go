@@ -23,6 +23,7 @@ import (
 	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/resilience"
 	"jul/internal/tracing"
 	"jul/internal/upstream"
 )
@@ -64,12 +65,12 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 
 	rp := &httputil.ReverseProxy{
 		Transport: &balancingTransport{
-			pool:        pool,
-			base:        transport,
-			log:         log,
-			maxRetries:  loc.ProxyRetries,
-			tlsBackend:  scheme == "https",
-			dialFailure: dialFailure,
+			pool:          pool,
+			base:          transport,
+			log:           log,
+			retryOverride: newLocationRetry(loc),
+			tlsBackend:    scheme == "https",
+			dialFailure:   dialFailure,
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
@@ -233,11 +234,20 @@ func resolvePool(ctx context.Context, loc config.LocationConfig, upstreams map[s
 
 // balancingTransport selects a backend per request, marks passive health, and
 // retries idempotent requests against other backends on connection failures.
+//
+// It is an adapter, not a retry engine: selection, the overall deadline,
+// backoff and the retry budget live in upstream.Pool.Do so that the CGI
+// adapters and the transcoder answer to the same rule. What stays here is
+// everything that is genuinely HTTP — body rewind, the scheme guard, spans and
+// passive-health logging.
 type balancingTransport struct {
-	pool       *upstream.Pool
-	base       *http.Transport
-	log        *slog.Logger
-	maxRetries int // 0 means try every distinct backend once
+	pool *upstream.Pool
+	base *http.Transport
+	log  *slog.Logger
+	// retryOverride holds the location's retry settings. A zero field inherits
+	// the pool policy, which is read per request so a reload takes effect
+	// without rebuilding the transport.
+	retryOverride locationRetry
 	// tlsBackend records that the configured target is https. A backend whose
 	// scheme is not https is then refused rather than dialled: no retry,
 	// failover or discovery result may move a request from TLS to plaintext.
@@ -245,6 +255,60 @@ type balancingTransport struct {
 	// dialFailure, when non-nil, counts a backend dial/connect failure by a
 	// bounded reason. It may be nil (for example in tests).
 	dialFailure func(reason string)
+}
+
+// locationRetry is the location-scoped half of the retry configuration, fixed
+// when the handler generation is built.
+type locationRetry struct {
+	attempts       int
+	deadline       time.Duration
+	backoffInitial time.Duration
+	backoffMax     time.Duration
+}
+
+// newLocationRetry reads the location's retry overrides, accepting the
+// deprecated proxy_retries spelling. Validation has already rejected setting
+// both, so preferring either here cannot mask a conflict.
+func newLocationRetry(loc config.LocationConfig) locationRetry {
+	lr := locationRetry{attempts: loc.ProxyRetries}
+	if loc.Resilience == nil {
+		return lr
+	}
+	if loc.Resilience.RetryAttempts > 0 {
+		lr.attempts = loc.Resilience.RetryAttempts
+	}
+	lr.deadline = loc.Resilience.RetryDeadline.Std()
+	lr.backoffInitial = loc.Resilience.RetryBackoffInitial.Std()
+	lr.backoffMax = loc.Resilience.RetryBackoffMax.Std()
+	return lr
+}
+
+// retryRequest resolves the effective retry settings for one request: the
+// location wins where it set a value, the pool policy supplies the rest. A zero
+// location value inherits rather than meaning "unlimited", matching every other
+// override in this block.
+func (t *balancingTransport) retryRequest(replayable bool) upstream.RetryRequest {
+	p := t.pool.Policy()
+	rr := upstream.RetryRequest{
+		MaxAttempts:    t.retryOverride.attempts,
+		Deadline:       t.retryOverride.deadline,
+		BackoffInitial: t.retryOverride.backoffInitial,
+		BackoffMax:     t.retryOverride.backoffMax,
+		Replayable:     replayable,
+	}
+	if rr.MaxAttempts == 0 {
+		rr.MaxAttempts = p.RetryAttempts()
+	}
+	if rr.Deadline == 0 {
+		rr.Deadline = p.RetryDeadline()
+	}
+	if rr.BackoffInitial == 0 {
+		rr.BackoffInitial = p.RetryBackoffInitial()
+		rr.BackoffMax = p.RetryBackoffMax()
+	} else if rr.BackoffMax == 0 {
+		rr.BackoffMax = resilience.DefaultRetryBackoffMax
+	}
+	return rr
 }
 
 func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -257,122 +321,111 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	defer span.End()
 	span.SetString("upstream.name", t.pool.Name())
 
-	canRetry := isIdempotent(req.Method) && (req.Body == nil || req.GetBody != nil)
+	replayable := isIdempotent(req.Method) && (req.Body == nil || req.GetBody != nil)
 
-	var lastErr error
-	tried := make(map[upstream.BackendIdentity]struct{})
-	retried := false
+	var resp *http.Response
 	attempts := 0
-	for {
+	_, err := t.pool.Do(req.Context(), t.retryRequest(replayable), func(actx context.Context, b *upstream.Backend, n int) upstream.AttemptResult {
 		attempts++
-		b, err := t.pool.PickExcluding(req.Context(), tried)
-		if err != nil {
-			if lastErr != nil {
-				err = lastErr
-			} else if t.dialFailure != nil {
-				// Every backend was already in cooldown before this call made
-				// any attempt of its own: count it (bounded reason "no_backend"),
-				// same as a real dial failure, so the counter is not undercounted
-				// relative to what an operator would see logged.
-				t.dialFailure(upstream.ClassifyDialError(err))
-			}
-			span.RecordError(err)
-			return nil, err
-		}
-		tried[b.Identity()] = struct{}{}
-
 		out := req
-		if retried && req.GetBody != nil {
+		if n > 1 && req.GetBody != nil {
 			body, berr := req.GetBody()
 			if berr != nil {
-				t.pool.Release(b)
-				// The body could not be rewound for this retry. The meaningful
-				// error is the upstream failure that triggered the retry, not the
-				// rewind error, so surface lastErr when present (it always is on a
-				// retry, since i > 0 means a prior attempt failed).
-				err := berr
-				if lastErr != nil {
-					err = lastErr
-				}
-				span.RecordError(err)
-				return nil, err
+				// A body that cannot be rewound is not a backend failure and
+				// retrying cannot fix it, so the sequence ends here — but the
+				// error the client deserves is the upstream failure that
+				// triggered the retry, which Do already carries as lastErr.
+				return upstream.AttemptResult{Err: berr, Terminal: true}
 			}
-			out = req.Clone(req.Context())
+			out = req.Clone(actx)
 			out.Body = body
+		} else if actx != req.Context() {
+			out = req.Clone(actx)
 		}
-		if t.tlsBackend && b.URL.Scheme != "https" {
+		if t.tlsBackend && (b.URL == nil || b.URL.Scheme != "https") {
 			// Fail closed rather than downgrade. Reaching here would mean a
 			// backend entered the pool with a different scheme than the route
-			// was configured with.
-			t.pool.Release(b)
-			err := fmt.Errorf("backend %s is not https but the route is: refusing to downgrade", b.URL.Host)
-			span.RecordError(err)
-			return nil, err
+			// was configured with. It is terminal: every retry would face the
+			// same misconfiguration, and none of them may downgrade either.
+			return upstream.AttemptResult{
+				Err:      fmt.Errorf("backend %s is not https but the route is: refusing to downgrade", b.Address),
+				Terminal: true,
+			}
 		}
 		out.URL.Scheme = b.URL.Scheme
 		out.URL.Host = b.URL.Host
 
 		// Child span per backend attempt. Inject W3C tracecontext from the
 		// attempt's context so the upstream continues this trace under it.
-		actx, aspan := tr.Start(ctx, "upstream.request")
+		sctx, aspan := tr.Start(ctx, "upstream.request")
 		aspan.SetString("upstream.backend", b.URL.Host)
-		tr.Inject(actx, out.Header)
+		tr.Inject(sctx, out.Header)
 
-		resp, err := t.base.RoundTrip(out)
+		r, err := t.base.RoundTrip(out)
 		if err == nil {
 			if t.pool.MarkSuccess(b) && t.log != nil {
 				t.log.Info("proxy backend recovered", "upstream", t.pool.Name(), "backend", b.URL.Host)
 			}
-			aspan.SetStatus(resp.StatusCode)
+			aspan.SetStatus(r.StatusCode)
 			aspan.End()
-			span.SetStatus(resp.StatusCode)
+			span.SetStatus(r.StatusCode)
 			// Hold the in-flight slot until the response body is closed so
 			// least-conn balancing reflects the full request lifetime. For a
 			// protocol upgrade (101) the body is also writable and ReverseProxy
 			// splices it bidirectionally, so the wrapper preserves
 			// io.ReadWriteCloser (WebSocket / raw stream passthrough).
-			resp.Body = wrapReleaseBody(resp.Body, func() { t.pool.Release(b) })
-			return resp, nil
+			r.Body = wrapReleaseBody(r.Body, func() { t.pool.Release(b) })
+			resp = r
+			return upstream.AttemptResult{Retain: true}
 		}
 		aspan.RecordError(err)
 		aspan.End()
-
-		tripped := t.pool.MarkFailure(b)
-		// Client cancellation and backend-TLS-identity failures are not backend
-		// dial failures: the former is client behavior, and the latter already has
-		// its own unthrottled, categorized line via tlsFailureCategory (ADR 0016
-		// territory). MarkFailure still runs for both, unchanged from before this
-		// counter existed: this is observability only, not a circuit-breaker change.
-		if !errors.Is(err, context.Canceled) && tlsFailureCategory(err) == "" {
-			reason := upstream.ClassifyDialError(err)
-			if t.dialFailure != nil {
-				t.dialFailure(reason)
-			}
-			switch {
-			case tripped:
-				if t.log != nil {
-					t.log.Warn("proxy backend marked down", "upstream", t.pool.Name(), "backend", b.URL.Host, "reason", reason, "error", err)
-				}
-			case t.pool.AllowDialFailureLog():
-				if t.log != nil {
-					t.log.Warn("proxy dial failed", "upstream", t.pool.Name(), "backend", b.URL.Host, "reason", reason, "error", err)
-				}
-			}
+		t.noteFailure(b, err)
+		// A deterministic backend-identity failure is the same failure against
+		// every backend, so retrying it is amplification with no chance of a
+		// different answer.
+		return upstream.AttemptResult{Err: err, Terminal: tlsFailureCategory(err) != ""}
+	})
+	if err != nil {
+		if attempts == 0 && t.dialFailure != nil {
+			// Every backend was already in cooldown before this call made any
+			// attempt of its own: count it (bounded reason "no_backend"), same as
+			// a real dial failure, so the counter is not undercounted relative to
+			// what an operator would see logged.
+			t.dialFailure(upstream.ClassifyDialError(err))
 		}
-		t.pool.Release(b)
-		lastErr = err
-		retried = true
-		if !canRetry {
-			break
-		}
-		// Bound retries: 0 means try every distinct backend once; a positive
-		// value caps attempts to the configured count.
-		if t.maxRetries > 0 && attempts >= t.maxRetries {
-			break
-		}
+		span.RecordError(err)
+		return nil, err
 	}
-	span.RecordError(lastErr)
-	return nil, lastErr
+	return resp, nil
+}
+
+// noteFailure records a failed attempt against passive health and the bounded
+// dial-failure counter, logging a transition unconditionally and an ordinary
+// failure only on the pool's throttle.
+func (t *balancingTransport) noteFailure(b *upstream.Backend, err error) {
+	tripped := t.pool.MarkFailure(b)
+	// Client cancellation and backend-TLS-identity failures are not backend
+	// dial failures: the former is client behavior, and the latter already has
+	// its own unthrottled, categorized line via tlsFailureCategory (ADR 0016
+	// territory). MarkFailure still runs for both, unchanged from before this
+	// counter existed: this is observability only, not a circuit-breaker change.
+	if errors.Is(err, context.Canceled) || tlsFailureCategory(err) != "" {
+		return
+	}
+	reason := upstream.ClassifyDialError(err)
+	if t.dialFailure != nil {
+		t.dialFailure(reason)
+	}
+	if t.log == nil {
+		return
+	}
+	switch {
+	case tripped:
+		t.log.Warn("proxy backend marked down", "upstream", t.pool.Name(), "backend", b.Address, "reason", reason, "error", err)
+	case t.pool.AllowDialFailureLog():
+		t.log.Warn("proxy dial failed", "upstream", t.pool.Name(), "backend", b.Address, "reason", reason, "error", err)
+	}
 }
 
 // releaseBody releases a backend's in-flight slot exactly once, when the
