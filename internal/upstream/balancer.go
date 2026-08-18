@@ -85,9 +85,10 @@ func (w *weightedRR) pick(a []*Backend) *Backend {
 	total := 0
 	var best *Backend
 	for _, b := range a {
-		cw := w.weights[b] + b.Weight
+		weight := b.Weight()
+		cw := w.weights[b] + weight
 		w.weights[b] = cw
-		total += b.Weight
+		total += weight
 		if best == nil || cw > w.weights[best] {
 			best = b
 		}
@@ -98,21 +99,17 @@ func (w *weightedRR) pick(a []*Backend) *Backend {
 	return best
 }
 
-// updateBackends removes weight state for backends that are no longer in the
-// pool. This prevents the weights map from growing without bound under endpoint
-// churn (R9-09).
+// updateBackends resets the smooth weighted round-robin accumulator.
+//
+// Clearing the whole map, rather than only dropping departed backends, is what
+// makes a weight change converge immediately: a surviving backend's current
+// weight was accumulated under its previous weight, so carrying it forward
+// would skew selection for as many picks as the old accumulator was worth. It
+// also keeps the map from growing without bound under endpoint churn (R9-09).
 func (w *weightedRR) updateBackends(backends []*Backend) {
-	live := make(map[*Backend]struct{}, len(backends))
-	for _, b := range backends {
-		live[b] = struct{}{}
-	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for b := range w.weights {
-		if _, ok := live[b]; !ok {
-			delete(w.weights, b)
-		}
-	}
+	clear(w.weights)
 }
 
 // identitySet builds a set of stable backend identities from a slice.

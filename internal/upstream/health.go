@@ -265,9 +265,15 @@ func (hc *healthChecker) probeHTTP(ctx context.Context, b *Backend) bool {
 	return true
 }
 
-// probeTCP succeeds if a TCP connection to the backend can be established.
+// probeTCP succeeds if a connection to the backend can be established. It dials
+// the backend's own network, so a unix-socket backend is probed by connecting to
+// its socket rather than to a TCP address it does not have.
 func (hc *healthChecker) probeTCP(ctx context.Context, b *Backend) bool {
-	conn, err := hc.dialer.DialContext(ctx, "tcp", b.Address)
+	network := b.Network
+	if network == "" {
+		network = NetworkTCP
+	}
+	conn, err := hc.dialer.DialContext(ctx, network, b.Address)
 	if err != nil {
 		return false
 	}
