@@ -1,0 +1,124 @@
+# Track 2 burn-in config — upstream resilience / admission isolated soak (#287)
+#
+# Exercises every admission path at once under sustained load so the properties
+# that only fail over hours are visible: bounded memory, a flat goroutine count,
+# and correct accounting for streams that outlive many reloads.
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/burn-in-backend.go            (HTTP backend :8081/:8082)
+#   Window 2: go run scripts/stream-echo-backend.go        (TCP echo :55432)
+#   Window 3: ./jul -config burn-in-resilience.toml
+#   Window 4: go run scripts/burn-in-load.go -duration 24h -workers 64
+#   Window 5: go run scripts/burn-in-load.go -duration 24h -workers 16 -stream-tcp
+#
+# What to watch, and what would falsify the design:
+#   * jul_upstream_active_requests must return to 0 whenever load pauses; a
+#     floor that creeps upward is a leaked slot.
+#   * jul_upstream_pending_requests must never exceed max_pending_requests.
+#   * go_goroutines must be flat across hours: a pending request parks the
+#     inbound goroutine and creates none of its own, so a queue that grows the
+#     count means that property broke.
+#   * process_resident_memory_bytes must plateau. A parked request is roughly
+#     7.5 KB of live heap, so the queue's contribution is bounded and visible.
+#   * A long-lived stream must hold exactly one slot for its whole life and
+#     release it once, across reloads.
+
+[global]
+log_level = "warn"
+log_format = "json"
+shutdown_timeout = "30s"
+
+[observability]
+
+  [observability.access_log]
+  sinks = ["file"]
+  file = "jul-data/access.log"
+  format = "json"
+  rotate_max_mb = 250
+  rotate_keep = 5
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "burnintoken"
+
+# ---------------------------------------------------------------------------
+# Bounded HTTP pool. The limit is deliberately below the offered load so the
+# queue is exercised continuously rather than only in bursts.
+# ---------------------------------------------------------------------------
+[[upstreams]]
+name = "bounded"
+strategy = "least_conn"
+servers = [
+  { address = "127.0.0.1:8081", weight = 1 },
+  { address = "127.0.0.1:8082", weight = 1 },
+]
+max_fails = 3
+fail_timeout = "10s"
+
+  [upstreams.resilience]
+  max_active_requests         = 32
+  max_active_per_backend      = 24
+  max_pending_requests        = 64
+  pending_timeout             = "2s"
+  max_connections_per_backend = 16
+
+# ---------------------------------------------------------------------------
+# Unlimited pool on the same backends: the compatibility path, which must show
+# no admission rejections at all and no memory growth of its own.
+# ---------------------------------------------------------------------------
+[[upstreams]]
+name = "unlimited"
+strategy = "round_robin"
+servers = [
+  { address = "127.0.0.1:8081", weight = 1 },
+  { address = "127.0.0.1:8082", weight = 1 },
+]
+max_fails = 3
+
+# ---------------------------------------------------------------------------
+# L4 pool. TCP admission is per pool; the UDP route below deliberately has no
+# max_active_requests, because its cap is max_udp_sessions per listener.
+# ---------------------------------------------------------------------------
+[[upstreams]]
+name = "l4_bounded"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:55432", weight = 1 }]
+max_fails = 1
+
+  [upstreams.resilience]
+  max_active_requests = 64
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["example.com"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/bounded/" }
+  proxy_pass = "http://bounded"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/unlimited/" }
+  proxy_pass = "http://unlimited"
+
+  # Long-lived streaming response: holds its slot for the whole response, which
+  # is the accounting a multi-hour soak is here to check.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/sse/" }
+  proxy_pass = "http://unlimited"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 204
+
+# ---------------------------------------------------------------------------
+# L4 TCP with admission.
+# ---------------------------------------------------------------------------
+[[stream]]
+listen = "127.0.0.1:15432"
+proxy_pass = "l4_bounded"
+connect_timeout = "5s"
+idle_timeout = "1h"
