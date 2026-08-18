@@ -177,3 +177,54 @@ func TestK8sDiscovererEgressBlocked(t *testing.T) {
 		t.Error("expected Resolve to fail when the API server is outside the egress allow-list")
 	}
 }
+
+// TestK8sDiscovererReadsTargetRefUID pins that the pod UID reaches the Target.
+// It is the only identity Kubernetes offers that survives a pod IP being
+// recycled, which it does within seconds, so without it a replacement pod
+// inherits the failure history of the one it replaced.
+func TestK8sDiscovererReadsTargetRefUID(t *testing.T) {
+	const payload = `{
+	  "items": [
+	    {
+	      "ports": [{"name":"http","port":8080}],
+	      "endpoints": [
+	        {"addresses":["10.1.0.1"],"conditions":{"ready":true},"targetRef":{"kind":"Pod","name":"web-0","uid":"uid-aaa"}},
+	        {"addresses":["10.1.0.2"],"conditions":{"ready":true}}
+	      ]
+	    }
+	  ]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{
+		Type: "kubernetes",
+		Kubernetes: &config.KubernetesDiscovery{
+			Namespace: "default", Service: "web", Port: "http",
+			APIServer: srv.URL, Token: "tok", InsecureSkipTLSVerify: true,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("newKubernetesDiscoverer: %v", err)
+	}
+
+	targets, err := d.Resolve(context.Background())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	got := map[string]string{}
+	for _, tg := range targets {
+		got[tg.Address] = tg.ID
+	}
+	if got["10.1.0.1:8080"] != "uid-aaa" {
+		t.Fatalf("targetRef UID = %q, want uid-aaa", got["10.1.0.1:8080"])
+	}
+	// An endpoint without a targetRef is still a usable backend; it simply has
+	// no identity beyond its address.
+	if got["10.1.0.2:8080"] != "" {
+		t.Fatalf("an endpoint with no targetRef reported ID %q, want empty", got["10.1.0.2:8080"])
+	}
+}
