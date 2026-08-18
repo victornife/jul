@@ -59,6 +59,7 @@ const (
 	SubRedact         Subsystem = "redact"
 	SubRedirect       Subsystem = "redirect"
 	SubReloadTimeout  Subsystem = "reload_timeout"
+	SubResilience     Subsystem = "resilience"
 	SubReturn         Subsystem = "return"
 	SubRewrites       Subsystem = "rewrites"
 	SubRoot           Subsystem = "root"
@@ -118,6 +119,7 @@ var subsystemDescriptions = map[Subsystem]string{
 	SubRedact:         "Secret redaction applied to logs.",
 	SubRedirect:       "Location redirect targets.",
 	SubReloadTimeout:  "The threshold that reports a slow reload.",
+	SubResilience:     "Admission and overload control for an upstream pool: concurrency limits, the pending queue and its timeout.",
 	SubReturn:         "Bare status returns for a location.",
 	SubRewrites:       "Regex rewrite rules applied before dispatch.",
 	SubRoot:           "Static-file document roots.",
@@ -164,6 +166,7 @@ const (
 	reasonClientAddressRebuild = "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
 	reasonBackendTLSPool       = "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
 	reasonBackendTLSRoute      = "the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload"
+	reasonResiliencePolicy     = "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
 )
 
 // Registry is the authoritative disposition of every public configuration path,
@@ -577,6 +580,12 @@ func upstreamEntries() []Entry {
 		"upstreams.*.servers.*.weight",
 		"upstreams.*.strategy",
 	)
+	out = append(out, hotGroup(SubResilience, reasonResiliencePolicy,
+		"upstreams.*.resilience.max_active_per_backend",
+		"upstreams.*.resilience.max_active_requests",
+		"upstreams.*.resilience.max_pending_requests",
+		"upstreams.*.resilience.pending_timeout",
+	)...)
 	out = append(out, hotGroup(SubHealthCheck, "active probes are restarted with the pool on each successful reload",
 		"upstreams.*.health_check.enabled",
 		"upstreams.*.health_check.expect_body",

@@ -53,6 +53,7 @@ subsystems:
   redact: "Secret redaction applied to logs."
   redirect: "Location redirect targets."
   reload_timeout: "The threshold that reports a slow reload."
+  resilience: "Admission and overload control for an upstream pool: concurrency limits, the pending queue and its timeout."
   return: "Bare status returns for a location."
   rewrites: "Regex rewrite rules applied before dispatch."
   root: "Static-file document roots."
@@ -73,12 +74,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 300
-  schema_leaves: 254
-  registry_entries: 254
+  schema_paths: 305
+  schema_leaves: 258
+  registry_entries: 258
   startup_consumed: 58
   by_class:
-    hot_reload: 182
+    hot_reload: 186
     restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
@@ -1192,6 +1193,22 @@ fields:
     class: hot_reload
     subsystem: upstream
     reason: "the upstream registry stages and swaps pools on each successful reload"
+  - path: "upstreams.*.resilience.max_active_per_backend"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
+  - path: "upstreams.*.resilience.max_active_requests"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
+  - path: "upstreams.*.resilience.max_pending_requests"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
+  - path: "upstreams.*.resilience.pending_timeout"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight"
   - path: "upstreams.*.servers.*.address"
     class: hot_reload
     subsystem: upstream

@@ -62,6 +62,7 @@ func Validate(c *Config) error {
 		}
 		errs = append(errs, validateUpstreamValues(up, where)...)
 		errs = append(errs, validateBackendTLS(up.BackendTLS, where+".backend_tls")...)
+		errs = append(errs, validateResilience(up.Resilience, where+".resilience", c.Global.ShutdownTimeout.Std())...)
 		errs = append(errs, validateHealthCheck(up.HealthCheck, where+".health_check")...)
 		errs = append(errs, validateDiscovery(up.Discovery, where+".discovery")...)
 	}

@@ -326,13 +326,6 @@ type LocationConfig struct {
 	// overrides the pool's for this route.
 	BackendTLS *BackendTLSConfig `toml:"backend_tls"`
 
-	// Resilience is the location's resilience block. A control is
-	// location-overridable if and only if it owns no shared state, so the
-	// stateful admission controls are rejected here and belong under
-	// [[upstreams]], where the pool is their unambiguous owner. The field exists
-	// so that mistake produces an explanation rather than an unknown-key error.
-	Resilience *ResilienceConfig `toml:"resilience"`
-
 	// GRPC turns the proxy_pass into a native gRPC / HTTP-2 passthrough: the
 	// request is forwarded end-to-end over HTTP/2 (preserving trailers such as
 	// grpc-status) with response buffering disabled so streaming frames flush
