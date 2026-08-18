@@ -605,6 +605,38 @@
       "active_when": "rate limit enabled"
     },
     {
+      "go_field": "ResilienceConfig.MaxActivePerBackend",
+      "path": "upstreams[].resilience.max_active_per_backend",
+      "kind": "integer",
+      "constraint": "0 to 10000000",
+      "zero_semantics": "omitted/zero means unlimited",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ResilienceConfig.MaxActiveRequests",
+      "path": "upstreams[].resilience.max_active_requests",
+      "kind": "integer",
+      "constraint": "0 to 10000000",
+      "zero_semantics": "omitted/zero means unlimited",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ResilienceConfig.MaxPendingRequests",
+      "path": "upstreams[].resilience.max_pending_requests",
+      "kind": "integer",
+      "constraint": "0 to 100000; requires max_active_requests > 0",
+      "zero_semantics": "omitted/zero means no queue, never unlimited",
+      "active_when": "always"
+    },
+    {
+      "go_field": "ResilienceConfig.PendingTimeout",
+      "path": "upstreams[].resilience.pending_timeout",
+      "kind": "duration",
+      "constraint": "0s to 60s; must not exceed global.shutdown_timeout",
+      "zero_semantics": "omitted/zero leaves the request context as the only bound",
+      "active_when": "max_pending_requests > 0"
+    },
+    {
       "go_field": "RewriteConfig.Flag",
       "path": "servers[].locations[].rewrites[].flag",
       "kind": "enum",

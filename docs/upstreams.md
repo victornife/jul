@@ -31,6 +31,7 @@ proxy_pass = "https://inventory"
 ## Contents
 
 - [Pool basics](#pool-basics)
+- [Admission and overload control](#admission-and-overload-control)
 - [`backend_tls`](#backend-tls)
 - [Trust roots](#trust-roots)
 - [Client certificates (mutual TLS)](#client-certificates-mutual-tls)
@@ -52,13 +53,103 @@ proxy_pass = "https://inventory"
 | `health_check` | table | Active probes — see [health.md](health.md) |
 | `discovery` | table | Dynamic backends — see [service-discovery.md](service-discovery.md) |
 | `backend_tls` | table | Outbound TLS policy — below |
+| `resilience` | table | Admission and overload control — below |
 
 > **Resilience.** `max_fails` and `fail_timeout` are Jul's circuit breaker: N consecutive failures
 > open the backend for the cooldown, after which the next request probes it and the next failure
 > re-trips it. [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) makes that model
 > explicit and decides the concurrency, pending, connection, retry-budget and half-open controls that
-> extend it. Those controls are an accepted decision under implementation (#141, #142, #143, #144);
-> the keys above are what the running binary reads today.
+> extend it. The admission controls below are implemented; the retry-budget and half-open controls
+> remain an accepted decision under implementation (#142, #143, #144).
+
+## Admission and overload control
+
+`[upstreams.resilience]` bounds how much work the pool will accept. It answers a different question
+from health checking: health decides *which* backend a request may go to, admission decides *whether*
+the request is taken on at all.
+
+```toml
+[[upstreams]]
+name = "api"
+servers = [{ address = "10.0.0.11:8080" }, { address = "10.0.0.12:8080" }]
+
+  [upstreams.resilience]
+  max_active_requests    = 1000
+  max_active_per_backend = 600
+  max_pending_requests   = 100
+  pending_timeout        = "2s"
+```
+
+| Key | Type | Default | Description |
+| --- | ---- | ------- | ----------- |
+| `max_active_requests` | int | `0` (unlimited) | Admitted logical requests, streams and connections for the whole pool |
+| `max_active_per_backend` | int | `0` (unlimited) | Admitted logical requests per backend, applied as a **selection filter** |
+| `max_pending_requests` | int | `0` (**no queue**) | How many requests may wait for a slot |
+| `pending_timeout` | duration | `0` (context-bounded) | How long a request may wait before it is rejected |
+
+Every default reproduces Jul's behaviour before these keys existed, so adding an empty block changes
+nothing.
+
+**`max_pending_requests = 0` means no queue, not an unlimited one.** An unbounded pending queue is
+the out-of-memory failure this control exists to prevent, so it is deliberately not expressible. If
+you want requests to wait, say how many.
+
+**`max_active_per_backend` filters, it does not queue.** A backend already at its limit is simply not
+a candidate for selection, so traffic moves to a backend with room. Queueing *inside* backend
+selection would let one slow backend block requests that another backend could serve, and a request
+holding a pool slot while waiting for a backend slot is a deadlock. When every eligible backend is at
+capacity the request is rejected with `503`, and the reason is distinct from "no healthy backend"
+because the two call for opposite responses.
+
+Size the two limits together. If `max_active_per_backend` multiplied by the number of backends is
+less than `max_active_requests`, the pool limit can never be reached: requests are rejected while the
+pending queue sits empty. `jul lint` warns about exactly that, for static server lists.
+
+### What a rejected request looks like
+
+Overload is **`503 Service Unavailable` with a `Retry-After` header**, never `429`. A `429` says the
+*client* sent too many requests; a saturated pool is not the client's fault, and `Retry-After` is
+defined for `503`.
+
+### Where admission sits
+
+Admission is the innermost step, immediately around the upstream call. The consequences are
+deliberate:
+
+- a **cache hit never consumes a slot**, because it never reaches an upstream;
+- a request blocked by the WAF or by authentication never consumes one either;
+- background cache revalidation *does* consume one, because it really does call the upstream;
+- under sustained overload Jul still pays full WAF and authentication cost for requests it then
+  rejects. Counting exactly the work that reaches a backend is worth more than saving CPU on the
+  rejection path.
+
+This is also why `jul_http_requests_in_flight` and the pool's active count legitimately differ.
+
+### Reload
+
+All four keys are hot. The resolved policy is swapped into the live pool as an atomic pointer, and
+the pool is **not** rebuilt — rebuilding would discard the very counters the limits govern. So:
+
+- requests already in flight are never evicted by a lower limit; admission is an *entry* control, and
+  the excess drains as those requests finish;
+- while the pool is over the new limit, new arrivals are rejected or queued, and recovery is
+  monotonic — the overshoot only ever shrinks;
+- raising a limit takes effect immediately and wakes requests that are already queued.
+
+`pending_timeout` may not exceed `global.shutdown_timeout`, which bounds handler-generation
+retirement: a request allowed to wait longer than the retirement grace would outlive the transport it
+is queued for. If a generation is forcibly retired, its queued requests are woken and rejected rather
+than admitted onto a closed transport.
+
+### Scope
+
+These four keys are **pool-scoped only**. They are stateful — the counters and the queue have exactly
+one owner — and a control is location-overridable only if it owns no shared state. A
+`[servers.locations.resilience]` block is rejected at parse time rather than silently ignored.
+
+A literal `proxy_pass = "http://10.0.0.5:8080"` target builds an unregistered pool of one that is
+rebuilt on every reload, so **its admission counters reset on reload**. Name the upstream if you need
+that state to survive.
 
 ## backend_tls
 

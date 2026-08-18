@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 300 |
-| Schema leaves (configurable values) | 254 |
-| Registry entries | 254 |
+| Schema paths (containers included) | 305 |
+| Schema leaves (configurable values) | 258 |
+| Registry entries | 258 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 182 |
+| Class `hot_reload` | 186 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -88,6 +88,7 @@ set, so preview and apply reach the same verdict.
 | `redact` | Secret redaction applied to logs. |
 | `redirect` | Location redirect targets. |
 | `reload_timeout` | The threshold that reports a slow reload. |
+| `resilience` | Admission and overload control for an upstream pool: concurrency limits, the pending queue and its timeout. |
 | `return` | Bare status returns for a location. |
 | `rewrites` | Regex rewrite rules applied before dispatch. |
 | `root` | Static-file document roots. |
@@ -357,6 +358,10 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.health_check.unhealthy_threshold` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.max_fails` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.name` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.resilience.max_active_per_backend` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
+| `upstreams.*.resilience.max_active_requests` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
+| `upstreams.*.resilience.max_pending_requests` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
+| `upstreams.*.resilience.pending_timeout` | `hot_reload` | `resilience` | — | the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight |
 | `upstreams.*.servers.*.address` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.servers.*.weight` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.strategy` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |

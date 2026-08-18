@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"jul/internal/backendtls"
+	"jul/internal/resilience"
 )
 
 // Config is the root configuration document.
@@ -470,6 +471,49 @@ type UpstreamConfig struct {
 	// minimum version and explicit peer identities. It is the same block, with
 	// the same meaning, as under [[servers.locations]].
 	BackendTLS *BackendTLSConfig `toml:"backend_tls"`
+
+	// Resilience is the pool's admission and overload policy. It is pool-scoped
+	// because the state it governs has exactly one owner; setting any of its
+	// fields in a location that targets a named upstream is a validation error
+	// rather than a silent ignore.
+	Resilience *ResilienceConfig `toml:"resilience"`
+}
+
+// ResilienceConfig is the public [upstreams.resilience] block: admission and
+// overload control for one pool (ADR 0017).
+//
+// Every zero value means "behave exactly as Jul does today", so an upstream
+// without this block is unchanged. The one field whose zero is not "unlimited"
+// is MaxPendingRequests: an unbounded pending queue is the memory failure this
+// block exists to prevent, so it is deliberately unrepresentable.
+type ResilienceConfig struct {
+	// MaxActiveRequests bounds admitted logical requests, streams and
+	// connections for the pool. 0 is unlimited.
+	MaxActiveRequests int `toml:"max_active_requests"`
+	// MaxActivePerBackend bounds admitted logical requests per backend. It is
+	// applied as a selection filter, never as a second queue, so it can neither
+	// deadlock nor block one backend's traffic behind another's. 0 is unlimited.
+	MaxActivePerBackend int `toml:"max_active_per_backend"`
+	// MaxPendingRequests bounds the queue of requests waiting for a slot. 0
+	// means no queue: reject immediately.
+	MaxPendingRequests int `toml:"max_pending_requests"`
+	// PendingTimeout bounds how long a request may wait for a slot. 0 leaves the
+	// request context as the only bound.
+	PendingTimeout Duration `toml:"pending_timeout"`
+}
+
+// Options converts the public block into the shape internal/resilience
+// consumes, so that package never imports config.
+func (r *ResilienceConfig) Options() resilience.Options {
+	if r == nil {
+		return resilience.Options{}
+	}
+	return resilience.Options{
+		MaxActiveRequests:   r.MaxActiveRequests,
+		MaxActivePerBackend: r.MaxActivePerBackend,
+		MaxPendingRequests:  r.MaxPendingRequests,
+		PendingTimeout:      r.PendingTimeout.Std(),
+	}
 }
 
 // BackendTLSConfig is the outbound (backend) TLS policy. It is deliberately a

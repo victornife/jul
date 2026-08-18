@@ -202,6 +202,12 @@ func fullConfig() *config.Config {
 			},
 			MaxFails:    3,
 			FailTimeout: config.Duration(10 * time.Second),
+			Resilience: &config.ResilienceConfig{
+				MaxActiveRequests:   1000,
+				MaxActivePerBackend: 250,
+				MaxPendingRequests:  100,
+				PendingTimeout:      config.Duration(2 * time.Second),
+			},
 			BackendTLS: &config.BackendTLSConfig{
 				CAFile:             "/etc/jul/backend-ca.pem",
 				CAMode:             "system_and_file",

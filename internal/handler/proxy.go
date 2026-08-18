@@ -111,7 +111,12 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 			http.Error(w, fmt.Sprintf("%d %s", code, http.StatusText(code)), code)
 		},
 	}
-	return &proxyHandler{ReverseProxy: rp, transport: transport}, nil
+	return &proxyHandler{
+		ReverseProxy: rp,
+		transport:    transport,
+		admission:    pool.Admission(),
+		retire:       make(chan struct{}),
+	}, nil
 }
 
 // proxyHandler is the reverse proxy plus ownership of its transport. The
@@ -121,9 +126,80 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 type proxyHandler struct {
 	*httputil.ReverseProxy
 	transport *http.Transport
+
+	// admission bounds the pool's in-flight work. It is the pool's own admission
+	// owner, so it is shared with every other route pointing at the same upstream
+	// and survives reload; only the retire channel below is generation-scoped.
+	admission *upstream.Admission
+
+	// retire is closed when this generation is torn down. A request parked in the
+	// pending queue holds a generation reference, but retirement is bounded by a
+	// forced grace after which the transport is closed anyway — so without an
+	// explicit wakeup a parked request could be admitted onto a closed transport.
+	// The channel is per generation rather than per pool: a reused pool's waiters
+	// belong to whichever generation parked them.
+	retire     chan struct{}
+	retireOnce sync.Once
 }
 
-func (h *proxyHandler) Close() error { return transportCloser{t: h.transport}.Close() }
+// ServeHTTP admits the request before any upstream work happens, then delegates
+// to the reverse proxy.
+//
+// This method exists because the type otherwise promotes ServeHTTP from the
+// embedded *httputil.ReverseProxy. Admission belongs here rather than in
+// RoundTrip because RoundTrip contains the retry loop, and admitting there would
+// count one admission per attempt instead of per request.
+//
+// Being innermost has consequences, all of them intended: a cache hit never
+// consumes a slot, a WAF-blocked or unauthenticated request never consumes one,
+// background cache revalidation does, and under sustained overload Jul pays full
+// WAF and authentication cost for requests it then rejects. Accounting
+// correctness outranks CPU savings on the rejection path.
+func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	release, err := h.admission.Admit(r.Context(), h.retire)
+	if err != nil {
+		writeAdmissionError(w, err)
+		return
+	}
+	// ReverseProxy.ServeHTTP returns only once the response body has been copied,
+	// and for a 101 upgrade only once the spliced connection closes, so the slot
+	// spans the request's real lifetime including WebSocket and SSE streams.
+	defer release()
+	h.ReverseProxy.ServeHTTP(w, r)
+}
+
+// writeAdmissionError maps an admission rejection to a client-facing status.
+// Overload is 503 with Retry-After, never 429: 429 says the client sent too many
+// requests, but overload is not the client's fault.
+func writeAdmissionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, context.Canceled):
+		// The client went away while queued. Nothing can be delivered; the status
+		// is recorded for the access log rather than written to a live peer.
+		w.WriteHeader(statusClientClosedRequest)
+	case errors.Is(err, context.DeadlineExceeded):
+		http.Error(w, "504 Gateway Timeout", http.StatusGatewayTimeout)
+	case errors.Is(err, upstream.ErrOverloaded):
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "503 Service Unavailable", http.StatusServiceUnavailable)
+	default: // upstream.ErrRetired
+		http.Error(w, "503 Service Unavailable", http.StatusServiceUnavailable)
+	}
+}
+
+// statusClientClosedRequest is nginx's 499: the client closed the connection
+// before a response could be produced. It is not an IANA status and is only ever
+// recorded, never negotiated.
+const statusClientClosedRequest = 499
+
+// Close retires this generation's proxy handler: it wakes any request parked in
+// the pending queue on behalf of this generation, then closes the transport's
+// idle connections. The order matters — a waiter granted a slot after the
+// transport closed would dial nothing.
+func (h *proxyHandler) Close() error {
+	h.retireOnce.Do(func() { close(h.retire) })
+	return transportCloser{t: h.transport}.Close()
+}
 
 // resolvePool turns proxy_pass into a backend pool plus the base path to join.
 // A reference to a named upstream is resolved through the registry (reg), which
@@ -508,7 +584,7 @@ func sslClientPairs(in *http.Request) []string {
 
 // proxyErrorStatus maps a transport error to a gateway status code.
 func proxyErrorStatus(err error) int {
-	if errors.Is(err, upstream.ErrNoAvailableBackend) {
+	if errors.Is(err, upstream.ErrNoAvailableBackend) || errors.Is(err, upstream.ErrBackendAtCapacity) {
 		return http.StatusServiceUnavailable
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {

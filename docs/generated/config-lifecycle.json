@@ -171,6 +171,10 @@
       "description": "The threshold that reports a slow reload."
     },
     {
+      "name": "resilience",
+      "description": "Admission and overload control for an upstream pool: concurrency limits, the pending queue and its timeout."
+    },
+    {
       "name": "return",
       "description": "Bare status returns for a location."
     },
@@ -244,12 +248,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 300,
-    "schema_leaves": 254,
-    "registry_entries": 254,
+    "schema_paths": 305,
+    "schema_leaves": 258,
+    "registry_entries": 258,
     "startup_consumed": 58,
     "by_class": {
-      "hot_reload": 182,
+      "hot_reload": 186,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
       "restart_required": 58,
@@ -3409,6 +3413,58 @@
       "class": "hot_reload",
       "subsystem": "upstream",
       "reason": "the upstream registry stages and swaps pools on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.resilience.max_active_per_backend",
+      "class": "hot_reload",
+      "subsystem": "resilience",
+      "reason": "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.resilience.max_active_requests",
+      "class": "hot_reload",
+      "subsystem": "resilience",
+      "reason": "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.resilience.max_pending_requests",
+      "class": "hot_reload",
+      "subsystem": "resilience",
+      "reason": "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.resilience.pending_timeout",
+      "class": "hot_reload",
+      "subsystem": "resilience",
+      "reason": "the resolved resilience policy is swapped into the live pool as an atomic pointer at commit, deliberately without rebuilding it: admission counters, parked requests and per-backend state all survive, a raised limit wakes waiters immediately, and a lowered one lets the excess drain instead of failing requests that are already in flight",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,

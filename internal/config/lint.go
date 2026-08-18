@@ -177,6 +177,7 @@ func Lint(c *Config) []Diagnostic {
 	}
 
 	diags = append(diags, lintBackendTLS(c)...)
+	diags = append(diags, lintResilience(c)...)
 	diags = append(diags, lintDiscoveryTrust(c)...)
 	diags = append(diags, listenerScopedDiagnostics(c)...)
 

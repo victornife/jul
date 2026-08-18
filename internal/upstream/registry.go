@@ -15,6 +15,7 @@ import (
 
 	"jul/internal/backendtls"
 	"jul/internal/config"
+	"jul/internal/resilience"
 )
 
 // Registry owns the lifecycle of named-upstream pools across configuration
@@ -79,6 +80,10 @@ type poolEntry struct {
 	reused    bool                    // staged: reuses a live pool (vs freshly built)
 	pending   []config.UpstreamServer // staged: servers to apply at Commit when reused
 	discovery bool                    // pool's backend set is owned by a discovery refresher
+
+	// policy is the staged resolved resilience policy, applied to a reused pool
+	// at Commit. A freshly built pool resolves its own in NewPool.
+	policy *resilience.Policy
 
 	// activation state is set on freshly built staged pools and consumed by
 	// Activate after Commit promotes the pool to live (R9-07).
@@ -192,6 +197,15 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	}
 
 	meta := metaOf(up, scheme)
+	// Resolved before the reuse check so a malformed policy fails the staged
+	// build — and with it the reload — whether or not the pool is being reused.
+	// It is deliberately not part of upstreamMeta: a policy change swaps a
+	// pointer and must never rebuild the pool, because rebuilding would discard
+	// exactly the admission counters and backend state the policy governs.
+	resPolicy, perr := resilience.Resolve(up.Resilience.Options())
+	if perr != nil {
+		return nil, fmt.Errorf("upstream %q: %w", up.Name, perr)
+	}
 	pending := up.Servers
 	if e, ok := r.live[key]; ok && e.meta.equal(meta) {
 		// Same shape: keep the running pool (and its checker/refresher). The backend
@@ -205,7 +219,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		if disco {
 			pending = backendsToServers(e.pool.Backends())
 		}
-		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco}
+		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco, policy: resPolicy}
 		return e.pool, nil
 	}
 
@@ -312,6 +326,13 @@ func (r *Registry) Commit() {
 		// them with the (possibly empty) static seed on reuse.
 		if e.reused && !e.discovery {
 			e.pool.UpdateBackends(e.pending)
+		}
+		// A freshly built pool already resolved its policy in NewPool. A reused one
+		// takes it here, so the swap lands with the rest of the reload and an
+		// aborted build leaves the live limits untouched. Raising a limit wakes
+		// parked waiters; lowering one lets the excess drain.
+		if e.reused && e.policy != nil {
+			e.pool.SetPolicy(e.policy)
 		}
 	}
 	for key, e := range r.live {

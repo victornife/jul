@@ -13,10 +13,17 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/logthrottle"
+	"jul/internal/resilience"
 )
 
 // ErrNoAvailableBackend is returned by Pick when every backend is in cooldown.
 var ErrNoAvailableBackend = errors.New("no available upstream backend")
+
+// ErrBackendAtCapacity is returned by Pick when every otherwise-eligible backend
+// is already at max_active_per_backend. It is deliberately distinct from
+// ErrNoAvailableBackend: both are 503 to a client, but one asks the operator to
+// raise a limit and the other to look at backend health.
+var ErrBackendAtCapacity = errors.New("all upstream backends are at capacity")
 
 // dialFailureLogInterval bounds how often AllowDialFailureLog admits a
 // heartbeat for one pool, independent of request/connection volume.
@@ -65,6 +72,11 @@ type Pool struct {
 	// checks in Y1-05, discovery refreshers in Y2-05).
 	done      chan struct{}
 	closeOnce sync.Once
+
+	// admission bounds the pool's in-flight logical work and owns the resolved
+	// resilience policy. It is created with the pool and never replaced, which is
+	// what preserves counters and parked waiters across a policy swap.
+	admission *Admission
 }
 
 // NewPool builds a Pool from an upstream config. scheme is the proxy scheme
@@ -81,6 +93,10 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 	if failTimeout <= 0 {
 		failTimeout = 10 * time.Second
 	}
+	policy, err := resilience.Resolve(cfg.Resilience.Options())
+	if err != nil {
+		return nil, fmt.Errorf("upstream %q: %w", cfg.Name, err)
+	}
 	p := &Pool{
 		name:        cfg.Name,
 		scheme:      scheme,
@@ -90,6 +106,7 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 		failTimeout: failTimeout,
 		dynamic:     discoveryEnabled(cfg.Discovery),
 		done:        make(chan struct{}),
+		admission:   NewAdmission(policy),
 	}
 	bs := buildBackends(cfg.Servers, scheme)
 	p.backends.Store(&bs)
@@ -124,6 +141,18 @@ func newBackend(s config.UpstreamServer, scheme string) *Backend {
 // Name returns the pool name.
 func (p *Pool) Name() string { return p.name }
 
+// Admission returns the pool's admission owner. Callers admit before doing any
+// upstream work and release exactly once when that work ends.
+func (p *Pool) Admission() *Admission { return p.admission }
+
+// Policy returns the pool's resolved resilience policy. It never returns nil.
+func (p *Pool) Policy() *resilience.Policy { return p.admission.Policy() }
+
+// SetPolicy swaps the pool's resolved resilience policy. This is the whole of a
+// resilience reload: no pool is rebuilt, so admission counters, parked waiters
+// and backend state all survive.
+func (p *Pool) SetPolicy(policy *resilience.Policy) { p.admission.SetPolicy(policy) }
+
 // Backends returns the current backend set (for inspection/representative URL).
 // The returned slice is shared and must not be modified by callers.
 func (p *Pool) Backends() []*Backend { return *p.backends.Load() }
@@ -131,23 +160,7 @@ func (p *Pool) Backends() []*Backend { return *p.backends.Load() }
 // Pick selects an available backend and increments its in-flight counter. The
 // caller must call Release exactly once when the request completes.
 func (p *Pool) Pick() (*Backend, error) {
-	now := time.Now().UnixNano()
-	backends := *p.backends.Load()
-	avail := make([]*Backend, 0, len(backends))
-	for _, b := range backends {
-		if b.available(now) {
-			avail = append(avail, b)
-		}
-	}
-	if len(avail) == 0 {
-		return nil, ErrNoAvailableBackend
-	}
-	b := p.balancer.pick(avail)
-	if b == nil {
-		return nil, ErrNoAvailableBackend
-	}
-	b.acquire()
-	return b, nil
+	return p.pickExcluding(nil)
 }
 
 // Release decrements a backend's in-flight counter.
@@ -239,9 +252,14 @@ func (p *Pool) UpdateBackends(servers []config.UpstreamServer) {
 }
 
 // Close stops the pool's background goroutines. It is idempotent and safe to
-// call from reload paths that replace a pool with a freshly built one.
+// call from reload paths that replace a pool with a freshly built one. Parked
+// waiters are woken and rejected rather than left holding a pool that no longer
+// has a health checker or a discovery refresher behind it.
 func (p *Pool) Close() {
-	p.closeOnce.Do(func() { close(p.done) })
+	p.closeOnce.Do(func() {
+		close(p.done)
+		p.admission.Retire()
+	})
 }
 
 // Done returns a channel closed when the pool is closed. Pool-owned goroutines
