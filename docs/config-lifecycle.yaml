@@ -74,12 +74,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 320
-  schema_leaves: 272
-  registry_entries: 272
+  schema_paths: 322
+  schema_leaves: 274
+  registry_entries: 274
   startup_consumed: 58
   by_class:
-    hot_reload: 200
+    hot_reload: 202
     restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
@@ -1225,6 +1225,10 @@ fields:
     class: hot_reload
     subsystem: resilience
     reason: "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once"
+  - path: "upstreams.*.resilience.fail_timeout"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once"
   - path: "upstreams.*.resilience.max_active_per_backend"
     class: hot_reload
     subsystem: resilience
@@ -1237,6 +1241,10 @@ fields:
     class: hot_reload
     subsystem: resilience
     reason: "the bound is a property of the outbound transport, which is already rebuilt with the handler generation that owns it, so a changed value takes effect on the next successful reload; connections established under the previous bound follow that generation's drain boundary"
+  - path: "upstreams.*.resilience.max_fails"
+    class: hot_reload
+    subsystem: resilience
+    reason: "the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once"
   - path: "upstreams.*.resilience.max_pending_requests"
     class: hot_reload
     subsystem: resilience

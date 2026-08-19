@@ -594,6 +594,8 @@ func upstreamEntries() []Entry {
 	out = append(out, hotGroup(SubResilience, reasonResilienceCircuit,
 		"upstreams.*.fail_timeout",
 		"upstreams.*.max_fails",
+		"upstreams.*.resilience.fail_timeout",
+		"upstreams.*.resilience.max_fails",
 	)...)
 	out = append(out, hotGroup(SubResilience, reasonResiliencePolicy,
 		"upstreams.*.resilience.max_active_per_backend",

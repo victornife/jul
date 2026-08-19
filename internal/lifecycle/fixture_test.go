@@ -202,9 +202,9 @@ func fullConfig() *config.Config {
 			Servers: []config.UpstreamServer{
 				{Address: "127.0.0.1:3000", Weight: 1},
 			},
-			MaxFails:    3,
-			FailTimeout: config.Duration(10 * time.Second),
 			Resilience: &config.ResilienceConfig{
+				MaxFails:            3,
+				FailTimeout:         config.Duration(10 * time.Second),
 				MaxActiveRequests:   1000,
 				MaxActivePerBackend: 250,
 				MaxPendingRequests:  100,

@@ -523,3 +523,100 @@ servers = [{ address = "127.0.0.1:3000" }]
 		t.Fatalf("error = %v, want it to name the rejected key", err)
 	}
 }
+
+// TestCircuitThresholdsResolveFromEitherSpelling pins the migration of
+// max_fails and fail_timeout into [upstreams.resilience]. The block is meant to
+// be the whole resilience surface, but the old top-level keys stay valid, so
+// resolution has to be defined rather than incidental.
+func TestCircuitThresholdsResolveFromEitherSpelling(t *testing.T) {
+	cases := []struct {
+		name            string
+		up              UpstreamConfig
+		wantFails       int
+		wantFailTimeout time.Duration
+	}{
+		{
+			name:            "neither spelling",
+			up:              UpstreamConfig{},
+			wantFails:       DefaultMaxFails,
+			wantFailTimeout: DefaultFailTimeout,
+		},
+		{
+			name:            "deprecated top level",
+			up:              UpstreamConfig{MaxFails: 4, FailTimeout: Duration(3 * time.Second)},
+			wantFails:       4,
+			wantFailTimeout: 3 * time.Second,
+		},
+		{
+			name: "resilience block",
+			up: UpstreamConfig{Resilience: &ResilienceConfig{
+				MaxFails: 7, FailTimeout: Duration(30 * time.Second),
+			}},
+			wantFails:       7,
+			wantFailTimeout: 30 * time.Second,
+		},
+		{
+			name: "block set, top level absent",
+			up: UpstreamConfig{
+				MaxFails:   0,
+				Resilience: &ResilienceConfig{MaxFails: 9},
+			},
+			wantFails:       9,
+			wantFailTimeout: DefaultFailTimeout,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.up.CircuitMaxFails(); got != tc.wantFails {
+				t.Errorf("CircuitMaxFails() = %d, want %d", got, tc.wantFails)
+			}
+			if got := tc.up.CircuitFailTimeout(); got != tc.wantFailTimeout {
+				t.Errorf("CircuitFailTimeout() = %v, want %v", got, tc.wantFailTimeout)
+			}
+		})
+	}
+}
+
+// TestValidateRejectsBothCircuitThresholdSpellings pins that the migration is
+// not a precedence rule. An operator who sets both has written a configuration
+// that means one of two things, and picking silently is how it comes to mean
+// the one they did not intend.
+func TestValidateRejectsBothCircuitThresholdSpellings(t *testing.T) {
+	base := func(r *ResilienceConfig, maxFails int, ft Duration) *Config {
+		cfg := validKnownValueConfig()
+		cfg.Upstreams = []UpstreamConfig{{
+			Name:        "api",
+			Strategy:    "round_robin",
+			Servers:     []UpstreamServer{{Address: "127.0.0.1:3000", Weight: 1}},
+			MaxFails:    maxFails,
+			FailTimeout: ft,
+			Resilience:  r,
+		}}
+		return cfg
+	}
+
+	// Controls: either spelling alone has to be accepted, or the rejections
+	// below prove nothing about which key caused them.
+	if err := Validate(base(&ResilienceConfig{MaxFails: 3}, 0, 0)); err != nil {
+		t.Fatalf("the block spelling alone was rejected: %v", err)
+	}
+	if err := Validate(base(nil, 3, Duration(time.Second))); err != nil {
+		t.Fatalf("the deprecated spelling alone was rejected: %v", err)
+	}
+
+	err := Validate(base(&ResilienceConfig{MaxFails: 3}, 5, 0))
+	if err == nil {
+		t.Fatal("max_fails set under both spellings was accepted")
+	}
+	if !strings.Contains(err.Error(), "max_fails") {
+		t.Fatalf("error = %v, want it to name max_fails", err)
+	}
+
+	err = Validate(base(&ResilienceConfig{FailTimeout: Duration(time.Second)}, 0, Duration(2*time.Second)))
+	if err == nil {
+		t.Fatal("fail_timeout set under both spellings was accepted")
+	}
+	if !strings.Contains(err.Error(), "fail_timeout") {
+		t.Fatalf("error = %v, want it to name fail_timeout", err)
+	}
+}

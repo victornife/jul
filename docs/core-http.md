@@ -260,9 +260,11 @@ Configured per upstream via `strategy`:
 | `weighted_round_robin` | smooth weighted round-robin (NGINX algorithm), proportional to `weight` |
 | `least_conn` | fewest in-flight requests |
 
-Passive health checking is built in: after `max_fails` (default 1) consecutive
-failures a backend is parked for `fail_timeout` (default 10s). There is **no**
-`ip_hash` / `random` strategy and no circuit breaker beyond passive health.
+Each backend has a circuit breaker: after `max_fails` (default 1) consecutive
+failures it is taken out of rotation for `fail_timeout` (default 10s), then
+tested by at most `circuit_half_open_probes` requests (default 1) before it is
+returned to full traffic. There is **no** `ip_hash` / `random` strategy and no
+outlier ejection.
 
 ## Core middleware
 
@@ -491,7 +493,8 @@ go test -run '^$' -bench . -benchmem ./internal/router/ ./internal/upstream/ ./i
 - **No SCGI** (FastCGI and uWSGI only).
 - **No `ip_hash` / `random`** load-balancing strategies.
 - **No `try_files` at the FastCGI level** (`try_files` is static-only).
-- **No circuit breaker** beyond passive `max_fails` / `fail_timeout` health.
+- **No outlier ejection** — the circuit breaker is consecutive-failure based, so a
+  backend failing intermittently while its peers succeed is not ejected.
 - **No per-backend rate limiting** (rate limiting is per-listener).
 - `read_timeout` / `write_timeout` are **unset by default** (no slow-client
   protection until configured).

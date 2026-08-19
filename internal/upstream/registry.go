@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"jul/internal/backendtls"
 	"jul/internal/config"
@@ -539,17 +538,9 @@ func backendsToServers(backends []*Backend) []config.UpstreamServer {
 // circuitParamsOf resolves an upstream's breaker thresholds, applying the same
 // defaults NewPool does.
 func circuitParamsOf(up config.UpstreamConfig) circuitParams {
-	maxFails := up.MaxFails
-	if maxFails < 1 {
-		maxFails = 1
-	}
-	failTimeout := up.FailTimeout.Std()
-	if failTimeout <= 0 {
-		failTimeout = 10 * time.Second
-	}
 	return circuitParams{
-		maxFails:       maxFails,
-		failTimeout:    failTimeout,
+		maxFails:       up.CircuitMaxFails(),
+		failTimeout:    up.CircuitFailTimeout(),
 		halfOpenProbes: up.Resilience.HalfOpenProbes(),
 	}
 }

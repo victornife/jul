@@ -596,12 +596,14 @@ and raw candidate/source access remains independently gated by `config:raw`.
 [[upstreams]]
 name = "backend"
 strategy = "least_conn"
-max_fails = 3
-fail_timeout = "10s"
 servers = [
   { address = "127.0.0.1:3000", weight = 2 },
   { address = "127.0.0.1:3001", weight = 1 },
 ]
+
+  [upstreams.resilience]
+  max_fails    = 3
+  fail_timeout = "10s"
 ```
 
 | Key | Type | Description |
@@ -609,10 +611,17 @@ servers = [
 | `name` | string | Pool name |
 | `strategy` | string | `round_robin`, `weighted_round_robin`, or `least_conn` |
 | `servers` | array | Bare addresses (`"127.0.0.1:3000"`) or tables with `address` + `weight` |
-| `max_fails` | int | Failures before a backend is marked unhealthy |
-| `fail_timeout` | duration | How long a backend stays out of rotation |
+| `max_fails` | int | **Deprecated** — moved to [`resilience`](#resilience). Still valid; setting both is an error |
+| `fail_timeout` | duration | **Deprecated** — moved to [`resilience`](#resilience). Still valid; setting both is an error |
 | `backend_tls` | table | Outbound TLS policy for this pool — see [`backend_tls`](#backend-tls) |
-| `resilience` | table | Admission and overload control — see [`resilience`](#resilience) |
+| `resilience` | table | Admission, retry and circuit-breaker control — see [`resilience`](#resilience) |
+
+`max_fails` and `fail_timeout` moved into `[upstreams.resilience]` so that block is the whole
+resilience surface rather than most of it. Same names, same defaults, same meanings — only the
+position changed, and the migration is moving one line. The old spelling stays valid and is scheduled
+for removal in the next major. Setting a threshold in both places is a validation error rather than a
+precedence rule: a configuration that means one of two values depending on a rule nobody remembers is
+worse than one that refuses to start.
 
 ### `resilience`
 
@@ -635,6 +644,8 @@ retry_backoff_initial = "20ms"
 retry_backoff_max     = "500ms"
 retry_budget_percent  = 10
 
+max_fails                = 1
+fail_timeout             = "10s"
 circuit_half_open_probes = 1
 ```
 
@@ -651,6 +662,8 @@ circuit_half_open_probes = 1
 | `retry_backoff_max` | duration | `500ms` when backoff is on | Clamps the doubling; requires `retry_backoff_initial`. Settable per location |
 | `retry_budget_percent` | int | `0` (unbudgeted) | Retries permitted as a percentage of primary attempts over a trailing window. **Pool-scoped only** |
 | `circuit_half_open_probes` | int | `1` | How many requests may test a recovering backend at once. Omit for the default; an explicit `0` means unbounded. **Pool-scoped only** |
+| `max_fails` | int | `1` | Consecutive failures that take a backend out of rotation. **Pool-scoped only** |
+| `fail_timeout` | duration | `10s` | How long a backend stays out of rotation before it is probed. **Pool-scoped only** |
 
 `max_pending_requests = 0` means *no queue*, not an unlimited one — an unbounded pending queue is the
 failure this control prevents. `max_pending_requests` requires `max_active_requests`, and

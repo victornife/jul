@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"jul/internal/config"
 )
 
 // fakeClock makes every transition deterministic. Nothing in this file sleeps:
@@ -559,6 +561,58 @@ func BenchmarkCircuitAdmitParallel(b *testing.B) {
 		for pb.Next() {
 			a := c.admit()
 			c.success(a)
+		}
+	})
+}
+
+// BenchmarkMarkSuccess measures the healthy result path, which every successful
+// request runs. Before the breaker it performed two unconditional stores; it is
+// now two atomic loads and no store when the generation still matches and there
+// is nothing on record.
+func BenchmarkMarkSuccess(b *testing.B) {
+	p, err := NewPool(config.UpstreamConfig{
+		Name:     "bench",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "127.0.0.1:9", Weight: 1}},
+	}, "http")
+	if err != nil {
+		b.Fatalf("pool: %v", err)
+	}
+	b.Cleanup(p.Close)
+
+	at, ok := p.Backends()[0].admit()
+	if !ok {
+		b.Fatal("admission refused")
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p.MarkSuccess(at)
+	}
+}
+
+func BenchmarkMarkSuccessParallel(b *testing.B) {
+	p, err := NewPool(config.UpstreamConfig{
+		Name:     "bench",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "127.0.0.1:9", Weight: 1}},
+	}, "http")
+	if err != nil {
+		b.Fatalf("pool: %v", err)
+	}
+	b.Cleanup(p.Close)
+
+	backend := p.Backends()[0]
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		at, ok := backend.admit()
+		if !ok {
+			b.Error("admission refused")
+			return
+		}
+		for pb.Next() {
+			p.MarkSuccess(at)
 		}
 	})
 }
