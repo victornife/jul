@@ -606,10 +606,25 @@ jobs:
       - name: install Playwright browsers
         # apt mirrors used by --with-deps occasionally hang; bound each try so a
         # stalled fetch fails fast instead of burning the whole job timeout.
+        #
+        # The retries also have to wait. The common failure is not a hang but a
+        # held apt lock (the runner image's own unattended-upgrades), and the
+        # previous loop fired attempts 2 and 3 within seconds of the first, so
+        # they hit the same lock and the whole step failed in under ten seconds
+        # having never run a test.
         run: |
           for attempt in 1 2 3; do
             timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install chromium --with-deps && exit 0
             echo "::warning::playwright install attempt $attempt failed or timed out, retrying..."
+            if [ "$attempt" = 3 ]; then break; fi
+            # Wait for whoever holds the apt lock to finish, up to five minutes.
+            # The unconditional sleep is the floor: fuser is absent on some
+            # images, and without it the wait would silently become a no-op.
+            sleep 15
+            for _ in $(seq 1 60); do
+              sudo fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || break
+              sleep 5
+            done
           done
           exit 1
       - name: run browser smoke
@@ -655,10 +670,25 @@ jobs:
       - name: install Playwright browsers
         # apt mirrors used by --with-deps occasionally hang; bound each try so a
         # stalled fetch fails fast instead of burning the whole job timeout.
+        #
+        # The retries also have to wait. The common failure is not a hang but a
+        # held apt lock (the runner image's own unattended-upgrades), and the
+        # previous loop fired attempts 2 and 3 within seconds of the first, so
+        # they hit the same lock and the whole step failed in under ten seconds
+        # having never run a test.
         run: |
           for attempt in 1 2 3; do
             timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install chromium --with-deps && exit 0
             echo "::warning::playwright install attempt $attempt failed or timed out, retrying..."
+            if [ "$attempt" = 3 ]; then break; fi
+            # Wait for whoever holds the apt lock to finish, up to five minutes.
+            # The unconditional sleep is the floor: fuser is absent on some
+            # images, and without it the wait would silently become a no-op.
+            sleep 15
+            for _ in $(seq 1 60); do
+              sudo fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || break
+              sleep 5
+            done
           done
           exit 1
       # Run only the real-server project — the mocked smoke runs in console-e2e
