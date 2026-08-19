@@ -53,7 +53,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 	if err != nil {
 		return nil, err
 	}
-	transport := newProxyTransport(loc, policy, maxConnsPerBackend(loc, pool))
+	transport := newProxyTransport(loc, policy, maxConnsPerBackend(loc, pool), pool)
 
 	// The target supplies the scheme and base path for path joining; the
 	// balancing transport overrides the scheme and host per selected backend on
@@ -465,7 +465,7 @@ func replayableBody(r *http.Request) bool {
 // pooling and that honours the request context while a request queues for a
 // dial. Idle connections count toward it until IdleConnTimeout, so under
 // HTTP/1.1 keep-alive it can bind while the pool's active count is low.
-func newProxyTransport(loc config.LocationConfig, policy *backendtls.Policy, maxConns int) *http.Transport {
+func newProxyTransport(loc config.LocationConfig, policy *backendtls.Policy, maxConns int, pool *upstream.Pool) *http.Transport {
 	connectTimeout := loc.ProxyConnectTimeout.Std()
 	if connectTimeout <= 0 {
 		connectTimeout = 10 * time.Second
@@ -482,6 +482,19 @@ func newProxyTransport(loc config.LocationConfig, policy *backendtls.Policy, max
 	// semantics) rather than the total transfer — a steadily streaming response
 	// (SSE, chunked downloads) is never interrupted while data keeps flowing.
 	dial := dialer.DialContext
+	if pool != nil {
+		// net/http enforces MaxConnsPerHost internally and exposes no live count,
+		// so the only honest source for jul_upstream_connections is Jul's own
+		// dialer.
+		base := dial
+		dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := base(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			return &countedConn{Conn: c, release: pool.TrackConn()}, nil
+		}
+	}
 	if readTimeout > 0 || sendTimeout > 0 {
 		base := dial
 		dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -725,4 +738,17 @@ func addrText(addr netip.Addr) string {
 		return ""
 	}
 	return addr.String()
+}
+
+// countedConn decrements a pool's live connection count when the transport
+// closes it.
+type countedConn struct {
+	net.Conn
+	release func()
+}
+
+func (c *countedConn) Close() error {
+	err := c.Conn.Close()
+	c.release()
+	return err
 }

@@ -377,6 +377,34 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_transport_retired_total",
+      "type": "counter",
+      "help": "Handler-generation transports retired, labeled by mode (graceful/forced).",
+      "labels": [
+        "mode"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_upstream_active_requests",
+      "type": "gauge",
+      "help": "Admitted logical requests, streams and connections currently in flight for a pool, labeled by pool.",
+      "labels": [
+        "pool"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_upstream_admission_rejected_total",
+      "type": "counter",
+      "help": "Requests refused before reaching a backend, labeled by pool and bounded reason.",
+      "labels": [
+        "pool",
+        "reason"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_upstream_backends",
       "type": "gauge",
       "help": "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",
@@ -384,6 +412,15 @@
         "pool"
       ],
       "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_upstream_backends_eligible",
+      "type": "gauge",
+      "help": "Backends currently able to take a request, labeled by pool.",
+      "labels": [
+        "pool"
+      ],
+      "state": "merged_release_pending"
     },
     {
       "name": "jul_upstream_backends_healthy",
@@ -395,23 +432,82 @@
       "state": "merged_release_pending"
     },
     {
-      "name": "jul_upstream_probe_duration_seconds",
-      "type": "histogram",
-      "help": "Active health-check probe latency in seconds, labeled by pool.",
+      "name": "jul_upstream_circuit_state",
+      "type": "gauge",
+      "help": "Backends per circuit state, labeled by pool and state (available/circuit_open/circuit_half_open/health_unhealthy/at_capacity).",
+      "labels": [
+        "pool",
+        "state"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_upstream_circuit_transitions_total",
+      "type": "counter",
+      "help": "Backend circuit transitions, labeled by pool and destination state.",
+      "labels": [
+        "pool",
+        "to"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_upstream_connections",
+      "type": "gauge",
+      "help": "Physical connections currently open to a pool's backends, labeled by pool.",
       "labels": [
         "pool"
       ],
-      "state": "released_v1.32.0"
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_upstream_pending_requests",
+      "type": "gauge",
+      "help": "Requests currently waiting for an admission slot, labeled by pool.",
+      "labels": [
+        "pool"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_upstream_probe_duration_seconds",
+      "type": "histogram",
+      "help": "Active health-check probe latency in seconds, labeled by pool and the proxy surface that owns the checker (http/stream).",
+      "labels": [
+        "pool",
+        "source"
+      ],
+      "state": "merged_release_pending"
     },
     {
       "name": "jul_upstream_probes_total",
       "type": "counter",
-      "help": "Active health-check probes, labeled by pool and result (success/failure).",
+      "help": "Active health-check probes, labeled by pool, result (success/failure) and the proxy surface that owns the checker (http/stream).",
       "labels": [
         "pool",
-        "result"
+        "result",
+        "source"
       ],
-      "state": "released_v1.32.0"
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_upstream_retry_attempts_total",
+      "type": "counter",
+      "help": "Retry attempts, labeled by pool and the bounded outcome that ended the sequence.",
+      "labels": [
+        "outcome",
+        "pool"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_upstream_retry_budget_denied_total",
+      "type": "counter",
+      "help": "Retries suppressed because the pool's retry budget was spent, labeled by pool.",
+      "labels": [
+        "pool"
+      ],
+      "state": "merged_release_pending"
     },
     {
       "name": "jul_waf_events_total",

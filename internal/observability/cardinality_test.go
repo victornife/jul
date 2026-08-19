@@ -179,9 +179,23 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveEgressDecision("jwks", "allow", "", 1)
 	m.ObserveBackendHealth("pool-a", "10.0.0.1:80", true)
 	m.ObserveBackendsHealthy("pool-a", 2)
+	m.ObserveAdmissionRejected("pool-a", "proxy_overloaded")
+	m.ObserveRetryAttempt("pool-a", "attempts_exhausted")
+	m.ObserveRetryBudgetDenied("pool-a")
+	m.ObserveCircuitTransition("pool-a", "circuit_open")
+	m.ObserveTransportRetired("graceful")
+	m.SetUpstreamStatsSource(func() []UpstreamPoolStats {
+		return []UpstreamPoolStats{{
+			Name: "pool-a", Active: 3, Pending: 1, Connections: 2, Eligible: 2,
+			ByState: map[string]int{
+				"available": 2, "circuit_open": 1, "circuit_half_open": 0,
+				"health_unhealthy": 0, "at_capacity": 0,
+			},
+		}}
+	})
 	m.ObserveUpstreamBackends("pool-a", 3)
 	m.ObserveDiscoveryError("pool-a")
-	m.ObserveProbe("pool-a", true, time.Millisecond)
+	m.ObserveProbe("pool-a", "http", true, time.Millisecond)
 	m.ObserveGRPCTranscode("pkg.Svc/Method", "200")
 	m.ObserveGRPCTranscodeStreamMsg("pkg.Svc/Method", "sent")
 	m.ObserveGRPCProxyStream()

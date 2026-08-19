@@ -49,8 +49,8 @@ func TestPoolSeriesAreRetired(t *testing.T) {
 		m.ObserveUpstreamBackends(pool, 3)
 		m.ObserveBackendsHealthy(pool, 2)
 		m.ObserveDiscoveryError(pool)
-		m.ObserveProbe(pool, true, time.Millisecond)
-		m.ObserveProbe(pool, false, time.Millisecond)
+		m.ObserveProbe(pool, "http", true, time.Millisecond)
+		m.ObserveProbe(pool, "stream", false, time.Millisecond)
 	}
 
 	// One steady pool that must survive every churn cycle.
@@ -77,9 +77,9 @@ func TestPoolSeriesAreRetired(t *testing.T) {
 func TestRetirePoolLeavesOtherPoolsAlone(t *testing.T) {
 	m := NewMetrics()
 	m.ObserveUpstreamBackends("keep", 1)
-	m.ObserveProbe("keep", true, time.Millisecond)
+	m.ObserveProbe("keep", "http", true, time.Millisecond)
 	m.ObserveUpstreamBackends("drop", 1)
-	m.ObserveProbe("drop", true, time.Millisecond)
+	m.ObserveProbe("drop", "http", true, time.Millisecond)
 
 	before := gatheredSeries(t, m)
 	m.RetirePool("drop")

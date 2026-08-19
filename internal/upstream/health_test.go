@@ -248,7 +248,7 @@ func TestStartHealthChecksStopsOnClose(t *testing.T) {
 		Enabled: true, Type: "http", Path: "/",
 		Interval: config.Duration(5 * time.Millisecond), Timeout: config.Duration(2 * time.Millisecond),
 		HealthyThreshold: 1, UnhealthyThreshold: 1, ExpectStatus: []int{200},
-	}, nil, func(string, bool, time.Duration) { probes.Add(1) })
+	}, nil, func(string, string, bool, time.Duration) { probes.Add(1) })
 
 	// Wait until at least one probe has run.
 	deadline := time.Now().Add(2 * time.Second)

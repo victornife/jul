@@ -24,7 +24,10 @@ type HealthHook func(pool, backend string, healthy bool)
 
 // ProbeHook is called after every probe with its outcome and latency, used to
 // drive probe counters and a latency histogram. It may be nil.
-type ProbeHook func(pool string, success bool, latency time.Duration)
+// ProbeHook reports one active health-check probe. source names the proxy
+// surface that owns the registry ("http" or "stream"), because an upstream used
+// by both is probed by each and the two must be separable.
+type ProbeHook func(pool, source string, success bool, latency time.Duration)
 
 // healthParams is the resolved, validated probe configuration for a pool.
 type healthParams struct {
@@ -190,7 +193,7 @@ func (hc *healthChecker) probeOne(b *Backend) {
 	start := time.Now()
 	ok := hc.probe(b)
 	if hc.onProbe != nil {
-		hc.onProbe(hc.pool.name, ok, time.Since(start))
+		hc.onProbe(hc.pool.name, "", ok, time.Since(start))
 	}
 
 	if ok {

@@ -37,6 +37,15 @@ type Pool struct {
 	strategy string
 	balancer Balancer
 
+	// circuitHook is applied to every backend built after it is set, so a
+	// discovery refresh does not silently stop reporting transitions.
+	circuitHook atomic.Pointer[func(BackendState)]
+
+	// conns counts physical connections open to this pool's backends. net/http
+	// enforces MaxConnsPerHost internally and exposes no live count, so Jul's own
+	// dialer is the only honest source.
+	conns atomic.Int64
+
 	// circuit is the pool's breaker configuration. It is an atomic pointer
 	// because a reload retunes it in place while the discovery refresher may be
 	// building backends from it on another goroutine.
@@ -274,6 +283,32 @@ func (p *Pool) ReleaseProbe(at Attempt) {
 	}
 }
 
+// SetCircuitHook wires the circuit-transition hook onto every current backend
+// and onto those built later. It is set once by the registry.
+func (p *Pool) SetCircuitHook(h func(pool string, to BackendState)) {
+	if h == nil {
+		return
+	}
+	name := p.name
+	fn := func(to BackendState) { h(name, to) }
+	p.circuitHook.Store(&fn)
+	for _, b := range p.Backends() {
+		b.circuit.setTransitionHook(fn)
+	}
+}
+
+// applyCircuitHook installs the pool's transition hook on a freshly built
+// backend set, so a discovery refresh does not silently stop reporting.
+func (p *Pool) applyCircuitHook(backends []*Backend) {
+	fn := p.circuitHook.Load()
+	if fn == nil {
+		return
+	}
+	for _, b := range backends {
+		b.circuit.setTransitionHook(*fn)
+	}
+}
+
 // SetHealthHook wires the passive-health transition hook. It is called once by
 // the registry when a pool is built, using the same HealthHook as the active
 // checker (RegistryOptions.OnHealth), so passive and active transitions feed
@@ -363,6 +398,7 @@ func (p *Pool) replaceBackends(next []*Backend) {
 		next[i] = existing
 		delete(prev, k) // reuse each surviving backend at most once
 	}
+	p.applyCircuitHook(next)
 	p.backends.Store(&next)
 	p.balancer.updateBackends(next)
 }

@@ -85,6 +85,16 @@ changing it requires a restart.
 | `jul_tls_cert_expiry_seconds` | Gauge | `domain` | Released `v1.32.0` | Leaf certificate expiry as a Unix timestamp, labeled by domain. |
 | `jul_upstream_backends` | Gauge | `pool` | Released `v1.32.0` | Current number of backends in a pool, labeled by pool (tracks dynamic service discovery). |
 | `jul_upstream_backends_healthy` | Gauge | `pool` | Merged, release pending | Backends a pool's active health checks currently consider healthy, labeled by pool. |
+| `jul_upstream_active_requests` | Gauge | `pool` | Merged, release pending | Admitted logical requests, streams and connections currently in flight for a pool, labeled by pool. |
+| `jul_upstream_pending_requests` | Gauge | `pool` | Merged, release pending | Requests currently waiting for an admission slot, labeled by pool. |
+| `jul_upstream_connections` | Gauge | `pool` | Merged, release pending | Physical connections currently open to a pool's backends, labeled by pool. |
+| `jul_upstream_backends_eligible` | Gauge | `pool` | Merged, release pending | Backends currently able to take a request, labeled by pool. |
+| `jul_upstream_circuit_state` | Gauge | `pool`, `state` | Merged, release pending | Backends per circuit state, labeled by pool and state (available/circuit_open/circuit_half_open/health_unhealthy/at_capacity). |
+| `jul_upstream_admission_rejected_total` | Counter | `pool`, `reason` | Merged, release pending | Requests refused before reaching a backend, labeled by pool and bounded reason. |
+| `jul_upstream_retry_attempts_total` | Counter | `outcome`, `pool` | Merged, release pending | Retry attempts, labeled by pool and the bounded outcome that ended the sequence. |
+| `jul_upstream_retry_budget_denied_total` | Counter | `pool` | Merged, release pending | Retries suppressed because the pool's retry budget was spent, labeled by pool. |
+| `jul_upstream_circuit_transitions_total` | Counter | `pool`, `to` | Merged, release pending | Backend circuit transitions, labeled by pool and destination state. |
+| `jul_transport_retired_total` | Counter | `mode` | Merged, release pending | Handler-generation transports retired, labeled by mode (graceful/forced). |
 | `jul_upstream_probe_duration_seconds` | Histogram | `pool` | Released `v1.32.0` | Active health-check probe latency in seconds, labeled by pool. |
 | `jul_upstream_probes_total` | Counter | `pool`, `result` | Released `v1.32.0` | Active health-check probes, labeled by pool and result (success/failure). |
 | `jul_waf_events_total` | Counter | `action`, `rule` | Released `v1.32.0` | Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID. |

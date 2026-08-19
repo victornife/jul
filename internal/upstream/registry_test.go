@@ -229,7 +229,7 @@ func TestRegistryStartsHealthChecks(t *testing.T) {
 
 	var probes atomic.Int64
 	r := NewRegistry(RegistryOptions{
-		OnProbe: func(string, bool, time.Duration) { probes.Add(1) },
+		OnProbe: func(string, string, bool, time.Duration) { probes.Add(1) },
 	})
 
 	up := upstreamCfg("api", "round_robin", addr)
@@ -315,7 +315,7 @@ func TestRegistryActivationDeferred(t *testing.T) {
 
 	var probes atomic.Int64
 	r := NewRegistry(RegistryOptions{
-		OnProbe: func(string, bool, time.Duration) { probes.Add(1) },
+		OnProbe: func(string, string, bool, time.Duration) { probes.Add(1) },
 	})
 
 	up := upstreamCfg("api", "round_robin", addr)

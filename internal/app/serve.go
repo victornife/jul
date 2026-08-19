@@ -209,16 +209,22 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// The upstream pool registry persists across reloads so named-upstream
 	// pools (and their health-check goroutines) have a defined lifetime.
 	poolReg := upstream.NewRegistry(upstream.RegistryOptions{
-		Logger:            log,
-		OnHealth:          metrics.ObserveBackendHealth,
-		OnProbe:           metrics.ObserveProbe,
-		OnBackends:        metrics.ObserveUpstreamBackends,
-		OnBackendsHealthy: metrics.ObserveBackendsHealthy,
-		OnPoolRetired:     metrics.RetirePool,
-		OnDiscoveryError:  metrics.ObserveDiscoveryError,
-		DialContext:       discoveryDial,
+		Logger:              log,
+		OnHealth:            metrics.ObserveBackendHealth,
+		OnProbe:             metrics.ObserveProbe,
+		OnBackends:          metrics.ObserveUpstreamBackends,
+		OnBackendsHealthy:   metrics.ObserveBackendsHealthy,
+		OnCircuitTransition: func(pool string, to upstream.BackendState) { metrics.ObserveCircuitTransition(pool, string(to)) },
+		OnPoolRetired:       metrics.RetirePool,
+		OnDiscoveryError:    metrics.ObserveDiscoveryError,
+		DialContext:         discoveryDial,
 	})
 	defer poolReg.CloseAll()
+	// The live gauges are read at scrape time rather than pushed from the
+	// admission path, which is the hottest code in the proxy.
+	metrics.SetUpstreamStatsSource(func() []observability.UpstreamPoolStats {
+		return upstreamStats(poolReg)
+	})
 
 	// The WASM plugin manager persists across reloads so the compilation
 	// cache and KV store survive config edits. Plugin fetches are guarded by
@@ -1149,4 +1155,26 @@ func warnInsecureBackends(log *slog.Logger, cfg *config.Config) {
 			}
 		}
 	}
+}
+
+// upstreamStats adapts the registry's live view to the shape the metrics
+// collector consumes, so neither package has to import the other.
+func upstreamStats(reg *upstream.Registry) []observability.UpstreamPoolStats {
+	live := reg.Stats()
+	out := make([]observability.UpstreamPoolStats, 0, len(live))
+	for _, s := range live {
+		byState := make(map[string]int, len(s.ByState))
+		for st, n := range s.ByState {
+			byState[string(st)] = n
+		}
+		out = append(out, observability.UpstreamPoolStats{
+			Name:        s.Name,
+			Active:      s.Active,
+			Pending:     s.Pending,
+			Connections: s.Connections,
+			Eligible:    s.Eligible,
+			ByState:     byState,
+		})
+	}
+	return out
 }
