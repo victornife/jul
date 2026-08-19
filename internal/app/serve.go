@@ -209,12 +209,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// The upstream pool registry persists across reloads so named-upstream
 	// pools (and their health-check goroutines) have a defined lifetime.
 	poolReg := upstream.NewRegistry(upstream.RegistryOptions{
-		Logger:           log,
-		OnHealth:         metrics.ObserveBackendHealth,
-		OnProbe:          metrics.ObserveProbe,
-		OnBackends:       metrics.ObserveUpstreamBackends,
-		OnDiscoveryError: metrics.ObserveDiscoveryError,
-		DialContext:      discoveryDial,
+		Logger:            log,
+		OnHealth:          metrics.ObserveBackendHealth,
+		OnProbe:           metrics.ObserveProbe,
+		OnBackends:        metrics.ObserveUpstreamBackends,
+		OnBackendsHealthy: metrics.ObserveBackendsHealthy,
+		OnPoolRetired:     metrics.RetirePool,
+		OnDiscoveryError:  metrics.ObserveDiscoveryError,
+		DialContext:       discoveryDial,
 	})
 	defer poolReg.CloseAll()
 

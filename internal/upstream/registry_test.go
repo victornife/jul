@@ -501,3 +501,69 @@ func TestReloadRetunesTheBreakerWithoutForgettingIt(t *testing.T) {
 		t.Fatal("failure 5 did not trip under the new threshold of 5")
 	}
 }
+
+// TestPoolRetirementIsReportedByName pins that a pool identity leaving the live
+// set is reported, so its metric series can be deleted.
+func TestPoolRetirementIsReportedByName(t *testing.T) {
+	var retired []string
+	r := NewRegistry(RegistryOptions{
+		OnPoolRetired: func(name string) { retired = append(retired, name) },
+	})
+	defer r.CloseAll()
+
+	r.Begin()
+	if _, err := r.For(context.Background(), upstreamCfg("keep", "round_robin", "10.0.0.1:80"), "http"); err != nil {
+		t.Fatalf("For keep: %v", err)
+	}
+	if _, err := r.For(context.Background(), upstreamCfg("drop", "round_robin", "10.0.0.2:80"), "http"); err != nil {
+		t.Fatalf("For drop: %v", err)
+	}
+	r.Commit()
+	if len(retired) != 0 {
+		t.Fatalf("retired = %v on the first commit, want none", retired)
+	}
+
+	r.Begin()
+	if _, err := r.For(context.Background(), upstreamCfg("keep", "round_robin", "10.0.0.1:80"), "http"); err != nil {
+		t.Fatalf("For keep again: %v", err)
+	}
+	r.Commit()
+
+	if len(retired) != 1 || retired[0] != "drop" {
+		t.Fatalf("retired = %v, want exactly [drop]", retired)
+	}
+}
+
+// TestPoolRetirementWaitsForEverySchemeOfAName pins the subtlety that makes this
+// worth a test at all: pools are keyed by (name, scheme) but the metric label is
+// the name alone. Retiring on the key would delete series the surviving sibling
+// is still writing, turning a series leak into missing data during a reload.
+func TestPoolRetirementWaitsForEverySchemeOfAName(t *testing.T) {
+	var retired []string
+	r := NewRegistry(RegistryOptions{
+		OnPoolRetired: func(name string) { retired = append(retired, name) },
+	})
+	defer r.CloseAll()
+
+	both := func(schemes ...string) {
+		r.Begin()
+		for _, scheme := range schemes {
+			if _, err := r.For(context.Background(), upstreamCfg("api", "round_robin", "10.0.0.1:80"), scheme); err != nil {
+				t.Fatalf("For %s: %v", scheme, err)
+			}
+		}
+		r.Commit()
+	}
+
+	both("http", "https")
+	both("http") // the https pool goes; the name is still served
+	if len(retired) != 0 {
+		t.Fatalf("retired = %v while one scheme still serves the name, want none", retired)
+	}
+
+	r.Begin()
+	r.Commit() // now the name is gone entirely
+	if len(retired) != 1 || retired[0] != "api" {
+		t.Fatalf("retired = %v, want exactly [api]", retired)
+	}
+}

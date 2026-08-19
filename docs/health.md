@@ -106,7 +106,7 @@ Active health state feeds directly into the balancer:
 | `weighted_round_robin` | Skipped; weight is ignored |
 | `least_conn` | Skipped; in-flight count is ignored |
 
-The `jul_upstream_healthy` gauge (`pool`, `backend` labels) reflects the active health verdict: `1` when healthy, `0` when not. `jul_upstream_probes_total` counts probes by `pool` and `result` (`success` / `failure`).
+The `jul_upstream_backends_healthy` gauge (`pool` label) counts the backends the active checks currently consider healthy. Per-backend verdicts are not a metric — a backend address is unbounded under pod churn — and are served by the Admin API instead. `jul_upstream_probes_total` counts probes by `pool` and `result` (`success` / `failure`).
 
 ## Reload behaviour
 
@@ -136,7 +136,7 @@ config authors know what is available and what is not.
 | Custom request headers | ☐ | n/a | Not supported |
 | TLS certificate verification | ✅ | n/a | An `https` pool is probed with the pool's resolved [`backend_tls`](upstreams.md#backend-tls) policy — the same trust live traffic uses |
 | gRPC health-check protocol | ☐ | n/a | Not supported (use TCP probe as a coarse substitute) |
-| Prometheus gauge per backend | ✅ | ✅ | `jul_upstream_healthy` |
+| Prometheus gauge per backend | ☐ | ☐ | Deliberately not exported — a backend address is an unbounded metric label. `jul_upstream_backends_healthy{pool}` gives the count; per-backend detail is in the Admin API |
 | Prometheus probe counter + latency histogram | ✅ | ✅ | `jul_upstream_probes_total`, `jul_upstream_probe_duration_seconds` |
 | Flapping detection (transition history) | ✅ | ✅ | `healthHistoryTracker` — ≥ 4 transitions in 5 min |
 | Console Status integration | ✅ | ✅ | Pool count + per-backend health in Admin API |
@@ -157,7 +157,7 @@ See [observability.md](observability.md) for the full metrics reference. Health-
 
 | Metric | Labels | Description |
 | --- | --- | --- |
-| `jul_upstream_healthy` | `pool`, `backend` | `1` = healthy, `0` = unhealthy (active verdict) |
+| `jul_upstream_backends_healthy` | `pool` | How many backends the active checks consider healthy |
 | `jul_upstream_probes_total` | `pool`, `result` | Active probe outcomes |
 | `jul_upstream_probe_duration_seconds` | `pool` | Probe latency histogram |
 
