@@ -634,7 +634,12 @@ func TestRetryRequestForMergesLocationOverPool(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := p.RetryRequestFor(tc.over, true)
 			tc.want.Replayable = true
-			if got != tc.want {
+			got.OnBackoff = nil
+			if got.MaxAttempts != tc.want.MaxAttempts ||
+				got.Deadline != tc.want.Deadline ||
+				got.BackoffInitial != tc.want.BackoffInitial ||
+				got.BackoffMax != tc.want.BackoffMax ||
+				got.Replayable != tc.want.Replayable {
 				t.Fatalf("RetryRequestFor = %+v, want %+v", got, tc.want)
 			}
 		})

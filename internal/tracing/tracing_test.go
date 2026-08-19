@@ -56,6 +56,7 @@ type fakeSpan struct {
 	status  int
 	err     error
 	strings map[string]string
+	ints    map[string]int64
 }
 
 func (s *fakeSpan) End()                { s.ended = true }
@@ -66,6 +67,13 @@ func (s *fakeSpan) SetString(k, v string) {
 		s.strings = map[string]string{}
 	}
 	s.strings[k] = v
+}
+
+func (s *fakeSpan) SetInt(k string, v int64) {
+	if s.ints == nil {
+		s.ints = map[string]int64{}
+	}
+	s.ints[k] = v
 }
 
 // TestSetActiveSwap verifies Set installs a tracer that Active delegates to, and

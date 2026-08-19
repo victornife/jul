@@ -301,6 +301,13 @@ type RetryRequest struct {
 	BackoffMax time.Duration
 	// Replayable records that this request may be sent again at all.
 	Replayable bool
+
+	// OnBackoff reports the interval the driver is about to wait before attempt
+	// next. It exists because the wait is the driver's to compute and the span
+	// to annotate is the caller's, and a backoff nobody records is latency with
+	// no explanation in a trace. It is called on the request goroutine, before
+	// sleeping, and must not block.
+	OnBackoff func(next int, d time.Duration)
 }
 
 // AttemptResult is what an adapter reports after one attempt.
@@ -395,6 +402,9 @@ func (p *Pool) Do(ctx context.Context, rr RetryRequest, fn AttemptFunc) (StopRea
 		delay, ok := backoffFor(n, rr.BackoffInitial, rr.BackoffMax, remaining, fullJitter)
 		if !ok {
 			return StopDeadline, lastErr
+		}
+		if rr.OnBackoff != nil {
+			rr.OnBackoff(n+1, delay)
 		}
 		if delay > 0 {
 			timer := time.NewTimer(delay)

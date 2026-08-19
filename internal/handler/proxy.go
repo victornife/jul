@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"jul/internal/backendtls"
@@ -156,7 +157,7 @@ type proxyHandler struct {
 // WAF and authentication cost for requests it then rejects. Accounting
 // correctness outranks CPU savings on the rejection path.
 func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	release, err := h.admission.Admit(r.Context(), h.retire)
+	release, err := admitTraced(r, h.admission, h.retire)
 	if err != nil {
 		writeAdmissionError(w, err)
 		return
@@ -293,7 +294,13 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	var resp *http.Response
 	attempts := 0
-	_, err := t.pool.Do(req.Context(), t.retryRequest(replayable), func(actx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
+	// The driver computes the backoff; the span to annotate is this one. Recorded
+	// per attempt so a trace shows which wait preceded which try, rather than a
+	// single total that explains nothing.
+	var backoff atomic.Int64
+	rr := t.retryRequest(replayable)
+	rr.OnBackoff = func(_ int, d time.Duration) { backoff.Store(int64(d / time.Millisecond)) }
+	_, err := t.pool.Do(req.Context(), rr, func(actx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 		attempts++
 		out := req
 		if n > 1 && req.GetBody != nil {
@@ -327,6 +334,10 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		// attempt's context so the upstream continues this trace under it.
 		sctx, aspan := tr.Start(ctx, "upstream.request")
 		aspan.SetString("upstream.backend", b.URL.Host)
+		aspan.SetInt("retry.attempt", int64(n))
+		if n > 1 {
+			aspan.SetInt("retry.backoff_ms", backoff.Load())
+		}
 		tr.Inject(sctx, out.Header)
 
 		r, err := t.base.RoundTrip(out)
@@ -646,7 +657,12 @@ func sslClientPairs(in *http.Request) []string {
 // the inbound one — so without the inbound context the two are indistinguishable
 // and every deadline Jul enforces would be recorded as a client going away.
 func proxyErrorStatus(err error, inbound context.Context) int {
-	if status := upstream.ReasonFor(err, inbound).HTTPStatus(); status != upstream.StatusFromLastAttempt {
+	reason := upstream.ReasonFor(err, inbound)
+	// The access log carries the operator-facing reason alongside the status,
+	// because four different reasons share 503 and the status alone cannot say
+	// which one this was.
+	middleware.SetUpstreamReason(inbound, string(reason))
+	if status := reason.HTTPStatus(); status != upstream.StatusFromLastAttempt {
 		return status
 	}
 	return http.StatusBadGateway

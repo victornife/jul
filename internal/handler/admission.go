@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"jul/internal/config"
+	"jul/internal/middleware"
+	"jul/internal/tracing"
 	"jul/internal/upstream"
 )
 
@@ -59,13 +61,32 @@ func newAdmittedHandler(next http.Handler, adm *upstream.Admission, closer func(
 }
 
 func (h *admittedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	release, err := h.admission.Admit(r.Context(), h.retire)
+	release, err := admitTraced(r, h.admission, h.retire)
 	if err != nil {
 		writeAdmissionError(w, err)
 		return
 	}
 	defer release()
 	h.next.ServeHTTP(w, r)
+}
+
+// admitTraced wraps the admission wait in its own span.
+//
+// A request parked in the pending queue is otherwise latency with no span to
+// account for it: the trace shows a gap before the upstream call and nothing
+// explaining it. The seam is a no-op without the otel build, so this costs
+// nothing in a lean binary.
+func admitTraced(r *http.Request, adm *upstream.Admission, retire chan struct{}) (func(), error) {
+	ctx, span := tracing.Active().Start(r.Context(), "upstream.admission")
+	defer span.End()
+	release, err := adm.Admit(ctx, retire)
+	if err != nil {
+		reason := upstream.ReasonFor(err, r.Context())
+		span.SetString("upstream.reason", string(reason))
+		span.RecordError(err)
+		middleware.SetUpstreamReason(r.Context(), string(reason))
+	}
+	return release, err
 }
 
 // Close wakes this generation's parked requests, then releases the handler's own

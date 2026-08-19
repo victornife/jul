@@ -218,3 +218,7 @@ func (s otelSpan) SetStatus(code int) {
 func (s otelSpan) SetString(key, value string) {
 	s.span.SetAttributes(attribute.String(key, value))
 }
+
+func (s otelSpan) SetInt(key string, value int64) {
+	s.span.SetAttributes(attribute.Int64(key, value))
+}
