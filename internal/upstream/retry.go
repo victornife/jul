@@ -283,6 +283,45 @@ func (b *Budget) Allow() bool {
 	}
 }
 
+// BudgetStatus is a point-in-time read of the retry allowance, for the admin
+// API. It is observational only: reading it consumes nothing.
+type BudgetStatus struct {
+	// Percent is the configured allowance. 0 means unbudgeted.
+	Percent int
+	// Primaries and Retries are the trailing-window counts the ratio is taken
+	// over. They span between one and two window widths, by design.
+	Primaries int64
+	Retries   int64
+	// Remaining is how many more retries Allow would grant right now, floored
+	// at zero. It can read zero while Percent is non-zero, which is the whole
+	// point of the budget and the thing an operator needs to see when retries
+	// are being denied.
+	Remaining int64
+}
+
+// Status reports the budget without consuming from it.
+//
+// It deliberately does not call Allow: a diagnostic that spends the allowance
+// it is reporting on would deny a real retry every time an operator refreshed
+// the page.
+func (b *Budget) Status() BudgetStatus {
+	percent := b.percent.Load()
+	st := BudgetStatus{Percent: int(percent)}
+	if percent <= 0 {
+		return st
+	}
+	// window() may rotate, which is correct: an unbudgeted-looking snapshot of
+	// a stale window would be worse than advancing one the next Allow would
+	// have advanced anyway.
+	w := b.window()
+	st.Primaries = w.primaries.Load() + w.prevPrimaries
+	st.Retries = w.retries.Load() + w.prevRetries
+	if r := st.Primaries*percent/100 + minFreeRetries - st.Retries; r > 0 {
+		st.Remaining = r
+	}
+	return st
+}
+
 // Budget returns the pool's retry budget. It never returns nil.
 func (p *Pool) Budget() *Budget { return p.budget }
 

@@ -705,7 +705,7 @@
       "path": "upstreams[].resilience.max_fails",
       "kind": "integer",
       "constraint": "non-negative",
-      "zero_semantics": "omitted/zero defaults to 1",
+      "zero_semantics": "omitted/zero defaults to 3",
       "active_when": "always"
     },
     {
@@ -933,7 +933,7 @@
       "path": "upstreams[].max_fails",
       "kind": "integer",
       "constraint": "non-negative",
-      "zero_semantics": "omitted/zero defaults to 1; deprecated in favour of upstreams[].resilience.max_fails, and setting both is an error",
+      "zero_semantics": "omitted/zero defaults to 3; deprecated in favour of upstreams[].resilience.max_fails, and setting both is an error",
       "active_when": "always"
     },
     {
@@ -954,7 +954,7 @@
       "path": "upstreams[].servers[].weight",
       "kind": "integer",
       "constraint": "positive when explicitly materialized; zero is treated as omitted for direct struct callers",
-      "zero_semantics": "omitted/zero defaults to 1",
+      "zero_semantics": "omitted/zero defaults to 3",
       "active_when": "always"
     },
     {

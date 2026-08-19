@@ -219,6 +219,28 @@ healthy backend never masks a tripped one.
 
 Backed by `GET /api/apps`.
 
+For a single pool, `GET /api/upstreams/{name}/resilience` answers the questions
+the Console summary cannot: the limits actually in force, which configuration
+key supplied each of them, the live admission and connection counts, the retry
+budget, and per backend the consecutive-failure count, the cooldown deadline
+(`open_until`) and how many half-open probes are left. It returns one entry per
+scheme, since a name can serve both an http and an https pool.
+
+This is the surface the per-backend metric label was withdrawn in favour of. An
+address costs one JSON field in a response queried on demand; the same address
+as a Prometheus label cost a time series per pod, kept for the life of the
+process.
+
+The `sources` map answers "which spelling won": `max_fails` and `fail_timeout`
+can each be written at the upstream level or in `[upstreams.resilience]`, and
+knowing the effective value is 3 does not tell an operator whether the change
+they just made is the one taking effect. Values are `resilience`, `upstream` or
+`default`.
+
+An unknown pool is a `404`. A pool whose backends are all down is a `200` with
+`verdict: "down"` — the two are deliberately different answers, because a pool
+that has vanished and a pool that is failing call for opposite responses.
+
 ### Certificates
 
 Shows every TLS certificate configured on a server block:
@@ -821,7 +843,7 @@ consumes the endpoints below.
 | --- | --- |
 | Overview | `GET /api/runtime/overview`, `GET /api/stats` |
 | Routes | `GET /api/routes`, `POST /api/routes/test` |
-| Apps & Upstreams | `GET /api/apps` |
+| Apps & Upstreams | `GET /api/apps`, `GET /api/upstreams`, `GET /api/upstreams/{name}/resilience` |
 | TLS & Certificates | `GET /api/tls`, `GET /api/certs`, `GET /api/mtls` |
 | Security | `GET /api/security`, `GET /api/listeners`, `GET`/`PATCH /api/listeners/{addr}/client_address` |
 | Traffic Controls | `GET /api/traffic-controls` |

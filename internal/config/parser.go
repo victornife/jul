@@ -215,12 +215,12 @@ func (c *Config) applyDefaults() {
 		if up.Strategy == "" {
 			up.Strategy = "round_robin"
 		}
-		if up.MaxFails == 0 {
-			up.MaxFails = 3
-		}
-		if up.FailTimeout == 0 {
-			up.FailTimeout = Duration(10 * time.Second)
-		}
+		// max_fails and fail_timeout are deliberately NOT materialised here.
+		// Writing the default into the deprecated field made it indistinguishable
+		// from one the operator set, and validation rejects both spellings being
+		// present — so defaulting here made [upstreams.resilience] unusable. The
+		// default is applied at the point of use, by CircuitMaxFails and
+		// CircuitFailTimeout.
 		for j := range up.Servers {
 			if up.Servers[j].Weight == 0 {
 				up.Servers[j].Weight = 1
