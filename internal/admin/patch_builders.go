@@ -5,9 +5,11 @@ package admin
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"jul/internal/config"
+	"jul/internal/resilience"
 )
 
 // This file holds the pure builder/formatter helpers used by applyPatch: they
@@ -190,4 +192,94 @@ func wafModeNote(enabled bool, mode string, crs bool) string {
 		return fmt.Sprintf(" — %s, CRS", mode)
 	}
 	return fmt.Sprintf(" — %s", mode)
+}
+
+// buildResilience turns an upstream_set_resilience payload into a config block
+// and a summary of what changed. It replaces the whole block rather than
+// merging, matching upstream_set_health_check: a partial merge would make the
+// result depend on state the caller cannot see in the request they are sending.
+func buildResilience(in upstreamResilience) (*config.ResilienceConfig, error) {
+	out := &config.ResilienceConfig{
+		MaxFails:                 in.MaxFails,
+		MaxActiveRequests:        in.MaxActiveRequests,
+		MaxActivePerBackend:      in.MaxActivePerBackend,
+		MaxPendingRequests:       in.MaxPendingRequests,
+		MaxConnectionsPerBackend: in.MaxConnectionsPerBackend,
+		RetryAttempts:            in.RetryAttempts,
+		RetryBudgetPercent:       in.RetryBudgetPercent,
+		CircuitHalfOpenProbes:    in.CircuitHalfOpenProbes,
+	}
+	durations := []struct {
+		val  string
+		dst  *config.Duration
+		name string
+	}{
+		{in.FailTimeout, &out.FailTimeout, "fail_timeout"},
+		{in.PendingTimeout, &out.PendingTimeout, "pending_timeout"},
+		{in.RetryDeadline, &out.RetryDeadline, "retry_deadline"},
+		{in.RetryBackoffInitial, &out.RetryBackoffInitial, "retry_backoff_initial"},
+		{in.RetryBackoffMax, &out.RetryBackoffMax, "retry_backoff_max"},
+	}
+	for _, d := range durations {
+		if err := parseDurInto(d.val, d.dst, "upstream_set_resilience: "+d.name); err != nil {
+			return nil, err
+		}
+	}
+	// The bounds are the runtime's, not this package's, so they are checked by
+	// the same resolver the proxy uses rather than restated here where the two
+	// could drift.
+	if _, err := resilience.Resolve(resilience.Options{
+		MaxActiveRequests:        out.MaxActiveRequests,
+		MaxActivePerBackend:      out.MaxActivePerBackend,
+		MaxPendingRequests:       out.MaxPendingRequests,
+		PendingTimeout:           out.PendingTimeout.Std(),
+		MaxConnectionsPerBackend: out.MaxConnectionsPerBackend,
+		RetryAttempts:            out.RetryAttempts,
+		RetryDeadline:            out.RetryDeadline.Std(),
+		RetryBackoffInitial:      out.RetryBackoffInitial.Std(),
+		RetryBackoffMax:          out.RetryBackoffMax.Std(),
+		RetryBudgetPercent:       out.RetryBudgetPercent,
+	}); err != nil {
+		return nil, fmt.Errorf("upstream_set_resilience: %w", err)
+	}
+	if out.MaxFails < 0 {
+		return nil, fmt.Errorf("upstream_set_resilience: max_fails must not be negative")
+	}
+	if out.CircuitHalfOpenProbes != nil && *out.CircuitHalfOpenProbes < 0 {
+		return nil, fmt.Errorf("upstream_set_resilience: circuit_half_open_probes must not be negative")
+	}
+	return out, nil
+}
+
+// resilienceSummary describes the applied block for the audit log, naming only
+// the limits actually set so the line stays readable.
+func resilienceSummary(r *config.ResilienceConfig) string {
+	if r == nil {
+		return "cleared"
+	}
+	parts := make([]string, 0, 8)
+	add := func(name string, set bool, val string) {
+		if set {
+			parts = append(parts, name+"="+val)
+		}
+	}
+	add("max_fails", r.MaxFails > 0, strconv.Itoa(r.MaxFails))
+	add("fail_timeout", r.FailTimeout > 0, r.FailTimeout.Std().String())
+	add("max_active_requests", r.MaxActiveRequests > 0, strconv.Itoa(r.MaxActiveRequests))
+	add("max_active_per_backend", r.MaxActivePerBackend > 0, strconv.Itoa(r.MaxActivePerBackend))
+	add("max_pending_requests", r.MaxPendingRequests > 0, strconv.Itoa(r.MaxPendingRequests))
+	add("pending_timeout", r.PendingTimeout > 0, r.PendingTimeout.Std().String())
+	add("max_connections_per_backend", r.MaxConnectionsPerBackend > 0, strconv.Itoa(r.MaxConnectionsPerBackend))
+	add("retry_attempts", r.RetryAttempts > 0, strconv.Itoa(r.RetryAttempts))
+	add("retry_deadline", r.RetryDeadline > 0, r.RetryDeadline.Std().String())
+	add("retry_backoff_initial", r.RetryBackoffInitial > 0, r.RetryBackoffInitial.Std().String())
+	add("retry_backoff_max", r.RetryBackoffMax > 0, r.RetryBackoffMax.Std().String())
+	add("retry_budget_percent", r.RetryBudgetPercent > 0, strconv.Itoa(r.RetryBudgetPercent))
+	if r.CircuitHalfOpenProbes != nil {
+		parts = append(parts, "circuit_half_open_probes="+strconv.Itoa(*r.CircuitHalfOpenProbes))
+	}
+	if len(parts) == 0 {
+		return "set to defaults"
+	}
+	return "set to " + strings.Join(parts, ", ")
 }

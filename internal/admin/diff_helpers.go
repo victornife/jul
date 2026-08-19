@@ -579,6 +579,9 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 	}
 	d.cover("upstreams.*.health_check")
 
+	diffResilienceFields(name, b.Resilience, a.Resilience, d)
+	d.cover("upstreams.*.resilience")
+
 	// Service discovery.
 	bDisc := discoveryType(b.Discovery)
 	aDisc := discoveryType(a.Discovery)
@@ -712,3 +715,71 @@ func intsStr(xs []int) string {
 }
 
 // diffGlobalCache compares the [cache] block.
+
+// diffResilienceFields reports per-field changes to an upstream's resilience
+// block.
+//
+// Without it the registry completeness pass produces a row for every resilience
+// path whether or not it changed, with empty before/after values and the schema
+// path as the name — thirteen rows saying nothing for a four-field change. An
+// operator previewing that cannot tell what they are about to apply.
+func diffResilienceFields(name string, b, a *config.ResilienceConfig, d *ConfigDiff) {
+	if b == nil {
+		b = &config.ResilienceConfig{}
+	}
+	if a == nil {
+		a = &config.ResilienceConfig{}
+	}
+	ints := []struct {
+		key    string
+		before int
+		after  int
+	}{
+		{"max_fails", b.MaxFails, a.MaxFails},
+		{"max_active_requests", b.MaxActiveRequests, a.MaxActiveRequests},
+		{"max_active_per_backend", b.MaxActivePerBackend, a.MaxActivePerBackend},
+		{"max_pending_requests", b.MaxPendingRequests, a.MaxPendingRequests},
+		{"max_connections_per_backend", b.MaxConnectionsPerBackend, a.MaxConnectionsPerBackend},
+		{"retry_attempts", b.RetryAttempts, a.RetryAttempts},
+		{"retry_budget_percent", b.RetryBudgetPercent, a.RetryBudgetPercent},
+	}
+	for _, f := range ints {
+		if f.before != f.after {
+			d.mod(DiffEntry{Kind: "resilience", Name: name, Before: fmt.Sprintf("%d", f.before), After: fmt.Sprintf("%d", f.after), Detail: "Change " + f.key + " of " + name}, "upstream "+name+" "+f.key)
+		}
+	}
+	durs := []struct {
+		key    string
+		before config.Duration
+		after  config.Duration
+	}{
+		{"fail_timeout", b.FailTimeout, a.FailTimeout},
+		{"pending_timeout", b.PendingTimeout, a.PendingTimeout},
+		{"retry_deadline", b.RetryDeadline, a.RetryDeadline},
+		{"retry_backoff_initial", b.RetryBackoffInitial, a.RetryBackoffInitial},
+		{"retry_backoff_max", b.RetryBackoffMax, a.RetryBackoffMax},
+	}
+	for _, f := range durs {
+		if f.before != f.after {
+			d.mod(DiffEntry{Kind: "resilience", Name: name, Before: durStr(f.before), After: durStr(f.after), Detail: "Change " + f.key + " of " + name}, "upstream "+name+" "+f.key)
+		}
+	}
+	// An explicit 0 asks for unbounded half-open probing, which is a different
+	// request from omitting the key, so the two must not render the same.
+	if bp, ap := probeStr(b.CircuitHalfOpenProbes), probeStr(a.CircuitHalfOpenProbes); bp != ap {
+		d.mod(DiffEntry{Kind: "resilience", Name: name, Before: bp, After: ap, Detail: "Change circuit_half_open_probes of " + name}, "upstream "+name+" circuit_half_open_probes")
+		if a.CircuitHalfOpenProbes != nil && *a.CircuitHalfOpenProbes == 0 {
+			d.warn("Setting circuit_half_open_probes to 0 on %s makes half-open probing unbounded; a recovering backend takes the full waiting load the instant its cooldown ends.", name)
+		}
+	}
+}
+
+func probeStr(p *int) string {
+	if p == nil {
+		return "(default)"
+	}
+	if *p == 0 {
+		return "0 (unbounded)"
+	}
+	return fmt.Sprintf("%d", *p)
+}
