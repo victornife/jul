@@ -305,7 +305,7 @@ Configured per upstream via `strategy`:
 | `weighted_round_robin` | smooth weighted round-robin (NGINX algorithm), proportional to `weight` |
 | `least_conn` | fewest in-flight requests |
 
-Each backend has a circuit breaker: after `max_fails` (default 1) consecutive
+Each backend has a circuit breaker: after `max_fails` (default 3) consecutive
 failures it is taken out of rotation for `fail_timeout` (default 10s), then
 tested by at most `circuit_half_open_probes` requests (default 1) before it is
 returned to full traffic. There is **no** `ip_hash` / `random` strategy and no

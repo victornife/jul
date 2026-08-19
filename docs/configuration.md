@@ -644,7 +644,7 @@ retry_backoff_initial = "20ms"
 retry_backoff_max     = "500ms"
 retry_budget_percent  = 10
 
-max_fails                = 1
+max_fails                = 3
 fail_timeout             = "10s"
 circuit_half_open_probes = 1
 ```
@@ -662,7 +662,7 @@ circuit_half_open_probes = 1
 | `retry_backoff_max` | duration | `500ms` when backoff is on | Clamps the doubling; requires `retry_backoff_initial`. Settable per location |
 | `retry_budget_percent` | int | `0` (unbudgeted) | Retries permitted as a percentage of primary attempts over a trailing window. **Pool-scoped only** |
 | `circuit_half_open_probes` | int | `1` | How many requests may test a recovering backend at once. Omit for the default; an explicit `0` means unbounded. **Pool-scoped only** |
-| `max_fails` | int | `1` | Consecutive failures that take a backend out of rotation. **Pool-scoped only** |
+| `max_fails` | int | `3` | Consecutive failures that take a backend out of rotation. **Pool-scoped only** |
 | `fail_timeout` | duration | `10s` | How long a backend stays out of rotation before it is probed. **Pool-scoped only** |
 
 `max_pending_requests = 0` means *no queue*, not an unlimited one — an unbounded pending queue is the

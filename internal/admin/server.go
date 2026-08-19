@@ -350,6 +350,10 @@ type Deps struct {
 	// Upstreams returns a snapshot of the live upstream pools and per-backend
 	// health for the console upstream panel. Nil yields an empty list.
 	Upstreams func() []UpstreamStatus
+	// UpstreamResilience returns live resilience state for every pool serving
+	// under the given name, one entry per scheme. An unknown name returns nil,
+	// which the handler renders as a 404. Nil disables the endpoint.
+	UpstreamResilience func(name string) []PoolResilience
 	// Certs returns configured-certificate metadata (subject, expiry; never key
 	// material) for the console certificate panel. Nil yields an empty list.
 	Certs func() []CertStatus

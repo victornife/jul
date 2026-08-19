@@ -136,11 +136,17 @@ name = "app"
 	if up.Strategy != "round_robin" {
 		t.Errorf("default strategy = %q, want round_robin", up.Strategy)
 	}
-	if up.MaxFails != 3 {
-		t.Errorf("default max_fails = %d, want 3", up.MaxFails)
+	// The circuit defaults are resolved at the point of use, not written into
+	// the deprecated fields: a materialised default is indistinguishable from
+	// one the operator set, and validation rejects both spellings being present.
+	if up.MaxFails != 0 || up.FailTimeout != 0 {
+		t.Errorf("parser materialised the deprecated circuit fields: max_fails=%d fail_timeout=%v", up.MaxFails, up.FailTimeout.Std())
 	}
-	if up.FailTimeout.Std() != 10*time.Second {
-		t.Errorf("default fail_timeout = %v", up.FailTimeout.Std())
+	if got := up.CircuitMaxFails(); got != 3 {
+		t.Errorf("effective max_fails = %d, want 3", got)
+	}
+	if got := up.CircuitFailTimeout(); got != 10*time.Second {
+		t.Errorf("effective fail_timeout = %v, want 10s", got)
 	}
 }
 

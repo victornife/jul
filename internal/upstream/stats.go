@@ -46,10 +46,7 @@ func (p *Pool) Stats() PoolStats {
 	}
 	perBackend := p.Policy().MaxActivePerBackend()
 	for _, b := range p.Backends() {
-		st := b.State()
-		if st == StateAvailable && perBackend > 0 && b.Inflight() >= perBackend {
-			st = StateAtCapacity
-		}
+		st := effectiveState(b, perBackend)
 		s.ByState[st]++
 		if st == StateAvailable {
 			s.Eligible++

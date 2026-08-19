@@ -135,6 +135,12 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleUpstreams) },
 	},
 	{
+		Pattern:    "/api/upstreams/{name}/resilience",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleUpstreamResilience) },
+	},
+	{
 		Pattern:    "/api/certs",
 		Methods:    []string{http.MethodGet},
 		Permission: rbac.StatusRead,

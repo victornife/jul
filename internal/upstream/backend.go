@@ -163,6 +163,23 @@ func (b *Backend) State() BackendState {
 	return b.circuit.state()
 }
 
+// CircuitStatus reports the backend's circuit in full for the admin API.
+//
+// Active health is applied here the same way State does, so the two can never
+// disagree: a backend ejected by a health check reads health_unhealthy even
+// when its circuit happens to be closed, because that is the condition keeping
+// it out of rotation. The circuit's own counters are still reported, since an
+// operator restoring a health check needs to know what it will find underneath.
+func (b *Backend) CircuitStatus() CircuitStatus {
+	st := b.circuit.status()
+	if !b.activeHealthy.Load() {
+		st.State = StateHealthUnhealthy
+		st.OpenUntil = time.Time{}
+		st.ProbesRemaining = 0
+	}
+	return st
+}
+
 // ActiveHealthy reports the active health checker's verdict alone, without the
 // circuit state that available() also weighs.
 func (b *Backend) ActiveHealthy() bool { return b.activeHealthy.Load() }

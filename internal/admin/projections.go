@@ -192,11 +192,11 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 			Name:        up.Name,
 			Strategy:    up.Strategy,
 			Backends:    make([]BackendProjection, 0, len(up.Servers)),
-			MaxFails:    up.MaxFails,
+			MaxFails:    up.CircuitMaxFails(),
 			RoutesUsing: routesByUpstream[up.Name],
 		}
-		if up.FailTimeout > 0 {
-			ap.FailTimeout = string(mustMarshal(up.FailTimeout.MarshalText()))
+		if d := up.CircuitFailTimeout(); d > 0 {
+			ap.FailTimeout = d.String()
 		}
 		if up.HealthCheck != nil {
 			ap.HealthCheck = up.HealthCheck.Enabled
