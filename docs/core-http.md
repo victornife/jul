@@ -139,7 +139,52 @@ transport that picks a backend from the named (or anonymous) upstream pool.
 | Connection reuse | `MaxIdleConns` 100, `MaxIdleConnsPerHost` 32, HTTP/2 attempted. One transport per handler generation, so a `backend_tls` change never lets a new request reuse a connection verified under the old policy |
 | Backend TLS | `https://` targets use the resolved [`backend_tls`](upstreams.md#backend-tls) policy — private roots, client certificate, verified name, minimum version, peer identities. A route configured for `https` never downgrades to plaintext |
 | WebSocket / SSE | `Connection: Upgrade` (HTTP `101`) spliced bidirectionally; `text/event-stream` and chunked responses streamed (flushed per write, never buffered). Both work with `cache = true`: an upgrade bypasses the cache and an event stream is never stored |
-| Error mapping | 503 no backend, 504 timeout, 502 connection error |
+| Error mapping | 503 no eligible backend / circuit open / overloaded / at capacity, 504 timeout, 502 connection or backend-TLS-identity failure, **499** client disconnected. See [the failure taxonomy](#upstream-failure-taxonomy) |
+
+### Upstream failure taxonomy
+
+The status a client sees and the reason an operator sees are different
+resolutions of the same event. Four reasons are all `503` to a client and are
+never merged for an operator: "the backends are gone" and "Jul is deliberately
+not calling them" call for opposite responses.
+
+| Reason | HTTP | gRPC | Meaning |
+| --- | --- | --- | --- |
+| `upstream_unavailable` | 503 | `UNAVAILABLE` | No eligible backend (admin, discovery or active health) |
+| `circuit_open` | 503 | `UNAVAILABLE` | Every candidate's circuit is open |
+| `proxy_overloaded` | 503 + `Retry-After` | `UNAVAILABLE` | Admission rejected the request |
+| `backend_at_capacity` | 503 | `UNAVAILABLE` | Every candidate is at `max_active_per_backend` |
+| `upstream_connect_failed` | 502 | `UNAVAILABLE` | Dial, handshake or transport failure |
+| `upstream_timeout` | 504 | `DEADLINE_EXCEEDED` | A per-attempt or overall timeout elapsed |
+| `upstream_tls_identity` | 502 | `UNAVAILABLE` | The backend failed to prove its identity (deterministic, never retried) |
+| `retry_budget_exhausted` | last attempt's status | last attempt's code | Retries suppressed by the pool budget |
+| `retry_deadline_exhausted` | 504 | `DEADLINE_EXCEEDED` | The overall retry deadline was consumed |
+| `request_not_replayable` | last attempt's status | last attempt's code | Method, body or an already-started response forbade another attempt |
+| `client_cancelled` | 499 | `CANCELLED` | The inbound request context was cancelled — the client went away |
+
+Retry suppression never overwrites the status a backend actually produced:
+reporting 503 because a budget was spent would hide a 500 the client needs.
+
+**Overload is 503, not 429.** `429` means the *client* sent too many requests and
+is already Jul's rate-limiter status; overload is not the client's fault, and
+`Retry-After` is defined for 503. The gRPC consequence follows: overload is
+`UNAVAILABLE`, not `RESOURCE_EXHAUSTED`, because `RESOURCE_EXHAUSTED` maps back
+to 429 and would contradict the HTTP path.
+
+**Client cancellation records 499**, nginx's non-IANA status, and this is a
+deliberate change: it was previously recorded as 504. The client has already
+disconnected, so nothing is transmitted either way and this is purely the
+recorded status — but recording 504 inflated "gateway timeout" with requests
+where nothing timed out.
+
+Telling the two cancellations apart matters. `context.Canceled` reaches the
+classifier both from a client going away *and* from Jul's own retry deadline,
+which derives its context from the inbound one. Only a cancellation of the
+**inbound** request context is a client disconnect; one of Jul's own is
+`retry_deadline_exhausted`, and 504.
+
+A reason is a closed enum, safe as a metric label and an access-log field. A
+backend address, route path, tenant identifier or raw error text is never one.
 
 ### Forwarded headers to the backend
 

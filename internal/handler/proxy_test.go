@@ -451,3 +451,41 @@ func TestExpandProxyVarSSLClientAbsent(t *testing.T) {
 		t.Errorf("$ssl_client_cn without a cert = %q, want empty", got)
 	}
 }
+
+// TestClientCancellationRecords499 pins the intentional compatibility change.
+//
+// proxyErrorStatus used to map context.Canceled to 504 alongside
+// DeadlineExceeded. The client has already disconnected by then, so nothing is
+// transmitted either way and this is purely the *recorded* status — but
+// recording 504 inflated "gateway timeout" with requests where nothing timed
+// out, corrupting the dashboards the taxonomy exists to make trustworthy.
+//
+// TestProxyGatewayTimeout above is the control: a real upstream timeout must
+// still be 504, or this test would pass for the wrong reason.
+func TestClientCancellationRecords499(t *testing.T) {
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+	defer close(release)
+
+	h := newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "http://edge/", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(rec, req)
+	}()
+	cancel()
+	<-done
+
+	if rec.Code != 499 {
+		t.Fatalf("status = %d, want 499: a client that disconnected did not time out", rec.Code)
+	}
+}
