@@ -4,9 +4,15 @@
 package handler
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
+	"jul/internal/config"
 	"jul/internal/observability"
 	"jul/internal/upstream"
 )
@@ -121,4 +127,54 @@ func TestNoMetricCarriesABackendAddress(t *testing.T) {
 			t.Errorf("metric %q carries a backend label: %v", name, labels)
 		}
 	}
+}
+
+// TestConnectionsGaugeTracksTheDialer pins that jul_upstream_connections is
+// sourced from real dials and returns to zero.
+//
+// net/http enforces MaxConnsPerHost internally and exposes no live count, so
+// this number exists only because Jul wraps its own dialer. A metric that
+// reported a constant zero would be worse than no metric, and nothing else in
+// the suite would notice.
+func TestConnectionsGaugeTracksTheDialer(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	p, err := upstream.NewPool(config.UpstreamConfig{
+		Name:     "conns",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: strings.TrimPrefix(backend.URL, "http://"), Weight: 1}},
+	}, "http")
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer p.Close()
+
+	if got := p.Stats().Connections; got != 0 {
+		t.Fatalf("connections before any request = %d, want 0", got)
+	}
+
+	tr := newProxyTransport(config.LocationConfig{}, nil, 0, p)
+	res, err := tr.RoundTrip(httptest.NewRequest(http.MethodGet, backend.URL, nil))
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, res.Body)
+	_ = res.Body.Close()
+
+	if got := p.Stats().Connections; got != 1 {
+		t.Fatalf("connections after one request = %d, want 1", got)
+	}
+
+	tr.CloseIdleConnections()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if p.Stats().Connections == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("connections after closing idle conns = %d, want 0", p.Stats().Connections)
 }
