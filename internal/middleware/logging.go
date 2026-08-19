@@ -42,8 +42,12 @@ type AccessRecord struct {
 	ClientResult string
 	RequestID    string
 	TraceID      string
-	UserAgent    string
-	Proto        string
+	// UpstreamReason is the bounded reason an upstream call failed, from the
+	// taxonomy in internal/upstream. It is empty for a request that never
+	// reached an upstream or reached one successfully.
+	UpstreamReason string
+	UserAgent      string
+	Proto          string
 }
 
 // AccessSink consumes completed access-log records. The access-log middleware
@@ -93,6 +97,11 @@ func (s *SlogSink) Log(rec AccessRecord) {
 	if rec.ClientResult != "" && rec.ClientResult != clientaddr.ResultAccepted.String() {
 		attrs = append(attrs, "client_addr_result", rec.ClientResult)
 	}
+	// Same rule again: present only when an upstream call actually failed, so a
+	// served request does not carry an empty field on every line.
+	if rec.UpstreamReason != "" {
+		attrs = append(attrs, "upstream_reason", rec.UpstreamReason)
+	}
 	if rec.TraceID != "" {
 		attrs = append(attrs, "trace_id", rec.TraceID)
 	}
@@ -112,23 +121,25 @@ func AccessLog(sinks ...AccessSink) Middleware {
 			start := time.Now()
 			rec := NewRecorder(w)
 
+			r = r.WithContext(WithUpstreamReason(r.Context()))
 			next.ServeHTTP(rec.Writer(), r)
 
 			record := AccessRecord{
-				Time:      start,
-				Method:    r.Method,
-				Host:      r.Host,
-				Path:      r.URL.Path,
-				Query:     r.URL.RawQuery,
-				Status:    rec.Status(),
-				Bytes:     rec.Bytes(),
-				Duration:  time.Since(start),
-				Client:    addrText(clientaddr.Client(r)),
-				Peer:      addrText(clientaddr.Peer(r)),
-				RequestID: RequestIDFrom(r.Context()),
-				TraceID:   TraceIDFrom(r.Context()),
-				UserAgent: r.UserAgent(),
-				Proto:     r.Proto,
+				Time:           start,
+				Method:         r.Method,
+				Host:           r.Host,
+				Path:           r.URL.Path,
+				Query:          r.URL.RawQuery,
+				Status:         rec.Status(),
+				Bytes:          rec.Bytes(),
+				Duration:       time.Since(start),
+				Client:         addrText(clientaddr.Client(r)),
+				Peer:           addrText(clientaddr.Peer(r)),
+				RequestID:      RequestIDFrom(r.Context()),
+				UpstreamReason: UpstreamReasonFrom(r.Context()),
+				TraceID:        TraceIDFrom(r.Context()),
+				UserAgent:      r.UserAgent(),
+				Proto:          r.Proto,
 			}
 			if id, ok := clientaddr.FromContext(r.Context()); ok {
 				record.ClientSource, record.ClientResult = id.Source.String(), id.Result.String()

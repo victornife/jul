@@ -225,3 +225,45 @@ func TestAccessLogObservesRecoveredPanic(t *testing.T) {
 		t.Fatalf("access record status = %d, want 500", got)
 	}
 }
+
+// TestSlogSinkEmitsUpstreamReasonOnlyWhenAnUpstreamFailed pins both halves of
+// the omit-when-empty rule for the reason field. A reason on every line would
+// make the field useless for filtering; a missing reason on a failure would
+// remove the one field that says why the request failed.
+func TestSlogSinkEmitsUpstreamReasonOnlyWhenAnUpstreamFailed(t *testing.T) {
+	render := func(reason string) string {
+		var buf bytes.Buffer
+		NewSlogSink(slog.New(slog.NewTextHandler(&buf, nil))).Log(AccessRecord{
+			Method:         http.MethodGet,
+			Path:           "/",
+			Status:         http.StatusBadGateway,
+			UpstreamReason: reason,
+		})
+		return buf.String()
+	}
+
+	if out := render("circuit_open"); !strings.Contains(out, "upstream_reason=circuit_open") {
+		t.Errorf("failure line missing the reason\nfull line: %s", out)
+	}
+	if out := render(""); strings.Contains(out, "upstream_reason") {
+		t.Errorf("served line carries an empty reason field\nfull line: %s", out)
+	}
+}
+
+// The whole point of the holder is that a handler deeper in the chain can set
+// the reason and have the access log, which already returned from that handler,
+// still pick it up. This exercises that path end to end through AccessLog.
+func TestAccessLogPicksUpAReasonSetByADownstreamHandler(t *testing.T) {
+	var buf bytes.Buffer
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		SetUpstreamReason(r.Context(), "retry_budget_exhausted")
+		w.WriteHeader(http.StatusBadGateway)
+	})
+	AccessLog(NewSlogSink(slog.New(slog.NewTextHandler(&buf, nil))))(handler).ServeHTTP(
+		httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodGet, "http://h/path", nil),
+	)
+	if out := buf.String(); !strings.Contains(out, "upstream_reason=retry_budget_exhausted") {
+		t.Errorf("reason set by the handler never reached the log\nfull line: %s", out)
+	}
+}

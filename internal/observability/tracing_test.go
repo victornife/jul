@@ -175,6 +175,7 @@ func TestSeamChildSpanExported(t *testing.T) {
 	parentCtx, parent := tr.tracer.Start(context.Background(), "parent")
 	_, span := adapter.Start(parentCtx, "proxy.roundtrip")
 	span.SetString("upstream.backend", "10.0.0.1:80")
+	span.SetInt("retry.attempt", 2)
 	span.SetStatus(http.StatusOK)
 	span.End()
 	parent.End()
@@ -203,6 +204,11 @@ func TestSeamChildSpanExported(t *testing.T) {
 	}
 	if v, ok := findAttr(child.Attributes, "http.response.status_code"); !ok || v.AsInt64() != 200 {
 		t.Errorf("status attribute = %d (present=%v), want 200", v.AsInt64(), ok)
+	}
+	// SetInt must land as a real int64 attribute, not a stringified one: the
+	// retry attributes are meant to be aggregated on in a trace backend.
+	if v, ok := findAttr(child.Attributes, "retry.attempt"); !ok || v.AsInt64() != 2 {
+		t.Errorf("retry.attempt = %d (present=%v), want 2", v.AsInt64(), ok)
 	}
 }
 

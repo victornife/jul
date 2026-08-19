@@ -33,6 +33,10 @@ type Span interface {
 	SetStatus(code int)
 	// SetString attaches a string attribute to the span.
 	SetString(key, value string)
+	// SetInt attaches a numeric attribute. A number recorded as a string cannot
+	// be filtered or aggregated by a tracing backend, which is the whole reason
+	// to record an attempt count or a backoff at all.
+	SetInt(key string, value int64)
 }
 
 // Tracer starts child spans and injects propagation headers. The otel build
@@ -87,3 +91,4 @@ func (noopSpan) End()                     {}
 func (noopSpan) RecordError(error)        {}
 func (noopSpan) SetStatus(int)            {}
 func (noopSpan) SetString(string, string) {}
+func (noopSpan) SetInt(string, int64)     {}

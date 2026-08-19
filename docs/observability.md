@@ -141,6 +141,20 @@ W3C `traceparent` propagation is supported in both directions:
 
 The active trace id is added to the access log as `trace_id`.
 
+Two spans cover the resilience path. `upstream.admission` wraps the wait for an
+admission slot — without it a request parked in the pending queue is a gap in
+the trace with nothing accounting for it. Each `upstream.request` attempt span
+carries `retry.attempt` and, from the second attempt on, `retry.backoff_ms`, so
+a trace shows which wait preceded which try rather than a single total that
+explains nothing. Both are numeric attributes: a number recorded as a string
+cannot be filtered or aggregated, which is the only reason to record it.
+
+**`jul_http_requests_in_flight` and `jul_upstream_active_requests{pool}`
+legitimately differ**, and the first operator to compare them will otherwise
+file a bug. The first counts inbound requests; the second counts admitted
+*upstream* work. A static file, a cache hit, a redirect and a WAF-blocked
+request all appear in the first and never in the second.
+
 ### Tracing limitations
 
 - Tracing settings are fixed at startup; changing them requires a restart.
@@ -211,6 +225,12 @@ Each access record carries:
   emitted whenever derivation did **not** simply accept the chain (omitted for
   `accepted`)
 - `request_id`, `user_agent`
+- `upstream_reason` — the bounded reason an upstream call failed, from the
+  [failure taxonomy](core-http.md#upstream-failure-taxonomy). Emitted only when
+  an upstream call actually failed, following the same "omit what adds nothing"
+  rule. **This is a format-contract addition**: a consumer that rejects unknown
+  fields needs updating, and the value set is closed, so a backend address or
+  raw error text will never appear here
 - `trace_id` — when tracing is active
 
 **Why the two derivation fields matter.** When a trusted proxy asserts a chain
