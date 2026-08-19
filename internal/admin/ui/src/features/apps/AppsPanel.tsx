@@ -10,6 +10,7 @@ import {
   fetchRoutes,
   type AppProjection,
   type BackendProjection,
+  type BackendState,
 } from "@/api/client.ts";
 import { usePermission } from "@/auth/usePermission.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
@@ -21,16 +22,34 @@ import { usePersistentState } from "@/lib/usePersistentState.ts";
 
 const APP_REOPEN_KEY = "jul-apps-reopen-selection";
 
-function HealthDot({ healthy }: { readonly healthy: boolean | undefined }) {
-  const label =
-    healthy === undefined ? "health unknown — no active checks" : healthy ? "healthy" : "unhealthy";
+// Every state is named, not merged into a colour. "Its circuit is open" and
+// "the health checker ejected it" call for opposite operator responses, and a
+// backend at its concurrency limit is not unhealthy at all.
+const BACKEND_STATE_LABEL: Record<BackendState, string> = {
+  available: "available",
+  circuit_open: "circuit open — recent failures took it out of rotation",
+  circuit_half_open: "circuit half-open — being probed for recovery",
+  health_unhealthy: "unhealthy — active health checks are failing",
+  at_capacity: "at capacity — max_active_per_backend reached",
+};
+
+const BACKEND_STATE_COLOUR: Record<BackendState, string> = {
+  available: "bg-jul-success",
+  circuit_open: "bg-jul-danger",
+  circuit_half_open: "bg-jul-warning",
+  health_unhealthy: "bg-jul-danger",
+  at_capacity: "bg-jul-warning",
+};
+
+function HealthDot({ state }: { readonly state: BackendState | undefined }) {
+  const label = state === undefined ? "state unknown — backend is not live" : BACKEND_STATE_LABEL[state];
   return (
     <span className="inline-flex items-center">
       <span
         aria-hidden
         title={label}
         className={`inline-block h-2 w-2 rounded-full ${
-          healthy === undefined ? "bg-jul-muted/50" : healthy ? "bg-jul-success" : "bg-jul-danger"
+          state === undefined ? "bg-jul-muted/50" : BACKEND_STATE_COLOUR[state]
         }`}
       />
       <span className="sr-only">{label}</span>
@@ -43,7 +62,7 @@ function BackendRow({ backend }: { readonly backend: BackendProjection }) {
     <tr className="border-b border-jul-border transition-colors last:border-b-0 hover:bg-jul-border/30">
       <td className="truncate px-4 py-2">
         <div className="flex items-center gap-2">
-          <HealthDot healthy={backend.healthy} />
+          <HealthDot state={backend.state} />
           <span className="font-mono text-sm text-jul-text">{backend.address}</span>
         </div>
       </td>
@@ -61,9 +80,9 @@ function BackendRow({ backend }: { readonly backend: BackendProjection }) {
 
 function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen: () => void }) {
   const totalCount = app.backends.length;
-  const healthyCount = app.backends.filter((backend) => backend.healthy === true).length;
-  const unhealthyCount = app.backends.filter((backend) => backend.healthy === false).length;
-  const known = healthyCount + unhealthyCount;
+  const availableCount = app.backends.filter((backend) => backend.state === "available").length;
+  const known = app.backends.filter((backend) => backend.state !== undefined).length;
+  const notAvailableCount = known - availableCount;
 
   return (
     <article className="rounded-lg border border-jul-border bg-jul-surface transition-colors hover:bg-jul-border/10">
@@ -96,8 +115,8 @@ function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen
           {totalCount === 0
             ? "no backends"
             : known === 0
-              ? `${String(totalCount)} backends · health unknown`
-              : `${String(healthyCount)}/${String(totalCount)} healthy${unhealthyCount > 0 ? ` · ${String(unhealthyCount)} down` : ""}`}
+              ? `${String(totalCount)} backends · state unknown`
+              : `${String(availableCount)}/${String(totalCount)} available${notAvailableCount > 0 ? ` · ${String(notAvailableCount)} out of rotation` : ""}`}
         </span>
       </button>
 
@@ -128,12 +147,12 @@ function AppCard({ app, onOpen }: { readonly app: AppProjection; readonly onOpen
 type HealthFilter = "all" | "healthy" | "degraded";
 type UsageFilter = "all" | "used" | "unused";
 
+// The filter reads the server's own verdict rather than recomputing one from
+// the backends: a rollup derived in the browser can disagree with the API
+// during an incident, which is exactly when someone is comparing them.
 function appMatches(app: AppProjection, health: HealthFilter, usage: UsageFilter): boolean {
-  const total = app.backends.length;
-  const healthy = app.backends.filter((backend) => backend.healthy === true).length;
-  const unhealthy = app.backends.filter((backend) => backend.healthy === false).length;
-  if (health === "healthy" && (total === 0 || healthy < total)) return false;
-  if (health === "degraded" && unhealthy === 0) return false;
+  if (health === "healthy" && app.verdict !== "healthy") return false;
+  if (health === "degraded" && app.verdict !== "degraded" && app.verdict !== "down") return false;
   const used = (app.routes_using ?? []).length > 0;
   if (usage === "used" && !used) return false;
   if (usage === "unused" && used) return false;

@@ -33,9 +33,13 @@ type UpstreamStatus struct {
 
 // BackendStatus is the console view of one backend within a pool.
 type BackendStatus struct {
-	Address  string `json:"address"`
-	Weight   int    `json:"weight"`
-	Healthy  bool   `json:"healthy"`
+	Address string `json:"address"`
+	Weight  int    `json:"weight"`
+	// State is the bounded reason this backend can or cannot take traffic:
+	// available, circuit_open, circuit_half_open, health_unhealthy or
+	// at_capacity. It replaces a boolean that could not tell an ejected backend
+	// from one whose circuit is open.
+	State    string `json:"state"`
 	Inflight int64  `json:"inflight"`
 }
 

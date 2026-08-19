@@ -554,10 +554,24 @@ export const RouteProjectionSchema = z.object({
 });
 export type RouteProjection = z.infer<typeof RouteProjectionSchema>;
 
+// The five states the server may report. A tri-state boolean could not express
+// them, and conflated "the health checker ejected it" with "its circuit is
+// open" — two conditions calling for opposite operator responses.
+export const BackendStateSchema = z.enum([
+  "available",
+  "circuit_open",
+  "circuit_half_open",
+  "health_unhealthy",
+  "at_capacity",
+]);
+export type BackendState = z.infer<typeof BackendStateSchema>;
+
 export const BackendProjectionSchema = z.object({
   address: z.string(),
   weight: z.number(),
-  healthy: z.boolean().optional(),
+  // Absent for a backend that is configured but not live, which the Console
+  // shows as unknown rather than guessing.
+  state: BackendStateSchema.optional(),
   inflight: z.number().optional(),
 });
 export type BackendProjection = z.infer<typeof BackendProjectionSchema>;
@@ -566,6 +580,10 @@ export const AppProjectionSchema = z.object({
   name: z.string(),
   strategy: z.string(),
   backends: z.array(BackendProjectionSchema),
+  // The pool-level rollup comes from the server so the Console and the API
+  // cannot disagree during an incident (ADR 0014). "unknown" is distinct from
+  // "down": not observed is not the same as observed to be failing.
+  verdict: z.enum(["healthy", "degraded", "down", "unknown"]).optional(),
   health_check: z.boolean(),
   discovery: z.string().optional(),
   max_fails: z.number().optional(),

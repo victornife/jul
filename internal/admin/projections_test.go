@@ -99,3 +99,39 @@ func TestProjectRoutesGRPCTranscodeTarget(t *testing.T) {
 		t.Errorf("target = %q, want grpc://backend:50051", loc.Target)
 	}
 }
+
+// poolVerdict is what the Console and any API consumer read to decide whether a
+// pool is in trouble. The case that matters is partial degradation: one healthy
+// backend must not mask a tripped one, and "not yet observed" must not be
+// reported as "failing".
+func TestPoolVerdict(t *testing.T) {
+	b := func(states ...string) []BackendProjection {
+		out := make([]BackendProjection, 0, len(states))
+		for i, s := range states {
+			out = append(out, BackendProjection{Address: string(rune('a'+i)) + ":80", State: s})
+		}
+		return out
+	}
+	cases := []struct {
+		name     string
+		backends []BackendProjection
+		want     string
+	}{
+		{"no backends at all", nil, "unknown"},
+		{"none observed yet", b("", ""), "unknown"},
+		{"all available", b("available", "available"), "healthy"},
+		{"one tripped alongside a healthy one", b("available", "circuit_open"), "degraded"},
+		{"one at capacity", b("available", "at_capacity"), "degraded"},
+		{"probing counts as not available", b("available", "circuit_half_open"), "degraded"},
+		{"every backend tripped", b("circuit_open", "health_unhealthy"), "down"},
+		{"observed failure plus an unobserved backend", b("", "circuit_open"), "down"},
+		{"observed success plus an unobserved backend", b("", "available"), "healthy"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := poolVerdict(tc.backends); got != tc.want {
+				t.Errorf("poolVerdict = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

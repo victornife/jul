@@ -18,8 +18,26 @@ server_names = ["localhost"]
   root = "testdata/www"
   index = ["index.html"]
 
+  # Routed so the upstream is actually instantiated at runtime. An upstream that
+  # no location references is projected from config alone, with no live backend
+  # state, which would leave the E2E asserting "unknown" and prove nothing.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/e2e-upstream" }
+  proxy_pass = "http://e2e-pool"
+
 [admin]
 enabled = true
 listen = "127.0.0.1:9291"
 token = "jul-e2e-test-token"
 console = true
+
+# One upstream so GET /api/apps returns a populated pool rather than an empty
+# array. Without it the AppProjection schema check passes vacuously and no
+# backend `state` or pool `verdict` is ever exercised end to end. The backend
+# address is never dialled by these tests: with no health check configured and
+# the circuit closed, a backend reports "available" from birth, so the projected
+# state is deterministic without needing anything listening on the port.
+[[upstreams]]
+name = "e2e-pool"
+strategy = "round_robin"
+servers = ["127.0.0.1:9393"]

@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AppProjection, BackendProjection } from "@/api/client.ts";
+import type { AppProjection, BackendProjection, BackendState } from "@/api/client.ts";
 import { usePermission } from "@/auth/usePermission.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { Drawer } from "@/components/Drawer.tsx";
@@ -31,25 +31,36 @@ function Row({ label, value }: { readonly label: string; readonly value: React.R
   );
 }
 
-function HealthState({ healthy }: { readonly healthy: boolean | undefined }) {
-  if (healthy === undefined) {
-    return (
-      <>
-        <span
-          title="health unknown — no active checks"
-          className="inline-block h-2 w-2 rounded-full bg-jul-muted/50"
-        />
-        <span className="sr-only">health unknown</span>
-      </>
-    );
-  }
+// Every state is named rather than merged into a colour: "its circuit is open"
+// and "the health checker ejected it" call for opposite operator responses, and
+// a backend at its concurrency limit is not unhealthy at all.
+const BACKEND_STATE_LABEL: Record<BackendState, string> = {
+  available: "available",
+  circuit_open: "circuit open — recent failures took it out of rotation",
+  circuit_half_open: "circuit half-open — being probed for recovery",
+  health_unhealthy: "unhealthy — active health checks are failing",
+  at_capacity: "at capacity — max_active_per_backend reached",
+};
+
+const BACKEND_STATE_COLOUR: Record<BackendState, string> = {
+  available: "bg-jul-success",
+  circuit_open: "bg-jul-danger",
+  circuit_half_open: "bg-jul-warning",
+  health_unhealthy: "bg-jul-danger",
+  at_capacity: "bg-jul-warning",
+};
+
+function HealthState({ state }: { readonly state: BackendState | undefined }) {
+  const label = state === undefined ? "state unknown — backend is not live" : BACKEND_STATE_LABEL[state];
   return (
     <>
       <span
-        title={healthy ? "healthy" : "unhealthy"}
-        className={`inline-block h-2 w-2 rounded-full ${healthy ? "bg-jul-success" : "bg-jul-danger"}`}
+        title={label}
+        className={`inline-block h-2 w-2 rounded-full ${
+          state === undefined ? "bg-jul-muted/50" : BACKEND_STATE_COLOUR[state]
+        }`}
       />
-      <span className="sr-only">{healthy ? "healthy" : "unhealthy"}</span>
+      <span className="sr-only">{label}</span>
     </>
   );
 }
@@ -78,7 +89,7 @@ function BackendRow({
     <tr className="border-b border-jul-border last:border-b-0">
       <td className="px-3 py-2">
         <div className="flex items-center gap-2">
-          <HealthState healthy={backend.healthy} />
+          <HealthState state={backend.state} />
           <span className="font-mono text-sm text-jul-text">{backend.address}</span>
         </div>
       </td>
@@ -322,14 +333,14 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
   const canWrite = has("config:write");
   const patch = useRunPatch();
   const total = app.backends.length;
-  const healthy = app.backends.filter((backend) => backend.healthy === true).length;
-  const unhealthy = app.backends.filter((backend) => backend.healthy === false).length;
+  const available = app.backends.filter((backend) => backend.state === "available").length;
+  const known = app.backends.filter((backend) => backend.state !== undefined).length;
   const backendsValue =
     total === 0
       ? "none"
-      : healthy + unhealthy === 0
-        ? `${String(total)} backends · health unknown`
-        : `${String(healthy)}/${String(total)} healthy${unhealthy > 0 ? ` · ${String(unhealthy)} down` : ""}`;
+      : known === 0
+        ? `${String(total)} backends · state unknown`
+        : `${String(available)}/${String(total)} available${known - available > 0 ? ` · ${String(known - available)} out of rotation` : ""}`;
   const [newAddr, setNewAddr] = useState("");
   const [newWeight, setNewWeight] = useState(1);
   const [strategy, setStrategy] = useState(app.strategy || "round_robin");

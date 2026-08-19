@@ -31,8 +31,8 @@ func TestUpstreamsAPI(t *testing.T) {
 		Name:     "api",
 		Strategy: "round_robin",
 		Backends: []BackendStatus{
-			{Address: "10.0.0.1:80", Weight: 1, Healthy: true, Inflight: 2},
-			{Address: "10.0.0.2:80", Weight: 3, Healthy: false, Inflight: 0},
+			{Address: "10.0.0.1:80", Weight: 1, State: "available", Inflight: 2},
+			{Address: "10.0.0.2:80", Weight: 3, State: "health_unhealthy", Inflight: 0},
 		},
 	}}
 	s := newTestServer(t, config.AdminConfig{}, Deps{Upstreams: func() []UpstreamStatus { return want }})
@@ -50,8 +50,8 @@ func TestUpstreamsAPI(t *testing.T) {
 	if len(got) != 1 || got[0].Name != "api" || len(got[0].Backends) != 2 {
 		t.Fatalf("unexpected payload: %+v", got)
 	}
-	if got[0].Backends[1].Healthy {
-		t.Error("second backend should be unhealthy")
+	if got[0].Backends[1].State != "health_unhealthy" {
+		t.Errorf("second backend state = %q, want health_unhealthy", got[0].Backends[1].State)
 	}
 }
 

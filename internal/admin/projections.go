@@ -257,8 +257,7 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 			seen[b.Address] = true
 			bp := BackendProjection{Address: b.Address, Weight: b.Weight}
 			if lb, ok := liveMap[b.Address]; ok {
-				healthy := lb.Healthy
-				bp.Healthy = &healthy
+				bp.State = lb.State
 				bp.Inflight = lb.Inflight
 			}
 			ap.Backends = append(ap.Backends, bp)
@@ -271,11 +270,11 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 				continue
 			}
 			bp := BackendProjection{Address: b.Address, Weight: b.Weight}
-			healthy := b.Healthy
-			bp.Healthy = &healthy
+			bp.State = b.State
 			bp.Inflight = b.Inflight
 			ap.Backends = append(ap.Backends, bp)
 		}
+		ap.Verdict = poolVerdict(ap.Backends)
 		ap.Warnings = appWarnings(up)
 		out = append(out, ap)
 	}
@@ -745,4 +744,45 @@ type TranscodeProjection struct {
 	Streaming          bool   `json:"streaming"`
 	StreamMode         string `json:"stream_mode,omitempty"`
 	MaxMessageSize     string `json:"max_message_size,omitempty"`
+}
+
+// BackendStateAvailable mirrors upstream.StateAvailable and is the one backend
+// state this package has to reason about rather than merely pass through.
+//
+// This package receives backend state as a plain string through a hook rather
+// than importing the runtime, so the two can drift silently. It is exported so
+// internal/app, which imports both packages, can pin it to the enum; the value
+// is already part of the wire contract, so exporting it widens nothing.
+const BackendStateAvailable = "available"
+
+// poolVerdict rolls a pool's backends up to one word.
+//
+// It is served rather than computed in the browser so the Console and the API
+// cannot disagree during an incident (ADR 0014). "unknown" is distinct from
+// "down": a pool with no live state has not been observed, which is not the
+// same as having been observed to be failing.
+func poolVerdict(backends []BackendProjection) string {
+	if len(backends) == 0 {
+		return "unknown"
+	}
+	known, available := 0, 0
+	for _, b := range backends {
+		if b.State == "" {
+			continue
+		}
+		known++
+		if b.State == BackendStateAvailable {
+			available++
+		}
+	}
+	switch {
+	case known == 0:
+		return "unknown"
+	case available == 0:
+		return "down"
+	case available < known:
+		return "degraded"
+	default:
+		return "healthy"
+	}
 }

@@ -140,13 +140,13 @@ describe("AppProjectionSchema", () => {
     const raw = {
       name: "api",
       strategy: "round_robin",
-      backends: [{ address: "10.0.0.1:80", weight: 1, healthy: true, inflight: 0 }],
+      backends: [{ address: "10.0.0.1:80", weight: 1, state: "available", inflight: 0 }],
       health_check: true,
       discovery: "consul",
     };
     const a = AppProjectionSchema.parse(raw);
     expect(a.discovery).toBe("consul");
-    expect(a.backends[0]?.healthy).toBe(true);
+    expect(a.backends[0]?.state).toBe("available");
   });
 });
 
@@ -367,8 +367,8 @@ describe("AppsPanel", () => {
               name: "api",
               strategy: "round_robin",
               backends: [
-                { address: "10.0.0.1:80", weight: 1, healthy: true, inflight: 2 },
-                { address: "10.0.0.2:80", weight: 1, healthy: false, inflight: 0 },
+                { address: "10.0.0.1:80", weight: 1, state: "available", inflight: 2 },
+                { address: "10.0.0.2:80", weight: 1, state: "health_unhealthy", inflight: 0 },
               ],
               health_check: true,
               discovery: "consul",
@@ -385,9 +385,9 @@ describe("AppsPanel", () => {
     expect(await screen.findByText("round_robin")).toBeInTheDocument();
   });
 
-  it("shows correct healthy/total count", async () => {
+  it("shows correct available/total count", async () => {
     render(<AppsPanel />, { wrapper: Wrapper });
-    expect(await screen.findByText("1/2 healthy · 1 down")).toBeInTheDocument();
+    expect(await screen.findByText("1/2 available · 1 out of rotation")).toBeInTheDocument();
   });
 
   it("shows discovery badge", async () => {
@@ -395,7 +395,7 @@ describe("AppsPanel", () => {
     expect(await screen.findByText("discovery:consul")).toBeInTheDocument();
   });
 
-  it("marks pool health unknown when no live status is present", async () => {
+  it("marks backend state unknown when no live status is present", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -415,7 +415,7 @@ describe("AppsPanel", () => {
       }),
     );
     render(<AppsPanel />, { wrapper: Wrapper });
-    expect(await screen.findByText("2 backends · health unknown")).toBeInTheDocument();
+    expect(await screen.findByText("2 backends · state unknown")).toBeInTheDocument();
   });
 });
 

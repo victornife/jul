@@ -191,12 +191,33 @@ by `GET /api/overview`.
 ### Upstreams
 
 Lists each named `[[upstreams]]` pool with its load-balancing strategy and a row
-per backend showing live health (active + passive), weight, and in-flight
-requests. Backend health is three-state: a green dot is known-healthy, red is
-known-unhealthy, and a grey dot means health is **unknown** — no live status yet
-(for example, health checks are disabled). The pool summary reports unknown
-pools as "*N* backends · health unknown" rather than counting them as healthy.
-Backed by `GET /api/upstreams`.
+per backend showing live state, weight, and in-flight requests.
+
+Backend state is a closed enum, not a boolean. A backend can be out of rotation
+for reasons that have nothing to do with health checking — the circuit breaker
+may have tripped it, or it may simply be full — and collapsing those into
+"unhealthy" hid the distinction operators need during an incident:
+
+| `state` | Dot | Meaning |
+| --- | --- | --- |
+| `available` | green | Serving. Eligible for selection. |
+| `circuit_open` | red | Tripped by consecutive live-traffic failures. Not selected until `fail_timeout` elapses. |
+| `circuit_half_open` | amber | Recovering. A limited number of probe requests are allowed through to test it. |
+| `health_unhealthy` | red | Ejected by an active health check. |
+| `at_capacity` | amber | Healthy, but already at `max_active_per_backend`. |
+| *(absent)* | grey | **Unknown** — no live status yet, e.g. the pool is configured but not routed. |
+
+Unknown is deliberately distinct from failing: a backend nobody has observed is
+not the same as one observed to be down.
+
+Each pool also carries a `verdict` — `healthy`, `degraded`, `down`, or
+`unknown` — rolled up from its backends. It is computed by the server rather
+than in the browser so the Console and any API client cannot disagree during an
+incident ([ADR 0014](adr/0014-operability-surfaces.md)). A pool is `degraded`
+when at least one backend is available and at least one is not, so a single
+healthy backend never masks a tripped one.
+
+Backed by `GET /api/apps`.
 
 ### Certificates
 
