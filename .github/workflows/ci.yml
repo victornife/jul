@@ -604,29 +604,28 @@ jobs:
       - name: build SPA
         run: pnpm --dir ${{ env.CONSOLE_UI }} run build
       - name: install Playwright browsers
-        # apt mirrors used by --with-deps occasionally hang; bound each try so a
-        # stalled fetch fails fast instead of burning the whole job timeout.
-        #
-        # The retries also have to wait. The common failure is not a hang but a
-        # held apt lock (the runner image's own unattended-upgrades), and the
-        # previous loop fired attempts 2 and 3 within seconds of the first, so
-        # they hit the same lock and the whole step failed in under ten seconds
-        # having never run a test.
+        # Split deliberately. --with-deps does two unrelated things: download
+        # the browser (no apt, no root) and apt-get its system libraries. Only
+        # the first is required for the job to run at all, and only the second
+        # can be blocked by another process holding the apt lock — which on
+        # this image is held for the whole job, not transiently, so waiting for
+        # it does not help.
         run: |
           for attempt in 1 2 3; do
-            timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install chromium --with-deps && exit 0
-            echo "::warning::playwright install attempt $attempt failed or timed out, retrying..."
-            if [ "$attempt" = 3 ]; then break; fi
-            # Wait for whoever holds the apt lock to finish, up to five minutes.
-            # The unconditional sleep is the floor: fuser is absent on some
-            # images, and without it the wait would silently become a no-op.
+            timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install chromium && break
+            echo "::warning::browser download attempt $attempt failed or timed out"
+            if [ "$attempt" = 3 ]; then
+              echo "::error::could not download the Playwright browser"
+              exit 1
+            fi
             sleep 15
-            for _ in $(seq 1 60); do
-              sudo fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || break
-              sleep 5
-            done
           done
-          exit 1
+          # System libraries are best-effort: ubuntu-latest already ships what
+          # headless chromium needs. If a library really is missing the smoke
+          # test fails on launch with a named error, which is a better outcome
+          # than a job that cannot start because apt is busy.
+          timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install-deps chromium \
+            || echo "::warning::playwright install-deps failed (apt busy?); continuing with the image's own libraries"
       - name: run browser smoke
         run: pnpm --dir ${{ env.CONSOLE_UI }} run e2e:ci
       - name: upload Playwright report
@@ -668,29 +667,28 @@ jobs:
       - name: build SPA
         run: pnpm --dir ${{ env.CONSOLE_UI }} run build
       - name: install Playwright browsers
-        # apt mirrors used by --with-deps occasionally hang; bound each try so a
-        # stalled fetch fails fast instead of burning the whole job timeout.
-        #
-        # The retries also have to wait. The common failure is not a hang but a
-        # held apt lock (the runner image's own unattended-upgrades), and the
-        # previous loop fired attempts 2 and 3 within seconds of the first, so
-        # they hit the same lock and the whole step failed in under ten seconds
-        # having never run a test.
+        # Split deliberately. --with-deps does two unrelated things: download
+        # the browser (no apt, no root) and apt-get its system libraries. Only
+        # the first is required for the job to run at all, and only the second
+        # can be blocked by another process holding the apt lock — which on
+        # this image is held for the whole job, not transiently, so waiting for
+        # it does not help.
         run: |
           for attempt in 1 2 3; do
-            timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install chromium --with-deps && exit 0
-            echo "::warning::playwright install attempt $attempt failed or timed out, retrying..."
-            if [ "$attempt" = 3 ]; then break; fi
-            # Wait for whoever holds the apt lock to finish, up to five minutes.
-            # The unconditional sleep is the floor: fuser is absent on some
-            # images, and without it the wait would silently become a no-op.
+            timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install chromium && break
+            echo "::warning::browser download attempt $attempt failed or timed out"
+            if [ "$attempt" = 3 ]; then
+              echo "::error::could not download the Playwright browser"
+              exit 1
+            fi
             sleep 15
-            for _ in $(seq 1 60); do
-              sudo fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || break
-              sleep 5
-            done
           done
-          exit 1
+          # System libraries are best-effort: ubuntu-latest already ships what
+          # headless chromium needs. If a library really is missing the smoke
+          # test fails on launch with a named error, which is a better outcome
+          # than a job that cannot start because apt is busy.
+          timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install-deps chromium \
+            || echo "::warning::playwright install-deps failed (apt busy?); continuing with the image's own libraries"
       # Run only the real-server project — the mocked smoke runs in console-e2e
       # already. The real-server project verifies Go admin API response shapes
       # match the Zod schemas in client.ts (schema-drift detection).
