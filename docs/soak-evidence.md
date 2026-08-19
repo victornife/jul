@@ -64,6 +64,47 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-08-19 — Resilience amplification — **measured deterministically; 24h soak still NOT RUN**
+
+#144 requires that a total outage at `retry_budget_percent = 10` hold upstream
+load at **≤ 1.1×** inbound. That measurement no longer waits on the soak: it is
+made by `TestAmplificationUnderTotalOutage` in `internal/upstream`, which counts
+every upstream attempt in the retry adapter — the only place that sees all of
+them, including the ones the budget denied.
+
+| | |
+| --- | --- |
+| Inbound | 100,000 requests, every backend refusing |
+| Upstream attempts | 110,003 |
+| **Measured amplification** | **1.10003×** |
+| Unbudgeted control | 3.00× (the attempt cap), so the budget's effect is a measured difference and not an assertion in isolation |
+
+**The criterion as literally written is not achievable by this design, at any
+volume.** `Allow` grants while
+
+```
+retries < floor(primaries * percent / 100) + minFreeRetries
+```
+
+so the ceiling is 1.1× **plus** `minFreeRetries` per accounting window, always.
+The 100,000-request run is over by exactly three requests — the floor — not by a
+proportion.
+
+The floor is deliberate: without it a pool with almost no traffic could not fail
+over at all, which is precisely when a stale connection is most likely. It is an
+absolute constant rather than a multiplier — at most 3 extra requests per
+10-second window, 0.3 requests per second, whatever the inbound rate — so it
+cannot produce the amplification collapse the criterion exists to prevent. The
+test asserts that the overshoot beyond 1.1× stays an absolute handful and does
+**not** grow with load, which is the property that actually matters.
+
+The acceptance checklist should be read as ≤ 1.1× + 3 requests per window, or
+amended.
+
+The 24-hour resilience soak itself — bounded memory, flat goroutine count and
+multi-hour stream accounting — is **still not run**; see the entry below, which
+remains open.
+
 ### 2026-08-18 — Upstream resilience / admission soak — **NOT RUN, acceptance item open**
 
 Recorded here because the absence of a run is itself evidence, and because the
