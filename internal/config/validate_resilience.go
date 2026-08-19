@@ -35,6 +35,26 @@ func validateResilience(r *ResilienceConfig, where string, grace time.Duration) 
 	return errs
 }
 
+// validateCircuitThresholds rejects writing a breaker threshold under both
+// spellings.
+//
+// The alternative is a precedence rule, which means an operator who set both to
+// different values has a configuration that silently means one of them. The
+// migration is moving one line into the block above it.
+func validateCircuitThresholds(up UpstreamConfig, where string) []error {
+	if up.Resilience == nil {
+		return nil
+	}
+	var errs []error
+	if up.Resilience.MaxFails > 0 && up.MaxFails > 0 {
+		errs = append(errs, fmt.Errorf("%s: max_fails is set both at the upstream level and in [upstreams.resilience]; they are the same control and must not both be set; keep the one in resilience", where))
+	}
+	if up.Resilience.FailTimeout.Std() > 0 && up.FailTimeout.Std() > 0 {
+		errs = append(errs, fmt.Errorf("%s: fail_timeout is set both at the upstream level and in [upstreams.resilience]; they are the same control and must not both be set; keep the one in resilience", where))
+	}
+	return errs
+}
+
 // validateLocationResilience checks a location's stateless resilience block.
 //
 // proxyRetries is the location's deprecated proxy_retries value. Setting both

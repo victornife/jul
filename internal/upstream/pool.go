@@ -93,14 +93,6 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 	if len(cfg.Servers) == 0 && !discoveryEnabled(cfg.Discovery) {
 		return nil, fmt.Errorf("upstream %q has no servers", cfg.Name)
 	}
-	maxFails := cfg.MaxFails
-	if maxFails < 1 {
-		maxFails = 1
-	}
-	failTimeout := cfg.FailTimeout.Std()
-	if failTimeout <= 0 {
-		failTimeout = 10 * time.Second
-	}
 	policy, err := resilience.Resolve(cfg.Resilience.Options())
 	if err != nil {
 		return nil, fmt.Errorf("upstream %q: %w", cfg.Name, err)
@@ -116,8 +108,8 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 		budget:    NewBudget(policy.RetryBudgetPercent()),
 	}
 	p.circuit.Store(&circuitParams{
-		maxFails:       maxFails,
-		failTimeout:    failTimeout,
+		maxFails:       cfg.CircuitMaxFails(),
+		failTimeout:    cfg.CircuitFailTimeout(),
 		halfOpenProbes: cfg.Resilience.HalfOpenProbes(),
 	})
 	bs := buildBackends(cfg.Servers, scheme, p.circuitParams())

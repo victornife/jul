@@ -103,7 +103,8 @@ servers = ["127.0.0.1:3000", "127.0.0.1:3001"]
 ```
 
 Start two backends on ports 3000 and 3001. Jul.IA balances requests between
-them and marks a backend unhealthy after 3 consecutive failures (`max_fails`).
+them and takes a backend out of rotation after `max_fails` consecutive failures
+(default 1).
 
 ---
 

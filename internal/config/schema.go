@@ -461,7 +461,14 @@ type UpstreamConfig struct {
 	Strategy string           `toml:"strategy"`
 	Servers  []UpstreamServer `toml:"servers"`
 
-	// Passive health-check tuning.
+	// MaxFails and FailTimeout are the circuit breaker's failure threshold and
+	// open duration.
+	//
+	// Deprecated: use [upstreams.resilience] max_fails and fail_timeout, so the
+	// block is the whole resilience surface rather than most of it. Same names,
+	// same defaults, same meanings. This spelling stays valid and is scheduled
+	// for removal in the next major; setting both is a validation error rather
+	// than a silent precedence rule.
 	MaxFails    int      `toml:"max_fails"`
 	FailTimeout Duration `toml:"fail_timeout"`
 
@@ -498,6 +505,17 @@ type UpstreamConfig struct {
 // is MaxPendingRequests: an unbounded pending queue is the memory failure this
 // block exists to prevent, so it is deliberately unrepresentable.
 type ResilienceConfig struct {
+	// MaxFails is how many consecutive failures take a backend out of rotation.
+	// 0 means the default of 1.
+	//
+	// It is the circuit breaker's failure threshold, not a second mechanism
+	// beside it: two spellings for one threshold, plus a precedence rule, would
+	// buy an operator nothing and cost them a way to be wrong.
+	MaxFails int `toml:"max_fails"`
+	// FailTimeout is how long a backend stays out of rotation before it is
+	// probed. 0 means the default of 10s.
+	FailTimeout Duration `toml:"fail_timeout"`
+
 	// MaxActiveRequests bounds admitted logical requests, streams and
 	// connections for the pool. 0 is unlimited.
 	MaxActiveRequests int `toml:"max_active_requests"`
@@ -613,6 +631,13 @@ func (r *ResilienceConfig) Options() resilience.Options {
 // DefaultCircuitHalfOpenProbes is the bound applied when the key is absent.
 const DefaultCircuitHalfOpenProbes = 1
 
+// DefaultMaxFails and DefaultFailTimeout are the breaker's thresholds when
+// neither spelling sets them.
+const (
+	DefaultMaxFails    = 1
+	DefaultFailTimeout = 10 * time.Second
+)
+
 // HalfOpenProbes resolves the half-open probe bound, distinguishing an absent
 // key (default) from an explicit 0 (unbounded).
 func (r *ResilienceConfig) HalfOpenProbes() int {
@@ -620,6 +645,31 @@ func (r *ResilienceConfig) HalfOpenProbes() int {
 		return DefaultCircuitHalfOpenProbes
 	}
 	return *r.CircuitHalfOpenProbes
+}
+
+// CircuitMaxFails resolves the failure threshold from either spelling. The
+// deprecated top-level key is only consulted when the block does not set it,
+// and both being set is a validation error, so this can never silently pick a
+// winner between two values an operator wrote.
+func (u UpstreamConfig) CircuitMaxFails() int {
+	if u.Resilience != nil && u.Resilience.MaxFails > 0 {
+		return u.Resilience.MaxFails
+	}
+	if u.MaxFails > 0 {
+		return u.MaxFails
+	}
+	return DefaultMaxFails
+}
+
+// CircuitFailTimeout resolves the open duration from either spelling.
+func (u UpstreamConfig) CircuitFailTimeout() time.Duration {
+	if u.Resilience != nil && u.Resilience.FailTimeout.Std() > 0 {
+		return u.Resilience.FailTimeout.Std()
+	}
+	if d := u.FailTimeout.Std(); d > 0 {
+		return d
+	}
+	return DefaultFailTimeout
 }
 
 // BackendTLSConfig is the outbound (backend) TLS policy. It is deliberately a

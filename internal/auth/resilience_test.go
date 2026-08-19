@@ -359,3 +359,103 @@ func TestAuthDependencyDefaultClients(t *testing.T) {
 		t.Fatalf("JWKS default client = %+v, want a %s timeout", c.dep.client, DefaultDependencyTimeout)
 	}
 }
+
+// openCircuitPool builds an auth-dependency pool whose only backend has an open
+// circuit, reached the way production reaches it — through a real failure, not
+// by poking at internal state.
+func openCircuitPool(t *testing.T, addr string) *upstream.Pool {
+	t.Helper()
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:     "authdep",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
+		Resilience: &config.ResilienceConfig{
+			MaxFails:    1,
+			FailTimeout: config.Duration(time.Hour),
+		},
+	}, "http")
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	at, err := pool.Pick()
+	if err != nil {
+		t.Fatalf("priming pick: %v", err)
+	}
+	pool.MarkFailure(at)
+	pool.Release(at.Backend)
+
+	// Control: without this the tests below could pass because the dependency
+	// was unreachable for some entirely different reason.
+	if _, err := pool.Pick(); err == nil {
+		t.Fatal("the circuit did not open, so these tests would prove nothing")
+	}
+	return pool
+}
+
+// TestForwardAuthFailsClosedWhenTheCircuitIsOpen closes the gap left by #142.
+//
+// The breaker landing in #294 added a new way for an auth dependency to be
+// unreachable, and a new refusal path is exactly where a fail-open would be
+// introduced without anyone noticing: the auth service here is healthy and
+// would allow the request, so nothing but the circuit stands between the client
+// and the protected handler.
+func TestForwardAuthFailsClosedWhenTheCircuitIsOpen(t *testing.T) {
+	var reached atomic.Int64
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+		w.WriteHeader(http.StatusOK) // would allow, if it were ever consulted
+	}))
+	defer authSrv.Close()
+
+	pool := openCircuitPool(t, strings.TrimPrefix(authSrv.URL, "http://"))
+
+	a, err := New(context.Background(), config.AuthConfig{
+		ForwardAuth: &config.ForwardAuthConfig{URL: authSrv.URL},
+	}, Options{ForwardPool: pool})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a.forward.dep.client = authSrv.Client()
+
+	var served atomic.Int64
+	h := a.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		served.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://app.example/secret", nil))
+
+	if served.Load() != 0 {
+		t.Fatal("the request reached the protected handler while the auth dependency's circuit was open: a resilience control became an authentication bypass")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if reached.Load() != 0 {
+		t.Fatalf("the auth service was called %d times; an open circuit must refuse before the subrequest", reached.Load())
+	}
+}
+
+// TestJWTFailsClosedWhenTheCircuitIsOpen pins the same rule for JWKS. A key that
+// cannot be fetched must not validate a token, and an unverifiable token must
+// not reach the protected handler.
+func TestJWTFailsClosedWhenTheCircuitIsOpen(t *testing.T) {
+	var reached atomic.Int64
+	jwks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+	}))
+	defer jwks.Close()
+
+	pool := openCircuitPool(t, strings.TrimPrefix(jwks.URL, "http://"))
+	c := newJWKSCache(jwks.URL, jwks.Client(), pool)
+
+	if _, err := c.keyByID("unknown-kid"); err == nil {
+		t.Fatal("keyByID returned a key while the JWKS pool's circuit was open")
+	}
+	if reached.Load() != 0 {
+		t.Fatalf("JWKS was fetched %d times; an open circuit must refuse first", reached.Load())
+	}
+}

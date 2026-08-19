@@ -669,6 +669,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "ResilienceConfig.FailTimeout",
+      "path": "upstreams[].resilience.fail_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 10s",
+      "active_when": "always"
+    },
+    {
       "go_field": "ResilienceConfig.MaxActivePerBackend",
       "path": "upstreams[].resilience.max_active_per_backend",
       "kind": "integer",
@@ -691,6 +699,14 @@
       "constraint": "0 to 100000",
       "zero_semantics": "omitted/zero means unlimited",
       "active_when": "HTTP proxy routes; not applicable to native gRPC or transcoding"
+    },
+    {
+      "go_field": "ResilienceConfig.MaxFails",
+      "path": "upstreams[].resilience.max_fails",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 1",
+      "active_when": "always"
     },
     {
       "go_field": "ResilienceConfig.MaxPendingRequests",
@@ -909,7 +925,7 @@
       "path": "upstreams[].fail_timeout",
       "kind": "duration",
       "constraint": "non-negative",
-      "zero_semantics": "omitted/zero defaults to 10s",
+      "zero_semantics": "omitted/zero defaults to 10s; deprecated in favour of upstreams[].resilience.fail_timeout, and setting both is an error",
       "active_when": "always"
     },
     {
@@ -917,7 +933,7 @@
       "path": "upstreams[].max_fails",
       "kind": "integer",
       "constraint": "non-negative",
-      "zero_semantics": "omitted/zero defaults to 3",
+      "zero_semantics": "omitted/zero defaults to 1; deprecated in favour of upstreams[].resilience.max_fails, and setting both is an error",
       "active_when": "always"
     },
     {
