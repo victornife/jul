@@ -673,3 +673,63 @@ func TestRetryRequestForNilPool(t *testing.T) {
 		t.Fatalf("RetryRequestFor on a nil pool = %+v, want the override verbatim", got)
 	}
 }
+
+// TestOnBackoffReportsEveryWaitBeforeItHappens pins the hook that lets a caller
+// annotate its span with the retry delay. The wait is the driver's to compute
+// and the span is the caller's, so without this hook a backoff shows up in a
+// trace as unexplained latency between attempts.
+func TestOnBackoffReportsEveryWaitBeforeItHappens(t *testing.T) {
+	p := testPool(t, "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3")
+
+	type call struct {
+		next int
+		d    time.Duration
+	}
+	var calls []call
+	attempts := 0
+
+	_, _ = p.Do(context.Background(), RetryRequest{
+		Replayable:     true,
+		BackoffInitial: time.Millisecond,
+		BackoffMax:     4 * time.Millisecond,
+		OnBackoff: func(next int, d time.Duration) {
+			calls = append(calls, call{next, d})
+			// The hook fires before the sleep, so the attempt it names must not
+			// have run yet. A hook reporting a wait after the fact would put the
+			// annotation on the wrong span.
+			if next != attempts+1 {
+				t.Errorf("OnBackoff announced attempt %d after %d attempts had run", next, attempts)
+			}
+		},
+	}, func(ctx context.Context, b Attempt, n int) AttemptResult {
+		attempts++
+		return AttemptResult{Err: errAttempt}
+	})
+
+	// Three backends, three attempts, so two gaps between them.
+	if len(calls) != attempts-1 {
+		t.Fatalf("OnBackoff fired %d times over %d attempts, want one per gap", len(calls), attempts)
+	}
+	for i, c := range calls {
+		if c.next != i+2 {
+			t.Errorf("call %d announced attempt %d, want %d", i, c.next, i+2)
+		}
+		// Full jitter draws from [0, cap), so the only bound that always holds
+		// is the clamp. Asserting a specific delay here would be asserting the
+		// jitter, which is deliberately random.
+		if c.d < 0 || c.d > 4*time.Millisecond {
+			t.Errorf("call %d delay %v outside [0, BackoffMax]", i, c.d)
+		}
+	}
+}
+
+// A nil hook is the common case and must not panic.
+func TestOnBackoffIsOptional(t *testing.T) {
+	p := testPool(t, "127.0.0.1:1", "127.0.0.1:2")
+	_, _ = p.Do(context.Background(), RetryRequest{
+		Replayable:     true,
+		BackoffInitial: time.Millisecond,
+	}, func(ctx context.Context, b Attempt, n int) AttemptResult {
+		return AttemptResult{Err: errAttempt}
+	})
+}

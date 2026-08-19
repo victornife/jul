@@ -27,6 +27,7 @@ func TestActiveDefaultsToNoop(t *testing.T) {
 	}
 	// None of these must panic on the no-op span.
 	span.SetString("upstream.backend", "10.0.0.1:80")
+	span.SetInt("retry.attempt", 2)
 	span.SetStatus(http.StatusBadGateway)
 	span.RecordError(errors.New("boom"))
 	span.End()
