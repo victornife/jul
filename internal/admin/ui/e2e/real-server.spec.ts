@@ -591,61 +591,54 @@ test(
   async ({ request }) => {
     // The e2e config has a static root route. Switch it to gRPC via structured
     // patch/apply and verify the action round-trips through /api/routes.
-    const cfgResp = await request.get("/api/config");
-    expect(cfgResp.status()).toBe(200);
-    const cfg = RawConfigSchema.parse(await cfgResp.json());
-    const baseVersion = cfg.base_version ?? "";
+    const setLocationAction = async (action: Record<string, unknown>) => {
+      const cfgResp = await request.get("/api/config");
+      expect(cfgResp.status()).toBe(200);
+      const cfg = RawConfigSchema.parse(await cfgResp.json());
+      return postWithConflictRetry(request, "/api/config/patch/apply", {
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({
+          base_version: cfg.base_version ?? "",
+          ops: [
+            {
+              op: "location_set_action",
+              listen: "127.0.0.1:9292",
+              server_names: ["localhost"],
+              match_type: "prefix",
+              path: "/",
+              action,
+            },
+          ],
+        }),
+      });
+    };
 
-    const applyResp = await request.post("/api/config/patch/apply", {
-      headers: { "Content-Type": "application/json" },
-      data: JSON.stringify({
-        base_version: baseVersion,
-        ops: [
-          {
-            op: "location_set_action",
-            listen: "127.0.0.1:9292",
-            server_names: ["localhost"],
-            match_type: "prefix",
-            path: "/",
-            action: { kind: "grpc_proxy", target: "http://backend:9000" },
-          },
-        ],
-      }),
-    });
-    expect(applyResp.status()).toBe(200);
-    const applyBody: unknown = await applyResp.json();
-    expect((applyBody as Record<string, unknown>).ok).toBe(true);
+    // The restore must run even if an assertion below fails — otherwise a
+    // failure here leaves "/" pointed at a nonexistent gRPC backend for every
+    // later test in this file (one shared server, workers: 1).
+    let failure: unknown;
+    try {
+      const applyResp = await setLocationAction({ kind: "grpc_proxy", target: "http://backend:9000" });
+      expect(applyResp.status()).toBe(200);
+      const applyBody: unknown = await applyResp.json();
+      expect((applyBody as Record<string, unknown>).ok).toBe(true);
 
-    const routesResp = await request.get("/api/routes");
-    expect(routesResp.status()).toBe(200);
-    const routes = z.array(RouteProjectionSchema).parse(await routesResp.json());
-    const server = routes.find((r) => r.listen === "127.0.0.1:9292");
-    expect(server).toBeTruthy();
-    const route = server!.locations.find((l) => l.match === "/" && l.type === "prefix");
-    expect(route).toBeTruthy();
-    expect(route!.action).toBe("grpc");
-    expect(route!.target).toBe("http://backend:9000");
+      const routesResp = await request.get("/api/routes");
+      expect(routesResp.status()).toBe(200);
+      const routes = z.array(RouteProjectionSchema).parse(await routesResp.json());
+      const server = routes.find((r) => r.listen === "127.0.0.1:9292");
+      expect(server).toBeTruthy();
+      const route = server!.locations.find((l) => l.match === "/" && l.type === "prefix");
+      expect(route).toBeTruthy();
+      expect(route!.action).toBe("grpc");
+      expect(route!.target).toBe("http://backend:9000");
+    } catch (err) {
+      failure = err;
+    }
 
     // Restore the static action so later tests keep the fixture baseline.
-    const cfgResp2 = await request.get("/api/config");
-    expect(cfgResp2.status()).toBe(200);
-    const latestCfg = RawConfigSchema.parse(await cfgResp2.json());
-    const restoreResp = await request.post("/api/config/patch/apply", {
-      headers: { "Content-Type": "application/json" },
-      data: JSON.stringify({
-        base_version: latestCfg.base_version ?? "",
-        ops: [
-          {
-            op: "location_set_action",
-            listen: "127.0.0.1:9292",
-            server_names: ["localhost"],
-            match_type: "prefix",
-            path: "/",
-            action: { kind: "static", target: "testdata/www" },
-          },
-        ],
-      }),
-    });
+    const restoreResp = await setLocationAction({ kind: "static", target: "testdata/www" });
+    if (failure) throw failure;
     expect(restoreResp.status()).toBe(200);
   },
 );
