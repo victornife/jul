@@ -50,8 +50,8 @@ func TestAdaptUpstreamsMapsCorrectly(t *testing.T) {
 			Name:     "api",
 			Strategy: "least_conn",
 			Backends: []upstream.BackendStatus{
-				{Address: "10.0.0.1:80", Healthy: true, Weight: 3, Inflight: 7},
-				{Address: "10.0.0.2:80", Healthy: false, Weight: 1, Inflight: 0},
+				{Address: "10.0.0.1:80", State: "available", Weight: 3, Inflight: 7},
+				{Address: "10.0.0.2:80", State: "health_unhealthy", Weight: 1, Inflight: 0},
 			},
 		},
 	}
@@ -66,7 +66,7 @@ func TestAdaptUpstreamsMapsCorrectly(t *testing.T) {
 		t.Fatalf("backends = %d, want 2", len(out[0].Backends))
 	}
 	b := out[0].Backends[0]
-	if b.Address != "10.0.0.1:80" || b.Weight != 3 || !b.Healthy || b.Inflight != 7 {
+	if b.Address != "10.0.0.1:80" || b.Weight != 3 || b.State != "available" || b.Inflight != 7 {
 		t.Errorf("unexpected backend[0]: %+v", b)
 	}
 }

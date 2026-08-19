@@ -646,7 +646,7 @@ func TestAppsProjection(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		LoadConfig: func() (*config.Config, error) { return cfg, nil },
 		Upstreams: func() []UpstreamStatus {
-			return []UpstreamStatus{{Name: "api", Backends: []BackendStatus{{Address: "10.0.0.1:80", Healthy: true}}}}
+			return []UpstreamStatus{{Name: "api", Backends: []BackendStatus{{Address: "10.0.0.1:80", State: "available"}}}}
 		},
 	})
 	rr := httptest.NewRecorder()
@@ -661,7 +661,7 @@ func TestAppsProjection(t *testing.T) {
 	if len(out) != 1 || out[0].Name != "api" {
 		t.Fatalf("unexpected projection: %+v", out)
 	}
-	if len(out[0].Backends) != 1 || out[0].Backends[0].Healthy == nil || !*out[0].Backends[0].Healthy {
+	if len(out[0].Backends) != 1 || out[0].Backends[0].State != "available" {
 		t.Error("backend should be marked healthy from live data")
 	}
 	if out[0].HealthCheckPath != "/healthz" || out[0].HealthCheckTimeout != "2s" || out[0].HealthCheckHealthyThr != 2 {
@@ -694,7 +694,7 @@ func TestAppsBackendHealthThreeState(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		LoadConfig: func() (*config.Config, error) { return cfg, nil },
 		Upstreams: func() []UpstreamStatus {
-			return []UpstreamStatus{{Name: "api", Backends: []BackendStatus{{Address: "10.0.0.1:80", Healthy: false}}}}
+			return []UpstreamStatus{{Name: "api", Backends: []BackendStatus{{Address: "10.0.0.1:80", State: "health_unhealthy"}}}}
 		},
 	})
 	rr := httptest.NewRecorder()
@@ -709,10 +709,10 @@ func TestAppsBackendHealthThreeState(t *testing.T) {
 	if len(out) != 1 || len(out[0].Backends) != 2 {
 		t.Fatalf("unexpected projection: %+v", out)
 	}
-	if out[0].Backends[0].Healthy == nil || *out[0].Backends[0].Healthy {
+	if out[0].Backends[0].State != "health_unhealthy" {
 		t.Error("first backend should be known-unhealthy (healthy=false)")
 	}
-	if out[0].Backends[1].Healthy != nil {
+	if out[0].Backends[1].State != "" {
 		t.Error("second backend should be unknown (healthy nil/omitted)")
 	}
 }

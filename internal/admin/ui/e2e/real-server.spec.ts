@@ -160,13 +160,26 @@ test("GET /api/apps matches AppProjectionSchema[]", async ({ request }) => {
   const resp = await request.get("/api/apps");
   expect(resp.status()).toBe(200);
   const data: unknown = await resp.json();
-  // No upstreams in the e2e config → empty array is valid.
   const parsed = z.array(AppProjectionSchema).safeParse(data);
   if (!parsed.success) {
     throw new Error(
       `Schema drift on /api/apps:\n${parsed.error.toString()}\n\nRaw:\n${JSON.stringify(data, null, 2)}`,
     );
   }
+
+  // The e2e config carries one routed upstream, so this must not be empty. An
+  // empty array would still parse, and the schema check above would pass while
+  // proving nothing about backend state or the pool verdict.
+  const pool = parsed.data.find((a) => a.name === "e2e-pool");
+  expect(pool, `no e2e-pool in ${JSON.stringify(parsed.data)}`).toBeDefined();
+  expect(pool?.backends).toHaveLength(1);
+
+  // A backend with no health check and a closed circuit is available from
+  // birth, whether or not anything is listening on the port. These two values
+  // are what the Console reads; the enum membership is enforced by the schema,
+  // so what is pinned here is that the server actually populates them.
+  expect(pool?.backends[0]?.state).toBe("available");
+  expect(pool?.verdict).toBe("healthy");
 });
 
 // ── TLS certs ────────────────────────────────────────────────────────────────

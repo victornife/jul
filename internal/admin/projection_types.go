@@ -108,7 +108,12 @@ type AppProjection struct {
 	Strategy    string              `json:"strategy"`
 	Backends    []BackendProjection `json:"backends"`
 	HealthCheck bool                `json:"health_check"`
-	Discovery   string              `json:"discovery,omitempty"`
+	// Verdict is the pool-level rollup, computed here rather than in the browser
+	// (ADR 0014). One of "healthy", "degraded", "down" or "unknown". If the
+	// Console derived it, the two could disagree during an incident, which is
+	// exactly when an operator is comparing them.
+	Verdict   string `json:"verdict,omitempty"`
+	Discovery string `json:"discovery,omitempty"`
 	// Detail fields (Milestone 2.4). Zero values render as "not configured".
 	MaxFails         int      `json:"max_fails,omitempty"`
 	FailTimeout      string   `json:"fail_timeout,omitempty"`
@@ -165,9 +170,14 @@ type K8sDiscoveryView struct {
 // observed), while a non-nil value reports a known healthy/unhealthy result.
 // Omitting the field for false would conflate "unhealthy" with "unknown".
 type BackendProjection struct {
-	Address  string `json:"address"`
-	Weight   int    `json:"weight"`
-	Healthy  *bool  `json:"healthy,omitempty"`
+	Address string `json:"address"`
+	Weight  int    `json:"weight"`
+	// State is the bounded backend state, empty when the backend is configured
+	// but not live, so the Console can say "unknown" rather than guess. It
+	// replaces a *bool, which had three values for five states and had to
+	// conflate "the health checker ejected it" with "its circuit is open" — two
+	// conditions calling for opposite operator responses.
+	State    string `json:"state,omitempty"`
 	Inflight int64  `json:"inflight,omitempty"`
 }
 
