@@ -46,7 +46,7 @@ func (s *Server) handleUpstreamResilience(w http.ResponseWriter, r *http.Request
 	}
 	if s.deps.LoadConfig != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil {
-			if up := findUpstreamByName(cfg, name); up != nil {
+			if up, err := findUpstream(cfg, name); err == nil {
 				for i := range pools {
 					pools[i].Limits.Sources = circuitLimitSources(up)
 				}
@@ -65,18 +65,6 @@ func poolVerdictFromStates(backends []BackendResilience) string {
 		bp = append(bp, BackendProjection{Address: b.Address, State: b.State})
 	}
 	return poolVerdict(bp)
-}
-
-func findUpstreamByName(c *config.Config, name string) *config.UpstreamConfig {
-	if c == nil {
-		return nil
-	}
-	for i := range c.Upstreams {
-		if c.Upstreams[i].Name == name {
-			return &c.Upstreams[i]
-		}
-	}
-	return nil
 }
 
 // circuitLimitSources reports which configuration key supplied each circuit

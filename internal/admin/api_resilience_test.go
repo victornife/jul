@@ -5,6 +5,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -145,5 +146,62 @@ func TestResilienceRejectsABadPoolName(t *testing.T) {
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for a blank name", rec.Code)
+	}
+}
+
+// The endpoint has to degrade rather than fail when its dependencies are not
+// wired: a build without the runtime hook must say so, and a configuration that
+// cannot be loaded must not take the live state down with it.
+func TestResilienceDegradesWhenDependenciesAreMissing(t *testing.T) {
+	t.Run("no runtime hook is a 404, not a panic", func(t *testing.T) {
+		s := newTestServer(t, config.AdminConfig{Token: "tok"}, Deps{})
+		if rec := getResilience(t, s, "api"); rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rec.Code)
+		}
+	})
+
+	t.Run("an unreadable config still returns live state", func(t *testing.T) {
+		s := newTestServer(t, config.AdminConfig{Token: "tok"}, Deps{
+			LoadConfig: func() (*config.Config, error) { return nil, errors.New("boom") },
+			UpstreamResilience: func(string) []PoolResilience {
+				return []PoolResilience{{Name: "api", Backends: []BackendResilience{{Address: "1", State: "available"}}}}
+			},
+		})
+		rec := getResilience(t, s, "api")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: the live state is still knowable", rec.Code)
+		}
+		var got []PoolResilience
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got[0].Verdict != "healthy" {
+			t.Errorf("verdict = %q, want healthy", got[0].Verdict)
+		}
+		// Sources come from the configuration, so they are absent rather than
+		// guessed. A guessed source is worse than none.
+		if got[0].Limits.Sources != nil {
+			t.Errorf("sources = %+v, want absent when the config cannot be read", got[0].Limits.Sources)
+		}
+	})
+
+	t.Run("a pool absent from the config still returns live state", func(t *testing.T) {
+		s := resilienceServer(t, &config.Config{}, []PoolResilience{
+			{Name: "orphan", Backends: []BackendResilience{{Address: "1", State: "available"}}},
+		})
+		if rec := getResilience(t, s, "orphan"); rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200", rec.Code)
+		}
+	})
+}
+
+func TestResilienceRejectsANonGETMethod(t *testing.T) {
+	s := resilienceServer(t, &config.Config{}, []PoolResilience{{Name: "api"}})
+	req := httptest.NewRequest(http.MethodPost, "http://h/api/upstreams/api/resilience", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", rec.Code)
 	}
 }
