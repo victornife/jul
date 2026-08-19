@@ -696,6 +696,18 @@ Full reference: [upstreams.md](upstreams.md#retry).
 > `retry_attempts`. It remains valid and behaves identically; setting both on one location is a
 > validation error. It is scheduled for removal in the next major release.
 
+The whole block can also be edited through the `upstream_set_resilience` typed
+patch operation, gated by `config:write` like every other patch operation. It
+replaces the block rather than merging into it, matching `upstream_set_health_check`:
+a partial merge would make the result depend on state the caller cannot see in
+the request they are sending. Omitting the payload removes the block, returning
+every limit to its default.
+
+Because `max_fails` and `fail_timeout` still have a deprecated upstream-level
+spelling, and a configuration carrying both is rejected, setting either of them
+through this operation moves them out of the old position. The move is reported
+in the operation summary rather than done silently.
+
 ### `backend_tls`
 
 The **outbound** TLS policy, used identically under `[[upstreams]]` and

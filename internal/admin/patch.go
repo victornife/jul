@@ -329,6 +329,39 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		up.HealthCheck = hc
 		return fmt.Sprintf("upstream %s active health checks %s", req.Upstream, summary), nil
 
+	case "upstream_set_resilience":
+		up, err := findUpstream(c, req.Upstream)
+		if err != nil {
+			return "", err
+		}
+		if req.Resilience == nil {
+			up.Resilience = nil
+			return fmt.Sprintf("upstream %s resilience cleared", req.Upstream), nil
+		}
+		res, err := buildResilience(*req.Resilience)
+		if err != nil {
+			return "", err
+		}
+		up.Resilience = res
+		// max_fails and fail_timeout have a deprecated top-level spelling, and
+		// validation rejects a config carrying both. Leaving the old keys would
+		// make this operation produce a configuration that cannot be loaded, so
+		// setting them migrates them — reported, not done silently.
+		migrated := ""
+		if res.MaxFails > 0 && up.MaxFails > 0 {
+			up.MaxFails = 0
+			migrated = "; moved max_fails out of the deprecated upstream-level key"
+		}
+		if res.FailTimeout > 0 && up.FailTimeout > 0 {
+			up.FailTimeout = 0
+			if migrated == "" {
+				migrated = "; moved fail_timeout out of the deprecated upstream-level key"
+			} else {
+				migrated += " and fail_timeout"
+			}
+		}
+		return fmt.Sprintf("upstream %s resilience %s%s", req.Upstream, resilienceSummary(res), migrated), nil
+
 	case "upstream_set_discovery":
 		up, err := findUpstream(c, req.Upstream)
 		if err != nil {

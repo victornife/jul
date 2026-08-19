@@ -66,6 +66,12 @@ type patchRequest struct {
 	// nil/disabled removes the block (passive health only).
 	HealthCheck *upstreamHealthCheck `json:"health_check,omitempty"`
 
+	// upstream_set_resilience payload: the pool's whole [upstreams.resilience]
+	// block. Omitting it removes the block, returning every limit to its
+	// default, which mirrors how upstream_set_health_check treats a disabled
+	// payload.
+	Resilience *upstreamResilience `json:"resilience,omitempty"`
+
 	// upstream_set_discovery payload: the pool's dynamic discovery block. Type
 	// "static"/"" removes it (the static Servers list is used instead).
 	Discovery *upstreamDiscovery `json:"discovery,omitempty"`
@@ -303,4 +309,33 @@ type k8sDiscoveryFields struct {
 	APIServer             string `json:"api_server,omitempty"`
 	CAFile                string `json:"ca_file,omitempty"`
 	InsecureSkipTLSVerify bool   `json:"insecure_skip_tls_verify,omitempty"`
+}
+
+// upstreamResilience carries the whole [upstreams.resilience] block for
+// upstream_set_resilience.
+//
+// Durations are strings so the wire shape matches the TOML an operator reads,
+// rather than an integer whose unit they have to guess.
+//
+// CircuitHalfOpenProbes is a pointer for the same reason the config field is:
+// an explicit 0 is the documented way to ask for the old unbounded behaviour,
+// which is a different request from omitting the key and taking the default.
+// Every other field's zero genuinely means "unset", so they need no pointer.
+type upstreamResilience struct {
+	MaxFails    int    `json:"max_fails,omitempty"`
+	FailTimeout string `json:"fail_timeout,omitempty"`
+
+	MaxActiveRequests        int    `json:"max_active_requests,omitempty"`
+	MaxActivePerBackend      int    `json:"max_active_per_backend,omitempty"`
+	MaxPendingRequests       int    `json:"max_pending_requests,omitempty"`
+	PendingTimeout           string `json:"pending_timeout,omitempty"`
+	MaxConnectionsPerBackend int    `json:"max_connections_per_backend,omitempty"`
+
+	RetryAttempts       int    `json:"retry_attempts,omitempty"`
+	RetryDeadline       string `json:"retry_deadline,omitempty"`
+	RetryBackoffInitial string `json:"retry_backoff_initial,omitempty"`
+	RetryBackoffMax     string `json:"retry_backoff_max,omitempty"`
+	RetryBudgetPercent  int    `json:"retry_budget_percent,omitempty"`
+
+	CircuitHalfOpenProbes *int `json:"circuit_half_open_probes,omitempty"`
 }
