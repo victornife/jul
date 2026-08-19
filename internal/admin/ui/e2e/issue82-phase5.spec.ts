@@ -16,24 +16,14 @@ async function expectStaticOK(request: any, expected: string): Promise<void> {
 }
 
 /**
- * Waits for GET /api/config's base_version to stop moving. A completed apply's
- * hot reload can trigger the server's own best-effort canonicalizing rewrite a
- * beat later (#270-style self-echo). If the next edit's preview pins its
- * base_version before that echo lands, the pin is stale by the time the
- * confirm click fires and patch/apply rejects it with a 409 that — unlike the
- * live-generation conflicts other endpoints retry past — is content-based and
- * cannot be resolved by re-sending the same request.
+ * Gives the server's post-apply canonicalizing rewrite (#270-style self-echo)
+ * time to land before the next edit pins its preview to a base_version. A
+ * fixed pause — rather than polling /api/config — avoids adding its own
+ * pressure on the admin API's read rate limit (rate_limit_read_per_min in the
+ * e2e fixture), which a polling version of this wait tripped for later tests.
  */
-async function waitForConfigQuiescence(request: any, attempts = 10): Promise<void> {
-  let previous: string | undefined;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const resp = await request.get("/api/config");
-    expect(resp.status()).toBe(200);
-    const cfg = RawConfigSchema.parse(await resp.json());
-    if (cfg.base_version !== undefined && cfg.base_version === previous) return;
-    previous = cfg.base_version;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
+async function waitForConfigQuiescence(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
 test(
@@ -115,7 +105,7 @@ test(
     await appEditor.getByLabel("Listener").fill(newListener);
     await appEditor.getByLabel("Server names").fill("localhost");
     await appEditor.getByLabel("Route path").fill("/");
-    await waitForConfigQuiescence(request);
+    await waitForConfigQuiescence();
     await appEditor.getByRole("button", { name: /Review batch in editor/ }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Apply live");
@@ -142,7 +132,7 @@ test(
     // authoritative serialize/reparse. Use an explicit 1-byte threshold so
     // this small fixture actually exercises the gzip data-plane path.
     await compression.getByLabel("Minimum response size").fill("1");
-    await waitForConfigQuiescence(request);
+    await waitForConfigQuiescence();
     await compression.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Apply live");
@@ -158,7 +148,7 @@ test(
     await limiter.getByLabel("Key").fill("ip");
     await limiter.getByLabel("Requests per second").fill("1");
     await limiter.getByLabel("Burst").fill("1");
-    await waitForConfigQuiescence(request);
+    await waitForConfigQuiescence();
     await limiter.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Apply live");
@@ -175,7 +165,7 @@ test(
     const limiterOff = await openTrafficEditor("Rate limiting", "Edit rate limiting");
     const limiterOffToggle = limiterOff.getByRole("checkbox", { name: "Enable global rate limiting" });
     if (await limiterOffToggle.isChecked()) await limiterOffToggle.uncheck();
-    await waitForConfigQuiescence(request);
+    await waitForConfigQuiescence();
     await limiterOff.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Apply live");
@@ -189,7 +179,7 @@ test(
     const logFormat = globalEditor.getByLabel("Log format");
     const currentFormat = await logFormat.inputValue();
     await logFormat.selectOption(currentFormat === "json" ? "text" : "json");
-    await waitForConfigQuiescence(request);
+    await waitForConfigQuiescence();
     await globalEditor.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Save for next restart");
@@ -200,7 +190,7 @@ test(
     const maxConns = stagedLimiter.getByLabel("Maximum concurrent connections");
     const currentMax = Number(await maxConns.inputValue()) || 0;
     await maxConns.fill(String(currentMax + 17));
-    await waitForConfigQuiescence(request);
+    await waitForConfigQuiescence();
     await stagedLimiter.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Update staged configuration");
@@ -236,7 +226,7 @@ test(
     const routeDetail = page.getByRole("dialog", { name: "prefix /" });
     await routeDetail.getByRole("button", { name: /Delete route prefix \/ from/ }).click();
     const routeDelete = page.getByRole("dialog", { name: "Remove this exact route?" });
-    await waitForConfigQuiescence(request);
+    await waitForConfigQuiescence();
     await routeDelete.getByRole("button", { name: "Hand off deletion for apply review" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Apply live");
@@ -246,7 +236,7 @@ test(
     const deletableApp = page.getByRole("dialog", { name: appName });
     await deletableApp.getByRole("button", { name: "Delete App / upstream…" }).click();
     const appDelete = page.getByRole("dialog", { name: `Remove App/upstream ${appName}?` });
-    await waitForConfigQuiescence(request);
+    await waitForConfigQuiescence();
     await appDelete.getByRole("button", { name: "Hand off deletion for apply review" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Apply live");
