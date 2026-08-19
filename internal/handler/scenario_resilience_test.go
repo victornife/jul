@@ -10,6 +10,7 @@ package handler
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -501,4 +502,65 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("condition not reached within 3s")
+}
+
+// TLS identity failure, the fifth fault mode.
+//
+// The classification is already covered by unit tests that hand synthetic x509
+// errors to ReasonFor. What was not covered is the wiring: that a real backend
+// presenting an identity the policy does not accept actually reaches that
+// classification through the proxy. A backend that fails to prove who it is
+// must be reported as an identity failure and never as a generic connect
+// failure — the two call for opposite responses, and only one of them is a
+// reason to look at the certificate.
+func TestScenarioTLSIdentityFailureIsReportedAsIdentity(t *testing.T) {
+	ca := newBackendPKI(t)
+	backend := tlsBackend(t, &tls.Config{
+		Certificates: []tls.Certificate{ca.issue(t, "backend", []string{"inventory.internal"}, nil)},
+		MinVersion:   tls.VersionTLS12,
+	}, okBackend())
+
+	// The CA is trusted, so the connection succeeds and only the name is wrong.
+	// That isolates identity from reachability.
+	h := newProxy(t, config.LocationConfig{
+		ProxyPass:  backend.URL,
+		BackendTLS: &config.BackendTLSConfig{CAMode: "file_only", CAFile: ca.caPath, ServerName: "wrong.internal"},
+	}, nil)
+
+	code, reason := reasonOf(t, h, getReq())
+	if code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", code)
+	}
+	if reason != string(upstream.ReasonUpstreamTLSIdentity) {
+		t.Errorf("reason = %q, want %q; a certificate problem read as a connect failure sends an operator to the wrong place", reason, upstream.ReasonUpstreamTLSIdentity)
+	}
+}
+
+// A deterministic identity failure is terminal: retrying it against the same or
+// another backend cannot make a wrong certificate right, and doing so would
+// multiply load during exactly the kind of misconfiguration that causes an
+// outage.
+func TestScenarioTLSIdentityFailureIsNotRetried(t *testing.T) {
+	ca := newBackendPKI(t)
+	var hits atomic.Int64
+	backend := tlsBackend(t, &tls.Config{
+		Certificates: []tls.Certificate{ca.issue(t, "backend", []string{"inventory.internal"}, nil)},
+		MinVersion:   tls.VersionTLS12,
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	h := newProxy(t, config.LocationConfig{
+		ProxyPass:  backend.URL,
+		BackendTLS: &config.BackendTLSConfig{CAMode: "file_only", CAFile: ca.caPath, ServerName: "wrong.internal"},
+		Resilience: &config.LocationResilienceConfig{RetryAttempts: 3},
+	}, nil)
+
+	h.ServeHTTP(httptest.NewRecorder(), getReq())
+
+	// The handshake never completes, so the backend handler must never run.
+	if n := hits.Load(); n != 0 {
+		t.Errorf("backend handler ran %d times for a rejected identity", n)
+	}
 }
