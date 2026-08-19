@@ -320,7 +320,7 @@ Labels fall into three classes by what bounds them:
 | `jul_waf_events_total` | `action`, `rule` | `block`/`detect` × loaded rule IDs |
 | `jul_egress_decisions_total` | `subsystem`, `result`, `reason` | fixed subsystem/result/reason enums |
 | `jul_egress_dns_answers_total` | `subsystem`, `result` | fixed subsystem/result enums |
-| `jul_upstream_healthy` | `pool`, `backend` | pool membership |
+| `jul_upstream_backends_healthy` | `pool` | configured pools |
 | `jul_upstream_backends` | `pool` | configured pools |
 | `jul_discovery_errors_total` | `pool` | configured pools |
 | `jul_upstream_probes_total` | `pool`, `result` | pools × `success`/`failure` |
@@ -412,13 +412,13 @@ Guidance:
 
 1. **Leave `host_label` off** on any edge exposed to arbitrary Host headers; rely
    on the Console Traffic Sources panel for per-host visibility instead.
-2. **Scrape-drop noisy topology labels** you do not alert on. For example, to keep
-   the per-pool health rollup but drop the per-`backend` fan-out on a large pool:
+2. **Scrape-drop noisy topology labels** you do not alert on. For example, to
+   drop the on-demand TLS expiry gauge for domains you do not track:
 
    ```yaml
    metric_relabel_configs:
-     - source_labels: [__name__, backend]
-       regex: jul_upstream_healthy;.+
+     - source_labels: [__name__, domain]
+       regex: jul_tls_cert_expiry_seconds;.+\.example\.net
        action: drop
    ```
 

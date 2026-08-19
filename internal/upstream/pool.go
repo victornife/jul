@@ -199,6 +199,20 @@ func (p *Pool) SetPolicy(policy *resilience.Policy) {
 	p.budget.SetPercent(policy.RetryBudgetPercent())
 }
 
+// HealthyCount returns how many backends the active health checks currently
+// consider healthy. It is deliberately not "eligible": circuit state is reported
+// separately, so one number never conflates two different reasons a backend is
+// out of rotation.
+func (p *Pool) HealthyCount() int {
+	n := 0
+	for _, b := range p.Backends() {
+		if b.ActiveHealthy() {
+			n++
+		}
+	}
+	return n
+}
+
 // Backends returns the current backend set (for inspection/representative URL).
 // The returned slice is shared and must not be modified by callers.
 func (p *Pool) Backends() []*Backend { return *p.backends.Load() }

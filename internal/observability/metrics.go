@@ -214,9 +214,9 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Help: "Egress CIDR-only hostname resolutions evaluated, labeled by subsystem and result (allow/block).",
 		}, []string{"subsystem", "result"}),
 		upstreamUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "jul_upstream_healthy",
-			Help: "Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend.",
-		}, []string{"pool", "backend"}),
+			Name: "jul_upstream_backends_healthy",
+			Help: "Backends a pool's active health checks currently consider healthy, labeled by pool.",
+		}, []string{"pool"}),
 		upstreamBackends: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_upstream_backends",
 			Help: "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",
@@ -561,19 +561,43 @@ func (m *Metrics) ObserveWAFEvent(action, rule string) {
 	m.wafEvents.WithLabelValues(action, rule).Inc()
 }
 
-// ObserveBackendHealth records an active health-check verdict for a backend as
-// a per-backend gauge (1 healthy, 0 unhealthy). It is wired into the upstream
-// pool registry as its OnHealth hook (the upstream package follows the
-// codebase's callback convention rather than importing observability).
+// ObserveBackendHealth records an active health-check transition for a backend.
+// It is wired into the upstream pool registry as its OnHealth hook (the upstream
+// package follows the codebase's callback convention rather than importing
+// observability).
+//
+// The backend address deliberately reaches the Console history tracker and not
+// a metric label: a pod address is unbounded under churn, and per-backend detail
+// belongs to an API queried on demand rather than a series retained forever.
 func (m *Metrics) ObserveBackendHealth(pool, backend string, healthy bool) {
-	v := 0.0
-	if healthy {
-		v = 1.0
-	}
-	m.upstreamUp.WithLabelValues(pool, backend).Set(v)
-	// Record up/down transitions for the Console v2 health-history panel
-	// (Milestone 5.5). The tracker only appends on an actual state change.
+	// The tracker only appends on an actual state change.
 	m.health.record(pool, backend, healthy)
+}
+
+// ObserveBackendsHealthy records how many of a pool's backends the active health
+// checks currently consider healthy. It is level-triggered — the caller reports
+// a count derived from current state rather than an increment — so a missed
+// event cannot leave the gauge permanently wrong.
+func (m *Metrics) ObserveBackendsHealthy(pool string, n int) {
+	m.upstreamUp.WithLabelValues(pool).Set(float64(n))
+}
+
+// RetirePool deletes every series belonging to a pool that no longer exists.
+//
+// Pool names are bounded at one configuration snapshot but not over the life of
+// the process: upstream_add and upstream_remove are supported admin patch
+// operations, so an operator can churn pool names indefinitely and every one of
+// them used to keep its series until restart. Prometheus never expires a series
+// on its own, so this has to be explicit.
+func (m *Metrics) RetirePool(pool string) {
+	labels := prometheus.Labels{"pool": pool}
+	m.upstreamUp.Delete(labels)
+	m.upstreamBackends.Delete(labels)
+	m.discoveryErrors.Delete(labels)
+	m.probeDuration.Delete(labels)
+	// probes carries a second label, so the whole family for this pool goes at
+	// once rather than one result value at a time.
+	m.probes.DeletePartialMatch(labels)
 }
 
 // ObserveUpstreamBackends records the current backend count of a pool as a

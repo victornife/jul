@@ -137,8 +137,8 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 		}
 		want[metric.Name] = normalizeMetric(metric)
 	}
-	if releasedCount != 28 || pendingCount != 18 {
-		t.Fatalf("metric contract states = %d released + %d pending, want 28 + 18", releasedCount, pendingCount)
+	if releasedCount != 27 || pendingCount != 19 {
+		t.Fatalf("metric contract states = %d released + %d pending, want 27 + 19", releasedCount, pendingCount)
 	}
 
 	for name, actual := range got {
@@ -158,6 +158,17 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 	}
 }
 
+// retiredReleasedMetrics names v1.32.0 metrics that have been deliberately
+// withdrawn, with the reason. Retiring a released metric is a compatibility
+// break, so it is recorded here rather than by loosening the frozen baseline:
+// the baseline keeps every other released family exact, and a reviewer sees the
+// removal and its justification in the same diff.
+//
+// Each entry must also appear in docs/compatibility.md.
+var retiredReleasedMetrics = map[string]string{
+	"jul_upstream_healthy": "labeled by raw backend address, which is unbounded under pod churn; replaced by jul_upstream_backends_healthy{pool} with per-backend detail moved to the runtime API (#144)",
+}
+
 func TestReleasedV1320MetricContractRemainsStable(t *testing.T) {
 	var released releasedMetricDocument
 	decodeContractFile(t, contractPath("internal", "observability", "testdata", "v1.32.0-metrics.json"), &released)
@@ -174,7 +185,14 @@ func TestReleasedV1320MetricContractRemainsStable(t *testing.T) {
 	for _, frozen := range released.Metrics {
 		actual, ok := current[frozen.Name]
 		if !ok {
-			t.Errorf("released metric %q was removed", frozen.Name)
+			if _, retired := retiredReleasedMetrics[frozen.Name]; retired {
+				continue
+			}
+			t.Errorf("released metric %q was removed; if that is intended, record it in retiredReleasedMetrics with a reason and in docs/compatibility.md", frozen.Name)
+			continue
+		}
+		if reason, retired := retiredReleasedMetrics[frozen.Name]; retired {
+			t.Errorf("metric %q is listed as retired (%s) but is still exported", frozen.Name, reason)
 			continue
 		}
 		if !reflect.DeepEqual(normalizeMetric(actual), normalizeMetric(frozen)) {

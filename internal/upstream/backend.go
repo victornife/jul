@@ -163,6 +163,10 @@ func (b *Backend) State() BackendState {
 	return b.circuit.state()
 }
 
+// ActiveHealthy reports the active health checker's verdict alone, without the
+// circuit state that available() also weighs.
+func (b *Backend) ActiveHealthy() bool { return b.activeHealthy.Load() }
+
 // setActiveHealthy records the active health checker's verdict for this backend.
 func (b *Backend) setActiveHealthy(healthy bool) { b.activeHealthy.Store(healthy) }
 

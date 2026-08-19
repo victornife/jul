@@ -52,8 +52,16 @@ type Registry struct {
 // RegistryOptions configures a Registry. All fields are optional.
 type RegistryOptions struct {
 	Logger   *slog.Logger
-	OnHealth HealthHook // backend health transitions -> gauge
+	OnHealth HealthHook // backend health transitions -> Console health history
 	OnProbe  ProbeHook  // per-probe outcome -> counter + latency histogram
+	// OnBackendsHealthy reports how many of a pool's backends the active health
+	// checks consider healthy. It replaces a per-backend gauge whose backend
+	// label grew without bound under Kubernetes pod churn.
+	OnBackendsHealthy func(pool string, n int)
+	// OnPoolRetired reports a pool identity leaving the live set, so its series
+	// can be deleted. Without it a pool name churned by admin patches keeps its
+	// series until the process restarts.
+	OnPoolRetired func(pool string)
 	// OnBackends reports a pool's current backend count (static pools at commit,
 	// discovery pools after each successful resolve) -> gauge.
 	OnBackends func(pool string, n int)
@@ -243,7 +251,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	// Wired unconditionally, not only when health_check is enabled: a passive
 	// (dial-triggered) transition deserves the same gauge/history entry as an
 	// active-checker one even on a pool with no active checks configured.
-	pool.SetHealthHook(r.opts.OnHealth)
+	pool.SetHealthHook(r.healthHookFor(up.Name, pool))
 	disco := discoveryEnabled(up.Discovery)
 	var d Discoverer
 	if disco {
@@ -342,6 +350,14 @@ func (r *Registry) Commit() {
 			e.pool.SetPolicy(e.policy)
 		}
 	}
+	// Retirement is decided by pool *name*, not by the (name, scheme) key that
+	// owns the pool object: one name can serve both an http and an https pool,
+	// and the metric label is the name alone. Retiring on the key would delete
+	// series still being written by the sibling that stayed.
+	wasLive := make(map[string]struct{}, len(r.live))
+	for key := range r.live {
+		wasLive[key.name] = struct{}{}
+	}
 	for key, e := range r.live {
 		if staged, ok := r.staged[key]; !ok || staged.pool != e.pool {
 			e.pool.Close()
@@ -351,12 +367,52 @@ func (r *Registry) Commit() {
 		}
 	}
 	r.live = r.staged
+	if r.opts.OnPoolRetired != nil {
+		for name := range wasLive {
+			if !r.hasLiveName(name) {
+				r.opts.OnPoolRetired(name)
+			}
+		}
+	}
 	r.staged = make(map[poolKey]*poolEntry)
 	// Seed the backend-count gauge for every live pool (discovery pools also
 	// update it from their refresher).
-	if r.opts.OnBackends != nil {
-		for key, e := range r.live {
+	for key, e := range r.live {
+		if r.opts.OnBackends != nil {
 			r.opts.OnBackends(key.name, len(e.pool.Backends()))
+		}
+		if r.opts.OnBackendsHealthy != nil {
+			r.opts.OnBackendsHealthy(key.name, e.pool.HealthyCount())
+		}
+	}
+}
+
+// hasLiveName reports whether any live pool still carries this name.
+func (r *Registry) hasLiveName(name string) bool {
+	for key := range r.live {
+		if key.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// healthHookFor wraps the configured health hook so a transition also refreshes
+// the pool's healthy count.
+//
+// The count is recomputed from the pool rather than accumulated from the events,
+// because an accumulator that misses one event stays wrong forever, while a
+// recomputed count is self-correcting at the next transition.
+func (r *Registry) healthHookFor(name string, pool *Pool) HealthHook {
+	if r.opts.OnHealth == nil && r.opts.OnBackendsHealthy == nil {
+		return nil
+	}
+	return func(poolName, backend string, healthy bool) {
+		if r.opts.OnHealth != nil {
+			r.opts.OnHealth(poolName, backend, healthy)
+		}
+		if r.opts.OnBackendsHealthy != nil {
+			r.opts.OnBackendsHealthy(name, pool.HealthyCount())
 		}
 	}
 }
@@ -376,16 +432,16 @@ func (r *Registry) Activate() {
 	if startHealthChecksTLS == nil {
 		startHealthChecksTLS = (*Pool).StartHealthChecksWithTLS
 	}
-	for _, e := range r.live {
+	for key, e := range r.live {
 		if e.reused {
 			continue
 		}
 		if e.needsHealth {
 			if r.startHealthChecks != nil {
 				// A test replaced the plain seam; keep observing it.
-				startHealthChecks(e.pool, e.healthCfg, r.opts.OnHealth, r.opts.OnProbe)
+				startHealthChecks(e.pool, e.healthCfg, r.healthHookFor(key.name, e.pool), r.opts.OnProbe)
 			} else {
-				startHealthChecksTLS(e.pool, e.healthCfg, e.healthTLS, r.opts.OnHealth, r.opts.OnProbe)
+				startHealthChecksTLS(e.pool, e.healthCfg, e.healthTLS, r.healthHookFor(key.name, e.pool), r.opts.OnProbe)
 			}
 		}
 		if e.discovery {

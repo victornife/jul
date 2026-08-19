@@ -178,6 +178,7 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveWAFEvent("block", "942100")
 	m.ObserveEgressDecision("jwks", "allow", "", 1)
 	m.ObserveBackendHealth("pool-a", "10.0.0.1:80", true)
+	m.ObserveBackendsHealthy("pool-a", 2)
 	m.ObserveUpstreamBackends("pool-a", 3)
 	m.ObserveDiscoveryError("pool-a")
 	m.ObserveProbe("pool-a", true, time.Millisecond)

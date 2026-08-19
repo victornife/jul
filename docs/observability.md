@@ -84,7 +84,7 @@ changing it requires a restart.
 | `jul_stream_udp_sessions_rejected_total` | Counter | — | Released `v1.32.0` | New UDP clients dropped because a listener's max_udp_sessions cap was reached and no session was reclaimable. |
 | `jul_tls_cert_expiry_seconds` | Gauge | `domain` | Released `v1.32.0` | Leaf certificate expiry as a Unix timestamp, labeled by domain. |
 | `jul_upstream_backends` | Gauge | `pool` | Released `v1.32.0` | Current number of backends in a pool, labeled by pool (tracks dynamic service discovery). |
-| `jul_upstream_healthy` | Gauge | `backend`, `pool` | Released `v1.32.0` | Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend. |
+| `jul_upstream_backends_healthy` | Gauge | `pool` | Merged, release pending | Backends a pool's active health checks currently consider healthy, labeled by pool. |
 | `jul_upstream_probe_duration_seconds` | Histogram | `pool` | Released `v1.32.0` | Active health-check probe latency in seconds, labeled by pool. |
 | `jul_upstream_probes_total` | Counter | `pool`, `result` | Released `v1.32.0` | Active health-check probes, labeled by pool and result (success/failure). |
 | `jul_waf_events_total` | Counter | `action`, `rule` | Released `v1.32.0` | Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID. |

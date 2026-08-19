@@ -216,7 +216,7 @@
     {
       "name": "jul_managed_apply_history_total",
       "type": "counter",
-      "help": "Configuration-history snapshot attempts made by the terminal managed-apply finalizer (WS02 §3.7), labeled by operation and result (recorded/skipped/failed).",
+      "help": "Configuration-history snapshot attempts made by the terminal managed-apply finalizer (WS02 \u00a73.7), labeled by operation and result (recorded/skipped/failed).",
       "labels": [
         "operation",
         "result"
@@ -386,14 +386,13 @@
       "state": "released_v1.32.0"
     },
     {
-      "name": "jul_upstream_healthy",
+      "name": "jul_upstream_backends_healthy",
       "type": "gauge",
-      "help": "Active health-check verdict per backend (1 healthy, 0 unhealthy), labeled by pool and backend.",
+      "help": "Backends a pool's active health checks currently consider healthy, labeled by pool.",
       "labels": [
-        "backend",
         "pool"
       ],
-      "state": "released_v1.32.0"
+      "state": "merged_release_pending"
     },
     {
       "name": "jul_upstream_probe_duration_seconds",
