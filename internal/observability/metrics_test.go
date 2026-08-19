@@ -107,8 +107,8 @@ func TestObserveDiscoveryError(t *testing.T) {
 
 func TestObserveProbe(t *testing.T) {
 	m := NewMetrics()
-	m.ObserveProbe("pool1", true, 10*time.Millisecond)
-	m.ObserveProbe("pool1", false, 0)
+	m.ObserveProbe("pool1", "http", true, 10*time.Millisecond)
+	m.ObserveProbe("pool1", "http", false, 0)
 }
 
 func TestObserveGRPCTranscode(t *testing.T) {

@@ -137,8 +137,8 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 		}
 		want[metric.Name] = normalizeMetric(metric)
 	}
-	if releasedCount != 27 || pendingCount != 19 {
-		t.Fatalf("metric contract states = %d released + %d pending, want 27 + 19", releasedCount, pendingCount)
+	if releasedCount != 25 || pendingCount != 31 {
+		t.Fatalf("metric contract states = %d released + %d pending, want 25 + 31", releasedCount, pendingCount)
 	}
 
 	for name, actual := range got {
@@ -165,6 +165,18 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 // removal and its justification in the same diff.
 //
 // Each entry must also appear in docs/compatibility.md.
+// amendedReleasedMetrics names v1.32.0 metrics whose shape has deliberately
+// changed without being withdrawn, with the reason. Adding a label is milder
+// than a removal — existing queries keep working — but a recording rule that
+// aggregates without the new label will start splitting, so it is recorded
+// rather than waved through.
+//
+// Each entry must also appear in docs/compatibility.md.
+var amendedReleasedMetrics = map[string]string{
+	"jul_upstream_probes_total":           "gained a bounded source label (http/stream): the stream proxy owns its own registry, so an upstream used by both surfaces is probed twice and the two were indistinguishable (#144)",
+	"jul_upstream_probe_duration_seconds": "gained the same bounded source label, for the same reason (#144)",
+}
+
 var retiredReleasedMetrics = map[string]string{
 	"jul_upstream_healthy": "labeled by raw backend address, which is unbounded under pod churn; replaced by jul_upstream_backends_healthy{pool} with per-backend detail moved to the runtime API (#144)",
 }
@@ -195,8 +207,11 @@ func TestReleasedV1320MetricContractRemainsStable(t *testing.T) {
 			t.Errorf("metric %q is listed as retired (%s) but is still exported", frozen.Name, reason)
 			continue
 		}
+		if _, amended := amendedReleasedMetrics[frozen.Name]; amended {
+			continue
+		}
 		if !reflect.DeepEqual(normalizeMetric(actual), normalizeMetric(frozen)) {
-			t.Errorf("released metric %q changed without compatibility handling:\n got  %+v\n want %+v", frozen.Name, normalizeMetric(actual), normalizeMetric(frozen))
+			t.Errorf("released metric %q changed without compatibility handling; if that is intended, record it in amendedReleasedMetrics with a reason and in docs/compatibility.md:\n got  %+v\n want %+v", frozen.Name, normalizeMetric(actual), normalizeMetric(frozen))
 		}
 	}
 }

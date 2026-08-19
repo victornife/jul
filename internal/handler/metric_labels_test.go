@@ -1,0 +1,124 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
+package handler
+
+import (
+	"slices"
+	"testing"
+
+	"jul/internal/observability"
+	"jul/internal/upstream"
+)
+
+// labelValuesFor returns the distinct values a metric family carries for one
+// label name.
+func labelValuesFor(t *testing.T, m *observability.Metrics, metric, label string) []string {
+	t.Helper()
+	families, err := m.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	var out []string
+	for _, f := range families {
+		if f.GetName() != metric {
+			continue
+		}
+		for _, series := range f.GetMetric() {
+			for _, l := range series.GetLabel() {
+				if l.GetName() == label {
+					out = append(out, l.GetValue())
+				}
+			}
+		}
+	}
+	return out
+}
+
+// labelNamesFor returns the label names a metric family carries.
+func labelNamesFor(t *testing.T, m *observability.Metrics, metric string) []string {
+	t.Helper()
+	families, err := m.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	for _, f := range families {
+		if f.GetName() != metric {
+			continue
+		}
+		for _, series := range f.GetMetric() {
+			var names []string
+			for _, l := range series.GetLabel() {
+				names = append(names, l.GetName())
+			}
+			return names
+		}
+	}
+	return nil
+}
+
+// TestAdmissionRejectionLabelsEqualTheReasonEnum is the cardinality guarantee
+// the taxonomy exists to provide.
+//
+// It lives here rather than in internal/observability because that package
+// deliberately does not import internal/upstream — the hooks exist precisely to
+// keep the dependency out — so this is the lowest package that can see both the
+// enum and the exported label values.
+//
+// The assertion is equality, not containment. A label value outside the enum
+// would be unbounded cardinality; an enum member never exported would be a
+// reason an operator cannot alert on.
+func TestAdmissionRejectionLabelsEqualTheReasonEnum(t *testing.T) {
+	m := observability.NewMetrics()
+	for _, r := range upstream.Reasons() {
+		m.ObserveAdmissionRejected("pool", string(r))
+	}
+
+	got := labelValuesFor(t, m, "jul_upstream_admission_rejected_total", "reason")
+	want := make([]string, 0, len(upstream.Reasons()))
+	for _, r := range upstream.Reasons() {
+		want = append(want, string(r))
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("reason labels = %v, want exactly the enum %v", got, want)
+	}
+}
+
+// TestCircuitTransitionLabelsEqualTheBackendStates pins the same property for
+// the transition counter's destination state.
+func TestCircuitTransitionLabelsEqualTheBackendStates(t *testing.T) {
+	m := observability.NewMetrics()
+	for _, s := range upstream.BackendStates() {
+		m.ObserveCircuitTransition("pool", string(s))
+	}
+
+	got := labelValuesFor(t, m, "jul_upstream_circuit_transitions_total", "to")
+	want := make([]string, 0, len(upstream.BackendStates()))
+	for _, s := range upstream.BackendStates() {
+		want = append(want, string(s))
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("transition labels = %v, want exactly the state set %v", got, want)
+	}
+}
+
+// TestNoMetricCarriesABackendAddress is the standing rule, asserted rather than
+// remembered. A backend address is unbounded under pod churn, which is the
+// defect this whole slice removed.
+func TestNoMetricCarriesABackendAddress(t *testing.T) {
+	m := observability.NewMetrics()
+	for _, name := range []string{
+		"jul_upstream_admission_rejected_total",
+		"jul_upstream_circuit_transitions_total",
+		"jul_upstream_retry_attempts_total",
+		"jul_upstream_retry_budget_denied_total",
+	} {
+		if labels := labelNamesFor(t, m, name); slices.Contains(labels, "backend") {
+			t.Errorf("metric %q carries a backend label: %v", name, labels)
+		}
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"jul/internal/backendtls"
 	"jul/internal/config"
@@ -51,13 +52,23 @@ type Registry struct {
 
 // RegistryOptions configures a Registry. All fields are optional.
 type RegistryOptions struct {
-	Logger   *slog.Logger
+	Logger *slog.Logger
+	// Source names which proxy surface owns this registry, and becomes a bounded
+	// label on the probe metrics. An upstream shared between an HTTP location and
+	// a stream route is probed by two registries, so without it an operator sees
+	// an unexplained 2x and files a bug. Defaults to "http".
+	Source string
+
 	OnHealth HealthHook // backend health transitions -> Console health history
 	OnProbe  ProbeHook  // per-probe outcome -> counter + latency histogram
 	// OnBackendsHealthy reports how many of a pool's backends the active health
 	// checks consider healthy. It replaces a per-backend gauge whose backend
 	// label grew without bound under Kubernetes pod churn.
 	OnBackendsHealthy func(pool string, n int)
+	// OnCircuitTransition reports a backend circuit entering a new state. The
+	// backend is deliberately not an argument: the counter is per pool and
+	// destination state, and a backend address is an unbounded label.
+	OnCircuitTransition func(pool string, to BackendState)
 	// OnPoolRetired reports a pool identity leaving the live set, so its series
 	// can be deleted. Without it a pool name churned by admin patches keeps its
 	// series until the process restarts.
@@ -252,6 +263,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	// (dial-triggered) transition deserves the same gauge/history entry as an
 	// active-checker one even on a pool with no active checks configured.
 	pool.SetHealthHook(r.healthHookFor(up.Name, pool))
+	pool.SetCircuitHook(r.opts.OnCircuitTransition)
 	disco := discoveryEnabled(up.Discovery)
 	var d Discoverer
 	if disco {
@@ -387,6 +399,53 @@ func (r *Registry) Commit() {
 	}
 }
 
+// Stats returns the live state of every pool currently serving, deduplicated
+// by name: one name can back both an http and an https pool, and the metric
+// label is the name alone, so the two are summed rather than reported twice.
+func (r *Registry) Stats() []PoolStats {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byName := make(map[string]PoolStats, len(r.live))
+	for key, e := range r.live {
+		s := e.pool.Stats()
+		prev, seen := byName[key.name]
+		if !seen {
+			byName[key.name] = s
+			continue
+		}
+		prev.Active += s.Active
+		prev.Pending += s.Pending
+		prev.Connections += s.Connections
+		prev.Eligible += s.Eligible
+		for st, n := range s.ByState {
+			prev.ByState[st] += n
+		}
+		byName[key.name] = prev
+	}
+	out := make([]PoolStats, 0, len(byName))
+	for _, s := range byName {
+		out = append(out, s)
+	}
+	return out
+}
+
+// probeHook binds this registry's source to the configured probe hook, so the
+// label is bounded by construction rather than by every call site remembering
+// to pass the right value.
+func (r *Registry) probeHook() ProbeHook {
+	if r.opts.OnProbe == nil {
+		return nil
+	}
+	source := r.opts.Source
+	if source == "" {
+		source = "http"
+	}
+	onProbe := r.opts.OnProbe
+	return func(pool, _ string, success bool, latency time.Duration) {
+		onProbe(pool, source, success, latency)
+	}
+}
+
 // hasLiveName reports whether any live pool still carries this name.
 func (r *Registry) hasLiveName(name string) bool {
 	for key := range r.live {
@@ -439,9 +498,9 @@ func (r *Registry) Activate() {
 		if e.needsHealth {
 			if r.startHealthChecks != nil {
 				// A test replaced the plain seam; keep observing it.
-				startHealthChecks(e.pool, e.healthCfg, r.healthHookFor(key.name, e.pool), r.opts.OnProbe)
+				startHealthChecks(e.pool, e.healthCfg, r.healthHookFor(key.name, e.pool), r.probeHook())
 			} else {
-				startHealthChecksTLS(e.pool, e.healthCfg, e.healthTLS, r.healthHookFor(key.name, e.pool), r.opts.OnProbe)
+				startHealthChecksTLS(e.pool, e.healthCfg, e.healthTLS, r.healthHookFor(key.name, e.pool), r.probeHook())
 			}
 		}
 		if e.discovery {

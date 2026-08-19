@@ -85,6 +85,27 @@ type circuit struct {
 	// now is the clock seam. Tests substitute it to make transitions
 	// deterministic; production never sets it.
 	now func() time.Time
+
+	// onTransition is called under mu on every state change, which is the only
+	// place HALF_OPEN entry is observable at all. It must not call back into
+	// this circuit: it is a counter increment, nothing more.
+	onTransition func(BackendState)
+}
+
+// setTransitionHook installs the hook under mu, because every reader of it
+// holds mu and a plain assignment would be a data race with a backend that is
+// already taking traffic.
+func (c *circuit) setTransitionHook(h func(BackendState)) {
+	c.mu.Lock()
+	c.onTransition = h
+	c.mu.Unlock()
+}
+
+// transitioned reports a state change to the hook. Called with mu held.
+func (c *circuit) transitioned(to BackendState) {
+	if c.onTransition != nil {
+		c.onTransition(to)
+	}
 }
 
 func newCircuit(maxFails int, failTimeout time.Duration, maxProbes int) *circuit {
@@ -180,6 +201,7 @@ func (c *circuit) admit() admission {
 		c.phase = phaseHalfOpen
 		c.probesInFlight = 1
 		c.halfOpenUntil = now.Add(c.failTimeout)
+		c.transitioned(StateCircuitHalfOpen)
 		return admission{epoch: c.epoch, probe: true}
 
 	default: // phaseHalfOpen
@@ -304,6 +326,7 @@ func (c *circuit) openLocked(now time.Time) {
 	c.probesInFlight = 0
 	c.fails.Store(0)
 	c.epoch++
+	c.transitioned(StateCircuitOpen)
 }
 
 // closeLocked establishes CLOSED and publishes the new generation *last*, so
@@ -318,6 +341,7 @@ func (c *circuit) closeLocked() {
 	c.fails.Store(0)
 	c.epoch++
 	c.closedEpoch.Store(c.epoch)
+	c.transitioned(StateAvailable)
 }
 
 // forceClose closes the circuit from outside the request path. The active

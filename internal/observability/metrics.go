@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 
 	"jul/internal/middleware"
 )
@@ -45,6 +46,12 @@ type Metrics struct {
 	authDecisions      *prometheus.CounterVec
 	upstreamUp         *prometheus.GaugeVec
 	upstreamBackends   *prometheus.GaugeVec
+	admissionRejected  *prometheus.CounterVec
+	retryAttempts      *prometheus.CounterVec
+	retryBudgetDenied  *prometheus.CounterVec
+	circuitTransitions *prometheus.CounterVec
+	transportRetired   *prometheus.CounterVec
+	resilience         *resilienceCollector
 	discoveryErrors    *prometheus.CounterVec
 	probes             *prometheus.CounterVec
 	probeDuration      *prometheus.HistogramVec
@@ -217,6 +224,27 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_upstream_backends_healthy",
 			Help: "Backends a pool's active health checks currently consider healthy, labeled by pool.",
 		}, []string{"pool"}),
+		admissionRejected: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_upstream_admission_rejected_total",
+			Help: "Requests refused before reaching a backend, labeled by pool and bounded reason.",
+		}, []string{"pool", "reason"}),
+		retryAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_upstream_retry_attempts_total",
+			Help: "Retry attempts, labeled by pool and the bounded outcome that ended the sequence.",
+		}, []string{"pool", "outcome"}),
+		retryBudgetDenied: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_upstream_retry_budget_denied_total",
+			Help: "Retries suppressed because the pool's retry budget was spent, labeled by pool.",
+		}, []string{"pool"}),
+		circuitTransitions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_upstream_circuit_transitions_total",
+			Help: "Backend circuit transitions, labeled by pool and destination state.",
+		}, []string{"pool", "to"}),
+		transportRetired: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_transport_retired_total",
+			Help: "Handler-generation transports retired, labeled by mode (graceful/forced).",
+		}, []string{"mode"}),
+		resilience: newResilienceCollector(),
 		upstreamBackends: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_upstream_backends",
 			Help: "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",
@@ -227,13 +255,13 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}, []string{"pool"}),
 		probes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_upstream_probes_total",
-			Help: "Active health-check probes, labeled by pool and result (success/failure).",
-		}, []string{"pool", "result"}),
+			Help: "Active health-check probes, labeled by pool, result (success/failure) and the proxy surface that owns the checker (http/stream).",
+		}, []string{"pool", "result", "source"}),
 		probeDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_upstream_probe_duration_seconds",
-			Help:    "Active health-check probe latency in seconds, labeled by pool.",
+			Help:    "Active health-check probe latency in seconds, labeled by pool and the proxy surface that owns the checker (http/stream).",
 			Buckets: prometheus.DefBuckets,
-		}, []string{"pool"}),
+		}, []string{"pool", "source"}),
 		grpcTranscode: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_grpc_transcode_requests_total",
 			Help: "gRPC-JSON transcoding requests, labeled by gRPC method full name and HTTP status code.",
@@ -365,6 +393,12 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 	}
 	m.startTime = time.Now()
 	reg.MustRegister(
+		m.admissionRejected,
+		m.retryAttempts,
+		m.retryBudgetDenied,
+		m.circuitTransitions,
+		m.transportRetired,
+		m.resilience,
 		m.requests,
 		m.duration,
 		m.inflight,
@@ -421,6 +455,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 }
 
 // Handler returns the Prometheus exposition handler for this registry.
+// Gather returns the currently exported metric families. It exists for tests
+// and tooling that need to inspect labels without scraping over HTTP.
+func (m *Metrics) Gather() ([]*dto.MetricFamily, error) { return m.registry.Gather() }
+
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
 }
@@ -594,10 +632,14 @@ func (m *Metrics) RetirePool(pool string) {
 	m.upstreamUp.Delete(labels)
 	m.upstreamBackends.Delete(labels)
 	m.discoveryErrors.Delete(labels)
-	m.probeDuration.Delete(labels)
+	m.probeDuration.DeletePartialMatch(labels)
 	// probes carries a second label, so the whole family for this pool goes at
 	// once rather than one result value at a time.
 	m.probes.DeletePartialMatch(labels)
+	m.admissionRejected.DeletePartialMatch(labels)
+	m.retryAttempts.DeletePartialMatch(labels)
+	m.retryBudgetDenied.Delete(labels)
+	m.circuitTransitions.DeletePartialMatch(labels)
 }
 
 // ObserveUpstreamBackends records the current backend count of a pool as a
@@ -606,6 +648,41 @@ func (m *Metrics) RetirePool(pool string) {
 // new endpoint sets).
 func (m *Metrics) ObserveUpstreamBackends(pool string, n int) {
 	m.upstreamBackends.WithLabelValues(pool).Set(float64(n))
+}
+
+// ObserveAdmissionRejected counts a request refused before it reached a
+// backend. reason is a value from the upstream failure taxonomy; the caller
+// passes the string form so this package need not import internal/upstream.
+func (m *Metrics) ObserveAdmissionRejected(pool, reason string) {
+	m.admissionRejected.WithLabelValues(pool, reason).Inc()
+}
+
+// ObserveRetryAttempt counts one retry attempt and the bounded outcome that
+// ended its sequence.
+func (m *Metrics) ObserveRetryAttempt(pool, outcome string) {
+	m.retryAttempts.WithLabelValues(pool, outcome).Inc()
+}
+
+// ObserveRetryBudgetDenied counts a retry suppressed by a spent budget. It is
+// separate from the rejection counter because a denied retry is not a rejected
+// request: the client still gets the last attempt's answer.
+func (m *Metrics) ObserveRetryBudgetDenied(pool string) {
+	m.retryBudgetDenied.WithLabelValues(pool).Inc()
+}
+
+// ObserveCircuitTransition counts a backend circuit entering a new state. The
+// backend is not a label: per-backend detail is a runtime-API concern and an
+// address is unbounded.
+func (m *Metrics) ObserveCircuitTransition(pool, to string) {
+	m.circuitTransitions.WithLabelValues(pool, to).Inc()
+}
+
+// ObserveTransportRetired counts a handler-generation transport retirement.
+// mode is "graceful" when the generation drained and "forced" when it was cut
+// short, which is the difference between a clean reload and one that dropped
+// in-flight work.
+func (m *Metrics) ObserveTransportRetired(mode string) {
+	m.transportRetired.WithLabelValues(mode).Inc()
 }
 
 // ObserveDiscoveryError records a failed or empty service-discovery resolve. It
@@ -639,13 +716,13 @@ func (m *Metrics) EgressBlocked() []EgressBlockedCount {
 
 // ObserveProbe records the outcome and latency of a single active health-check
 // probe. It is wired into the upstream pool registry as its OnProbe hook.
-func (m *Metrics) ObserveProbe(pool string, success bool, latency time.Duration) {
+func (m *Metrics) ObserveProbe(pool, source string, success bool, latency time.Duration) {
 	result := "failure"
 	if success {
 		result = "success"
 	}
-	m.probes.WithLabelValues(pool, result).Inc()
-	m.probeDuration.WithLabelValues(pool).Observe(latency.Seconds())
+	m.probes.WithLabelValues(pool, result, source).Inc()
+	m.probeDuration.WithLabelValues(pool, source).Observe(latency.Seconds())
 }
 
 // ObserveGRPCTranscode counts a gRPC-JSON transcoding request by the gRPC method

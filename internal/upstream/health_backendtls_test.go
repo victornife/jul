@@ -343,7 +343,7 @@ func TestPrivateCABackendIsBothReachableAndHealthy(t *testing.T) {
 	probes := make(chan bool, 8)
 	reg := NewRegistry(RegistryOptions{
 		DialContext: (&net.Dialer{}).DialContext,
-		OnProbe: func(_ string, ok bool, _ time.Duration) {
+		OnProbe: func(_, _ string, ok bool, _ time.Duration) {
 			select {
 			case probes <- ok:
 			default:

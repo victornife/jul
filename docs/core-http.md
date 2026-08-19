@@ -366,6 +366,16 @@ Labels fall into three classes by what bounds them:
 | `jul_egress_decisions_total` | `subsystem`, `result`, `reason` | fixed subsystem/result/reason enums |
 | `jul_egress_dns_answers_total` | `subsystem`, `result` | fixed subsystem/result enums |
 | `jul_upstream_backends_healthy` | `pool` | configured pools |
+| `jul_upstream_active_requests` | `pool` | configured pools |
+| `jul_upstream_pending_requests` | `pool` | configured pools |
+| `jul_upstream_connections` | `pool` | configured pools |
+| `jul_upstream_backends_eligible` | `pool` | configured pools |
+| `jul_upstream_circuit_state` | `pool`, `state` | pools × 5 backend states |
+| `jul_upstream_admission_rejected_total` | `pool`, `reason` | pools × the failure-reason enum |
+| `jul_upstream_retry_attempts_total` | `outcome`, `pool` | pools × the retry stop-reason enum |
+| `jul_upstream_retry_budget_denied_total` | `pool` | configured pools |
+| `jul_upstream_circuit_transitions_total` | `pool`, `to` | pools × 5 backend states |
+| `jul_transport_retired_total` | `mode` | `graceful`/`forced` |
 | `jul_upstream_backends` | `pool` | configured pools |
 | `jul_discovery_errors_total` | `pool` | configured pools |
 | `jul_upstream_probes_total` | `pool`, `result` | pools × `success`/`failure` |

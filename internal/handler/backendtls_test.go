@@ -463,7 +463,7 @@ func TestProxyRefusesToDowngradeToPlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
-	tr := &balancingTransport{pool: pool, base: newProxyTransport(config.LocationConfig{}, nil, 0), tlsBackend: true}
+	tr := &balancingTransport{pool: pool, base: newProxyTransport(config.LocationConfig{}, nil, 0, nil), tlsBackend: true}
 
 	req := httptest.NewRequest(http.MethodGet, "https://inventory/", nil)
 	if _, err := tr.RoundTrip(req); err == nil {
