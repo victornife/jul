@@ -79,7 +79,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 			applyProxyHeaders(pr, loc)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			code := proxyErrorStatus(err)
+			code := proxyErrorStatus(err, r.Context())
 			if log != nil {
 				// A dial/connect-shaped failure was already counted (and, if new,
 				// logged once) per attempt inside RoundTrip. This request-level line
@@ -625,16 +625,16 @@ func sslClientPairs(in *http.Request) []string {
 }
 
 // proxyErrorStatus maps a transport error to a gateway status code.
-func proxyErrorStatus(err error) int {
-	if errors.Is(err, upstream.ErrNoAvailableBackend) || errors.Is(err, upstream.ErrBackendAtCapacity) {
-		return http.StatusServiceUnavailable
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return http.StatusGatewayTimeout
-	}
-	var ne net.Error
-	if errors.As(err, &ne) && ne.Timeout() {
-		return http.StatusGatewayTimeout
+// proxyErrorStatus maps a transport error to a gateway status, using the
+// inbound request context to tell a client that disconnected from Jul's own
+// machinery giving up.
+//
+// Both arrive as context.Canceled — the retry driver derives its context from
+// the inbound one — so without the inbound context the two are indistinguishable
+// and every deadline Jul enforces would be recorded as a client going away.
+func proxyErrorStatus(err error, inbound context.Context) int {
+	if status := upstream.ReasonFor(err, inbound).HTTPStatus(); status != upstream.StatusFromLastAttempt {
+		return status
 	}
 	return http.StatusBadGateway
 }

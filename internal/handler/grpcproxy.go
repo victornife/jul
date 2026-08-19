@@ -77,7 +77,7 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 			applyProxyHeaders(pr, loc)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			code := proxyErrorStatus(err)
+			code := proxyErrorStatus(err, r.Context())
 			if log != nil {
 				log.Error("grpc proxy upstream error",
 					"upstream", pool.Name(),
