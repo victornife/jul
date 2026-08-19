@@ -624,14 +624,10 @@ func (r *Registry) Snapshot() []PoolStatus {
 		ps := PoolStatus{Name: key.name, Scheme: key.scheme, Strategy: e.meta.strategy}
 		perBackend := e.pool.Policy().MaxActivePerBackend()
 		for _, b := range e.pool.Backends() {
-			st := b.State()
-			if st == StateAvailable && perBackend > 0 && b.Inflight() >= perBackend {
-				st = StateAtCapacity
-			}
 			ps.Backends = append(ps.Backends, BackendStatus{
 				Address:  b.Address,
 				Weight:   b.Weight(),
-				State:    st,
+				State:    effectiveState(b, perBackend),
 				Inflight: b.Inflight(),
 			})
 		}

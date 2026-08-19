@@ -620,3 +620,77 @@ func TestValidateRejectsBothCircuitThresholdSpellings(t *testing.T) {
 		t.Fatalf("error = %v, want it to name fail_timeout", err)
 	}
 }
+
+// TestResilienceSpellingIsUsableOnItsOwn is a regression test for a defect that
+// made the whole [upstreams.resilience] block unusable for the two keys it was
+// introduced to carry.
+//
+// applyDefaults wrote max_fails and fail_timeout into the *deprecated*
+// upstream-level fields when they were unset. Validation then saw a value in
+// both places and rejected the configuration for setting both spellings — of
+// keys the operator had written exactly once. Every config following the
+// documented migration failed to start.
+func TestResilienceSpellingIsUsableOnItsOwn(t *testing.T) {
+	src := []byte(`
+[[servers]]
+listen = "127.0.0.1:8080"
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://api"
+
+[[upstreams]]
+name = "api"
+servers = ["127.0.0.1:9000"]
+  [upstreams.resilience]
+  max_fails = 5
+  fail_timeout = "45s"
+`)
+	cfg, err := Parse(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("a config using only the resilience spelling was rejected: %v", err)
+	}
+	up := cfg.Upstreams[0]
+	if up.CircuitMaxFails() != 5 {
+		t.Errorf("effective max_fails = %d, want the resilience value 5", up.CircuitMaxFails())
+	}
+	if up.CircuitFailTimeout() != 45*time.Second {
+		t.Errorf("effective fail_timeout = %v, want the resilience value 45s", up.CircuitFailTimeout())
+	}
+}
+
+// The deprecated spelling must keep working, and both spellings together must
+// still be an error. Fixing the default must not have relaxed either.
+func TestDeprecatedCircuitSpellingStillWorksAndConflictsAreStillRejected(t *testing.T) {
+	base := `
+[[servers]]
+listen = "127.0.0.1:8080"
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://api"
+
+[[upstreams]]
+name = "api"
+servers = ["127.0.0.1:9000"]
+`
+	cfg, err := Parse([]byte(base + "max_fails = 7\nfail_timeout = \"20s\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("the deprecated spelling was rejected: %v", err)
+	}
+	if got := cfg.Upstreams[0].CircuitMaxFails(); got != 7 {
+		t.Errorf("effective max_fails = %d, want 7", got)
+	}
+
+	both, err := Parse([]byte(base + "max_fails = 7\n\n  [upstreams.resilience]\n  max_fails = 5\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := Validate(both); err == nil {
+		t.Error("setting both spellings was accepted; they are the same control")
+	}
+}

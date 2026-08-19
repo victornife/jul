@@ -378,6 +378,56 @@ func (c *circuit) state() BackendState {
 	}
 }
 
+// CircuitStatus is a consistent point-in-time read of one backend's circuit.
+//
+// It exists because reading state, deadline and probe count through separate
+// calls would take the lock three times and could interleave a transition
+// between them, reporting a deadline that belongs to a phase the caller was
+// never told about. An operator diagnosing a flapping backend would then be
+// looking at a state that never existed.
+type CircuitStatus struct {
+	State BackendState
+	// OpenUntil is when the cooldown ends. Zero unless State is circuit_open.
+	OpenUntil time.Time
+	// ProbesRemaining is how many more half-open probes may be admitted before
+	// the circuit stops letting requests through to test recovery. Zero unless
+	// State is circuit_half_open.
+	ProbesRemaining int
+	// Fails is the consecutive-failure count against MaxFails. It is what an
+	// operator needs to tell a backend about to trip from one merely unlucky.
+	Fails int
+	// MaxFails and FailTimeout are the limits in force for this backend, which
+	// may differ from the file on disk after a reload the operator has not seen.
+	MaxFails    int
+	FailTimeout time.Duration
+}
+
+// status reports the circuit's whole state under one acquisition of mu.
+func (c *circuit) status() CircuitStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	st := CircuitStatus{
+		Fails:       int(c.fails.Load()),
+		MaxFails:    c.maxFails,
+		FailTimeout: c.failTimeout,
+	}
+	switch {
+	case c.phase == phaseClosed:
+		st.State = StateAvailable
+	case c.phase == phaseOpen && c.now().Before(c.openUntil):
+		st.State = StateCircuitOpen
+		st.OpenUntil = c.openUntil
+	default:
+		// Either already half-open, or open with an elapsed cooldown, which is
+		// the same thing to the next request: it becomes a probe.
+		st.State = StateCircuitHalfOpen
+		if r := c.maxProbes - c.probesInFlight; r > 0 {
+			st.ProbesRemaining = r
+		}
+	}
+	return st
+}
+
 // Attempt is one admitted use of a backend: the backend itself, plus the
 // circuit generation that authorised it.
 //

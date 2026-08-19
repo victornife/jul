@@ -634,7 +634,7 @@ const DefaultCircuitHalfOpenProbes = 1
 // DefaultMaxFails and DefaultFailTimeout are the breaker's thresholds when
 // neither spelling sets them.
 const (
-	DefaultMaxFails    = 1
+	DefaultMaxFails    = 3
 	DefaultFailTimeout = 10 * time.Second
 )
 

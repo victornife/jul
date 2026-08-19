@@ -6,6 +6,7 @@ package app
 import (
 	"sort"
 	"sync/atomic"
+	"time"
 
 	"jul/internal/admin"
 	"jul/internal/cache"
@@ -59,6 +60,9 @@ func BuildAdminDeps(productName, version string, src config.Source, subsystems S
 
 	deps.Upstreams = func() []admin.UpstreamStatus {
 		return AdaptUpstreams(subsystems.PoolReg.Snapshot())
+	}
+	deps.UpstreamResilience = func(name string) []admin.PoolResilience {
+		return AdaptResilience(subsystems.PoolReg.Resilience(name))
 	}
 	deps.Certs = func() []admin.CertStatus {
 		c, err := src.Load()
@@ -133,4 +137,76 @@ func AdaptCerts(in []server.CertSummary) []admin.CertStatus {
 		})
 	}
 	return out
+}
+
+// AdaptResilience maps the runtime's resilience view onto the admin package's
+// decoupled types. Durations become strings and states become plain strings for
+// the same reason as AdaptUpstreams: internal/admin must not import the runtime.
+func AdaptResilience(in []upstream.PoolResilience) []admin.PoolResilience {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]admin.PoolResilience, 0, len(in))
+	for _, p := range in {
+		byState := make(map[string]int, len(p.ByState))
+		for st, n := range p.ByState {
+			byState[string(st)] = n
+		}
+		ap := admin.PoolResilience{
+			Name:        p.Name,
+			Scheme:      p.Scheme,
+			Active:      p.Active,
+			Pending:     p.Pending,
+			Connections: p.Connections,
+			Eligible:    p.Eligible,
+			ByState:     byState,
+			Limits: admin.ResilienceLimits{
+				MaxActiveRequests:        p.Limits.MaxActiveRequests,
+				MaxActivePerBackend:      p.Limits.MaxActivePerBackend,
+				MaxPendingRequests:       p.Limits.MaxPendingRequests,
+				PendingTimeout:           durationString(p.Limits.PendingTimeout),
+				MaxConnectionsPerBackend: p.Limits.MaxConnectionsPerBackend,
+				RetryAttempts:            p.Limits.RetryAttempts,
+				RetryDeadline:            durationString(p.Limits.RetryDeadline),
+				RetryBackoffInitial:      durationString(p.Limits.RetryBackoffInitial),
+				RetryBackoffMax:          durationString(p.Limits.RetryBackoffMax),
+				RetryBudgetPercent:       p.Limits.RetryBudgetPercent,
+				CircuitMaxFails:          p.Limits.CircuitMaxFails,
+				CircuitFailTimeout:       durationString(p.Limits.CircuitFailTimeout),
+				CircuitHalfOpenProbes:    p.Limits.CircuitHalfOpenProbes,
+			},
+			Budget: admin.RetryBudgetStatus{
+				Percent:   p.Budget.Percent,
+				Primaries: p.Budget.Primaries,
+				Retries:   p.Budget.Retries,
+				Remaining: p.Budget.Remaining,
+			},
+		}
+		for _, b := range p.Backends {
+			ab := admin.BackendResilience{
+				Address:         b.Address,
+				Weight:          b.Weight,
+				Inflight:        b.Inflight,
+				State:           string(b.State),
+				Fails:           b.Fails,
+				ProbesRemaining: b.ProbesRemaining,
+			}
+			if !b.OpenUntil.IsZero() {
+				ab.OpenUntil = b.OpenUntil.UTC().Format(time.RFC3339)
+			}
+			ap.Backends = append(ap.Backends, ab)
+		}
+		out = append(out, ap)
+	}
+	return out
+}
+
+// durationString renders a limit for the API. Zero means unset throughout the
+// resilience configuration, and an explicit "0s" would read as a deliberate
+// zero rather than an absent key.
+func durationString(d time.Duration) string {
+	if d == 0 {
+		return ""
+	}
+	return d.String()
 }
