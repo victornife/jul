@@ -98,8 +98,13 @@ cannot produce the amplification collapse the criterion exists to prevent. The
 test asserts that the overshoot beyond 1.1× stays an absolute handful and does
 **not** grow with load, which is the property that actually matters.
 
-The acceptance checklist should be read as ≤ 1.1× + 3 requests per window, or
-amended.
+**Amended, 2026-08-20** (ADR 0017, Amendment 4): the acceptance criterion now reads
+**≤ (1 + p/100)× inbound + `min_free_retries` per accounting window** — 1.1× plus an
+absolute handful of requests at `p = 10`, never a proportion of load. The bare
+`≤ 1.1×` reading is withdrawn; it was not achievable by this design at any volume
+and penalized a control that has no amplification-collapse defect. See
+[docs/adr/0017-upstream-resilience-and-overload-control.md](adr/0017-upstream-resilience-and-overload-control.md#5-retry-gains-a-deadline-bounded-backoff-and-a-budget-and-nothing-else)
+for the amendment.
 
 The 24-hour resilience soak itself — bounded memory, flat goroutine count and
 multi-hour stream accounting — is **still not run**; see the entry below, which

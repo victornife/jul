@@ -217,6 +217,12 @@ incident ([ADR 0014](adr/0014-operability-surfaces.md)). A pool is `degraded`
 when at least one backend is available and at least one is not, so a single
 healthy backend never masks a tripped one.
 
+The Apps list header shows a plain count of the same states, e.g. `2/3
+available`, for a glance at a page that lists many pools at once. That count is
+arithmetic over states the server already classified — not a second, competing
+verdict computation — and it is expected to always agree with the pool's
+`verdict`; the authoritative degraded/healthy/down decision stays server-side.
+
 Backed by `GET /api/apps`.
 
 For a single pool, `GET /api/upstreams/{name}/resilience` answers the questions
