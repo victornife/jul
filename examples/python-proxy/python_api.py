@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
