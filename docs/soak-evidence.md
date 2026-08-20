@@ -335,7 +335,7 @@ Environment: Linux/amd64, Go 1.26+, tags `soak stream`, `SOAK_DURATION=8h`, `SOA
 SOAK_DURATION=8h SOAK_WORKERS=16 go test -tags 'soak stream' -run '^TestSoakUDPChurn$' -count=1 -timeout 0 -v ./internal/stream/
 ```
 
-**Log:** [tmp/l4-soak-8h.log](../tmp/l4-soak-8h.log)
+**Log:** [soak-artifacts/l4-soak-8h.log](../soak-artifacts/l4-soak-8h.log)
 
 **Result:** `TestSoakUDPChurn` passed after 8h of sustained UDP source-address churn.
 
