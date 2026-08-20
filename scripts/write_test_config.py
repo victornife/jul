@@ -4,8 +4,8 @@ config = r"""# Maximum-features local test config for Console v2.
 # Run:
 #   go run -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes" ./cmd/jul -config test-full.toml
 # Backends:
-#   PORT=3000 node tmp/local-apps/node-api.js
-#   PORT=3001 node tmp/local-apps/node-api.js
+#   PORT=3000 node examples/node-proxy/node-api.js
+#   PORT=3001 node examples/node-proxy/node-api.js
 
 [global]
 worker_threads = "auto"
