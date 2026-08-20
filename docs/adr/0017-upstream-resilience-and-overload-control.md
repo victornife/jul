@@ -1,6 +1,7 @@
 # ADR 0017 — Upstream resilience and overload control
 
-- **Status:** Accepted — amended 2026-08-17 (explicit circuit state machine)
+- **Status:** Accepted — amended 2026-08-17 (explicit circuit state machine), amended 2026-08-20
+  (amplification acceptance criterion)
 - **Date:** 2026-08-13
 - **Deciders:** Jul.IA maintainer
 - **Applies to:** upstream pools and backends, HTTP reverse proxy, native gRPC passthrough, gRPC
@@ -223,6 +224,26 @@ Because `retry_attempts` is location-overridable while the budget is pool-scoped
 sharing a pool share one budget window**: a location configured to retry aggressively can consume the
 allowance of a conservative one. This is correct — the budget protects the shared backend — and it is
 stated because it is surprising.
+
+> **Amendment 4, 2026-08-20 — the ≤ 1.1× criterion is amended to the bound this design actually
+> provides.** `TestAmplificationUnderTotalOutage` (#144) drove 100,000 requests at a total outage with
+> `retry_budget_percent = 10` and measured **1.10003×**, against **3.00×** unbudgeted. The excess is not
+> a proportion: `Allow` grants while `retries < floor(primaries * percent / 100) + min_free_retries`, and
+> `min_free_retries` is added unconditionally, so the run was over by exactly three requests — the floor,
+> not a ratio — whatever the inbound volume. A bare `≤ 1.1×` is therefore **not achievable by this design
+> at any volume**, and holding the criterion to that literal reading would fail a design with no
+> amplification-collapse defect.
+>
+> The floor is deliberate and bounded independently of load: without it, a pool with almost no traffic
+> could never fail over, which is exactly when a stale connection is most likely, and it costs at most
+> `min_free_retries` extra requests per accounting window (0.3 requests/second at the default `p = 10`,
+> ten-second window) regardless of inbound rate. `TestAmplificationUnderTotalOutage` and
+> `TestAnUnbudgetedPoolAmplifiesByTheAttemptCap` assert that the overshoot beyond the ratio stays that
+> absolute handful and does not scale with load — the property that actually matters.
+>
+> The criterion is amended to: **upstream load stays at or below `(1 + p/100)× inbound +
+> min_free_retries` per accounting window** — 1.1× plus an absolute handful of requests at `p = 10`,
+> never a proportion of load. See `docs/soak-evidence.md` for the dated measurement.
 
 ### 6. The circuit breaker absorbs passive health; it does not sit beside it
 
@@ -863,7 +884,13 @@ Console health indicator, taken now because there is no adoption to protect.
 
 The pool-level aggregate verdict is served by the API rather than derived in the browser, so the Console
 health filter and the API cannot disagree during an incident. The Console renders server-supplied values
-and reason strings and computes no resilience logic, per [ADR 0014](0014-operability-surfaces.md).
+and reason strings and computes no resilience logic, per [ADR 0014](0014-operability-surfaces.md). This
+is a claim about *decisions* — nothing in the Console decides a backend's state, trips a circuit, or
+rolls up a pool's `verdict`; every one of those is server-computed and rendered as-is. It does not mean
+the Console performs no arithmetic at all: an App card header tallies already-classified backend states
+for a glance count (e.g. `2/3 available`), which is `Array.filter().length` over a closed enum the
+server already produced, not a health or circuit judgment, and it must never be allowed to diverge from
+the server-computed `verdict` — if it ever could, that would be the bug.
 Console data is polled on an interval, so displayed counters are point-in-time samples and are not an
 alerting source.
 
