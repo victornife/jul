@@ -31,6 +31,14 @@ type cacheWriter struct {
 	// body is a live event stream.
 	noStore  bool
 	hijacked bool
+	// snapshot is a clone of the response header map taken inside WriteHeader,
+	// before delegating to the outer ResponseWriter. Every wrapper from here to
+	// the real connection shares one http.Header map, and layers outside the
+	// cache (compression in particular) mutate it after this call returns — so
+	// buildEntry must consume this snapshot rather than re-read w.Header() once
+	// the stack has unwound, or a stored entry can pair headers from one layer
+	// with a body captured at another.
+	snapshot http.Header
 }
 
 // dropCapture abandons the captured response. It is called the moment the
@@ -50,6 +58,12 @@ func (w *cacheWriter) WriteHeader(code int) {
 	}
 	w.status = code
 	w.wroteHeader = true
+	// Snapshot before delegating outward: once ResponseWriter.WriteHeader below
+	// returns control to an outer wrapper such as compression, that wrapper is
+	// free to mutate the shared header map (Content-Encoding, Content-Length,
+	// Accept-Ranges, Vary) for bytes this writer never sees, since it buffers
+	// only what the handler itself wrote.
+	w.snapshot = cloneHeader(w.Header())
 	// A 1xx status is an interim or protocol-switch response, not a
 	// representation; 101 in particular means the connection is leaving HTTP.
 	// An event stream never ends, so capturing it would only grow a buffer that

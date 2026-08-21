@@ -491,7 +491,16 @@ func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.
 	if !cw.storable() {
 		return
 	}
-	if e := c.buildEntry(r, cw.status, w.Header(), cw.buf.Bytes(), now); e != nil {
+	// cw.snapshot, not w.Header(): layers outside the cache (compression in
+	// particular) mutate the shared header map after cacheWriter.WriteHeader
+	// returns, and cw.buf only ever holds the bytes the handler itself wrote.
+	// Reading w.Header() here would pair a header from one layer with a body
+	// captured at another. See #326.
+	h := cw.snapshot
+	if h == nil {
+		h = w.Header()
+	}
+	if e := c.buildEntry(r, cw.status, h, cw.buf.Bytes(), now); e != nil {
 		c.store(key(r), r, e)
 	}
 }
