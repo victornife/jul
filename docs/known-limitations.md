@@ -25,8 +25,8 @@ references.
   compressible stores the `Content-Encoding` the compression layer set alongside the *uncompressed*
   body, because the cache re-reads the shared response header map after the stack unwinds instead of
   snapshotting it at header commit. A later cache hit is served an undecodable body.
-  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) §11 fixes the capture; until it
-  lands, do not combine `cache = true` with compressible content types on the same route.
+  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) §11 fixes the capture (#326);
+  until it lands, do not combine `cache = true` with compressible content types on the same route.
 
 ---
 
