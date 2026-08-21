@@ -21,12 +21,6 @@ references.
   and no CORS or preflight handling of any kind. `[servers.locations].headers` sets headers on the
   *upstream request*, not on the response to the client. A WASM middleware plugin is the only way to
   set a response header today.
-- **Response cache × compression corruption:** a location with `cache = true` whose responses are
-  compressible stores the `Content-Encoding` the compression layer set alongside the *uncompressed*
-  body, because the cache re-reads the shared response header map after the stack unwinds instead of
-  snapshotting it at header commit. A later cache hit is served an undecodable body.
-  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) §11 fixes the capture (#326);
-  until it lands, do not combine `cache = true` with compressible content types on the same route.
 
 ---
 
