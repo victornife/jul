@@ -42,9 +42,11 @@ has unwound. Compression sits outside the router and therefore outside the cache
 before the read happens. A characterization test written for this record reproduces the consequence
 on current `main`: a cacheable, compressible response is stored with `Content-Encoding: gzip` and an
 *uncompressed* body, and the next matching request is served that entry — 2400 bytes of plain text
-under a `gzip` label, which no browser can decode. This is a pre-existing defect, tracked as #326,
-but it is decisive here: a response policy placed anywhere inside the cache, or placed outside it
-without fixing the capture, would store `Access-Control-Allow-Origin: https://one-tenant.example`
+under a `gzip` label, which no browser can decode. This is a pre-existing defect, tracked and fixed
+as #326 (independently of this record, by #327, since a shared-cache correctness bug does not wait
+on an unrelated routing decision), but it is decisive here: a response policy placed anywhere inside
+the cache, or placed outside it without fixing the capture, would store
+`Access-Control-Allow-Origin: https://one-tenant.example`
 in an entry keyed without `Origin` and serve it to every other origin. The cache is a shared,
 disk-backed, process-lifetime object that outlives handler generations and process restarts, so the
 leak would also outlive the configuration that caused it.
@@ -838,10 +840,10 @@ required by it.
   neither auth nor the action; denied preflight does.
 - **§11 cache — the invariant test:** a response stored under a location with a CORS policy and
   header operations contains none of them; a second request from a different origin receives its own
-  correct headers; an entry rehydrated from disk carries no policy headers. **Plus the regression
-  test for the pre-existing compression defect**, which the same snapshot fixes: a compressible
-  cacheable response served on a hit must have a body whose encoding matches its
-  `Content-Encoding`.
+  correct headers; an entry rehydrated from disk carries no policy headers. (The regression test for
+  the pre-existing compression defect that the same snapshot fixes — a compressible cacheable
+  response served on a hit must have a body whose encoding matches its `Content-Encoding` — already
+  landed with the snapshot itself in #327, ahead of this ADR's own implementation.)
 - **§12 protocols:** identical predicate and policy behaviour on HTTP/1.1, h2c, HTTP/2 and HTTP/3;
   WebSocket upgrade unaffected and the wrapper inert after hijack; native gRPC and transcoding
   policy applied without touching trailers.
@@ -854,8 +856,9 @@ required by it.
 
 1. Route selection becomes a candidate enumeration. This is the largest internal change and the one
    with the most observable blast radius; §6 exists so it is implemented rather than designed.
-2. `cacheWriter` must snapshot headers at commit. This also fixes a reproduced, client-visible
-   compression corruption bug that exists today, tracked as #326.
+2. `cacheWriter` must snapshot headers at commit. That snapshot already shipped independently, in
+   #327, which also fixed the reproduced, client-visible compression corruption bug tracked as #326;
+   §146's response-policy wrapper builds on the same mechanism rather than introducing it.
 3. `sr.fallback` disappears as a special case; duplicate `prefix "/"` locations change from
    last-declared to first-declared, aligning the router with the lint.
 4. `AuthScope`, `WAFScope` and the rate-limit scope gain match type and ordinal. Rate-limit buckets
@@ -918,7 +921,7 @@ change semantics silently, which is worse than an explicit unsupported finding.
 - #145 — `[ROUTE-01]` request matching; implements §1–§7, §13–§16
 - #146 — `[ROUTE-02]` response policy and CORS; implements §8–§12, §15, §16
 - #147 — `[ROUTE-03]` typed API, Console, importer, E2E; also gated on ADR 0019
-- #326 — the pre-existing cache × compression corruption that §11 also fixes
+- #326 — the pre-existing cache × compression corruption §11 also fixes; already resolved by #327
 - #108 — Core Gateway Completeness epic; `docs/specs/core-gateway-completeness.md` §7 (D12)
 - [ADR 0016](0016-inbound-identity-and-backend-peer-trust.md) §12 — identity asserted to the backend
 - [ADR 0011](0011-reload-plan.md) — reload transaction and the closed-world lifecycle registry
