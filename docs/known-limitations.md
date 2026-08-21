@@ -14,6 +14,13 @@ references.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust have shipped ([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). The remaining boundaries are documented as deferrals with explicit promotion triggers in that record, not as gaps: proxy-aware Admin identity, QUIC and UDP client preservation, and per-tenant policy.
 - **Upstream overload control:** the bounded model decided by [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is not yet implemented. Until #141–#144 land, the running binary has: no cap on concurrent upstream requests or on physical backend connections (`MaxConnsPerHost` is unset); no retry budget, overall retry deadline or backoff between attempts; no bound on how many requests probe a backend the instant its `fail_timeout` cooldown elapses; no load balancing, health checking or failure accounting for `fastcgi_pass` and `uwsgi_pass`, whose connection count is unbounded; no connection cap on L4 TCP routes (UDP already has `max_udp_sessions`); and no circuit breaker on the forward-auth and JWKS subrequests, which carry a fixed 10s timeout.
+- **Routing and response policy:** the bounded model decided by
+  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) is not yet implemented. Until
+  #145 and #146 land, a location can only be selected by host and path: there is no method,
+  request-header or query-parameter matching, no way to add, replace or remove a response header,
+  and no CORS or preflight handling of any kind. `[servers.locations].headers` sets headers on the
+  *upstream request*, not on the response to the client. A WASM middleware plugin is the only way to
+  set a response header today.
 
 ---
 

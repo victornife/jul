@@ -64,6 +64,14 @@ docs/adr/              # Architecture Decision Records
   transcoding, FastCGI, uWSGI and the L4 stream proxy — rather than reimplemented
   per protocol. Limits are per replica, not cluster-wide.
   [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is the authority.
+- **One route matcher, and the cache stores only what the origin sent:** route
+  selection is a tiered enumeration over slices in declaration order — never a map
+  iteration — and no surface reimplements it, including the admin route-test
+  endpoint. Response-header policy and CORS are applied outside the response
+  cache, and the cache captures response headers at header commit rather than
+  re-reading the shared map afterwards, so nothing a layer outside the cache adds
+  can enter a stored entry.
+  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) is the authority.
 
 ## Trust boundaries
 
