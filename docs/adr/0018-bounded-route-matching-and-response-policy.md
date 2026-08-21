@@ -176,6 +176,14 @@ and a table entry missing its required field is an error rather than a silently 
 - `CONNECT` may be configured but never matches: Go's server does not route `CONNECT` requests to
   the handler with a normal request target. Validation rejects it with that reason rather than
   accepting a predicate that can never fire.
+- **On a location with `cors.enabled = true`, a `methods` predicate additionally accepts a CORS
+  preflight** — `OPTIONS` carrying exactly one `Origin` and an `Access-Control-Request-Method`.
+  Without this rule a CORS-enabled route with `methods = ["GET", "POST"]` could never be selected
+  for its own preflight, so the preflight would fall through to another route or to 404 and the
+  feature would silently not work on precisely the routes most likely to use it. A plain `OPTIONS`
+  that is not a preflight still obeys `methods`. Listing `OPTIONS` explicitly is permitted and
+  redundant. This is the same kind of rule as GET⊇HEAD and is stated for the same reason: the
+  alternative is a footgun discovered in a browser console.
 
 ### 3. Header predicate semantics
 
@@ -414,6 +422,18 @@ defined.
 **Preflight.** A request is a preflight when it is `OPTIONS`, carries exactly one `Origin`, and
 carries `Access-Control-Request-Method`.
 
+A preflight is deliberately stripped by the browser of nearly everything a route might predicate on:
+it carries no `Authorization`, no cookies and none of the application headers the actual request will
+carry. Two consequences follow, and both are contract, not implementation detail.
+
+- §2's rule applies: a `methods` predicate on a `cors.enabled` location also accepts the preflight,
+  so the route can be selected for it.
+- **A `cors.enabled` location that also carries header predicates produces a lint warning.** The
+  browser will not send those headers on the preflight, so the preflight will not select that route,
+  and the operator would otherwise debug an intermittent-looking CORS failure that is really a
+  routing outcome. Jul does not silently exempt header predicates for preflights: that would create
+  a second, invisible matching mode, and §6 exists to prevent exactly that.
+
 - An **approved** preflight — allowed origin, requested method in `allowed_methods`, and every
   comma-separated token of `Access-Control-Request-Headers` in `allowed_headers` compared
   case-insensitively — is answered by Jul with **204 No Content**, an empty body, and no upstream
@@ -512,7 +532,8 @@ Two rules, and the second is what makes the first true.
    eligible for storage.
 2. **`cacheWriter` snapshots the response header map inside its own `WriteHeader`, before delegating
    outward, and `buildEntry` consumes that snapshot instead of re-reading `w.Header()` after the
-   stack unwinds.**
+   stack unwinds.** A header set after `WriteHeader` is excluded, which is correct: it never reached
+   the client either.
 
 Rule 1 alone is not sufficient and this record must say so explicitly, because the natural reading of
 "place it outside the cache" is that placement settles it. It does not. Every wrapper in the chain
@@ -610,7 +631,8 @@ operator meant:
 
 - `SeverityError`: a predicate on `Forwarded`, `X-Forwarded-*` or an RFC 9440 name (§3).
 - Warning: a hop-by-hop header predicate; `"null"` in `allowed_origins`; `cors` on a native gRPC
-  location; a response-header operation on `Content-Type` at a gRPC location.
+  location; a response-header operation on `Content-Type` at a gRPC location; a `cors.enabled`
+  location that also carries header predicates (§9).
 - Warning: **unreachable routes.** The existing duplicate-match rule extends to predicates. Two
   locations with the same `(type, path)` are duplicates only when their normalized predicate sets are
   equal. A later location is unreachable when an earlier location with the same `(type, path)` has a
@@ -681,7 +703,7 @@ approximated silently.
 | Match predicates as arrays of tables with an `op` enum (§1) | **One-way door** | public TOML, typed API, JSON Schema, Console forms, importer output | schema migration, dual-read parsing, deprecation window |
 | Absent vs empty semantics; `methods = []` rejected (§1) | **One-way door** | changing it later silently reinterprets deployed configurations | breaking, or a new field |
 | Byte-exact method comparison; non-uppercase registered methods rejected (§2) | Expensive two-way door | loosening is additive, tightening is breaking | one-directional only |
-| **`GET` also matches `HEAD` (§2)** | **One-way door** | directly observable routing behaviour | breaking; only escapable via an additive opt-out |
+| **`GET` also matches `HEAD`; `cors.enabled` widens `methods` for preflights (§2)** | **One-way door** | directly observable routing behaviour | breaking; only escapable via an additive opt-out |
 | Header name canonicalization; no comma splitting; unanchored regex (§3) | **One-way door** | changes which requests a deployed route matches | breaking |
 | `present` includes present-empty (§3) | **One-way door** | same | breaking |
 | Query parsing semantics; malformed pairs absent, never a 400 (§4) | **One-way door** | client-visible behaviour under malformed input | breaking |
@@ -792,7 +814,8 @@ required by it.
 
 - **§2 methods:** exact-case comparison; lowercase registered method rejected; extension method
   accepted; duplicate rejected; empty list rejected; `CONNECT` rejected; `GET` matches HEAD; `HEAD`
-  alone does not match GET.
+  alone does not match GET; a `cors.enabled` route with `methods = ["GET"]` is selected for its own
+  preflight, and a non-preflight `OPTIONS` to the same route is not.
 - **§3 headers:** name case-insensitivity across HTTP/1.1, HTTP/2 and HTTP/3; absent vs present-empty;
   repeated field lines; comma-combined value not split; unanchored regex; regex compile failure fails
   the reload; `Host` rejected; pseudo-header rejected; `X-Forwarded-For` predicate produces the
