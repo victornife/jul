@@ -251,9 +251,12 @@ references.
 
 - **No WebSocket over HTTP/3 — or over HTTP/2.** Jul.IA implements the HTTP/1.1 `Upgrade` mechanism
   only. WebSocket over HTTP/2 and HTTP/3 uses extended `CONNECT` (RFC 8441 / RFC 9220), which Jul.IA
-  does not implement and which Go's bundled HTTP/2 server keeps behind `GODEBUG=http2xconnect=1` and
-  documents as unsupported. A
-  WebSocket upgrade over HTTP/3 will be rejected.
+  does not implement. Go's bundled HTTP/2 server keeps extended `CONNECT` behind
+  `GODEBUG=http2xconnect=1` for a reason that applies directly here: advertising it makes browsers
+  *stop* sending HTTP/1.1 `Upgrade` and start sending extended `CONNECT`, which then fails against a
+  server whose WebSocket path does not implement it. A WebSocket upgrade over HTTP/3 will be
+  rejected. Browsers fall back to an HTTP/1.1 connection for the WebSocket, so nothing is
+  unreachable.
 - **HTTP/3 settings require a restart.** The QUIC listener is built at bind
   time; changes to `[servers.http3]` take effect only after a full restart.
 - **QUIC path MTU discovery.** Some networks drop oversized UDP packets; QUIC

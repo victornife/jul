@@ -93,11 +93,14 @@ policy change applies after the planned restart and to subsequent handshakes.
 
 1. **No WebSocket upgrade over HTTP/3 — and none over HTTP/2 either.** Jul supports
    the HTTP/1.1 `Upgrade` mechanism only. WebSocket over HTTP/2 and HTTP/3 uses
-   extended `CONNECT` ([RFC 8441][rfc8441] / RFC 9220), which Jul does not implement;
-   Go's bundled HTTP/2 server keeps it behind `GODEBUG=http2xconnect=1` and documents
-   it as unsupported. A client that connects over HTTP/3 and requests a WebSocket
-   upgrade will receive a `400 Bad Request` or the upgrade will fail. Browsers fall
-   back to an HTTP/1.1 connection for the WebSocket, so nothing is unreachable.
+   extended `CONNECT` ([RFC 8441][rfc8441] / RFC 9220), which Jul does not implement.
+   Go's bundled HTTP/2 server keeps extended `CONNECT` behind `GODEBUG=http2xconnect=1`
+   for a reason that applies directly here: advertising it makes browsers *stop*
+   sending HTTP/1.1 `Upgrade` and start sending extended `CONNECT`, which then fails
+   against a server whose WebSocket path does not implement it. A client that connects
+   over HTTP/3 and requests a WebSocket upgrade will receive a `400 Bad Request` or the
+   upgrade will fail. Browsers fall back to an HTTP/1.1 connection for the WebSocket,
+   so nothing is unreachable.
 
 [rfc8441]: https://www.rfc-editor.org/rfc/rfc8441.html
 

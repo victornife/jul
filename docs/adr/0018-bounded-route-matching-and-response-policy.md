@@ -26,6 +26,7 @@
 | 2026-08-24 | Second review round. §11's invariant was **falsified** and is narrowed to the commit boundary, with the stronger form required from #332: `RequestID` pre-sets `X-Request-ID` before `next`, so a cache hit replays a stale id beside the current one. §12 renamed to *HTTP semantic parity* with a transport/action matrix, because the previous blanket claim was untrue for WebSocket, native gRPC and the L4 stream proxy. §10's WAF justification was **factually wrong** — Coraza inspects URI, query, headers, method and client address without a body — so the preflight terminator now runs the WAF as well as the rate guard, restructured as decide-then-guard so nothing is evaluated twice. §9 states CORS defaults, empty-list semantics and `enabled = false` validation. §15's unreachable-route rule is reduced to the provable cases. §10's diagram had `BodyLimit` outermost, contradicting this record's own *Existing architecture* table. |
 | 2026-08-24 | Third review round. §12's WebSocket row said HTTP/1.1 **and HTTP/2**, taken from a stale line in `docs/http3.md` rather than verified; Jul implements no RFC 8441 extended `CONNECT`, as `docs/cache.md` already said, so it is HTTP/1.1 only and §17 records the cost and re-entry trigger for changing that. §14 adds `preflight_widening` to the canonical fingerprint and §15's subsumption model, because §2 made `cors.enabled` a *matcher* input and two routes differing only in it were collapsing to one scope. §14 freezes the route-test request extension (`raw_query`, `header_values`), which the existing `map[string]string` could not express. §11 stops prescribing a multiset difference as a proof: it delivers the no-leak property this record needs but not header fidelity, and the mechanism is #332's to choose. Coherence: `architecture.md`, the `Access-Control-Allow-Headers` emission condition, and `enabled = false` validating present *values* rather than requiredness. |
 | 2026-08-24 | Final read-through before merge. Three handoff gaps closed, no decisions changed: §9 makes the wildcard/`Vary` coupling structural (one derived predicate plus a named coupling test) rather than relying on a paragraph a future editor may not read; §10 states that both preflight guards compose as ordinary middleware around the 204 emitter, so nobody invents a parallel `Check()` API with its own metrics and failure modes; §8a names the capability the `Vary` restriction costs — an operator whose uncontrollable upstream varies silently must set `cache = false` on that route — instead of leaving it to be discovered. |
+| 2026-08-24 | §17's RFC 8441 re-entry trigger said "golang/go#71128 resolves". Wrong twice: that issue closed in January 2025, and it closed **by disabling** extended `CONNECT` — it produced the current state rather than tracking its removal. The trigger is now state-based. The same passage misattributed Go's rationale: *"package doesn't support extended CONNECT"* refers to **the server's WebSocket package**, not `net/http`, and the real hazard is sharper — advertising `SETTINGS_ENABLE_CONNECT_PROTOCOL` makes browsers *stop* sending HTTP/1.1 `Upgrade`, so a partial implementation breaks WebSocket for clients that work today. `docs/http3.md` and `docs/known-limitations.md` carried the same misquote. |
 
 ## Context
 
@@ -1224,19 +1225,28 @@ own configuration.
 **On RFC 8441/9220 specifically**, because "why not just support it" is the obvious question and the
 answer is not "it is hard". It is feasible and it is currently not worth its cost:
 
-- **Go gates it off.** Go 1.26's bundled HTTP/2 server implements extended `CONNECT` but sets
-  `disableExtendedConnectProtocol = true`, with the comment *"package doesn't support extended
-  CONNECT"*, reachable only through the process-global `GODEBUG=http2xconnect=1`. There is no
-  `Server` field. Shipping a supported product feature on a GODEBUG escape hatch that Go's own
-  maintainers describe as unsupported is not a defensible foundation. quic-go does support extended
-  `CONNECT` for HTTP/3, so supporting h3 but not h2 would be the *inverse* of the useful order.
+- **Advertising it changes what browsers send, so a partial implementation is worse than none.** Go
+  1.26's bundled HTTP/2 server implements extended `CONNECT` and then deliberately disables it,
+  `disableExtendedConnectProtocol = true`, reachable only through the process-global
+  `GODEBUG=http2xconnect=1`; there is no `Server` field. The reason Go gives is the important part,
+  and it is not "our plumbing is unfinished":
+
+  > *"Enabling extended CONNECT [...] causes browsers to attempt to use WebSockets-over-HTTP/2. This
+  > results in problems when the server's websocket package doesn't support extended CONNECT."*
+
+  Emitting `SETTINGS_ENABLE_CONNECT_PROTOCOL` is a promise. Browsers that see it **stop** sending
+  HTTP/1.1 `Upgrade` and start sending extended `CONNECT`. Jul's entire WebSocket path is
+  `Upgrade` + hijack, so advertising the setting before the whole path supports it would break
+  WebSocket for exactly the clients that today work fine. This is not a flag to flip and then
+  incrementally improve behind.
 - **It buys almost no capability.** A browser that cannot use RFC 8441 opens an ordinary HTTP/1.1
   connection for the WebSocket. Nothing becomes possible that is impossible today; connection count
   and head-of-line behaviour improve. That is an optimization, not a gap.
 - **The backend side is a real adapter, not a flag.** Inbound extended `CONNECT` proxied to an
   HTTP/1.1 backend means translating an HTTP/2 stream to an `Upgrade` + hijack and back, with
   flow-control and half-close semantics Jul would own. [ADR 0002](0002-protocol-adaptation.md)
-  governs exactly this and requires it to be an explicit adapter.
+  governs exactly this and requires it to be an explicit adapter. quic-go does support extended
+  `CONNECT` for HTTP/3, so building h3 first without h2 would be the *inverse* of the useful order.
 - **It would reopen the wrapper-composition defect class.** An extended `CONNECT` carries neither an
   `Upgrade` header nor `Connection: upgrade`, so `isUpgradeRequest` would not fire: the cache would
   see a `200` with an unbounded body and buffer it to `maxEntry`, compression would try to compress a
@@ -1244,10 +1254,19 @@ answer is not "it is hard". It is feasible and it is currently not worth its cos
   class as #326, #331 and #332, and adopting RFC 8441 without first revisiting all four wrappers
   would create a fourth instance.
 
-> **Re-entry trigger:** golang/go#71128 resolves and Go enables extended `CONNECT` by default with a
-> supported server-side API. At that point the decision is reopened as an ADR 0002 protocol-adapter
-> question, and the cache, compression, `Recorder` and `respwriter` upgrade/hijack assumptions are
-> re-derived *before* any implementation, not after.
+> **Re-entry trigger — a state of the world, not a ticket.** Revisit when **Go exposes a supported,
+> per-`Server` API for extended `CONNECT` and enables it by default**, and Jul's WebSocket path can
+> serve an extended-`CONNECT` stream end to end.
+>
+> An earlier revision made the trigger "golang/go#71128 resolves", which was wrong twice over: that
+> issue closed in January 2025, and it closed *by disabling* extended `CONNECT` — it is the issue
+> that produced the current state, not one tracking its removal. A re-entry trigger has to be a
+> condition someone can evaluate against the world, because a ticket can close in the direction
+> opposite to the one the trigger assumed.
+>
+> When it fires, the decision reopens as an ADR 0002 protocol-adapter question, and the cache,
+> compression, `Recorder` and `respwriter` upgrade/hijack assumptions are re-derived *before* any
+> implementation, not after.
 
 ### 18. Importer
 
