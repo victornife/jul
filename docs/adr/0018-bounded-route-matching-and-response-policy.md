@@ -27,6 +27,7 @@
 | 2026-08-24 | Third review round. §12's WebSocket row said HTTP/1.1 **and HTTP/2**, taken from a stale line in `docs/http3.md` rather than verified; Jul implements no RFC 8441 extended `CONNECT`, as `docs/cache.md` already said, so it is HTTP/1.1 only and §17 records the cost and re-entry trigger for changing that. §14 adds `preflight_widening` to the canonical fingerprint and §15's subsumption model, because §2 made `cors.enabled` a *matcher* input and two routes differing only in it were collapsing to one scope. §14 freezes the route-test request extension (`raw_query`, `header_values`), which the existing `map[string]string` could not express. §11 stops prescribing a multiset difference as a proof: it delivers the no-leak property this record needs but not header fidelity, and the mechanism is #332's to choose. Coherence: `architecture.md`, the `Access-Control-Allow-Headers` emission condition, and `enabled = false` validating present *values* rather than requiredness. |
 | 2026-08-24 | Final read-through before merge. Three handoff gaps closed, no decisions changed: §9 makes the wildcard/`Vary` coupling structural (one derived predicate plus a named coupling test) rather than relying on a paragraph a future editor may not read; §10 states that both preflight guards compose as ordinary middleware around the 204 emitter, so nobody invents a parallel `Check()` API with its own metrics and failure modes; §8a names the capability the `Vary` restriction costs — an operator whose uncontrollable upstream varies silently must set `cache = false` on that route — instead of leaving it to be discovered. |
 | 2026-08-24 | §17's RFC 8441 re-entry trigger said "golang/go#71128 resolves". Wrong twice: that issue closed in January 2025, and it closed **by disabling** extended `CONNECT` — it produced the current state rather than tracking its removal. The trigger is now state-based. The same passage misattributed Go's rationale: *"package doesn't support extended CONNECT"* refers to **the server's WebSocket package**, not `net/http`, and the real hazard is sharper — advertising `SETTINGS_ENABLE_CONNECT_PROTOCOL` makes browsers *stop* sending HTTP/1.1 `Upgrade`, so a partial implementation breaks WebSocket for clients that work today. `docs/http3.md` and `docs/known-limitations.md` carried the same misquote. |
+| 2026-08-24 | Review of the record's own stated doubts. One design change: §10 adds a **location-scoped recover**, so a panic after route selection produces a 500 carrying the location's response headers and CORS — the earlier draft documented that hole as a boundary, which was wrong, since §9 already argues a cross-origin 401/403/429/502 must be readable and 500 is not different. Three accuracy corrections: §16's bounds are labelled conservative and **unmeasured**, with worst-case benchmarks at the maxima required of #145/#146; §14's reversibility is downgraded to an *internal* two-way door with transient impact, because `authByScope`/`wafByScope` are rebuilt per generation and only rate-limit buckets are keyed across reloads (evicted by the store's idle TTL); and #331/#332 become **hard merge gates** for #146 rather than sequencing preferences. §9's `allowed_methods` default is **kept**, with the rule that makes it safe now stated exactly: every `Access-Control-Request-Headers` token must be listed, with **no safelist exemption**, because a browser lists a name there precisely when it is *not* safelisted. |
 
 ## Context
 
@@ -603,10 +604,24 @@ is how a security feature acquires two:
   makes the minimal configuration silently useless.
 - An explicit `[]` is a **validation error** on all four, for the same reason `match.methods = []` is
   (§1): a list that can never match is a mistake, not a way to express a policy.
-- `allowed_headers` empty means only the CORS-safelisted request headers pass preflight approval, and
-  `Access-Control-Allow-Headers` is omitted from the response rather than emitted with an empty
-  value. Jul never reflects `Access-Control-Request-Headers` back: reflecting is how a bounded policy
+- **Every token in `Access-Control-Request-Headers` must appear in `allowed_headers`. There is no
+  implicit safelist exemption**, so an empty `allowed_headers` approves a preflight only when the
+  request lists no headers at all. This is both simpler and safer than carving out the
+  CORS-safelisted names, and it is correct rather than merely strict: a browser includes a name in
+  `Access-Control-Request-Headers` *precisely when it is not safelisted*. `Content-Type` appears
+  there only when its value is outside `application/x-www-form-urlencoded`, `multipart/form-data`
+  and `text/plain` — a JSON body, in other words — so treating a listed `Content-Type` as safelisted
+  would approve exactly the preflight the operator did not authorize. `Access-Control-Allow-Headers`
+  is omitted from the response when the list is empty, rather than emitted with an empty value.
+  Jul never reflects `Access-Control-Request-Headers` back: reflecting is how a bounded policy
   becomes an unbounded one.
+
+  This rule is what makes the `allowed_methods` default above safe. An origins-only policy permits a
+  *simple* cross-origin `POST` — which the browser would send without a preflight anyway, and which
+  already receives an allow-origin header — while a JSON `POST` or an `Authorization`-bearing `POST`
+  is denied, because each puts a non-safelisted name in `Access-Control-Request-Headers` that
+  `allowed_headers` does not list. The method default and the header rule are a pair: permitting the
+  method is not permitting the request.
 - **`enabled = false` does not skip validation of the values that are present.** Every field the
   operator wrote is validated exactly as if the block were enabled, and the block is inert at
   runtime. *Requiredness* stays conditional: `allowed_origins` is required only when
@@ -710,7 +725,7 @@ Private Network Access (`Access-Control-Request-Private-Network`) is out of scop
 
 ### 10. Execution order
 
-The per-location chain gains two positions. Nothing existing moves.
+The per-location chain gains three positions. Nothing existing moves.
 
 ```
 request
@@ -721,6 +736,7 @@ request
   Compression
   router: host -> location (§6)     <- method/header/query predicates evaluated here
     >> response policy + CORS response headers        (NEW, outermost per-location)
+    >> location recover                               (NEW, routed panics get the policy)
     plugins
     ClientCert
     >> CORS preflight termination                     (NEW: decide, then guard, then 204)
@@ -826,10 +842,40 @@ response-phase rules see the generated 204, which is correct.
 Moving `Auth` inside `RateLimit`/`WAF` remains rejected: it would break two documented, load-bearing
 behaviours to solve a problem the terminator's own guards already solve without moving anything.
 
-**Responses produced outside route selection carry no location policy**, by construction and by
-design: the router's own 404, the HTTP→HTTPS redirect, the ACME challenge handler, and the 500 that
-`Recover` writes after a panic are all emitted outside the per-location chain. This is stated so it
-is a documented boundary rather than a surprise.
+**A panic *after* route selection produces a 500 that carries the location's policy.** An earlier
+draft documented the opposite as a boundary, which was the wrong call. The global `Recover` sits
+outside the router, so a panic in a plugin, an authenticator, the WAF or the action produced a 500
+emitted outside the per-location chain — no response headers, and crucially no
+`Access-Control-Allow-Origin`. For a browser client that turns an informative generic 500 into an
+opaque CORS failure, on the request most likely to need diagnosing. §9 already argues that a
+cross-origin 401, 403, 429 or 502 must be readable; there is no principled reason 500 is different,
+and "it happened to sit outside the router" is not one.
+
+So route-scoped recovery is added, at exactly one place:
+
+```
+    >> response policy + CORS response headers        (outermost per-location)
+    >> location recover                               (NEW)
+    plugins ... action
+```
+
+| Panic occurs | Recovered by | Location policy applied? |
+| --- | --- | --- |
+| Before route selection — router, observers, compression | global `Recover` | no — no location is known |
+| After selection, **before** the response commits | **location recover** | **yes** — the generic 500 is written through the policy wrapper |
+| After the response commits | neither can help | the status is already on the wire; the stream ends incomplete |
+| In the policy wrapper itself | global `Recover` | no — the fallback stays |
+
+The global `Recover` is **not** removed: it remains the final backstop for the router, the policy
+wrapper and everything before selection, and it is what keeps the observers recording a 500 rather
+than losing the request. The location recover writes a generic 500 and adds no detail the global one
+does not — this is about which headers accompany it, not about leaking panic text. Cost is one
+deferred recovery per routed request.
+
+**Responses produced outside route selection still carry no location policy**, by construction: the
+router's own 404, the HTTP→HTTPS redirect and the ACME challenge handler are all emitted before a
+location exists. That remains a documented boundary — it is now a boundary about *what could not have
+a policy*, rather than one that also swallowed a case that could.
 
 ### 11. Cache × response policy: the cache stores the origin representation
 
@@ -907,7 +953,7 @@ The consequences of rule 2 are what this record wants:
 **Invariant, as the implementation can state it today:** *no header written by a layer outside the
 cache handler **after the handler commits its response** may appear in a stored cache entry.*
 
-**Invariant this record requires, and #332 delivers:** *no header contributed by a layer outside the
+**Invariant this record requires, and #332 must deliver:** *no header contributed by a layer outside the
 cache may appear in a stored entry, whenever it was written.* The second subsumes the first and is
 the one §8's and §9's reasoning should be read against; the first is what is true on `main` today.
 Neither claims fidelity — that a stored entry reproduces the origin's headers exactly — and no
@@ -1192,11 +1238,23 @@ but it never lets an unusual one be silent.
 | Generated CORS header set — total serialized bytes | 4 KiB |
 | `Access-Control-Request-Headers` tokens honoured | 64 |
 
+**These are conservative initial safety ceilings, not benchmark-derived capacity limits.** They were
+chosen to bound configuration size, compilation cost and per-request work, not measured against a
+workload — and this record says so rather than implying a rigour it does not have. Conservative is
+the right starting point because the asymmetry is one-directional: raising a limit later is additive,
+lowering an advertised one is breaking, and setting one too high initially can expose CPU, memory or
+response-amplification problems in production rather than in review.
+
+**#145 and #146 must benchmark the worst case at each maximum** — a location holding 16 header
+predicates of which 8 are 512-byte regexes, 32 response-header operations totalling 8 KiB, and a CORS
+policy at 64 origins / 64 allowed headers / 64 exposed headers — and record the numbers. If a ceiling
+turns out to be far below what the implementation comfortably sustains, raise it then, with evidence.
+
 Count limits and byte limits are both present on purpose: 64 `allowed_headers` of unbounded length
 is not a bound on the response Jul generates, and the preflight-response size argument in §10 depends
 on one existing.
 
-These are validation limits, checked before `Publish`, except the per-request query-pair cap and the
+All are checked before `Publish`, except the per-request query-pair cap and the
 `Access-Control-Request-Headers` token cap, which bound request-time work. They exist so that a
 pathological or adversarial configuration cannot make route selection or preflight evaluation
 superlinear, and so that the cost of a request is bounded by a number an operator can read off their
@@ -1315,9 +1373,11 @@ approximated silently.
 | HTTP semantic parity scoped to supported transport/action pairs (§12) | Two-way door | a description of existing capability, not a new constraint | none |
 | Cache stores the origin representation; snapshot at commit (§11) | Two-way door in mechanism, **one-way in guarantee** | the *guarantee* is a security contract; the snapshot is private | mechanism: local refactor. Guarantee: not reversible |
 | `match_ordinal` as a CAS-bound **selector**, never an identity (§14) | **One-way door** on the field, two-way on the policy | public API field; the CAS requirement can only be relaxed, not added, later | additive now |
-| Internal scopes keyed by predicate fingerprint, including `preflight_widening` (§14) | Expensive two-way door | one-time bucket reset on upgrade; omitting the bit is a scope collision | documented changelog entry |
+| Internal scopes keyed by predicate fingerprint, including `preflight_widening` (§14) | **Internal two-way door, transient operational impact** | `authByScope`/`wafByScope` are rebuilt every generation, so nothing migrates; only rate-limit buckets are keyed across reloads, and orphaned ones are evicted by the store's idle TTL | changelog note; buckets refill within the TTL |
 | Route-test `raw_query` + `header_values` (§14) | **One-way door** | public admin API fields | additive now; removing them later is breaking |
 | WebSocket is HTTP/1.1 only; RFC 8441/9220 deferred (§12, §17) | Two-way door | adding extended `CONNECT` later is additive capability | new protocol adapter, plus re-deriving the wrapper assumptions |
+| Location-scoped recover so a routed panic 500 carries policy (§10) | Expensive two-way door | observable: a cross-origin client can read a routed 500 | breaking for clients that came to rely on it |
+| Every `Access-Control-Request-Headers` token must be listed; no safelist exemption (§9) | One-way door to *loosen* only | relaxing is additive; it is what makes the `allowed_methods` default safe | one-directional |
 | Numeric and byte bounds (§16) | Two-way door upward, one-way downward | raising a limit is additive | low upward |
 | Compiled matcher representation, package layout, predicate structs | **Two-way door** | entirely private | local refactor |
 | Where the parsed query is memoized; the fingerprint's digest algorithm | **Two-way door** | private and derived | local refactor |
@@ -1470,18 +1530,26 @@ required by it.
   is absent only when the emitted `Access-Control-Allow-Origin` is byte-identical across every
   request shape — so a future exception carved out of the wildcard fails at the point it is
   introduced. CORS headers present on 401, 403, 429 and 502.
-- **§9 defaults:** `allowed_origins` omitted with `enabled = true` is rejected; `allowed_methods`
-  omitted defaults to the safelisted set and a route configured with origins alone approves a `POST`
-  preflight; an explicit `[]` is rejected on all four lists; empty `allowed_headers`/`exposed_headers`
-  **omit** their response header rather than emitting it empty; `Access-Control-Request-Headers` is
-  never reflected; a populated block with `enabled = false` validates fully, is inert, and lint-warns.
+- **§9 defaults:** `allowed_origins` omitted with `enabled = true` is rejected; an explicit `[]` is
+  rejected on all four lists; empty `allowed_headers`/`exposed_headers` **omit** their response header
+  rather than emitting it empty; `Access-Control-Request-Headers` is never reflected; a populated
+  block with `enabled = false` validates fully, is inert, and lint-warns. **The `allowed_methods`
+  default is safe only in combination with the header rule, so test the pair:** with an origins-only
+  policy, a *simple* cross-origin `POST` succeeds and receives allow-origin; a **JSON `POST`
+  preflight is denied** unless `Content-Type` is listed; an **`Authorization`-bearing `POST`
+  preflight is denied** unless `Authorization` is listed. Also: a listed `Content-Type` in
+  `Access-Control-Request-Headers` is **not** treated as safelisted.
 - **§10 ordering:** policy applied to auth, rate-limit, WAF, **BodyLimit 413**, upstream-error and
-  cache-hit responses; not applied to the router 404, the HTTPS redirect or the `Recover` 500;
-  approved preflight reaches neither auth nor the action; denied preflight does; **an approved
-  preflight is rate-limited and WAF-inspected by the terminator**, keys on the client address even
-  when the policy says `jwt:<claim>`, and shares no bucket with the identity-aware limiter; a denied
-  preflight is guarded by the ordinary chain and **not** by the terminator, so neither is evaluated
-  twice; a location without a rate policy installs no rate guard.
+  cache-hit responses; **and to the 500 from a panic after route selection** — a cross-origin request
+  to a route whose action panics must receive a 500 carrying `Access-Control-Allow-Origin`, while a
+  panic in the router or before selection still yields the global `Recover` 500 with no location
+  policy, and a panic *after* the response commits changes neither status nor headers; not applied to
+  the router 404, the HTTPS redirect or the ACME challenge handler; approved preflight reaches
+  neither auth nor the action; denied preflight does; **an approved preflight is rate-limited and
+  WAF-inspected by the terminator**, keys on the client address even when the policy says
+  `jwt:<claim>`, and shares no bucket with the identity-aware limiter; a denied preflight is guarded
+  by the ordinary chain and **not** by the terminator, so neither is evaluated twice; a location
+  without a rate policy installs no rate guard.
 - **§10 informational responses:** `1xx` passes through without applying policy and without latching;
   the final status reaches the client after one or more `103`s; an implicit `200` via `Write` with no
   explicit `WriteHeader` still gets policy applied exactly once; `ReaderFrom` and `Flusher` paths
@@ -1537,10 +1605,12 @@ required by it.
    configuration surface.
 8. The lifecycle registry, `docs/config-lifecycle.yaml` and both generated mirrors grow entries; a
    new `cors` subsystem is added.
-9. #331 (`1xx` drops the final status) and #332 (a hit replays a stale `X-Request-ID`) should both
-   land before #146. #331 gives §10's informational-response rule one implementation to follow rather
-   than a fourth divergent one; #332 upgrades §11's invariant from the commit-boundary form to the
-   unconditional one the CORS reasoning reads best against.
+9. **#146 must not merge until #331 and #332 have landed**, or fixes them atomically in the same
+   change. This is a hard gate, not a sequencing preference: #331 gives §10's informational-response
+   rule one implementation to follow rather than a fourth divergent one, and #332 is what upgrades
+   §11's invariant from the commit-boundary form to the unconditional one §8's and §9's reasoning is
+   written against. Merging #146 first would ship CORS on a cache whose stated guarantee is not yet
+   true.
 10. `docs/configuration.md`, `docs/core-http.md`, `docs/cache.md`, `docs/compression.md`,
     `docs/security-posture.md`, `docs/nginx-importer.md`, `docs/known-limitations.md`,
     `docs/console.md`, `docs/reload-semantics.md`, the generated configuration reference and
