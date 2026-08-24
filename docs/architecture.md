@@ -74,7 +74,7 @@ docs/adr/              # Architecture Decision Records
   pre-sets **before** the handler runs are still captured today (#332), which is why
   a layer outside the cache must set per-request response headers at commit rather
   than before calling the next handler.
-  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) is the proposed authority; the
+  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) is the authority; the
   compression half of the capture fix shipped in #327.
 
 ## Trust boundaries

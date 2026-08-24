@@ -1,6 +1,6 @@
 # ADR 0018 — Bounded route matching and response policy
 
-- **Status:** Proposed — becomes Accepted on merge of #325
+- **Status:** Accepted
 - **Date:** 2026-08-21 (revised 2026-08-24 after external review)
 - **Deciders:** Jul.IA maintainer
 - **Applies to:** location matching, route selection, the HTTP request pipeline, response-header
