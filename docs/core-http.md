@@ -243,8 +243,11 @@ special configuration:
 Both are pinned by passthrough conformance tests
 (`TestProxyWebSocketPassthrough` drives a real WebSocket echo with text and
 binary frames; `TestProxyServerSentEventsStreaming` proves events are streamed,
-not buffered). WebSocket upgrades are not available on HTTP/3 listeners (clients
-transparently fall back to HTTP/2 — see [HTTP/3 (QUIC)](../docs/configuration.md#http3-quic)).
+not buffered). WebSocket upgrades use the **HTTP/1.1 `Upgrade` mechanism only**:
+WebSocket over HTTP/2 and HTTP/3 uses extended `CONNECT` (RFC 8441 / RFC 9220),
+which Jul.IA does not implement. Browsers transparently open an HTTP/1.1
+connection for the WebSocket, so nothing is unreachable — see
+[HTTP/3 (QUIC)](../docs/configuration.md#http3-quic).
 
 Both also work with `cache = true` on the same location. An upgrade request
 bypasses the cache before lookup and reaches the handler with the untouched

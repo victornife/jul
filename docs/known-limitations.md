@@ -249,7 +249,10 @@ references.
 
 ## HTTP/3 over QUIC ([http3.md](http3.md))
 
-- **No WebSocket over HTTP/3.** WebSocket requires HTTP/1.1 or HTTP/2; a
+- **No WebSocket over HTTP/3 — or over HTTP/2.** Jul.IA implements the HTTP/1.1 `Upgrade` mechanism
+  only. WebSocket over HTTP/2 and HTTP/3 uses extended `CONNECT` (RFC 8441 / RFC 9220), which Jul.IA
+  does not implement and which Go's bundled HTTP/2 server keeps behind `GODEBUG=http2xconnect=1` and
+  documents as unsupported. A
   WebSocket upgrade over HTTP/3 will be rejected.
 - **HTTP/3 settings require a restart.** The QUIC listener is built at bind
   time; changes to `[servers.http3]` take effect only after a full restart.

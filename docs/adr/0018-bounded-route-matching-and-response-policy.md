@@ -24,6 +24,7 @@
 | 2026-08-21 | §2/§9: `cors.enabled` widens a `methods` predicate for preflights; header predicates get a lint warning instead of a hidden exemption. Found by adversarial review — a CORS route with a method predicate could not be selected for its own preflight. |
 | 2026-08-24 | External review. Seven substantive changes: §8 rejects `Vary` operations on cached locations (an outer-layer `Vary` cannot protect Jul's own cache); §8a fixes CORS/`response_headers` ownership and order; §10 adds a coarse pre-authentication guard for approved preflights and drops two weak justifications; §9 makes the credential-free wildcard unconditional so suppressing `Vary: Origin` is actually sound; §14 demotes `match_ordinal` to a CAS-bound selector and moves internal scopes to a predicate fingerprint; §9/§16 complete the CORS and field-validation bounds; §10 specifies `1xx` handling. Corrected three factual errors: `CONNECT` *is* routed to Go handlers, RFC 9110's HEAD requirement is in §9.1, and the performance argument against 405 was wrong. |
 | 2026-08-24 | Second review round. §11's invariant was **falsified** and is narrowed to the commit boundary, with the stronger form required from #332: `RequestID` pre-sets `X-Request-ID` before `next`, so a cache hit replays a stale id beside the current one. §12 renamed to *HTTP semantic parity* with a transport/action matrix, because the previous blanket claim was untrue for WebSocket, native gRPC and the L4 stream proxy. §10's WAF justification was **factually wrong** — Coraza inspects URI, query, headers, method and client address without a body — so the preflight terminator now runs the WAF as well as the rate guard, restructured as decide-then-guard so nothing is evaluated twice. §9 states CORS defaults, empty-list semantics and `enabled = false` validation. §15's unreachable-route rule is reduced to the provable cases. §10's diagram had `BodyLimit` outermost, contradicting this record's own *Existing architecture* table. |
+| 2026-08-24 | Third review round. §12's WebSocket row said HTTP/1.1 **and HTTP/2**, taken from a stale line in `docs/http3.md` rather than verified; Jul implements no RFC 8441 extended `CONNECT`, as `docs/cache.md` already said, so it is HTTP/1.1 only and §17 records the cost and re-entry trigger for changing that. §14 adds `preflight_widening` to the canonical fingerprint and §15's subsumption model, because §2 made `cors.enabled` a *matcher* input and two routes differing only in it were collapsing to one scope. §14 freezes the route-test request extension (`raw_query`, `header_values`), which the existing `map[string]string` could not express. §11 stops prescribing a multiset difference as a proof: it delivers the no-leak property this record needs but not header fidelity, and the mechanism is #332's to choose. Coherence: `architecture.md`, the `Access-Control-Allow-Headers` emission condition, and `enabled = false` validating present *values* rather than requiredness. |
 
 ## Context
 
@@ -596,11 +597,14 @@ is how a security feature acquires two:
   `Access-Control-Allow-Headers` is omitted from the response rather than emitted with an empty
   value. Jul never reflects `Access-Control-Request-Headers` back: reflecting is how a bounded policy
   becomes an unbounded one.
-- **`enabled = false` does not skip validation.** Every field is validated exactly as if the block
-  were enabled, and the block is inert at runtime. This is the same principle as §8a's cached-location
-  rule: an operator who flips `enabled = true` must not discover then that their configuration was
-  never valid. A populated block with `enabled = false` is accepted and lint-warned, so a
-  deliberately-parked policy is possible and a forgotten one is visible.
+- **`enabled = false` does not skip validation of the values that are present.** Every field the
+  operator wrote is validated exactly as if the block were enabled, and the block is inert at
+  runtime. *Requiredness* stays conditional: `allowed_origins` is required only when
+  `enabled = true`, so a disabled block may legitimately omit it, but a disabled block that *does*
+  list an origin has that origin normalized and checked. This is the same principle as §8a's
+  cached-location rule: an operator who flips `enabled = true` must not discover then that the values
+  they wrote were never valid. A populated block with `enabled = false` is accepted and lint-warned,
+  so a deliberately-parked policy is possible and a forgotten one is visible.
 
 **Two questions, kept separate.** Whether Jul *processes* the request and whether Jul *tells the
 browser the response may be read* are different questions. CORS is a browser policy, not server
@@ -640,8 +644,8 @@ carry. Two consequences follow, and both are contract, not implementation detail
   preflight.
 - `Access-Control-Request-Headers` is bounded at 64 tokens; a longer list is not approved.
 - Preflight responses carry `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`,
-  `Access-Control-Allow-Headers`, `Access-Control-Max-Age` when `max_age` is set,
-  `Access-Control-Allow-Credentials: true` when credentials are enabled, and
+  `Access-Control-Allow-Headers` **when `allowed_headers` is non-empty**, `Access-Control-Max-Age`
+  when `max_age` is set, `Access-Control-Allow-Credentials: true` when credentials are enabled, and
   `Vary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers` — except under the
   unconditional wildcard, where `Origin` is omitted from that list for the reason given above. No
   other header is emitted: §8b excludes generic `response_headers` operations from generated
@@ -822,13 +826,32 @@ The consequences of rule 2 are what this record wants:
   shared map when the snapshot is taken, so the snapshot cannot exclude it. That class is not
   hypothetical: `RequestID` does exactly this, so a hit is served a stale `X-Request-ID` beside the
   current one (#332), and the cache does it to itself with `X-Cache`, which is why
-  `buildEntry`'s `stored.Del("X-Cache")` is load-bearing rather than vestigial. **#332 closes the
-  class constructively** — store the multiset difference between the commit snapshot and the header
-  map as it stood when the cache handler was entered, so only what the handler itself contributed is
-  stored, with no denylist to keep in step.
-- **Nothing in §8, §9 or §10 is a member of that class.** The response-policy and CORS wrapper applies
-  at commit, never before `next` (§10), which is the same rule stated from the other side. This is
-  why the ordering rule in §10 is a contract and not a style preference: it is what keeps the
+  `buildEntry`'s `stored.Del("X-Cache")` is load-bearing rather than vestigial.
+- **What this record needs is narrower than "stores exactly the origin representation", and the
+  difference matters.** The property §8 and §9 depend on is one-directional:
+
+  > **No header contributed by a layer outside the cache may appear in a stored entry.**
+
+  That is a *no-leak* property. It is what makes a stored entry safe to serve to a different origin,
+  a different tenant and a different request. An entry that is missing something the origin sent is a
+  **fidelity** defect, not a leak, and nothing in §8, §9 or §10 rests on fidelity.
+
+  The distinction is worth drawing because the obvious mechanism — storing the multiset difference
+  between the commit snapshot and the map as it stood on entry — delivers the no-leak property but
+  **does not** deliver fidelity, and this record should not claim it does. Two cases survive it: a
+  handler that `Set`s a name to the same value an outer layer already set (the difference is empty,
+  so the entry under-stores), and a handler that *deletes* an outer field (there is no tombstone, so
+  a hit resurrects the outer layer's current value). Neither is a cross-request leak — an outer layer
+  re-derives its own value per request — but both are real, and calling the difference a proof of
+  "only what the handler contributed" would be false.
+
+  **The mechanism is #332's to choose**, and a genuine inner-header ownership boundary is the shape
+  that would prove the stronger property. This record requires only the no-leak property, states the
+  residual fidelity gap so nobody rediscovers it as a surprise, and requires #332 to test
+  same-value replacement and deletion rather than only different-value overwrite.
+- **Nothing in §8, §9 or §10 is a member of the leaking class.** The response-policy and CORS wrapper
+  applies at commit, never before `next` (§10), which is the same rule stated from the other side.
+  This is why the ordering rule in §10 is a contract and not a style preference: it is what keeps the
   per-origin CORS argument true.
 - **No policy generation stamp is needed anywhere in the cache.** A gob-encoded entry rehydrated from
   disk after a restart, written under a configuration nobody can inspect any more, cannot carry a
@@ -852,9 +875,11 @@ The consequences of rule 2 are what this record wants:
 **Invariant, as the implementation can state it today:** *no header written by a layer outside the
 cache handler **after the handler commits its response** may appear in a stored cache entry.*
 
-**Invariant this record requires, and #332 delivers:** *a stored cache entry contains only the header
-field lines the handler itself contributed.* The second subsumes the first and is the one §8's and
-§9's reasoning should be read against; the first is what is true on `main` today.
+**Invariant this record requires, and #332 delivers:** *no header contributed by a layer outside the
+cache may appear in a stored entry, whenever it was written.* The second subsumes the first and is
+the one §8's and §9's reasoning should be read against; the first is what is true on `main` today.
+Neither claims fidelity — that a stored entry reproduces the origin's headers exactly — and no
+decision in this record depends on fidelity.
 
 ### 12. HTTP semantic parity — not capability parity
 
@@ -875,17 +900,27 @@ The precise claim:
 | HTTP/1.1 | yes | yes | yes | — |
 | h2c / HTTP/2 | yes | yes | yes | — |
 | HTTP/3 | yes | yes | yes | — |
-| WebSocket upgrade | yes (it is an HTTP request) | on the 101 only | **no** | HTTP/1.1 and HTTP/2 only; already rejected over HTTP/3 (`docs/http3.md`) |
+| WebSocket upgrade | yes (it is an HTTP request) | on the 101 only | **no** | **HTTP/1.1 only** — see below |
 | Native gRPC | yes | yes, on the HTTP response headers | accepted, lint-warned | end-to-end **HTTP/2 only** by design (`docs/grpc-proxy.md`) |
 | gRPC transcoding | yes | yes | yes | the transcoded response is an ordinary HTTP response |
 | L4 `[[stream]]` TCP/UDP | **none** | **none** | **none** | out of scope — see below |
 
-- **WebSocket upgrade.** Response-header operations apply to the 101 like any other response, which
-  is safe because `Connection` and `Upgrade` are rejected at validation, so the handshake cannot be
-  broken by configuration. After the hijack the wrapper is inert. CORS headers are **not** emitted on
-  a 101: the WebSocket handshake has its own origin model and `Access-Control-*` means nothing on it.
-  Jul rejects WebSocket upgrade over HTTP/3 today; this record neither changes that nor depends on
-  it.
+- **WebSocket upgrade is HTTP/1.1 only.** Response-header operations apply to the 101 like any other
+  response, which is safe because `Connection` and `Upgrade` are rejected at validation, so the
+  handshake cannot be broken by configuration. After the hijack the wrapper is inert. CORS headers
+  are **not** emitted on a 101: the WebSocket handshake has its own origin model and
+  `Access-Control-*` means nothing on it.
+
+  All three of those statements describe the HTTP/1.1 `Upgrade` mechanism and only it. WebSocket over
+  HTTP/2 is [RFC 8441](https://www.rfc-editor.org/rfc/rfc8441.html) extended `CONNECT`: it answers
+  **200, not 101**, and it never hijacks, because an HTTP/2 stream is not a connection to take over.
+  HTTP/3 is the same mechanism via RFC 9220. **Jul implements neither**, which `docs/cache.md`
+  already states and [ADR 0017](0017-upstream-resilience-and-overload-control.md) repeats for HTTP/3.
+  An earlier draft of this matrix said "HTTP/1.1 and HTTP/2", taken from a stale line in
+  `docs/http3.md` rather than verified — exactly the mistake this record warns against elsewhere.
+  Both documents are corrected alongside this one.
+
+  §17 records what adopting RFC 8441/9220 would cost and what would trigger revisiting it.
 - **Native gRPC passthrough.** Predicates apply — the method is always `POST`, and `content-type`,
   `te` and gRPC metadata are ordinary header fields. Response-header operations apply to the HTTP
   response headers. **gRPC trailers are not touched**: `Trailer` is a rejected name and trailer policy
@@ -900,8 +935,8 @@ The precise claim:
   the omission would otherwise look like an oversight rather than a boundary.
 
 **Consequence for #145 and #146:** the required cross-protocol tests use a *supported*
-transport/action matrix. A test asserting CORS behaviour on a WebSocket 101, or predicates on an L4
-stream route, is asserting something this record does not claim.
+transport/action matrix. A test asserting CORS behaviour on a WebSocket 101, WebSocket over HTTP/2 or
+HTTP/3, or predicates on an L4 stream route, is asserting something this record does not claim.
 
 ### 13. Lifecycle
 
@@ -951,11 +986,49 @@ an operator inserts or reorders a same-path route. An operator adding a route wo
 route's accumulated limiter state to another.
 
 So these scopes key on a **canonical predicate fingerprint**: a deterministic digest over the listen
-address, the normalized `server_names` set, the match type, the path, and the normalized predicate
-set (methods sorted, header and query predicates sorted by `(name, op, value)`). It is stable across
-insertion and reordering, changes exactly when the route's matching behaviour changes — which is
-also exactly when resetting the state is correct — and it is derived, so there is nothing for an
-operator to keep in sync.
+address, the normalized `server_names` set, the match type, the path, the normalized predicate set
+(methods sorted, header and query predicates sorted by `(name, op, value)`), **and the effective
+matcher bit defined below**. It is stable across insertion and reordering, changes exactly when the
+route's matching behaviour changes — which is also exactly when resetting the state is correct — and
+it is derived, so there is nothing for an operator to keep in sync.
+
+**The fingerprint must include `preflight_widening`, because §2 made CORS part of matching.**
+
+```
+preflight_widening := cors.enabled && match.methods is present
+```
+
+§2 widens a `methods` predicate on a `cors.enabled` location to accept preflights. That makes
+`cors.enabled` a *matcher* input, not only a policy input, and omitting it from the fingerprint is a
+correctness bug rather than an aesthetic one. Two routes with the same type, path and predicates but
+different `cors.enabled` are **not** the same route:
+
+```toml
+# route A — rejects OPTIONS
+[[servers.locations]]
+proxy_pass = "http://api"
+
+[servers.locations.match]
+type = "prefix"
+path = "/api/"
+methods = ["GET"]
+
+# route B — same coordinates, but reachable for a preflight, which A rejects
+[[servers.locations]]
+proxy_pass = "http://api"
+
+[servers.locations.match]
+type = "prefix"
+path = "/api/"
+methods = ["GET"]
+
+[servers.locations.cors]
+enabled = true
+allowed_origins = ["https://app.example.test"]
+```
+
+Without the bit, A and B collapse to one fingerprint and therefore share an auth, WAF and rate-limit
+scope — recreating precisely the collision §14 exists to remove.
 
 **A durable external route identity is deferred to ADR 0019.** An optional stable `route_id` is the
 right long-term answer for API resource naming, diff correlation and Console deep links, but external
@@ -974,6 +1047,43 @@ re-entry trigger. Until then, no surface presents `match_ordinal` as an identity
   `bestServer`/`bestLocation` are deleted and `routeTestRequest.Method`/`Headers` — already present
   and already ignored — become real inputs. Two matching implementations are how the Console acquires
   semantics the server does not have, which ADR 0014 forbids.
+
+**The route-test request type cannot express this record's model, so its extension is frozen here.**
+Today it is:
+
+```go
+type routeTestRequest struct {
+	Method  string            `json:"method"`
+	Path    string            `json:"path"`
+	Host    string            `json:"host"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+```
+
+A `map[string]string` cannot carry repeated header field lines, and there is no query input at all —
+which are exactly the cases §3 and §4 spend most of their text specifying. A diagnostic that cannot
+reproduce the semantics it is diagnosing is not a diagnostic. Two additive fields, both optional, no
+existing field changed:
+
+```go
+RawQuery     string             `json:"raw_query,omitempty"`
+HeaderValues []routeTestHeader  `json:"header_values,omitempty"`   // {name, value}
+```
+
+- **`raw_query`** is the query string *exactly* as it would appear after `?`, parsed with §4's rules.
+  It carries repeated keys, percent-encoding, `+` and malformed escapes without JSON flattening any
+  of them. It is **not** derived by splitting `path`: `path` is the path, `?` in it stays a literal,
+  and today's callers keep working unchanged.
+- **`header_values`** is an ordered list of `{name, value}` pairs, appended to whatever `headers`
+  supplied, so a caller can express two `X-Tenant` field lines. `headers` is retained verbatim for
+  compatibility and remains the convenient form for the single-value case.
+- Both are optional and omitted-means-absent, so every existing Console call and every existing test
+  payload is unaffected.
+
+The result gains the matching explanation §14 requires: which candidates the path produced, which
+predicate failed on each rejected candidate, and which location was selected. Freezing this here is
+the point of the record — otherwise #145 would have to invent a public API shape, which is precisely
+what an accepted ADR is supposed to make unnecessary.
 
 ### 15. Validation, lint and the difference between them
 
@@ -1007,11 +1117,17 @@ operator meant:
   | Case | Provable when |
   | --- | --- |
   | Earlier has no predicates at all | always — it matches everything the later one could |
-  | Structural equality | the two normalized predicate sets are identical (this is the duplicate case) |
+  | Structural equality | the two normalized predicate sets are identical **and their `preflight_widening` bits are equal** (this is the duplicate case) |
   | Methods | the earlier method set **contains** the later's, or the earlier omits `methods` entirely |
   | Header/query `present` vs anything | the earlier has `present` on name *N* and the later has any predicate on *N* |
   | Header/query `exact` | both are `exact` on the same name with byte-equal values |
   | Header regex | both are `regex` on the same name with byte-equal patterns |
+
+  **`preflight_widening` (§14) participates in subsumption, not only in equality.** An earlier route
+  with `preflight_widening = false` does not shadow a later one with `preflight_widening = true`,
+  because the later route is still reachable for the preflight the earlier one rejects. Reporting it
+  as a duplicate would tell an operator to delete a route that is the only thing answering their
+  CORS preflight.
 
   Anything else — two different regexes, a regex against an exact, disjoint names — is **not
   reported**. A false "this route is unreachable" on a route that is in fact reachable is worse than
@@ -1072,6 +1188,35 @@ own configuration.
 | **A cache-variance contract** — declaring, *inside* the cache, that a stored representation varies by a request field (§8a) | an upstream that genuinely varies and cannot be made to send its own `Vary`; owned by the cache portfolio (#107), not by this record |
 | **A durable external `route_id`** (§14) | ADR 0019 / #118 decides external resource identity; this record deliberately does not pre-empt it |
 | `"*"` in `allowed_headers` / `exposed_headers` (§9) | a bounded design for Fetch's `Authorization` exception that does not require an operator to know about it |
+| **WebSocket over HTTP/2 and HTTP/3** (RFC 8441 / RFC 9220 extended `CONNECT`) | see below |
+
+**On RFC 8441/9220 specifically**, because "why not just support it" is the obvious question and the
+answer is not "it is hard". It is feasible and it is currently not worth its cost:
+
+- **Go gates it off.** Go 1.26's bundled HTTP/2 server implements extended `CONNECT` but sets
+  `disableExtendedConnectProtocol = true`, with the comment *"package doesn't support extended
+  CONNECT"*, reachable only through the process-global `GODEBUG=http2xconnect=1`. There is no
+  `Server` field. Shipping a supported product feature on a GODEBUG escape hatch that Go's own
+  maintainers describe as unsupported is not a defensible foundation. quic-go does support extended
+  `CONNECT` for HTTP/3, so supporting h3 but not h2 would be the *inverse* of the useful order.
+- **It buys almost no capability.** A browser that cannot use RFC 8441 opens an ordinary HTTP/1.1
+  connection for the WebSocket. Nothing becomes possible that is impossible today; connection count
+  and head-of-line behaviour improve. That is an optimization, not a gap.
+- **The backend side is a real adapter, not a flag.** Inbound extended `CONNECT` proxied to an
+  HTTP/1.1 backend means translating an HTTP/2 stream to an `Upgrade` + hijack and back, with
+  flow-control and half-close semantics Jul would own. [ADR 0002](0002-protocol-adaptation.md)
+  governs exactly this and requires it to be an explicit adapter.
+- **It would reopen the wrapper-composition defect class.** An extended `CONNECT` carries neither an
+  `Upgrade` header nor `Connection: upgrade`, so `isUpgradeRequest` would not fire: the cache would
+  see a `200` with an unbounded body and buffer it to `maxEntry`, compression would try to compress a
+  WebSocket stream, and nothing would mark the stream as "not a representation". That is the same
+  class as #326, #331 and #332, and adopting RFC 8441 without first revisiting all four wrappers
+  would create a fourth instance.
+
+> **Re-entry trigger:** golang/go#71128 resolves and Go enables extended `CONNECT` by default with a
+> supported server-side API. At that point the decision is reopened as an ADR 0002 protocol-adapter
+> question, and the cache, compression, `Recorder` and `respwriter` upgrade/hijack assumptions are
+> re-derived *before* any implementation, not after.
 
 ### 18. Importer
 
@@ -1120,7 +1265,9 @@ approximated silently.
 | HTTP semantic parity scoped to supported transport/action pairs (§12) | Two-way door | a description of existing capability, not a new constraint | none |
 | Cache stores the origin representation; snapshot at commit (§11) | Two-way door in mechanism, **one-way in guarantee** | the *guarantee* is a security contract; the snapshot is private | mechanism: local refactor. Guarantee: not reversible |
 | `match_ordinal` as a CAS-bound **selector**, never an identity (§14) | **One-way door** on the field, two-way on the policy | public API field; the CAS requirement can only be relaxed, not added, later | additive now |
-| Internal scopes keyed by predicate fingerprint (§14) | Expensive two-way door | one-time bucket reset on upgrade | documented changelog entry |
+| Internal scopes keyed by predicate fingerprint, including `preflight_widening` (§14) | Expensive two-way door | one-time bucket reset on upgrade; omitting the bit is a scope collision | documented changelog entry |
+| Route-test `raw_query` + `header_values` (§14) | **One-way door** | public admin API fields | additive now; removing them later is breaking |
+| WebSocket is HTTP/1.1 only; RFC 8441/9220 deferred (§12, §17) | Two-way door | adding extended `CONNECT` later is additive capability | new protocol adapter, plus re-deriving the wrapper assumptions |
 | Numeric and byte bounds (§16) | Two-way door upward, one-way downward | raising a limit is additive | low upward |
 | Compiled matcher representation, package layout, predicate structs | **Two-way door** | entirely private | local refactor |
 | Where the parsed query is memoized; the fingerprint's digest algorithm | **Two-way door** | private and derived | local refactor |
@@ -1293,13 +1440,24 @@ required by it.
   request's — that test belongs to #332 and fails today. (The regression test for the compression
   defect the same snapshot fixes landed with the snapshot itself in #327.)
 - **§12 parity:** the cross-protocol matrix runs only *supported* transport/action pairs — predicates
-  and policy on HTTP/1.1, h2c, HTTP/2 and HTTP/3; WebSocket upgrade on HTTP/1.1 and HTTP/2 with the
+  and policy on HTTP/1.1, h2c, HTTP/2 and HTTP/3; **WebSocket upgrade on HTTP/1.1 only**, with the
   wrapper inert after hijack and **no CORS headers on the 101**; native gRPC over HTTP/2 with
   trailers untouched; transcoding as an ordinary response. No test asserts CORS on a 101, WebSocket
-  over HTTP/3, or predicates on an L4 `[[stream]]` route, because this record claims none of them.
+  over HTTP/2 or HTTP/3, or predicates on an L4 `[[stream]]` route, because this record claims none
+  of them.
+- **§14 identity:** the fingerprint changes when `preflight_widening` flips, so two routes differing
+  only in `cors.enabled` do **not** share an auth, WAF or rate-limit scope; it does not change when a
+  same-path route is inserted above the target; it does change when the predicate set changes.
+- **§14 route-test contract:** `raw_query` reproduces §4's semantics end to end — repeated keys,
+  percent-encoding, `+`, malformed escapes — and a `?` inside `path` stays a literal; `header_values`
+  expresses two field lines of the same name and composes with the legacy `headers` map; a payload
+  using neither behaves exactly as today; the result names the rejected candidates and the failing
+  predicate on each.
 - **§15 lint:** each provable shadowing case is reported; **two different regexes on the same header,
   a regex against an exact, and disjoint predicate names are NOT reported** — a false unreachable
-  warning costs an operator real traffic.
+  warning costs an operator real traffic; **a route with `preflight_widening = true` is not reported
+  as shadowed by an otherwise identical route with it false**, because the later route is the only
+  one answering the preflight.
 - **§13/§14 lifecycle and API:** invalid predicate or policy aborts the reload before `Publish`;
   order preserved across reload; typed patch round-trip including clear; `match_ordinal` resolution
   including the ambiguity rejection and the `409` when `base_version` is absent or stale; the
@@ -1409,10 +1567,12 @@ header, the method and the client address, all of which Coraza's request-phase r
 ever needing a body. The rejected shape would have handed an attacker a request shape that reaches a
 Jul-generated response having passed no rule at all.
 
-**A denylist in `buildEntry` for Jul-owned response headers.** Rejected in §11 in favour of #332's
-constructive rule. `stored.Del("X-Cache")` already exists and nobody called it a denylist, which is
-exactly how `X-Request-ID` joined the class unnoticed. Storing only the field lines the handler
-itself contributed leaves nothing to keep in step.
+**A denylist in `buildEntry` for Jul-owned response headers.** Rejected in §11 in favour of a
+constructive boundary chosen by #332. `stored.Del("X-Cache")` already exists and nobody called it a
+denylist, which is exactly how `X-Request-ID` joined the class unnoticed. This record does not
+prescribe the replacement mechanism: it states the no-leak property it needs, and records that a
+simple multiset difference delivers that property but not header fidelity, so #332 can choose
+knowingly rather than inherit a claim.
 
 **Claiming protocol parity across all transports and actions.** Withdrawn in §12. WebSocket upgrade
 is unavailable over HTTP/3, native gRPC is end-to-end HTTP/2 by design, and the L4 stream proxy has
