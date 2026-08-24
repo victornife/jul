@@ -486,6 +486,10 @@ func (c *Cache) serveUnsafe(w http.ResponseWriter, r *http.Request, next http.Ha
 func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time) {
 	cw := &cacheWriter{ResponseWriter: w, limit: c.maxEntry}
 	w.Header().Set("X-Cache", stateMiss)
+	// Captured after X-Cache is set, so that field cancels out of the stored
+	// entry the same way any other outer-layer pre-set field does (#332),
+	// rather than needing its own denylist entry in buildEntry.
+	cw.entrySnapshot = cloneHeader(w.Header())
 	next.ServeHTTP(respwriter.Wrap(cw, w), r)
 
 	if !cw.storable() {
@@ -495,7 +499,10 @@ func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.
 	// particular) mutate the shared header map after cacheWriter.WriteHeader
 	// returns, and cw.buf only ever holds the bytes the handler itself wrote.
 	// Reading w.Header() here would pair a header from one layer with a body
-	// captured at another. See #326.
+	// captured at another (#326). cw.snapshot is also already the multiset
+	// difference against cw.entrySnapshot, so a field an outer layer pre-set
+	// before the handler ran — X-Request-ID, the X-Cache line just above — is
+	// not in it at all (#332).
 	h := cw.snapshot
 	if h == nil {
 		h = w.Header()
@@ -672,7 +679,6 @@ func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []by
 
 	stored := cloneHeader(h)
 	removeHopByHop(stored)
-	stored.Del("X-Cache")
 
 	// created is when the origin generated the representation, not when Jul
 	// received it: RFC 9111 §4.2.3 corrected initial age. Without it a response
@@ -741,9 +747,19 @@ func initialAge(h http.Header, now time.Time) time.Duration {
 // serve writes a cached entry to the client, honoring conditional requests.
 func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state string, now time.Time) {
 	h := w.Header()
+	// Set on the first value, Add on the rest: a stored multi-value field is
+	// still reproduced in full, but a stored field cannot stack beside a value
+	// an outer layer already put on this same map before serve ran. The
+	// entry-side rule in cacheWriter.WriteHeader already keeps a pre-set field
+	// like X-Request-ID out of e.Header entirely (#332); this is the second,
+	// independent half — belt and braces, not a substitute for it.
 	for k, vs := range e.Header {
-		for _, v := range vs {
-			h.Add(k, v)
+		for i, v := range vs {
+			if i == 0 {
+				h.Set(k, v)
+			} else {
+				h.Add(k, v)
+			}
 		}
 	}
 	age := int(now.Sub(e.CreatedAt).Seconds())

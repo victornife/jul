@@ -340,6 +340,7 @@ the complete audit record is [the 2026-08-07 cache recertification](audit/2026-0
 | Key construction | `METHOD\nhost.lower\nREQUEST_URI`; credentials and cookies never enter the key | `TestKeyConstruction`, `TestCredentialsNeverEnterTheCacheKey` (`internal/cache`) |
 | GET/HEAD, unsafe and other methods | GET/HEAD may cache; successful unsafe methods invalidate GET+HEAD; OPTIONS/TRACE/CONNECT do not invalidate | `TestSuccessfulUnsafeMethodsInvalidateTheTarget`, `TestSafeMethodsNeverInvalidate`, `TestInvalidationStatusRules`, `TestHeadRangeRequestBypasses` |
 | Cacheable statuses | Only the documented status allow-list is stored; 1xx/101 and origin errors are not | `TestCacheableStatusSet`, `TestProtocolSwitchResponseNeverStored`, `TestResponseDirectiveStorage` |
+| Stored headers | Multiset difference against the map at cache-handler entry; a field an outer layer pre-set (`X-Request-ID`, `X-Cache`) is excluded unless the handler overwrote it with a different value | `TestHeaderDifference`, `TestCacheHitDoesNotReplayAStaleRequestID`, `TestCacheStoresAHandlerOverriddenRequestIDWithTheHandlersValue`, `TestStoredEntryExcludesOuterLayerOnlyHeaders` |
 | Request `no-store` | Bypass lookup and storage without purging an existing entry | `TestRequestNoStoreBypassesLookupAndStorage`, `TestRequestNoStoreResponseIsNotStored` |
 | Request `no-cache`, `max-age=0`, `Pragma` | Mandatory synchronous validation, including fresh entries | `TestRequestNoCacheValidatesEvenAFreshEntry`, `TestPragmaNoCacheValidates`, `TestRequestPolicyMatrix` |
 | Response storage/freshness directives | `no-store`, `private`, `public`, `s-maxage`, `max-age`, `Expires` and malformed/duplicate values follow the contract above | `TestResponseDirectiveStorage`, `TestFreshnessPrecedence`, `TestResponsePolicyMatrix`, `TestParseCacheControlDirectiveMatrix`, `TestParseCacheControlIsTotal` |
@@ -548,6 +549,44 @@ at all.
 | Anything written after a successful hijack | no | The connection has left HTTP; the wrapper also refuses further writes with `http.ErrHijacked`. |
 | `Content-Type: text/event-stream` | no | An event stream never ends. Capture stops at the first byte, so an open SSE connection accumulates nothing. |
 | A body larger than `memory_max_size` | no | Existing size bound; capture is discarded when the limit is passed. |
+
+### Which response headers are stored
+
+A stored entry's headers are the **multiset difference** between the response
+header map at commit and the same map as it stood the instant the cache handler
+was entered — not the whole map, and not a denylist of field names.
+
+`RequestID` sets `X-Request-ID` on the shared header map before calling the next
+handler, and the cache sets its own `X-Cache: MISS` the same way, before the
+handler runs. Both are therefore already on the map when the cache takes its
+"entry" snapshot; if the handler never touches them, they cancel out of the
+commit-time snapshot exactly and never reach the stored entry. A handler that
+`Set`s a name to a *different* value — deliberately overriding what an outer
+layer put there — has that different value survive, because the difference is
+per `(name, value)`, not per name. A field the handler adds an extra value to
+(`Add`, not `Set`) keeps only the addition. See `TestCacheHitDoesNotReplayAStaleRequestID`
+and `TestHeaderDifference` in `internal/cache` (#332).
+
+This delivers a **no-leak** guarantee — nothing a layer outside the cache
+contributed can appear in a stored entry, and a hit can therefore never replay
+one client's per-request header to another — but not full **fidelity** to the
+origin representation. Two cases are a known, accepted residual rather than a
+bug, per [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) §11:
+
+- a handler that `Set`s a field to the *exact same value* an outer layer already
+  set is indistinguishable, by value, from the outer layer's own contribution,
+  so the difference is empty and the field is **not stored** even though the
+  handler asserted it (`TestHandlerSettingTheOuterLayersExactValueIsNotStored`);
+- a handler that actively deletes a field an outer layer pre-set has no way to
+  record that deletion — there is no tombstone — so a later **hit still carries
+  whatever value the outer layer sets on that later request**
+  (`TestHandlerDeletingAnOuterHeaderIsResurrectedOnAHit`). This is not a leak:
+  the outer layer re-derives its own value on every request, hit or miss: never
+  a stored one.
+
+A layer outside the cache that wants full fidelity for a header it also sets
+must apply it at commit, the same rule §10 states for the response-policy
+wrapper — never before calling the next handler.
 
 ### Flushing does not make a response uncacheable
 

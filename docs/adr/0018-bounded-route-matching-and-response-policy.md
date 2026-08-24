@@ -29,6 +29,7 @@
 | 2026-08-24 | §17's RFC 8441 re-entry trigger said "golang/go#71128 resolves". Wrong twice: that issue closed in January 2025, and it closed **by disabling** extended `CONNECT` — it produced the current state rather than tracking its removal. The trigger is now state-based. The same passage misattributed Go's rationale: *"package doesn't support extended CONNECT"* refers to **the server's WebSocket package**, not `net/http`, and the real hazard is sharper — advertising `SETTINGS_ENABLE_CONNECT_PROTOCOL` makes browsers *stop* sending HTTP/1.1 `Upgrade`, so a partial implementation breaks WebSocket for clients that work today. `docs/http3.md` and `docs/known-limitations.md` carried the same misquote. |
 | 2026-08-24 | Review of the record's own stated doubts. One design change: §10 adds a **location-scoped recover**, so a panic after route selection produces a 500 carrying the location's response headers and CORS — the earlier draft documented that hole as a boundary, which was wrong, since §9 already argues a cross-origin 401/403/429/502 must be readable and 500 is not different. Three accuracy corrections: §16's bounds are labelled conservative and **unmeasured**, with worst-case benchmarks at the maxima required of #145/#146; §14's reversibility is downgraded to an *internal* two-way door with transient impact, because `authByScope`/`wafByScope` are rebuilt per generation and only rate-limit buckets are keyed across reloads (evicted by the store's idle TTL); and #331/#332 become **hard merge gates** for #146 rather than sequencing preferences. §9's `allowed_methods` default is **kept**, with the rule that makes it safe now stated exactly: every `Access-Control-Request-Headers` token must be listed, with **no safelist exemption**, because a browser lists a name there precisely when it is *not* safelisted. |
 | 2026-08-24 | #331 landed: `Recorder`, `compressWriter` and `cacheWriter` now pass `1xx` straight through and apply their own logic exactly once, on the first status `>= 200`, matching the rule §10 specifies for the response-policy wrapper. One of the two hard merge gates on #146 is satisfied; #332 remains open. |
+| 2026-08-24 | #332 landed, choosing the mechanism this record left open: `cacheWriter` stores the multiset difference between the header map at commit and the same map as it stood when the cache handler was entered, so `X-Request-ID` and the cache's own `X-Cache` — both pre-set before the handler runs — cancel out of a stored entry unless the handler overwrote them with a different value. §11's invariant is upgraded from the commit-boundary form to the unconditional one, as anticipated, with the residual this record predicted: the difference delivers no-leak, not fidelity, so a handler `Set`ting a field to the outer layer's exact value under-stores it, and a handler deleting an outer-set field sees it resurface on a later hit. Both are tested (`TestHandlerSettingTheOuterLayersExactValueIsNotStored`, `TestHandlerDeletingAnOuterHeaderIsResurrectedOnAHit`) rather than left to be rediscovered. Both hard merge gates on #146 are now satisfied. |
 
 ## Context
 
@@ -902,12 +903,15 @@ The consequences of rule 2 are what this record wants:
 - A stored entry contains the origin representation and nothing an outer layer added **after the
   handler committed its response**. No `Access-Control-Allow-Origin`, no operator header operations,
   no `Content-Encoding` that Jul applied.
-- **The guarantee stops at the commit boundary, and this record says so rather than rounding up.**
-  A layer outside the cache that writes a response header *before* calling `next` is already in the
-  shared map when the snapshot is taken, so the snapshot cannot exclude it. That class is not
-  hypothetical: `RequestID` does exactly this, so a hit is served a stale `X-Request-ID` beside the
-  current one (#332), and the cache does it to itself with `X-Cache`, which is why
-  `buildEntry`'s `stored.Del("X-Cache")` is load-bearing rather than vestigial.
+- **The guarantee also covers what an outer layer wrote *before* calling `next`, closing the gap this
+  record originally left open.** A layer outside the cache that writes a response header before
+  calling `next` is already in the shared map when the snapshot is taken, so a plain commit-time
+  snapshot could not exclude it. That class was not hypothetical: `RequestID` does exactly this, and
+  before #332 a hit was served a stale `X-Request-ID` beside the current one, and the cache did the
+  same thing to itself with `X-Cache` — which is why `buildEntry`'s `stored.Del("X-Cache")` was
+  load-bearing rather than vestigial. #332 replaced both the ad hoc `Del` and the commit-time-only
+  snapshot with one mechanism: `cacheWriter` also snapshots the header map when the cache handler is
+  *entered*, before `next` runs, and stores the multiset difference between the two snapshots.
 - **What this record needs is narrower than "stores exactly the origin representation", and the
   difference matters.** The property §8 and §9 depend on is one-directional:
 
@@ -917,19 +921,21 @@ The consequences of rule 2 are what this record wants:
   a different tenant and a different request. An entry that is missing something the origin sent is a
   **fidelity** defect, not a leak, and nothing in §8, §9 or §10 rests on fidelity.
 
-  The distinction is worth drawing because the obvious mechanism — storing the multiset difference
-  between the commit snapshot and the map as it stood on entry — delivers the no-leak property but
-  **does not** deliver fidelity, and this record should not claim it does. Two cases survive it: a
-  handler that `Set`s a name to the same value an outer layer already set (the difference is empty,
-  so the entry under-stores), and a handler that *deletes* an outer field (there is no tombstone, so
-  a hit resurrects the outer layer's current value). Neither is a cross-request leak — an outer layer
-  re-derives its own value per request — but both are real, and calling the difference a proof of
-  "only what the handler contributed" would be false.
+  The distinction was worth drawing because the mechanism #332 chose — storing the multiset
+  difference between the commit snapshot and the map as it stood on entry — delivers the no-leak
+  property but **does not** deliver fidelity, and this record does not claim it does. Two cases
+  survive it, both tested rather than left to be rediscovered
+  (`TestHandlerSettingTheOuterLayersExactValueIsNotStored`,
+  `TestHandlerDeletingAnOuterHeaderIsResurrectedOnAHit`): a handler that `Set`s a name to the same
+  value an outer layer already set (the difference is empty, so the entry under-stores), and a
+  handler that *deletes* an outer field (there is no tombstone, so a hit resurrects the outer layer's
+  current value). Neither is a cross-request leak — an outer layer re-derives its own value per
+  request — but both are real, and this record does not call the difference a proof of "only what the
+  handler contributed".
 
-  **The mechanism is #332's to choose**, and a genuine inner-header ownership boundary is the shape
-  that would prove the stronger property. This record requires only the no-leak property, states the
-  residual fidelity gap so nobody rediscovers it as a surprise, and requires #332 to test
-  same-value replacement and deletion rather than only different-value overwrite.
+  This record required only the no-leak property from #332, and #332 delivered exactly that: the
+  residual fidelity gap above, not a surprise, is the accepted cost of the simplest mechanism that
+  proves it.
 - **Nothing in §8, §9 or §10 is a member of the leaking class.** The response-policy and CORS wrapper
   applies at commit, never before `next` (§10), which is the same rule stated from the other side.
   This is why the ordering rule in §10 is a contract and not a style preference: it is what keeps the
@@ -953,14 +959,13 @@ The consequences of rule 2 are what this record wants:
   method in any case.
 - Cache invalidation, `Vary` stubs, variant membership and the disk store are otherwise untouched.
 
-**Invariant, as the implementation can state it today:** *no header written by a layer outside the
-cache handler **after the handler commits its response** may appear in a stored cache entry.*
-
-**Invariant this record requires, and #332 must deliver:** *no header contributed by a layer outside the
-cache may appear in a stored entry, whenever it was written.* The second subsumes the first and is
-the one §8's and §9's reasoning should be read against; the first is what is true on `main` today.
-Neither claims fidelity — that a stored entry reproduces the origin's headers exactly — and no
-decision in this record depends on fidelity.
+**Invariant, as the implementation states it:** *no header contributed by a layer outside the cache
+handler — whether written before or after `next` — may appear in a stored cache entry, up to the
+residual fidelity gap #332 accepted (same-value `Set`, and deletion of an outer-set field).* This is
+the unconditional form §8's and §9's reasoning is written against; §11 required only this, and #332
+delivered it. Neither this nor the pre-#332 commit-boundary form ever claimed fidelity — that a
+stored entry reproduces the origin's headers exactly — and no decision in this record depends on
+fidelity.
 
 ### 12. HTTP semantic parity — not capability parity
 
@@ -1409,8 +1414,9 @@ nobody noticed until review.
 4. **Credentialed CORS cannot emit `*`.** Rejected at validation, not repaired at runtime (§9).
 5. **A cached response cannot carry another origin's CORS grant.** §11 makes it unrepresentable
    rather than merely unlikely, including for entries rehydrated from disk under a configuration that
-   no longer exists. The guarantee holds at the commit boundary today and unconditionally once #332
-   lands; §11 states both forms rather than the flattering one.
+   no longer exists. The guarantee now holds unconditionally, before or after the handler commits,
+   with #332 landed; §11 states the residual fidelity gap that mechanism accepted rather than the
+   flattering, fidelity-claiming version.
 6. **An operator cannot announce a variance Jul's own cache does not honour.** §8a rejects `Vary`
    operations on a cached location, which closes a cross-tenant leak in which Jul serves one tenant's
    stored body while truthfully telling downstream caches the response varies.
@@ -1560,8 +1566,11 @@ required by it.
 - **§11 cache — the invariant test:** a response stored under a location with a CORS policy and
   header operations contains none of them; a second request from a different origin receives its own
   correct headers; an entry rehydrated from disk carries no policy headers. **Plus the boundary the
-  invariant actually has:** a hit must carry exactly one `X-Request-ID`, and it must be the current
-  request's — that test belongs to #332 and fails today. (The regression test for the compression
+  invariant actually has, closed by #332:** a hit carries exactly one `X-Request-ID`, and it is the
+  current request's (`TestCacheHitDoesNotReplayAStaleRequestID`); same-value `Set` and deletion of an
+  outer-set field are tested as the accepted residual, not left to be rediscovered
+  (`TestHandlerSettingTheOuterLayersExactValueIsNotStored`,
+  `TestHandlerDeletingAnOuterHeaderIsResurrectedOnAHit`). (The regression test for the compression
   defect the same snapshot fixes landed with the snapshot itself in #327.)
 - **§12 parity:** the cross-protocol matrix runs only *supported* transport/action pairs — predicates
   and policy on HTTP/1.1, h2c, HTTP/2 and HTTP/3; **WebSocket upgrade on HTTP/1.1 only**, with the
@@ -1609,12 +1618,12 @@ required by it.
    firewall; none of the three adds a configuration surface.
 8. The lifecycle registry, `docs/config-lifecycle.yaml` and both generated mirrors grow entries; a
    new `cors` subsystem is added.
-9. **#146 must not merge until #332 has landed**, or fixes it atomically in the same change. This is
-   a hard gate, not a sequencing preference: #332 is what upgrades §11's invariant from the
-   commit-boundary form to the unconditional one §8's and §9's reasoning is written against. #331,
-   the other gate this record originally named, landed first and gives §10's informational-response
-   rule one existing implementation to follow rather than a fourth divergent one. Merging #146 before
-   #332 would ship CORS on a cache whose stated guarantee is not yet true.
+9. **Both of #146's hard merge gates are now satisfied.** #331 gave §10's informational-response rule
+   one existing implementation to follow rather than a fourth divergent one. #332 upgraded §11's
+   invariant from the commit-boundary form to the unconditional one §8's and §9's reasoning is written
+   against, with the residual fidelity gap it accepted stated and tested rather than hidden. Had either
+   still been open, #146 would not have been mergeable without fixing it atomically in the same change:
+   merging CORS onto a cache whose stated guarantee was not yet true was never acceptable.
 10. `docs/configuration.md`, `docs/core-http.md`, `docs/cache.md`, `docs/compression.md`,
     `docs/security-posture.md`, `docs/nginx-importer.md`, `docs/known-limitations.md`,
     `docs/console.md`, `docs/reload-semantics.md`, the generated configuration reference and
@@ -1694,12 +1703,13 @@ header, the method and the client address, all of which Coraza's request-phase r
 ever needing a body. The rejected shape would have handed an attacker a request shape that reaches a
 Jul-generated response having passed no rule at all.
 
-**A denylist in `buildEntry` for Jul-owned response headers.** Rejected in §11 in favour of a
-constructive boundary chosen by #332. `stored.Del("X-Cache")` already exists and nobody called it a
-denylist, which is exactly how `X-Request-ID` joined the class unnoticed. This record does not
-prescribe the replacement mechanism: it states the no-leak property it needs, and records that a
-simple multiset difference delivers that property but not header fidelity, so #332 can choose
-knowingly rather than inherit a claim.
+**A denylist in `buildEntry` for Jul-owned response headers.** Rejected in §11 in favour of the
+constructive boundary #332 chose: the multiset difference between the header map at commit and the
+same map as it stood when the cache handler was entered. `stored.Del("X-Cache")` existed before #332
+and nobody called it a denylist, which is exactly how `X-Request-ID` joined the class unnoticed; #332
+removed it as redundant once the difference made it unnecessary. The difference delivers the no-leak
+property this record needs but not header fidelity — same-value `Set` and deletion of an outer-set
+field are a known, tested residual, not a silent gap.
 
 **Claiming protocol parity across all transports and actions.** Withdrawn in §12. WebSocket upgrade
 is unavailable over HTTP/3, native gRPC is end-to-end HTTP/2 by design, and the L4 stream proxy has
@@ -1724,8 +1734,8 @@ change semantics silently, which is worse than an explicit unsupported finding.
 - #326 — the pre-existing cache × compression corruption §11 also fixes; already resolved by #327
 - #331 — `1xx` makes every response-writer wrapper drop the final status; §10's informational-response
   rule exists so this record does not add a fourth
-- #332 — a cache hit replays a stale `X-Request-ID`; §11's invariant is written against the boundary
-  this defect exposes, and is upgraded when it lands
+- #332 — a cache hit replays a stale `X-Request-ID`; §11's invariant was written against the
+  boundary this defect exposed, and is upgraded now that it has landed
 - #108 — Core Gateway Completeness epic; `docs/specs/core-gateway-completeness.md` §7 (D12)
 - [ADR 0016](0016-inbound-identity-and-backend-peer-trust.md) §12 — identity asserted to the backend
 - [ADR 0011](0011-reload-plan.md) — reload transaction and the closed-world lifecycle registry
