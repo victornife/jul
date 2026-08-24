@@ -25,6 +25,7 @@
 | 2026-08-24 | External review. Seven substantive changes: §8 rejects `Vary` operations on cached locations (an outer-layer `Vary` cannot protect Jul's own cache); §8a fixes CORS/`response_headers` ownership and order; §10 adds a coarse pre-authentication guard for approved preflights and drops two weak justifications; §9 makes the credential-free wildcard unconditional so suppressing `Vary: Origin` is actually sound; §14 demotes `match_ordinal` to a CAS-bound selector and moves internal scopes to a predicate fingerprint; §9/§16 complete the CORS and field-validation bounds; §10 specifies `1xx` handling. Corrected three factual errors: `CONNECT` *is* routed to Go handlers, RFC 9110's HEAD requirement is in §9.1, and the performance argument against 405 was wrong. |
 | 2026-08-24 | Second review round. §11's invariant was **falsified** and is narrowed to the commit boundary, with the stronger form required from #332: `RequestID` pre-sets `X-Request-ID` before `next`, so a cache hit replays a stale id beside the current one. §12 renamed to *HTTP semantic parity* with a transport/action matrix, because the previous blanket claim was untrue for WebSocket, native gRPC and the L4 stream proxy. §10's WAF justification was **factually wrong** — Coraza inspects URI, query, headers, method and client address without a body — so the preflight terminator now runs the WAF as well as the rate guard, restructured as decide-then-guard so nothing is evaluated twice. §9 states CORS defaults, empty-list semantics and `enabled = false` validation. §15's unreachable-route rule is reduced to the provable cases. §10's diagram had `BodyLimit` outermost, contradicting this record's own *Existing architecture* table. |
 | 2026-08-24 | Third review round. §12's WebSocket row said HTTP/1.1 **and HTTP/2**, taken from a stale line in `docs/http3.md` rather than verified; Jul implements no RFC 8441 extended `CONNECT`, as `docs/cache.md` already said, so it is HTTP/1.1 only and §17 records the cost and re-entry trigger for changing that. §14 adds `preflight_widening` to the canonical fingerprint and §15's subsumption model, because §2 made `cors.enabled` a *matcher* input and two routes differing only in it were collapsing to one scope. §14 freezes the route-test request extension (`raw_query`, `header_values`), which the existing `map[string]string` could not express. §11 stops prescribing a multiset difference as a proof: it delivers the no-leak property this record needs but not header fidelity, and the mechanism is #332's to choose. Coherence: `architecture.md`, the `Access-Control-Allow-Headers` emission condition, and `enabled = false` validating present *values* rather than requiredness. |
+| 2026-08-24 | Final read-through before merge. Three handoff gaps closed, no decisions changed: §9 makes the wildcard/`Vary` coupling structural (one derived predicate plus a named coupling test) rather than relying on a paragraph a future editor may not read; §10 states that both preflight guards compose as ordinary middleware around the 204 emitter, so nobody invents a parallel `Check()` API with its own metrics and failure modes; §8a names the capability the `Vary` restriction costs — an operator whose uncontrollable upstream varies silently must set `cache = false` on that route — instead of leaving it to be discovered. |
 
 ## Context
 
@@ -469,6 +470,14 @@ no feature from this record. What is rejected is only the case where the operato
 Jul's own store did not observe. The reference documentation must state this at the point of use,
 because "rejected" without "here is what to do instead" is a bad error message.
 
+**The capability this costs, stated rather than glossed.** An operator whose upstream genuinely
+varies but does not send `Vary`, and which they cannot change, has exactly one option under this
+record: **`cache = false` on that route**. That is a real narrowing — NGINX would let them write
+`proxy_cache_key` — and it is accepted deliberately, because the alternative on offer was a header
+operation that *looks* like it protects Jul's cache and does not. Losing caching on one route is
+recoverable; serving tenant A's body to tenant B is not. §17 records the contract that would lift the
+restriction and who owns it.
+
 Expressing variance to Jul's own cache *without* the upstream's cooperation needs a cache-key contract
 consumed inside the cache. That is deferred (§17) rather than smuggled in through a header operation.
 
@@ -671,6 +680,20 @@ row is only sound because the wildcard was made unconditional above — a wildca
 carved out of it varies by origin, and suppressing `Vary` would then be a cache-poisoning bug rather
 than an optimization.
 
+**These two rules are load-bearing for each other, and prose is not a strong enough guard.** A later
+change that carves any exception out of the wildcard, without also restoring `Vary: Origin`, is a
+cache-poisoning bug that no test of either rule *in isolation* would catch. Two structural
+requirements, so the coupling survives an editor who has not read this paragraph:
+
+1. **One derived decision, not two.** The emission of `Access-Control-Allow-Origin` and the decision
+   to suppress `Vary: Origin` are computed from a single predicate over the compiled policy — the
+   policy is a constant-output wildcard, or it is not. They are never two independent branches.
+2. **A coupling test**, named as such, asserting the property rather than the pair of behaviours:
+   *for every request shape, `Vary: Origin` is absent only if the emitted
+   `Access-Control-Allow-Origin` is byte-identical across all of them.* A future exception to the
+   wildcard fails that test at the point it is introduced, which is the only place it is cheap to
+   fix.
+
 `Vary` is always *appended*, never replaced, so compression's `Accept-Encoding` survives. This is the
 same field §8 forbids operators from setting or removing, and §8a forbids them from adding on a
 cached location — CORS may append it precisely because CORS is what introduced the variance.
@@ -790,6 +813,14 @@ thing genuinely skipped.
   request shape that reaches a Jul-generated response having passed no rule at all — and an attacker
   chooses the shape. Running it costs a request-phase evaluation on approved preflights only, which
   is what the operator asked for by enabling the WAF on that route.
+
+**Neither guard needs a new API.** Both are already `middleware.Middleware`, so "guard" means
+composing them around the 204 emitter in the ordinary way — roughly
+`rateGuard(wafGuard(emit204))` — and letting each either write its own rejection or call through.
+This is stated because "apply a rate-limit check and a WAF check" invites inventing a boolean
+`Check()` entry point on both subsystems, which would be a second code path with a second set of
+metrics, logs and failure modes beside the one that already works. It also means the WAF's
+response-phase rules see the generated 204, which is correct.
 
 Moving `Auth` inside `RateLimit`/`WAF` remains rejected: it would break two documented, load-bearing
 behaviours to solve a problem the terminator's own guards already solve without moving anything.
@@ -1416,7 +1447,10 @@ required by it.
   of the emitted lists is stable across reloads. **The wildcard table specifically:** under
   `["*"]`+no-credentials, `*` is emitted for an allowed origin, for `Origin: null`, and for a request
   with no `Origin` at all, and `Vary: Origin` is absent in all three; under every other policy
-  `Vary: Origin` is present in all three. CORS headers present on 401, 403, 429 and 502.
+  `Vary: Origin` is present in all three. **Plus the §9 coupling test**, named as such: `Vary: Origin`
+  is absent only when the emitted `Access-Control-Allow-Origin` is byte-identical across every
+  request shape — so a future exception carved out of the wildcard fails at the point it is
+  introduced. CORS headers present on 401, 403, 429 and 502.
 - **§9 defaults:** `allowed_origins` omitted with `enabled = true` is rejected; `allowed_methods`
   omitted defaults to the safelisted set and a route configured with origins alone approves a `POST`
   preflight; an explicit `[]` is rejected on all four lists; empty `allowed_headers`/`exposed_headers`
