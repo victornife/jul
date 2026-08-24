@@ -36,20 +36,23 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0016](0016-inbound-identity-and-backend-peer-trust.md) | Identity and trust boundaries | Accepted | 2026-08-12 |
 | [0017](0017-upstream-resilience-and-overload-control.md) | Upstream resilience and overload control | Accepted | 2026-08-13 |
 | [0018](0018-bounded-route-matching-and-response-policy.md) | Bounded route matching and response policy | Accepted | 2026-08-21 |
+| [0019](0019-configuration-authority-generated-contracts-and-resource-identity.md) | Configuration authority, generated contracts, resource identity and remote automation | Accepted | 2026-08-24 |
 
 ## Reading order
 
 - **What the product is and how work enters it:** [0013](0013-project-operating-model-and-completeness.md),
   [0003](0003-maturity-and-ga.md), [0012](0012-oss-open-core-boundary.md).
 - **What operators get:** [0014](0014-operability-surfaces.md), [0004](0004-console-ui-invariants.md),
-  [0009](0009-two-tier-editing.md), [0010](0010-console-rbac.md), [0006](0006-console-v2-stack.md).
+  [0009](0009-two-tier-editing.md), [0010](0010-console-rbac.md), [0006](0006-console-v2-stack.md),
+  [0019](0019-configuration-authority-generated-contracts-and-resource-identity.md).
 - **How the runtime behaves:** [0011](0011-reload-plan.md),
   [0015](0015-managed-apply-terminal-ledger.md), [0007](0007-composition-root-monolith.md),
   [0017](0017-upstream-resilience-and-overload-control.md),
   [0018](0018-bounded-route-matching-and-response-policy.md).
 - **Security boundaries:** [0016](0016-inbound-identity-and-backend-peer-trust.md),
   [0017](0017-upstream-resilience-and-overload-control.md),
-  [0018](0018-bounded-route-matching-and-response-policy.md).
+  [0018](0018-bounded-route-matching-and-response-policy.md),
+  [0019](0019-configuration-authority-generated-contracts-and-resource-identity.md).
 - **Technology boundaries:** [0001](0001-language-strategy.md), [0002](0002-protocol-adaptation.md),
   [0008](0008-gofast-x-tools-technical-debt.md), [0005](0005-soak-post-ga-gate.md).
 

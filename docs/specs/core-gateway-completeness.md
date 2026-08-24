@@ -350,27 +350,39 @@ Distributed cache is outside the standalone boundary.
 
 ## 10. Configuration authority and lifecycle
 
+> **Decided.** [ADR 0019](../adr/0019-configuration-authority-generated-contracts-and-resource-identity.md)
+> accepts D13 and the widened D14, and fixes the authority field, drift and adoption semantics,
+> durable resource identity, the generated-contract set, the external API boundary and the remote CLI
+> contract.
+
 ### Authority model — D13
 
-One desired-state writer exists at a time.
+One desired-state writer exists at a time. The public field is `[global].config_authority`.
 
 #### `managed`
 
 - Jul owns persistence, history, rollback and planned restart;
 - Console/admin/remote CLI may mutate subject to RBAC/CAS/validation;
-- unexpected external file edits are drift, not silently adopted;
-- explicit adoption uses the complete validation/apply pipeline.
+- unexpected external file edits are drift, not silently adopted — **neither the file watcher nor
+  SIGHUP adopts them**;
+- explicit adoption uses the complete validation/apply pipeline and its own `config:adopt` permission.
 
 #### `file_owned`
 
 - external file/GitOps owns desired state;
 - file watch/SIGHUP remains authoritative;
-- Console/API/CLI mutation is denied server-side with a stable error;
-- read, validation, status and diagnostics remain available;
-- Jul does not rewrite or roll back the external file.
+- Console/API/CLI mutation is denied server-side before any side effect with one stable error;
+- read, validation, plan/preview, status and diagnostics remain available;
+- Jul does not rewrite or roll back the external file, and records no history.
 
-Authority mode is restart-bound and transitions through the complete staged
-candidate.
+#### Default
+
+When `config_authority` is omitted the mode is **derived**: `managed` when `[admin].enabled` is true,
+`file_owned` otherwise. An explicit value always wins, and both the effective mode and its origin are
+reported. `[admin].enabled` is itself restart-bound, so the derived value cannot change under a hot
+reload.
+
+Authority mode is restart-bound and transitions through the complete staged candidate.
 
 ### Lifecycle authority — D07
 
@@ -389,27 +401,37 @@ machine authority; generated/checkable artifacts are mirrors.
 
 ## 11. Generated contracts and automation
 
-### Generated configuration contracts — D14
+### Generated configuration contracts and resource identity — D14
 
 From the code-defined schema plus explicit metadata, generate/check:
 
 - JSON Schema;
-- lifecycle/capability/deprecation/secret metadata;
+- lifecycle/capability/deprecation/secret/identity metadata;
 - exhaustive factual configuration reference;
 - stable anchors/version information.
 
 Runtime validators remain authoritative for cross-field behavior.
 
+Every externally addressable configuration resource has exactly one identity model — durable
+identity, natural key, or revision-scoped selector — and no second field or identity registry exists.
+Routes gain an optional durable `route_id`, globally unique within one configuration. Every other
+resource keeps the key it already has: upstream and plugin names, RBAC principal names, the listen
+address, and `(protocol, listen)` for L4 streams. Server blocks remain a revision-scoped selector;
+`servers.*.name` stays a projection label.
+
 ### External admin API
 
-- explicit versioned supported subset;
-- internal Console routes are not stable accidentally;
+- explicit versioned supported subset under `/api/v1`;
+- internal Console routes are not stable accidentally, and a route is internal unless classified;
 - common error envelope and code/status catalog;
 - authentication/RBAC/authority behavior;
-- optimistic concurrency;
+- optimistic concurrency, with `base_version` required on every external mutation;
 - preview/apply/stage/pending/history/status contracts;
 - deterministic OpenAPI checked against route/DTO catalogs;
 - no secret readback.
+
+Remote *mutating* automation additionally requires admin listener transport security, which is a
+hard prerequisite rather than an assumption.
 
 ### Remote CLI
 
@@ -556,7 +578,7 @@ acceptable final outcome.
 | Backend trust | #115 — accepted, [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) | #109, #137-#140 |
 | Resilience | #116 | #110, #141-#144 |
 | Routing/response policy | #117 — accepted, [ADR 0018](../adr/0018-bounded-route-matching-and-response-policy.md) | #145-#147 |
-| Authority/generated contracts/API/CLI | #118 | #111, #148-#151 |
+| Authority/generated contracts/API/CLI | #118 — accepted, [ADR 0019](../adr/0019-configuration-authority-generated-contracts-and-resource-identity.md) | #111, #148-#151 |
 | Lifecycle authority | D07 | #89, #128, #149 |
 | Cache correctness | D05-D06 | #107, #131-#134 |
 | Selected runtime dynamics | D08/D15 | #88-#106, #157-#161 |
