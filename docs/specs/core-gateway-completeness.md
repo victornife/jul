@@ -377,12 +377,15 @@ One desired-state writer exists at a time. The public field is `[global].config_
 
 #### Default
 
-When `config_authority` is omitted the mode is **derived**: `managed` when `[admin].enabled` is true,
-`file_owned` otherwise. An explicit value always wins, and both the effective mode and its origin are
-reported. `[admin].enabled` is itself restart-bound, so the derived value cannot change under a hot
-reload.
+When `config_authority` is omitted the mode is **`file_owned`**. The default is fixed, not derived:
+`[admin].enabled` proves the admin surface exists, not that it owns configuration, so a deployment
+running the Console for visibility while shipping its file from a pipeline must not be placed in
+`managed`. `file_owned` is chosen because a wrong `managed` default fails silently — SIGHUP stops
+working — while a wrong `file_owned` default fails loudly, with a Console banner naming the field to
+set. Both the effective mode and its origin are reported.
 
-Authority mode is restart-bound and transitions through the complete staged candidate.
+Authority mode is restart-bound and transitions through the complete staged candidate. No other
+configuration field can change it.
 
 ### Lifecycle authority — D07
 
@@ -425,13 +428,15 @@ address, and `(protocol, listen)` for L4 streams. Server blocks remain a revisio
 - internal Console routes are not stable accidentally, and a route is internal unless classified;
 - common error envelope and code/status catalog;
 - authentication/RBAC/authority behavior;
-- optimistic concurrency, with `base_version` required on every external mutation;
+- optimistic concurrency, with `base_version` required on every external mutation and a
+  client-supplied idempotency key for unambiguous retry;
 - preview/apply/stage/pending/history/status contracts;
 - deterministic OpenAPI checked against route/DTO catalogs;
-- no secret readback.
+- no secret readback, and no raw configuration export in the first external version.
 
-Remote *mutating* automation additionally requires admin listener transport security, which is a
-hard prerequisite rather than an assumption.
+Remote *mutating* automation additionally requires admin listener transport security: a mutating
+external request in cleartext on a non-loopback listener is rejected, and the transport work is a hard
+prerequisite rather than an assumption.
 
 ### Remote CLI
 
