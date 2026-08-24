@@ -31,14 +31,22 @@ type cacheWriter struct {
 	// body is a live event stream.
 	noStore  bool
 	hijacked bool
-	// snapshot is a clone of the response header map taken inside WriteHeader,
-	// before delegating to the outer ResponseWriter. Every wrapper from here to
-	// the real connection shares one http.Header map, and layers outside the
-	// cache (compression in particular) mutate it after this call returns — so
-	// buildEntry must consume this snapshot rather than re-read w.Header() once
-	// the stack has unwound, or a stored entry can pair headers from one layer
-	// with a body captured at another.
+	// snapshot is the multiset difference between the response header map at
+	// WriteHeader and entrySnapshot, taken before delegating to the outer
+	// ResponseWriter. Every wrapper from here to the real connection shares one
+	// http.Header map, and layers outside the cache (compression in particular)
+	// mutate it after this call returns — so buildEntry must consume this
+	// snapshot rather than re-read w.Header() once the stack has unwound, or a
+	// stored entry can pair headers from one layer with a body captured at
+	// another.
 	snapshot http.Header
+	// entrySnapshot is a clone of the response header map as it stood when the
+	// cache handler was entered, before `next` ran. A layer outside the cache —
+	// RequestID setting X-Request-ID, the cache's own X-Cache — pre-sets a
+	// per-request field on this same shared map before the handler ever runs, and
+	// that field is not part of the origin representation the handler produced.
+	// snapshot keeps only what changed relative to this baseline (#332).
+	entrySnapshot http.Header
 }
 
 // dropCapture abandons the captured response. It is called the moment the
@@ -72,8 +80,11 @@ func (w *cacheWriter) WriteHeader(code int) {
 	// returns control to an outer wrapper such as compression, that wrapper is
 	// free to mutate the shared header map (Content-Encoding, Content-Length,
 	// Accept-Ranges, Vary) for bytes this writer never sees, since it buffers
-	// only what the handler itself wrote.
-	w.snapshot = cloneHeader(w.Header())
+	// only what the handler itself wrote. The multiset difference against
+	// entrySnapshot then removes whatever an outer layer had already set before
+	// the handler ran, so a pre-set field is never mistaken for one the handler
+	// contributed.
+	w.snapshot = headerDifference(w.Header(), w.entrySnapshot)
 	// A 1xx status is an interim or protocol-switch response, not a
 	// representation; 101 in particular means the connection is leaving HTTP.
 	// An event stream never ends, so capturing it would only grow a buffer that
@@ -294,6 +305,38 @@ func cloneHeader(h http.Header) http.Header {
 		out[k] = append([]string(nil), vs...)
 	}
 	return out
+}
+
+// headerDifference returns the multiset difference final − entry: for each
+// field name, every value in final survives once for each occurrence beyond
+// however many times entry already held that exact (name, value) pair.
+//
+// This is what makes "store only what the handler itself contributed" precise
+// rather than a per-name denylist (#332): a field an outer layer pre-set and
+// the handler never touched cancels out completely (X-Request-ID, this
+// cache's own X-Cache); a field the handler overwrote with Set survives with
+// the handler's value, because that value did not exist in entry; a field the
+// handler added an extra value to keeps only the addition. entry may be nil,
+// which behaves as an empty map — every value in final survives.
+func headerDifference(final, entry http.Header) http.Header {
+	diff := make(http.Header, len(final))
+	for name, values := range final {
+		used := make([]bool, len(entry[name]))
+		for _, v := range values {
+			consumed := false
+			for i, ev := range entry[name] {
+				if !used[i] && ev == v {
+					used[i] = true
+					consumed = true
+					break
+				}
+			}
+			if !consumed {
+				diff[name] = append(diff[name], v)
+			}
+		}
+	}
+	return diff
 }
 
 // hopByHopHeaders are connection-specific headers that must not be cached or

@@ -169,9 +169,17 @@ func (c *Cache) finishValidation(call *revalidateCall, e *Entry, outcome revalid
 // writeRecorded forwards a buffered origin response to the client.
 func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, state string) {
 	h := w.Header()
+	// Set on the first value, Add on the rest — see the identical rule in
+	// Cache.serve: a multi-value field still reproduces in full, but a
+	// recorded field cannot stack beside a value an outer layer already set on
+	// this same map (#332).
 	for name, values := range rec.header {
-		for _, v := range values {
-			h.Add(name, v)
+		for i, v := range values {
+			if i == 0 {
+				h.Set(name, v)
+			} else {
+				h.Add(name, v)
+			}
 		}
 	}
 	h.Set("X-Cache", state)

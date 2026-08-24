@@ -153,6 +153,58 @@ func TestCloneHeader(t *testing.T) {
 	}
 }
 
+// TestHeaderDifference is the pure-function unit test for #332's storage rule:
+// a stored entry is the multiset difference final − entry, not final minus a
+// per-name denylist.
+func TestHeaderDifference(t *testing.T) {
+	t.Run("a field only the outer layer set does not survive", func(t *testing.T) {
+		entry := http.Header{"X-Request-Id": {"outer-id"}, "X-Cache": {"MISS"}}
+		final := http.Header{"X-Request-Id": {"outer-id"}, "X-Cache": {"MISS"}, "Cache-Control": {"max-age=60"}}
+		diff := headerDifference(final, entry)
+		if diff.Get("X-Request-Id") != "" || diff.Get("X-Cache") != "" {
+			t.Fatalf("diff = %v, want X-Request-Id and X-Cache absent", diff)
+		}
+		if diff.Get("Cache-Control") != "max-age=60" {
+			t.Fatalf("diff = %v, want Cache-Control preserved", diff)
+		}
+	})
+
+	t.Run("a field the handler overwrote survives with the handler's value", func(t *testing.T) {
+		entry := http.Header{"X-Request-Id": {"outer-id"}}
+		final := http.Header{"X-Request-Id": {"handler-id"}}
+		diff := headerDifference(final, entry)
+		if got := diff.Values("X-Request-Id"); len(got) != 1 || got[0] != "handler-id" {
+			t.Fatalf("diff X-Request-Id = %v, want [handler-id]", got)
+		}
+	})
+
+	t.Run("an added extra value survives, the pre-set one does not", func(t *testing.T) {
+		entry := http.Header{"Vary": {"Accept"}}
+		final := http.Header{"Vary": {"Accept", "Accept-Language"}}
+		diff := headerDifference(final, entry)
+		if got := diff.Values("Vary"); len(got) != 1 || got[0] != "Accept-Language" {
+			t.Fatalf("diff Vary = %v, want [Accept-Language]", got)
+		}
+	})
+
+	t.Run("a field the outer layer never touched survives in full", func(t *testing.T) {
+		entry := http.Header{"X-Cache": {"MISS"}}
+		final := http.Header{"X-Cache": {"MISS"}, "Content-Type": {"text/plain"}}
+		diff := headerDifference(final, entry)
+		if diff.Get("Content-Type") != "text/plain" {
+			t.Fatalf("diff = %v, want Content-Type preserved", diff)
+		}
+	})
+
+	t.Run("a nil entry behaves as empty: everything survives", func(t *testing.T) {
+		final := http.Header{"X-Request-Id": {"whatever"}}
+		diff := headerDifference(final, nil)
+		if diff.Get("X-Request-Id") != "whatever" {
+			t.Fatalf("diff = %v, want X-Request-Id preserved against a nil entry", diff)
+		}
+	})
+}
+
 func TestRemoveHopByHop(t *testing.T) {
 	h := http.Header{}
 	h.Set("Connection", "X-Custom, Keep-Alive")

@@ -70,10 +70,12 @@ docs/adr/              # Architecture Decision Records
   endpoint. Response-header policy and CORS are applied outside the response
   cache, and the cache captures response headers at header commit rather than
   re-reading the shared map afterwards, so nothing a layer outside the cache adds
-  *after the handler commits* can enter a stored entry. Headers an outer layer
-  pre-sets **before** the handler runs are still captured today (#332), which is why
-  a layer outside the cache must set per-request response headers at commit rather
-  than before calling the next handler.
+  *after the handler commits* can enter a stored entry. What a layer outside the
+  cache pre-sets **before** the handler runs — `RequestID`, the cache's own
+  `X-Cache` — is excluded too: a stored entry is the multiset difference between
+  the header map at commit and the map as it stood when the cache handler was
+  entered, so a pre-set field cancels out unless the handler itself overwrote it
+  with a different value (#332).
   [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) is the authority; the
   compression half of the capture fix shipped in #327.
 
