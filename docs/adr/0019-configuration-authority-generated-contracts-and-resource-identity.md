@@ -24,6 +24,7 @@
 | --- | --- |
 | 2026-08-24 | Initial record. |
 | 2026-08-24 | External review. Three architectural defects and one insufficiently-evidenced decision, all fixed rather than argued down. **§9.1: the derived default is withdrawn.** `[admin].enabled` proves the admin *surface* exists, not that it *owns configuration* — a deployment running the Console for visibility while operating by GitOps would have been derived into `managed` and silently lost SIGHUP, which is the exact population the derivation was meant to protect. There is no other signal in the schema to derive from, so the default is now fixed at **`file_owned`**, chosen on the asymmetry of failure visibility: a wrong `managed` default fails *silently* (SIGHUP no-ops), a wrong `file_owned` default fails *loudly* (a Console banner naming the field). **§11/§12: invariant M1 was falsified by §12's own restart row** — M1 said "no restart" and §12 said the file wins — and `baseline_adopted_at_startup` was unimplementable, because nothing persisted the baseline for a new process to compare against. A managed baseline **digest marker** now persists it, reusing the `PlannedRestartMarker` pattern, and a restart into drift starts in `managed_drift` instead of adopting. **§27: a client-supplied idempotency key is added**, reversing this record's own rejection of one; mandatory CAS prevents the lost update but leaves the client unable to distinguish "my retry lost" from "someone else won", which for a pipeline is exit 0 versus exit 5. **§4.7: preview now mints and returns the `route_id`** and the client's apply carries it — the earlier text had preview and apply minting independently, so the previewed diff showed an identifier that never existed. **§24: `/api/v1/config/raw` is withdrawn from v1**, resolving a direct contradiction with #150's "no secret readback". **§28.1: plaintext remote mutation is now *rejected*, not warned about.** Corrections: §3 defines **seven** identity classes, not six; §29 includes `StabilityDeprecated` in OpenAPI; the resource catalog covers *configuration* resources only; §27's CAS basis was wrong in the safe direction — `verifyBaselineLocked` compares **raw** bytes, so a comment-only change already conflicts; `--json` output goes to stdout on failure too; §24a fixes collection ordering, pagination, retention, limits and content types; §23 fixes the JSON Schema dialect and the TOML↔JSON representation; §33 gains the error-code-to-exit-code matrix. |
+| 2026-08-24 | Second external review round. Three blocking findings, all upheld. **§11.2: the digest-only baseline marker could not satisfy §14.** Adoption must diff against the previous managed configuration and snapshot its exact bytes, and after an external overwrite a digest cannot reconstruct them — so the baseline is now a marker **plus a snapshot of the exact last-managed bytes**, updated through a two-phase `preparing` → `current` protocol with the crash-recovery decision procedure `PlannedRestartStore` already implements. The `.bak` sidecar is the precedent; this is not a second source of desired state. **§11.2.1: an absent marker no longer means "first managed boot".** It meant ownership could be reset by deleting a file, so it becomes `managed_unadopted` — one of **three origins behind one gate**, distinct from `managed_drift` and `managed_inconsistent` because they differ in what adoption can produce and in whether they are worth alerting on. `managed_inconsistent` gains a bounded `reason`, having previously named two unrelated events. **§11.2.2: the "cannot silently execute an external edit" claim is withdrawn.** It contradicted this record's own restart behaviour — the external bytes are served, because refusing to start would convert a configuration problem into an outage. M1 is narrowed to what is true and achievable: no external edit becomes Jul's *desired state* without an explicit act. The two alternatives, serving the snapshot and failing startup, are recorded as rejected with the incident case that decides it. **§27.1: the idempotency key is bound to `principal + method + path + request fingerprint`**, registered *before* side effects in a `pending` state, with typed conflicts for reuse and for in-flight duplicates — a principal-scoped key could return a previous success for a different operation, and completion-time registration left concurrent duplicates undefined. `--idempotency-key` is added because a per-invocation key defeats the crash-and-rerun case the mechanism exists for. Contract fixes: `payload_too_large` and `unsupported_media_type` become codes of their own rather than overloading `invalid_request`, which is fixed at 400; parameters accompanying a raw TOML body travel as query parameters; §28's pre-authentication `403` is documented as a named exception that discloses nothing; and §28.1's claim is scoped to `/api/v1` rather than to the admin API as a whole. |
 
 ## Context
 
@@ -972,7 +973,10 @@ stateDiagram-v2
     direction LR
 
     state "managed" as M {
-        [*] --> managed_clean
+        [*] --> managed_unadopted: no baseline marker
+        [*] --> managed_clean: marker matches disk
+        [*] --> managed_drift: marker disagrees with disk
+        managed_unadopted --> managed_clean: adopt, establishes ownership
         managed_clean --> managed_drift: external write detected
         managed_drift --> managed_clean: adopt succeeds
         managed_drift --> managed_clean: operator restores the file
@@ -1005,11 +1009,11 @@ stateDiagram-v2
 | State | Desired state lives in | Active runtime | Managed writes | Reload from disk |
 | --- | --- | --- | --- | --- |
 | `managed_clean` | the file, owned by Jul | matches | allowed | Jul's own writes only |
+| `managed_unadopted` | none yet — ownership not established | the file | **refused** until adopted | n/a |
 | `managed_drift` | the file, **not** written by Jul | last managed version, or the drifted file after a restart | **refused** until resolved | refused |
 | `managed_pending_restart` | the file (staged candidate) + marker | previous version | refused (existing rule) | n/a |
 | `managed_failed_apply` | previous bytes restored to the file | previous version | allowed once restored | n/a |
-| `managed_inconsistent` | ambiguous — recovery snapshot exists | previous version | **refused** | refused |
-| `file_owned_clean` | the file, owned externally | matches | denied (always) | yes |
+| `managed_inconsistent` | ambiguous — recovery snapshot exists | previous version | **refused** | refused || `file_owned_clean` | the file, owned externally | matches | denied (always) | yes |
 | `file_owned_desired_ahead` | the file, owned externally | previous version | denied | attempted; restart-bound part rejected at swap |
 | `file_owned_invalid` | the file, owned externally, unparseable | previous version | denied | attempted and failed; file untouched |
 | `authority transition staged` | staged candidate | current authority still fully in force | per current authority | per current authority |
@@ -1055,64 +1059,138 @@ In `managed` mode Jul owns the configuration file.
    operator who keeps comments in a managed configuration should know which surface preserves them.
    `route_id` carries `omitempty`, so a canonical rewrite adds nothing to routes that do not have one.
 
-> **Invariant M1 — managed mode never silently adopts an external file edit.** No watcher event, no
-> signal, no status read, no reload, no rollback and no restart converts external bytes into the
-> managed desired state. Only §14's explicit, authenticated, CAS-bound adoption does.
+> **Invariant M1 — no external edit becomes Jul's desired state without an explicit, authenticated,
+> audited act.** No watcher event, no signal, no status read, no reload, no rollback and no restart
+> advances the managed baseline. Only §14's adoption does.
 
-The restart clause is the one that needs a mechanism rather than a rule, and §11.2 provides it. An
-earlier draft of this record asserted M1 and then contradicted it two sections later by saying the
-file wins on restart; the contradiction was real, and it existed because the baseline was in memory
-only.
+**M1 is a statement about ownership, not about execution, and this record no longer claims otherwise.**
+An earlier draft asserted that managed mode never silently *adopts* an external edit and then, in a
+security consideration, that it never silently *executes* one. The first is achievable and §11.2 makes
+it true across restarts; the second is not, because after a restart the file is the only configuration
+that exists and refusing to serve it would convert a configuration-management problem into an outage.
+§11.2.2 states the trade-off directly.
 
-#### 11.2 The managed baseline is persisted, so a restart cannot launder drift
+#### 11.2 The managed baseline is persisted, so a restart cannot launder ownership
 
 A managed baseline that exists only in a running process cannot survive the one event it most needs
 to survive. Without persistence, a restart into a drifted file is indistinguishable from a normal
-start, the new process adopts whatever it loaded, and an external writer acquires managed desired
-state by waiting for a restart — which is exactly what M1 forbids.
+start, the new process treats whatever it loaded as its own, and an external writer acquires managed
+desired state by waiting for a restart.
 
-**Managed mode persists the baseline digest in a marker adjacent to the configuration file**, written
-with the same discipline as the planned-restart sidecar: `atomicfile.Write`, `0o600`, temp-file
-rename. It carries the raw `sha256` of the bytes Jul last persisted, their canonical version, and the
-timestamp — **and no configuration content**. It is provenance, not desired state: the configuration
-file remains the only desired state there is, and the marker only answers *"did Jul write these
-bytes?"*
+**Managed mode persists the baseline as a marker plus a snapshot, adjacent to the configuration
+file**, both written with the discipline the planned-restart sidecar already uses: `atomicfile.Write`,
+`0o600`, temp-file rename.
 
-This is not a new mechanism. `PlannedRestartMarker` already persists `BaseRawSHA256`,
-`StagedRawSHA256` and `BaseCanonicalVersion` across a restart for precisely this class of question,
-with crash recovery already specified. The managed baseline marker is the same pattern applied to the
-steady state rather than to the staging window, and the two must not disagree: a marker whose digest
-contradicts a staged planned restart is `managed_inconsistent`.
+| Artifact | Content |
+| --- | --- |
+| marker | state, raw `sha256` of the bytes Jul last persisted, their canonical version, the digest of the write in progress, and timestamps. **No configuration content** |
+| snapshot | the **exact bytes** Jul last persisted |
 
-Startup resolution, in `managed` mode only:
+**The snapshot is required, not a convenience, and an earlier draft's digest-only marker was
+incompatible with this record's own adoption procedure.** §14 must compute a diff against the previous
+managed configuration and must write a history snapshot of its exact bytes. After an external
+overwrite and a restart, those bytes exist nowhere — the file holds the external content and a digest
+cannot reconstruct what it summarises. A digest-only marker would therefore have made §14 silently
+degrade, in the one situation an operator most needs a diff and a restorable prior state.
 
-| Marker | Disk | Result |
+This is not a new mechanism, and it is not a second source of desired state. `PlannedRestartStore`
+already persists exactly this pair — `<cfg>.pending-restart.json` carrying digests and versions,
+`<cfg>.pending-restart.bak` carrying the exact previous raw bytes — and already restores from the
+second on a verified discard. The managed baseline applies the same pattern to the steady state
+rather than to the staging window. The configuration file remains the only *desired* state; the
+snapshot is recovery material, in the same sense `.bak` already is.
+
+**The two files are updated as one transaction.** Two independent renames have crash states between
+them, so the marker is two-phase, exactly as `plannedRestartStatePrepared` → `plannedRestartStateStaged`
+already is:
+
+```
+1. write the snapshot of the CURRENT managed bytes        (recovery material for the write ahead)
+2. write the marker in state "preparing", naming BOTH
+   the current digest and the intended new digest
+3. rename the new configuration into place
+4. promote the marker to "current", naming the new digest
+```
+
+Crash recovery reads which digest the file on disk matches, which is the same decision procedure
+`PlannedRestartStore.Reconcile` already implements:
+
+| Marker state | Disk matches | Resolution |
 | --- | --- | --- |
-| absent | any | **first managed boot** — the loaded file becomes the baseline and the marker is written. There is no prior managed state to protect |
-| present, digest **matches** disk | matches | `managed_clean` |
-| present, digest **differs** from disk | differs | **`managed_drift`** — see below |
-| present but unreadable or malformed | any | `managed_inconsistent`; managed writes refused; the operator adopts or removes the marker |
+| `current` | the marker's digest | `managed_clean` |
+| `current` | neither | `managed_drift` |
+| `preparing` | the **prior** digest | the rename never happened; roll the marker back to `current` on the prior digest |
+| `preparing` | the **intended** digest | the rename completed; promote to `current` |
+| `preparing` | neither | an external write landed inside the window; `managed_inconsistent`, reason `marker_contradicts_disk` |
+| absent | any | `managed_unadopted` — see below |
+| unreadable | any | `managed_inconsistent`, reason `marker_unreadable` |
 
-**What a restart into drift actually does, stated precisely, because the distinction is the whole
-point.** The process **serves the file**, because the file is the only configuration that exists and
-refusing to serve would convert a configuration-management problem into an outage. But the **managed
-baseline does not advance**: the marker keeps naming the bytes Jul last wrote, the process starts in
-`managed_drift`, and managed writes are refused until the operator adopts or restores. So the
-external bytes are *running* without ever becoming the *managed desired state* — which is what M1
-claims, and now what happens.
+#### 11.2.1 Three origins, one gate
+
+Three distinct startup conditions produce the **same operator-visible behaviour** — serve the file,
+refuse managed writes, resolve with one explicit act — and they are **not the same state**, because
+they have different causes, different remedies and different alerting value.
+
+| State | Origin | What adoption can produce | Alertable |
+| --- | --- | --- | --- |
+| `managed_unadopted` | no marker: a first managed boot, or a marker that was deleted or lost | **ownership establishment.** No diff and no prior-configuration snapshot, because no prior managed state ever existed. The response says so explicitly rather than returning an empty diff | no — every fresh managed install passes through it |
+| `managed_drift` | marker present and disagreeing with the disk | **full §14.** Diff against the baseline snapshot, and an exact history snapshot of the prior managed configuration | **yes** |
+| `managed_inconsistent` | `marker_unreadable`, `marker_contradicts_disk`, `marker_contradicts_staged_restart`, or `restoration_failed` | adoption is available, but the operator should establish why Jul's own state is damaged first | yes, and differently — this can indicate storage trouble rather than a human edit |
+
+Collapsing the first two into one state was the earlier draft's mistake and is worth naming, because
+the failure is operational rather than logical. If drift is a condition an operator pages on, and
+every fresh managed install reports drift, the page is disabled within a week. A status field that
+cries wolf on first boot is worse than no status field.
+
+`managed_inconsistent` carries a bounded `reason` for the same discipline: an earlier draft used one
+state name for a malformed marker and for a failed restoration, which are unrelated events with
+unrelated remedies. This mirrors `PendingRestartStatus`, which is already an authoritative `State`
+enum plus explanatory fields rather than a set of overloaded booleans.
+
+**An absent marker is not treated as a first managed boot that adopts silently.** It once was, and
+that made ownership trivially resettable: delete the marker, restart, and the external file becomes
+the baseline. Requiring one explicit act instead costs a fresh managed installation a single
+adoption — which is arguably what it should always have been, since under §9.1's `file_owned` default
+a move to `managed` is a deliberate transfer of ownership over an operator's file, and asking them to
+confirm the bytes Jul is about to take responsibility for is proportionate.
+
+#### 11.2.2 What a restart into drift serves
+
+The process **serves the file.** Refusing to start because someone edited a configuration file would
+convert a configuration-management problem into an outage, and the file is the only configuration in
+existence. The **baseline does not advance**: the marker keeps naming the bytes Jul last wrote, the
+snapshot keeps holding them, the process starts in `managed_drift`, and managed writes are refused
+until the operator adopts or restores.
+
+**This record does not claim that managed mode prevents external bytes from executing, and an earlier
+draft did.** The distinction between *running* and *owned* is real and load-bearing for the control
+plane, but it does not rescue a runtime-integrity claim: the external bytes run. Two alternatives were
+considered and rejected in *Alternatives considered* — serving the persisted snapshot instead of the
+file, and failing startup — and both were rejected on the same operational case, which is worth
+stating because it is where the decision actually turns:
+
+> The Console is unavailable during an incident. The operator edits the configuration file directly
+> and restarts. Under either alternative, nothing they did takes effect, for reasons that are not
+> visible at three in the morning.
+
+What managed mode does guarantee is narrower and is what D13 and #111 asked for: **Jul's own writers
+cannot compete, and no external edit becomes Jul's desired state without an explicit, authenticated,
+audited act.** `config_authority` is an ownership mechanism, not a defence against someone who can
+write the file and restart the process — that is what filesystem permissions are for, and it is true
+of every file-configured daemon. §35's security section states the trade-off as availability over
+runtime integrity rather than implying an integrity property Jul does not have.
 
 Adoption after a restart is therefore cheap and honest: the bytes are already live, so §14's sequence
-reduces to validation, a history snapshot of the previous managed configuration, an audit entry and a
-baseline advance. No reload is needed and none is performed.
+reduces to validation, a diff against the snapshot, a history snapshot of the previous managed
+configuration, an audit entry and a baseline advance. **No reload is needed and none is performed.**
 
 **`baseline_adopted_at_startup` is withdrawn.** An earlier draft promised that status field; it was
 unimplementable, because a process with no persisted baseline has no evidence that anything was
-adopted. The replacement is a state, not a claim: `managed_drift` at startup, with the marker's
-digest and the disk digest both reported.
+adopted. The replacement is a state with an origin, not a claim.
 
-The marker is **excluded from every export, diagnostic bundle and history snapshot**, is not part of
-the configuration contract, and is absent entirely in `file_owned` mode — where Jul writes nothing,
-including this.
+Both artifacts are **excluded from every export, diagnostic bundle and history snapshot**, are not
+part of the configuration contract, and are absent entirely in `file_owned` mode — where Jul writes
+nothing, including these.
 
 #### 11.3 Managed mode requires a writable, non-symlinked config path
 
@@ -1215,20 +1293,38 @@ POST /api/v1/config/adopt-external
 Preview is the same request against `POST /api/v1/config/adopt-external/preview`, which is
 side-effect-free.
 
-1. observe drift and read the **exact** current external bytes;
+1. observe the condition and read the **exact** current external bytes;
 2. strict decode (D03: unknown fields fail), resolve secrets, validate;
 3. lint, and return findings with severities (§22) without converting them into invalidity;
 4. classify lifecycle against the live generation, producing `hot` / `stage_restart` / refused;
-5. compute the diff against the managed baseline, by §7's rules;
+5. compute the diff **against the baseline snapshot** (§11.2), by §7's rules;
 6. bind the operation to **both** the observed external digest and the managed baseline version;
 7. require explicit confirmation that managed ownership resumes over these bytes;
 8. under `applyMu`, re-read the file and re-check the digest — a change since the preview is a `409`;
 9. apply or stage through the existing coordinator, unchanged;
-10. persist under managed ownership; the adopted bytes become the new managed baseline **verbatim**;
-11. write a history snapshot of the *previous managed* configuration, with the adoption source
-    recorded in the metadata sidecar;
-12. audit the adoption with actor, digests and versions — never the content;
+10. persist under managed ownership; the adopted bytes become the new managed baseline **verbatim**,
+    and both baseline artifacts are updated through §11.2's two-phase protocol;
+11. write a history snapshot of the *previous managed* configuration **from the baseline snapshot**,
+    with the adoption source recorded in the metadata sidecar;
+12. audit the adoption with actor, origin, digests and versions — never the content;
 13. return the exact resulting state, including the terminal reload outcome.
+
+**Steps 5 and 11 are the reason §11.2 persists bytes and not only a digest.** Both read the previous
+managed configuration, and after an external overwrite the file no longer contains it.
+
+#### 14.1 Adoption reports which condition it is resolving
+
+§11.2.1 defines three origins behind one gate, and they differ in what adoption can honestly produce.
+The preview response carries an `origin` discriminator so a client never has to infer it:
+
+| `origin` | Steps 5 and 11 | Response |
+| --- | --- | --- |
+| `drift` | performed in full | `diff` present; the history snapshot records the prior managed configuration |
+| `no_baseline` | **not performed** | `diff` is **absent**, with `diff_unavailable_reason: "no_prior_managed_state"`. No history snapshot is written, because nothing prior existed. The operation is an ownership *establishment*, audited as such |
+| `inconsistent` | attempted; degraded if the snapshot is unreadable | `diff` present or absent with the reason; the response carries the `managed_inconsistent` reason so the operator can decide whether to investigate before proceeding |
+
+An absent diff is reported as absent. It is never rendered as an empty diff, because an empty diff
+asserts that nothing changed, and in the `no_baseline` case Jul does not know whether anything did.
 
 Identity behaviour during adoption is fixed by §6 and repeated here because step 10 is where someone
 would be tempted to break it: **adoption preserves the `route_id` values present in the external
@@ -1681,11 +1777,12 @@ semantics rather than DTO detail**, and #150 would otherwise have to invent them
 
 | Concern | Contract |
 | --- | --- |
-| Request content type | `application/json` for structured bodies; `application/toml` (with `text/plain` accepted) for raw candidate bodies. Anything else is `415`, mapped to `invalid_request` |
+| Request content type | `application/json` for structured bodies; `application/toml` (with `text/plain` accepted) for raw candidate bodies. Anything else is `415 unsupported_media_type` |
+| **Parameters alongside a raw body** | a raw TOML body cannot also be a structured DTO, so `base_version`, `mode` and any other operation parameter travel as **query parameters** on those operations — matching the existing `?confirm_admin=true` precedent. `Idempotency-Key` is a header and is unaffected |
 | Response content type | `application/json` for every response including errors; raw candidate *echoes* are never returned |
 | Unknown request fields | **rejected**, mirroring D03's strict TOML decoder. An automation client that misspells a field learns immediately rather than having it silently ignored |
 | Unknown response fields | clients **must ignore** them; adding one is an additive change (§25) |
-| Request body limit | the existing 1 MiB admin cap applies to every v1 mutation; exceeding it is `413`, mapped to `invalid_request` with the limit in `details` |
+| Request body limit | the existing 1 MiB admin cap applies to every v1 mutation; exceeding it is `413 payload_too_large` with the limit in `details` |
 | Collection ordering | **deterministic and declaration-ordered**: routes in server-then-location declaration order, upstreams, listeners and streams in configuration order. Never map-iteration order, and never sorted by an identifier — ADR 0018 makes declaration order part of the routing contract, and a collection that reorders it would misrepresent precedence |
 | History ordering | newest first, by history `id`, which is monotonic by construction |
 | Pagination | `limit` and `cursor` query parameters on `/config/history` only — the one collection whose size is unbounded. `limit` defaults to 50 and caps at 200; `cursor` is an opaque server-supplied string. Every other v1 collection is bounded by the configuration itself and returns in full, because paginating a route list would make an operator page through their own configuration |
@@ -1787,6 +1884,10 @@ namespace adds it.
 | `restart_required` | 409 | the candidate cannot be hot-applied | `subsystems[]`, `can_stage` |
 | `admin_reachability_confirmation_required` | 409 | the change would alter admin reachability | `changes[]` |
 | `rate_limited` | 429 | admin rate limit | `retry_after_seconds` |
+| `payload_too_large` | 413 | the request body exceeded the 1 MiB cap (§24a) | `limit_bytes` |
+| `unsupported_media_type` | 415 | the `Content-Type` is not accepted for this operation (§24a) | `accepted[]` |
+| `idempotency_key_reused` | 409 | the key matches a recorded operation with a different request fingerprint (§27.1) | `recorded_method`, `recorded_path` |
+| `idempotency_key_in_flight` | 409 | the key matches an operation that has not reached a terminal state (§27.1) | `apply_id` |
 | `internal_error` | 500 | unexpected server failure | — |
 | `not_implemented` | 501 | the capability is not in this build | `capability` |
 | `storage_unavailable` | 503 | the configuration or history store cannot be read or written | — |
@@ -1796,11 +1897,15 @@ Four rules bound the catalogue:
 
 1. **Raw Go errors are never a machine contract.** They may appear in `message`; they never appear in
    `code`, and `errors.Is` results are mapped to a code explicitly.
-2. **`details` never carries candidate bytes, resolved secrets, tokens, or a value read from a
+2. **One code, one status.** A code never carries more than one HTTP status — an earlier draft mapped
+   oversized and unsupported bodies onto `invalid_request`, which is fixed at 400, so `413` and `415`
+   had no code that could represent them. `payload_too_large` and `unsupported_media_type` exist for
+   that reason rather than to enlarge the catalogue.
+3. **`details` never carries candidate bytes, resolved secrets, tokens, or a value read from a
    configuration field.** Field *paths* are safe; field *values* are not.
-3. **The set is bounded and grows deliberately.** A new code is an additive API change and appears in
+4. **The set is bounded and grows deliberately.** A new code is an additive API change and appears in
    OpenAPI, the compatibility document and the contract tests.
-4. **`validation_failed` keeps the existing five-field finding shape** from
+5. **`validation_failed` keeps the existing five-field finding shape** from
    `internal/admin/humanerrors.go`, so Console error-to-field attachment and ADR 0018's exact
    predicate paths (`servers[0].locations[2].match.headers[1]`) work unchanged.
 
@@ -1876,19 +1981,42 @@ So `/api/v1` mutations accept a **client-supplied idempotency key**:
 | Transport | `Idempotency-Key` request header |
 | Grammar | 8–128 bytes, `[A-Za-z0-9_-]`; anything else is `invalid_request` |
 | Generation | the client's, opaque to the server, never parsed |
-| Scope | the authenticated principal — two principals may use the same key without colliding |
-| Storage | one field on the existing `ManagedApplyRecord`; no new store |
+| **Binding** | `principal + method + path + request fingerprint`, where the fingerprint is `sha256` over the canonical request body, `mode` and `base_version` |
+| Storage | two fields on the existing `ManagedApplyRecord` — the key and the fingerprint; no new store |
+| Registration | the key is recorded **before any side effect**, in a `pending` state, under the same lock that guards the write |
 | Retention | the ledger's existing bounds, 512 records or one hour |
-| Replay inside the window | the recorded terminal outcome is returned, **the operation is not executed**, and the response carries `idempotent_replay: true` |
-| Replay after eviction | `409 stale_base_version` from ordinary CAS, or success if the state genuinely still matches; the client falls back to §31's inspection |
+| Replay of a **terminal** record | the recorded outcome is returned, **the operation is not executed**, and the response carries `idempotent_replay: true` |
+| Replay of a **pending** record | `409 idempotency_key_in_flight`, carrying the `apply_id` so the client polls rather than racing |
+| Same key, **different** fingerprint | `409 idempotency_key_reused`, carrying the recorded fingerprint's method and path |
+| Replay after eviction | ordinary CAS semantics; the client falls back to §31's inspection |
 | Optionality | optional on the API for compatibility; **the CLI always sends one** |
 
+**The binding is what makes the key safe, and an earlier draft of this record scoped it only to the
+principal.** A key scoped to a principal alone can be replayed against a *different* operation — a
+different endpoint, body, mode or `base_version` — and would return the previous success for a request
+that was never made. `ManagedApplyRecord` carries no canonical request fingerprint today, so one is
+added and compared: a matching key with a non-matching fingerprint is a client bug, and it is reported
+as one rather than silently answered.
+
+**Pending registration is what makes concurrency defined.** Recording the key only on completion
+leaves a duplicate that arrives while the first request is still executing with nothing to match
+against, so it would execute a second time — which CAS then rejects, correctly but confusingly. The
+key is therefore registered before side effects, and the duplicate gets a typed in-flight conflict
+naming the operation it should poll.
+
 Three properties keep it small. It reuses `ManagedApplyRecord`, which already exists, already has
-retention, and is already the thing `GET /api/v1/config/applies/{apply_id}` reads — so this is a field,
-not a subsystem. It is **not** a general-purpose HTTP idempotency layer: it applies to the mutating
-`/api/v1` operations and nothing else. And it does not replace CAS, which still runs: the key answers
-*"is this the same request?"*, `base_version` answers *"against the same state?"*, and a request that
-is new but stale is still rejected.
+retention, and is already the thing `GET /api/v1/config/applies/{apply_id}` reads — so this is two
+fields, not a subsystem. It is **not** a general-purpose HTTP idempotency layer: it applies to the
+mutating `/api/v1` operations and nothing else. And it does not replace CAS, which still runs: the key
+answers *"is this the same request?"*, `base_version` answers *"against the same state?"*, and a
+request that is new but stale is still rejected.
+
+**The client must be able to choose the key, and the CLI must let it.** A key generated per invocation
+solves nothing for the scenario the mechanism exists for: a CI job whose process is killed mid-apply
+re-runs, generates a *new* key, and is back to guessing. So `jul` accepts `--idempotency-key`, and the
+documentation directs automation to supply a stable value derived from something the job already has —
+a build or run identifier — so a re-run of the same logical operation carries the same key. A generated
+per-invocation key remains the default for interactive use, where the operator is present to inspect.
 
 The retention bound is a **client-visible contract**, not an implementation detail, and §24a publishes
 it: a client that retries after the window has passed gets ordinary CAS semantics and must inspect
@@ -1914,6 +2042,14 @@ the write permissions for mutations, evaluated before the resource is resolved.
 
 Checking permission before lookup is what makes the 403/404 boundary meaningful; the reverse order
 turns every 404-vs-403 difference into an oracle for an unauthorized caller.
+
+**One named exception: the transport check of §28.1 runs before all of this.** A mutating `/api/v1`
+request on a cleartext non-loopback listener is rejected with `403 insecure_transport` **before route
+lookup and before authentication**, so an unauthenticated caller receives a `403` where the table
+above would give a `401`. The exception is deliberate and discloses nothing: the verdict is a property
+of the listener, identical for every request and every principal, and reached without consulting the
+credential or the target. Rejecting after authentication would defeat the purpose — the credential
+would already have crossed the wire in the clear.
 
 #### 28.1 The admin listener has no transport security, and remote mutation is blocked on it
 
@@ -2101,6 +2237,7 @@ The CLI consumes the API's identity model and invents nothing.
 | `--upstream <name>` | natural key |
 | `--listener <addr>` | natural key |
 | `--base-version <v>` | required for every mutation (§27) |
+| `--idempotency-key <k>` | §27.1; automation should supply a stable, job-scoped value so a re-run of the same logical operation carries the same key |
 
 It must not invent a route hash, a local index, a coordinate encoding of its own, or a client-side
 identity cache. If a route cannot be addressed by ID, the CLI uses the selector and says so; it does
@@ -2180,10 +2317,14 @@ same server condition differently. It is exhaustive over §26.
 | `validation_failed` | 1 | the candidate is not a valid configuration |
 | `operation_failed` | 1 | a typed operation was rejected |
 | `invalid_request` | 2 | the client built a bad request — a usage error |
+| `unsupported_media_type` | 2 | the client sent the wrong `Content-Type` |
+| `payload_too_large` | 2 | the client sent a body over the published cap |
 | `not_found` | 2 | the operator named a resource that does not exist |
 | `stale_base_version` | 5 | conflict |
 | `drift_detected` | 5 | conflict |
 | `pending_restart_conflict` | 5 | conflict |
+| `idempotency_key_reused` | 5 | conflict — the same key was sent for a different operation |
+| `idempotency_key_in_flight` | 5 | conflict — poll `applies/{apply_id}` instead of retrying |
 | `restart_required` | 5 | conflict — `apply` refuses rather than silently staging (§31) |
 | `admin_reachability_confirmation_required` | 5 | conflict; re-run with confirmation |
 | `config_authority_read_only` | 6 | authority denial |
@@ -2197,13 +2338,18 @@ same server condition differently. It is exhaustive over §26.
 | `operation_timeout` | 9 | |
 | `internal_error` | 9 | |
 
-Three placements are worth their justification. `invalid_request` and `not_found` are **2, not 1**,
-because 1 has always meant *"your configuration is wrong"* and these mean *"your command was wrong"* —
-collapsing them would make exit 1 useless as a validation signal. `insecure_transport` is **7**
-because it is an authentication-class refusal: the credential was declined for the channel it arrived
-on. And `rate_limited` is **8** rather than a code of its own, because the operator action is
-identical to any other connectivity failure — wait and retry — and `retry_after_seconds` in the JSON
-carries the detail.
+Three placements are worth their justification. `invalid_request`, `unsupported_media_type`,
+`payload_too_large` and `not_found` are **2, not 1**, because 1 has always meant *"your configuration
+is wrong"* and these mean *"your command was wrong"* — collapsing them would make exit 1 useless as a
+validation signal. `insecure_transport` is **7** because it is an authentication-class refusal: the
+credential was declined for the channel it arrived on. And `rate_limited` is **8** rather than a code
+of its own, because the operator action is identical to any other connectivity failure — wait and
+retry — and `retry_after_seconds` in the JSON carries the detail.
+
+**`idempotency_key_in_flight` is exit 5 rather than a success**, even though the operation it names
+may well be about to succeed. The command in front of the operator did not do anything, and reporting
+success for work another invocation is performing would be a lie; the JSON carries the `apply_id` so
+the caller can poll for the real outcome.
 
 The convention is identical across every command. Every exit code is part of the API version's
 compatibility surface, appears in `jul capabilities --json`, and is contract-tested.
@@ -2223,7 +2369,9 @@ compatibility surface, appears in `jul capabilities --json`, and is contract-tes
 | Apply committed, reload `not_applied` | previous bytes restored | previous version | previous | existing Phase 5 restoration |
 | Restoration itself fails | ambiguous — candidate on disk | previous version | ambiguous | `recovery` history snapshot written; `managed_inconsistent`; managed writes refused until resolved |
 | Restart with a staged candidate | staged bytes | new version after restart | as staged | existing planned-restart reconciliation |
-| Restart while drift exists | last managed bytes, per the persisted marker | the file, because nothing else exists | unchanged — the baseline does not advance | starts in `managed_drift`; adopt or restore (§11.2) |
+| Restart while drift exists | last managed bytes, per the persisted marker and snapshot | the file, because nothing else exists | unchanged — the baseline does not advance | starts in `managed_drift`; adopt or restore (§11.2.2) |
+| Restart with no baseline marker | none established | the file | none yet | starts in `managed_unadopted`; one explicit adoption establishes ownership (§11.2.1) |
+| Crash between the snapshot, marker and config writes | resolved by the marker state × disk digest table | previous version | resolved deterministically | §11.2's recovery procedure |
 | Authority transition fails at startup | the file | none — startup failed | as in the file | existing staged-restart recovery: backup retained, marker preserved |
 | Endpoint or token cutover | staged candidate | previous | unchanged | the change is `restart_required`; the CLI names the new endpoint before confirmation (§31) |
 | Route with no `route_id` | as in the file | as in the file | **no durable identity** | the revision-scoped selector remains fully functional (§4.13) |
@@ -2312,8 +2460,10 @@ control plane writable, and the changelog names it as a required migration step.
 | `global.config_authority` name, location and enum (§9) | **One-way door** | public configuration; every deployment declares it | schema migration plus a deprecation window |
 | **Default `file_owned`, fixed** (§9.1) | **One-way door** | changes the effective mode of every deployment that never declares it; changing it later moves write authority silently | breaking; only escapable by making the field required, which is worse |
 | Managed mode: watcher and SIGHUP stop adopting (§11) | **One-way door** | an operational contract operators build runbooks on | breaking in both directions |
-| Managed baseline persisted in a marker (§11.2) | Expensive two-way door | removing it re-opens the restart-laundering hole; the marker itself is private state | the file format is internal; the *behaviour* is not reversible |
-| Idempotency key semantics and retention window (§27.1) | **One-way door** | clients branch on `idempotent_replay`, and the window bounds their retry logic | additive now; narrowing the window later is breaking |
+| Managed baseline persisted as marker **plus snapshot** (§11.2) | Expensive two-way door | removing it re-opens the restart-laundering hole and breaks §14's diff and history guarantees; the file formats are private state | the *behaviour* is not reversible; the formats are |
+| An absent marker means `managed_unadopted`, not first boot (§11.2.1) | Expensive two-way door | operators encounter it once per managed installation | relaxing it later is additive; tightening it later is breaking |
+| Managed mode serves the drifted file after a restart (§11.2.2) | **One-way door** | availability-over-integrity contract that runbooks depend on | breaking in both directions |
+| Idempotency key semantics, binding and retention window (§27.1) | **One-way door** | clients branch on `idempotent_replay` and on the two typed conflicts, and the window bounds their retry logic | additive now; narrowing the window later is breaking |
 | `Idempotency-Key` grammar (§27.1) | One-way to *narrow*, additive to *widen* | widening accepts strictly more | low upward |
 | Preview mints and returns the `route_id` (§4.7) | Expensive two-way door | clients echo it back; changing which side mints changes what a diff means | client migration |
 | Raw export withdrawn from v1 (§24) | **Two-way door** | adding an endpoint later is additive | none |
@@ -2377,11 +2527,20 @@ if the entries it names are not the ones that actually move.
    nothing and a well-known one costs nothing (§28).
 2. **Existence is not disclosed to unauthorized callers.** The permission check precedes the lookup,
    so 403 and 404 cannot be used as an oracle (§28).
-3. **Managed mode cannot silently execute an external edit.** Invariant M1, made true by §11.2's
-   persisted baseline: a partially written, truncated or hostile file becomes drift, never a live
-   *managed* configuration, and **not even a restart launders it** — an external writer cannot acquire
-   managed desired state by waiting for one. Adoption re-validates from scratch through the same
-   pipeline as any other candidate (§14).
+3. **No external edit becomes Jul's desired state without an explicit, authenticated, audited act.**
+   Invariant M1, made true across restarts by §11.2's persisted baseline: a partially written,
+   truncated or hostile file becomes drift, and **not even a restart advances the baseline** — an
+   external writer cannot acquire managed ownership by waiting for one, and cannot reset ownership by
+   deleting the marker (§11.2.1). Adoption re-validates from scratch through the same pipeline as any
+   other candidate (§14).
+
+   **This is an ownership property, not a runtime-integrity property, and the difference is stated
+   rather than blurred.** After a restart the external bytes *are served*, because the file is the
+   only configuration in existence (§11.2.2). An earlier draft of this record claimed managed mode
+   "cannot silently execute an external edit", which was not true and is withdrawn.
+   `config_authority` prevents Jul's own writers from competing; it is not a defence against someone
+   who can write the configuration file and restart the process. That is what filesystem permissions
+   are for, and it is true of every file-configured daemon.
 4. **File-owned mode cannot be tricked into a write.** Denial precedes body parsing, temp files,
    history writes and lock acquisition, and it is the same check for every principal including a
    wildcard admin (§15).
@@ -2409,22 +2568,25 @@ if the entries it names are not the ones that actually move.
 13. **A managed write cannot silently detach a mounted configuration.** §11.3 rejects a symlinked
     config path under managed authority in lint and reports it at startup, so a ConfigMap-style mount
     cannot be replaced by a regular file.
-14. **A credential is never accepted over a channel that would expose it.** §28.1 rejects a mutating
-    `/api/v1` request on a cleartext non-loopback listener **before authentication**, with no
-    server-side override, so a bearer token granting full read/write access cannot be solicited over
-    the wire in the clear.
+14. **A credential is never accepted over an exposing channel *on the external namespace*.** §28.1
+    rejects a mutating `/api/v1` request on a cleartext non-loopback listener before authentication,
+    with no server-side override. The scope is deliberate and is stated rather than implied: the
+    existing unversioned `/api/…` routes keep their current behaviour, so a deployment mutating over
+    a private network today is not broken by this record. It will meet the rule the day it adopts
+    `/api/v1`, and the changelog says so.
 15. **The default authority is the fail-safe one.** §9.1 defaults to `file_owned`, so an upgraded
     deployment never grants Jul write authority over a file nobody said it owned.
 
 **Residual exposure, stated plainly.** A restart while drift exists causes the external bytes to be
 *served*, because a gateway that refuses to start rather than run the only configuration it has has
-turned a configuration-management problem into an outage. They do not become the managed desired
-state: the persisted baseline (§11.2) keeps naming what Jul last wrote, the process starts in
-`managed_drift`, and managed writes stay refused. More broadly, anyone who can write the
-configuration file and restart the process can change what is served — which is true of any
-file-configured daemon, and is why file permissions, not `config_authority`, are the security
-boundary. `config_authority` prevents *Jul* from becoming a second writer, not the filesystem from
-having one.
+turned a configuration-management problem into an outage (§11.2.2). They do not become the managed
+desired state: the persisted baseline keeps naming what Jul last wrote, the process starts in
+`managed_drift`, and managed writes stay refused. **This record chooses availability over runtime
+integrity at that point, deliberately, and says so rather than implying an integrity property Jul
+does not have.** More broadly, anyone who can write the configuration file and restart the process
+can change what is served — which is true of any file-configured daemon, and is why file permissions,
+not `config_authority`, are the security boundary. `config_authority` prevents *Jul* from becoming a
+second writer, not the filesystem from having one.
 
 ## Observability
 
@@ -2461,9 +2623,13 @@ Grouped by the decision each pins.
   `config.Parse` reaches no randomness source, proven structurally.
 - **§27.1 idempotency:** a replayed key inside the window returns the recorded outcome with
   `idempotent_replay: true` and **does not execute the operation** — asserted by observing that the
-  configuration file is untouched and no second ledger record appears; a key from a different
-  principal does not collide; a malformed key is `invalid_request`; a replay after eviction falls
-  through to ordinary CAS; a new key with a stale `base_version` is still rejected.
+  configuration file is untouched and no second ledger record appears; **the same key with a different
+  body, mode, path or `base_version` is `idempotency_key_reused`, never a replayed success**; **a
+  duplicate arriving while the first is pending is `idempotency_key_in_flight` carrying the
+  `apply_id`**, asserted under real concurrency; a key from a different principal does not collide; a
+  malformed key is `invalid_request`; a replay after eviction falls through to ordinary CAS; a new key
+  with a stale `base_version` is still rejected; `--idempotency-key` is honoured and a re-run supplying
+  the same value replays rather than re-applies.
 - **§5 taxonomy:** every **configuration** resource in §5's table appears exactly once in the resource
   catalog; every `CollectionPath` and `IdentityField` resolves against `SchemaPaths()`; no operation
   identity appears in the catalog.
@@ -2483,11 +2649,20 @@ Grouped by the decision each pins.
   managed writes are refused while drift exists; a torn or truncated file never reaches the runtime;
   editor temp files are ignored; drift never changes `/readyz`.
 - **§11.2 the persisted baseline:** a restart into a drifted file starts in `managed_drift`, serves
-  the file, and **does not advance the baseline**; managed writes stay refused until adoption; a
-  missing marker is a first managed boot and writes one; a malformed marker is `managed_inconsistent`;
-  the marker contains no configuration content and is absent in `file_owned` mode; it is excluded from
-  exports, diagnostic bundles and history snapshots. **The falsification test:** an external writer
-  that edits the file and waits for a restart must not obtain managed desired state.
+  the file, and **does not advance the baseline**; managed writes stay refused until adoption; **a
+  missing marker is `managed_unadopted`, not a silent rebaseline**, and requires an explicit adoption;
+  a malformed marker is `managed_inconsistent` with the correct `reason`; the marker contains no
+  configuration content; the snapshot contains the exact last-managed bytes; both are absent in
+  `file_owned` mode and excluded from exports, diagnostic bundles and history snapshots.
+  **The falsification tests:** an external writer that edits the file and waits for a restart must not
+  advance the baseline; and one that *deletes the marker* and restarts must not either.
+- **§11.2 crash recovery:** every row of the marker-state × disk-digest table, including a crash
+  between the snapshot write, the marker write and the configuration rename — asserted by interrupting
+  at each of the four steps and reconciling.
+- **§11.2.1 origins:** `managed_unadopted`, `managed_drift` and `managed_inconsistent` are reported as
+  distinct states with distinct audit categories; adoption from `no_baseline` returns **no diff** with
+  `diff_unavailable_reason` and writes **no** history snapshot; adoption from `drift` returns a diff
+  computed against the snapshot and writes a history snapshot of the prior managed configuration.
 - **§11.3:** lint reports a symlinked config path under managed authority at error severity, and a
   non-writable directory as a warning; both are reported at startup; neither is fatal.
 - **§13:** drift status contains no external bytes and no configuration values; a drift diff requires
@@ -2570,14 +2745,17 @@ Grouped by the decision each pins.
    the branch; the existing echo suppression is retained and now serves drift detection.
 4. **SIGHUP becomes mode-dependent** for the same reason. It affects only deployments that opt into
    `managed`, because the default is `file_owned` (§9.1).
-5. **A managed baseline marker is added** adjacent to the configuration file, reusing
-   `PlannedRestartMarker`'s atomic-write, `0o600` and crash-recovery discipline. It holds a digest and
-   two versions, never configuration content, and is excluded from exports, bundles and history.
+5. **A managed baseline marker and snapshot are added** adjacent to the configuration file, reusing
+   `PlannedRestartStore`'s atomic-write, `0o600`, two-phase-marker and crash-recovery discipline. The
+   marker holds digests and versions; the snapshot holds the exact last-managed bytes, which §14
+   requires. Both are excluded from exports, bundles and history, and absent in `file_owned` mode.
+   `managed_unadopted` joins the state vocabulary and `managed_inconsistent` gains a bounded `reason`.
 6. **`external_divergence` is generalized** from "startup-bound subsystems differ" to §12's digest
    comparison, and the existing `PlannedRestartStateEnum` is reused rather than duplicated.
 7. **One new permission**, `config:adopt`, and one new mutating endpoint pair for adoption.
-8. **`ManagedApplyRecord` gains one field** for the idempotency key (§27.1). No new store, no new
-   retention policy — the ledger's existing 512-record/one-hour bounds become a published contract.
+8. **`ManagedApplyRecord` gains two fields** for the idempotency key and its request fingerprint
+   (§27.1), plus registration before side effects. No new store, no new retention policy — the
+   ledger's existing 512-record/one-hour bounds become a published contract.
 9. **`RouteSpec` gains `Stability`**, and the existing guard test grows an OpenAPI correspondence
    assertion covering external, public and deprecated routes.
 10. **A new external response encoder** is added and adopted endpoint by endpoint; the five existing
@@ -2688,6 +2866,43 @@ what it is overwriting. The internal endpoints keep their behaviour so the Conso
 
 **Designing admin TLS inside this record.** Rejected in §28.1 on scope discipline: a transport
 security surface appended to an already very large ADR is one that gets frozen without being read.
+
+**Serving the persisted baseline snapshot instead of the file after a restart into drift.** Rejected
+in §11.2.2, and it was technically available once §11.2 persisted the bytes. It is the strongest
+integrity position short of refusing to start, and the argument against it is entirely operational:
+the file on disk and the running configuration would diverge with no operator action and no way to
+converge except an explicit act, and the case where that bites is the worst possible one — the Console
+is down during an incident, the operator edits the file directly, restarts, and nothing changes for
+reasons that are not visible at three in the morning. An operator who edits a file and restarts a
+daemon has an unambiguous expectation, and a gateway that silently declines to meet it is not safer,
+only harder to reason about. It also needs a fallback for the case where the snapshot is missing or
+unparseable, which is the very case a corrupted-state recovery path is most likely to hit.
+
+**Failing startup when drift is present.** Rejected in §11.2.2 as a default: a gateway that refuses to
+start because someone touched a configuration file converts a configuration-management problem into an
+outage, which is the wrong trade for an edge proxy. §36 records it as a possible future opt-in with a
+re-entry trigger rather than a third authority mode.
+
+**A digest-only managed baseline marker.** Drafted, and replaced in §11.2 after external review. It
+was incompatible with this record's own §14: adoption must diff against the previous managed
+configuration and snapshot its exact bytes, and after an external overwrite a digest cannot
+reconstruct what it summarises. The alternative to persisting the bytes was to let §14 silently
+degrade after a restart, which withdraws the diff and the restorable prior state in exactly the
+situation that needs them most.
+
+**Treating an absent baseline marker as a first managed boot that adopts silently.** Drafted, and
+replaced in §11.2.1. It made ownership trivially resettable — delete the marker, restart, and the
+external file becomes the baseline — which is the same laundering hole persistence was added to close,
+reached through a different door. Requiring one explicit adoption costs a fresh managed installation a
+single act and makes "Jul now owns this file" something an operator performs rather than something
+that happens to them.
+
+**Collapsing `managed_unadopted` into `managed_drift`.** Rejected in §11.2.1. The two share a gate but
+not a cause: one means Jul has no prior managed state, the other means Jul knows exactly what it last
+wrote and the disk disagrees. They differ in what adoption can honestly produce — the first has no
+diff and no prior configuration to snapshot — and, decisively, in alerting value: if drift is a
+condition an operator pages on, and every fresh managed install reports drift, the page is disabled
+within a week.
 
 **An idempotency key for apply.** Rejected in the first revision of this record on the grounds that
 `apply_id` is assigned at admission and `base_version` comparison covers the rest — and **that
