@@ -194,6 +194,16 @@ func (cw *compressWriter) WriteHeader(code int) {
 	if cw.sawHeader {
 		return
 	}
+	// A 1xx other than 101 is an interim response: RFC 9110 §15.2 permits any
+	// number of them ahead of exactly one final status, so it must pass through
+	// without latching sawHeader, without a compression decision, and without
+	// running the Vary/finalize logic that belongs to the real status. 101 is a
+	// protocol switch, not an interim response, and keeps the normal treatment
+	// below (bodyAllowed is false for it too, so it passes straight through).
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		cw.ResponseWriter.WriteHeader(code)
+		return
+	}
 	cw.sawHeader = true
 	cw.code = code
 	// Responses without a body, responses already encoded, and representations

@@ -417,6 +417,61 @@ func TestPanicAfterHeadersThroughCachedChain(t *testing.T) {
 	}
 }
 
+// TestInformationalResponseSurvivesTheFullMiddlewareChain is the composed
+// regression test for #331: an origin's 103 Early Hints, forwarded verbatim by
+// httputil.ReverseProxy, must not make the metrics/access-log Recorder, the
+// compression writer, or the cache writer latch onto it as the final status.
+// Before the fix every wrapper in this chain served the client a 200 no matter
+// what the origin actually wrote after the 103.
+func TestInformationalResponseSurvivesTheFullMiddlewareChain(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.WriteHeader(http.StatusEarlyHints) // multiple interim responses are permitted
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, strings.Repeat("the real body ", 20))
+	}))
+	defer backend.Close()
+
+	c := newCache(t)
+	sink := &recordingSink{}
+	front := httptest.NewServer(productionChain(t, c, []middleware.AccessSink{sink},
+		newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil)))
+	defer front.Close()
+
+	resp, body := do(t, front.Client(), http.MethodGet, front.URL+"/hints")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("client-visible status = %d, want 404", resp.StatusCode)
+	}
+	wantBody := strings.Repeat("the real body ", 20)
+	if body != wantBody {
+		t.Fatalf("body = %q, want %q", body, wantBody)
+	}
+
+	records := sink.wait(t, 1)
+	if len(records) != 1 {
+		t.Fatalf("access log records = %d, want 1", len(records))
+	}
+	if records[0].Status != http.StatusNotFound {
+		t.Fatalf("logged status = %d, want 404 (not 200 and not the 103)", records[0].Status)
+	}
+
+	// A second request must be servable from the cache with the same status,
+	// proving the entry the first request built was never corrupted by the 103.
+	resp2, body2 := do(t, front.Client(), http.MethodGet, front.URL+"/hints")
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Fatalf("cached status = %d, want 404", resp2.StatusCode)
+	}
+	if resp2.Header.Get("X-Cache") != "HIT" {
+		t.Fatalf("X-Cache = %q, want HIT", resp2.Header.Get("X-Cache"))
+	}
+	if body2 != wantBody {
+		t.Fatalf("cached body = %q, want %q", body2, wantBody)
+	}
+}
+
 // recordingSink collects access-log records for assertions.
 type recordingSink struct {
 	mu      sync.Mutex

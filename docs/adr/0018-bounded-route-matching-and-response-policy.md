@@ -28,6 +28,7 @@
 | 2026-08-24 | Final read-through before merge. Three handoff gaps closed, no decisions changed: §9 makes the wildcard/`Vary` coupling structural (one derived predicate plus a named coupling test) rather than relying on a paragraph a future editor may not read; §10 states that both preflight guards compose as ordinary middleware around the 204 emitter, so nobody invents a parallel `Check()` API with its own metrics and failure modes; §8a names the capability the `Vary` restriction costs — an operator whose uncontrollable upstream varies silently must set `cache = false` on that route — instead of leaving it to be discovered. |
 | 2026-08-24 | §17's RFC 8441 re-entry trigger said "golang/go#71128 resolves". Wrong twice: that issue closed in January 2025, and it closed **by disabling** extended `CONNECT` — it produced the current state rather than tracking its removal. The trigger is now state-based. The same passage misattributed Go's rationale: *"package doesn't support extended CONNECT"* refers to **the server's WebSocket package**, not `net/http`, and the real hazard is sharper — advertising `SETTINGS_ENABLE_CONNECT_PROTOCOL` makes browsers *stop* sending HTTP/1.1 `Upgrade`, so a partial implementation breaks WebSocket for clients that work today. `docs/http3.md` and `docs/known-limitations.md` carried the same misquote. |
 | 2026-08-24 | Review of the record's own stated doubts. One design change: §10 adds a **location-scoped recover**, so a panic after route selection produces a 500 carrying the location's response headers and CORS — the earlier draft documented that hole as a boundary, which was wrong, since §9 already argues a cross-origin 401/403/429/502 must be readable and 500 is not different. Three accuracy corrections: §16's bounds are labelled conservative and **unmeasured**, with worst-case benchmarks at the maxima required of #145/#146; §14's reversibility is downgraded to an *internal* two-way door with transient impact, because `authByScope`/`wafByScope` are rebuilt per generation and only rate-limit buckets are keyed across reloads (evicted by the store's idle TTL); and #331/#332 become **hard merge gates** for #146 rather than sequencing preferences. §9's `allowed_methods` default is **kept**, with the rule that makes it safe now stated exactly: every `Access-Control-Request-Headers` token must be listed, with **no safelist exemption**, because a browser lists a name there precisely when it is *not* safelisted. |
+| 2026-08-24 | #331 landed: `Recorder`, `compressWriter` and `cacheWriter` now pass `1xx` straight through and apply their own logic exactly once, on the first status `>= 200`, matching the rule §10 specifies for the response-policy wrapper. One of the two hard merge gates on #146 is satisfied; #332 remains open. |
 
 ## Context
 
@@ -773,10 +774,12 @@ exactly once, on the first status `>= 200`. `101` keeps its own treatment as a p
 an interim response.
 
 This is stated because Jul's three existing wrappers — `Recorder`, `compressWriter` and `cacheWriter`
-— all latch on the *first* `WriteHeader` regardless of code, so a `103 Early Hints` swallows the real
-status and the client is served `200`. `Recorder` is on the global chain unconditionally, so that
-affects every deployment. It is filed as **#331** and is not this record's to fix; the rule is written
-down here so the response-policy wrapper does not become a fourth instance of the same defect.
+— used to latch on the *first* `WriteHeader` regardless of code, so a `103 Early Hints` swallowed the
+real status and the client was served `200`. `Recorder` is on the global chain unconditionally, so
+that affected every deployment. It was filed as **#331** and is now fixed — each of the three passes
+`1xx` straight through and applies its own logic exactly once, on the first status `>= 200` — so the
+response-policy wrapper has one existing implementation of the rule to follow rather than inventing
+a fourth divergent one.
 
 **Preflight termination sits immediately outside `Auth`**, which is the minimum bypass that makes the
 feature work. The CORS-preflight fetch is defined to be sent with credentials omitted, so a route
@@ -1606,12 +1609,12 @@ required by it.
    firewall; none of the three adds a configuration surface.
 8. The lifecycle registry, `docs/config-lifecycle.yaml` and both generated mirrors grow entries; a
    new `cors` subsystem is added.
-9. **#146 must not merge until #331 and #332 have landed**, or fixes them atomically in the same
-   change. This is a hard gate, not a sequencing preference: #331 gives §10's informational-response
-   rule one implementation to follow rather than a fourth divergent one, and #332 is what upgrades
-   §11's invariant from the commit-boundary form to the unconditional one §8's and §9's reasoning is
-   written against. Merging #146 first would ship CORS on a cache whose stated guarantee is not yet
-   true.
+9. **#146 must not merge until #332 has landed**, or fixes it atomically in the same change. This is
+   a hard gate, not a sequencing preference: #332 is what upgrades §11's invariant from the
+   commit-boundary form to the unconditional one §8's and §9's reasoning is written against. #331,
+   the other gate this record originally named, landed first and gives §10's informational-response
+   rule one existing implementation to follow rather than a fourth divergent one. Merging #146 before
+   #332 would ship CORS on a cache whose stated guarantee is not yet true.
 10. `docs/configuration.md`, `docs/core-http.md`, `docs/cache.md`, `docs/compression.md`,
     `docs/security-posture.md`, `docs/nginx-importer.md`, `docs/known-limitations.md`,
     `docs/console.md`, `docs/reload-semantics.md`, the generated configuration reference and

@@ -329,24 +329,85 @@ func TestFailedHijackKeepsWriterUsable(t *testing.T) {
 }
 
 // TestProtocolSwitchResponseNeverStored proves rule 4 of the contract even when
-// the request carried no upgrade headers, so the bypass never ran.
+// the request carried no upgrade headers, so the bypass never ran. 101 is the
+// only status here that is genuinely final on its own: it is a protocol
+// switch, not an interim response, so nothing follows it on this connection.
 func TestProtocolSwitchResponseNeverStored(t *testing.T) {
-	for _, code := range []int{http.StatusContinue, http.StatusSwitchingProtocols, http.StatusProcessing} {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+		_, _ = w.Write([]byte("interim"))
+	}))
+
+	r := httptest.NewRequest(http.MethodGet, "http://x/switch", nil)
+	h.ServeHTTP(httptest.NewRecorder(), r)
+
+	if _, ok := c.get(key(r)); ok {
+		t.Fatal("a 101 response was stored")
+	}
+}
+
+// TestBareInterimResponseIsNotTheFinalStatus is the regression test for #331: a
+// 100 or 102 ahead of a handler that never calls WriteHeader again is not
+// itself the final status — exactly as a real net/http connection treats it,
+// the first Write with no explicit final WriteHeader implies 200, and the
+// interim response must not have latched the writer against that implicit
+// status or dropped its capture.
+func TestBareInterimResponseIsNotTheFinalStatus(t *testing.T) {
+	for _, code := range []int{http.StatusContinue, http.StatusProcessing} {
 		t.Run(http.StatusText(code), func(t *testing.T) {
 			c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
 			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Cache-Control", "max-age=60")
 				w.WriteHeader(code)
-				_, _ = w.Write([]byte("interim"))
+				_, _ = w.Write([]byte("real body"))
 			}))
 
-			r := httptest.NewRequest(http.MethodGet, "http://x/switch", nil)
+			r := httptest.NewRequest(http.MethodGet, "http://x/interim-"+http.StatusText(code), nil)
 			h.ServeHTTP(httptest.NewRecorder(), r)
 
-			if _, ok := c.get(key(r)); ok {
-				t.Fatalf("a %d response was stored", code)
+			e, ok := c.get(key(r))
+			if !ok {
+				t.Fatalf("the implicit-200 response following a %d was not stored", code)
+			}
+			if e.Status != http.StatusOK || string(e.Body) != "real body" {
+				t.Fatalf("stored entry = %+v, want status 200 and body %q", e, "real body")
 			}
 		})
+	}
+}
+
+// TestCacheWriterInterimResponseDoesNotLatchTheFinalStatus is a direct unit
+// test on cacheWriter for #331: a 103 ahead of the real status must not latch
+// wroteHeader, take the header snapshot early, or drop the capture — that
+// belongs to the real status alone.
+func TestCacheWriterInterimResponseDoesNotLatchTheFinalStatus(t *testing.T) {
+	rec := httptest.NewRecorder()
+	cw := &cacheWriter{ResponseWriter: rec, limit: 1024}
+
+	cw.Header().Set("Link", "</style.css>; rel=preload")
+	cw.WriteHeader(http.StatusEarlyHints)
+	cw.WriteHeader(http.StatusEarlyHints)
+	if cw.wroteHeader {
+		t.Fatal("a 1xx must not latch wroteHeader")
+	}
+	if cw.snapshot != nil {
+		t.Fatal("a 1xx must not take the header snapshot")
+	}
+
+	cw.Header().Set("Cache-Control", "max-age=60")
+	cw.WriteHeader(http.StatusNoContent)
+	_, _ = cw.Write(nil)
+
+	if cw.status != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", cw.status)
+	}
+	if !cw.storable() {
+		t.Fatal("a 204 preceded by a 103 must still be storable")
+	}
+	if cw.snapshot.Get("Cache-Control") != "max-age=60" {
+		t.Fatalf("snapshot = %v, missing Cache-Control set after the 1xx", cw.snapshot)
 	}
 }
 
@@ -354,7 +415,6 @@ func TestProtocolSwitchResponseNeverStored(t *testing.T) {
 // response is served with its flushes intact but is never stored.
 func TestEventStreamIsNeverStoredOrBuffered(t *testing.T) {
 	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
-
 	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "max-age=60") // deliberately cacheable-looking
